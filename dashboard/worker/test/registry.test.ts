@@ -1,4 +1,5 @@
 import inventory from '../src/account-inventory.json';
+import { RESOURCE_IDENTITIES } from '../src/resource-identities.ts';
 import opsReadme from '../../../contracts/ops-v1/README.md?raw';
 import { describe, expect, it } from 'vitest';
 import { MAX_OUTBOUND_PER_TICK, VIEW_BODY_BUDGET } from '../src/api-types.ts';
@@ -76,7 +77,7 @@ describe('the registry', () => {
 
   it('registers the entries of the design, in their groups and order', () => {
     const byGroup = (group: string) => REGISTRY.entries.filter((e) => e.group === group).sort((a, b) => a.order - b.order).map((e) => e.id);
-    expect(byGroup('apps')).toEqual(['mail-hero', 'todofy', 'links', 'watch', 'fleet', 'mailsort', 'recall', 'brief', 'tasks']);
+    expect(byGroup('apps')).toEqual(['mail-hero', 'todofy', 'links', 'watch', 'fleet', 'mailsort', 'recall', 'brief', 'tasks', 'model-router']);
     expect(byGroup('sites')).toEqual(['website']);
     expect(byGroup('services')).toEqual(['notion-publish', 'newsletter', 'personal-mcp', 'codex-gateway']);
     expect(byGroup('hidden')).toEqual(['home', 'self-hosted', 'platform-runtime']);
@@ -99,6 +100,7 @@ describe('the registry', () => {
       'platform-runtime': 'none',
       'personal-mcp': 'ops_v1',
       'codex-gateway': 'ops_v1',
+      'model-router': 'ops_v1',
     });
   });
 
@@ -149,7 +151,7 @@ describe('the registry', () => {
     expect(REGISTRY.workers.filter((w) => w.entry === 'self-hosted')).toEqual([]);
     // All deployed namespaces are recorded in config/resources.toml.
     const unmatched = REGISTRY.resources.filter((r) => r.match === null).map((r) => r.id);
-    expect(unmatched).toEqual([]);
+    expect(unmatched).toEqual(RESOURCE_IDENTITIES['model-router-engine'] ? [] : ['model-router-engine']);
     expect(resourceByMatch('do', '7d90ef3fb1d44ac591a3b21c99fdcccc')).toMatchObject({ id: 'tasks-jobs', kind: 'do', entry: 'tasks', script: 'tasks' });
     expect(resourceByMatch('do', '6edfe7c19d6748b186ee38bb48c686be')).toMatchObject({ id: 'brief-state', kind: 'do', entry: 'brief', script: 'brief' });
     expect(REGISTRY.resources.find((r) => r.id === 'recall-state')).toMatchObject({ kind: 'do', entry: 'recall', script: 'recall' });
@@ -166,10 +168,10 @@ describe('the registry', () => {
   });
 
   it('keeps the tick within the Workers Free subrequest budget', () => {
-    // 12 status() + 2 probes (website, links) + 1 GraphQL + 4 setGuard + 2 canary calls + 1 createInboxTask + 12 drift calls.
-    expect(outboundPerTick()).toBe(34);
+    // 13 status() + 2 probes (website, links) + 1 GraphQL + 4 setGuard + 2 canary calls + 1 createInboxTask + 12 drift calls.
+    expect(outboundPerTick()).toBe(35);
     expect(outboundPerTick()).toBeLessThanOrEqual(MAX_OUTBOUND_PER_TICK);
-    expect(outboundPerRefresh()).toBe(14);
+    expect(outboundPerRefresh()).toBe(15);
   });
 
   it('serves a public view without bindings or probe URLs, within its budget', () => {

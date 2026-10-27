@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ServiceStatus_KeyState } from '@ziyixi/proto/brief/ui/v1/status_pb';
-import { apiError, jsonAnswer } from '../fakes/claude.ts';
+import { modelError, jsonAnswer } from '../fakes/claude.ts';
 import { la, op, reasonOf, rejection, SECOND, startHarness, type Harness, type HarnessOptions } from './harness.ts';
 
 let h: Harness | null = null;
@@ -24,7 +24,7 @@ afterEach(async () => {
 
 /** The packets of a write request (its user turn's JSON). */
 function packetsIn(body: Record<string, unknown>): number {
-  const content = (body['messages'] as { content: string }[])[0]?.content ?? '';
+  const content = (typeof body['input'] === 'string' ? body['input'] : '');
   return (content.match(/"packet":"p\d+"/g) ?? []).length;
 }
 
@@ -58,8 +58,8 @@ describe('refusals', () => {
     const { h, at } = await toMondayRun();
     h.claude.script = (body, step) => {
       if (step !== 'write') return null;
-      const content = (body['messages'] as { content: string }[])[0]?.content ?? '';
-      return content.includes('世界与经济') ? { blocks: [], stop: 'refusal', category: 'cyber' } : null;
+      const content = (typeof body['input'] === 'string' ? body['input'] : '');
+      return content.includes('世界与经济') ? { finishReason: 'refused' } : null;
     };
     await h.runUntil(at, la('2026-10-12', '07:00'));
     const [issue] = await h.sql<{ state: string; item_count: number; quiet_reason: string }>(`SELECT * FROM issues WHERE issue = '2026-10-12'`);
@@ -75,7 +75,7 @@ describe('refusals', () => {
 
   it('falls back to the gate order after a refused pick and its retry', async () => {
     const { h, at } = await toMondayRun();
-    h.claude.script = (_body, step) => (step === 'pick' ? { blocks: [], stop: 'refusal', category: 'reasoning_extraction' } : null);
+    h.claude.script = (_body, step) => (step === 'pick' ? { finishReason: 'refused' } : null);
     await h.runUntil(at, la('2026-10-12', '07:00'));
     expect(h.claude.steps().filter((step) => step === 'pick')).toHaveLength(2);
     const [issue] = await h.sql<{ state: string; pick_fallback: number; item_count: number }>(`SELECT * FROM issues WHERE issue = '2026-10-12'`);
@@ -88,8 +88,8 @@ describe('refusals', () => {
     h = harness;
     harness.claude.script = (body, step) => {
       if (step !== 'gate') return null;
-      const content = (body['messages'] as { content: string }[])[0]?.content ?? '';
-      return content.includes('Central bank') ? { blocks: [], stop: 'refusal', category: 'general_harms' } : null;
+      const content = (typeof body['input'] === 'string' ? body['input'] : '');
+      return content.includes('Central bank') ? { finishReason: 'refused' } : null;
     };
     await harness.runUntil(la('2026-10-11', '12:30'), la('2026-10-12', '07:00'));
     const refused = await harness.sql<{ gate: string }>(`SELECT gate FROM items WHERE title LIKE 'Central bank%' AND candidate = 1`);
@@ -102,10 +102,10 @@ describe('refusals', () => {
   });
 });
 
-describe('the Claude API refusing requests', () => {
-  it('stops every call at a 402, sends the note 调用被拒, and resumes when the owner says so', async () => {
+describe('Router model failures', () => {
+  it('stops on a rejected connection, sends the note 调用被拒, and resumes when the owner says so', async () => {
     const { h, at } = await toMondayRun();
-    h.claude.script = (_body, step) => (step === 'write' ? apiError(402, 'billing_error') : null);
+    h.claude.script = (_body, step) => (step === 'write' ? modelError('MODEL_AUTH', 7) : null);
     await h.runUntil(at, la('2026-10-12', '07:00'));
     const [issue] = await h.sql<{ state: string; quiet_reason: string; error_code: string }>(`SELECT * FROM issues WHERE issue = '2026-10-12'`);
     expect(issue).toMatchObject({ state: 'sent', quiet_reason: 'calls_rejected' });
@@ -113,11 +113,11 @@ describe('the Claude API refusing requests', () => {
     expect(h.sent[0]?.body.text).toContain('调用被拒');
     const status = await h.api.getServiceStatus({ name: 'serviceStatus' });
     expect(status.keyState).toBe(ServiceStatus_KeyState.REJECTED);
-    expect(status.rejectedStatus).toBe(402);
-    expect(status.rejectedErrorType).toBe('billing_error');
+    expect(status.rejectedStatus).toBe(7);
+    expect(status.rejectedErrorType).toBe('MODEL_AUTH');
     const ops = await h.opsStatus();
     expect(ops['health']).toBe('degraded');
-    expect(ops['signals']).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'anthropic_rejected', severity: 'critical', metrics: { status: 402, billing_error: 1 } })]));
+    expect(ops['signals']).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'anthropic_rejected', severity: 'critical', metrics: { status: 7, model_auth: 1 } })]));
     expect(h.logs.join('\n')).not.toContain('synthetic error message');
     // While stopped, the next round's gate makes no call.
     const before = h.claude.requests.length;
@@ -127,13 +127,13 @@ describe('the Claude API refusing requests', () => {
     expect(resumed.keyState).toBe(ServiceStatus_KeyState.OK);
   });
 
-  it('retries a 529 before the stream with backoff, without using an attempt', async () => {
+  it('retries an unstarted unavailable model with backoff, without using an attempt', async () => {
     const { h, at } = await toMondayRun();
     let failures = 0;
     h.claude.script = (_body, step) => {
       if (step === 'write' && failures < 2) {
         failures++;
-        return apiError(529, 'overloaded_error');
+        return modelError('MODEL_UNAVAILABLE', 14);
       }
       return null;
     };
@@ -146,7 +146,7 @@ describe('the Claude API refusing requests', () => {
 
   it('counts a write whose answers are no JSON: 3 attempts 15 minutes apart, then the note', async () => {
     const { h, at } = await toMondayRun();
-    h.claude.script = (_body, step) => (step === 'write' ? { blocks: [{ type: 'text', text: 'not json at all' }] } : null);
+    h.claude.script = (_body, step) => (step === 'write' ? { output: 'not json at all' } : null);
     await h.runUntil(at, la('2026-10-12', '08:00'));
     // Each answer is an attempt and is never read again (it once looped on the stored text for days).
     expect(h.claude.steps().filter((step) => step === 'write')).toHaveLength(3);
@@ -158,7 +158,7 @@ describe('the Claude API refusing requests', () => {
 
   it('halves a write that ran out of tokens (the same request would again): the halves make the issue', async () => {
     const { h, at } = await toMondayRun();
-    h.claude.script = (body, step) => (step === 'write' && packetsIn(body) > 3 ? { blocks: [{ type: 'text', text: '{"items": [' }], stop: 'max_tokens' } : null);
+    h.claude.script = (body, step) => (step === 'write' && packetsIn(body) > 3 ? { finishReason: 'output_limit' } : null);
     await h.runUntil(at, la('2026-10-12', '07:00'));
     const calls = await h.sql<{ step: string }>(`SELECT step FROM calls WHERE step IN ('write', 'bisect') ORDER BY id`);
     expect(calls.map((call) => call.step)).toEqual(['write', 'bisect', 'bisect']);
@@ -175,7 +175,7 @@ describe('the Claude API refusing requests', () => {
     h.claude.script = (_body, step) => {
       if (step !== 'write') return null;
       tried.push(h.now());
-      return apiError(529, 'overloaded_error');
+      return modelError('MODEL_UNAVAILABLE', 14);
     };
     await h.runUntil(at, la('2026-10-12', '13:00'));
     expect(tried.length).toBeGreaterThan(5);
@@ -272,7 +272,7 @@ describe('the read and the gate', () => {
   it('leaves candidates pending when a gate call fails mid-stream: only a refusal marks them refused', async () => {
     const harness = await startHarness();
     h = harness;
-    harness.claude.script = (_body, step) => (step === 'gate' ? { model: 'claude-haiku-5-5', blocks: [{ type: 'thinking' }, { type: 'text', text: '{"scores": [' }], errorAfterBlocks: 2 } : null);
+    harness.claude.script = (_body, step) => (step === 'gate' ? modelError('MODEL_UNAVAILABLE', 14, true) : null);
     await harness.runUntil(la('2026-10-11', '12:30'), la('2026-10-11', '13:00'));
     expect(await harness.sql(`SELECT rowid FROM items WHERE gate = 'refused'`)).toEqual([]);
     const [pending] = await harness.sql<{ n: number }>(`SELECT count(*) AS n FROM items WHERE gate = 'pending'`);
@@ -293,7 +293,7 @@ describe('never repeat', () => {
     expect(left).toEqual([]);
     // Tuesday: a later member of such a story makes a card marked 已报道 with the title that ran.
     const pick = h.claude.requests.filter((request) => request.step === 'pick')[1]?.body ?? {};
-    const content = (pick['messages'] as { content: string }[])[0]?.content ?? '';
+    const content = (typeof pick['input'] === 'string' ? pick['input'] : '');
     const world = JSON.parse(content.split('世界与经济卡片：\n')[1]?.split('\n')[0] ?? '[]') as { id: string; held_back?: string }[];
     const back = world.filter((card) => clusters.includes(Number(card.id.slice(1))));
     expect(back.length).toBeGreaterThan(0);
@@ -312,17 +312,17 @@ describe('the deep read', () => {
     let deepReads = 0;
     harness.claude.script = (body, step) => {
       if (step === 'deep_pick') {
-        const content = (body['messages'] as { content: string }[])[0]?.content ?? '';
+        const content = (typeof body['input'] === 'string' ? body['input'] : '');
         const cards = JSON.parse(content.split('本周卡片：\n')[1]?.split('\n')[0] ?? '[]') as { id: string; full_text: string }[];
         const readable = cards.filter((card) => card.full_text === '可读全文').slice(0, 8);
         return jsonAnswer({ threads: [{ title: '断层如何慢慢滑动', angle: '从观测到机制', ids: readable.map((card) => card.id), reason: '本周有多篇全文' }] });
       }
-      if (step === 'deep_read' && deepReads++ === 0) return { blocks: [{ type: 'text', text: '{"title": "' }], stop: 'max_tokens' };
+      if (step === 'deep_read' && deepReads++ === 0) return { finishReason: 'output_limit' };
       return null;
     };
     await harness.runUntil(la('2026-10-16', '12:30'), la('2026-10-17', '09:00'));
     const documents = harness.claude.requests.filter((request) => request.step === 'deep_read').map((request) => {
-      const content = (request.body['messages'] as { content: string }[])[0]?.content ?? '';
+      const content = (typeof request.body['input'] === 'string' ? request.body['input'] : '');
       return (JSON.parse(content.split('材料包：\n')[1]?.split('\n')[0] ?? '{}') as { documents: unknown[] }).documents.length;
     });
     expect(documents[0]).toBeGreaterThan(4);
@@ -429,8 +429,8 @@ describe('the walls and the switches', () => {
     expect(shadow.sent[0]?.body.subject).toBe('[影子版] 简报 · 10月12日（周一）');
   });
 
-  it('makes no issue and no model call without a Claude key', async () => {
-    const harness = await startHarness({ bindings: { ANTHROPIC_API_KEY: undefined } });
+  it('makes no issue and no model call without the configured model connection', async () => {
+    const harness = await startHarness({ modelConfigured: false });
     h = harness;
     await harness.runUntil(la('2026-10-11', '12:30'), la('2026-10-12', '08:00'));
     expect(harness.claude.requests).toHaveLength(0);

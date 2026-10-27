@@ -13,6 +13,8 @@ import pytest
 
 import newsletter.contracts as contracts
 import newsletter.editor as newsletter_editor
+import newsletter.model_client as model_client
+import newsletter.settings as settings
 import newsletter.types as types
 import newsletter.workflow.components as components
 import newsletter.workflow.story_editor as story_editor
@@ -208,14 +210,16 @@ def rig(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> StoryRig:
     }
     state = StoryRig(
         editor=story_editor.StoryEditor(
-            newsletter_editor.CodexEditor(tmp_path / "unused-auth")
+            newsletter_editor.ModelEditor(
+                model_client.configured_client(settings.Settings())
+            )
         ),
         packet=packet,
         workspace=tmp_path / "job",
     )
 
     async def execute(
-        editor: newsletter_editor.CodexEditor,
+        editor: newsletter_editor.ModelEditor,
         prompt: str,
         schema: types.Payload,
         instructions: str,
@@ -243,7 +247,7 @@ def rig(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> StoryRig:
             searched,
         )
 
-    monkeypatch.setattr(newsletter_editor.CodexEditor, "execute", execute)
+    monkeypatch.setattr(newsletter_editor.ModelEditor, "execute", execute)
     return state
 
 

@@ -19,7 +19,8 @@ def live(tmp_path):
         workflow_backend="dag",
         editor_token="e" * 32,
         send_token="s" * 32,
-        codex_home=tmp_path / "isolated-auth",
+        model_router_url="https://models.example.test",
+        model_router_token="synthetic-token",
         notion_backend="notion",
         notion_token="synthetic-provider-key",
     )

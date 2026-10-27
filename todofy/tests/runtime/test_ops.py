@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 
 from tests import mail_contract
-from tests.fakes.gemini_fake import GeminiFake, error_reply
+from tests.fakes.model_router_fake import ModelRouterFake, error_reply
 from tests.runtime.conftest import pipeline_vars
 from tests.runtime.harness import error_code, mail_event, transitions, wait_until
 from tests.runtime.ops_support import OpsStack, start_ops_stack
@@ -74,7 +74,7 @@ def seed(stack: OpsStack, event_id: str, state: str, *, body: bytes | None, crea
 
 
 @pytest.fixture(scope="module")
-def launch_stack(tmp_path_factory: pytest.TempPathFactory, gemini: GeminiFake) -> Iterator[StackLaunch]:
+def launch_stack(tmp_path_factory: pytest.TempPathFactory, gemini: ModelRouterFake) -> Iterator[StackLaunch]:
     running: list[Iterator[OpsStack]] = []
 
     def start(**overrides: str) -> OpsStack:
@@ -116,7 +116,9 @@ def test_status_validates_and_carries_no_mail_content(stack: OpsStack) -> None:
 # ---- canary ----------------------------------------------------------------------------------
 
 
-def test_a_canary_is_summarised_and_ends_ok_without_any_side_effect(stack: OpsStack, fresh_gemini: GeminiFake) -> None:
+def test_a_canary_is_summarised_and_ends_ok_without_any_side_effect(
+    stack: OpsStack, fresh_gemini: ModelRouterFake
+) -> None:
     assert stack.ok("canaryResult", CANARY_ID, definition="CanaryResult") == {"state": "not_seen"}
     before = stack.overview()
 
@@ -125,7 +127,7 @@ def test_a_canary_is_summarised_and_ends_ok_without_any_side_effect(stack: OpsSt
 
     assert result["state"] == "ok", result
     [call] = fresh_gemini.calls_mentioning(CANARY_TEXT)
-    assert call.system.strip() and call.model == "gemini-3.5-flash-lite"
+    assert call.system.strip() and call.requested_model == "models/gemini-email"
     event = stack.event(CANARY_ID)
     assert (event["state"], event["canary"], event["allowed_actions"], event["summary"]) == ("complete", True, [], None)
     assert transitions(event) == [
@@ -157,9 +159,9 @@ def test_a_canary_is_summarised_and_ends_ok_without_any_side_effect(stack: OpsSt
 
 
 def test_a_canary_whose_summary_keeps_failing_ends_failed_after_three_attempts(
-    stack: OpsStack, fresh_gemini: GeminiFake
+    stack: OpsStack, fresh_gemini: ModelRouterFake
 ) -> None:
-    for _ in range(9):  # three steps, each trying all three email models
+    for _ in range(3):  # three business steps; fallback attempts are inside the Router
         fresh_gemini.queue_generate(error_reply(503))
     event_id, body = canary_event()
 
@@ -169,7 +171,7 @@ def test_a_canary_whose_summary_keeps_failing_ends_failed_after_three_attempts(
     assert (result["state"], result["error_code"]) == ("failed", "summary_failed")
     event = stack.event(event_id)
     assert (event["state"], event["attempt_count"], event["allowed_actions"]) == ("ignored", 3, [])
-    assert len(fresh_gemini.calls_mentioning(CANARY_TEXT)) == 9
+    assert len(fresh_gemini.calls_mentioning(CANARY_TEXT)) == 3
     assert stack.ok("status", definition="OpsStatus")["counters"]["attention_events"] == 0
 
 

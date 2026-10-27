@@ -33,7 +33,7 @@ from todofy.core import owner_ui as ui
 from todofy.core.api_errors import ApiError
 from todofy.core.owner_ui import Reason, UiError
 from todofy.core.report_schema import MAX_TOP_N
-from todofy.runtime import api, backup, metrics, reports
+from todofy.runtime import api, backup, metrics, model_settings, reports
 from todofy.runtime.config import flag, report_default_top
 from todofy.runtime.interop import now_s
 
@@ -189,7 +189,17 @@ async def _get_service_status(call: Call) -> Answer:
 
 # rpc name -> (request message, handler, whether it writes). GetIntegration is the gateway's own (its facts and
 # TodofyCore's setup()).
+async def _get_models(call: Call) -> Answer:
+    return Answer(await model_settings.catalog(call.env))
+
+
+async def _update_models(call: Call) -> Answer:
+    return Answer(await model_settings.update(call.env, call.owner, call.request))
+
+
 METHODS: dict[str, tuple[type, Handler, bool]] = {
+    "GetModelSettings": (pb.GetModelSettingsRequest, _get_models, False),
+    "UpdateModelSettings": (pb.UpdateModelSettingsRequest, _update_models, True),
     "GetServiceStatus": (pb.GetServiceStatusRequest, _get_service_status, False),
     "ListMailEvents": (pb.ListMailEventsRequest, _list_mail_events, False),
     "GetMailEvent": (pb.GetMailEventRequest, _get_mail_event, False),

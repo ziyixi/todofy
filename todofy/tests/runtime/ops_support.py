@@ -30,6 +30,7 @@ from tests.runtime.harness import (
     SHARED_VARS,
     Worker,
     _run,
+    attach_model_router,
 )
 
 CONTRACT = ROOT.parent / "contracts" / "ops-v1"
@@ -101,6 +102,7 @@ def start_ops_stack(state: Path, variables: dict[str, str]) -> Iterator[OpsStack
     gateway = tomllib.loads((ROOT / GATEWAY_CONFIG).read_text())
     gateway["vars"] |= gateway_vars
     core = tomllib.loads(CORE_CONFIG.read_text())
+    bridge = attach_model_router(core, state, variables)
     core["vars"] |= core_vars
     run = uuid.uuid4().hex
     gateway_path = ROOT / "gateway" / f"wrangler.test-run-{run}.json"
@@ -109,7 +111,7 @@ def start_ops_stack(state: Path, variables: dict[str, str]) -> Iterator[OpsStack
     (state / "wrangler.toml").write_text(PROBE_CONFIG.replace("{gateway}", gateway["name"]))
     gateway_path.write_text(json.dumps(gateway))
     core_path.write_text(json.dumps(core))
-    configs = [str(state / "wrangler.toml"), str(gateway_path.relative_to(ROOT)), core_path.name]
+    configs = [str(state / "wrangler.toml"), str(gateway_path.relative_to(ROOT)), core_path.name, str(bridge)]
     try:
         yield from _run(OpsStack(configs, core_path.name, state, {}))
     finally:

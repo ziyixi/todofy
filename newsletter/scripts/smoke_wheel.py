@@ -113,11 +113,27 @@ def main() -> None:
             "--extra",
             "codex",
             "--no-emit-project",
+            "--no-emit-package",
+            "ziyixi-proto",
+            "--no-emit-package",
+            "ziyixi-model-router-client",
             "--output-file",
             str(requirements),
             "--quiet",
             cwd=root,
         )
+        shared = temporary / "shared-wheels"
+        for package in ("ziyixi-proto", "ziyixi-model-router-client"):
+            run(
+                uv,
+                "build",
+                "--package",
+                package,
+                "--wheel",
+                "--out-dir",
+                str(shared),
+                cwd=root,
+            )
         environment = temporary / "venv"
         run(
             uv,
@@ -146,6 +162,7 @@ def main() -> None:
             python,
             "--no-deps",
             "--no-index",
+            *(str(path) for path in sorted(shared.glob("*.whl"))),
             str(wheels[0]),
             cwd=temporary,
         )
@@ -184,8 +201,8 @@ def main() -> None:
             "('editorial_pb2.py', 'editorial_pb2.pyi', 'provenance.json')); "
             "from newsletter.preflight import check_proto_dependency; "
             "check_proto_dependency(); "
-            "from codex_cli_bin import bundled_codex_path; "
-            "assert Path(bundled_codex_path()).is_file()",
+            "import model_router_client; "
+            "assert model_router_client.ModelClient is not None",
             cwd=temporary,
         )
         run(

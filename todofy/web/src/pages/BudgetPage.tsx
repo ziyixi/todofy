@@ -121,7 +121,7 @@ function DailyTrends() {
         {tokens.length ? (
           <TrendChart
             {...chart}
-            title="Gemini token（按模型）"
+            title="模型 token（按模型）"
             variant="bar"
             format={formatNumber}
             axisFormat={formatCompact}
@@ -130,10 +130,10 @@ function DailyTrends() {
         ) : null}
         <TrendChart
           {...chart}
-          title="Gemini 请求（次）"
+          title="模型请求（次）"
           variant="line"
           format={formatNumber}
-          series={[{ label: 'Gemini', color: 1, values: counts(days, (day) => day.geminiCallCount) }]}
+          series={[{ label: '模型', color: 1, values: counts(days, (day) => day.geminiCallCount) }]}
         />
       </div>
     </Section>
@@ -168,7 +168,7 @@ export function BudgetPage() {
           <ErrorPanel error={overview.error} onRetry={() => overview.refetch()} />
         ) : (
           <>
-            <Section title="Gemini" aside={<span className="muted small">UTC {gemini?.day}</span>}>
+            <Section title="模型用量" aside={<span className="muted small">UTC {gemini?.day}</span>}>
               <Meter
                 label="今日 token"
                 value={(gemini?.usedTokens ?? 0) + (gemini?.reservedTokens ?? 0)}

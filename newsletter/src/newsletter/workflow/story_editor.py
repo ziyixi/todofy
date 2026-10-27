@@ -501,7 +501,7 @@ def _supplements(
 class StoryEditor:
     """Run draft, review and at most one repair with a second review."""
 
-    def __init__(self, editor: newsletter_editor.CodexEditor) -> None:
+    def __init__(self, editor: newsletter_editor.ModelEditor) -> None:
         self.editor = editor
 
     async def prepare(

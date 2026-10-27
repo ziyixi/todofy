@@ -4,7 +4,7 @@ import shutil
 from collections.abc import Iterator
 from pathlib import Path
 
-from tests.runtime.harness import ROOT, Worker, _run
+from tests.runtime.harness import ROOT, Worker, start_worker
 
 # Same runtime as the shipped core; D1 with the real migrations. No assets, cron or Durable Object: the probe
 # passes its own budget to the modules as the coordinator.
@@ -32,4 +32,4 @@ def start_probe(state: Path, variables: dict[str, str]) -> Iterator[Worker]:
     (stage / "python_modules").symlink_to(ROOT / "python_modules", target_is_directory=True)
     config = stage / "wrangler.toml"
     config.write_text(CONFIG.format(migrations=ROOT / "migrations"))
-    yield from _run(Worker([str(config)], str(config), state, variables))
+    yield from start_worker(str(config), state, variables)

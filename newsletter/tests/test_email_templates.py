@@ -99,7 +99,7 @@ def test_external_layout_preserves_graph_sources_sections_personal_and_usage(
     assert visible.index("TODOFY / 与你有关") > visible.index(
         rendering.SAMPLE_DRAFT["chart"]["question"]
     )
-    assert visible.index("Codex 已记录 120 tokens") > visible.index(
+    assert visible.index("模型已记录 120 tokens") > visible.index(
         "TODOFY / 与你有关"
     )
     assert rendered["chart_png"]

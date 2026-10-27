@@ -62,6 +62,7 @@ TEST_CONFIGS = {
 
 # Each app with a deploy-vars wrapper: the wrapper, how CI calls it, and its production configs.
 WRAPPERS = {
+    "model-router": ("model-router/tools/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["model-router"]),
     "mail-hero": ("mail-hero/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["mail-hero"]),
     "todofy": (
         "todofy/deploy/deploy_vars.py",
@@ -146,7 +147,7 @@ TOGGLES = {
     # the brief's ceiling (off, archive, shadow or live): the emergency switch of brief/docs/design.md section 15.
     "BRIEF_MODE",
 }
-DEPLOY_JOBS = ("todofy-deploy", "mail-hero-deploy", "dashboard-deploy", "links-deploy", "watch-deploy", "fleet-deploy", "mailsort-deploy", "recall-deploy", "brief-deploy", "personal-mcp-deploy")
+DEPLOY_JOBS = ("todofy-deploy", "mail-hero-deploy", "dashboard-deploy", "links-deploy", "watch-deploy", "fleet-deploy", "mailsort-deploy", "recall-deploy", "brief-deploy", "personal-mcp-deploy", "model-router-deploy")
 # The retired generators' required GitHub variables, still set in production: a revert of the committed-config
 # layout needs them (README "Rolling back the committed-config layout"), and nothing may read them now.
 LEGACY_VARIABLES = {
@@ -453,8 +454,8 @@ class Files(unittest.TestCase):
         self.assertEqual(tasks["services"], [{
             "binding": "MAIL", "service": "todofy", "entrypoint": "Mail", "props": {"access": "read-write"},
         }])
-        # Neither Todofy Worker binds another app: Focus, planning, GTD and the backup of tasks live in Tasks.
-        self.assertNotIn("services", core)
+        # The core uses only the authenticated inference boundary; native task ownership stays in Tasks.
+        self.assertEqual(core["services"], [{"binding": "MODEL_ROUTER", "service": "model-router", "entrypoint": "Inference", "props": {"app": "todofy"}}])
         self.assertNotIn("services", gateway)
         for config in (core, gateway):
             # Tasks is the only task store: no source switch remains.

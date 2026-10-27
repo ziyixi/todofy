@@ -133,7 +133,7 @@ PREFIX = {app: app.replace("-", "_") for app in APPS}
 CHECK_ONLY: set[str] = set()
 # Apps whose Ops entrypoint Home binds (dashboard/wrangler.toml): while one of them is CHECK_ONLY its Worker does not
 # exist yet, so Home's deploy (whose binding would name a missing service) waits too.
-HOME_BOUND = {"fleet", "mailsort", "recall", "brief", "tasks", "personal-mcp"}
+HOME_BOUND = {"fleet", "mailsort", "recall", "brief", "tasks", "personal-mcp", "model-router"}
 KEYS = (
     "todofy_check",
     "mail_hero_check",
@@ -150,6 +150,7 @@ KEYS = (
     "brief_check",
     "tasks_check",
     "personal_mcp_check",
+    "model_router_check",
     "contracts",
     "packages",
     "infra",
@@ -172,6 +173,7 @@ KEYS = (
     "brief_deploy",
     "tasks_deploy",
     "personal_mcp_deploy",
+    "model_router_deploy",
 )
 DISPATCH = {
     "both": ("todofy", "mail-hero"),
@@ -191,6 +193,7 @@ DISPATCH = {
     "brief": ("brief",),
     "tasks": ("tasks",),
     "personal-mcp": ("personal-mcp",),
+    "model-router": ("model-router",),
 }
 # The website's Notion relay Worker deploys on its own (website_relay_deploy).
 RELAY = "website/relay/"
@@ -235,9 +238,11 @@ APP_TEST_DIRECTORIES = (
     "tasks/tools/test/",
     "personal-mcp/worker/test/",
     "personal-mcp/deploy/test/",
+    "model-router/worker/test/",
+    "model-router/tools/test/",
 )
 # packages/<name>/ -> the apps whose Workers compile its workspace dependency in.
-PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "links", "watch", "fleet", "mailsort", "recall", "brief", "tasks", "personal-mcp"), "planning-ui": ("tasks",), "task-dates": ("tasks",)}
+PACKAGE_USERS = {"model-router-client": ("mailsort", "brief", "newsletter", "todofy"), "edge-auth": ("todofy", "mail-hero", "dashboard", "links", "watch", "fleet", "mailsort", "recall", "brief", "tasks", "personal-mcp", "model-router"), "planning-ui": ("tasks",), "task-dates": ("tasks",)}
 # The protobuf IDL (proto/README.md): app -> the languages ("ts", "python") whose generated code and runtime
 # its production bundles compile in; () for a user whose bundles take nothing from it (types only, tests
 # only). test_proto.py derives this map from the apps' manifests and sources.
@@ -257,6 +262,8 @@ PROTO_USERS: dict[str, tuple[str, ...]] = {
     "brief": ("ts",),
     "tasks": ("ts",),
     "personal-mcp": ("ts",),
+    "model-router": ("ts",),
+    "newsletter": ("python",),
 }
 # The hand-written runtimes and generators: a change reaches every user of each language listed. The wire
 # profile's own options (common/wire/v1: value rules, map order, binding arguments) are part of both runtimes:
@@ -274,8 +281,9 @@ PROTO_RUNTIMES: dict[str, tuple[str, ...]] = {
 # value imports, Python imports; test_proto.py checks this against the sources). A package missing here
 # reaches every user (fail safe; test_proto.py fails until it is listed).
 PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
-    "proto/codex/inference/": ("codex-gateway", "mailsort"),
-    "proto/codex/monitor/": ("codex-gateway", "mailsort", "mail-hero", "todofy", "dashboard", "watch", "website", "recall", "brief", "tasks", "personal-mcp", "fleet", "platform"),
+    "proto/modelrouter/inference/": ("model-router", "mailsort", "todofy", "brief", "newsletter", "codex-gateway"),
+    "proto/codex/inference/": ("codex-gateway",),
+    "proto/codex/monitor/": ("codex-gateway", "mailsort", "mail-hero", "todofy", "dashboard", "watch", "website", "recall", "brief", "tasks", "personal-mcp", "fleet", "platform", "model-router"),
     # recommendation-v1 and summary-v1 (todofy/api/*.schema.json are generated from it): todofy-core builds them.
     "proto/todofy/report/": ("todofy",),
     # Todofy's owner API (todofy.ui.v1): todofy-core writes every answer with it, the gateway serves it through the
@@ -303,8 +311,8 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     # CommonReason: Platform bundles Python error aliases.
     "proto/common/errors/": ("platform",),
     # ops-v1 (contracts/ops-v1): every app's Ops entrypoint and the dashboard that calls them.
-    "proto/ops/": ("mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp"),
-    "proto/website/sync/": ("mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp"),
+    "proto/ops/": ("mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp", "model-router"),
+    "proto/website/sync/": ("mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp", "model-router"),
     # mail.received.v1 (contracts/mail-received-v1's schema is generated from it): Mail Hero builds every event,
     # todofy-core reads every webhook body.
     "proto/mailhero/webhook/": ("mail-hero", "todofy"),
@@ -384,6 +392,7 @@ CHECK_JOBS = {
     "brief_check": ("Brief checks",),
     "tasks_check": ("Tasks checks",),
     "personal_mcp_check": ("Personal MCP checks",),
+    "model_router_check": ("Model Router checks",),
     "contracts": ("Contracts",),
     "packages": ("Shared packages",),
     "infra": ("Infra checks",),

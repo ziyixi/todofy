@@ -2,25 +2,26 @@
 # and bindings stay with each app's wrangler.toml and CI. prevent_destroy on all of them: a destroyed
 # database or bucket is data loss, and a recreated one has a new id that no wrangler.toml knows.
 #
-# R2 lifecycle rules are deliberately NOT modelled (README.md "Storage"): each bucket has only Cloudflare's
-# default multipart-abort rule, cloudflare_r2_bucket_lifecycle cannot be imported (an apply would PUT the
-# whole rule set), and time-based expiry must never be added to these buckets.
+# Existing mail, archive and backup buckets keep their own retention contracts. Only the new Model Router body
+# bucket has the explicitly approved seven-day lifecycle below; it contains no application source of record.
 
 locals {
   # name => the app whose wrangler.toml binds it
   d1_databases = {
-    "mail-hero" = "mail-hero"
-    "todofy"    = "todofy (todofy-core)"
-    "links"     = "links"
-    "tasks"     = "tasks"
+    "mail-hero"    = "mail-hero"
+    "todofy"       = "todofy (todofy-core)"
+    "links"        = "links"
+    "tasks"        = "tasks"
+    "model-router" = "model-router"
   }
   r2_buckets = {
-    "mail-hero-store"   = "mail-hero (MAIL_STORE)"
-    "mail-hero-backups" = "mail-hero (BACKUP_STORE)"
-    "todofy-backups"    = "todofy-core (BACKUPS)"
-    "recall-store"      = "recall (STORE)"
-    "tasks-backups"     = "tasks (BACKUPS)"
-    "watch-evidence"    = "watch (EVIDENCE_STORE)"
+    "mail-hero-store"             = "mail-hero (MAIL_STORE)"
+    "mail-hero-backups"           = "mail-hero (BACKUP_STORE)"
+    "todofy-backups"              = "todofy-core (BACKUPS)"
+    "recall-store"                = "recall (STORE)"
+    "tasks-backups"               = "tasks (BACKUPS)"
+    "watch-evidence"              = "watch (EVIDENCE_STORE)"
+    "model-router-request-bodies" = "model-router (REQUEST_BODIES)"
   }
 }
 
@@ -43,6 +44,29 @@ resource "cloudflare_r2_bucket" "app" {
   account_id = var.account_id
   name       = each.key
 
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# Pinned provider 5.25.0: ages are seconds. This complete rule set belongs only to the new private body bucket.
+resource "cloudflare_r2_bucket_lifecycle" "model_router_request_bodies" {
+  account_id  = var.account_id
+  bucket_name = cloudflare_r2_bucket.app["model-router-request-bodies"].name
+  rules = [
+    {
+      id                                 = "Default Multipart Abort Rule"
+      enabled                            = true
+      conditions                         = { prefix = "" }
+      abort_multipart_uploads_transition = { condition = { type = "Age", max_age = 604800 } }
+    },
+    {
+      id                        = "Expire private inference bodies after seven days"
+      enabled                   = true
+      conditions                = { prefix = "" }
+      delete_objects_transition = { condition = { type = "Age", max_age = 604800 } }
+    },
+  ]
   lifecycle {
     prevent_destroy = true
   }

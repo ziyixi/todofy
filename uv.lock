@@ -9,6 +9,7 @@ members = [
     "todofy",
     "todofy-personal-cloud",
     "todofy-workspace",
+    "ziyixi-model-router-client",
     "ziyixi-proto",
 ]
 constraints = [
@@ -848,6 +849,7 @@ version = "0.1.0"
 source = { editable = "codex-gateway" }
 dependencies = [
     { name = "fastapi" },
+    { name = "jsonschema" },
     { name = "openai-codex" },
     { name = "uvicorn" },
     { name = "ziyixi-proto" },
@@ -862,6 +864,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi" },
+    { name = "jsonschema" },
     { name = "openai-codex" },
     { name = "uvicorn" },
     { name = "ziyixi-proto", directory = "proto/python" },
@@ -886,12 +889,9 @@ dependencies = [
     { name = "protobuf" },
     { name = "pyyaml" },
     { name = "uvicorn" },
+    { name = "ziyixi-model-router-client" },
+    { name = "ziyixi-proto" },
     { name = "ziyixi-protos" },
-]
-
-[package.optional-dependencies]
-codex = [
-    { name = "openai-codex" },
 ]
 
 [package.dev-dependencies]
@@ -909,12 +909,13 @@ requires-dist = [
     { name = "fastapi" },
     { name = "httpx" },
     { name = "jinja2" },
-    { name = "openai-codex", marker = "extra == 'codex'" },
     { name = "packaging" },
     { name = "pillow" },
     { name = "protobuf" },
     { name = "pyyaml" },
     { name = "uvicorn" },
+    { name = "ziyixi-model-router-client", directory = "packages/model-router-client/python" },
+    { name = "ziyixi-proto", directory = "proto/python" },
     { name = "ziyixi-protos", url = "https://github.com/ziyixi/protos/releases/download/python-v0.1.0.dev7/ziyixi_protos-0.1.0.dev7-py3-none-any.whl" },
 ]
 provides-extras = ["codex"]
@@ -1392,6 +1393,7 @@ name = "todofy"
 version = "0.1.0"
 source = { virtual = "todofy" }
 dependencies = [
+    { name = "ziyixi-model-router-client" },
     { name = "ziyixi-proto" },
 ]
 
@@ -1408,7 +1410,10 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "ziyixi-proto", directory = "proto/python" }]
+requires-dist = [
+    { name = "ziyixi-model-router-client", directory = "packages/model-router-client/python" },
+    { name = "ziyixi-proto", directory = "proto/python" },
+]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1626,6 +1631,17 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/2a/99/f6431c8968e89be608d74b28ae2d024521b2953f27dd44e0dece5e04f67a/yarl-1.25.1-cp314-cp314t-win_arm64.whl", hash = "sha256:287e99ff5aa4dc1c7630bfc683ded6f106d756c99dec432a2d7f197a784f51c6", size = 102094, upload-time = "2026-09-15T19:33:31.151Z" },
     { url = "https://files.pythonhosted.org/packages/54/22/318c7980066769c6bcd9221ed2248294f5698811da099013098c670565ed/yarl-1.25.1-py3-none-any.whl", hash = "sha256:681c758b0490f9e96b78e5fa8e8dc6e648e9185bb6eaebe73183c33ea0c445f3", size = 63617, upload-time = "2026-09-15T19:34:59.616Z" },
 ]
+
+[[package]]
+name = "ziyixi-model-router-client"
+version = "0.1.0"
+source = { directory = "packages/model-router-client/python" }
+dependencies = [
+    { name = "ziyixi-proto" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "ziyixi-proto", directory = "proto/python" }]
 
 [[package]]
 name = "ziyixi-proto"

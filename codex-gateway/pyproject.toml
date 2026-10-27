@@ -12,6 +12,7 @@ dependencies = [
   "uvicorn",
   "openai-codex",
   "ziyixi-proto",
+  "jsonschema",
 ]
 
 [dependency-groups]

@@ -7,6 +7,7 @@ import re
 from api import ReleaseError
 
 DO_KEYS = {
+    "RouterEngine": "model-router-engine",
     "FleetState": "fleet-state",
     "HomeState": "home-state",
     "MailCoordinator": "mail-coordinator",

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 import pathlib
 import sys
 import tempfile
@@ -72,7 +73,9 @@ CONFIG_OVERRIDES = (
 )
 
 
-def runtime_overrides(home: pathlib.Path) -> tuple[str, ...]:
+def runtime_overrides(
+    home: pathlib.Path, *, web_research: bool = False
+) -> tuple[str, ...]:
     disabled = [
         {"path": str(home / "skills" / ".system" / name / "SKILL.md"), "enabled": False}
         for name in SYSTEM_SKILLS
@@ -80,12 +83,31 @@ def runtime_overrides(home: pathlib.Path) -> tuple[str, ...]:
     skills = ",".join(
         "{path=" + json.dumps(item["path"]) + ",enabled=false}" for item in disabled
     )
-    return (*CONFIG_OVERRIDES, "skills.config=[" + skills + "]")
+    overrides = tuple(
+        value
+        for value in CONFIG_OVERRIDES
+        if not web_research
+        or value not in {'web_search="disabled"', "features.code_mode_host=false"}
+    )
+    web = ('web_search="live"', "features.code_mode_host=true") if web_research else ()
+    return (*overrides, *web, "skills.config=[" + skills + "]")
 
 
-def runtime_config(sdk: Any, home: pathlib.Path, workspace: pathlib.Path) -> Any:
-    overrides = runtime_overrides(home)
-    args = [sys.executable, "-I", str(pathlib.Path(__file__).with_name("_launch.py"))]
+def runtime_config(
+    sdk: Any,
+    home: pathlib.Path,
+    workspace: pathlib.Path,
+    *,
+    web_research: bool = False,
+) -> Any:
+    overrides = runtime_overrides(home, web_research=web_research)
+    args = [
+        sys.executable,
+        "-I",
+        str(pathlib.Path(__file__).with_name("_launch.py")),
+        "--gateway-parent-pid",
+        str(os.getpid()),
+    ]
     for override in overrides:
         args.extend(["--config", override])
     args.extend(["app-server", "--listen", "stdio://"])

@@ -1,0 +1,41 @@
+version = 1
+id = "model-router"
+target = "cloudflare"
+
+[[workers]]
+config = "model-router/wrangler.toml"
+personal_secrets = ["ACCESS_OWNER", "ACCESS_OWNER_ALIASES", "CSRF_SIGNING_KEY"]
+manual_secrets = []
+optional_secrets = ["ACCESS_OWNER_ALIASES"]
+# Put by the owner, preserved by the release recipe, never sent through GitHub.
+owner_machine_secrets = ["ANTHROPIC_API_KEY_MAILSORT", "ANTHROPIC_API_KEY_BRIEF", "GEMINI_API_KEY_TODOFY", "CODEX_EXECUTOR_TOKEN", "CODEX_ACCESS_CLIENT_ID", "CODEX_ACCESS_CLIENT_SECRET", "MODEL_ROUTER_NEWSLETTER_TOKEN"]
+hosts = ["models"]
+entry = "model-router"
+role = "统一模型推理与私有控制台"
+position = 33
+
+[[entries]]
+id = "model-router"
+name = "Model Router"
+description = "各应用的模型调用、请求记录与推理试运行"
+group = "apps"
+icon = "gauge"
+accent = "green"
+access = true
+app_only_signals = []
+order = 31
+worker = "model-router"
+url_path = "/"
+position = 33
+[entries.status]
+type = "ops_v1"
+binding = "MODEL_ROUTER"
+guard = false
+
+[[access]]
+key = "model-router"
+kind = "owner"
+worker = "model-router"
+name = "Model Router"
+paths = [""]
+session = "24h"

@@ -12,6 +12,31 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
+### Unified Model Router (`codex/model-router`)
+
+Owner approved Cloudflare Router/API/console + D1 metadata + private R2 bodies and a VPS official Codex
+executor. All clients use root `modelrouter.inference.v1`; no vendor payload, SDK or raw-proxy path in apps.
+Generate returns a final result; optional short conversations preserve Newsletter's two rounds and web
+observations. Content retention7 days, request metadata90 days. Preserve business modes/budgets/history;
+Todofy switches to Sol6.1 after synthetic acceptance. Implement contract/executor/provider adapters first,
+then console and consumer migrations Mailsort->Todofy->Brief->Newsletter, using same-green-SHA publication
+and final resolved-infrastructure reconciliation. No real content used as fixtures or printed in public logs.
+Shared owner/Claude checkout is untouched; work is isolated in the temporary checkout.
+
+Implementation checkpoint: common proto, TS/Python clients, Cloudflare engine/console, official SDK executor and
+Mailsort/Brief/Newsletter migrations are implemented. Todofy model selection is persisted in D1 and included in
+backups; existing results stay frozen. Router uses one `router-v1` DO with concurrent independent requests and
+per-conversation turns. Input/output seven days, metadata90 days. No public token streaming or vendor escape hatch.
+Local evidence so far: Mailsort184 units+123 workerd+smoke; Brief105 units+41 workerd; providers24;
+Newsletter2263 tests+wheel+mypy; TS client11 and Python client4; Router13 runtime/SSE cases; private console17
+and synthetic desktop/mobile checks. Final combined checks and Linux image/parent-death checks remain CI gates.
+Additive IaC was applied through extend bootstrap: six creates,42 no-op, no existing resource writes. Actual IDs
+are in config/resources.toml. No application deployment or production model switch has happened yet. First
+namespace capture and matching main reconcile remain required. New provider connections and deployment-credential
+writes await owner confirmation; do not bypass that boundary. Newsletter needs its new URL/token installed in
+its existing runtime settings before the migrated image starts. Preserve its current archive/paused state.
+
+
 ### Tasks Sunday planning week (`codex/tasks-next-step-estimate`)
 
 Owner chose Sunday as the first calendar day and Saturday-to-Sunday 00:00 account-local rollover.

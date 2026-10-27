@@ -9,11 +9,12 @@
 # Their actual IDs were verified with exact-name/domain Access reads and recorded in config/resources.toml.
 locals {
   access_policy_ids = {
-    "owner"          = "018f1a13-1a1b-4cf6-a470-c865c4577851"
-    "github_owner"   = "eea00ced-7de7-4094-a705-c9741d835b7c"
-    "fleet_receipt"  = "fb3608f4-bf0e-4db8-8983-5fb1340f20d5"
-    "brief_feedback" = "402ed2c7-f548-44e1-8b6c-e46424554ae2"
-    "recall_machine" = "dcd778e7-e901-4638-8ced-bfe119a470c6"
+    "owner"                  = "018f1a13-1a1b-4cf6-a470-c865c4577851"
+    "github_owner"           = "eea00ced-7de7-4094-a705-c9741d835b7c"
+    "fleet_receipt"          = "fb3608f4-bf0e-4db8-8983-5fb1340f20d5"
+    "brief_feedback"         = "402ed2c7-f548-44e1-8b6c-e46424554ae2"
+    "recall_machine"         = "dcd778e7-e901-4638-8ced-bfe119a470c6"
+    "model_router_inference" = "097fe721-2615-4cfa-847b-9f0d0448dd79"
   }
   mail_hero_backup_app_id = "dafc6e08-7b1b-461f-8735-2cfa668a0ce0"
   fleet_receipt_app_id    = "e468db67-b8aa-4be4-9961-6965a5fced5d"
@@ -31,11 +32,13 @@ locals {
     "brief"        = "6005b0c0-ddc3-4812-8b28-322f3601a95a"
     "tasks"        = "1cf91393-a308-4b4a-bcb0-962bc2840ea3"
     "personal-mcp" = "0ae92f11-d672-4c2c-b511-83fb3e73b68e"
+    "model-router" = "fef4b5c4-d15d-47f7-b8c0-69ac89db7bf0"
   }
   d1_database_ids = {
-    "mail-hero" = "6c13e4c3-e239-42fb-a7a4-96810fa8d7dc"
-    "todofy"    = "151c1306-3885-4679-9592-08887b30ae68"
-    "links"     = "2f8c5331-06ce-4347-8c0a-90fe51c82260"
-    "tasks"     = "79a1f345-1183-46c3-bc6a-651be106f90c"
+    "mail-hero"    = "6c13e4c3-e239-42fb-a7a4-96810fa8d7dc"
+    "todofy"       = "151c1306-3885-4679-9592-08887b30ae68"
+    "links"        = "2f8c5331-06ce-4347-8c0a-90fe51c82260"
+    "tasks"        = "79a1f345-1183-46c3-bc6a-651be106f90c"
+    "model-router" = "79388b2a-1d62-49ad-9536-fb4cacd6c777"
   }
 }

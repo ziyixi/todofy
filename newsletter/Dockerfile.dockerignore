@@ -3,6 +3,9 @@
 !pyproject.toml
 !uv.lock
 !.python-version
+!package.json
+!pnpm-workspace.yaml
+!pnpm-lock.yaml
 !codex-gateway/
 !codex-gateway/pyproject.toml
 !platform/
@@ -10,8 +13,13 @@
 !todofy/
 !todofy/pyproject.toml
 !proto/
-!proto/python/
-!proto/python/pyproject.toml
+!proto/**
+!packages/
+!packages/model-router-client/
+!packages/model-router-client/python/
+!packages/model-router-client/python/pyproject.toml
+!packages/model-router-client/python/src/
+!packages/model-router-client/python/src/**
 !newsletter/
 !newsletter/pyproject.toml
 !newsletter/MANIFEST.in
@@ -20,6 +28,7 @@
 !newsletter/src/newsletter/**
 **/__pycache__/
 **/*.pyc
+**/node_modules/
 **/.env*
 **/.codex-auth/
 **/codex-auth/

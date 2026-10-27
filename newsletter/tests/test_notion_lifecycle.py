@@ -34,7 +34,8 @@ def settings(tmp_path):
         notion_token="synthetic-notion-token-for-offline-test",
         notion_materials_data_source_id="11111111-1111-4111-8111-111111111111",
         notion_editions_data_source_id="22222222-2222-4222-8222-222222222222",
-        codex_home=tmp_path / "auth",
+        model_router_url="https://models.example.test",
+        model_router_token="synthetic-token",
     )
 
 

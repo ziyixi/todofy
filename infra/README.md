@@ -72,7 +72,7 @@ Nothing unrelated is imported, declared, read or modelled, not even read-only.
 [`test_infra_guard.py`](../.github/scripts/test_infra_guard.py) tests the guard itself against
 configurations built to slip past it.
 
-### Managed here (42 objects)
+### Managed here (48 objects)
 
 This is the maximum declared count. It includes the dedicated Codex inference token, policy and
 path application. Fresh bootstrap omits the optional legacy backup application and the mail rule
@@ -116,8 +116,8 @@ imports their actual IDs before switching to the managed references.
 | `cloudflare_zero_trust_tunnel_cloudflared_config.platform` | Platform ingress | Exact Codex prefix to loopback 18766, daemon to loopback 18765, then 404; each validates its Access audience |
 | `cloudflare_dns_record.platform["runtime"]` | Runtime CNAME | Only this exact platform host; existing Worker and mailbox DNS remain with their current owners |
 | `cloudflare_zero_trust_access_application.mail_hero_backup` | Access app "Mail Hero backup API" | `mail-hero.ziyixi.science/api/internal/backup/*`. Used by the backup collector's machine identity (mail-hero/AGENTS.md §7). **Frozen**: an apply refuses any write to it ([Apply](#apply-p4)) |
-| `cloudflare_d1_database.app["mail-hero" \| "todofy" \| "links" \| "tasks"]` | D1 databases | Existence only |
-| `cloudflare_r2_bucket.app["mail-hero-store" \| "mail-hero-backups" \| "todofy-backups" \| "recall-store" \| "tasks-backups" \| "watch-evidence"]` | R2 buckets | Existence only. `recall-store` was **created** here before recall's first deploy, and `tasks-backups` was created here before Tasks bound it for its own weekly backup. `watch-evidence` stores Watch's private page evidence and screenshots |
+| `cloudflare_d1_database.app["mail-hero" \| "todofy" \| "links" \| "tasks" \| "model-router"]` | D1 databases | Existence only |
+| `cloudflare_r2_bucket.app["mail-hero-store" \| "mail-hero-backups" \| "todofy-backups" \| "recall-store" \| "tasks-backups" \| "watch-evidence" \| "model-router-request-bodies"]` | R2 buckets | Existence only. `recall-store` was **created** here before recall's first deploy, and `tasks-backups` was created here before Tasks bound it for its own weekly backup. `watch-evidence` stores Watch's private page evidence and screenshots |
 
 **Never edit these objects in the Cloudflare dashboard** (the links app's application included). A
 hand edit is drift: the next "Infra apply" reverts it, and before the first apply it would even turn an import into
@@ -192,7 +192,11 @@ each app's wrangler.toml and CI. `test_infra_config.py` checks on every push tha
 the databases and buckets the production configs bind, and that each D1 import id is the
 `database_id` committed in that app's config.
 
-R2 lifecycle rules are **not modelled**:
+The new Model Router request-body bucket has an explicitly approved seven-day lifecycle, managed by
+`cloudflare_r2_bucket_lifecycle.model_router_request_bodies`. It covers only that private bucket and
+preserves the default multipart-abort rule. Its pinned provider ages are seconds.
+
+All existing buckets keep their prior rules and are **not modelled** as lifecycle resources:
 
 - Each bucket has only Cloudflare's "Default Multipart Abort Rule".
 - `cloudflare_r2_bucket_lifecycle` cannot be imported in 5.25.0. A declared rule set would show up as

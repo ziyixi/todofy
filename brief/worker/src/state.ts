@@ -33,7 +33,7 @@ import { handlers, recordVote, type ApiContext } from './api.ts';
 import { sleep, StepBudget } from './budget.ts';
 import { settleOpenCalls, type CallContext } from './claude.ts';
 import { collectStep, type CollectResult } from './collect.ts';
-import { aiRunner, anthropicKey, buildSha, mode, publicHost, REQUEST_ID_HEADER, upstreamFetch, type Env } from './env.ts';
+import { modelRouter, buildSha, mode, publicHost, REQUEST_ID_HEADER, upstreamFetch, type Env } from './env.ts';
 import type { VoteName } from './feedback.ts';
 import { Hosts, type Clock } from './fetch/hosts.ts';
 import type { FetchFn } from './fetch/net.ts';
@@ -248,7 +248,6 @@ export class BriefState extends DurableObject<Env> {
     return {
       store: this.store,
       env: this.env,
-      fetch: (input, init) => upstreamFetch(this.env)(input, init),
       now: () => this.now(),
       transact: this.transact,
       timeLeft,
@@ -322,7 +321,7 @@ export class BriefState extends DurableObject<Env> {
     const clock = this.clock();
     const fetchFn = this.fetcher();
     const own = ownSuffixes(publicHost(this.env));
-    const gate = deployment !== 'off' && !settings.paused && anthropicKey(this.env) !== null;
+    const gate = deployment !== 'off' && !settings.paused && modelRouter(this.env) !== null;
     try {
       this.transact(() => { this.store.setJson('collect_open', { round: round.key, build }); });
       const result = await collectStep({
@@ -334,7 +333,7 @@ export class BriefState extends DurableObject<Env> {
         hosts: new Hosts(this.store, budget, clock, fetchFn, own),
         fetchFn,
         own,
-        ai: shed ? null : aiRunner(this.env),
+        ai: shed ? null : modelRouter(this.env),
         claude: gate ? this.claudeContext(settings.monthlyBudgetUsd, timeLeft) : null,
         transact: this.transact,
         round,
@@ -356,7 +355,7 @@ export class BriefState extends DurableObject<Env> {
     const date = localDate(now);
     const kind = issueKind(date);
     if (kind === null || now < cutoffOf(date)) return false;
-    if (mode(this.env) === 'off' || anthropicKey(this.env) === null || readSettings(this.store).paused) return false;
+    if (mode(this.env) === 'off' || modelRouter(this.env) === null || this.store.getMeta('model_configured') === '0' || readSettings(this.store).paused) return false;
     if (this.store.one(`SELECT 1 AS x FROM runs WHERE issue = ?`, date) !== undefined) return false;
     const cutoffKey = `${date}T03:30`;
     if ((this.store.getMeta('round_done') ?? '') < cutoffKey && now < cutoffOf(date) + CUTOFF_ROUND_WAIT_MS) return false;

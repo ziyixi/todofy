@@ -7,8 +7,6 @@ the worker. Request handlers do not construct providers or own their lifetime.
 import asyncio
 from collections.abc import AsyncIterator, Callable
 import contextlib
-import pathlib
-from typing import cast
 
 import fastapi
 
@@ -18,6 +16,7 @@ import newsletter.collection.instructions as instructions
 import newsletter.collection.pipeline as newsletter_collection_pipeline
 import newsletter.collection.repository as repository
 import newsletter.editor as newsletter_editor
+import newsletter.model_client as model_client
 import newsletter.notion_api as notion_api
 import newsletter.notion_journal as notion_journal
 import newsletter.notion_sync as notion_sync
@@ -59,6 +58,10 @@ async def service_lifespan(
                 }
             )
             store.recover()
+            if settings.mode == "live":
+                await store.deployment.recover_model_contexts(
+                    model_client.configured_client(settings)
+                )
             store.deployment.recover()
             # A newly bootstrapped process must stay closed until the release
             # pipeline explicitly verifies/resumes it. A completed same-key
@@ -132,8 +135,8 @@ async def service_lifespan(
                 newsletter_workflow_pipeline.DagPipeline(
                     runs,
                     settings.data_dir / "collection-jobs",
-                    editor=newsletter_editor.CodexEditor(
-                        cast(pathlib.Path, settings.codex_home),
+                    editor=newsletter_editor.ModelEditor(
+                        model_client.configured_client(settings),
                         model=settings.model,
                         timeout_seconds=settings.collection_timeout_seconds,
                     ),

@@ -24,7 +24,7 @@ from todofy.core.contract import (
     parse_mail_event,
     utf8_len,
 )
-from todofy.core.gemini_wire import summary_content
+from todofy.core.model_input import summary_content
 from todofy.core.render import content_notice
 
 FIXTURES = mail_contract.fixtures()

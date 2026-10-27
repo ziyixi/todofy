@@ -230,6 +230,8 @@ def generated_files(root: Path) -> dict[str, str]:
             replacements["PUBLIC_HOST"] = hosts[0]
         if name == "mail-hero":
             replacements["WEBHOOK_ALLOWED_HOSTS"] = "daily." + profile["zone"]
+        if name == "model-router":
+            replacements["CODEX_EXECUTOR_ORIGIN"] = "https://" + profile["vps"]["platform_runtime_host"]
         if name == "mailsort":
             replacements["CODEX_ENDPOINT_URL"] = "https://" + profile["vps"]["platform_runtime_host"] + "/api/codex/v1/inference:run"
         for variable, value in replacements.items():

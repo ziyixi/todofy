@@ -127,7 +127,7 @@ export const CLUSTER_NEAR = 0.03;
 /** Embeddings: the title and the summary's first characters, this many texts a call. */
 export const EMBED_SUMMARY_CHARS = 600;
 export const EMBED_BATCH = 50;
-export const EMBEDDING_MODEL = '@cf/baai/bge-m3';
+export const EMBEDDING_MODEL = 'models/bge-m3';
 export const EMBEDDING_DIMENSIONS = 1024;
 /** Neurons per million input tokens (Workers AI pricing, 2026-10). */
 export const NEURONS_PER_M_TOKENS = 1075;
@@ -136,7 +136,7 @@ export const DAILY_NEURON_CAP = 500;
 
 // ---- the gate (design §5.1) ------------------------------------------------------------------------------------------
 
-export const GATE_MODEL = 'claude-haiku-5-5';
+export const GATE_MODEL = 'models/claude-haiku-5-5';
 export const GATE_GROUP = 12;
 export const GATE_CALLS_PER_ROUND = 10;
 export const GATE_DAILY_MAX = 400;
@@ -211,17 +211,12 @@ export const TEXT_KEPT_MS = 7 * DAY;
 
 // ---- the model calls (design §7, §9, §13) ---------------------------------------------------------------------------------
 
-export const OPUS_MODEL = 'claude-opus-5-5';
-export const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
-/** The SDK's timeout covers only the time to response headers; the stream has its own deadline. */
-export const SDK_TIMEOUT_MS = 120 * SECOND;
+export const OPUS_MODEL = 'models/claude-opus-5-5';
 /** A model stream's own deadline, never past the alarm's time left minus a minute. */
 export const MODEL_DEADLINE_MS = 13 * MINUTE;
 export const MODEL_DEADLINE_MARGIN_MS = 60 * SECOND;
 /** An Opus call never starts with less than this left in its alarm (it is the first thing its alarm does). */
 export const MODEL_MIN_LEFT_MS = 11 * MINUTE;
-/** No byte of the stream (pings included) for this long is a stall. */
-export const STREAM_STALL_MS = 3 * MINUTE;
 export const PICK_MAX_TOKENS = 32_000;
 export const WRITE_MAX_TOKENS = 64_000;
 export const REPAIR_MAX_TOKENS = 32_000;

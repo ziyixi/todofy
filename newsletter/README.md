@@ -23,7 +23,7 @@ Newsletter 是一个可自托管的私人日报服务。它按你设定的方向
 外部触发 → 搜集与选题 → 调查与审校 → 生成简报和预览 → 邮件投递
 ```
 
-搜集和审校使用 Codex。模型仍可能漏掉重要信息或理解有误，来源检查和自动测试不能保证每篇内容都正确。
+搜集和审校通过统一 Model Router 调用配置的模型。模型仍可能漏掉重要信息或理解有误，来源检查和自动测试不能保证每篇内容都正确。
 
 ## 先看看效果
 
@@ -53,7 +53,7 @@ make demo
 
 | 项目 | 用途 |
 | --- | --- |
-| 服务专用的 Codex 登录目录 | 搜集、写作和审校；使用 ChatGPT 登录，不是 OpenAI API key |
+| Model Router 地址和 Newsletter 专用 token | 搜集、写作和审校；提供方账号由 Router 执行层管理 |
 | Notion 集成授权和两个数据库 | 分别保存材料、简报档案 |
 | Resend key、发件地址和收件地址 | 投递邮件 |
 | 两个独立的服务 token | 一个用于启动采编，另一个用于批准发送 |
@@ -99,7 +99,7 @@ newsletter-trigger --send --timeout 7200
 ## 开发与维护
 
 项目采用 Python、FastAPI 和 SQLite，使用 uv 管理依赖。SQLite 保存完整运行记录和发送账本，Notion 是便于阅读的副本，不会把手工修改同步回服务。
-Codex Python SDK 与配套 CLI 精确锁定为 0.163.0；内置技能缓存由 SDK 升级，服务在模型调用前仍核对五个预期 system 技能全部禁用。升级不改变模型配置、运行开关、提示词或历史记录。
+Newsletter 只使用共享的 `modelrouter.inference.v1` Python 客户端，不安装模型 SDK，也不挂载登录目录。默认模型是 `models/sol-6-1`；未指定 effort 时保留模型默认值。一次采编调用可在同一短会话内补查一轮，使用 Router 返回的实际网页观察和逐次用量。历史运行、业务开关、提示词和发送账本保持原样。
 
 ```sh
 make check    # Ruff、mypy、结构检查和离线测试；与 CI 相同
@@ -108,7 +108,7 @@ make smoke    # 本地 HTTP 全流程测试，模拟外部服务，不发真实�
 make build    # 构建 Python 安装包
 ```
 
-代码在 `src/newsletter/`，测试及基准材料在 `tests/`，可重复使用的验证工具在 `scripts/`。接口消息来自公共 [protos 仓库](https://github.com/ziyixi/protos) 发布的 Python wheel，本仓库不生成 protobuf。
+代码在 `src/newsletter/`，测试及基准材料在 `tests/`，可重复使用的验证工具在 `scripts/`。业务消息继续使用公共 [protos 仓库](https://github.com/ziyixi/protos) 的 Python wheel；模型调用使用仓库根 proto 的共享客户端，Newsletter 不生成 IDL。
 
 - [开发指南](docs/development.md)：代码分工、检查规则和扩展方法。
 - [工作流说明](docs/workflow.md)：采编、保存进度、失败处理和 token 统计。

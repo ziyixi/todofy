@@ -16,6 +16,7 @@ import tempfile
 import newsletter.contracts as contracts
 import newsletter.editor as newsletter_editor
 import newsletter.errors as errors
+import newsletter.model_client as model_client
 import newsletter.settings as newsletter_settings
 import newsletter.types as types
 import newsletter.usage as usage
@@ -74,7 +75,7 @@ def smoke_cases() -> list[tuple[str, types.Payload, types.Payload]]:
     return cases
 
 
-async def check_schemas(editor: newsletter_editor.CodexEditor) -> types.Payload:
+async def check_schemas(editor: newsletter_editor.ModelEditor) -> types.Payload:
     """Probe provider schema acceptance without research or publication."""
     records: dict[str, usage.UsageRecord] = {}
     checked = []
@@ -128,10 +129,12 @@ def main() -> None:
         )
     try:
         settings = newsletter_settings.Settings.from_env()
-        if settings.codex_home is None or not settings.model.strip():
+        if not settings.model_router_url or not settings.model.strip():
             raise errors.EditorError("configuration")
-        editor = newsletter_editor.CodexEditor(
-            settings.codex_home, settings.model, timeout_seconds=90
+        editor = newsletter_editor.ModelEditor(
+            model_client.configured_client(settings),
+            settings.model,
+            timeout_seconds=90,
         )
         print(contracts.canonical_json(asyncio.run(check_schemas(editor))))
     except errors.EditorError as error:

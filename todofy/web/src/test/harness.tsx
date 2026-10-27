@@ -53,6 +53,14 @@ export function mockApi(handlers: Record<string, Handler>) {
   const table: Record<string, Handler> = {
     'GET /api/csrf': { token: 'csrf-token-1' },
     'GET /api/v1/serviceStatus': overview(),
+    'GET /api/v1/modelSettings': {
+      settings: { name: 'modelSettings', email_model: 'models/gemini-email', report_model: 'models/gemini-report', etag: '0' },
+      models: [
+        { name: 'models/gemini-email', display_name: 'Email chain', configured: true, generation: true },
+        { name: 'models/gemini-report', display_name: 'Report chain', configured: true, generation: true },
+        { name: 'models/sol-6-1', display_name: 'Sol 6.1', configured: true, generation: true },
+      ],
+    },
     'GET /api/v1/metricDays': dailyMetrics(),
     ...handlers,
   }

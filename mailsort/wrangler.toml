@@ -67,6 +67,13 @@ class_name = "MailsortState"
 tag = "v1"
 new_sqlite_classes = ["MailsortState"]
 
+# Authenticated per-caller inference over the shared private ModelService.
+[[services]]
+binding = "MODEL_ROUTER"
+service = "model-router"
+entrypoint = "Inference"
+props = { app = "mailsort" }
+
 [vars]
 # The app's host: the only origin a mutation may come from (CSRF).
 PUBLIC_HOST = "sort.ziyixi.science"

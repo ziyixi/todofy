@@ -15,10 +15,12 @@ TABLES = {
     "d1_databases": "cloudflare_d1_database.app",
 }
 POLICY_KEYS = {
+    "model-router-inference": "model_router_inference",
     "github-owner": "github_owner", "fleet-receipt": "fleet_receipt",
     "brief-feedback": "brief_feedback", "recall-machine": "recall_machine",
 }
 STANDALONE = {
+    "model-router-inference": "cloudflare_zero_trust_access_application.model_router_inference",
     "fleet-receipt": "cloudflare_zero_trust_access_application.fleet_receipt",
     "mail-hero-backup": "cloudflare_zero_trust_access_application.mail_hero_backup",
 }

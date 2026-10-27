@@ -1,8 +1,9 @@
 """Test URL provenance without SDK, redirect or network requests."""
 
+import dataclasses
 import json
-import types
 
+import model_router_client as models
 import pytest
 
 import newsletter.editor as newsletter_editor
@@ -178,7 +179,7 @@ def test_honest_component_hold_or_malformed_claim_does_not_trigger_research(
 
 
 async def test_component_approval_gets_one_same_thread_source_action_correction(
-    tmp_path, fake_sdk
+    tmp_path, fake_router
 ):
     value = {
         "assessments": [
@@ -186,7 +187,7 @@ async def test_component_approval_gets_one_same_thread_source_action_correction(
         ],
         "issues": [],
     }
-    fake_sdk.turns = [
+    fake_router.turns = [
         editor.FakeTurn(value, research=False),
         editor.FakeTurn(value),
     ]
@@ -194,15 +195,15 @@ async def test_component_approval_gets_one_same_thread_source_action_correction(
         "{}", {}, "fixture", tmp_path / "job"
     )
     assert json.loads(text) == value and opened and searched
-    assert len(fake_sdk.prompts) == 2 and fake_sdk.thread_starts == 1
-    correction = fake_sdk.prompts[1]
+    assert len(fake_router.prompts) == 2 and fake_router.thread_starts == 1
+    correction = fake_router.prompts[1]
     assert correction["missing_approval_actions"] == ["search", "openPage"]
     assert "status" in correction["task"] and "blocked" in correction["task"]
     assert "不得增加 passed 字段" in correction["task"]
 
 
 async def test_self_approval_adds_no_fake_actions_or_third_turn(
-    tmp_path, fake_sdk
+    tmp_path, fake_router
 ):
     value = {
         "assessments": [
@@ -210,11 +211,11 @@ async def test_self_approval_adds_no_fake_actions_or_third_turn(
         ],
         "issues": [],
     }
-    fake_sdk.turn = editor.FakeTurn(value, research=False)
+    fake_router.turn = editor.FakeTurn(value, research=False)
     text, opened, searched = await editor.live_editor(tmp_path).execute(
         "{}", {}, "fixture", tmp_path / "job"
     )
-    assert not opened and not searched and len(fake_sdk.prompts) == 2
+    assert not opened and not searched and len(fake_router.prompts) == 2
     # The StoryEditor receipt boundary still rejects this unobserved approval.
     assert newsletter_editor._unobserved_approval_actions(
         text, opened, searched
@@ -225,7 +226,7 @@ async def test_self_approval_adds_no_fake_actions_or_third_turn(
 
 
 async def test_all_components_blocked_do_not_spend_an_action_correction(
-    tmp_path, fake_sdk
+    tmp_path, fake_router
 ):
     value = {
         "assessments": [
@@ -237,12 +238,12 @@ async def test_all_components_blocked_do_not_spend_an_action_correction(
         ],
         "issues": [],
     }
-    fake_sdk.turn = editor.FakeTurn(value, research=False)
+    fake_router.turn = editor.FakeTurn(value, research=False)
     text, opened, searched = await editor.live_editor(tmp_path).execute(
         "{}", {}, "fixture", tmp_path / "job"
     )
     assert json.loads(text) == value and not opened and not searched
-    assert len(fake_sdk.prompts) == 1
+    assert len(fake_router.prompts) == 1
 
 
 def test_prior_retraction_needs_fresh_actions_without_new_body():
@@ -289,17 +290,14 @@ class SourceTurn(editor.FakeTurn):
         super().__init__(value, research=False, **kwargs)
         self.urls, self.searched = urls, searched
 
-    async def stream(self):
-        actions = (
-            [{"type": "search", "query": "synthetic"}] if self.searched else []
-        ) + [{"type": "openPage", "url": url} for url in self.urls]
-        for action in actions:
-            yield types.SimpleNamespace(
-                method="item/completed",
-                payload={"item": {"type": "webSearch", "action": action}},
-            )
-        async for event in super().stream():
-            yield event
+    async def result(self, name):
+        value = await super().result(name)
+        return dataclasses.replace(
+            value,
+            observations=models.Observations(
+                searched=self.searched, opened_urls=tuple(self.urls)
+            ),
+        )
 
 
 def test_only_approved_components_select_code_owned_missing_urls():
@@ -373,10 +371,10 @@ def test_review_url_matching_ignores_only_fragments():
 
 
 async def test_first_open_keeps_second_url_in_one_correction(
-    tmp_path, fake_sdk
+    tmp_path, fake_router
 ):
     value = component_review(body="approved", signal="approved")
-    fake_sdk.turns = [
+    fake_router.turns = [
         SourceTurn(value, [SHORT_URL]),
         SourceTurn(value, [CANONICAL_URL], searched=False),
     ]
@@ -391,8 +389,8 @@ async def test_first_open_keeps_second_url_in_one_correction(
         and opened == {SHORT_URL, CANONICAL_URL}
         and searched
     )
-    assert len(fake_sdk.prompts) == 2 and fake_sdk.thread_starts == 1
-    correction = fake_sdk.prompts[1]
+    assert len(fake_router.prompts) == 2 and fake_router.thread_starts == 1
+    correction = fake_router.prompts[1]
     assert correction["unverified_urls"] == [CANONICAL_URL]
     assert correction["missing_approval_actions"] == []
     assert (
@@ -402,10 +400,10 @@ async def test_first_open_keeps_second_url_in_one_correction(
 
 
 async def test_missing_second_url_adds_no_third_turn_or_global_failure(
-    tmp_path, fake_sdk
+    tmp_path, fake_router
 ):
     value = component_review(body="approved", reading="approved")
-    fake_sdk.turn = SourceTurn(value, [SHORT_URL])
+    fake_router.turn = SourceTurn(value, [SHORT_URL])
     sources = newsletter_editor.ApprovalSources(
         {"body": [SHORT_URL], "reading": [CANONICAL_URL]}
     )
@@ -413,7 +411,7 @@ async def test_missing_second_url_adds_no_third_turn_or_global_failure(
         "{}", {}, "fixture", tmp_path / "job", approval_sources=sources
     )
     assert json.loads(text) == value and opened == {SHORT_URL} and searched
-    assert len(fake_sdk.prompts) == 2
+    assert len(fake_router.prompts) == 2
     # Caller keeps the independently verified body and blocks the reading card.
     assert newsletter_editor._unopened_approval_sources(
         text, opened, sources
@@ -421,13 +419,13 @@ async def test_missing_second_url_adds_no_third_turn_or_global_failure(
 
 
 async def test_correction_can_block_only_unverifiable_component_and_keep_body(
-    tmp_path, fake_sdk
+    tmp_path, fake_router
 ):
     first, final = (
         component_review(body="approved", reading="approved"),
         component_review(body="approved", reading="blocked"),
     )
-    fake_sdk.turns = [
+    fake_router.turns = [
         SourceTurn(first, [SHORT_URL]),
         SourceTurn(final, [], searched=False),
     ]
@@ -437,7 +435,7 @@ async def test_correction_can_block_only_unverifiable_component_and_keep_body(
     text, opened, _ = await editor.live_editor(tmp_path).execute(
         "{}", {}, "fixture", tmp_path / "job", approval_sources=sources
     )
-    assert json.loads(text) == final and len(fake_sdk.prompts) == 2
+    assert json.loads(text) == final and len(fake_router.prompts) == 2
     assert (
         newsletter_editor._unopened_approval_sources(text, opened, sources)
         == []
@@ -445,12 +443,12 @@ async def test_correction_can_block_only_unverifiable_component_and_keep_body(
 
 
 async def test_source_packet_and_component_misses_share_one_correction_slot(
-    tmp_path, fake_sdk, bundle
+    tmp_path, fake_router, bundle
 ):
     value = component_review(body="approved")
     value["supplemental_packets"] = bundle["supplemental_packets"]
     third_url = "https://example.org/third-source"
-    fake_sdk.turns = [
+    fake_router.turns = [
         SourceTurn(value, [SHORT_URL]),
         SourceTurn(value, [CANONICAL_URL, third_url]),
     ]
@@ -458,8 +456,8 @@ async def test_source_packet_and_component_misses_share_one_correction_slot(
     _, opened, _ = await editor.live_editor(tmp_path).execute(
         "{}", {}, "fixture", tmp_path / "job", approval_sources=sources
     )
-    assert len(fake_sdk.prompts) == 2
-    assert set(fake_sdk.prompts[1]["unverified_urls"]) == {
+    assert len(fake_router.prompts) == 2
+    assert set(fake_router.prompts[1]["unverified_urls"]) == {
         CANONICAL_URL,
         third_url,
     }
@@ -467,14 +465,14 @@ async def test_source_packet_and_component_misses_share_one_correction_slot(
 
 
 async def test_withdrawal_missing_specific_evidence_gets_existing_correction(
-    tmp_path, fake_sdk
+    tmp_path, fake_router
 ):
     value = component_review(body="not_present")
     value["prior_withdrawal"] = {
         "target_body_hash": "a" * 64,
         "evidence": ["p/second"],
     }
-    fake_sdk.turns = [
+    fake_router.turns = [
         SourceTurn(value, [SHORT_URL]),
         SourceTurn(value, [CANONICAL_URL]),
     ]
@@ -484,14 +482,14 @@ async def test_withdrawal_missing_specific_evidence_gets_existing_correction(
     await editor.live_editor(tmp_path).execute(
         "{}", {}, "fixture", tmp_path / "job", approval_sources=sources
     )
-    assert fake_sdk.prompts[1]["unverified_urls"] == [CANONICAL_URL]
+    assert fake_router.prompts[1]["unverified_urls"] == [CANONICAL_URL]
 
 
 async def test_missing_component_url_correction_stays_inside_original_timeout(
-    tmp_path, fake_sdk
+    tmp_path, fake_router
 ):
     value = component_review(body="approved")
-    fake_sdk.turns = [
+    fake_router.turns = [
         SourceTurn(value, [SHORT_URL]),
         SourceTurn(value, [], hang=True),
     ]
@@ -505,7 +503,7 @@ async def test_missing_component_url_correction_stays_inside_original_timeout(
                 {"body": [CANONICAL_URL]}
             ),
         )
-    assert error.value.code == "timeout" and len(fake_sdk.prompts) == 2
+    assert error.value.code == "timeout" and len(fake_router.prompts) == 2
 
 
 @pytest.mark.parametrize(
@@ -525,13 +523,13 @@ async def test_missing_component_url_correction_stays_inside_original_timeout(
     ],
 )
 async def test_invalid_review_source_configuration_fails_before_starting_sdk(
-    tmp_path, fake_sdk, sources
+    tmp_path, fake_router, sources
 ):
     with pytest.raises(newsletter_errors.EditorError) as error:
         await editor.live_editor(tmp_path).execute(
             "{}", {}, "fixture", tmp_path / "job", approval_sources=sources
         )
-    assert error.value.code == "invalid_input" and not fake_sdk.started
+    assert error.value.code == "invalid_input" and not fake_router.started
 
 
 def test_review_source_snapshot_cannot_be_changed_by_later_caller_mutation():

@@ -37,7 +37,7 @@ class EditorialNodes:
         self,
         store: newsletter_store.Store,
         definition: newsletter_workflow_definition.WorkflowDefinition,
-        editor: newsletter_editor.CodexEditor,
+        editor: newsletter_editor.ModelEditor,
         workspace: pathlib.Path,
     ) -> None:
         self.store, self.definition, self.editor, self.workspace = (

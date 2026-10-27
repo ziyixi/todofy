@@ -1,4 +1,4 @@
-"""All VPS Codex consumers use one matching, locked SDK/runtime version."""
+"""The executor owns the pinned Codex runtime; Newsletter calls the shared Router client."""
 
 import ast
 from pathlib import Path
@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class CodexVersions(unittest.TestCase):
-    def test_newsletter_and_gateway_share_the_pinned_runtime(self):
+    def test_the_executor_owns_the_pinned_runtime(self):
         project = tomllib.loads((ROOT / "pyproject.toml").read_text())
         specs = [
             value
@@ -24,7 +24,6 @@ class CodexVersions(unittest.TestCase):
         self.assertEqual(packages["openai-codex"]["version"], expected)
         self.assertEqual(packages["openai-codex-cli-bin"]["version"], expected)
         for app, runtime in (
-            ("newsletter", "src/newsletter/codex_runtime.py"),
             ("codex-gateway", "src/codex_gateway/runtime.py"),
         ):
             with self.subTest(app=app):
@@ -44,6 +43,13 @@ class CodexVersions(unittest.TestCase):
                     and node.targets[0].id == "SDK_VERSION"
                 }
                 self.assertNotIn("SDK_VERSION", constants)
+
+    def test_newsletter_uses_router_without_embedding_a_codex_runtime(self):
+        project = tomllib.loads((ROOT / "newsletter/pyproject.toml").read_text())
+        dependencies = project["project"]["dependencies"]
+        self.assertIn("ziyixi-model-router-client", dependencies)
+        self.assertNotIn("openai-codex", dependencies)
+        self.assertFalse((ROOT / "newsletter/src/newsletter/codex_runtime.py").exists())
 
 
 if __name__ == "__main__":

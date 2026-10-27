@@ -4,10 +4,10 @@
  * The selected engine classifies a bounded batch in one request. Historical learning and replay remain readable.
  * Existing write gates and Gmail request limits apply to every step.
  */
-import { CLAUDE_CACHE_TTL_MS, ClaudeBudgetError, ClaudeConfigurationError, ClaudeError, classifyEmails, type ClaudeBatchResult, type ClaudeEmail, type ClaudeItem } from './claude.ts';
-import { classifyWithCodex, CodexError, CodexConfigurationError, type CodexBatchResult } from './codex.ts';
+import { CLAUDE_CACHE_TTL_MS, ClassificationError, classifyEmails, type ClassificationBatchResult } from './classification-model.ts';
+import type { ClassificationEmail as ClaudeEmail, ClassificationItem as ClaudeItem } from './classification-result.ts';
 import { readClassificationPrompt } from './classification-prompt.ts';
-import { modeCeiling, type Env, type ModeName } from './env.ts';
+import { modelRouterBinding, modeCeiling, type Env, type ModeName } from './env.ts';
 import { applyFeedback, setCurrentLabels } from './feedback.ts';
 import { countFlow, skipOutcome, stageOf } from './flow.ts';
 import { GmailRefused, GoogleError, isMessageId, type AccessToken, type GmailClient, type HistoryPage } from './gmail.ts';
@@ -532,7 +532,7 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
         const prompt = readClassificationPrompt(store);
         const recentCache = Number(store.getMeta('claude_prompt_cache_at') ?? 0) > at - CLAUDE_CACHE_TTL_MS;
         const cachePrompt = store.count(`SELECT count(*) AS n FROM pending WHERE not_before <= ?`, at) > prepared.length || recentCache;
-        let answer: ClaudeBatchResult | CodexBatchResult | null = null;
+        let answer: ClassificationBatchResult | null = null;
         try {
           budget.left--;
           const emails: ClaudeEmail[] = prepared.map(({ read, gathered: g }) => ({
@@ -542,7 +542,7 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
             body_truncated: read.bodyTruncated === true || Array.from(read.body).length > 12000,
           }));
           if (provider === 'codex') {
-            const recorded = await classifyWithCodex(deps.env, emails, deps.fetch, { basePrompt: prompt.baseText, personalRules: prompt.personalRules });
+            const recorded = await classifyEmails(modelRouterBinding(deps.env), provider, emails, { basePrompt: prompt.baseText, personalRules: prompt.personalRules });
             transact(() => {
               store.addCodexUsage(utcDay(at), true, recorded.usageAvailable ? recorded : undefined);
               store.setMeta('codex_last_request_at', String(at));
@@ -552,7 +552,7 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
             });
             answer = recorded;
           } else {
-            const recorded = await classifyEmails(deps.env.ANTHROPIC_API_KEY ?? '', emails, deps.fetch, { basePrompt: prompt.baseText, personalRules: prompt.personalRules, cachePrompt });
+            const recorded = await classifyEmails(modelRouterBinding(deps.env), provider, emails, { basePrompt: prompt.baseText, personalRules: prompt.personalRules, cachePrompt });
             answer = recorded;
             transact(() => {
               store.addClaudeUsage(utcDay(at), recorded);
@@ -563,22 +563,22 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
             });
           }
         } catch (error) {
-          const errorCode = error instanceof ClaudeError || error instanceof CodexError ? error.code : `${provider}_unexpected`;
+          const errorCode = error instanceof ClassificationError ? error.code : `${provider}_unexpected`;
           transact(() => {
-            if (error instanceof CodexError && error.attempted) {
+            if (provider === 'codex' && error instanceof ClassificationError && error.attempted) {
               store.addCodexUsage(utcDay(at), false, error.usage);
               store.setMeta('codex_last_request_at', String(at));
               store.setMeta('codex_usage_last_request_at', String(at));
             }
-            if (error instanceof ClaudeError && error.usage !== undefined) {
+            if (provider === 'claude' && error instanceof ClassificationError && error.usage !== undefined) {
               store.addClaudeUsage(utcDay(at), error.usage);
               if (error.usage.cacheWriteTokens + error.usage.cacheReadTokens > 0) store.setMeta('claude_prompt_cache_at', String(at));
               store.setMeta('claude_last_request_at', String(at));
             }
             store.pushError(errorCode);
             store.setMeta(`${provider}_error`, errorCode);
-            if (error instanceof ClaudeBudgetError) store.setMeta('claude_limited_month', month);
-            if (!(error instanceof ClaudeBudgetError) && !(error instanceof ClaudeConfigurationError) && !(error instanceof CodexConfigurationError) && errorCode !== 'codex_quota') {
+            if (provider === 'claude' && error instanceof ClassificationError && error.spendLimited) store.setMeta('claude_limited_month', month);
+            if (!(error instanceof ClassificationError && (error.spendLimited || error.configuration)) && errorCode !== 'codex_quota') {
               for (const item of prepared) {
                 if (item.attempts + 1 >= (/^(claude|codex)_bad_/.test(errorCode) || errorCode === 'claude_incomplete' || errorCode === 'codex_response_too_large' ? BAD_ANSWER_ATTEMPTS_MAX : MAIL_ATTEMPTS_MAX)) {
                   if (!item.recheck || store.decision(item.read.id) === undefined) {
@@ -593,7 +593,7 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
               }
             }
           });
-          if (error instanceof ClaudeBudgetError) deferred = deferModel(store, nextUtcMonth(at), at, transact);
+          if (provider === 'claude' && error instanceof ClassificationError && error.spendLimited) deferred = deferModel(store, nextUtcMonth(at), at, transact);
           else if (errorCode === 'codex_quota') deferred = deferModel(store, at + HOUR, at, transact);
           code = errorCode;
         }

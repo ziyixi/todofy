@@ -240,7 +240,7 @@ def test_legacy_binding_advance_ignores_unused_projection_failures(
     pipeline = newsletter_workflow_pipeline.DagPipeline(
         runs,
         tmp_path / "workspace",
-        editor=editor.CodexEditor(tmp_path / "unused-auth-path"),
+        editor=editor.ModelEditor(tmp_path / "unused-auth-path"),
     )
     assert pipeline.advance()
     assert runs.get(run["id"])["state"] == "ready"
@@ -274,7 +274,7 @@ def test_legacy_binding_advance_blocks_unconfirmed_adopted_projection(
     pipeline = newsletter_workflow_pipeline.DagPipeline(
         runs,
         tmp_path / "workspace",
-        editor=editor.CodexEditor(tmp_path / "unused-auth-path"),
+        editor=editor.ModelEditor(tmp_path / "unused-auth-path"),
     )
     assert pipeline.advance()
     blocked = runs.get(run["id"])
@@ -311,7 +311,7 @@ def test_legacy_binding_closes_when_packet_projection_is_skipped(
     pipeline = newsletter_workflow_pipeline.DagPipeline(
         runs,
         tmp_path / "workspace",
-        editor=editor.CodexEditor(tmp_path / "unused-auth-path"),
+        editor=editor.ModelEditor(tmp_path / "unused-auth-path"),
         packet_projection=False,
     )
     assert pipeline.advance()
@@ -334,7 +334,7 @@ def test_legacy_binding_waits_for_pending_projection_when_it_runs(
     pipeline = newsletter_workflow_pipeline.DagPipeline(
         runs,
         tmp_path / "workspace",
-        editor=editor.CodexEditor(tmp_path / "unused-auth-path"),
+        editor=editor.ModelEditor(tmp_path / "unused-auth-path"),
     )
     assert pipeline.advance() is False
     assert runs.get(run["id"])["state"] == "editing"

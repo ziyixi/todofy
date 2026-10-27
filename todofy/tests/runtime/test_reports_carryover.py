@@ -11,7 +11,7 @@ from pathlib import Path
 import jsonschema
 import pytest
 
-from tests.fakes.gemini_fake import text_reply
+from tests.fakes.model_router_fake import text_reply
 from tests.runtime.reports_support import (  # noqa: F401
     NEWSLETTER,
     NOW,

@@ -52,6 +52,7 @@ FIELD_MASK = ".google.protobuf.FieldMask"
 # Every other package is TypeScript only. .github/scripts/test_proto.py keeps this, the wheel and the apps' imports in
 # step.
 PYTHON_PACKAGES = {
+    "modelrouter.inference.v1": True,
     "codex.inference.v1": True,
     "codex.monitor.v1": True,
     "todofy.report.v1": True,

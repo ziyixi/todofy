@@ -46,6 +46,10 @@ def test_uv_is_the_only_lock_and_direct_pins_match_resolution():
     )
     for name in declared:
         assert re.fullmatch(r"[A-Za-z0-9_.-]+", name)
+        if name in {"ziyixi-proto", "ziyixi-model-router-client"}:
+            assert workspace["tool"]["uv"]["sources"][name]["workspace"]
+            assert any(package["name"] == name for package in lock["package"])
+            continue
         version = constraints[name]
         assert (re.sub(r"[-_.]+", "-", name.lower()), version) in resolved
 
@@ -173,8 +177,16 @@ def test_docker_context_only_allows_build_inputs():
         "todofy/",
         "todofy/pyproject.toml",
         "proto/",
-        "proto/python/",
-        "proto/python/pyproject.toml",
+        "proto/**",
+        "package.json",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
+        "packages/",
+        "packages/model-router-client/",
+        "packages/model-router-client/python/",
+        "packages/model-router-client/python/pyproject.toml",
+        "packages/model-router-client/python/src/",
+        "packages/model-router-client/python/src/**",
         "newsletter/",
         "newsletter/pyproject.toml",
         "newsletter/MANIFEST.in",

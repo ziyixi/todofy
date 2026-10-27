@@ -1,23 +1,20 @@
-"""ChatGPT-authenticated Codex editor, and an explicitly fake offline editor.
-
-SDK surface verified against openai-codex 0.163.0. No SDK client is started at
-import or construction time. The application, not the model, writes artifacts.
-"""
+"""Router-backed research editor and an explicitly fake offline editor."""
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator, Mapping, Sequence
-import contextlib
+from collections.abc import Mapping, Sequence
 import dataclasses
 import json
 import logging
 import os
 import pathlib
-from typing import Any, cast, Protocol, TYPE_CHECKING
+from typing import Any, Protocol
 import urllib.parse as parse
+import uuid
 
-import newsletter.codex_runtime as codex_runtime
+import model_router_client as models
+
 import newsletter.contracts as contracts
 import newsletter.diagnostics as diagnostics
 import newsletter.drain as drain
@@ -26,10 +23,6 @@ import newsletter.model_io as model_io
 import newsletter.schema_compat as schema_compat
 import newsletter.types as types
 import newsletter.usage as newsletter_usage
-
-if TYPE_CHECKING:
-    import openai_codex
-    import openai_codex.models as codex_models
 
 POLICY_DIR = pathlib.Path(__file__).parent / "policy"
 
@@ -234,93 +227,6 @@ class MockEditor:
         return result
 
 
-def _plain(value: object) -> Any:
-    if hasattr(value, "model_dump"):
-        return value.model_dump(mode="json", by_alias=True)
-    return value
-
-
-def _vendor_failure(value: object) -> errors.EditorError:
-    # Classification may inspect vendor text locally, but never returns or logs
-    # it.
-    text = str(_plain(value)).lower()
-    # Request-schema rejection is deterministic configuration failure, not an
-    # unavailable topic. Check before broad authentication/quota string matching
-    # because a schema path/property name may itself contain those words.
-    if (
-        "invalid_json_schema" in text
-        or "invalid schema for response_format" in text
-        or "invalid schema for text.format" in text
-    ):
-        return errors.EditorError("configuration")
-    if any(
-        x in text
-        for x in (
-            "unauthorized",
-            "unauthenticated",
-            "401",
-            "403",
-            "not logged in",
-            "authentication",
-            "sign in",
-        )
-    ):
-        return errors.EditorError("authentication")
-    if any(
-        x in text
-        for x in (
-            "usagelimit",
-            "usage_limit",
-            "rate limit",
-            "rate_limit",
-            "429",
-            "quota",
-            "sessionbudget",
-            "usage limit",
-        )
-    ):
-        return errors.EditorError("rate_limit")
-    return errors.EditorError("unavailable")
-
-
-async def _collect(
-    turn: openai_codex.AsyncTurnHandle,
-) -> tuple[str, set[str], bool]:
-    final = None
-    opened: set[str] = set()
-    searched = False
-    completed = False
-    # Pinned SDK implements stream as an async generator, but annotates the
-    # narrower AsyncIterator surface; aclosing also needs its aclose method.
-    async with contextlib.aclosing(
-        cast("AsyncGenerator[codex_models.Notification]", turn.stream())
-    ) as events:
-        async for event in events:
-            payload = _plain(event.payload)
-            newsletter_usage.observe_codex_usage(event.method, payload)
-            if event.method == "item/completed":
-                item = payload["item"]
-                if item.get("type") == "agentMessage" and item.get("phase") in (
-                    None,
-                    "final_answer",
-                ):
-                    final = item.get("text")
-                if item.get("type") == "webSearch":
-                    action = item.get("action") or {}
-                    if action.get("type") == "search":
-                        searched = True
-                    if action.get("type") == "openPage" and action.get("url"):
-                        opened.add(parse.urldefrag(action["url"])[0])
-            elif event.method == "turn/completed":
-                completed = True
-                status = payload["turn"]["status"]
-                if status != "completed":
-                    raise _vendor_failure(payload["turn"].get("error"))
-    if not completed or not isinstance(final, str):
-        raise errors.EditorError("invalid_output")
-    return final, opened, searched
-
-
 def _unopened_sources(text: str, opened: set[str]) -> list[str]:
     """Inspect new evidence, never require re-opening persisted input packets.
 
@@ -434,19 +340,19 @@ def _unopened_approval_sources(
     )
 
 
-class CodexEditor:
-    """Use the pinned Codex runtime for isolated research and editing."""
+class ModelEditor:
+    """Research through one finite remote model context per execution."""
 
     def __init__(
         self,
-        codex_home: pathlib.Path,
-        model: str = "gpt-6.1-sol",
+        client: models.ModelClient,
+        model: str = "models/sol-6-1",
         *,
         timeout_seconds: float = 840,
     ) -> None:
         if not model.strip() or timeout_seconds <= 0:
             raise errors.EditorError("configuration")
-        self.codex_home = codex_home
+        self.client = client
         self.model = model
         self.timeout_seconds = timeout_seconds
 
@@ -462,7 +368,9 @@ class CodexEditor:
         """Research with one correction at most; never write to providers."""
         schema_compat.validate_output_schema(schema)
         sources = _approval_snapshot(approval_sources)
-        with newsletter_usage.codex_usage(self.model) as usage:
+        if len(prompt.encode("utf-8")) > model_io.MAX_JSON_BYTES:
+            raise errors.EditorError("invalid_input")
+        with newsletter_usage.model_usage(self.model) as usage:
             return await self._execute(
                 prompt, schema, instructions, workspace, usage, sources
             )
@@ -473,52 +381,36 @@ class CodexEditor:
         schema: types.Payload,
         instructions: str,
         workspace: pathlib.Path,
-        usage: newsletter_usage.CodexUsage,
+        usage: newsletter_usage.ModelUsage,
         approval_sources: ApprovalSources | None = None,
     ) -> tuple[str, set[str], bool]:
-        client: openai_codex.AsyncCodex | None = None
-        turn: openai_codex.AsyncTurnHandle | None = None
+        name = f"conversations/{uuid.uuid4()}"
+        close_request_id = drain.register_model_context(name)
         try:
-            if len(prompt.encode("utf-8")) > model_io.MAX_JSON_BYTES:
-                raise errors.EditorError("invalid_input")
-            codex_home = codex_runtime.check_codex_home(
-                self.codex_home, workspace
+            config = models.GenerationConfig(
+                model=self.model,
+                instructions=(
+                    models.Instruction(text=instructions, cache=True),
+                ),
+                output_schema_json=_json(schema),
+                web_research=True,
             )
-            sdk = codex_runtime.load_sdk()
-            overrides = codex_runtime.runtime_overrides(codex_home)
-            config = sdk.CodexConfig(
-                cwd=str(workspace),
-                env=codex_runtime.runtime_env(codex_home),
-                config_overrides=overrides,
-                launch_args_override=codex_runtime.launch_args(overrides),
-                client_name="newsletter_editor",
-            )
-            client = sdk.AsyncCodex(config)
             async with asyncio.timeout(self.timeout_seconds):
-                await client.__aenter__()
-                account = await client.account(refresh_token=False)
-                root = getattr(account.account, "root", None)
-                if getattr(root, "type", None) != "chatgpt":
-                    raise errors.EditorError("authentication")
-                codex_runtime.check_codex_home(codex_home, workspace)
-                await codex_runtime.assert_no_skills(
-                    client, workspace, codex_home
+                conversation = await self.client.create_conversation(
+                    models.CreateConversationRequest(
+                        request_id=str(uuid.uuid4()),
+                        conversation=models.Conversation(
+                            name=name,
+                            config=config,
+                            timeout_ms=min(
+                                840000, max(1, int(self.timeout_seconds * 1000))
+                            ),
+                        ),
+                    )
                 )
-                thread = await client.thread_start(
-                    cwd=str(workspace),
-                    model=self.model,
-                    model_provider="openai",
-                    sandbox=sdk.Sandbox.read_only,
-                    approval_mode=sdk.ApprovalMode.deny_all,
-                    ephemeral=True,
-                    developer_instructions=instructions,
-                )
-                usage.start_turn()
-                turn = await thread.turn(prompt, output_schema=schema)
-                usage.bind_turn(
-                    getattr(turn, "thread_id", None), getattr(turn, "id", None)
-                )
-                text, opened, searched = await _collect(turn)
+                if conversation.name != name or conversation.state != "open":
+                    raise errors.EditorError("unavailable")
+                text, opened, searched = await self._turn(name, prompt, usage)
                 missing = sorted(
                     set(_unopened_sources(text, opened))
                     | set(
@@ -531,7 +423,7 @@ class CodexEditor:
                     text, opened, searched
                 )
                 if missing or missing_actions:
-                    # SDK reports open inputs, not redirect/canonical
+                    # The router reports open inputs, not redirect/canonical
                     # equivalence. Keep
                     # the same thread so the model retains its evidence. This is
                     # one
@@ -578,57 +470,93 @@ class CodexEditor:
                             "observed_open_inputs": sorted(opened),
                         }
                     )
-                    usage.start_turn()
-                    turn = await thread.turn(correction, output_schema=schema)
-                    usage.bind_turn(
-                        getattr(turn, "thread_id", None),
-                        getattr(turn, "id", None),
+                    text, more_opened, more_searched = await self._turn(
+                        name, correction, usage
                     )
-                    text, more_opened, more_searched = await _collect(turn)
                     opened |= more_opened
                     searched |= more_searched
                     if _unopened_sources(text, opened):
                         raise errors.EditorError("invalid_output")
                 return text, opened, searched
-        except asyncio.CancelledError:
-            await _interrupt(turn)
-            raise
         except TimeoutError:
-            await _interrupt(turn)
             raise errors.EditorError("timeout") from None
-        except errors.EditorError:
-            raise
-        except (ImportError, FileNotFoundError):
-            raise errors.EditorError("configuration") from None
-        # SDK exception classes are vendor-specific; normalize at this boundary.
-        except Exception as exc:  # noqa: BLE001
-            diagnostics.record_failure(
-                logging.getLogger(__name__), phase="model", error=exc
-            )
-            raise _vendor_failure(exc) from None
+        except models.ModelRouterError as error:
+            raise errors.EditorError(_error_category(error.code)) from None
         finally:
-            if client is not None:
-                try:
-                    await asyncio.wait_for(client.close(), timeout=5)
-                except asyncio.CancelledError:
-                    drain.mark_uncertain()
-                    raise
-                # Closing a failed SDK must not replace the original outcome.
-                except Exception as exc:  # noqa: BLE001
-                    drain.mark_uncertain()
-                    diagnostics.record_failure(
-                        logging.getLogger(__name__),
-                        phase="model_cleanup",
-                        error=exc,
+            try:
+                async with asyncio.timeout(30):
+                    receipt = await self.client.close_conversation(
+                        models.CloseConversationRequest(
+                            name=name, request_id=close_request_id
+                        )
                     )
+                if receipt.name != name or receipt.state not in {
+                    "closed",
+                    "expired",
+                }:
+                    raise errors.EditorError("unavailable")
+                drain.confirm_model_context_closed(name)
+            except asyncio.CancelledError:
+                drain.mark_uncertain()
+                raise
+            except Exception as error:  # noqa: BLE001
+                drain.mark_uncertain()
+                diagnostics.record_failure(
+                    logging.getLogger(__name__),
+                    phase="model_cleanup",
+                    error=error,
+                )
 
-
-async def _interrupt(turn: openai_codex.AsyncTurnHandle | None) -> None:
-    if turn is not None:
-        try:
-            await asyncio.wait_for(turn.interrupt(), timeout=3)
-        # Best-effort vendor cleanup preserves the cancellation/timeout cause.
-        except Exception as exc:  # noqa: BLE001
-            diagnostics.record_failure(
-                logging.getLogger(__name__), phase="model_interrupt", error=exc
+    async def _turn(
+        self, name: str, prompt: str, usage: newsletter_usage.ModelUsage
+    ) -> tuple[str, set[str], bool]:
+        request_id = str(uuid.uuid4())
+        usage.start_turn()
+        usage.bind_turn(name, request_id)
+        result = await self.client.generate(
+            models.GenerateRequest(
+                request_id=request_id,
+                conversation=name,
+                input=prompt,
+                timeout_ms=min(
+                    840000, max(1, int(self.timeout_seconds * 1000))
+                ),
             )
+        )
+        usage.observe_generation(result)
+        if (
+            result.error is not None
+            or result.state != "succeeded"
+            or result.finish_reason
+            in {"refused", "output_limit", "interrupted"}
+        ):
+            code = result.error.code if result.error else 14
+            raise errors.EditorError(
+                _error_category(
+                    {
+                        1: "CANCELLED",
+                        4: "DEADLINE_EXCEEDED",
+                        8: "RESOURCE_EXHAUSTED",
+                        16: "UNAUTHENTICATED",
+                        3: "INVALID_ARGUMENT",
+                        13: "INTERNAL",
+                    }.get(code, "UNAVAILABLE")
+                )
+            )
+        observations = result.observations or models.Observations()
+        return (
+            result.output,
+            {parse.urldefrag(url)[0] for url in observations.opened_urls},
+            observations.searched,
+        )
+
+
+def _error_category(code: str) -> str:
+    return {
+        "UNAUTHENTICATED": "authentication",
+        "PERMISSION_DENIED": "authentication",
+        "RESOURCE_EXHAUSTED": "rate_limit",
+        "DEADLINE_EXCEEDED": "timeout",
+        "INVALID_ARGUMENT": "configuration",
+        "INTERNAL": "invalid_output",
+    }.get(code, "unavailable")

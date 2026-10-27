@@ -4,6 +4,7 @@ from workflow_sources import effective_ci
 
 import io
 import json
+import tomllib
 import os
 import re
 import shutil
@@ -66,6 +67,8 @@ def expect(
     personal_mcp_deploy=False,
     codex_gateway_check=False,
     codex_gateway_deploy=False,
+    model_router_check=False,
+    model_router_deploy=False,
 ):
     # The bootstrap mask (ci_changes.outputs): an app in CHECK_ONLY never deploys, and neither does Home while an app it
     # binds is one. Mailsort was CHECK_ONLY until its Access application existed (mailsort/docs/design.md §12), recall
@@ -119,6 +122,8 @@ def expect(
         "brief_deploy": brief_deploy,
         "tasks_check": tasks_check,
         "tasks_deploy": tasks_deploy,
+        "model_router_check": model_router_check,
+        "model_router_deploy": model_router_deploy,
         "personal_mcp_check": personal_mcp_check,
         "personal_mcp_deploy": personal_mcp_deploy,
     }
@@ -127,7 +132,7 @@ def expect(
 # Every app checked (a contracts/ or .github/ change, the links app and the watch app included); the dashboard
 # checked and deployed; the edge-auth apps (the website compiles in no package) are todofy and mail-hero plus
 # EDGE_AUTH; every app with the website Worker (the relay Worker is added where a test expects it).
-ALL_CHECKED = {"dashboard_check": True, "website_check": True, "links_check": True, "watch_check": True, "newsletter_check": True, "codex_gateway_check": True, "fleet_check": True, "platform_check": True, "mailsort_check": True, "recall_check": True, "brief_check": True, "tasks_check": True, "personal_mcp_check": True}
+ALL_CHECKED = {"model_router_check": True,"dashboard_check": True, "website_check": True, "links_check": True, "watch_check": True, "newsletter_check": True, "codex_gateway_check": True, "fleet_check": True, "platform_check": True, "mailsort_check": True, "recall_check": True, "brief_check": True, "tasks_check": True, "personal_mcp_check": True}
 DASH = {"dashboard_check": True, "dashboard_deploy": True}
 LINKS = {"links_check": True, "links_deploy": True}
 WATCH = {"watch_check": True, "watch_deploy": True}
@@ -141,8 +146,8 @@ VPS = {**PLATFORM, "newsletter_check": True, "newsletter_deploy": True}
 ALL = {**DASH}
 # Every app that compiles in packages/edge-auth besides Todofy and Mail Hero: the dashboard, the links app, the watch
 # app, Fleet, mailsort, recall, the brief and Tasks, each checked and deployed.
-EDGE_AUTH = {"personal_mcp_check": True, "personal_mcp_deploy": True, "tasks_check": True, "tasks_deploy": True, **ALL, **LINKS, **WATCH, **FLEET, **MAILSORT, **RECALL, **BRIEF}
-EVERY = {"personal_mcp_check": True, "personal_mcp_deploy": True, "tasks_check": True, "tasks_deploy": True, **ALL, "website_check": True, "website_deploy": True, **LINKS, **WATCH, **FLEET, **MAILSORT, **RECALL, **BRIEF, **PLATFORM, "newsletter_check": True, "newsletter_deploy": True}
+EDGE_AUTH = {"model_router_check": True, "model_router_deploy": True,"personal_mcp_check": True, "personal_mcp_deploy": True, "tasks_check": True, "tasks_deploy": True, **ALL, **LINKS, **WATCH, **FLEET, **MAILSORT, **RECALL, **BRIEF}
+EVERY = {"model_router_check": True, "model_router_deploy": True,"personal_mcp_check": True, "personal_mcp_deploy": True, "tasks_check": True, "tasks_deploy": True, **ALL, "website_check": True, "website_deploy": True, **LINKS, **WATCH, **FLEET, **MAILSORT, **RECALL, **BRIEF, **PLATFORM, "newsletter_check": True, "newsletter_deploy": True}
 
 
 def push(paths, ref=MAIN, last_success=BASE, ancestor=True, merge_base=BASE):
@@ -260,11 +265,11 @@ class Classify(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(push([path]), expect(F, F, T, F, F, codex_gateway_check=T))
 
-    def test_codex_inference_proto_reaches_only_gateway_and_mailsort_bundles(self):
+    def test_legacy_codex_inference_proto_reaches_only_the_executor(self):
         result = push(["proto/codex/inference/v1/inference.proto"])
         self.assertTrue(result["proto"])
         self.assertEqual({app for app in ci_changes.APPS if result[f"{ci_changes.PREFIX[app]}_check"]}, set(ci_changes.PROTO_USERS))
-        self.assertEqual({key for key, value in result.items() if value and key.endswith(("_deploy", "_publish"))}, {"codex_gateway_deploy", "mailsort_deploy"})
+        self.assertEqual({key for key, value in result.items() if value and key.endswith(("_deploy", "_publish"))}, {"codex_gateway_deploy"})
         self.assertEqual(ci_changes.dispatched("codex-gateway"), expect(F, F, T, F, F, packages=T, proto=T, **CODEX_GATEWAY))
 
     def test_platform_release_changes_publish_its_independent_tested_image(self):
@@ -515,7 +520,7 @@ class Classify(unittest.TestCase):
 
     def test_contract_code_the_workers_bundle_deploys_every_app_that_bundles_it(self):
         """OPS_LIMITS and friends ship inside the Workers that import them, so a change must redeploy each."""
-        bundled = expect(T, T, T, F, T, **ALL, website_check=T, links_check=T, **WATCH, newsletter_check=T, fleet_check=T, platform_check=T, mailsort_check=T, recall_check=T, **BRIEF, proto=T, tasks_check=T, personal_mcp_check=T, codex_gateway_check=T)
+        bundled = expect(T, T, T, F, T, **ALL, website_check=T, links_check=T, **WATCH, newsletter_check=T, fleet_check=T, platform_check=T, mailsort_check=T, recall_check=T, **BRIEF, proto=T, tasks_check=T, personal_mcp_check=T, model_router_check=T, codex_gateway_check=T)
         self.assertEqual(push(["contracts/ops-v1/ops-v1.ts"]), bundled)
         self.assertEqual(
             push(["contracts/ops-v1/ops-v1.ts", "todofy/gateway/src/ops.ts"]), {**bundled, "todofy_deploy": True}
@@ -541,6 +546,7 @@ class Classify(unittest.TestCase):
             "brief": [REPO / "brief" / "worker" / "src", REPO / "brief" / "web" / "src"],
             "tasks": [REPO / "tasks" / "worker" / "src", REPO / "tasks" / "web" / "src"],
             "personal-mcp": [REPO / "personal-mcp" / "worker" / "src"],
+            "model-router": [REPO / "model-router" / "worker" / "src", REPO / "model-router" / "web" / "src"],
         }
         self.assertEqual(set(roots), set(ci_changes.APPS))
         importers = {}
@@ -613,11 +619,13 @@ class Classify(unittest.TestCase):
                 "brief": ("ts",),
                 "tasks": ("ts",),
                 "personal-mcp": ("ts",),
+                "model-router": ("ts",),
+                "newsletter": ("python",),
             },
         )
         # Todofy is both: todofy-core vendors the Python package, its gateway and UI bundle the TypeScript
         # (todofy.ui.v1).
-        ts, python = {"mail-hero", "dashboard", "links", "watch", "todofy", "fleet", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp"}, {"todofy", "platform", "codex-gateway"}
+        ts, python = {"mail-hero", "dashboard", "links", "watch", "todofy", "fleet", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp", "model-router"}, {"todofy", "platform", "codex-gateway", "newsletter"}
         every, none = ts | python, set()
         cases = {
             # recommendation-v1 and summary-v1: todofy-core builds the reports, Todofy's gateway and UI read them in
@@ -634,13 +642,14 @@ class Classify(unittest.TestCase):
             "proto/tasks/inbox/v1/task_inbox.proto": {"tasks", "dashboard", "watch"},
             # ops-v1: the Ops entrypoints that bundle its generated code (Todofy's gateway takes its types only, its
             # core reads ops.v1 in Python).
-            "proto/ops/v1/ops.proto": {"mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp"},
+            "proto/ops/v1/ops.proto": {"mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp", "model-router"},
             # OpsStatus embeds WebsiteSyncStatus; every Ops descriptor brings this package too.
-            "proto/website/sync/v1/sync.proto": {"mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp"},
+            "proto/website/sync/v1/sync.proto": {"mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp", "model-router"},
             # mailsort's owner API: its Worker serves it, its UI calls it.
             "proto/mailsort/ui/v2/mailsort_ui_service.proto": {"mailsort"},
             # Only the gateway serves this inference API and Mailsort calls it.
-            "proto/codex/inference/v1/inference.proto": {"codex-gateway", "mailsort"},
+            "proto/codex/inference/v1/inference.proto": {"codex-gateway"},
+            "proto/modelrouter/inference/v1/inference.proto": {"model-router", "mailsort", "todofy", "brief", "newsletter", "codex-gateway"},
             # recall's owner API, the extension's upload and the archive feed: its Worker serves all three.
             "proto/recall/ui/v1/recall_ui_service.proto": {"recall", "personal-mcp"},
             "proto/recall/ingest/v1/ingest.proto": {"recall", "personal-mcp"},
@@ -707,6 +716,7 @@ class Classify(unittest.TestCase):
         }
 
         def checked_and(deployed: set[str]) -> dict[str, bool]:
+            paired = bool(deployed & {"platform", "newsletter"})
             return expect(
                 T,
                 T,
@@ -725,12 +735,12 @@ class Classify(unittest.TestCase):
                 fleet_check=T,
                 fleet_deploy="fleet" in deployed,
                 platform_check=T,
-                platform_publish="platform" in deployed,
-                platform_deploy="platform" in deployed,
-                newsletter_check="platform" in deployed,
-                newsletter_deploy="platform" in deployed,
+                platform_publish=paired,
+                platform_deploy=paired,
+                newsletter_check=T,
+                newsletter_deploy=paired,
                 codex_gateway_check=T,
-                codex_gateway_deploy=bool(deployed & {"codex-gateway", "platform"}),
+                codex_gateway_deploy=paired or "codex-gateway" in deployed,
                 mailsort_check=T,
                 mailsort_deploy="mailsort" in deployed,
                 recall_check=T,
@@ -739,8 +749,9 @@ class Classify(unittest.TestCase):
                 brief_deploy="brief" in deployed,
                 tasks_check=T,
                 tasks_deploy="tasks" in deployed,
-                personal_mcp_check=T,
+                personal_mcp_check=T, model_router_check=T,
                 personal_mcp_deploy="personal-mcp" in deployed,
+                model_router_deploy="model-router" in deployed,
             )
 
         for path, deployed in cases.items():
@@ -758,7 +769,7 @@ class Classify(unittest.TestCase):
         self.assertEqual(ci_changes.proto_deploys("proto/fleet/ui/v1/fleet_ui_service.proto"), {"fleet"})
         self.assertEqual(ci_changes.proto_deploys("proto/fleet/telemetry/v1/host_report.proto"), {"fleet", "platform"})
         self.assertEqual(ci_changes.proto_deploys("proto/mailhero/ui/v2/message.proto"), {"mail-hero"})
-        self.assertEqual(ci_changes.proto_deploys("proto/codex/inference/v1/inference.proto"), {"codex-gateway", "mailsort"})
+        self.assertEqual(ci_changes.proto_deploys("proto/codex/inference/v1/inference.proto"), {"codex-gateway"})
 
     def test_deleting_a_retired_package_deploys_nothing(self):
         """A package proto/retired.json lists is gone with its importers' use of it: its deletion checks every user and
@@ -843,12 +854,12 @@ class Classify(unittest.TestCase):
             ["packages/edge-auth/docs/notes.md"],
         ):
             with self.subTest(paths=paths):
-                self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, dashboard_check=T, links_check=T, watch_check=T, fleet_check=T, mailsort_check=T, recall_check=T, brief_check=T, tasks_check=T, personal_mcp_check=T))
+                self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, dashboard_check=T, links_check=T, watch_check=T, fleet_check=T, mailsort_check=T, recall_check=T, brief_check=T, tasks_check=T, personal_mcp_check=T, model_router_check=T))
         # With the package's code, or with one app, the usual rules apply.
         paths = ["packages/edge-auth/SPEC.md", "packages/edge-auth/src/csrf.ts"]
         self.assertEqual(push(paths), expect(T, T, T, T, T, packages=T, **EDGE_AUTH))
         paths = ["packages/edge-auth/SPEC.md", "dashboard/docs/design.md"]
-        self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, **DASH, links_check=T, watch_check=T, fleet_check=T, mailsort_check=T, recall_check=T, brief_check=T, tasks_check=T, personal_mcp_check=T))
+        self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, **DASH, links_check=T, watch_check=T, fleet_check=T, mailsort_check=T, recall_check=T, brief_check=T, tasks_check=T, personal_mcp_check=T, model_router_check=T))
         # An unregistered package's documents are checked by every app, deployed by none.
         self.assertEqual(push(["packages/new-kit/README.md"]), expect(T, T, T, F, F, packages=T, **ALL_CHECKED))
 
@@ -867,7 +878,7 @@ class Classify(unittest.TestCase):
         ]
         self.assertEqual(
             push(paths),
-            expect(T, T, T, F, F, packages=T, infra=T, proto=T, **DASH, website_check=T, links_check=T, watch_check=T, newsletter_check=T, fleet_check=T, platform_check=T, mailsort_check=T, recall_check=T, brief_check=T, tasks_check=T, personal_mcp_check=T, codex_gateway_check=T),
+            expect(T, T, T, F, F, packages=T, infra=T, proto=T, **DASH, website_check=T, links_check=T, watch_check=T, newsletter_check=T, fleet_check=T, platform_check=T, mailsort_check=T, recall_check=T, brief_check=T, tasks_check=T, personal_mcp_check=T, model_router_check=T, codex_gateway_check=T),
         )
 
     def test_a_package_change_with_one_app_still_deploys_every_user(self):
@@ -1175,7 +1186,7 @@ class RealGit(unittest.TestCase):
         expected = {**dict.fromkeys(ci_changes.KEYS, "true"), "packages": "false", "infra": "false", "proto": "false"}
         expected.update(dashboard_check="false", dashboard_deploy="false", tasks_check="false", tasks_deploy="false")
         expected.update(website_check="false", website_deploy="false", website_relay_deploy="false", personal_mcp_check="false", personal_mcp_deploy="false")
-        expected.update(codex_gateway_check="false", codex_gateway_deploy="false")
+        expected.update(codex_gateway_check="false", codex_gateway_deploy="false", model_router_check="false", model_router_deploy="false")
         expected.update(links_check="false", links_deploy="false", watch_check="false", watch_deploy="false", newsletter_check="false", newsletter_deploy="false", fleet_check="false", fleet_deploy="false", platform_check="false", platform_publish="false", platform_deploy="false", mailsort_check="false", mailsort_deploy="false", recall_check="false", recall_deploy="false", recall_extension_publish="false", brief_check="false", brief_deploy="false")
         self.assertEqual(outputs, expected)
 
@@ -1258,6 +1269,17 @@ class PackageUsers(unittest.TestCase):
                 for package, spec in data.get(section, {}).items():
                     if package in packages and spec == "workspace:*":
                         found.setdefault(packages[package], set()).add(relative.parts[0])
+        python_packages = {
+            tomllib.loads(manifest.read_text())["project"]["name"]: manifest.parents[1].name
+            for manifest in (REPO / "packages").glob("*/python/pyproject.toml")
+        }
+        for manifest in REPO.glob("*/pyproject.toml"):
+            if manifest.parent.name in {"proto", "packages"}:
+                continue
+            for dependency in tomllib.loads(manifest.read_text()).get("project", {}).get("dependencies", []):
+                name = re.split(r"[\s<>=!~;\[]", dependency, maxsplit=1)[0]
+                if name in python_packages:
+                    found.setdefault(python_packages[name], set()).add(manifest.parent.name)
         return found
 
     def test_every_package_directory_is_registered(self):
@@ -1401,7 +1423,12 @@ class DeployConditions(unittest.TestCase):
     SKIPPED_OK = {
         ("vps-deploy", "fleet-deploy"),
         ("codex-gateway-deploy", "fleet-deploy"),
-        ("codex-gateway-deploy", "vps-deploy"),
+        ("model-router-deploy", "codex-gateway-deploy"),
+        ("vps-deploy", "model-router-deploy"),
+        ("dashboard-deploy", "model-router-deploy"),
+        ("mailsort-deploy", "model-router-deploy"),
+        ("todofy-deploy", "model-router-deploy"),
+        ("brief-deploy", "model-router-deploy"),
         ("dashboard-deploy", "todofy-deploy"),
         ("dashboard-deploy", "mail-hero-deploy"),
         ("dashboard-deploy", "watch-deploy"),
@@ -1442,6 +1469,7 @@ class DeployConditions(unittest.TestCase):
         "recall-checks",
         "brief-checks",
         "personal-mcp-checks",
+        "model-router-checks",
     }
 
     def jobs(self):
@@ -1478,6 +1506,7 @@ class DeployConditions(unittest.TestCase):
                 "recall-extension-release",
                 "brief-deploy",
                 "personal-mcp-deploy",
+                "model-router-deploy",
                 "platform-image",
                 "vps-deploy",
                 "vps-bootstrap-bundle",
@@ -1498,6 +1527,20 @@ class DeployConditions(unittest.TestCase):
                             f"&& needs.{need}.result == 'skipped'))",
                             condition,
                         )
+
+    def test_model_router_rollout_orders_executor_before_migrated_callers(self):
+        jobs = self.jobs()
+        executor = self.needs(jobs["codex-gateway-deploy"])
+        router = self.needs(jobs["model-router-deploy"])
+        paired = self.needs(jobs["vps-deploy"])
+        self.assertNotIn("vps-deploy", executor)
+        self.assertNotIn("model-router-deploy", executor)
+        self.assertIn("codex-gateway-deploy", router)
+        self.assertIn("model-router-deploy", paired)
+        for app in ("mailsort", "todofy", "brief", "dashboard"):
+            self.assertIn("model-router-deploy", self.needs(jobs[app + "-deploy"]))
+        for name in ("codex-gateway-deploy", "model-router-deploy", "vps-deploy"):
+            self.assertIn("gate", self.needs(jobs[name]))
                         self.assertEqual(condition.count(f"needs.{need}.result == 'skipped'"), 1)
                     else:
                         self.assertIn(f"needs.{need}.result == 'success'", condition)
@@ -1612,6 +1655,7 @@ class DeployConditions(unittest.TestCase):
                 "recall-deploy": "recall-production",
                 "brief-deploy": "brief-production",
                 "personal-mcp-deploy": "personal-mcp-production",
+                "model-router-deploy": "model-router-production",
                 "platform-image": "platform-image-production",
                 "vps-deploy": "vps-production",
             },
@@ -2978,6 +3022,7 @@ class Reuse(unittest.TestCase):
             "Brief checks",
             "Tasks checks",
             "Personal MCP checks",
+            "Model Router checks",
             "Platform checks",
             "Newsletter checks",
             "Newsletter image checks",

@@ -11,10 +11,12 @@ dependencies = [
   "fastapi", "uvicorn", "httpx",
   "protobuf", "jinja2", "pillow", "pyyaml", "packaging",
   "ziyixi-protos",
+  "ziyixi-proto", "ziyixi-model-router-client",
 ]
 
 [project.optional-dependencies]
-codex = ["openai-codex"]
+# Keep the former deployment extra accepted while images move to the router.
+codex = []
 
 [dependency-groups]
 dev = [

@@ -36,11 +36,12 @@ constraint-dependencies = [
 build-constraint-dependencies = ["setuptools==84.0.0"]
 
 [tool.uv.workspace]
-members = ["newsletter", "codex-gateway", "platform", "todofy", "proto/python"]
+members = ["newsletter", "codex-gateway", "platform", "todofy", "proto/python", "packages/model-router-client/python"]
 
 [tool.uv.sources]
 # Workers vendor real package files, rather than an editable .pth reference.
 ziyixi-proto = { workspace = true, editable = false }
+ziyixi-model-router-client = { workspace = true, editable = false }
 ziyixi-protos = { url = "https://github.com/ziyixi/protos/releases/download/python-v0.1.0.dev7/ziyixi_protos-0.1.0.dev7-py3-none-any.whl" }
 
 [tool.ruff]

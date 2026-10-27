@@ -29,7 +29,7 @@ def dag(store, tmp_path):
     return newsletter_workflow_pipeline.DagPipeline(
         repository.RunRepository(store),
         tmp_path / "jobs",
-        editor=editor.CodexEditor(tmp_path / "unused-auth"),
+        editor=editor.ModelEditor(tmp_path / "unused-auth"),
     )
 
 

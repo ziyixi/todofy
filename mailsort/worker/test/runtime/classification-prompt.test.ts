@@ -67,12 +67,12 @@ it('uses saved prompt text on the next request without rejudging prior mail and 
   deliver(h, input(1), T0 + MINUTE);
   await h.step(T0 + 2 * MINUTE);
   expect(h.up.claude.systems[0]?.map(block => block.text)).toEqual([PRIORITY_PROMPT, PERSONAL_RULES]);
-  expect(h.up.claude.systems[0]?.every(block => block.cache_control === undefined)).toBe(true);
+  expect(h.up.claude.systems[0]?.every(block => !block.cache)).toBe(true);
   await save('New synthetic base', 'New synthetic rules');
   deliver(h, input(2), T0 + HOUR);
   await h.step(T0 + HOUR + 2 * MINUTE);
   expect(h.up.claude.systems[1]?.map(block => block.text)).toEqual(['New synthetic base', 'New synthetic rules']);
-  expect(h.up.claude.systems[1]?.every(block => block.cache_control === undefined)).toBe(true);
+  expect(h.up.claude.systems[1]?.every(block => !block.cache)).toBe(true);
   expect(h.up.claude.calls.flat().map(email => email.id)).toEqual([input(1).id, input(2).id]);
 });
 
@@ -82,19 +82,19 @@ it('caches a backlog and its recent tail, recording actual cache writes/reads wi
   for (let id = 1; id <= 11; id++) deliver(h, input(id), T0 + MINUTE);
   await h.step(T0 + 2 * MINUTE);
   expect(h.up.claude.calls[0]).toHaveLength(10);
-  expect(h.up.claude.systems[0]?.every(block => block.cache_control?.ttl === '5m')).toBe(true);
+  expect(h.up.claude.systems[0]?.every(block => block.cache)).toBe(true);
   expect(await h.sql(`SELECT value FROM meta WHERE key = 'claude_prompt_cache_at'`)).toEqual([{ value: String(T0 + 2 * MINUTE) }]);
   h.up.claude.cacheWriteTokens = 0;
   h.up.claude.cacheReadTokens = 6000;
   await h.step(T0 + 3 * MINUTE);
   expect(h.up.claude.calls[1]).toHaveLength(1);
-  expect(h.up.claude.systems[1]?.every(block => block.cache_control?.ttl === '5m')).toBe(true);
+  expect(h.up.claude.systems[1]?.every(block => block.cache)).toBe(true);
   expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).claudeBudget).toMatchObject({ inputTokens: 14400, cacheWriteTokens: 6000, cacheReadTokens: 6000, outputTokens: 240, spentUsd: 0.0456 });
   expect((await h.opsStatus())['counters']).toMatchObject({ claude_cache_write_tokens: 6000, claude_cache_read_tokens: 6000 });
   h.up.claude.cacheReadTokens = 0;
   deliver(h, input(12), T0 + HOUR + 3 * MINUTE);
   await h.step(T0 + HOUR + 3 * MINUTE);
-  expect(h.up.claude.systems[2]?.every(block => block.cache_control === undefined)).toBe(true);
+  expect(h.up.claude.systems[2]?.every(block => !block.cache)).toBe(true);
 });
 
 it('records billed cache usage and the request-start marker even when a batch answer is invalid', async () => {
@@ -102,7 +102,7 @@ it('records billed cache usage and the request-start marker even when a batch an
   h.up.claude.cacheWriteTokens = 6000;
   h.up.claude.badItems = true;
   for (let id = 1; id <= 11; id++) deliver(h, input(id), T0 + MINUTE);
-  expect(await h.step(T0 + 2 * MINUTE)).toMatchObject({ code: 'claude_bad_items', decided: 0 });
+  expect(await h.step(T0 + 2 * MINUTE)).toMatchObject({ code: 'claude_bad_answer', decided: 0 });
   expect(await h.sql(`SELECT value FROM meta WHERE key = 'claude_prompt_cache_at'`)).toEqual([{ value: String(T0 + 2 * MINUTE) }]);
   expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).claudeBudget).toMatchObject({ cacheWriteTokens: 6000, spentUsd: 0.0372 });
 });

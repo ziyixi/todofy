@@ -1,0 +1,44 @@
+name: check-model-router
+description: Verify the shared inference router and private console using synthetic requests.
+runs:
+  using: composite
+  steps:
+    - name: Install the selected Node workspaces
+      uses: ./.github/actions/setup-workspace
+      with:
+        root: .
+        filters: 'model-router-worker... model-router-web...'
+    - name: Check deployment values and production boundaries
+      working-directory: model-router
+      shell: bash -e {0}
+      run: node --test tools/test/*.test.mjs
+    - name: Lint, typecheck and test the Worker
+      working-directory: model-router/worker
+      shell: bash -e {0}
+      run: |
+        npm run lint
+        npm run typecheck
+        npm test
+    - name: Lint, typecheck, test and build the private console
+      working-directory: model-router/web
+      shell: bash -e {0}
+      run: |
+        npm run lint
+        npm run typecheck
+        npm test
+        npm run build
+    - name: Dry-run the committed production config
+      working-directory: model-router/worker
+      env:
+        MODEL_ROUTER_WORKER_SECRETS: '{"ACCESS_OWNER":"owner@example.test","CSRF_SIGNING_KEY":"0000000000000000000000000000000000000000000000000000000000000000"}'
+      shell: bash -e {0}
+      run: |
+        node ../tools/deploy-vars.mjs secrets "$RUNNER_TEMP/model-router-secrets.json"
+        node ../tools/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
+          --secrets-file "$RUNNER_TEMP/model-router-secrets.json" --outdir "$RUNNER_TEMP/model-router-bundle"
+        node ../tools/bundle-size.mjs "$RUNNER_TEMP/model-router-bundle"
+    - name: Remove the placeholder secrets file
+      if: always()
+      working-directory: model-router
+      shell: bash -e {0}
+      run: rm -f "$RUNNER_TEMP/model-router-secrets.json"

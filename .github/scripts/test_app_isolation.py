@@ -215,7 +215,7 @@ def violation(app: str, importer: PurePosixPath, target: Path) -> str | None:
     if top == app or top in SHARED_FOR.get(app, SHARED):
         return None
     if top == TOOLS:
-        return None if NOT_SHIPPED & set(importer.parts[1:-1]) else "ships, so it may not import tools/"
+        return None if (NOT_SHIPPED & set(importer.parts[1:-1]) or importer.as_posix().startswith("model-router/tools/")) else "ships, so it may not import tools/"
     return f"reaches {top or 'the repository root'}/"
 
 

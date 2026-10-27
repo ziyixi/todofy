@@ -318,5 +318,5 @@ def test_wide_reader_layout_has_utf8_headroom_and_disjoint_partial_usage():
         assert "6,090,000 tokens" in output and "11,090,000" not in output
         assert "部分用量，未含未返回用量的调用" in output
         assert "Todofy/Gemini 用量未计入" in output
-        assert output.index("TODOFY / 与你有关") < output.index("Codex 已记录")
+        assert output.index("TODOFY / 与你有关") < output.index("模型已记录")
         assert "plan" not in output.lower()

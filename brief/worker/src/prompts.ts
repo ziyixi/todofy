@@ -1,8 +1,7 @@
 /**
  * The requests the brief sends to Claude and the strict readers of their answers (../../docs/design.md §5, §7-§9). The
  * system blocks are the owner's own texts (content-config/profile.md and policy.md) and fixed output rules, frozen and
- * without a date; the user turns hold the day's data as JSON. Every answer is structured output (`output_config.format`
- * with a JSON Schema) and is still read strictly here: IDs only from the request, bounds applied, anything else refused
+ * without a date; the user turns hold the day's data as JSON. Every answer carries a standard JSON Schema and is still read strictly here: IDs only from the request, bounds applied, anything else refused
  * (`null`). Feed text and titles are data, never instructions: every system block says so, and learning never puts a
  * voted title into a prompt.
  *
@@ -15,7 +14,8 @@
  * the deep read `high`. Thinking is adaptive (always on in Opus 5.5, on by default in Haiku 5.5), so it is omitted; no
  * sampling parameters, no prefill.
  */
-import type { BetaTextBlockParam, MessageCreateParamsBase } from '@anthropic-ai/sdk/resources/beta/messages/messages';
+import { instructions } from '@ziyixi/model-router-client';
+import type { Instruction, Parameters } from '@ziyixi/proto/modelrouter/inference/v1/inference_pb';
 import { type Claim, type Paragraph, type WrittenItem } from './ground.ts';
 import {
   DEEP_CHARS_MAX,
@@ -41,7 +41,16 @@ import {
 import { estimateTokens } from './prices.ts';
 import { POLICY_TEXT, PROFILE_TEXT, type FormatName, type ReviewName, type SectionName, type Topic } from './registry.ts';
 
-export type Params = Omit<MessageCreateParamsBase, 'model' | 'stream' | 'betas' | 'fallbacks'>;
+export interface Params {
+  instructions: Instruction[];
+  input: string;
+  parameters: Omit<Parameters, '$typeName'>;
+  outputSchemaJson: string;
+}
+
+function parameters(system: string | readonly Instruction[], input: string, maxOutputTokens: number, effort: string, schema: Record<string, unknown>, allowFallback: boolean): Params {
+  return { instructions: typeof system === 'string' ? instructions(system) : [...system], input, parameters: { effort, maxOutputTokens, allowFallback }, outputSchemaJson: JSON.stringify(schema) };
+}
 
 export const REVIEW_WORDS: Readonly<Record<ReviewName, string>> = {
   peer_reviewed: '同行评议',
@@ -111,12 +120,7 @@ export function gateRequest(candidates: readonly GateCandidate[], topics: readon
     candidates.map((c) => ({ id: c.id, section: SECTION_WORDS[c.section], venue: c.venue, review: REVIEW_WORDS[c.review], title: c.title, summary: c.summary, other_venues: c.otherVenues })),
   )}`;
   return {
-    params: {
-      max_tokens: GATE_MAX_TOKENS,
-      system: [{ type: 'text', text: GATE_SYSTEM, cache_control: { type: 'ephemeral' } }],
-      messages: [{ role: 'user', content: user }],
-      output_config: { effort: 'low', format: { type: 'json_schema', schema: gateSchema(topics) } },
-    },
+    params: parameters(instructions({ text: GATE_SYSTEM, cache: true }), user, GATE_MAX_TOKENS, 'low', gateSchema(topics), false),
     estimatedInputTokens: estimateTokens(GATE_SYSTEM) + estimateTokens(user),
   };
 }
@@ -205,12 +209,7 @@ function cardJson(card: Card): Record<string, unknown> {
 export function pickRequest(date: string, research: readonly Card[], world: readonly Card[], weights: Readonly<Record<string, number>>): { params: Params; estimatedInputTokens: number } {
   const user = `日期：${date}\n主题权重（1 为中性）：${JSON.stringify(weights)}\n研究前沿卡片：\n${JSON.stringify(research.map(cardJson))}\n世界与经济卡片：\n${JSON.stringify(world.map(cardJson))}`;
   return {
-    params: {
-      max_tokens: PICK_MAX_TOKENS,
-      system: PICK_SYSTEM,
-      messages: [{ role: 'user', content: user }],
-      output_config: { effort: 'medium', format: { type: 'json_schema', schema: PICK_SCHEMA } },
-    },
+    params: parameters(PICK_SYSTEM, user, PICK_MAX_TOKENS, 'medium', PICK_SCHEMA, true),
     estimatedInputTokens: estimateTokens(PICK_SYSTEM) + estimateTokens(user),
   };
 }
@@ -283,19 +282,16 @@ export interface WriterPacket {
  */
 export const WRITER_PREFIX = `${POLICY_TEXT.trim()}\n\n${PROFILE_TEXT.trim()}`;
 
-/** A 5-minute cache write costs this much of input: the reservation estimates the prefix at it (design §13). */
-const CACHE_WRITE_PREMIUM = 1.25;
+/** Preserve the existing conservative token estimate of stable cached prefixes. */
+const CACHE_ESTIMATE_MARGIN = 1.25;
 
-function writerSystem(rules: string): BetaTextBlockParam[] {
-  return [
-    { type: 'text', text: WRITER_PREFIX, cache_control: { type: 'ephemeral' } },
-    { type: 'text', text: rules },
-  ];
+function writerSystem(rules: string): Instruction[] {
+  return instructions({ text: WRITER_PREFIX, cache: true }, rules);
 }
 
 /** The input a request is reserved for: its cached blocks at the cache-write premium, the rest as it is. */
-function inputEstimate(system: readonly BetaTextBlockParam[], user: string): number {
-  return system.reduce((sum, block) => sum + Math.ceil(estimateTokens(block.text) * (block.cache_control ? CACHE_WRITE_PREMIUM : 1)), estimateTokens(user));
+function inputEstimate(system: readonly Instruction[], user: string): number {
+  return system.reduce((sum, block) => sum + Math.ceil(estimateTokens(block.text) * (block.cache ? CACHE_ESTIMATE_MARGIN : 1)), estimateTokens(user));
 }
 
 /** What every writer call's output keeps to: plain text, verbatim claims, their markers, numbers and names. */
@@ -341,10 +337,10 @@ const REPAIR_RULES = `# 修订
 - primary_not_cited：研究条目没有引用材料包的第一个文档；too_few_claims：引用条数少于写法的最少条数；length：篇幅超出范围。`;
 
 /** The weekday write and its bisection. */
-export const WRITE_SYSTEM: readonly BetaTextBlockParam[] = writerSystem(WRITE_RULES);
-export const REPAIR_SYSTEM: readonly BetaTextBlockParam[] = writerSystem(`${WRITE_RULES}\n\n${REPAIR_RULES}\n输出格式与写作相同（items 与 omitted），只含这些条目。`);
-export const DEEP_SYSTEM: readonly BetaTextBlockParam[] = writerSystem(DEEP_RULES);
-export const DEEP_REPAIR_SYSTEM: readonly BetaTextBlockParam[] = writerSystem(`${DEEP_RULES}\n\n${REPAIR_RULES}\n只重写有问题的段落，其余段落原样保留；输出格式与深读相同（title、paragraphs、claims）。`);
+export const WRITE_SYSTEM: readonly Instruction[] = writerSystem(WRITE_RULES);
+export const REPAIR_SYSTEM: readonly Instruction[] = writerSystem(`${WRITE_RULES}\n\n${REPAIR_RULES}\n输出格式与写作相同（items 与 omitted），只含这些条目。`);
+export const DEEP_SYSTEM: readonly Instruction[] = writerSystem(DEEP_RULES);
+export const DEEP_REPAIR_SYSTEM: readonly Instruction[] = writerSystem(`${DEEP_RULES}\n\n${REPAIR_RULES}\n只重写有问题的段落，其余段落原样保留；输出格式与深读相同（title、paragraphs、claims）。`);
 
 const ITEM_SCHEMA = {
   type: 'object',
@@ -398,14 +394,9 @@ function packetJson(packet: WriterPacket): Record<string, unknown> {
   };
 }
 
-function writerRequest(system: readonly BetaTextBlockParam[], user: string, maxTokens: number, schema: Record<string, unknown>): { params: Params; estimatedInputTokens: number } {
+function writerRequest(system: readonly Instruction[], user: string, maxTokens: number, schema: Record<string, unknown>): { params: Params; estimatedInputTokens: number } {
   return {
-    params: {
-      max_tokens: maxTokens,
-      system: [...system],
-      messages: [{ role: 'user', content: user }],
-      output_config: { effort: 'high', format: { type: 'json_schema', schema } },
-    },
+    params: parameters(system, user, maxTokens, 'high', schema, true),
     estimatedInputTokens: inputEstimate(system, user),
   };
 }
@@ -527,12 +518,7 @@ export const DEEP_PICK_SCHEMA: Record<string, unknown> = {
 export function deepPickRequest(date: string, cards: readonly Card[], recent: readonly string[]): { params: Params; estimatedInputTokens: number } {
   const user = `日期：${date}\n最近的深读：${JSON.stringify(recent)}\n本周卡片：\n${JSON.stringify(cards.map(cardJson))}`;
   return {
-    params: {
-      max_tokens: DEEP_PICK_MAX_TOKENS,
-      system: DEEP_PICK_SYSTEM,
-      messages: [{ role: 'user', content: user }],
-      output_config: { effort: 'medium', format: { type: 'json_schema', schema: DEEP_PICK_SCHEMA } },
-    },
+    params: parameters(DEEP_PICK_SYSTEM, user, DEEP_PICK_MAX_TOKENS, 'medium', DEEP_PICK_SCHEMA, true),
     estimatedInputTokens: estimateTokens(DEEP_PICK_SYSTEM) + estimateTokens(user),
   };
 }
@@ -592,12 +578,7 @@ export interface EntailCase {
 export function entailRequest(cases: readonly EntailCase[]): { params: Params; estimatedInputTokens: number } {
   const user = JSON.stringify(cases);
   return {
-    params: {
-      max_tokens: ENTAIL_MAX_TOKENS,
-      system: ENTAIL_SYSTEM,
-      messages: [{ role: 'user', content: user }],
-      output_config: { effort: 'low', format: { type: 'json_schema', schema: ENTAIL_SCHEMA } },
-    },
+    params: parameters(ENTAIL_SYSTEM, user, ENTAIL_MAX_TOKENS, 'low', ENTAIL_SCHEMA, false),
     estimatedInputTokens: estimateTokens(ENTAIL_SYSTEM) + estimateTokens(user),
   };
 }

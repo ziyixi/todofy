@@ -57,8 +57,9 @@ class Settings:
     resend_api_key: str = dataclasses.field(default="", repr=False)
     recipient_email: str = ""
     from_email: str = ""
-    codex_home: pathlib.Path | None = None
-    model: str = "gpt-6.1-sol"
+    model_router_url: str = ""
+    model_router_token: str = dataclasses.field(default="", repr=False)
+    model: str = "models/sol-6-1"
     todofy_backend: str = "disabled"
     todofy_base_url: str = "https://daily.ziyixi.science"
     todofy_user: str = dataclasses.field(default="", repr=False)
@@ -113,10 +114,9 @@ class Settings:
             resend_api_key=os.getenv("RESEND_API_KEY", ""),
             recipient_email=os.getenv("RECIPIENT_EMAIL", ""),
             from_email=os.getenv("NEWSLETTER_FROM_EMAIL", ""),
-            codex_home=pathlib.Path(os.environ["NEWSLETTER_CODEX_HOME"])
-            if os.getenv("NEWSLETTER_CODEX_HOME")
-            else None,
-            model=os.getenv("NEWSLETTER_MODEL", "gpt-6.1-sol"),
+            model_router_url=os.getenv("NEWSLETTER_MODEL_ROUTER_URL", ""),
+            model_router_token=os.getenv("NEWSLETTER_MODEL_ROUTER_TOKEN", ""),
+            model=os.getenv("NEWSLETTER_MODEL", "models/sol-6-1"),
             todofy_backend=os.getenv("NEWSLETTER_TODOFY", "disabled"),
             todofy_base_url=os.getenv(
                 "TODO_API_BASE", "https://daily.ziyixi.science"
@@ -273,9 +273,13 @@ class Settings:
             raise ValueError(
                 "Live mode requires the Codex editor; no mock fallback"
             )
-        if self.editor_backend == "codex" and self.codex_home is None:
+        if self.editor_backend == "codex" and (
+            not self.model_router_url.startswith("https://")
+            or not self.model_router_token.strip()
+        ):
             raise ValueError(
-                "Set an isolated NEWSLETTER_CODEX_HOME for the server editor"
+                "Configure NEWSLETTER_MODEL_ROUTER_URL and "
+                "NEWSLETTER_MODEL_ROUTER_TOKEN for the server editor"
             )
 
     def _validate_notion(self) -> None:

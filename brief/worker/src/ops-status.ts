@@ -122,7 +122,8 @@ export function briefStatus(store: Store, registry: Registry, env: Env, now: num
     if (!making) signals.push(signal('brief_off', Severity.INFO));
     if (numbers.keyState === 'rejected') {
       const metrics: Record<string, number> = { status: numbers.rejectedStatus };
-      if (/^[a-z][a-z0-9_]{0,47}$/.test(numbers.rejectedType)) metrics[numbers.rejectedType] = 1;
+      const reason = numbers.rejectedType.toLowerCase();
+      if (/^[a-z][a-z0-9_]{0,47}$/.test(reason)) metrics[reason] = 1;
       signals.push(signal('anthropic_rejected', Severity.CRITICAL, metrics));
     }
     if (making && numbers.keyState === 'not_configured') signals.push(signal('anthropic_not_configured', Severity.WARNING));

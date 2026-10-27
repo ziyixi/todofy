@@ -1,0 +1,24 @@
+{
+  "name": "@ziyixi/model-router-client",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@ziyixi/proto": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "postinstall": "node ../../proto/tools/ensure.mjs",
+    "pretest": "node ../../proto/tools/ensure.mjs",
+    "pretypecheck": "node ../../proto/tools/ensure.mjs"
+  }
+}

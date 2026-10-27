@@ -42,12 +42,12 @@ describe('a weekday', () => {
     expect(steps.filter((step) => step === 'write')).toHaveLength(1);
     expect(steps.filter((step) => step === 'entail')).toHaveLength(1);
     const gate = h.claude.requests.find((request) => request.step === 'gate')?.body ?? {};
-    expect(gate['model']).toBe('claude-haiku-5-5');
+    expect(gate['model']).toBe('models/claude-haiku-5-5');
     expect(gate['fallbacks']).toBeUndefined();
     const write = h.claude.requests.find((request) => request.step === 'write')?.body ?? {};
-    expect(write['model']).toBe('claude-opus-5-5');
-    expect(write['output_config']).toMatchObject({ effort: 'high' });
-    expect(write['max_tokens']).toBe(64_000);
+    expect(write['model']).toBe('models/claude-opus-5-5');
+    expect(write['parameters']).toMatchObject({ effort: 'high' });
+    expect(write['parameters']).toMatchObject({ maxOutputTokens: 64_000 });
   });
 
   it('holds back arXiv papers fetched since the previous cutoff, and leaves a celebrity story out', async () => {

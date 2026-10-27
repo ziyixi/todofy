@@ -44,6 +44,7 @@ async function defaults(app: StubApp): Promise<Record<string, unknown>> {
   if (app === 'notion-publish') return { status: await fixture('OpsStatus/notion-publish-ok.json') };
   // recall has no guard: its setGuard always refuses, and Home never calls it.
   if (app === 'tasks') return { status: await fixture('OpsStatus/tasks-ok.json'), createInboxTask: SYNTHETIC_TASK };
+  if (app === 'model-router') return { status: JSON.parse(await readFile(join(ROOT, 'test/fixtures/model-router-ok.json'), 'utf8')) as unknown };
   if (app === 'personal-mcp') return { status: JSON.parse(await readFile(join(ROOT, 'test/fixtures/personal-mcp-ok.json'), 'utf8')) as unknown };
   if (app === 'recall') return { status: await fixture('OpsStatus/recall-ok.json') };
   if (app === 'fleet' || app === 'newsletter' || app === 'codex-gateway') {
@@ -137,7 +138,7 @@ export interface Harness {
 export async function startHarness(options: HarnessOptions = {}): Promise<Harness> {
   const temp = options.persist ?? (await mkdtemp(join(tmpdir(), 'home-dashboard-')));
   const outbound: Outbound = options.outbound ?? (() => new Response('no outbound fetch expected', { status: 599 }));
-  const scripts = { home: await bundle(), 'mail-hero': await stubScript('mail-hero'), todofy: await stubScript('todofy'), watch: await stubScript('watch'), fleet: await stubScript('fleet'), newsletter: await stubScript('newsletter'), 'codex-gateway': await stubScript('codex-gateway'), 'notion-publish': await stubScript('notion-publish'), mailsort: await stubScript('mailsort'), recall: await stubScript('recall'), brief: await stubScript('brief'), tasks: await stubScript('tasks'), 'personal-mcp': await stubScript('personal-mcp') };
+  const scripts = { home: await bundle(), 'mail-hero': await stubScript('mail-hero'), todofy: await stubScript('todofy'), watch: await stubScript('watch'), fleet: await stubScript('fleet'), newsletter: await stubScript('newsletter'), 'codex-gateway': await stubScript('codex-gateway'), 'notion-publish': await stubScript('notion-publish'), mailsort: await stubScript('mailsort'), recall: await stubScript('recall'), brief: await stubScript('brief'), tasks: await stubScript('tasks'), 'personal-mcp': await stubScript('personal-mcp'), 'model-router': await stubScript('model-router') };
   const configure = (bindings: Record<string, string>): ConstructorParameters<typeof Miniflare>[0] =>
     convertV4MiniflareOptions({
       host: '127.0.0.1',
@@ -165,6 +166,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
             BRIEF: { name: 'brief', entrypoint: 'Ops' },
             TASKS: { name: 'tasks', entrypoint: 'Ops' },
             PERSONAL_MCP: { name: 'personal-mcp', entrypoint: 'Ops' },
+            MODEL_ROUTER: { name: 'model-router', entrypoint: 'Ops' },
             // As dashboard/wrangler.toml binds it: Tasks' TaskInbox for source home.
             TASK_INBOX: { name: 'tasks', entrypoint: 'TaskInbox', props: { source: 'home' } },
             ASSETS: () => new Response('<!doctype html><title>home</title>', { headers: { 'content-type': 'text/html' } }),
@@ -184,6 +186,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
         { name: 'brief', modules: true, script: scripts.brief, compatibilityDate: '2026-09-08' },
         { name: 'tasks', modules: true, script: scripts.tasks, compatibilityDate: '2026-09-08' },
         { name: 'personal-mcp', modules: true, script: scripts['personal-mcp'], compatibilityDate: '2026-09-08' },
+        { name: 'model-router', modules: true, script: scripts['model-router'], compatibilityDate: '2026-09-08' },
         // Calls a stub's Ops method over the same kind of binding "home" has (tests of the stubs).
         {
           name: 'ops-probe',
@@ -191,7 +194,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
           compatibilityDate: '2026-09-08',
           script: `export default { async fetch(request, env) {
             const { app, method, args } = await request.json()
-            const target = app === 'mail-hero' ? env.MAIL_HERO : app === 'watch' ? env.WATCH : app === 'fleet' ? env.FLEET : app === 'newsletter' ? env.NEWSLETTER : app === 'codex-gateway' ? env.CODEX_GATEWAY : app === 'notion-publish' ? env.WEBSITE_SYNC : app === 'mailsort' ? env.MAILSORT : app === 'recall' ? env.RECALL : app === 'brief' ? env.BRIEF : app === 'tasks' ? env.TASKS : app === 'personal-mcp' ? env.PERSONAL_MCP : env.TODOFY
+            const target = app === 'mail-hero' ? env.MAIL_HERO : app === 'watch' ? env.WATCH : app === 'fleet' ? env.FLEET : app === 'newsletter' ? env.NEWSLETTER : app === 'codex-gateway' ? env.CODEX_GATEWAY : app === 'notion-publish' ? env.WEBSITE_SYNC : app === 'mailsort' ? env.MAILSORT : app === 'recall' ? env.RECALL : app === 'brief' ? env.BRIEF : app === 'tasks' ? env.TASKS : app === 'personal-mcp' ? env.PERSONAL_MCP : app === 'model-router' ? env.MODEL_ROUTER : env.TODOFY
             try { return Response.json({ ok: await target[method](...args) }) }
             catch (error) { return Response.json({ error: error instanceof Error ? error.message : 'not_an_error' }) }
           } }`,
@@ -208,6 +211,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
             BRIEF: { name: 'brief', entrypoint: 'Ops' },
             TASKS: { name: 'tasks', entrypoint: 'Ops' },
             PERSONAL_MCP: { name: 'personal-mcp', entrypoint: 'Ops' },
+            MODEL_ROUTER: { name: 'model-router', entrypoint: 'Ops' },
           },
         },
       ],

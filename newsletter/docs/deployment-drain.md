@@ -1,6 +1,6 @@
 # 发布排空合同 v1
 
-Newsletter 继续使用独立 VPS 进程、专用可刷新的 Codex 登录目录和原 SQLite。
+Newsletter 继续使用独立 VPS 进程和原 SQLite，模型由统一 Router 执行。
 monorepo 新镜像为 `ghcr.io/ziyixi/todofy-newsletter`；源码与发布入口现在属于 Todofy monorepo。
 本合同用于以后按固定 digest 升级该服务，本次入仓不升级 VPS，不调用模型或发信。
 
@@ -18,7 +18,7 @@ PATCH、上传、模型等待和本地渲染由外围活动覆盖。冻结回执
 不含邮件正文、提示词、模型输出、供应商响应或登录信息。
 
 正常结束但供应商结果为 unknown 的活动已经停止在本机执行，可以冻结；unknown
-原账本不改写为成功，也不授权重发。SDK close 失败/超时或清理被取消时，即使普通模型 timeout 已转成业务失败，
+原账本不改写为成功，也不授权重发。远端会话关闭失败/超时或清理被取消时，即使普通模型 timeout 已转成业务失败，
 原活动也持久记为 uncertain，不能被 Worker 的异常处理正常返回抹掉。
 对 cancelled/SystemExit 等中断，活动同样记为
 uncertain，继续阻止 freeze。只有服务取得原有独占目录锁、确认旧进程已经退出后，
@@ -79,7 +79,7 @@ newsletter admin drain begin --request-key 'release-<完整commit>'
 newsletter admin drain freeze --request-key 'release-<完整commit>' --wait --timeout 7200
 # 核对输出确为对应 key 的 frozen，并记录 unknown / queued 计数。
 # 暂停唯一外部触发器与配置同步器，备份并停止旧进程，切固定镜像 digest。
-# 保留相同 data/auth/config 挂载；新进程独占同一数据目录并仍处于 frozen。
+# 保留相同 data/config 挂载；新进程独占同一数据目录并仍处于 frozen。
 newsletter admin drain status
 # 核对新版本、健康、存储/配置身份与回执后，显式恢复：
 newsletter admin drain resume --request-key 'release-<完整commit>'
@@ -105,4 +105,10 @@ SQLite schema 只增加三个 `deployment_*` 表，不重写采编、发送或 N
 `tests/test_deployment_drain.py` 使用合成 SQLite、mock editor/mail 与 HTTP transport，
 覆盖 admission/begin 竞态、排队保留、当前 step/send 完成、unknown、取消后禁止冻结、
 持久 gate 的重启恢复、重复/过时键、权限与严格 body、轮询和超时不恢复。
-这不证明生产 Codex 子进程、Notion、Resend、VPS 升级或真实恢复已经验收。
+这不证明生产远端模型清理、Notion、Resend、VPS 升级或真实恢复已经验收。
+
+## 远端模型活动
+
+`deployment_model_contexts` 在发送 Create 前保存调用方选择的会话 ID、所属活动和稳定 Close request ID，不保存提示词或结果。正常退出只有在 Router 返回 `closed` 或 `expired` 后才登记关闭。关闭失败会把外层活动保留为 uncertain，freeze 仍拒绝通过。
+
+独占本地目录只证明旧 Newsletter 进程已停止。启动恢复先对未确认的远端会话执行幂等 Close 并核对清理确认，再把对应的旧本地活动标为 interrupted；没有确认时继续阻止排空完成。不重放模型调用，不重发业务。Router 对未知会话写关闭墓碑，以阻止响应丢失后的晚到 Create。

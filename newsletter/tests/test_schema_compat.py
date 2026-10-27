@@ -1,7 +1,5 @@
 """Test strict endpoint schema rejection without provider calls."""
 
-import copy
-
 import pytest
 
 import newsletter.editor as newsletter_editor
@@ -101,7 +99,7 @@ def test_unclosed_or_malformed_schema_is_configuration_failure(change):
 
 
 async def test_unsupported_schema_fails_before_sdk_or_usage(
-    monkeypatch, tmp_path, fake_sdk
+    monkeypatch, tmp_path, fake_router
 ):
     schema = story_editor.story_writer_schema("brief")
     schema["properties"]["supplemental_packets"]["uniqueItems"] = True
@@ -111,78 +109,32 @@ async def test_unsupported_schema_fails_before_sdk_or_usage(
             "No usage context may start for rejected configuration"
         )
 
-    monkeypatch.setattr(usage, "codex_usage", unexpected)
+    monkeypatch.setattr(usage, "model_usage", unexpected)
     with pytest.raises(errors.EditorError) as error:
         await editor.live_editor(tmp_path).execute(
             "{}", schema, "fixture", tmp_path / "workspace"
         )
     assert error.value.code == "configuration"
-    assert not fake_sdk.started and fake_sdk.thread_starts == 0
-
-
-_PROVIDER_SCHEMA_ERROR = {
-    "message": (
-        "Invalid schema for response_format 'codex_output_schema': "
-        "In context=('properties', 'content', 'anyOf', '0', "
-        "'properties', 'paragraphs', 'items', 'properties', "
-        "'citations'), 'uniqueItems' is not permitted."
-    ),
-    "type": "invalid_request_error",
-    "code": "invalid_json_schema",
-    "param": "text.format.schema",
-}
+    assert not fake_router.started and fake_router.thread_starts == 0
 
 
 @pytest.mark.parametrize(
-    "failure",
+    "code,category",
     [
-        _PROVIDER_SCHEMA_ERROR,
-        RuntimeError(str(_PROVIDER_SCHEMA_ERROR)),
-        {
-            "message": (
-                "Invalid schema for text.format 'codex_output_schema': "
-                "schema keyword rejected"
-            )
-        },
+        ("INVALID_ARGUMENT", "configuration"),
+        ("RESOURCE_EXHAUSTED", "rate_limit"),
+        ("UNAUTHENTICATED", "authentication"),
+        ("UNAVAILABLE", "unavailable"),
     ],
 )
-def test_real_shaped_schema_rejection_fatal_config_without_raw_details(
-    failure,
+def test_normalized_error_classification(code, category):
+    assert newsletter_editor._error_category(code) == category
+
+
+async def test_router_schema_rejection_has_no_provenance_retry(
+    tmp_path, fake_router
 ):
-    error = newsletter_editor._vendor_failure(failure)
-    assert error.code == "configuration"
-    assert "uniqueItems" not in str(error) and "codex_output_schema" not in str(
-        error
-    )
-
-
-@pytest.mark.parametrize(
-    ("failure", "code"),
-    [
-        (
-            {"message": "Generated output failed schema validation"},
-            "unavailable",
-        ),
-        ({"message": "HTTP 400 bad request"}, "unavailable"),
-        ({"message": "temporary connection failure"}, "unavailable"),
-        ({"message": "rate_limit_exceeded"}, "rate_limit"),
-        ({"message": "not logged in"}, "authentication"),
-    ],
-)
-def test_schema_classification_does_not_absorb_unrelated_failures(
-    failure, code
-):
-    assert newsletter_editor._vendor_failure(failure).code == code
-
-
-async def test_provider_schema_rejection_has_no_provenance_retry(
-    tmp_path, fake_sdk
-):
-    # A valid local schema can still be rejected by a changed provider. The
-    # upstream configuration error must reach the existing fatal workflow path.
-    fake_sdk.turn = editor.FakeTurn(
-        {}, research=False, failure=copy.deepcopy(_PROVIDER_SCHEMA_ERROR)
-    )
+    fake_router.turn = editor.FakeTurn({}, research=False, failure={"code": 3})
     with pytest.raises(errors.EditorError) as error:
         await editor.live_editor(tmp_path).execute(
             "{}",
@@ -191,4 +143,4 @@ async def test_provider_schema_rejection_has_no_provenance_retry(
             tmp_path / "workspace",
         )
     assert error.value.code == "configuration"
-    assert len(fake_sdk.prompts) == 1 and fake_sdk.closed
+    assert len(fake_router.prompts) == 1 and fake_router.closed

@@ -230,7 +230,7 @@ export type CanaryState = Omit<CanaryView, 'id'>;
  * is open on the wire (an app may join within ops-v1), so the generated type of `app` is a string; this dashboard knows
  * exactly the apps it binds.
  */
-export type OpsApp = 'mail-hero' | 'todofy' | 'watch' | 'fleet' | 'newsletter' | 'codex-gateway' | 'notion-publish' | 'mailsort' | 'recall' | 'brief' | 'tasks' | 'personal-mcp';
+export type OpsApp = 'mail-hero' | 'todofy' | 'watch' | 'fleet' | 'newsletter' | 'codex-gateway' | 'notion-publish' | 'mailsort' | 'recall' | 'brief' | 'tasks' | 'personal-mcp' | 'model-router';
 
 // ---- transport outside the service --------------------------------------------------------------------------
 
@@ -333,10 +333,10 @@ export const VIEW_ROWS_READ: Readonly<Record<ViewId, number>> = { home: 40, flow
 export const VIEW_ROWS_READ_MAX = 320;
 
 /**
- * Outbound calls one tick may make, computed from the registry (tested). Free: 50 subrequests. Personal MCP adds one read-only status() call.
- * (12 status, 2 probes, 1 GraphQL, 4 setGuard, 2 canary, 1 createInboxTask, 12 drift = 34).
+ * Outbound calls one tick may make, computed from the registry (tested). Free: 50 subrequests. Model Router adds one read-only status() call.
+ * (13 status, 2 probes, 1 GraphQL, 4 setGuard, 2 canary, 1 createInboxTask, 12 drift = 35).
  */
-export const MAX_OUTBOUND_PER_TICK = 34;
+export const MAX_OUTBOUND_PER_TICK = 35;
 /** Outbound calls one owner refresh may make (tested). */
 export const MAX_OUTBOUND_PER_REFRESH = 20;
 

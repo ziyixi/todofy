@@ -49,7 +49,7 @@ def test_every_read_matches_the_idl_after_traffic(worker: Worker) -> None:
     )
     integration = assert_message(worker.owner.get("/api/v1/integration"), status_pb.Integration)
     # The pipeline files mail in Tasks' Inbox: no default project is configured.
-    configured = {"mail_webhook_token": True, "report_basic_auth": True, "gemini_api_key": True}
+    configured = {"mail_webhook_token": True, "report_basic_auth": True, "model_router": True}
     assert integration["configured"] == configured and integration["access_owner"] == OWNER
     assert worker.owner.get("/api/csrf").status_code == 200
     assert_message(worker.owner.get("/api/v1/latestReports"), reports_pb.LatestReports)

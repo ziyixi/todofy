@@ -54,7 +54,7 @@ def pool(request, tmp_path, monkeypatch):
     async def forbidden(*args, **kwargs):
         raise AssertionError("Candidate pooling cannot call a provider")
 
-    monkeypatch.setattr(editor.CodexEditor, "execute", forbidden)
+    monkeypatch.setattr(editor.ModelEditor, "execute", forbidden)
     definition = newsletter_workflow_definition.load_definition(
         pathlib.Path(
             str(resources.files("newsletter").joinpath("workflows/daily.yaml"))
@@ -64,7 +64,7 @@ def pool(request, tmp_path, monkeypatch):
     nodes = request.param(
         store,
         definition,
-        editor.CodexEditor(tmp_path / "unused-auth"),
+        editor.ModelEditor(tmp_path / "unused-auth"),
         tmp_path,
     )
 

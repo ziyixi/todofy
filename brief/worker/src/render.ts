@@ -157,7 +157,7 @@ export function sourceLine(item: Pick<FinalItem, 'section' | 'refs'>): { text: s
 
 /** A model's name for the footer: `claude-opus-4-8` is Claude Opus 4.8; an ID of another shape stays as it is. */
 export function modelName(id: string): string {
-  const match = /^claude-([a-z]+)-(\d+)(?:-(\d))?(?:-\d{8})?$/.exec(id);
+  const match = /^claude-([a-z]+)-(\d+)(?:-(\d))?(?:-\d{8})?$/.exec(id.replace(/^models\//, ''));
   if (match === null) return id;
   const family = match[1] ?? '';
   return `Claude ${family.charAt(0).toUpperCase()}${family.slice(1)} ${match[2] ?? ''}${match[3] === undefined ? '' : `.${match[3]}`}`;
@@ -165,9 +165,10 @@ export function modelName(id: string): string {
 
 /** The footer's words for the writer after a server-side fallback (design §7), or nothing. */
 function writerWords(writers: readonly string[]): string {
-  const fallbacks = writers.filter((model) => model !== OPUS_MODEL);
+  const primary = OPUS_MODEL.replace(/^models\//, '');
+  const fallbacks = writers.filter((model) => model !== OPUS_MODEL && model !== primary);
   if (fallbacks.length === 0) return '';
-  return `${writers.includes(OPUS_MODEL) ? '部分由' : '由'} ${fallbacks.map(modelName).join('、')} 撰写`;
+  return `${writers.includes(OPUS_MODEL) || writers.includes(primary) ? '部分由' : '由'} ${fallbacks.map(modelName).join('、')} 撰写`;
 }
 
 // ---- the HTML -----------------------------------------------------------------------------------------------------------------

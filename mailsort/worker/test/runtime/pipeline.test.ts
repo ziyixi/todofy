@@ -53,7 +53,7 @@ describe('Claude priority pipeline', () => {
     await h.step(T0 + 19 * MINUTE);
     expect(h.up.claude.calls).toHaveLength(4);
     const status = await h.api.getServiceStatus({ name: 'serviceStatus' });
-    expect(status.claudeBudget).toMatchObject({ model: 'claude-opus-5-5', effort: 'medium', month: '2026-10', limitUsd: 20, spentUsd: 0.0288, inputTokens: 4800, outputTokens: 480, thinkingTokens: 160 });
+    expect(status.claudeBudget).toMatchObject({ model: 'models/claude-opus-5-5', effort: 'medium', month: '2026-10', limitUsd: 20, spentUsd: 0.0288, inputTokens: 4800, outputTokens: 480, thinkingTokens: 160 });
   });
 
   it('classifies recent Inbox mail regardless of read state and leaves historical/graded mail unchanged', async () => {
@@ -153,7 +153,7 @@ describe('Claude priority pipeline', () => {
     await initialize();
     h.up.claude.badItems = true;
     deliver(h, mail(1), T0 + MINUTE);
-    expect(await h.step(T0 + 2 * MINUTE)).toMatchObject({ code: 'claude_bad_items', decided: 0 });
+    expect(await h.step(T0 + 2 * MINUTE)).toMatchObject({ code: 'claude_bad_answer', decided: 0 });
     expect(await h.sql(`SELECT attempts, not_before FROM pending`)).toEqual([{ attempts: 1, not_before: T0 + 7 * MINUTE }]);
     expect(await h.sql(`SELECT requests, cost_micros FROM claude_usage`)).toEqual([{ requests: 1, cost_micros: 7200 }]);
     expect(await decision(h, mail(1).id)).toBeUndefined();
@@ -162,7 +162,8 @@ describe('Claude priority pipeline', () => {
   });
 
   it('keeps missing credentials visible without consuming pending attempts', async () => {
-    await initialize({ ANTHROPIC_API_KEY: undefined });
+    await initialize();
+    h.up.claude.configured = false;
     deliver(h, mail(1), T0 + MINUTE);
     expect(await h.step(T0 + 2 * MINUTE)).toMatchObject({ code: 'claude_not_configured', decided: 0 });
     expect(await h.sql(`SELECT attempts FROM pending`)).toEqual([{ attempts: 0 }]);

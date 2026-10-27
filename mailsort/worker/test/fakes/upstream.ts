@@ -4,24 +4,26 @@
  * runner). The Worker's development fetch (env.ts upstreamFetch) sends each Google request to this loopback origin with
  * the real Google URL in `x-mailsort-original-url`; anything else is a 502 and is recorded as a stray request.
  */
-import type { ClaudeEmail } from '../../src/claude.ts';
+import type { ClassificationEmail as ClaudeEmail } from '../../src/classification-result.ts';
 import { create } from '@ziyixi/proto/protobuf';
 import { fromWire, toWire } from '@ziyixi/proto/wire-json';
-import { RunInferenceRequestSchema, RunInferenceResponseSchema, type RunInferenceRequest } from '@ziyixi/proto/codex/inference/v1/inference_pb';
+import { GenerateRequestSchema, GenerationSchema, ListModelsResponseSchema, type GenerateRequest } from '@ziyixi/proto/modelrouter/inference/v1/inference_pb';
 import { FakeAi } from './fake-ai.ts';
 import { FakeGmail, type RecordedLedger } from './fake-gmail.ts';
 
 export const ORIGINAL_URL_HEADER = 'x-mailsort-original-url';
-export const CODEX_ENDPOINT = 'https://codex.synthetic.example/api/codex/v1/inference:run';
+export const MODEL_ENDPOINT = 'https://model-router.internal/api/model/v1/generations:generate';
 
 export class FakeUpstream {
   readonly gmail = new FakeGmail();
   readonly ai = new FakeAi();
   readonly claude = {
     calls: [] as ClaudeEmail[][],
-    systems: [] as { text: string; cache_control?: { type: string; ttl: string } }[][],
+    systems: [] as { text: string; cache: boolean }[][],
     bucket: 'P2' as 'P1' | 'P2' | 'P3' | 'P4',
-    status: 200,
+    configured: true,
+    errorReason: '',
+    errorCode: 0,
     badItems: false,
     spendLimit: false,
     cacheWriteTokens: 0,
@@ -32,10 +34,11 @@ export class FakeUpstream {
   };
   readonly codex = {
     calls: [] as ClaudeEmail[][],
-    requests: [] as RunInferenceRequest[],
+    requests: [] as GenerateRequest[],
     bucket: 'P2' as 'P1' | 'P2' | 'P3' | 'P4',
-    status: 200,
-    errorCode: '',
+    configured: true,
+    errorReason: '',
+    errorCode: 0,
     badItems: false,
     inputTokens: 1200,
     outputTokens: 120,
@@ -61,14 +64,18 @@ export class FakeUpstream {
     this.claude.systems.length = 0;
     this.claude.cacheWriteTokens = 0;
     this.claude.cacheReadTokens = 0;
-    this.claude.status = 200;
+    this.claude.configured = true;
+    this.claude.errorReason = '';
+    this.claude.errorCode = 0;
     this.claude.spendLimit = false;
     this.claude.badItems = false;
     this.codex.calls.length = 0;
     this.codex.requests.length = 0;
     this.codex.bucket = 'P2';
-    this.codex.status = 200;
-    this.codex.errorCode = '';
+    this.codex.configured = true;
+    this.codex.errorReason = '';
+    this.codex.errorCode = 0;
+
     this.codex.badItems = false;
     this.codex.inputTokens = 1200;
     this.codex.outputTokens = 120;
@@ -79,33 +86,35 @@ export class FakeUpstream {
   async handle(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const body = request.method === 'GET' || request.method === 'HEAD' ? '' : await request.text();
-    const originalUrl = request.headers.get(ORIGINAL_URL_HEADER) ?? request.url;
-    if (request.method === 'POST' && originalUrl === CODEX_ENDPOINT) {
-      const input = fromWire(RunInferenceRequestSchema, JSON.parse(body)).message;
-      const emails = (JSON.parse(input.inputJson) as { emails: ClaudeEmail[] }).emails;
-      this.codex.requests.push(input);
-      this.codex.calls.push(emails);
-      if (this.codex.status !== 200) return new Response('Synthetic private gateway failure.', { status: this.codex.status });
-      const items = this.codex.badItems ? [] : emails.map(email => ({ id: email.id, bucket: this.codex.bucket, reason: 'Synthetic reading priority.' }));
-      return Response.json(toWire(RunInferenceResponseSchema, create(RunInferenceResponseSchema, {
-        model: 'gpt-6.1-sol', effort: 'medium', outputJson: this.codex.errorCode ? '' : JSON.stringify({ items }),
-        inputTokens: this.codex.inputTokens, outputTokens: this.codex.outputTokens,
-        usageAvailable: this.codex.usageAvailable, errorCode: this.codex.errorCode,
-      })));
+    if (url.pathname === '/api/model/v1/models') {
+      return Response.json(toWire(ListModelsResponseSchema, create(ListModelsResponseSchema, { models: [
+        { name: 'models/claude-opus-5-5', configured: this.claude.configured }, { name: 'models/sol-6-1', configured: this.codex.configured },
+      ] })));
     }
-    if (request.method === 'POST' && originalUrl === 'https://api.anthropic.com/v1/messages') {
-      const input = JSON.parse(body) as { messages: { content: string }[]; system: { text: string; cache_control?: { type: string; ttl: string } }[] };
-      const emails = (JSON.parse(input.messages[0]?.content ?? '{}') as { emails: ClaudeEmail[] }).emails;
-      this.claude.calls.push(emails);
-      this.claude.systems.push(input.system);
-      if (this.claude.spendLimit) return Response.json({ error: { type: 'rate_limit_error', details: { error_code: 'enforced_spend_limit_reached' } } }, { status: 429 });
-      if (this.claude.status !== 200) return Response.json({ error: { type: 'api_error' } }, { status: this.claude.status });
-      const items = this.claude.badItems ? [] : emails.map(email => ({ id: email.id, bucket: this.claude.bucket, reason: 'Synthetic reading priority.' }));
-      return Response.json({ model: 'claude-opus-5-5', type: 'message', role: 'assistant', stop_reason: 'end_turn',
-        content: [{ type: 'text', text: JSON.stringify({ items }) }],
-        usage: { input_tokens: this.claude.inputTokens, output_tokens: this.claude.outputTokens,
-          cache_creation_input_tokens: this.claude.cacheWriteTokens, cache_read_input_tokens: this.claude.cacheReadTokens,
-          ...(this.claude.thinkingTokens === null ? {} : { output_tokens_details: { thinking_tokens: this.claude.thinkingTokens } }) } });
+    if (request.method === 'POST' && url.pathname === '/api/model/v1/generations:generate') {
+      const input = fromWire(GenerateRequestSchema, JSON.parse(body)).message;
+      const emails = (JSON.parse(input.input) as { emails: ClaudeEmail[] }).emails;
+      const isClaude = input.config?.model === 'models/claude-opus-5-5';
+      const engine = isClaude ? this.claude : this.codex;
+      if (engine.configured) engine.calls.push(emails);
+      if (isClaude) this.claude.systems.push(input.config?.instructions ?? []);
+      else this.codex.requests.push(input);
+      const reason = !engine.configured ? 'MODEL_NOT_CONFIGURED' : isClaude && this.claude.spendLimit ? 'MODEL_SPEND_LIMIT' : engine.errorReason;
+      const code = !engine.configured ? 9 : isClaude && this.claude.spendLimit ? 8 : engine.errorCode;
+      const items = engine.badItems ? [] : emails.map(email => ({ id: email.id, bucket: engine.bucket, reason: 'Synthetic reading priority.' }));
+      const cacheWrite = isClaude ? this.claude.cacheWriteTokens : 0;
+      const cacheRead = isClaude ? this.claude.cacheReadTokens : 0;
+      const inputTokens = engine.inputTokens + cacheWrite + cacheRead;
+      const cost = Math.ceil(engine.inputTokens * 4 + cacheWrite * 5 + cacheRead * 0.2 + engine.outputTokens * 20);
+      return Response.json(toWire(GenerationSchema, create(GenerationSchema, {
+        name: `requests/${input.requestId}`, model: input.config?.model ?? '', reportedModel: isClaude ? 'claude-opus-5-5' : 'gpt-6.1-sol',
+        state: reason ? 'failed' : 'succeeded', output: reason ? '' : JSON.stringify({ items }), parameters: input.config?.parameters,
+        upstreamStarted: !reason, attemptCount: engine.configured ? 1 : 0, finishReason: reason ? '' : 'complete',
+        ...(reason ? { error: { code, reason, message: 'Synthetic model failure.' } } : {}),
+        usage: { available: !reason && (isClaude || this.codex.usageAvailable), inputTokens: reason ? 0 : inputTokens, outputTokens: reason ? 0 : engine.outputTokens,
+          totalTokens: reason ? 0 : inputTokens + engine.outputTokens, cacheWriteTokens: cacheWrite, cachedInputTokens: cacheRead,
+          reasoningOutputTokens: isClaude ? this.claude.thinkingTokens ?? 0 : 0, ...(isClaude ? { estimatedCostMicrousd: cost } : {}) },
+      })));
     }
     if (request.method === 'POST' && url.pathname.startsWith('/ai/run/')) {
       try {

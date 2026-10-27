@@ -10,7 +10,6 @@ in the returned report or safe failure messages.
 from __future__ import annotations
 
 import asyncio
-import base64
 import contextlib
 import dataclasses
 import hashlib
@@ -18,23 +17,22 @@ import importlib.metadata as importlib_metadata
 import importlib.resources as resources
 import json
 import logging
-import os
 import pathlib
 import re
 import sqlite3
 import sys
 import tempfile
-import types
-from typing import cast, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import httpx
+import model_router_client as models
 import packaging.requirements as packaging_requirements
 import ziyixi_protos.newsletter.editorial_pb2 as editorial_pb2
 
 import newsletter.adapters as adapters
 import newsletter.charts as charts
-import newsletter.codex_runtime as codex_runtime
 import newsletter.diagnostics as diagnostics
+import newsletter.model_client as model_client
 import newsletter.notion_api as notion_api
 import newsletter.rendering as rendering
 import newsletter.schema_compat as schema_compat
@@ -46,7 +44,7 @@ if TYPE_CHECKING:
     import newsletter.store as newsletter_store
 
 HTTP_TIMEOUT = 15.0
-CODEX_TIMEOUT = 45.0
+MODEL_TIMEOUT = 45.0
 MAX_RESPONSE_BYTES = 512 * 1024
 logger = logging.getLogger(__name__)
 
@@ -181,138 +179,24 @@ def _check_resources() -> None:
         raise PreflightError("RENDERER_UNAVAILABLE")
 
 
-def _runtime_files() -> tuple[pathlib.Path, pathlib.Path]:
-    # Mock startup must not require the optional live Codex runtime package.
-    import codex_cli_bin  # type: ignore[import-untyped]  # noqa: PLC0415
-
-    sdk_version = importlib_metadata.version("openai-codex")
-    if importlib_metadata.version("openai-codex-cli-bin") != sdk_version:
-        raise PreflightError("CODEX_VERSION_MISMATCH")
-    executable = pathlib.Path(codex_cli_bin.bundled_codex_path())
-    host = executable.with_name("codex-code-mode-host")
-    metadata = json.loads(
-        executable.parent.parent.joinpath("codex-package.json").read_text()
-    )
-    if metadata.get("version") != sdk_version:
-        raise PreflightError("CODEX_VERSION_MISMATCH")
-    installed = importlib_metadata.distribution("openai-codex-cli-bin")
-    records = {str(record): record for record in installed.files or ()}
-    for binary in (executable, host):
-        if (
-            binary.is_symlink()
-            or not binary.is_file()
-            or not os.access(binary, os.X_OK)
-        ):
-            raise PreflightError("CODEX_EXECUTABLE_UNAVAILABLE")
-        record = records.get("codex_cli_bin/bin/" + binary.name)
-        if (
-            record is None
-            or record.hash is None
-            or record.hash.mode != "sha256"
-        ):
-            raise PreflightError("CODEX_INTEGRITY_FAILED")
-        with binary.open("rb") as stream:
-            digest = base64.urlsafe_b64encode(
-                hashlib.file_digest(stream, "sha256").digest()
-            )
-        if (
-            digest.decode().rstrip("=") != record.hash.value
-            or binary.stat().st_size != record.size
-        ):
-            raise PreflightError("CODEX_INTEGRITY_FAILED")
-    return executable, host
-
-
-async def _host_executable(host: pathlib.Path, workspace: pathlib.Path) -> None:
-    # --help exits before hosting tools. An exact, non-secret environment
-    # excludes service keys, auth homes, proxies, and injected originators.
-    process = await asyncio.create_subprocess_exec(
-        str(host),
-        "--help",
-        cwd=workspace,
-        env={
-            "PATH": os.defpath,
-            "HOME": str(workspace),
-            "TMPDIR": str(workspace),
-        },
-        stdout=asyncio.subprocess.DEVNULL,
-        stderr=asyncio.subprocess.DEVNULL,
-    )
-    try:
-        async with asyncio.timeout(5):
-            if await process.wait() != 0:
-                raise PreflightError("CODEX_HOST_UNAVAILABLE")
-    finally:
-        if process.returncode is None:
-            process.kill()
-            await process.wait()
-
-
-async def _check_codex(
-    settings: newsletter_settings.Settings, sdk: types.ModuleType | None
+async def _check_model_router(
+    settings: newsletter_settings.Settings,
+    client: models.ModelClient | None,
 ) -> None:
-    # Only the live backend requires the optional SDK and response schema.
-    import openai_codex.generated.v2_all as v2_all  # noqa: PLC0415
-
-    _, host = _runtime_files()
-    sdk = sdk or codex_runtime.load_sdk()
-    with tempfile.TemporaryDirectory(
-        prefix=".preflight-codex-", dir=settings.data_dir
-    ) as name:
-        workspace = pathlib.Path(name).resolve()
-        home = codex_runtime.check_codex_home(
-            cast(pathlib.Path, settings.codex_home), workspace
+    client = client or model_client.configured_client(settings)
+    async with asyncio.timeout(MODEL_TIMEOUT):
+        catalog = await client.list_models()
+    if not any(
+        item.configured
+        and item.generation
+        and item.conversations
+        and item.web_research
+        and (
+            item.name == settings.model or item.upstream_model == settings.model
         )
-        await _host_executable(host, workspace)
-        overrides = codex_runtime.runtime_overrides(home)
-        client = sdk.AsyncCodex(
-            sdk.CodexConfig(
-                cwd=str(workspace),
-                env=codex_runtime.runtime_env(home),
-                config_overrides=overrides,
-                launch_args_override=codex_runtime.launch_args(overrides),
-                client_name="newsletter_preflight",
-            )
-        )
-        try:
-            async with asyncio.timeout(CODEX_TIMEOUT):
-                await client.__aenter__()
-                codex_runtime.check_codex_home(home, workspace)
-                await codex_runtime.assert_no_skills(client, workspace, home)
-                account = await client.account(refresh_token=True)
-                if (
-                    account.account is None
-                    or account.account.root.type != "chatgpt"
-                ):
-                    raise PreflightError("CODEX_CHATGPT_AUTH_REQUIRED")
-                cursor = None
-                seen = set()
-                for _ in range(20):
-                    params: newsletter_types.Payload = {
-                        "limit": 100,
-                        "includeHidden": True,
-                    }
-                    if cursor is not None:
-                        params["cursor"] = cursor
-                    # SDK 0.163.0's public models() omits pagination parameters.
-                    result = await client._client.request(  # noqa: SLF001
-                        "model/list",
-                        params,
-                        response_model=v2_all.ModelListResponse,
-                    )
-                    if any(
-                        model.model == settings.model for model in result.data
-                    ):
-                        return
-                    cursor = result.next_cursor
-                    if cursor is None:
-                        raise PreflightError("CODEX_MODEL_UNAVAILABLE")
-                    if cursor in seen:
-                        raise PreflightError("CODEX_MODEL_LIST_INVALID")
-                    seen.add(cursor)
-                raise PreflightError("CODEX_MODEL_LIST_INVALID")
-        finally:
-            await asyncio.wait_for(client.close(), timeout=3)
+        for item in catalog.models
+    ):
+        raise PreflightError("MODEL_UNAVAILABLE")
 
 
 async def _get_json(
@@ -479,7 +363,7 @@ async def preflight(
     *,
     store: newsletter_store.Store | None = None,
     http_transport: httpx.AsyncBaseTransport | None = None,
-    sdk: types.ModuleType | None = None,
+    model_router: models.ModelClient | None = None,
 ) -> PreflightReport:
     """Raise on mandatory failures; explicit dependency injection is for tests.
 
@@ -501,11 +385,11 @@ async def preflight(
         _check_resources()
         checks.append("proto_policy_template_cjk_png")
         if settings.editor_backend == "codex":
-            stage = "CODEX"
-            await _check_codex(settings, sdk)
-            checks.append("codex_runtime_host_auth_skills_model_catalog")
+            stage = "MODEL"
+            await _check_model_router(settings, model_router)
+            checks.append("model_router_capabilities")
             limitations.append(
-                "Codex catalog/auth checks do not execute a model or "
+                "Router catalog checks do not execute a model or "
                 "verify web-search tools."
             )
         if settings.notion_backend == "notion":

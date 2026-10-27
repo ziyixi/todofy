@@ -66,7 +66,12 @@ class InferenceMonitor:
         self.latest: InferenceRequestSample | None = None
 
     async def run(
-        self, request: RunInferenceRequest, home: pathlib.Path, runner: Runner
+        self,
+        request: RunInferenceRequest,
+        home: pathlib.Path,
+        runner: Runner,
+        *,
+        effort: str = EFFORT,
     ) -> RunInferenceResponse:
         self.request_count += 1
         sequence = self.request_count
@@ -103,7 +108,9 @@ class InferenceMonitor:
                 sequence=sequence,
                 completed_at=timestamp(self.clock()),
                 model=model,
-                effort=EFFORT,
+                effort=effort
+                if effort in {"default", "low", "medium", "high", "xhigh", "max"}
+                else "unknown",
                 duration_ms=duration_ms,
                 error_code=error_code,
                 input_tokens=input_tokens,

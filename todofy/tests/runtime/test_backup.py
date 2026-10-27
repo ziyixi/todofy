@@ -115,7 +115,9 @@ def seed(worker: Worker, now: int) -> None:
         # Legacy text: one of ~300 KB (with a NUL), three short ones.
         "INSERT INTO legacy_mail_text (event_id, created_at, text) VALUES"
         " ('legacy:big', 1, replace(hex(zeroblob(50000)), '00', '旧文' || char(0) || 'x')),"
-        " ('legacy:a', 2, 'a'), ('legacy:b', 3, 'b'), ('legacy:c', 4, 'c')"
+        " ('legacy:a', 2, 'a'), ('legacy:b', 3, 'b'), ('legacy:c', 4, 'c');"
+        "INSERT INTO model_settings (id, email_model, report_model, version) "
+        "VALUES (1, 'models/sol-6-1', 'models/gemini-report', 7)"
     )
 
 
@@ -196,7 +198,7 @@ def test_weekly_backup_restores_into_an_empty_database(backup_worker: Worker, tm
     status = wait_for_backup(worker)
     prefix = status["last_backup_key"]
     assert re.fullmatch(rf"backups/{today:%Y-%m-%d}T\d{{6}}Z/", prefix), prefix  # the job's start second
-    rows = EVENTS + TRANSITIONS + 1 + 1 + 1 + 1 + 1 + 1 + LEGACY_TEXTS
+    rows = EVENTS + TRANSITIONS + 1 + 1 + 1 + 1 + 1 + 1 + LEGACY_TEXTS + 1
     assert status | {"last_backup_time": None, "last_backup_size_bytes": 0} == {
         "state": "ok",
         "last_backup_time": None,
@@ -236,6 +238,8 @@ def test_weekly_backup_restores_into_an_empty_database(backup_worker: Worker, tm
     assert verified.stdout.splitlines()[-1] == "verify PASS"
     source = dump(worker, worker.persist_to)
     assert dump(worker, target) == source
+    assert source["model_settings"][0]["email_model"] == "models/sol-6-1"
+    assert source["model_settings"][0]["version"] == 7
     assert len(source["legacy_mail_text"]) == LEGACY_TEXTS
 
     # A second job on the same day (here: the object lost its state) writes a new prefix and leaves

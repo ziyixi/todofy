@@ -202,16 +202,16 @@ def _status(status: str) -> pb.ReportStatus:
 def recommendation_response_schema(top_n: int) -> dict[str, Any]:
     """Gemini ``responseSchema`` for the recommendation call."""
     return {
-        "type": "ARRAY",
+        "type": "array",
         "maxItems": top_n,
         "items": {
-            "type": "OBJECT",
+            "type": "object",
             "properties": {
-                "rank": {"type": "INTEGER"},
-                "title": {"type": "STRING"},
-                "reason": {"type": "STRING"},
+                "rank": {"type": "integer"},
+                "title": {"type": "string"},
+                "reason": {"type": "string"},
             },
             "required": ["rank", "title", "reason"],
-            "propertyOrdering": ["rank", "title", "reason"],
+            "additionalProperties": False,
         },
     }

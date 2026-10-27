@@ -206,7 +206,7 @@ function write(packet: PacketJson, turn: number, overstate: boolean): Record<str
 }
 
 function userJson(body: Record<string, unknown>, marker: string): unknown {
-  const content = (body['messages'] as { content: string }[])[0]?.content ?? '';
+  const content = (typeof body['input'] === 'string' ? body['input'] : '');
   const at = content.indexOf(marker);
   return at < 0 ? null : (JSON.parse(content.slice(at + marker.length).split('\n')[0] ?? 'null') as unknown);
 }
@@ -227,7 +227,7 @@ export function plausibleClaude(): ClaudeScript {
       const world = userJson(body, '世界与经济卡片：\n') as { id: string; topic: string }[];
       const take = (cards: { id: string; topic: string }[], topics: readonly string[], perTopic: number) =>
         topics.flatMap((topic) => cards.filter((card) => card.topic === topic).slice(0, perTopic)).map((card) => ({ id: card.id, reason: PICK_REASONS[card.topic] ?? '值得一读' }));
-      return answer({ research: take(research, RESEARCH_ORDER, 2), world: take(world, WORLD_ORDER, 1) }, model, { input_tokens: 15_000, output_tokens: 6_000 });
+      return answer({ research: take(research, RESEARCH_ORDER, 2), world: take(world, WORLD_ORDER, 1) }, model, { inputTokens: 15_000, outputTokens: 6_000 });
     }
     if (step === 'write') {
       const packets = userJson(body, '材料包：\n') as PacketJson[];
@@ -236,16 +236,16 @@ export function plausibleClaude(): ClaudeScript {
       return answer(
         { items: items.flatMap((entry) => (entry.item === null ? [] : [entry.item])), omitted: items.filter((entry) => entry.item === null).map((entry) => ({ packet: entry.packet.packet, code: 'thin' })) },
         model,
-        { input_tokens: 30_000, output_tokens: 22_000, cache_creation_input_tokens: 3_500 },
+        { inputTokens: 30_000, outputTokens: 22_000, cacheWriteTokens: 3_500 },
       );
     }
     if (step === 'repair') {
       const cases = userJson(body, '需要修订的条目：\n') as { packet: PacketJson; problems: string[] }[];
-      return answer({ items: cases.flatMap((entry) => write(entry.packet, turns.get(entry.packet.packet) ?? 0, false) ?? []), omitted: [] }, model, { input_tokens: 6_000, output_tokens: 4_000, cache_read_input_tokens: 3_500 });
+      return answer({ items: cases.flatMap((entry) => write(entry.packet, turns.get(entry.packet.packet) ?? 0, false) ?? []), omitted: [] }, model, { inputTokens: 6_000, outputTokens: 4_000, cachedInputTokens: 3_500 });
     }
     if (step === 'entail') {
-      const cases = JSON.parse((body['messages'] as { content: string }[])[0]?.content ?? '[]') as { item: string; n: number }[];
-      return answer({ verdicts: cases.map((entry) => ({ item: entry.item, n: entry.n, verdict: 'supported' })) }, model, { input_tokens: 9_000, output_tokens: 1_500 });
+      const cases = JSON.parse((typeof body['input'] === 'string' ? body['input'] : '[]')) as { item: string; n: number }[];
+      return answer({ verdicts: cases.map((entry) => ({ item: entry.item, n: entry.n, verdict: 'supported' })) }, model, { inputTokens: 9_000, outputTokens: 1_500 });
     }
     return null;
   };

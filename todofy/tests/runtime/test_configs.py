@@ -22,6 +22,7 @@ CORE_SHAPE = (
     "compatibility_flags",
     "migrations",
     "analytics_engine_datasets",
+    "services",
 )
 GATEWAY_SHAPE = (
     "main",

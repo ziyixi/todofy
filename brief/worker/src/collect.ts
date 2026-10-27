@@ -24,7 +24,7 @@
 import type { StepBudget } from './budget.ts';
 import { callModel, type CallContext } from './claude.ts';
 import { addToCentroid, AiError, AiQuotaError, embed, embeddingNeurons, embeddingText, nearest, unit } from './cluster.ts';
-import type { AiRunner } from './env.ts';
+import type { ModelBinding } from '@ziyixi/model-router-client';
 import type { FeedEntry } from './fetch/feeds.ts';
 import type { Clock, Hosts } from './fetch/hosts.ts';
 import type { FetchFn } from './fetch/net.ts';
@@ -72,7 +72,7 @@ export interface CollectEnv {
   readonly fetchFn: FetchFn;
   readonly own: readonly string[];
   /** Workers AI, or null (no binding; Home's guard deferred embedding). */
-  readonly ai: AiRunner | null;
+  readonly ai: ModelBinding | null;
   /** The Claude calls, or null when the gate may not run (mode off, paused, no key). */
   readonly claude: CallContext | null;
   readonly transact: <T>(fn: () => T) => T;
@@ -364,7 +364,7 @@ async function pollPhase(env: CollectEnv): Promise<{ polled: number; created: nu
 }
 
 /** The topic vectors of the current profile, embedded once per profile version (the refused-candidate fallback). */
-async function ensureTopicVectors(env: CollectEnv, ai: AiRunner): Promise<void> {
+async function ensureTopicVectors(env: CollectEnv, ai: ModelBinding): Promise<void> {
   const version = env.topics.map((topic) => `${topic.id}:${topic.description}`).join('|');
   const stored = env.store.one<{ version: string }>(`SELECT version FROM topic_vectors LIMIT 1`);
   if (stored?.version === version || !env.budget.take()) return;
@@ -505,7 +505,7 @@ function gateCandidate(store: Store, registry: Registry, item: ItemRow): GateCan
 type GateStop = 'blocked' | 'transient' | null;
 
 async function gateGroup(env: CollectEnv, claude: CallContext, items: readonly ItemRow[], split: boolean): Promise<{ stop: GateStop; calls: number }> {
-  if (!env.budget.take()) return { stop: 'transient', calls: 0 };
+  if (!env.budget.take(2)) return { stop: 'transient', calls: 0 };
   const candidates = items.map((item) => gateCandidate(env.store, env.registry, item));
   const { params, estimatedInputTokens } = gateRequest(candidates, env.topics);
   const outcome = await callModel(claude, { step: 'gate', issue: env.day, model: GATE_MODEL, params, estimatedInputTokens, deadlineMs: Math.min(3 * MINUTE, env.budget.timeLeft()) });

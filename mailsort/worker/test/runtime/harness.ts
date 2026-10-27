@@ -46,7 +46,6 @@ export const SYNTHETIC_BINDINGS: Readonly<Record<string, string>> = {
   DEV_MANUAL_ALARMS: 'true',
   // Any loopback origin: the outbound service answers every request, whatever its address.
   DEV_FAKE_UPSTREAM: 'http://127.0.0.1:9',
-  ANTHROPIC_API_KEY: 'synthetic-anthropic-key',
   GMAIL_CLIENT_ID: 'synthetic-client.apps.example.com',
   GMAIL_CLIENT_SECRET: 'synthetic-secret',
   GMAIL_REFRESH_TOKEN: REFRESH_TOKEN,
@@ -126,6 +125,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     durableObjects: { MAILSORT: { className: 'MailsortState', useSQLite: true, ...(split ? { scriptName: OBJECT_WORKER } : {}) } },
     serviceBindings: {
       ASSETS: () => new Response(TEST_PAGE, { headers: { 'content-type': 'text/html; charset=utf-8' } }),
+      MODEL_ROUTER: (request: Request) => up.handle(request),
       ...(options.aiBinding === true ? { AI: { name: 'fake-ai', entrypoint: 'FakeAiBinding' } } : {}),
     },
     bindings,

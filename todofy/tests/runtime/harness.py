@@ -525,7 +525,37 @@ def _run(worker: Worker) -> Iterator[Worker]:
 
 def start_worker(config: str, state: Path, variables: dict[str, str]) -> Iterator[Worker]:
     """A single Worker (the test-only probes); every var goes to it."""
-    yield from _run(Worker([config], config, state, variables))
+    source = Path(config)
+    document = tomllib.loads(source.read_text())
+    bridge = attach_model_router(document, state, variables)
+    generated = source.with_name("wrangler-model-test.json")
+    generated.write_text(json.dumps(document))
+    yield from _run(Worker([str(generated), str(bridge)], str(generated), state, variables))
+
+
+def attach_model_router(document: dict[str, Any], state: Path, variables: dict[str, str]) -> Path:
+    """Bind a test-only Worker bridge to the loopback synthetic Router."""
+    state.mkdir(parents=True, exist_ok=True)
+    script = state / "model-router-bridge.js"
+    script.write_text(
+        "export default { async fetch(request, env) { "
+        "const url = new URL(request.url); "
+        "return fetch(new Request(env.TEST_ROUTER_ORIGIN + url.pathname + url.search, request)); "
+        "} };\n"
+    )
+    bridge = state / "model-router-bridge.json"
+    bridge.write_text(
+        json.dumps(
+            {
+                "name": "todofy-model-router-test-bridge",
+                "main": str(script),
+                "compatibility_date": "2026-09-08",
+                "vars": {"TEST_ROUTER_ORIGIN": variables.get("MODEL_ROUTER_FAKE_ORIGIN", "http://127.0.0.1:9")},
+            }
+        )
+    )
+    document["services"] = [{"binding": "MODEL_ROUTER", "service": "todofy-model-router-test-bridge"}]
+    return bridge
 
 
 def start_gateway(
@@ -550,11 +580,12 @@ def start_gateway(
         yield from _run(Worker([config], str(CORE_CONFIG), state, gateway))
         return
     core_config = tomllib.loads(CORE_CONFIG.read_text())
+    bridge = attach_model_router(core_config, state, variables)
     core_config["vars"] |= {name: value for name, value in variables.items() if name not in gateway} | shared
     generated = ROOT / f"wrangler.test-run-{uuid.uuid4().hex}.json"
     generated.write_text(json.dumps(core_config))
     try:
-        configs = [*([front] if front else []), config, generated.name]
+        configs = [*([front] if front else []), config, generated.name, str(bridge)]
         yield from _run(Worker(configs, generated.name, state, gateway))
     finally:
         generated.unlink(missing_ok=True)

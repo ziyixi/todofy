@@ -28,9 +28,9 @@ describe('the gate', () => {
   ];
   it('keeps one cache breakpoint at the end of the frozen system block and reads strictly', () => {
     const { params } = gateRequest(group, topics);
-    expect(params.system).toEqual([expect.objectContaining({ cache_control: { type: 'ephemeral' } })]);
-    expect(params.output_config).toMatchObject({ effort: 'low' });
-    expect(JSON.stringify(params.system)).not.toMatch(/2026/);
+    expect(params.instructions).toEqual([expect.objectContaining({ cache: true })]);
+    expect(params.parameters).toMatchObject({ effort: 'low' });
+    expect(JSON.stringify(params.instructions)).not.toMatch(/2026/);
     const ok = readGate({ scores: [{ id: 'c1', topic: 'geo.seismology', score: 7 }, { id: 'c2', topic: 'world.economy', score: 4 }] }, group, topics);
     expect(ok?.get('c1')).toEqual({ topic: 'geo.seismology', score: 7 });
     expect(readGate({ scores: [{ id: 'c1', topic: 'geo.seismology', score: 7 }] }, group, topics)).toBeNull();

@@ -21,11 +21,11 @@ def test_footer_below_branding_also_ends_plain_text_and_changes_frozen_hash():
     summary = newsletter_usage.summarize_usage(tests_support_usage.record_one())
     without = render()
     with_usage = render(summary)
-    assert "Codex 已记录 120 tokens" in with_usage["html"]
+    assert "模型已记录 120 tokens" in with_usage["html"]
     assert "非缓存输入 40 · 缓存输入 60 · 输出 20" in with_usage["html"]
     assert "非缓存输入 40 · 缓存输入 60 · 输出 20" in with_usage["text"]
     assert "不重复相加" not in with_usage["text"]
-    assert with_usage["html"].index("Codex 已记录") > with_usage["html"].index(
+    assert with_usage["html"].index("模型已记录") > with_usage["html"].index(
         "THE DAILY BRIEF"
     )
     assert "text-align:right" in with_usage["html"]
@@ -121,7 +121,7 @@ def test_chart_and_missing_digest_keep_partial_footer_last():
         assert output.index(chart["limitations"]) < output.index(
             "TODOFY / 与你有关"
         )
-        assert output.index("TODOFY / 与你有关") < output.index("Codex 已记录")
+        assert output.index("TODOFY / 与你有关") < output.index("模型已记录")
         assert "6,090,000 tokens" in output
         assert (
             "非缓存输入 1,000,000 · 缓存输入 5,000,000 · 输出 90,000" in output

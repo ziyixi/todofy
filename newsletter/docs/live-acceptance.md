@@ -14,15 +14,15 @@ make smoke
 make smoke-codex
 ```
 
-`make setup` 按仓库根 `.python-version`（Python 3.14.7）和唯一的 `uv.lock` 选择 Newsletter 成员安装，包含 Codex extra、dev 工具组及 GitHub Release 分发的 `ziyixi-protos==0.1.0.dev7`；可能下载解释器或依赖，但不会访问账号。`make check` 覆盖锁一致性、Ruff 80列/Google公开文档/模块导入、AST结构门禁、严格mypy与离线测试；`make format` 单独格式化Python。发布包与loopback服务另用上面的build/smoke。`make proto-check` 校验已安装公共 wheel 的代码、stub、descriptor hash、来源清单及发行版本；不依赖 sibling protos 仓库或 protoc，也不在 newsletter 内生成代码。不能运行的验收项单独标记，不应通过跳过来宣称完整通过。
+`make setup` 按仓库根 `.python-version`（Python 3.14.7）和唯一的 `uv.lock` 选择 Newsletter 成员安装，包含共享 Model Router 客户端、dev 工具组及 GitHub Release 分发的 `ziyixi-protos==0.1.0.dev7`；可能下载解释器或依赖，但不会访问账号。`make check` 覆盖锁一致性、Ruff 80列/Google公开文档/模块导入、AST结构门禁、严格mypy与离线测试；`make format` 单独格式化Python。发布包与loopback服务另用上面的build/smoke。`make proto-check` 校验已安装公共 wheel 的代码、stub、descriptor hash、来源清单及发行版本；不依赖 sibling protos 仓库或 protoc，也不在 newsletter 内生成代码。不能运行的验收项单独标记，不应通过跳过来宣称完整通过。
 
-这里的 `make build` 只构建 Python 包，不发布镜像。Docker 验收须另行检查 daemon、构建和运行：镜像只在构建阶段从同一锁安装运行依赖及 Codex extra，不带 dev 工具，不在服务启动时解析或下载依赖。锁定工具链不会搬动或读取已有 `.env` 和专用登录缓存。
+这里的 `make build` 只构建 Python 包，不发布镜像。Docker 验收须另行检查 daemon、构建和运行：镜像只在构建阶段从同一锁安装运行依赖及共享 Model Router 客户端，不带 dev 工具，不在服务启动时解析或下载依赖。锁定工具链不会搬动或读取已有 `.env` 和提供方凭据。
 
 ## 需要准备什么
 
 | 用途 | 当前代码读取的配置 | 获取与权限 |
 | --- | --- | --- |
-| Codex 指令采集、总编及补查 | `NEWSLETTER_CODEX_HOME`、`NEWSLETTER_MODEL` | 在运行服务的机器上完成专用 ChatGPT 登录；不是 OpenAI API key。登录目录只供该服务使用，持久化且可写。 |
+| 采集、总编及补查 | `NEWSLETTER_MODEL_ROUTER_URL`、`NEWSLETTER_MODEL_ROUTER_TOKEN`、`NEWSLETTER_MODEL` | 使用 Newsletter 专用的 Router 机器 token；提供方登录不进入本应用。 |
 | Todofy 事件概述 | `TODO_API_BASE`、`TODO_API_USER`、`TODO_API_PASSWORD` | 使用现有 Todofy Basic Auth 用户，对应 Todofy 部署的 `ALLOWED_USERS`。不需要把 Todoist token 交给 newsletter。 |
 | Notion 双库 | `NOTION_TOKEN`、`NOTION_MATERIALS_DATA_SOURCE_ID`、`NOTION_EDITIONS_DATA_SOURCE_ID` | 专用 internal connection 只授权这两个数据库，需要 Read/Insert/Update content，关系目标均须可访问。无需用户资料或评论权限。 |
 | Resend 投递 | `RESEND_API_KEY`、`NEWSLETTER_FROM_EMAIL`、`RECIPIENT_EMAIL` | 可复用现有 key；新建时优先只允许 Sending access 并限制发件域名。发件地址使用已验证域名，收件人由用户明确确认。 |
@@ -32,29 +32,13 @@ newsletter 不直接调用 Gemini。Todofy 自己负责其服务器上的 `GEMIN
 
 凭据不要发在聊天、截图、命令行参数、Git、镜像或日志里。现有仓库位于 Google Drive 同步目录；**新增登录缓存与联调密钥放到同步目录之外**。不要覆盖已有 `.env`，新服务也不会自动加载它。准备完成后只告知私有文件/目录的位置和非秘密的数据库链接。
 
-## Codex：服务专用登录
+## Model Router 连接
 
-`make setup` 已从锁定的 Codex extra 安装 SDK 和配套 runtime，不需要额外拿一个 OpenAI API key。本机测试可在 newsletter 仓库终端运行以下命令；它们由用户显式执行登录，不会开始采编或发信。已经完成此专用登录时只核对 `login status`，无需重复登录：
+设置 `NEWSLETTER_MODEL_ROUTER_URL` 和 Newsletter 专用的 `NEWSLETTER_MODEL_ROUTER_TOKEN`，通过正规密钥配置流程保存 token。Newsletter 不需要本机模型登录目录、SDK 或提供方 API key；账号由 Router 的执行层维护。默认公共模型名为 `models/sol-6-1`，历史冻结运行的模型值由 Router 兼容解析，不改写历史。
 
-```sh
-export NEWSLETTER_CODEX_HOME='/Users/ziyixi/Library/Application Support/newsletter/codex-auth'
-mkdir -p "$NEWSLETTER_CODEX_HOME"
-chmod 700 "$NEWSLETTER_CODEX_HOME"
-NEWSLETTER_CODEX_BIN="$(.venv/bin/python -c 'from codex_cli_bin import bundled_codex_path; print(bundled_codex_path())')"
-env CODEX_HOME="$NEWSLETTER_CODEX_HOME" "$NEWSLETTER_CODEX_BIN" \
-  -c 'cli_auth_credentials_store="file"' \
-  -c 'forced_login_method="chatgpt"' login
-```
+启动预检只读取配置模型目录，确认生成、短会话和网页研究能力；不会执行模型。`make smoke-codex` 保留原发布命令名，当前只用假 HTTP transport 检查共享客户端，既不启动 SDK 也不访问真实账号。真实搜索、来源打开和完整采编仍需另行授权验收。
 
-终端会打开官方登录流程。在无浏览器服务器上，最后一个命令可用 `login --device-auth`，并按提示在自己的浏览器输入一次性代码；账号或工作区可能需要先启用 device code login。服务器需使用自己的服务目录和身份，不复制本机日常使用的登录状态到多个并发主机。检查登录可在同一命令最后使用 `login status`。
-
-上述环境覆盖只作用于该子进程，不修改个人全局 Codex home。不要把 `config.toml`、hooks、plugins、自定义 skills 或个人 `AGENTS.md` 放进专用登录目录；现有总编适配器会拒绝它们。runtime 自己创建的 `skills/.system` 不要删除：升级时由 SDK 刷新其内置缓存。启动前仍拒绝符号链接、非 system 根和过大的缓存树；启动后核对物理缓存名称，并在同一 SDK 连接确认预期的五个 system 技能路径全部 disabled。旧版多出的 `plugin-creator` 缓存由新 SDK 自行移除；异常即在模型调用前失败。用户或系统的 `.agents/skills`、`/etc/codex/skills` 也不应进入此专用服务环境。默认模型为 `gpt-6.1-sol`，必须通过真实账号确认可用性；不会悄悄切成 API 付费或假稿。
-
-SDK 会把 `config.env` 合并到父进程环境。服务先清空密钥，再通过隔离 Python 启动器以精确白名单 `execve` 配套 runtime，避免空的桌面 override 被 runtime 当成有效配置。`make smoke-codex` 不使用账号或模型，在临时目录验证被污染的启动环境及连续两次启动，可发现单纯模拟 SDK 无法覆盖的握手/缓存兼容问题。
-
-SDK 与配套 CLI 均固定为 0.163.0，继续使用 `features.code_mode_host` 提供 hosted web tools，不启用 shell、插件或自定义技能。2026-09-05 的真实对照曾恢复 `search` / `openPage` 事件；升级 runtime 后仍需核查实际工具事件，登录或启动 smoke 成功不能代替搜索验收。补查引用必须对应观测到的打开 URL（仅忽略 fragment）；模型不能自行换成 canonical 链接或去掉参数，需要先打开新 URL。结构化输出的栏目、图表和来源类型与业务校验共享枚举。
-
-ChatGPT 登录使用订阅访问，但仍受额度、模型和工作区权限限制；并非无限免费。官方总体推荐 API key 用于自动化，而私有自动化登录需要维护可刷新的登录缓存。见 [OpenAI 登录文档](https://learn.chatgpt.com/docs/auth)、[私有自动化登录说明](https://learn.chatgpt.com/docs/auth/ci-cd-auth)。
+一次采编使用一个总期限固定的短会话，并在原期限内最多补查一轮。来源必须对应 Router 实际观测的打开 URL（校验仅忽略 fragment）；模型文字不能替代网页观察。退出时等待远端关闭确认；关闭失败会保留排空活动，重启后先核对远端清理，不能据本地进程退出推断模型已结束。
 
 ## Notion：专用测试数据库
 
@@ -79,7 +63,7 @@ ChatGPT 登录使用订阅访问，但仍受额度、模型和工作区权限限
 ## 分阶段验收
 
 1. **离线与 HTTP**：`make check`、公共 proto 生成一致性、`make build` 与 `make smoke`；覆盖类型、依赖锁、鉴权、恶意材料、坏 JSON、超时、去重、重启恢复和冻结 hash。不调用生产失败场景来制造错误。
-2. **真实连接预检**：启动检查专用 Codex 账号/模型目录、Notion 数据源 schema 和 Todofy public health；不调用模型或发送邮件。账号、schema及本地运行依赖错误拒绝启动；新选题DAG允许临时Notion/Todofy供应商故障以degraded状态启动，实际内容和投影仍须单独验收。公开 health 不证明 Todofy Basic Auth 有效，Notion 可读不证明可写，模型目录不证明搜索工具可用；后续真实请求另验。只输出通过/失败，不回显敏感响应。
+2. **真实连接预检**：启动读取 Router 的配置模型目录、Notion 数据源 schema 和 Todofy public health；不调用模型或发送邮件。账号、schema及本地运行依赖错误拒绝启动；新选题DAG允许临时Notion/Todofy供应商故障以degraded状态启动，实际内容和投影仍须单独验收。公开 health 不证明 Todofy Basic Auth 有效，Notion 可读不证明可写，模型目录不证明搜索工具可用；后续真实请求另验。只输出通过/失败，不回显敏感响应。
 3. **少量真实采编**：只发一次 `POST /v1/runs`，服务自行扫描指令目录并冻结快照，真实搜索/打开原文；再把同一幂等键重发，验证没有多次采集。观察各方向的完成/缺口、Notion 投影、总编补查和自足中文成稿；人工逐值核验图表及引用。AI/ML 与其他学科分别检查，Todofy 独立在文末，失败不拖垮公共稿件。不能由测试脚本手工投稿来替代此验收。
 4. **Notion 与服务韧性**：在专用数据库创建有限条材料、核对投影；本地验证重启后仍能取冻结预览、重复请求不多投影或重取 Todofy。Notion 结果不明时先核对，不自动重试；测试记录不自行删除。
 5. **邮件预览**：HTML、纯文本、CID 图像、长标题/长理由、无图、无 head 样式、桌面/手机；内容与最终批准 hash 一致。

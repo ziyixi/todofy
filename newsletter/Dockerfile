@@ -9,13 +9,17 @@ ENV UV_PYTHON_DOWNLOADS=never UV_LINK_MODE=copy UV_COMPILE_BYTECODE=1 \
     UV_PROJECT_ENVIRONMENT=/opt/newsletter/.venv
 WORKDIR /opt/workspace
 COPY pyproject.toml uv.lock .python-version ./
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY newsletter/pyproject.toml ./newsletter/pyproject.toml
 COPY codex-gateway/pyproject.toml ./codex-gateway/pyproject.toml
 COPY platform/pyproject.toml ./platform/pyproject.toml
 COPY todofy/pyproject.toml ./todofy/pyproject.toml
 COPY proto/python/pyproject.toml ./proto/python/pyproject.toml
+COPY packages/model-router-client/python/pyproject.toml ./packages/model-router-client/python/pyproject.toml
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --package personal-newsletter --no-dev --extra codex --no-install-workspace
+COPY proto ./proto
+COPY packages/model-router-client/python/src ./packages/model-router-client/python/src
 COPY newsletter/MANIFEST.in ./newsletter/MANIFEST.in
 COPY newsletter/src ./newsletter/src
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -32,8 +36,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 WORKDIR /opt/newsletter
 RUN python -c 'import json, os; from pathlib import Path; Path("build-info.json").write_text(json.dumps({"source_sha": os.environ.get("BUILD_SHA", "")}))'
 COPY --from=builder /opt/newsletter/.venv /opt/newsletter/.venv
-RUN mkdir -p /var/lib/newsletter /var/lib/newsletter-auth \
-    && chown newsletter:newsletter /var/lib/newsletter /var/lib/newsletter-auth
+RUN mkdir -p /var/lib/newsletter \
+    && chown newsletter:newsletter /var/lib/newsletter
 USER newsletter
 ENV PATH="/opt/newsletter/.venv/bin:$PATH" \
     NEWSLETTER_DATA_DIR=/var/lib/newsletter \

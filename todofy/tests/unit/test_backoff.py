@@ -81,5 +81,5 @@ def test_retry_after_seconds_and_http_dates(header, seconds):
 
 
 def test_budgets_are_the_v2_values():
-    assert (backoff.GEMINI_MODEL_TIMEOUT, backoff.GEMINI_STEP_BUDGET) == (60, 90)
+    assert (backoff.GEMINI_MODEL_TIMEOUT, backoff.GEMINI_STEP_BUDGET) == (60, 180)
     assert backoff.SUMMARY_RETRY_WINDOW == 7 * DAY

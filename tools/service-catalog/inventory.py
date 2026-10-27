@@ -10,6 +10,7 @@ from catalog import REPO, load_catalog, read_toml, require
 from cloud_profile import load_resources
 
 DO_KEYS = {
+    "RouterEngine": "model-router-engine",
     "FleetState": "fleet-state", "HomeState": "home-state",
     "MailCoordinator": "mail-coordinator", "TodofyCore": "todofy-core-do", "WatchState": "watch-state",
     "MailsortState": "mailsort-state", "RecallState": "recall-state", "BriefState": "brief-state",
@@ -18,7 +19,7 @@ DO_KEYS = {
 # Workers awaiting namespace capture. Their Worker and buckets stay registered but may be absent;
 # namespaces are ignored until their first deployment assigns IDs. Record those IDs in config/resources.toml
 # and clear the corresponding names here. CHECK_ONLY controls release readiness independently.
-FIRST_DEPLOY_PENDING: set[str] = set()
+FIRST_DEPLOY_PENDING: set[str] = {"model-router"}
 OUTPUT = "dashboard/worker/src/account-inventory.json"
 BUCKET_NAME = re.compile(r"[a-z0-9][a-z0-9-]{1,61}[a-z0-9]")
 PAGE_LIMIT = 100

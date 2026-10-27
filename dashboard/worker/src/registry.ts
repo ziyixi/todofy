@@ -281,6 +281,20 @@ const ENTRIES: readonly EntryDef[] = [
     app_only_signals: ['host_never_seen', 'host_stale', 'host_missing', 'codex_gateway_unavailable', 'deployment_pending'],
     order: 5,
   },
+  {
+    id: 'model-router',
+    name: 'Model Router',
+    description: '各应用的模型调用、请求记录与推理试运行',
+    group: 'apps',
+    icon: 'gauge',
+    accent: 'green',
+    url: 'https://models.ziyixi.science/',
+    access: true,
+    status: { type: 'ops_v1', binding: 'MODEL_ROUTER', guard: false },
+    tile_metric: null,
+    app_only_signals: [],
+    order: 31,
+  },
   // END service-catalog entries
   {
     // Not a monorepo app: the self-hosted VPS and home server keep their backups in the account's R2
@@ -317,10 +331,14 @@ const WORKERS: readonly WorkerDef[] = [
   { script: 'brief', entry: 'brief', role: '每日简报、深读与归档' },
   { script: 'tasks', entry: 'tasks', role: '任务存储与桌面规划' },
   { script: 'personal-mcp', entry: 'personal-mcp', role: '私有工具与事件订阅' },
+  { script: 'model-router', entry: 'model-router', role: '统一模型推理与私有控制台' },
   // END service-catalog workers
 ];
 
 const RESOURCES: readonly ResourceDef[] = [
+  { id: 'model-router-db', kind: 'd1', name: 'Model Router 请求元数据', entry: 'model-router', match: RESOURCE_IDENTITIES['model-router-db'] ?? null },
+  { id: 'model-router-engine', kind: 'do', name: 'RouterEngine', entry: 'model-router', script: 'model-router', match: RESOURCE_IDENTITIES['model-router-engine'] ?? null, todo: '首次发布后记录 DO namespace 到 config/resources.toml' },
+  { id: 'model-router-request-bodies', kind: 'r2', name: 'Model Router 七天请求内容', entry: 'model-router', match: 'model-router-request-bodies' },
   { id: 'infra-state', kind: 'r2', name: '基础设施状态存储', entry: 'home', match: 'infra-state' },
   { id: 'fleet-state', kind: 'do', name: 'FleetState', entry: 'fleet', script: 'fleet', match: RESOURCE_IDENTITIES['fleet-state'] ?? null, todo: '首次 Fleet 发布后，记录 DO namespace 到 config/resources.toml' },
   { id: 'mailsort-state', kind: 'do', name: 'MailsortState', entry: 'mailsort', script: 'mailsort', match: RESOURCE_IDENTITIES['mailsort-state'] ?? null, todo: '首次 mailsort 发布后，记录 DO namespace 到 config/resources.toml' },

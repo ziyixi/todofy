@@ -14,8 +14,7 @@ from typing import Any
 import pytest
 from ziyixi_proto.wire_json import WireJsonError
 
-from tests.fakes.gemini_fake import API_KEY as GEMINI_KEY
-from tests.fakes.gemini_fake import GeminiFake
+from tests.fakes.model_router_fake import ModelRouterFake
 from tests.runtime.harness import Worker
 from tests.runtime.reports_probe import start_probe
 from todofy.core import owner_ui
@@ -35,7 +34,7 @@ def digest(user: str, password: str) -> str:
 
 
 class Probe:
-    def __init__(self, worker: Worker, gemini: GeminiFake) -> None:
+    def __init__(self, worker: Worker, gemini: ModelRouterFake) -> None:
         self.worker = worker
         self.gemini = gemini
 
@@ -53,12 +52,11 @@ class Probe:
 
 @pytest.fixture(scope="module", name="probe")
 def probe_fixture(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Probe]:
-    gemini = GeminiFake()
+    gemini = ModelRouterFake()
     variables = {
-        "GEMINI_API_BASE": gemini.url,
-        "GEMINI_API_KEY": GEMINI_KEY,
+        "MODEL_ROUTER_FAKE_ORIGIN": gemini.url,
         "GEMINI_MODELS": MODEL,
-        "GEMINI_TIMEOUT_MS": "5000",
+        "MODEL_TIMEOUT_MS": "5000",
         "REPORT_BASIC_AUTH_SHA256": f"{digest(*NEWSLETTER)},{digest(*ROTATED)}",
         "TODOFY_PUBLIC_HOST": PUBLIC_HOST,
     }

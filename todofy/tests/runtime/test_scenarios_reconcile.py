@@ -9,7 +9,7 @@ import uuid
 
 import pytest
 
-from tests.fakes.gemini_fake import GeminiFake, error_reply
+from tests.fakes.model_router_fake import ModelRouterFake, error_reply
 from tests.runtime.conftest import Launch
 from tests.runtime.harness import Worker, mail_event, reason, sha256_hex, transitions
 from tests.runtime.owner_support import event_row, seed
@@ -82,7 +82,7 @@ def test_the_task_actions_are_not_offered(worker: Worker) -> None:
     assert worker.event(event_id)["state"] == "failed_summary"
 
 
-def test_retry_summary_after_the_worker_gave_up(worker: Worker, fresh_gemini: GeminiFake) -> None:
+def test_retry_summary_after_the_worker_gave_up(worker: Worker, fresh_gemini: ModelRouterFake) -> None:
     for _ in range(SUMMARY_GIVE_UP_ATTEMPTS + 1):
         fresh_gemini.queue_generate(error_reply(400), model="model-a")
     event_id = _arrive(worker)

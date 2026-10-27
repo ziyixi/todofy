@@ -57,6 +57,8 @@ import "google/api/client.proto";
 import "google/api/field_behavior.proto";
 import "google/api/field_info.proto";
 import "google/api/resource.proto";
+import "google/protobuf/field_mask.proto";
+import "modelrouter/inference/v1/inference.proto";
 import "todofy/report/v1/report.proto";
 import "todofy/ui/v1/history.proto";
 import "todofy/ui/v1/mail_event.proto";
@@ -153,6 +155,85 @@ service TodofyUiService {
     option (google.api.http) = {get: "/api/v1/{name=integration}"};
     option (google.api.method_signature) = "name";
   }
+
+  // Current model choices; changing them affects future calls only.
+  // (-- api-linter: core::0131::response-message-name=disabled
+  //     aip.dev/not-precedent: The existing singleton read returns both saved selection and the shared catalog, without a name argument. --)
+  // (-- api-linter: core::0131::http-uri-name=disabled
+  //     aip.dev/not-precedent: The existing singleton read returns both saved selection and the shared catalog, without a name argument. --)
+  // (-- api-linter: core::0131::method-signature=disabled
+  //     aip.dev/not-precedent: The existing singleton read returns both saved selection and the shared catalog, without a name argument. --)
+  rpc GetModelSettings(GetModelSettingsRequest) returns (GetModelSettingsResponse) {
+    option (google.api.http) = {get: "/api/v1/modelSettings"};
+    option (google.api.method_signature) = "";
+  }
+
+  // Saves the owner's future mail/report model choices.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  // (-- api-linter: core::0134::http-body=disabled
+  //     aip.dev/not-precedent: The existing settings field and fixed singleton path are preserved for current UI callers. --)
+  // (-- api-linter: core::0134::http-uri-name=disabled
+  //     aip.dev/not-precedent: The existing settings field and fixed singleton path are preserved for current UI callers. --)
+  // (-- api-linter: core::0134::method-signature=disabled
+  //     aip.dev/not-precedent: The existing settings field and fixed singleton path are preserved for current UI callers. --)
+  rpc UpdateModelSettings(UpdateModelSettingsRequest) returns (ModelSettings) {
+    option (google.api.http) = {
+      patch: "/api/v1/{settings.name=modelSettings}"
+      body: "settings"
+    };
+    option (google.api.method_signature) = "settings,update_mask";
+  }
+}
+
+// Model Router routes selected for new computations.
+message ModelSettings {
+  option (google.api.resource) = {
+    type: "todofy.ziyixi.science/ModelSettings"
+    pattern: "modelSettings"
+    singular: "modelSettings"
+    plural: "modelSettings"
+  };
+
+  // Single modelSettings resource.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // Route for individual mail and synthetic canaries.
+  string email_model = 2 [(google.api.field_behavior) = REQUIRED];
+  // Route for daily reports and recommendations.
+  string report_model = 3 [(google.api.field_behavior) = REQUIRED];
+  // Revision checked on update.
+  string etag = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+// Reads model selection and the caller's configured catalog.
+// (-- api-linter: core::0131::request-name-required=disabled
+//     aip.dev/not-precedent: The UI reads the one modelSettings singleton through its established fixed path, without arguments. --)
+message GetModelSettingsRequest {}
+// Selection and supported common model capabilities.
+message GetModelSettingsResponse {
+  // Current selection.
+  ModelSettings settings = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Router capabilities available to this application.
+  // (-- api-linter: core::0215::foreign-type-reference=disabled
+  //     aip.dev/not-precedent: The model catalog is the shared Router contract, read unchanged by every application. --)
+  repeated modelrouter.inference.v1.Model models = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+// A bounded, idempotent owner settings change.
+message UpdateModelSettingsRequest {
+  // New selection and current revision.
+  // (-- api-linter: core::0134::request-resource-field=disabled
+  //     aip.dev/not-precedent: The established UI request names its singleton resource settings; renaming the field would change its wire. --)
+  // (-- api-linter: core::0134::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: The established UI request names its singleton resource settings; renaming the field would change its wire. --)
+  ModelSettings settings = 1 [(google.api.field_behavior) = REQUIRED];
+  // Fields to update.
+  google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
+  // UUID deduplicating this owner action.
+  string request_id = 3 [
+    (google.api.field_behavior) = OPTIONAL,
+    (google.api.field_info).format = UUID4
+  ];
+  // Current revision, kept outside the masked resource fields.
+  string etag = 4 [(google.api.field_behavior) = REQUIRED];
 }
 
 // Input of GetServiceStatus.

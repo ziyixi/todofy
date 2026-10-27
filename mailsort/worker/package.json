@@ -23,6 +23,7 @@
     "test:smoke": "node test/smoke/smoke.mts"
   },
   "dependencies": {
+    "@ziyixi/model-router-client": "workspace:*",
     "@ziyixi/edge-auth": "workspace:*",
     "@ziyixi/proto": "workspace:*"
   },

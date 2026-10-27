@@ -14,6 +14,8 @@ import json
 from typing import TYPE_CHECKING
 import uuid
 
+import model_router_client as models
+
 if TYPE_CHECKING:
     import newsletter.store as storage
 
@@ -35,6 +37,34 @@ def mark_uncertain() -> None:
         )
 
 
+def register_model_context(name: str) -> str:
+    """Persist the chosen remote identity before sending context creation."""
+    current = _CURRENT.get()
+    close_request_id = str(uuid.uuid4())
+    if current is not None:
+        gate, lease = current
+        with gate.store.transaction():
+            gate.store.db.execute(
+                "INSERT INTO deployment_model_contexts "
+                "VALUES (?, ?, ?, 'open')",
+                (name, lease, close_request_id),
+            )
+    return close_request_id
+
+
+def confirm_model_context_closed(name: str) -> None:
+    """Record only a real closed/expired acknowledgement from the router."""
+    current = _CURRENT.get()
+    if current is not None:
+        gate, _ = current
+        with gate.store.transaction():
+            gate.store.db.execute(
+                "UPDATE deployment_model_contexts SET state='closed' "
+                "WHERE name=?",
+                (name,),
+            )
+
+
 class DrainError(Exception):
     """A safe machine-readable deployment conflict."""
 
@@ -54,6 +84,9 @@ class DeploymentDrain:
             "receipt TEXT);"
             "CREATE TABLE IF NOT EXISTS deployment_activities ("
             "id TEXT PRIMARY KEY, kind TEXT NOT NULL, state TEXT NOT NULL);"
+            "CREATE TABLE IF NOT EXISTS deployment_model_contexts ("
+            "name TEXT PRIMARY KEY, activity_id TEXT NOT NULL, "
+            "close_request_id TEXT NOT NULL, state TEXT NOT NULL);"
             "CREATE TABLE IF NOT EXISTS deployment_gate ("
             "singleton INTEGER PRIMARY KEY CHECK(singleton=1), "
             "request_key TEXT REFERENCES deployment_drains(request_key));"
@@ -65,8 +98,34 @@ class DeploymentDrain:
         with self.store.transaction():
             self.store.db.execute(
                 "UPDATE deployment_activities SET state='interrupted' "
-                "WHERE state IN ('active','uncertain')"
+                "WHERE state IN ('active','uncertain') AND NOT EXISTS ("
+                "SELECT 1 FROM deployment_model_contexts c WHERE "
+                "c.activity_id=deployment_activities.id AND c.state='open')"
             )
+
+    async def recover_model_contexts(self, client: models.ModelClient) -> None:
+        """Confirm remote cleanup under exclusive ownership, without replay."""
+        rows = self.store.db.execute(
+            "SELECT name, close_request_id FROM deployment_model_contexts "
+            "WHERE state='open'"
+        ).fetchall()
+        for name, request_id in rows:
+            receipt = await client.close_conversation(
+                models.CloseConversationRequest(
+                    name=name, request_id=request_id
+                )
+            )
+            if receipt.name != name or receipt.state not in {
+                "closed",
+                "expired",
+            }:
+                raise DrainError("model_cleanup_unconfirmed")
+            with self.store.transaction():
+                self.store.db.execute(
+                    "UPDATE deployment_model_contexts SET state='closed' "
+                    "WHERE name=?",
+                    (name,),
+                )
 
     @contextlib.contextmanager
     def activity(self, kind: str, *, required: bool = True) -> Iterator[bool]:

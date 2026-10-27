@@ -19,7 +19,7 @@ const NOW = Date.parse('2026-10-06T14:00:00.000Z');
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const GRANT = { GMAIL_CLIENT_ID: 'synthetic.apps.googleusercontent.com', GMAIL_CLIENT_SECRET: 'synthetic', GMAIL_REFRESH_TOKEN: 'synthetic' };
-const env = { PUBLIC_HOST: 'sort.example.com', MODE: 'live', ANTHROPIC_API_KEY: 'synthetic-claude-key', ...GRANT };
+const env = { PUBLIC_HOST: 'sort.example.com', MODE: 'live', MODEL_ROUTER: { fetch: () => Promise.resolve(new Response()) }, ...GRANT };
 
 test('Ops reports only the selected provider failure and keeps Claude accounting historical under Codex', () => {
   const target = store();
@@ -29,7 +29,7 @@ test('Ops reports only the selected provider failure and keeps Claude accounting
   target.setMeta('claude_error', 'claude_spend_limit');
   target.setMeta('claude_limited_month', '2026-10');
   target.addClaudeUsage('2026-10-06', { inputTokens: 0, outputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0, thinkingTokens: 0, costMicros: 20_000_000 });
-  const configured = { ...env, CODEX_ENDPOINT_URL: 'https://codex.example.com/api/codex/v1/inference:run', CODEX_ENDPOINT_TOKEN: 'synthetic-inference-token' };
+  const configured = env;
   expect(sortStatus(target, configured, NOW).signals).toEqual([]);
   expect(sortStatus(target, configured, NOW).counters.claude_spent_usd).toBe(20);
   target.setMeta('codex_error', 'codex_auth');

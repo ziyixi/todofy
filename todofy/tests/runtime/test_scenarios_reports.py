@@ -6,7 +6,7 @@ import pytest
 from ziyixi_proto.todofy.ui.v1 import reports_pb
 from ziyixi_proto.todofy.ui.v1 import todofy_ui_service_pb as pb
 
-from tests.fakes.gemini_fake import GeminiFake, text_reply
+from tests.fakes.model_router_fake import ModelRouterFake, text_reply
 from tests.runtime.conftest import Launch
 from tests.runtime.harness import Worker, error_code, mail_event, wait_until
 from tests.runtime.owner_support import assert_contract, assert_message
@@ -34,7 +34,7 @@ def _complete_one(worker: Worker) -> str:
     return event_id
 
 
-def test_precompute_stores_todays_empty_reports_without_calling_gemini(worker: Worker, gemini: GeminiFake) -> None:
+def test_precompute_stores_todays_empty_reports_without_calling_gemini(worker: Worker, gemini: ModelRouterFake) -> None:
     assert worker.trigger_cron().status_code == 200
 
     def stored() -> dict | None:
@@ -54,18 +54,20 @@ def test_precompute_stores_todays_empty_reports_without_calling_gemini(worker: W
     assert_message(worker.owner.get("/api/v1/latestReports"), reports_pb.LatestReports)
 
 
-def test_owner_recompute_summarises_the_window_with_the_range_prompt(worker: Worker, fresh_gemini: GeminiFake) -> None:
+def test_owner_recompute_summarises_the_window_with_the_range_prompt(
+    worker: Worker, fresh_gemini: ModelRouterFake
+) -> None:
     _complete_one(worker)
 
     report = _recompute(worker, "summary")
 
-    assert (report["status"], report["model"], report["task_count"] >= 1) == ("ok", "model-a", True)
+    assert (report["status"], report["model"], report["task_count"] >= 1) == ("ok", "gemini-probe", True)
     [call] = [c for c in fresh_gemini.calls() if c.system == SUMMARY_RANGE]
     assert call.response_schema is None
     assert assert_contract(worker.report("/api/summary"), "/api/summary") == report
 
 
-def test_recommendation_asks_for_json_and_never_pads(worker: Worker, fresh_gemini: GeminiFake) -> None:
+def test_recommendation_asks_for_json_and_never_pads(worker: Worker, fresh_gemini: ModelRouterFake) -> None:
     report = _recompute(worker, "recommendation", top_n=10)
 
     [call] = [c for c in fresh_gemini.calls() if c.response_schema is not None]
@@ -73,7 +75,7 @@ def test_recommendation_asks_for_json_and_never_pads(worker: Worker, fresh_gemin
     assert (report["status"], report["top_n"], [t["rank"] for t in report["tasks"]]) == ("ok", 10, [1, 2, 3])
 
 
-def test_unusable_model_output_is_reported_not_passed_through(worker: Worker, fresh_gemini: GeminiFake) -> None:
+def test_unusable_model_output_is_reported_not_passed_through(worker: Worker, fresh_gemini: ModelRouterFake) -> None:
     fresh_gemini.queue_generate(text_reply("Here are your tasks: 1. do it"))
 
     report = _recompute(worker, "recommendation", top_n=2)
@@ -81,7 +83,7 @@ def test_unusable_model_output_is_reported_not_passed_through(worker: Worker, fr
     assert (report["status"], report["tasks"], report["top_n"]) == ("model_output_invalid", [], 2)
 
 
-def test_a_top_nobody_precomputed_is_computed_on_demand(worker: Worker, fresh_gemini: GeminiFake) -> None:
+def test_a_top_nobody_precomputed_is_computed_on_demand(worker: Worker, fresh_gemini: ModelRouterFake) -> None:
     report = assert_contract(worker.report("/api/recommendation", {"top": "4"}), "/api/recommendation")
 
     assert (report["status"], report["top_n"]) == ("ok", 4)

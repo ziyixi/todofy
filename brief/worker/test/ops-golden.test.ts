@@ -32,7 +32,7 @@ const env: Env = {
   PUBLIC_HOST: 'brief.example.org',
   MODE: 'live',
   BUILD_SHA: 'b'.repeat(40),
-  ANTHROPIC_API_KEY: 'sk-ant-synthetic',
+  MODEL_ROUTER: { fetch: () => Promise.resolve(new Response()) },
   RESEND_API_KEY: 're_synthetic',
   MAIL_FROM: 'Brief <brief@example.org>',
   MAIL_TO: 'reader@example.org',

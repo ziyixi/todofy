@@ -15,7 +15,7 @@ import newsletter.settings as settings
 async def test_schema_smoke_checks_all_cases_without_creating_publication(
     tmp_path,
 ):
-    editor = newsletter_editor.CodexEditor(tmp_path)
+    editor = newsletter_editor.ModelEditor(tmp_path)
     cases = schema_smoke.smoke_cases()
     editor.execute = mock.AsyncMock(
         side_effect=[(json.dumps(c[2]), set(), False) for c in cases]
@@ -35,7 +35,7 @@ async def test_schema_smoke_checks_all_cases_without_creating_publication(
     [("{}", set(), False), ("invalid", set(), False), ("{}", set(), True)],
 )
 async def test_schema_smoke_fails_on_first_bad_response(tmp_path, reply):
-    editor = newsletter_editor.CodexEditor(tmp_path)
+    editor = newsletter_editor.ModelEditor(tmp_path)
     editor.execute = mock.AsyncMock(return_value=reply)
     with pytest.raises(errors.EditorError, match="invalid or unverifiable"):
         await schema_smoke.check_schemas(editor)

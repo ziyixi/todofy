@@ -2,6 +2,7 @@
  * Bindings, vars and secrets of the Worker "mailsort" (../../wrangler.toml, ../../docs/design.md §10).
  */
 import type { MailsortState } from './state.ts';
+import type { ModelBinding } from '@ziyixi/model-router-client';
 
 /** The name of the single MailsortState instance. */
 export const MAILSORT_OBJECT = 'mailsort-v1';
@@ -39,14 +40,8 @@ export interface Env {
 
   // secrets the owner puts with `wrangler secret put` from their own machine (deploy/mint-token.mjs); never in GitHub,
   // never sent or removed by a deploy (--secrets-file keeps the secrets it does not name).
-  /** Owner-written native Anthropic API key, isolated to the Mailsort workspace. */
-  readonly ANTHROPIC_API_KEY?: string;
-  /** Private Codex gateway URL and its inference-only bearer, never exposed by the owner API. */
-  readonly CODEX_ENDPOINT_URL?: string;
-  readonly CODEX_ENDPOINT_TOKEN?: string;
-  /** Machine access to the exact private gateway path, separate from its inference bearer. */
-  readonly CODEX_ACCESS_CLIENT_ID?: string;
-  readonly CODEX_ACCESS_CLIENT_SECRET?: string;
+  /** Private Model Router binding; provider credentials belong to that service. */
+  readonly MODEL_ROUTER?: ModelBinding;
   readonly GMAIL_CLIENT_ID?: string;
   readonly GMAIL_CLIENT_SECRET?: string;
   readonly GMAIL_REFRESH_TOKEN?: string;
@@ -97,6 +92,14 @@ export function devUpstream(env: Pick<Env, 'DEV_FAKE_UPSTREAM' | 'DEV_AUTH_BYPAS
   } catch {
     return null;
   }
+}
+
+/** Local smoke tests expose the same common Router API on the existing loopback fake. */
+export function modelRouterBinding(env: Pick<Env, 'MODEL_ROUTER' | 'DEV_FAKE_UPSTREAM' | 'DEV_AUTH_BYPASS'>): ModelBinding | undefined {
+  if (env.MODEL_ROUTER) return env.MODEL_ROUTER;
+  const origin = devUpstream(env);
+  if (origin === null) return undefined;
+  return { fetch: request => fetch(new Request(`${origin}${new URL(request.url).pathname}`, request)) };
 }
 
 /** The header that carries a redirected request's original URL to the local fake. */

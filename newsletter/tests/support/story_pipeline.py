@@ -18,6 +18,7 @@ import newsletter.collection.instructions as newsletter_collection_instructions
 import newsletter.collection.repository as repository
 import newsletter.contracts as contracts
 import newsletter.editor as editor
+import newsletter.model_client as model_client
 import newsletter.settings as settings
 import newsletter.store as newsletter_store
 import newsletter.types as types
@@ -95,7 +96,7 @@ def rig_factory(
             "A publication checkpoint must never run another model or collector"
         )
 
-    monkeypatch.setattr(editor.CodexEditor, "execute", forbidden)
+    monkeypatch.setattr(editor.ModelEditor, "execute", forbidden)
     monkeypatch.setattr(collector.MockCollector, "collect", forbidden)
 
     def make(*, expired: bool = False, legacy: bool = False) -> PublicationRig:
@@ -109,7 +110,9 @@ def rig_factory(
         pipeline = newsletter_workflow_pipeline.DagPipeline(
             runs,
             directory / "collection",
-            editor=editor.CodexEditor(directory / "nonexistent-auth"),
+            editor=editor.ModelEditor(
+                model_client.configured_client(settings.Settings())
+            ),
         )
         instructions, snapshot = newsletter_workflow_pipeline.freeze_workflow(
             settings.Settings(data_dir=directory, workflow_file=recipe),

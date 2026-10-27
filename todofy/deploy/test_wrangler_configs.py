@@ -21,14 +21,10 @@ CORE = _load("core")
 GATEWAY = _load("gateway")
 DOMAIN = re.compile(r"(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}")
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
-FIXED_UPSTREAMS = {"GEMINI_API_BASE": "https://generativelanguage.googleapis.com"}
 # The vars each Worker has in production: committed ones plus the deploy's --var.
 CORE_VARS = {
-    "GEMINI_API_BASE",
     "TODOFY_PUBLIC_HOST",
     "MAIL_SOURCE_ID",
-    "GEMINI_MODELS",
-    "GEMINI_EMAIL_MODELS",
     "GEMINI_DAILY_TOKEN_BUDGET",
     "REPORT_DEFAULT_TOP",
     "REPORT_PRECOMPUTE_UTC",
@@ -115,14 +111,12 @@ def test_core_shape() -> None:
 
 def test_core_vars() -> None:
     variables = CORE["vars"]
-    # Fixed upstreams: a setting can never send the API keys elsewhere.
-    assert {name: variables[name] for name in FIXED_UPSTREAMS} == FIXED_UPSTREAMS
+    assert CORE["services"] == [
+        {"binding": "MODEL_ROUTER", "service": "model-router", "entrypoint": "Inference", "props": {"app": "todofy"}}
+    ]
+    assert "GEMINI_API_BASE" not in variables
     assert DOMAIN.fullmatch(variables["TODOFY_PUBLIC_HOST"])
     assert re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", variables["MAIL_SOURCE_ID"])
-    for name in ("GEMINI_MODELS", "GEMINI_EMAIL_MODELS"):
-        models = variables[name].split(",")
-        assert 1 <= len(models) <= 5 and len(set(models)) == len(models)
-        assert all(re.fullmatch(r"[a-z0-9][a-z0-9.-]{0,63}", model) for model in models)
     assert _integer(variables["GEMINI_DAILY_TOKEN_BUDGET"], 1, 1_000_000_000)
     assert _integer(variables["REPORT_DEFAULT_TOP"], 1, MAX_TOP_N)
     assert re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", variables["REPORT_PRECOMPUTE_UTC"])

@@ -3,14 +3,14 @@
 import asyncio
 import dataclasses
 import importlib.metadata as metadata
-import pathlib
 import types
 
 import httpx
+import model_router_client as models
 import pytest
 
-import newsletter.codex_runtime as codex_runtime
 import newsletter.errors as errors
+import newsletter.model_client as model_client
 import newsletter.notion_api as notion_api
 import newsletter.preflight as preflight
 import newsletter.schema_compat as schema_compat
@@ -33,102 +33,44 @@ def live(settings, tmp_path):
     home = tmp_path / "isolated-auth"
     home.mkdir()
     return dataclasses.replace(
-        settings, mode="live", editor_backend="codex", codex_home=home
+        settings,
+        mode="live",
+        editor_backend="codex",
+        model_router_url="https://models.example.test",
+        model_router_token="synthetic-token",
     )
 
 
 @pytest.fixture
-def sdk(monkeypatch, live):
-    actual = pytest.importorskip("openai_codex")
+def router(monkeypatch, live):
     state = types.SimpleNamespace(
-        closed=False,
-        requests=[],
-        account_type="chatgpt",
-        model=live.model,
-        skills_enabled=False,
-        fail=False,
-        hang=False,
-        config=None,
+        requests=[], model=live.model, fail=False, hang=False
     )
 
     class Client:
-        def __init__(self, config):
-            state.config = config
-            self._client = self
-
-        async def __aenter__(self):
+        async def list_models(self):
+            state.requests.append("models/list")
             if state.fail:
-                raise RuntimeError("upstream-response-secret")
+                raise models.ModelRouterError("UNAVAILABLE")
             if state.hang:
                 await asyncio.Event().wait()
-            return self
-
-        async def account(self, *, refresh_token=False):
-            assert refresh_token is True
-            state.requests.append("account/read")
-            return types.SimpleNamespace(
-                account=types.SimpleNamespace(
-                    root=types.SimpleNamespace(type=state.account_type)
+            return models.ListModelsResponse(
+                models=(
+                    models.Model(
+                        name=state.model,
+                        configured=True,
+                        generation=True,
+                        conversations=True,
+                        web_research=True,
+                    ),
                 )
             )
 
-        async def request(self, method, params, *, response_model):
-            state.requests.append(method)
-            if method == "skills/list":
-                return response_model.model_validate(
-                    {
-                        "data": [
-                            {
-                                "cwd": state.config.cwd,
-                                "errors": [],
-                                "skills": [
-                                    {
-                                        "path": path,
-                                        "name": pathlib.Path(path).parent.name,
-                                        "scope": "system",
-                                        "enabled": state.skills_enabled,
-                                        "description": "fixture",
-                                    }
-                                    for path in sorted(
-                                        codex_runtime.skill_paths(
-                                            live.codex_home
-                                        )
-                                    )
-                                ],
-                            }
-                        ]
-                    }
-                )
-            assert method == "model/list"
-            assert params["includeHidden"] is True
-            if "cursor" not in params:
-                return response_model.model_validate(
-                    {"data": [], "nextCursor": "second-page"}
-                )
-            assert params["cursor"] == "second-page"
-            return types.SimpleNamespace(
-                data=[types.SimpleNamespace(model=state.model)],
-                next_cursor=None,
-            )
-
-        async def close(self):
-            state.closed = True
-
-    module = types.ModuleType("offline-sdk-fixture")
-    module.AsyncCodex = Client
-    module.CodexConfig = actual.CodexConfig
-
-    async def host_fixture(host, workspace):
-        assert workspace.is_dir()
-        state.requests.append("host/help")
-
-    monkeypatch.setattr(preflight, "_host_executable", host_fixture)
+    client = Client()
     monkeypatch.setattr(
-        preflight,
-        "_runtime_files",
-        lambda: (pathlib.Path("codex"), pathlib.Path("host")),
+        model_client, "configured_client", lambda *args, **kwargs: client
     )
-    return module, state
+    return client, state
 
 
 async def test_mock_checks_real_resources_without_provider_calls(
@@ -139,7 +81,7 @@ async def test_mock_checks_real_resources_without_provider_calls(
         def unexpected(*args, **kwargs):
             raise AssertionError("No provider may be selected in mock mode")
 
-        patch.setattr(codex_runtime, "load_sdk", unexpected)
+        patch.setattr(model_client, "configured_client", unexpected)
         report = await preflight.preflight(settings)
     assert report.checks == (
         "model_output_schema_subset",
@@ -165,7 +107,7 @@ async def test_invalid_writer_schema_stops_before_storage_or_providers(
 
     monkeypatch.setattr(story_editor, "story_writer_schema", broken_writer)
     monkeypatch.setattr(preflight, "_check_storage", unexpected)
-    monkeypatch.setattr(preflight, "_check_codex", unexpected)
+    monkeypatch.setattr(preflight, "_check_model_router", unexpected)
     with pytest.raises(preflight.PreflightError) as error:
         await preflight.preflight(settings)
     assert error.value.code == "MODEL_SCHEMA_CHECK_FAILED"
@@ -187,53 +129,21 @@ async def test_existing_database_is_checked_without_changing_records(settings):
         store.close()
 
 
-async def test_live_checks_managed_auth_disabled_skills_and_paginated_models(
-    live, sdk
-):
-    module, state = sdk
-    report = await preflight.preflight(live, sdk=module)
-    assert state.requests == [
-        "host/help",
-        "skills/list",
-        "account/read",
-        "model/list",
-        "model/list",
-    ]
-    assert state.closed
-    assert "codex_runtime_host_auth_skills_model_catalog" in report.checks
-    assert any("do not execute a model" in item for item in report.limitations)
-    assert list(live.data_dir.iterdir()) == []
+async def test_live_reads_router_capabilities_without_inference(live, router):
+    client, state = router
+    report = await preflight.preflight(live, model_router=client)
+    assert state.requests == ["models/list"]
+    assert "model_router_capabilities" in report.checks
 
 
-@pytest.mark.parametrize(
-    ("field", "value", "code"),
-    [
-        ("account_type", "apiKey", "CODEX_CHATGPT_AUTH_REQUIRED"),
-        ("model", "missing-model", "CODEX_MODEL_UNAVAILABLE"),
-        ("skills_enabled", True, "CODEX_CHECK_FAILED"),
-        ("fail", True, "CODEX_CHECK_FAILED"),
-    ],
-)
-async def test_codex_startup_failures_are_closed_and_secret_free(
-    live, sdk, field, value, code
-):
-    module, state = sdk
-    setattr(state, field, value)
-    with pytest.raises(preflight.PreflightError) as error:
-        await preflight.preflight(live, sdk=module)
-    assert error.value.code == code
-    assert str(error.value) == code
-    assert "secret" not in repr(error.value)
-    assert state.closed
-
-
-async def test_codex_timeout_closes_client(live, sdk, monkeypatch):
-    module, state = sdk
-    state.hang = True
-    monkeypatch.setattr(preflight, "CODEX_TIMEOUT", 0.01)
-    with pytest.raises(preflight.PreflightError, match="CODEX_CHECK_FAILED"):
-        await preflight.preflight(live, sdk=module)
-    assert state.closed
+@pytest.mark.parametrize("failure", ["missing-model", "unavailable"])
+async def test_router_startup_failures_are_safe(live, router, failure):
+    client, state = router
+    state.fail = failure == "unavailable"
+    if failure == "missing-model":
+        state.model = "models/missing"
+    with pytest.raises(preflight.PreflightError):
+        await preflight.preflight(live, model_router=client)
 
 
 async def test_missing_font_is_a_startup_failure(settings, monkeypatch):
@@ -306,8 +216,10 @@ def dual_notion_response(settings, kind):
     }
 
 
-async def test_dual_notion_validates_both_schemas_read_only(dual_notion, sdk):
-    module, _ = sdk
+async def test_dual_notion_validates_both_schemas_read_only(
+    dual_notion, router
+):
+    module, _ = router
     calls = []
 
     def handler(request):
@@ -329,7 +241,9 @@ async def test_dual_notion_validates_both_schemas_read_only(dual_notion, sdk):
         return httpx.Response(200, json=dual_notion_response(dual_notion, kind))
 
     report = await preflight.preflight(
-        dual_notion, sdk=module, http_transport=httpx.MockTransport(handler)
+        dual_notion,
+        model_router=module,
+        http_transport=httpx.MockTransport(handler),
     )
     assert [request.url.path for request in calls] == [
         "/v1/data_sources/" + dual_notion.notion_materials_data_source_id,
@@ -392,9 +306,9 @@ async def test_dual_notion_missing_or_wrong_schema_never_auto_migrates(
 
 @pytest.mark.parametrize("failure", [429, 500, 503, "timeout", "network"])
 async def test_dual_notion_transient_failures_degrade_without_legacy_gates(
-    dual_notion, sdk, monkeypatch, failure, caplog
+    dual_notion, router, monkeypatch, failure, caplog
 ):
-    module, _ = sdk
+    module, _ = router
     monkeypatch.setattr(preflight, "HTTP_TIMEOUT", 0.01)
     calls = []
 
@@ -410,7 +324,9 @@ async def test_dual_notion_transient_failures_degrade_without_legacy_gates(
         )
 
     report = await preflight.preflight(
-        dual_notion, sdk=module, http_transport=httpx.MockTransport(handler)
+        dual_notion,
+        model_router=module,
+        http_transport=httpx.MockTransport(handler),
     )
     assert len(calls) == 1
     assert "notion_temporarily_unavailable" in report.checks
@@ -429,9 +345,9 @@ async def test_dual_notion_transient_failures_degrade_without_legacy_gates(
     ],
 )
 async def test_dual_notion_auth_and_target_failures_stop_startup(
-    dual_notion, sdk, status, code
+    dual_notion, router, status, code
 ):
-    module, _ = sdk
+    module, _ = router
     calls = []
 
     def handler(request):
@@ -444,7 +360,9 @@ async def test_dual_notion_auth_and_target_failures_stop_startup(
 
     with pytest.raises(preflight.PreflightError, match=code) as error:
         await preflight.preflight(
-            dual_notion, sdk=module, http_transport=httpx.MockTransport(handler)
+            dual_notion,
+            model_router=module,
+            http_transport=httpx.MockTransport(handler),
         )
     assert len(calls) == 1
     assert "private" not in repr(error.value)
@@ -480,9 +398,9 @@ async def test_dual_notion_invalid_response_is_a_hard_failure(
 
 
 async def test_provider_probes_only_get_schema_and_public_health(
-    providers, sdk
+    providers, router
 ):
-    module, _ = sdk
+    module, _ = router
     requests = []
 
     def handler(request):
@@ -514,7 +432,9 @@ async def test_provider_probes_only_get_schema_and_public_health(
         )
 
     report = await preflight.preflight(
-        providers, sdk=module, http_transport=httpx.MockTransport(handler)
+        providers,
+        model_router=module,
+        http_transport=httpx.MockTransport(handler),
     )
     assert len(requests) == 3
     assert "resend_configuration_only" in report.checks
@@ -525,9 +445,9 @@ async def test_provider_probes_only_get_schema_and_public_health(
 
 
 async def test_todofy_health_failure_does_not_try_generating_endpoint(
-    providers, sdk
+    providers, router
 ):
-    module, _ = sdk
+    module, _ = router
     settings = dataclasses.replace(providers, notion_backend="disabled")
     requests = []
 
@@ -540,15 +460,17 @@ async def test_todofy_health_failure_does_not_try_generating_endpoint(
 
     with pytest.raises(preflight.PreflightError, match="TODOFY_UNHEALTHY"):
         await preflight.preflight(
-            settings, sdk=module, http_transport=httpx.MockTransport(handler)
+            settings,
+            model_router=module,
+            http_transport=httpx.MockTransport(handler),
         )
     assert len(requests) == 1
 
 
 async def test_mail_header_injection_fails_before_any_email_request(
-    providers, sdk
+    providers, router
 ):
-    module, _ = sdk
+    module, _ = router
     settings = dataclasses.replace(
         providers,
         notion_backend="disabled",
@@ -556,32 +478,16 @@ async def test_mail_header_injection_fails_before_any_email_request(
         from_email="sender@example.org\r\nBcc: other@example.org",
     )
     with pytest.raises(preflight.PreflightError, match="MAIL_CHECK_FAILED"):
-        await preflight.preflight(settings, sdk=module)
-
-
-def test_installed_pinned_runtime_and_companion_match_record():
-    pytest.importorskip("codex_cli_bin")
-    executable, host = preflight._runtime_files()
-    assert executable.parent == host.parent
-    assert host.name == "codex-code-mode-host"
-
-
-def test_runtime_version_mismatch_fails_closed(monkeypatch):
-    pytest.importorskip("codex_cli_bin")
-    monkeypatch.setattr(metadata, "version", lambda _: "0.0.0")
-    with pytest.raises(
-        preflight.PreflightError, match="CODEX_VERSION_MISMATCH"
-    ):
-        preflight._runtime_files()
+        await preflight.preflight(settings, model_router=module)
 
 
 @pytest.mark.parametrize(
     "failure", ["oversize", "invalid-json", "wrong-content-type"]
 )
 async def test_provider_response_limits_and_timeout_are_safe(
-    providers, sdk, monkeypatch, failure
+    providers, router, monkeypatch, failure
 ):
-    module, _ = sdk
+    module, _ = router
     monkeypatch.setattr(preflight, "MAX_RESPONSE_BYTES", 64)
     monkeypatch.setattr(preflight, "HTTP_TIMEOUT", 0.01)
 
@@ -601,7 +507,9 @@ async def test_provider_response_limits_and_timeout_are_safe(
     settings = dataclasses.replace(providers, notion_backend="disabled")
     with pytest.raises(preflight.PreflightError) as error:
         await preflight.preflight(
-            settings, sdk=module, http_transport=httpx.MockTransport(handler)
+            settings,
+            model_router=module,
+            http_transport=httpx.MockTransport(handler),
         )
     assert error.value.code == "TODOFY_INVALID_RESPONSE"
     assert "private" not in str(error.value)
@@ -610,9 +518,9 @@ async def test_provider_response_limits_and_timeout_are_safe(
 @pytest.mark.parametrize("provider", ["notion", "todofy"])
 @pytest.mark.parametrize("failure", [429, 500, 503, "timeout", "network"])
 async def test_optional_provider_transient_failure_does_not_block_startup(
-    providers, sdk, monkeypatch, provider, failure, caplog
+    providers, router, monkeypatch, provider, failure, caplog
 ):
-    module, _ = sdk
+    module, _ = router
     settings = dataclasses.replace(
         providers,
         **{
@@ -635,7 +543,9 @@ async def test_optional_provider_transient_failure_does_not_block_startup(
         )
 
     report = await preflight.preflight(
-        settings, sdk=module, http_transport=httpx.MockTransport(handler)
+        settings,
+        model_router=module,
+        http_transport=httpx.MockTransport(handler),
     )
     assert len(calls) == 1
     assert provider + "_temporarily_unavailable" in report.checks
@@ -647,14 +557,14 @@ async def test_optional_provider_transient_failure_does_not_block_startup(
 
 @pytest.mark.parametrize("status", [401, 403, 404, 302])
 async def test_todofy_auth_or_target_errors_remain_hard_failures(
-    providers, sdk, status
+    providers, router, status
 ):
-    module, _ = sdk
+    module, _ = router
     settings = dataclasses.replace(providers, notion_backend="disabled")
     with pytest.raises(preflight.PreflightError):
         await preflight.preflight(
             settings,
-            sdk=module,
+            model_router=module,
             http_transport=httpx.MockTransport(
                 lambda _: httpx.Response(status)
             ),
@@ -700,12 +610,3 @@ async def test_font_with_only_missing_glyph_boxes_is_rejected(
     )
     with pytest.raises(preflight.PreflightError, match="CJK_FONT_UNAVAILABLE"):
         await preflight.preflight(settings)
-
-
-def test_nonexecutable_runtime_fails_closed(monkeypatch):
-    pytest.importorskip("codex_cli_bin")
-    monkeypatch.setattr(preflight.os, "access", lambda *_: False)
-    with pytest.raises(
-        preflight.PreflightError, match="CODEX_EXECUTABLE_UNAVAILABLE"
-    ):
-        preflight._runtime_files()

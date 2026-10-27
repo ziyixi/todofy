@@ -1,13 +1,46 @@
 # Codex gateway
 
-Private, synchronous structured inference through `openai-codex==0.163.0` and its pinned runtime.
-The default model is `gpt-6.1-sol`, with medium effort.
+Private execution through `openai-codex==0.163.0` and its pinned runtime. The Cloudflare model router
+uses the generated `modelrouter.inference.v1` contract; provider details stay in this executor.
 The service uses the subscription login mounted at
 `CODEX_HOME`; it checks the SDK account type and does not use an API key or another model.
 
+`POST /api/model/v1/generations:generate` returns one final text or schema-constrained JSON result.
+`models/sol-6-1` maps to `gpt-6.1-sol`; the local catalog lists the other fixed mappings. Requested public
+model and provider-reported model are separate fields. The latter stays empty when the SDK does not
+report it. There is no automatic fallback. Empty effort preserves the SDK model default; callers can
+explicitly select a supported effort. Temperature and model-side output caps are rejected before execution.
+Instruction blocks remain ordered; the subscription adapter accepts cache hints without claiming cache control.
+JSON Schema validation runs locally without fetching external references.
+The model API accepts a 3 MiB wire request and up to 2 MiB of decoded final output.
+Legacy inference keeps its existing smaller limits.
+
+Optional `/api/model/v1/conversations` contexts keep the same ephemeral SDK thread and temporary workspace
+for multiple turns. Creation accepts a caller-assigned `conversations/{id}` and a UUID `request_id` query
+parameter, following the generated HTTP binding. The default total lifetime is 840 seconds, with the same
+maximum; further turns cannot extend it. Each generation defaults to 110 seconds and can request up to
+840 seconds, bounded by the remaining context lifetime. Concurrent turns on one context are rejected.
+Get reports liveness. Close interrupts active work and acknowledges only after SDK/process/workspace cleanup.
+Content-free SQLite receipts preserve confirmed closure across restart; interrupted contexts become `lost`
+and can then be closed. No SDK thread is resumed and no model operation is replayed after restart.
+
+Generate and Create accept private `Accept: text/event-stream` transport so the router can wait through
+long calls. The stream sends `ready`, a heartbeat every 15 seconds, then one `result` containing the generated
+wire JSON response. A setup or context error after headers uses terminal `error` with the shared HTTP RPC
+Status body. Without that Accept header the response is final JSON. This transport is private; the public
+router API returns only the final result. Disconnect cancels execution.
+
+The generated result includes actual hosted-web search/open observations and per-call usage. Thread token
+snapshots are cumulative; subsequent calls subtract the previous trusted snapshot, including cached and
+reasoning subsets. Missing baselines or invalid counters leave `available=false`. Output text cannot claim
+an observed search or open. `web_research=true` enables hosted live web and its required code-mode host;
+shell, local file tools, browser, desktop, plugins, apps, skills and MCP servers remain disabled.
+
+## Legacy rollout endpoints
+
 `POST /api/codex/v1/inference:run` uses the generated `codex.inference.v1` wire JSON contract.
 The request carries `instructions`, `input_json`, `output_schema_json` and an optional explicit `model`.
-An empty model uses the service default; there is no automatic model fallback. An inference response carries
+An empty model uses `gpt-6.1-sol` with medium effort; there is no automatic model fallback. An inference response carries
 the selected model and fixed effort, output JSON, reported token counts and a safe `error_code`. Model failures return
 HTTP 200 with an empty output and one of `codex_auth`, `codex_quota`, `codex_timeout`,
 `codex_unavailable` or `codex_bad_answer`. Transport/configuration errors use the shared RPC Status body.
@@ -25,14 +58,19 @@ mount, and `DATA_DIR` as the writable monitor directory (`.data` for local runs)
 service creates a private temporary CLI home and links only the shared `auth.json` into it. SDK token refresh writes through that link; cache, skills and SQLite files stay out
 of Newsletter's login directory. `SOURCE_SHA` is a Docker build argument baked into `build-info.json`; the release supplies
 `CODEX_GATEWAY_RELEASE_REQUEST_ID` separately. Authentication runs before reading the request body.
-The body is limited to 768 KiB, output to 64 KiB and each model operation to 110 seconds. There are no
-saved jobs or automatic retries. Each request has a temporary workspace and an ephemeral thread.
+The body is limited to 768 KiB and output to 64 KiB. Legacy operations stay capped at 110 seconds. There are no
+saved jobs or automatic retries. One-shot requests have their own temporary workspace and ephemeral thread.
 The app does not log request bodies, model output, credentials or vendor error text. Access logging is disabled.
 
-The runtime disables shell, browser, desktop, web, app/plugin, image, memory and multi-agent features.
+The legacy runtime disables shell, browser, desktop, web, app/plugin, image, memory and multi-agent features.
 It supplies no MCP servers, disables the pinned system skills and verifies that no skills are enabled
 before starting a model turn. Any returned tool item rejects the answer. These checks do not claim
 that the Codex protocol exposes a global empty tool-list option.
+
+The launch helper supervises a dedicated process group, so terminating the SDK process also terminates
+its hosted-tool descendants. On Linux a parent-death signal handles abrupt server-worker termination.
+Run one server process per state directory; live contexts belong to that process. Container restarts use
+the normal container process boundary. The synthetic Linux parent-death test runs only on Linux.
 
 Build from the repository root after generating the root proto package:
 
@@ -63,6 +101,8 @@ volume. The health response exposes the latest 30 recorded days, newest first. S
 `history_since` records when this database began observing requests. Earlier usage is unknown; upgrading does
 not reconstruct lost process counters. Startup and writes require working storage and do not fall back to memory.
 
+Both generated model calls and legacy calls update these counters. Samples use `default` when effort was
+left to the SDK; the legacy top-level configured effort remains medium.
 Only validated, authenticated inference requests count; health and metadata checks do not. HTTP 200 with a
 nonempty `error_code` is a failed inference. Completed failures, including cancellation, count even when usage
 is unavailable. An abrupt process termination before completion is not reconstructed. `usage_available` and the
@@ -83,4 +123,6 @@ uv run --locked ruff check src tests
 uv run --locked ruff format --check src tests
 ```
 
-Tests use a fake SDK, temporary SQLite files and an in-process ASGI client. They do not log in or call a model.
+Tests use a fake SDK, temporary SQLite files, an in-process ASGI client and synthetic sleeping processes.
+They check two-turn reuse, usage deltas, web observations, JSON/SSE transport, expiry, timeout, cancellation,
+restart receipts and cleanup acknowledgements. They do not log in or call a model.

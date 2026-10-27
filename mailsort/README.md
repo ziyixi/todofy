@@ -23,8 +23,8 @@ Choose either provider in **设置 → 分类引擎**:
 
 | Choice | Fixed model | Authentication |
 | --- | --- | --- |
-| Claude API | Opus 5.5, medium | Dedicated Anthropic workspace API key |
-| VPS Codex | `gpt-6.1-sol`, medium | Existing ChatGPT subscription login on the owner's VPS |
+| Claude API | `models/claude-opus-5-5`, medium | Model Router, dedicated Mailsort connection |
+| VPS Codex | `models/sol-6-1`, medium | Model Router, existing VPS subscription executor |
 
 The Codex model and effort were checked against the production VPS catalog; inference requires separate verification.
 The choice is saved in the existing settings row and survives reload and deployment. Legacy settings use Claude
@@ -66,12 +66,12 @@ emails and evaluation times follow it. Ordinary scheduled single batches do not 
 shows actual cache reads/writes, and cost uses their separate prices. There is no prewarming or extra API call.
 This explicit cache policy applies only to Claude.
 
-Codex uses the independent [gateway](../codex-gateway/README.md), with the official
-[Python SDK](https://learn.chatgpt.com/docs/codex-sdk) pinned to `openai-codex==0.163.0`.
-It accepts one synchronous structured-inference request, has no Gmail access or saved jobs, and starts no autonomous
-work. It shares only the existing login PVC with Newsletter; it does not import Newsletter code or invoke its workflows.
-The model gets masked data without business tools or web access. The gateway requires ChatGPT subscription auth,
-with no API-key fallback. Process health and a saved login do not establish model availability or successful inference.
+Both choices use the private `MODEL_ROUTER` service binding and the shared `modelrouter.inference.v1` contract.
+Mailsort sends trusted instruction blocks, masked input and a standard JSON Schema through
+`@ziyixi/model-router-client`. The Router owns model connections, provider formats, usage normalization and the
+VPS executor connection. Its authenticated Mailsort caller uses a dedicated Claude connection; Brief's key remains
+separate. No model receives Gmail credentials or business tools. Model availability and successful real inference
+remain separate checks from a configured route.
 
 The app records Codex HTTP classification attempts, valid/failed responses and reported input/output tokens by UTC day,
 retains those counters for 400 days and shows the current UTC month's totals. A response with an invalid classification
@@ -97,8 +97,7 @@ Provider selection does not repeat that setup or delete labels.
 ## Development
 
 One Worker serves static UI assets and a generated owner API backed by the existing SQLite DO `mailsort-v1`.
-`gmail.ts` owns Google calls; `claude.ts` owns Anthropic calls; `codex.ts` calls the independent VPS gateway through
-the root `codex.inference.v1` wire contract. The Worker and existing DO retain Gmail, settings, pending work and
+`gmail.ts` owns Google calls; `classification-model.ts` calls Model Router and validates Mailsort's classification IDs and buckets. The Worker and existing DO retain Gmail, settings, pending work and
 write-ledger ownership. The gateway adds no database or scheduler.
 
 From the repository root, with Node 26 and the shared workspace toolchain:
@@ -124,32 +123,14 @@ See [design](docs/design.md) and [collaboration rules](AGENTS.md).
 ## Release and credentials
 
 Pass the complete branch CI gate, then release the exact same SHA through main Actions. The deploy wrapper
-injects Access/CSRF material, `BUILD_SHA` and the `MAILSORT_MODE` ceiling. Gmail and `ANTHROPIC_API_KEY` credentials
-and the three Codex credentials below are owner-written Worker secrets, excluded from GitHub release secrets and
-preserved by the wrapper. Do not run a plain release.
+injects Access/CSRF material, `BUILD_SHA` and the `MAILSORT_MODE` ceiling. Gmail credentials remain owner-written Worker secrets, excluded from GitHub release secrets and preserved by
+the wrapper. Provider keys and Codex executor credentials belong to Model Router. The Worker receives a private
+`MODEL_ROUTER` binding with the Mailsort caller identity; it has no arbitrary endpoint setting or provider credential.
+Preserve the dedicated Mailsort Claude workspace and its $20 monthly provider cap when configuring the Router.
 
-For a new account, create a dedicated Claude workspace, set its monthly spend limit to $20, and issue a key scoped
-to that workspace. Put it directly into the Worker from the owner machine:
-
-```sh
-cd mailsort/worker
-npx --no-install wrangler secret put ANTHROPIC_API_KEY --config ../wrangler.toml
-```
-
-For Codex, the generated `CODEX_ENDPOINT_URL` deployment var points to
-`https://platform-runtime.ziyixi.science/api/codex/v1/inference:run`. The route requires a dedicated Access machine
-identity and an inference-only Bearer; it grants no deployment or Newsletter permissions. Put its credentials
-directly into the Worker from the owner machine, through Wrangler's local prompts:
-
-```sh
-npx --no-install wrangler secret put CODEX_ENDPOINT_TOKEN --config ../wrangler.toml
-npx --no-install wrangler secret put CODEX_ACCESS_CLIENT_ID --config ../wrangler.toml
-npx --no-install wrangler secret put CODEX_ACCESS_CLIENT_SECRET --config ../wrangler.toml
-```
-
-IaC owns the Access identity and keeps sensitive outputs in encrypted state. The gateway's subscription login stays
-in the existing VPS auth PVC. Verify a real synthetic inference separately from `/healthz`, release identity and
-Access/Bearer configuration before treating Codex as ready. Deployment does not select a provider on the owner's behalf.
+The migration does not change the saved classifier choice, mode, prompt, pending work, write limits, breaker or
+usage history. Credential transfer, deployment and a real synthetic inference require separate release evidence.
+Do not paste keys into chat, issues or GitHub.
 
 Gmail credentials still use `deploy/mint-token.mjs`. Full rebuild steps are in the root
 [rebuild guide](../docs/rebuild.md). Home reads private Ops status and API budget warnings; account Workers AI

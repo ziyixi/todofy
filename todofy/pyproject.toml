@@ -5,7 +5,7 @@ description = "Turns Mail Hero webhook events into Todoist tasks on Cloudflare W
 requires-python = ">=3.14"
 # The Worker runs stdlib-only on Pyodide. Its one dependency is the generated wire JSON types of the proto/
 # IDL (proto/README.md), itself stdlib only; pywrangler vendors it into python_modules/. Add nothing else.
-dependencies = ["ziyixi-proto"]
+dependencies = ["ziyixi-proto", "ziyixi-model-router-client"]
 
 [dependency-groups]
 dev = [

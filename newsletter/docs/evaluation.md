@@ -44,13 +44,12 @@
 uv run --locked --extra codex python scripts/evaluate_prompts.py --help
 ```
 
-实际对比会使用模型额度，必须另行批准。测试集和输出放在仓库、云同步目录及登录目录之外的私有位置；输出目录必须尚不存在，但其父目录应已创建。`--codex-home` 则指向已完成登录的服务专用目录：
+实际对比会使用模型额度，必须另行批准。测试集和输出放在仓库、云同步目录及登录目录之外的私有位置；输出目录必须尚不存在，但其父目录应已创建。通过环境配置 `NEWSLETTER_MODEL_ROUTER_URL` 和 `NEWSLETTER_MODEL_ROUTER_TOKEN`；提供方登录由 Router 执行层维护：
 
 ```sh
 uv run --locked --extra codex python scripts/evaluate_prompts.py \
   --suite /private/path/suite.json \
   --output /private/path/new-comparison \
-  --codex-home /private/path/isolated-login \
   --allow-model-calls
 ```
 

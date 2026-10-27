@@ -44,7 +44,7 @@ from typing import Any
 from pyodide.ffi import JsException
 from workers import DurableObject, Response
 
-from todofy.core import gemini_wire, prompts
+from todofy.core import model_input, prompts
 from todofy.core import ops as ops_rules
 from todofy.core.api_errors import ApiError
 from todofy.core.backoff import (
@@ -63,8 +63,8 @@ from todofy.core.metrics import Step, StepPoint
 from todofy.core.render import clean_summary, content_notice
 from todofy.core.sql import views
 from todofy.core.vocab import Code, EventState, Reconcile, allowed_actions
-from todofy.runtime import api, backup, gemini, ledger, mail, metrics, ops, reports, retention
-from todofy.runtime.config import flag, gemini_email_models, gemini_models, integer, source_id
+from todofy.runtime import api, backup, ledger, mail, metrics, model, model_settings, ops, reports, retention
+from todofy.runtime.config import flag, integer, source_id
 from todofy.runtime.http import NO_CONTENT, Result, failed, not_found, ok
 from todofy.runtime.interop import now_ms, now_s, read_capped, sha256_hex
 from todofy.runtime.ledger import WORKER, CompletedSummary, EventRow, OwnerAction
@@ -451,6 +451,7 @@ class TodofyCore(DurableObject):
         now = now_s()
         usage = self._usage(now)
         alarm = await self.ctx.storage.getAlarm()
+        selected = await model_settings.get(self.env)
         return {
             "next_alarm_at": None if alarm is None else api.timestamp(int(alarm) // 1000),
             "gemini": {
@@ -459,8 +460,8 @@ class TodofyCore(DurableObject):
                 "reserved_tokens": usage["reserved_tokens"],
                 "used_tokens": usage["used_tokens"],
                 "calls": usage["calls"],
-                "models": gemini_models(self.env),
-                "email_models": gemini_email_models(self.env),
+                "models": [selected.report_model],
+                "email_models": [selected.email_model],
             },
         }
 
@@ -638,7 +639,7 @@ class TodofyCore(DurableObject):
             code = Code.MAIL_NEEDS_REVIEW if event else Code.INVALID_SAVED_EVENT
             await ledger.transition(db, row, stuck, actor=WORKER, now=now, code=code, next_attempt_at=0)
             return
-        content, preface = gemini_wire.summary_content(event), content_notice(event)
+        content, preface = model_input.summary_content(event), content_notice(event)
         reserved = math.ceil(len((prompts.SUMMARY_EMAIL + preface + content).encode()) / 2) + OUTPUT_TOKEN_ALLOWANCE
         if not self.reserve_tokens(reserved, now):
             tomorrow = now - now % DAY + DAY
@@ -667,15 +668,15 @@ class TodofyCore(DurableObject):
             if running is None:
                 return
             used, started = reserved, now_ms()
-            result = await gemini.generate(
+            result = await model.generate(
                 self.env,
                 system=prompts.SUMMARY_EMAIL,
                 user=content,
                 preface=preface,
                 deadline_ms=started + GEMINI_STEP_BUDGET * 1000,
-                models=gemini_email_models(self.env),
+                model=(await model_settings.get(self.env)).email_model,
             )
-            used = result.tokens
+            used = result.tokens if result.usage_available else reserved
         finally:
             self.sql.exec("DELETE FROM llm_inflight WHERE event_id = ?", row.event_id)
             self.settle_tokens(reserved, used, now)
@@ -712,7 +713,7 @@ class TodofyCore(DurableObject):
             )
         self.record_step(point, now)
 
-    async def _finish_canary(self, running: EventRow, result: gemini.GeminiResult, done: int) -> None:
+    async def _finish_canary(self, running: EventRow, result: model.ModelResult, done: int) -> None:
         """A canary's summary step ends it: ``complete`` when Gemini answered, else retried or ``ignored``. Its
         summary is never stored, so it never becomes report input."""
         db, verdict = self.env.DB, result.verdict

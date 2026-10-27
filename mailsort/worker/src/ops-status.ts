@@ -11,7 +11,6 @@ import { file_ops_v1_ops, GuardLevel, GuardStateSchema, Health, OpsService, OpsS
 import type * as wire from '@ziyixi/proto/ops/v1/ops_wire';
 import { fieldRules, formatMatches, fromWireArguments, toWire, WireJsonError } from '@ziyixi/proto/wire-json';
 import { modeCeiling, publicHost, type Env } from './env.ts';
-import { codexEndpoint } from './classifier-config.ts';
 import { ALARM_IDLE_MS, MINUTE } from './limits.ts';
 import { authState } from './session.ts';
 import { effectiveMode, readSettings } from './settings.ts';
@@ -69,7 +68,7 @@ export function uiUrl(host: string | null): string | undefined {
   return formatMatches(file_ops_v1_ops, 'HttpsUrl', url) ? url : undefined;
 }
 
-type StatusEnv = Pick<Env, 'PUBLIC_HOST' | 'MODE' | 'GMAIL_CLIENT_ID' | 'GMAIL_CLIENT_SECRET' | 'GMAIL_REFRESH_TOKEN' | 'ANTHROPIC_API_KEY' | 'CODEX_ENDPOINT_URL' | 'CODEX_ENDPOINT_TOKEN'>;
+type StatusEnv = Pick<Env, 'PUBLIC_HOST' | 'MODE' | 'GMAIL_CLIENT_ID' | 'GMAIL_CLIENT_SECRET' | 'GMAIL_REFRESH_TOKEN' | 'MODEL_ROUTER'>;
 
 /** status(): a few indexed counts and meta rows. */
 export function sortStatus(store: Store, env: StatusEnv, now: number): wire.OpsStatus {
@@ -99,11 +98,11 @@ export function sortStatus(store: Store, env: StatusEnv, now: number): wire.OpsS
     }
     if (settings.breaker !== '' && settings.mode === 'live') signals.push(signal('breaker_tripped', Severity.WARNING, { applied_today: usage.applied }));
     if (mode !== 'off' && settings.classificationProvider === 'claude') {
-      const modelError = store.getMeta('claude_error') ?? (env.ANTHROPIC_API_KEY === undefined ? 'claude_not_configured' : '');
+      const modelError = store.getMeta('claude_error') ?? (env.MODEL_ROUTER === undefined ? 'claude_not_configured' : '');
       if (store.getMeta('claude_limited_month') === month || claude.cost_micros >= CLAUDE_MONTHLY_LIMIT_MICROS) signals.push(signal('claude_spend_limit', Severity.WARNING, {}));
       else if (modelError !== '' && modelError !== 'claude_spend_limit') signals.push(signal(modelError === 'claude_not_configured' ? modelError : modelError === 'claude_auth' || modelError === 'claude_401' || modelError === 'claude_403' ? 'claude_auth' : 'claude_unavailable', Severity.WARNING, {}));
     } else if (mode !== 'off') {
-      const modelError = store.getMeta('codex_error') ?? (codexEndpoint(env) === null ? 'codex_not_configured' : '');
+      const modelError = store.getMeta('codex_error') ?? (env.MODEL_ROUTER === undefined ? 'codex_not_configured' : '');
       if (modelError !== '') signals.push(signal(['codex_not_configured', 'codex_auth', 'codex_quota'].includes(modelError) ? modelError : 'codex_unavailable', Severity.WARNING, {}));
     }
     signals.sort((a, b) => rank(a.severity) - rank(b.severity) || (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));

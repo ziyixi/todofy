@@ -3,24 +3,19 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
 import dataclasses
-import inspect
 import json
 import pathlib
-import types
-from typing import TYPE_CHECKING
+from typing import cast
 
-import pydantic
+import model_router_client as models
 import pytest
 
-import newsletter.codex_runtime as codex_runtime
 import newsletter.contracts as contracts
 import newsletter.editor as editor
+import newsletter.model_client as model_client
+import newsletter.settings as settings
 import newsletter.types as newsletter_types
-
-if TYPE_CHECKING:
-    import openai_codex
 
 
 @pytest.fixture
@@ -77,16 +72,8 @@ def bundle() -> newsletter_types.Payload:
     }
 
 
-@dataclasses.dataclass
-class SDKEvent:
-    """SDK notification shape consumed by the real response collector."""
-
-    method: str
-    payload: newsletter_types.Payload
-
-
 class FakeTurn:
-    """Stream synthetic research and final events with explicit failures."""
+    """Serve one synthetic final response and observed research actions."""
 
     def __init__(
         self,
@@ -97,200 +84,108 @@ class FakeTurn:
         hang: bool = False,
         omit_action: str | None = None,
     ) -> None:
-        self.bundle = bundle
-        self.research = research
-        self.failure = failure
-        self.hang = hang
-        self.omit_action = omit_action
+        self.bundle, self.research, self.failure = bundle, research, failure
+        self.hang, self.omit_action = hang, omit_action
         self.interrupted = False
         self.started = asyncio.Event()
+        self.usage: models.Usage | None = None
 
-    async def stream(self) -> AsyncIterator[SDKEvent]:
-        """Yield bounded notification events without creating an SDK process."""
+    async def result(self, name: str) -> models.Generation:
+        """Return a normalized receipt without provider-specific events."""
         self.started.set()
         if self.hang:
             await asyncio.Event().wait()
-        if self.research:
-            for action in (
-                {"type": "search", "query": "public topic"},
-                {"type": "openPage", "url": "https://example.com/evidence"},
-            ):
-                if action["type"] == self.omit_action:
-                    continue
-                yield SDKEvent(
-                    method="item/completed",
-                    payload={"item": {"type": "webSearch", "action": action}},
-                )
-        yield SDKEvent(
-            method="item/completed",
-            payload={
-                "item": {
-                    "type": "agentMessage",
-                    "phase": "final_answer",
-                    "text": self.bundle
-                    if isinstance(self.bundle, str)
-                    else json.dumps(self.bundle),
-                }
-            },
+        return models.Generation(
+            name=name,
+            state="failed" if self.failure else "succeeded",
+            output=self.bundle
+            if isinstance(self.bundle, str)
+            else json.dumps(self.bundle),
+            usage=self.usage,
+            error=models.ModelError(
+                code=self.failure["code"], reason="MODEL_FAILURE"
+            )
+            if self.failure
+            else None,
+            observations=models.Observations(
+                searched=self.research and self.omit_action != "search",
+                opened_urls=("https://example.com/evidence",)
+                if self.research and self.omit_action != "openPage"
+                else (),
+            ),
         )
-        yield SDKEvent(
-            method="turn/completed",
-            payload={
-                "turn": {
-                    "status": "failed" if self.failure else "completed",
-                    "error": self.failure,
-                }
-            },
-        )
-
-    async def interrupt(self) -> None:
-        """Record timeout or cancellation cleanup for assertions."""
-        self.interrupted = True
 
 
 @dataclasses.dataclass
-class FakeSDKState:
-    """Observable SDK state, preserving real SDK call-signature validation."""
+class FakeRouterState:
+    """Observable shared-client operations with no provider implementation."""
 
     turn: FakeTurn
-    account_type: str = "chatgpt"
     closed: bool = False
     close_error: Exception | None = None
     close_hang: bool = False
     started: bool = False
     prompt: newsletter_types.Payload | None = None
-    thread_options: dict[str, object] | None = None
     thread_starts: int = 0
-    config: openai_codex.CodexConfig | None = None
-    skills_response: newsletter_types.Payload | None = None
-    skills_checked: bool = False
     turns: list[FakeTurn] = dataclasses.field(default_factory=list)
     prompts: list[newsletter_types.Payload] = dataclasses.field(
         default_factory=list
     )
     schema: newsletter_types.Payload | None = None
+    config: models.GenerationConfig | None = None
+    conversation: models.Conversation | None = None
+    active: FakeTurn | None = None
 
+    async def create_conversation(
+        self, request: models.CreateConversationRequest
+    ) -> models.Conversation:
+        """Capture immutable generic model configuration."""
+        assert request.conversation is not None
+        self.started = True
+        self.thread_starts += 1
+        self.config = request.conversation.config
+        assert self.config is not None
+        self.schema = json.loads(self.config.output_schema_json)
+        self.conversation = dataclasses.replace(
+            request.conversation, state="open"
+        )
+        return self.conversation
 
-@dataclasses.dataclass
-class _AccountKind:
-    type: str
+    async def generate(
+        self, request: models.GenerateRequest
+    ) -> models.Generation:
+        """Serve a call within the same remote context."""
+        assert self.conversation is not None
+        assert request.conversation == self.conversation.name
+        self.prompt = json.loads(request.input)
+        self.prompts.append(self.prompt)
+        self.active = self.turns.pop(0) if self.turns else self.turn
+        return await self.active.result("requests/" + request.request_id)
 
-
-@dataclasses.dataclass
-class _Account:
-    root: _AccountKind
-
-
-@dataclasses.dataclass
-class _AccountResponse:
-    account: _Account
+    async def close_conversation(
+        self, request: models.CloseConversationRequest
+    ) -> models.Conversation:
+        """Confirm cleanup, or deliberately leave it uncertain."""
+        if self.close_error:
+            raise self.close_error
+        if self.close_hang:
+            await asyncio.Event().wait()
+        if self.active:
+            self.active.interrupted = True
+        self.closed = True
+        return models.Conversation(name=request.name, state="closed")
 
 
 @pytest.fixture
-def fake_sdk(
+def fake_router(
     monkeypatch: pytest.MonkeyPatch, bundle: newsletter_types.Payload
-) -> FakeSDKState:
-    """Install inert SDK constructors checked against pinned signatures."""
-    # Importing the actual SDK is inert; its real constructors/method signatures
-    # constrain the fake. No actual AsyncCodex object is ever instantiated.
-    sdk = pytest.importorskip("openai_codex")
-    sdk_api = pytest.importorskip("openai_codex.api")
-    state = FakeSDKState(turn=FakeTurn(bundle))
-
-    class FakeClient:
-        """Expose runtime account, skills and thread operations only."""
-
-        def __init__(self, config: openai_codex.CodexConfig) -> None:
-            state.config = config
-            self._client = self
-
-        async def request[Response: pydantic.BaseModel](
-            self,
-            method: str,
-            params: newsletter_types.Payload,
-            *,
-            response_model: type[Response],
-        ) -> Response:
-            """Validate disabled-skill fixtures with the SDK response model."""
-            assert method == "skills/list" and params["forceReload"] is True
-            state.skills_checked = True
-            assert state.config is not None and state.config.env is not None
-            value = state.skills_response or {
-                "data": [
-                    {
-                        "cwd": state.config.cwd,
-                        "errors": [],
-                        "skills": [
-                            {
-                                "path": path,
-                                "scope": "system",
-                                "enabled": False,
-                                "name": pathlib.Path(path).parent.name,
-                                "description": "disabled fixture skill",
-                            }
-                            for path in sorted(
-                                codex_runtime.skill_paths(
-                                    pathlib.Path(state.config.env["CODEX_HOME"])
-                                )
-                            )
-                        ],
-                    }
-                ]
-            }
-            return response_model.model_validate(value)
-
-        async def __aenter__(self) -> FakeClient:
-            """Record entry without launching an app-server process."""
-            state.started = True
-            return self
-
-        async def account(
-            self, *, refresh_token: bool = False
-        ) -> _AccountResponse:
-            """Return the selected account kind without reading credentials."""
-            assert refresh_token is False
-            return _AccountResponse(_Account(_AccountKind(state.account_type)))
-
-        async def thread_start(self, **kwargs: object) -> FakeThread:
-            """Check the thread signature and capture requested isolation."""
-            inspect.signature(sdk.AsyncCodex.thread_start).bind(self, **kwargs)
-            state.thread_starts += 1
-            state.thread_options = kwargs
-            return FakeThread()
-
-        async def close(self) -> None:
-            """Record cleanup of the inert client."""
-            if state.close_error is not None:
-                raise state.close_error
-            if state.close_hang:
-                await asyncio.Event().wait()
-            state.closed = True
-
-    class FakeThread:
-        """Serve queued fake turns while enforcing the pinned turn signature."""
-
-        async def turn(self, prompt: str, **kwargs: object) -> FakeTurn:
-            """Capture a JSON prompt and serve exactly one selected response."""
-            inspect.signature(sdk_api.AsyncThread.turn).bind(
-                self, prompt, **kwargs
-            )
-            state.prompt = json.loads(prompt)
-            assert state.prompt is not None
-            state.prompts.append(state.prompt)
-            schema = kwargs["output_schema"]
-            assert isinstance(schema, dict)
-            state.schema = schema
-            return state.turns.pop(0) if state.turns else state.turn
-
+) -> FakeRouterState:
+    """Inject the shared client boundary; never construct an SDK."""
+    state = FakeRouterState(FakeTurn(bundle))
     monkeypatch.setattr(
-        codex_runtime,
-        "load_sdk",
-        lambda: types.SimpleNamespace(
-            AsyncCodex=FakeClient,
-            CodexConfig=sdk.CodexConfig,
-            Sandbox=sdk.Sandbox,
-            ApprovalMode=sdk.ApprovalMode,
-        ),
+        model_client,
+        "configured_client",
+        lambda *_args, **_kwargs: cast(models.ModelClient, state),
     )
     return state
 
@@ -298,17 +193,19 @@ def fake_sdk(
 def live_editor(
     tmp_path: pathlib.Path,
     *,
-    model: str = "gpt-6.1-sol",
+    model: str = "models/sol-6-1",
     timeout_seconds: float = 840,
-) -> editor.CodexEditor:
-    """Build a real editor with an isolated empty authentication directory."""
-    dedicated = tmp_path / "dedicated-codex"
-    dedicated.mkdir(exist_ok=True)
-    return editor.CodexEditor(dedicated, model, timeout_seconds=timeout_seconds)
+) -> editor.ModelEditor:
+    """Build the production editor with an injected remote model client."""
+    return editor.ModelEditor(
+        model_client.configured_client(settings.Settings()),
+        model,
+        timeout_seconds=timeout_seconds,
+    )
 
 
 def discovery_turn(
     value: newsletter_types.Payload | str, *, omit_action: str
 ) -> FakeTurn:
-    """Simulate research events that omit one provenance action."""
+    """Return research observations with one deliberately missing action."""
     return FakeTurn(value, omit_action=omit_action)

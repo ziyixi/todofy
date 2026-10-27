@@ -39,7 +39,7 @@ def limited_turn(value, missing):
 @pytest.mark.parametrize("component", ["body", "signal"])
 @pytest.mark.parametrize("missing", ["search", "openPage", "both"])
 async def test_claimed_pass_gets_same_thread_action_correction(
-    tmp_path, fake_sdk, component, missing
+    tmp_path, fake_router, component, missing
 ):
     value = approval(component)
     # The second turn supplies only the missing action when possible. Observed
@@ -50,14 +50,14 @@ async def test_claimed_pass_gets_same_thread_action_correction(
         if missing != "both"
         else editor.FakeTurn(value)
     )
-    fake_sdk.turns = [limited_turn(value, missing), corrected]
+    fake_router.turns = [limited_turn(value, missing), corrected]
     text, opened, searched = await editor.live_editor(tmp_path).execute(
         "{}", {}, "synthetic", tmp_path / "job"
     )
     assert json.loads(text) == value
     assert searched and opened == {"https://example.com/evidence"}
-    assert fake_sdk.thread_starts == 1 and len(fake_sdk.prompts) == 2
-    correction = fake_sdk.prompts[1]
+    assert fake_router.thread_starts == 1 and len(fake_router.prompts) == 2
+    correction = fake_router.prompts[1]
     assert correction["unverified_urls"] == []
     assert correction["missing_approval_actions"] == (
         ["search", "openPage"] if missing == "both" else [missing]
@@ -65,15 +65,15 @@ async def test_claimed_pass_gets_same_thread_action_correction(
     assert "blocked" in correction["task"] and "HOLD" in correction["task"]
     assert "review.passed" not in correction["task"]
     assert "实际" in correction["task"] and "web search" in correction["task"]
-    assert fake_sdk.closed
+    assert fake_router.closed
 
 
 @pytest.mark.parametrize("component", ["body", "signal"])
 async def test_correction_may_honestly_hold_without_inventing_research(
-    tmp_path, fake_sdk, component
+    tmp_path, fake_router, component
 ):
     held = approval(component, passed=False)
-    fake_sdk.turns = [
+    fake_router.turns = [
         editor.FakeTurn(approval(component), research=False),
         editor.FakeTurn(held, research=False),
     ]
@@ -81,16 +81,16 @@ async def test_correction_may_honestly_hold_without_inventing_research(
         "{}", {}, "synthetic", tmp_path / "job"
     )
     assert json.loads(text) == held and not opened and not searched
-    assert fake_sdk.thread_starts == 1 and len(fake_sdk.prompts) == 2
+    assert fake_router.thread_starts == 1 and len(fake_router.prompts) == 2
 
 
 @pytest.mark.parametrize("component", ["body", "signal"])
 @pytest.mark.parametrize("missing", ["search", "openPage", "both"])
 async def test_unsupported_second_pass_does_not_get_a_third_turn(
-    tmp_path, fake_sdk, component, missing
+    tmp_path, fake_router, component, missing
 ):
     value = approval(component)
-    fake_sdk.turn = limited_turn(value, missing)
+    fake_router.turn = limited_turn(value, missing)
     text, opened, searched = await editor.live_editor(tmp_path).execute(
         "{}", {}, "synthetic", tmp_path / "job"
     )
@@ -99,12 +99,12 @@ async def test_unsupported_second_pass_does_not_get_a_third_turn(
         text, opened, searched
     )
     # Execute never fabricates successful actions; callers still see the gap.
-    assert fake_sdk.thread_starts == 1 and len(fake_sdk.prompts) == 2
+    assert fake_router.thread_starts == 1 and len(fake_router.prompts) == 2
 
 
 @pytest.mark.parametrize("corrected_search", [True, False])
 async def test_url_and_approval_share_one_correction_budget(
-    tmp_path, fake_sdk, corrected_search
+    tmp_path, fake_router, corrected_search
 ):
     value = approval("body")
     sources = newsletter_editor.ApprovalSources({"body": [EVIDENCE_URL]})
@@ -113,14 +113,14 @@ async def test_url_and_approval_share_one_correction_budget(
         if corrected_search
         else limited_turn(value, "search")
     )
-    fake_sdk.turns = [editor.FakeTurn(value, research=False), corrected]
+    fake_router.turns = [editor.FakeTurn(value, research=False), corrected]
     text, opened, searched = await editor.live_editor(tmp_path).execute(
         "{}", {}, "synthetic", tmp_path / "job", approval_sources=sources
     )
-    correction = fake_sdk.prompts[1]
+    correction = fake_router.prompts[1]
     assert correction["unverified_urls"] == [EVIDENCE_URL]
     assert correction["missing_approval_actions"] == ["search", "openPage"]
-    assert fake_sdk.thread_starts == 1 and len(fake_sdk.prompts) == 2
+    assert fake_router.thread_starts == 1 and len(fake_router.prompts) == 2
     assert not newsletter_editor._unopened_approval_sources(
         text, opened, sources
     )
@@ -132,19 +132,19 @@ async def test_url_and_approval_share_one_correction_budget(
 
 @pytest.mark.parametrize("component", ["body", "signal"])
 async def test_honest_initial_hold_does_not_force_actions(
-    tmp_path, fake_sdk, component
+    tmp_path, fake_router, component
 ):
     value = approval(component, passed=False)
-    fake_sdk.turn = editor.FakeTurn(value, research=False)
+    fake_router.turn = editor.FakeTurn(value, research=False)
     text, opened, searched = await editor.live_editor(tmp_path).execute(
         "{}", {}, "synthetic", tmp_path / "job"
     )
     assert json.loads(text) == value and not opened and not searched
-    assert fake_sdk.thread_starts == 1 and len(fake_sdk.prompts) == 1
+    assert fake_router.thread_starts == 1 and len(fake_router.prompts) == 1
 
 
 async def test_unapproved_writer_output_still_corrects_new_unopened_sources(
-    tmp_path, fake_sdk, packet
+    tmp_path, fake_router, packet
 ):
     # The story writer claims no approval, but its new supplemental sources
     # still need an independent open.
@@ -155,7 +155,7 @@ async def test_unapproved_writer_output_still_corrects_new_unopened_sources(
             {"id": "supplement-1", "content": packet["content"]}
         ],
     }
-    fake_sdk.turns = [
+    fake_router.turns = [
         editor.FakeTurn(value, research=False),
         limited_turn(value, "search"),
     ]
@@ -163,25 +163,25 @@ async def test_unapproved_writer_output_still_corrects_new_unopened_sources(
         "{}", {}, "synthetic", tmp_path / "job"
     )
     assert json.loads(text) == value and opened and not searched
-    assert len(fake_sdk.prompts) == 2
-    assert fake_sdk.prompts[1]["unverified_urls"] == [EVIDENCE_URL]
-    assert fake_sdk.prompts[1]["missing_approval_actions"] == []
+    assert len(fake_router.prompts) == 2
+    assert fake_router.prompts[1]["unverified_urls"] == [EVIDENCE_URL]
+    assert fake_router.prompts[1]["missing_approval_actions"] == []
 
 
 @pytest.mark.parametrize("component", ["body", "signal"])
 async def test_action_correction_uses_original_timeout(
-    tmp_path, fake_sdk, component
+    tmp_path, fake_router, component
 ):
     value = approval(component)
     hanging = editor.FakeTurn(value, hang=True)
-    fake_sdk.turns = [editor.FakeTurn(value, research=False), hanging]
+    fake_router.turns = [editor.FakeTurn(value, research=False), hanging]
     with pytest.raises(newsletter_errors.EditorError) as error:
         await editor.live_editor(tmp_path, timeout_seconds=0.05).execute(
             "{}", {}, "synthetic", tmp_path / "job"
         )
     assert error.value.code == "timeout" and hanging.interrupted
-    assert fake_sdk.thread_starts == 1 and len(fake_sdk.prompts) == 2
-    assert fake_sdk.closed
+    assert fake_router.thread_starts == 1 and len(fake_router.prompts) == 2
+    assert fake_router.closed
 
 
 @pytest.mark.parametrize(

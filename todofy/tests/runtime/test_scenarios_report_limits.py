@@ -6,7 +6,7 @@ import uuid
 
 import pytest
 
-from tests.fakes.gemini_fake import GeminiFake, error_reply
+from tests.fakes.model_router_fake import ModelRouterFake, error_reply
 from tests.runtime.conftest import Launch
 from tests.runtime.harness import Worker, error_code, reason
 from tests.runtime.owner_support import assert_contract
@@ -29,7 +29,7 @@ def _clear_of_the_hour_boundary(margin_s: int = 10) -> None:
 
 @pytest.mark.reaches("unavailable")
 def test_without_a_fresh_report_a_failed_run_is_503_even_with_an_older_row(
-    launch: Launch, fresh_gemini: GeminiFake
+    launch: Launch, fresh_gemini: ModelRouterFake
 ) -> None:
     worker = launch()
     now = int(time.time())

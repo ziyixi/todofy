@@ -179,7 +179,8 @@ message OpsStatus {
         "recall",
         "brief",
         "tasks",
-        "personal-mcp"
+        "personal-mcp",
+        "model-router"
       ]
       open: true
     }

@@ -4,7 +4,7 @@
  * no thinking parameter, sampling parameter or prefill; no link in what the writer reads; the reservation's estimate.
  * Synthetic packets only.
  */
-import type { BetaTextBlockParam } from '@anthropic-ai/sdk/resources/beta/messages/messages';
+import type { Instruction } from '@ziyixi/proto/modelrouter/inference/v1/inference_pb';
 import { describe, expect, it } from 'vitest';
 import { DEEP_WRITE_MAX_TOKENS, REPAIR_MAX_TOKENS, WRITE_MAX_TOKENS } from '../src/limits.ts';
 import { estimateTokens } from '../src/prices.ts';
@@ -57,16 +57,8 @@ const writers: [string, () => { params: Params; estimatedInputTokens: number }, 
   ['deep repair', () => repairRequest('2026-10-17', [{ packet: PACKET, item: { ...ITEM, section: 'deep_read', why: '' }, problems: ['length: 1100'] }], true), '# 输出规则（深读）\n', REPAIR_MAX_TOKENS, DEEP_WRITE_SCHEMA],
 ];
 
-function userText(params: Params): string {
-  const content = params.messages[0]?.content;
-  if (typeof content !== 'string') throw new Error('the user turn is not text');
-  return content;
-}
-
-function system(params: Params): BetaTextBlockParam[] {
-  if (!Array.isArray(params.system)) throw new Error('system is not blocks');
-  return params.system;
-}
+function userText(params: Params): string { return params.input; }
+function system(params: Params): Instruction[] { return params.instructions; }
 
 describe('the writer', () => {
   it('starts every call with policy.md then profile.md, frozen, with the one cache breakpoint at its end', () => {
@@ -77,12 +69,12 @@ describe('the writer', () => {
     for (const [name, build, rules] of writers) {
       const { params } = build();
       const [prefix, own, ...rest] = system(params);
-      expect(prefix, name).toEqual({ type: 'text', text: WRITER_PREFIX, cache_control: { type: 'ephemeral' } });
+      expect(prefix, name).toEqual(expect.objectContaining({ text: WRITER_PREFIX, cache: true }));
       expect(own?.text.startsWith(rules), name).toBe(true);
-      expect(own?.cache_control, name).toBeUndefined();
+      expect(own?.cache, name).toBe(false);
       expect(rest, name).toEqual([]);
       // One breakpoint in the whole request, and nothing of the day before it.
-      expect(JSON.stringify(params).match(/cache_control/g), name).toHaveLength(1);
+      expect(params.instructions.filter(block => block.cache), name).toHaveLength(1);
       expect(JSON.stringify(system(params)), name).not.toMatch(/20\d\d-\d\d-\d\d|synthetic-preprints|Speculative/);
     }
     expect(system(repairRequest(DATE, [], false).params)[1]?.text).toContain('# 修订');
@@ -92,11 +84,10 @@ describe('the writer', () => {
   it('asks for high effort, its limit and its schema; no thinking or sampling parameter; one user turn, no prefill', () => {
     for (const [name, build, , maxTokens, schema] of writers) {
       const { params } = build();
-      expect(params.max_tokens, name).toBe(maxTokens);
-      expect(params.output_config, name).toEqual({ effort: 'high', format: { type: 'json_schema', schema } });
+      expect(params.parameters.maxOutputTokens, name).toBe(maxTokens);
+      expect(params.parameters, name).toMatchObject({ effort: 'high', allowFallback: true });
+      expect(JSON.parse(params.outputSchemaJson), name).toEqual(schema);
       for (const key of ['thinking', 'temperature', 'top_p', 'top_k', 'stop_sequences', 'cache_control']) expect(params, `${name}: ${key}`).not.toHaveProperty(key);
-      expect(params.messages, name).toHaveLength(1);
-      expect(params.messages[0]?.role, name).toBe('user');
       expect(userText(params), name).toMatch(/^日期：2026-10-1\d\n/);
     }
   });
@@ -142,9 +133,9 @@ describe('the writer', () => {
 describe('the other calls', () => {
   it('keep their efforts: the gate and the log low, the picks medium', () => {
     const { topics } = bundled();
-    expect(gateRequest([{ id: 'c1', section: 'research', venue: 'V', review: 'preprint', title: 't', summary: 's', otherVenues: [] }], topics).params.output_config?.effort).toBe('low');
-    expect(entailRequest([{ item: 'r1', n: 1, quote: 'q', sentences: ['s'] }]).params.output_config?.effort).toBe('low');
-    expect(pickRequest(DATE, [], [], {}).params.output_config?.effort).toBe('medium');
-    expect(deepPickRequest('2026-10-17', [], []).params.output_config?.effort).toBe('medium');
+    expect(gateRequest([{ id: 'c1', section: 'research', venue: 'V', review: 'preprint', title: 't', summary: 's', otherVenues: [] }], topics).params.parameters.effort).toBe('low');
+    expect(entailRequest([{ item: 'r1', n: 1, quote: 'q', sentences: ['s'] }]).params.parameters.effort).toBe('low');
+    expect(pickRequest(DATE, [], [], {}).params.parameters.effort).toBe('medium');
+    expect(deepPickRequest('2026-10-17', [], []).params.parameters.effort).toBe('medium');
   });
 });

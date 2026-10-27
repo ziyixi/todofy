@@ -13,6 +13,7 @@ from deployments import identity, last_good, record_success
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKERS = {
+    "model-router": ["model-router/wrangler.toml"],
     "todofy": ["todofy/wrangler.toml", "todofy/gateway/wrangler.toml"],
     "mail-hero": ["mail-hero/wrangler.toml"],
     "dashboard": ["dashboard/wrangler.toml"],

@@ -76,6 +76,7 @@ PRODUCTION = {
     "recall": "recall/wrangler.toml",
     "brief": "brief/wrangler.toml",
     "tasks": "tasks/wrangler.toml",
+    "model-router": "model-router/wrangler.toml",
 }
 from cloud_profile import load_profile, load_resources  # noqa: E402
 
@@ -93,6 +94,10 @@ if "tasks" in test_wrangler_configs.ci_changes.CHECK_ONLY:
     AHEAD_OF_DEPLOY["tasks"] = "tasks." + load_profile(REPO)["zone"]
 if "personal-mcp" in test_wrangler_configs.ci_changes.CHECK_ONLY:
     AHEAD_OF_DEPLOY["personal-mcp"] = "mcp." + load_profile(REPO)["zone"]
+
+
+if "model-router" in test_wrangler_configs.ci_changes.CHECK_ONLY:
+    AHEAD_OF_DEPLOY["model-router"] = "models." + load_profile(REPO)["zone"]
 
 
 def uncommented(text: str) -> str:
@@ -267,7 +272,7 @@ class MatchesTheApps(unittest.TestCase):
             + re.findall(r'"([^"]+)"', re.search(r"more\s*=\s*\[(.*?)\]", value).group(1))
             for key, value in owner.items()
         }
-        self.assertEqual(set(owner), {"mail-hero", "todofy", "home", "links", "watch", "fleet", "mailsort", "recall", "brief", "tasks", "personal-mcp"})
+        self.assertEqual(set(owner), {"mail-hero", "todofy", "home", "links", "watch", "fleet", "mailsort", "recall", "brief", "tasks", "personal-mcp", "model-router"})
         for worker, uris in destinations.items():
             if worker in AHEAD_OF_DEPLOY:
                 hosts = {AHEAD_OF_DEPLOY[worker]}  # no Custom Domain before the first deploy
@@ -332,7 +337,7 @@ class MatchesTheApps(unittest.TestCase):
                 planned = config(worker)
                 self.assertEqual(planned["name"], worker)
                 self.assertEqual(planned["vars"]["PUBLIC_HOST"], host)
-                self.assertNotIn("ACCESS_AUDIENCE", planned["vars"])
+                self.assertFalse(planned["vars"].get("ACCESS_AUDIENCE"))
                 self.assertEqual(planned["routes"], [{"pattern": host, "custom_domain": True}])
                 self.assertIn(f'domain = "{host}", more = []', owner[worker])
                 outputs = [f"{test_wrangler_configs.ci_changes.PREFIX[worker]}_deploy"]

@@ -15,14 +15,14 @@ describe('budget page trends', () => {
     expect(charts.map((chart) => within(chart).getByRole('img').getAttribute('aria-label')?.split('，')[0])).toEqual([
       '邮件（封）',
       '从收到到完成',
-      'Gemini token（按模型）',
-      'Gemini 请求（次）',
+      '模型 token（按模型）',
+      '模型请求（次）',
     ])
     const mail = within(trends).getByRole('figure', { name: '邮件（封）' })
     expect(within(mail).getByRole('img')).toHaveAccessibleName(/收到：最高 70，最近一天 70/)
     const latency = within(trends).getByRole('figure', { name: '从收到到完成' })
     expect(within(latency).getByRole('img')).toHaveAccessibleName(/P90：最高 4 分钟，最近一天 4 分钟/)
-    const tokens = within(trends).getByRole('figure', { name: 'Gemini token（按模型）' })
+    const tokens = within(trends).getByRole('figure', { name: '模型 token（按模型）' })
     // Largest 30-day total first.
     expect(within(tokens).getAllByRole('listitem').map((item) => item.textContent)).toEqual(['gemini-3.8-flash', 'gemini-3.7-flash'])
     // Stacked bars: one rect per model on each of the three recorded days.
@@ -40,7 +40,7 @@ describe('budget page trends', () => {
     const trends = await screen.findByRole('region', { name: '近 30 天趋势' })
     const charts = await within(trends).findAllByRole('figure')
     expect(charts).toHaveLength(4)
-    const tokenChart = within(trends).getByRole('figure', { name: 'Gemini token（按模型）' })
+    const tokenChart = within(trends).getByRole('figure', { name: '模型 token（按模型）' })
     // The four largest models keep their own colour; the other two share '其他'.
     expect(within(tokenChart).getAllByRole('listitem').map((item) => item.textContent)).toEqual([
       'model-6',
@@ -98,7 +98,7 @@ describe('budget page trends', () => {
     mockApi({ 'GET /api/v1/metricDays': apiError(503, 'UNAVAILABLE', 'req-metrics') })
     renderApp('/budget')
     expect(await screen.findByRole('alert')).toHaveTextContent('req-metrics')
-    expect(screen.getByRole('region', { name: 'Gemini' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '模型用量' })).toBeInTheDocument()
   })
 })
 

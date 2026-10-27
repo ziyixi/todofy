@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from tests.unit.host_support import ObjectSql, stubbed_pyodide
+from tests.unit.host_support import D1, ObjectSql, stubbed_pyodide
 
 NOW = 1_792_240_000
 
@@ -25,7 +25,7 @@ def coordinator(monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
         platform["clock"]["ms"] = NOW * 1000
         monkeypatch.setattr(backup, "holds_ledger", lambda *_args: False)
         core = TodofyCore.__new__(TodofyCore)
-        core.env = types.SimpleNamespace(GEMINI_DAILY_TOKEN_BUDGET="12345")
+        core.env = types.SimpleNamespace(GEMINI_DAILY_TOKEN_BUDGET="12345", DB=D1())
         core.sql = ObjectSql()
         # The object's storage as a release that still wrote Todoist left it.
         core.sql.exec("CREATE TABLE todoist_calls (minute_bucket INTEGER PRIMARY KEY, count INTEGER NOT NULL)")

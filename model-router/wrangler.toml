@@ -1,0 +1,55 @@
+# The sole production config. Real resource identities are exported by gated IaC before release.
+name = "model-router"
+account_id = "f57937bd1d93bf59e737b6d8445fb7a3"
+main = "worker/src/index.ts"
+compatibility_date = "2026-09-08"
+workers_dev = false
+preview_urls = false
+routes = [{ pattern = "models.ziyixi.science", custom_domain = true }]
+
+[observability]
+enabled = true
+[observability.logs]
+enabled = true
+invocation_logs = false
+[observability.traces]
+enabled = false
+
+[assets]
+directory = "web/dist"
+binding = "ASSETS"
+run_worker_first = true
+not_found_handling = "single-page-application"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "model-router"
+# Provider-assigned identity, generated from config/resources.toml.
+database_id = "79388b2a-1d62-49ad-9536-fb4cacd6c777"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "REQUEST_BODIES"
+bucket_name = "model-router-request-bodies"
+
+[[durable_objects.bindings]]
+name = "ENGINE"
+class_name = "RouterEngine"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RouterEngine"]
+
+[ai]
+binding = "AI"
+
+# Bounded daily cleanup; R2's independent seven-day rule covers orphaned private bodies too.
+[triggers]
+crons = ["47 4 * * *"]
+
+[vars]
+PUBLIC_HOST = "models.ziyixi.science"
+ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"
+# Provider-assigned Access audience, generated from config/resources.toml.
+ACCESS_AUDIENCE = "205e46e84c7d7ee7d2c2e4b1fa65b9268ff66487e077d71f11c2c9cee7c9decf"
+CODEX_EXECUTOR_ORIGIN = "https://platform-runtime.ziyixi.science"

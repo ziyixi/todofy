@@ -2,9 +2,8 @@
 
 A daily research-and-world briefing in Chinese for the owner, to replace the newsletter: a short weekday email
 (研究前沿 and the day's 2-3 most important 世界与经济 stories) and a Saturday deep read. The Worker fetches its sources
-itself, Claude Haiku 5.5 screens them, Claude Opus 5.5 picks the day's items side by side and writes them, and code
-checks every quote, name and number. One Worker and one SQLite Durable Object on Workers Free; the Claude API is its
-only paid product. Design: [`docs/design.md`](docs/design.md). Rules: [`AGENTS.md`](AGENTS.md).
+itself, the configured Haiku route screens them, the configured Opus route picks the day's items side by side and writes them, and code
+checks every quote, name and number. One Worker and one SQLite Durable Object on Workers Free. Inference and embeddings use the private shared Model Router; the dedicated Brief Claude connection keeps its existing billing boundary. Design: [`docs/design.md`](docs/design.md). Rules: [`AGENTS.md`](AGENTS.md).
 
 **Status: deployed in archive mode** (2026-10-11). The first deployment, `7bea3ec`, passed
 [CI](https://github.com/ziyixi/todofy/actions/runs/38128504001). Production `MODE` and the GitHub variable `BRIEF_MODE`
@@ -39,7 +38,7 @@ public) → write (Opus, structured output) → check (every quote aligned to th
 → repair → render → entail (a Haiku log) → send (06:30 on weekdays, 07:30 on Saturday; one Resend request a day with
 an idempotency key, never replayed after an unknown outcome). Saturday's deep read takes a thread of the week instead.
 Every step is resumable after a deploy or a crash, and a step that cannot go on sends a two-line note instead of
-silence. Each model call is costed from its usage against the monthly budget (设置).
+silence. Each model call reserves the Router catalog's worst-case rates against the monthly budget (设置), then settles the Router's actual API cost. Unknown or interrupted consumption keeps the reservation. Connection revisions replace local key hashes for resuming rejected connections; historical ledger rows remain readable.
 
 ## Develop
 
@@ -48,8 +47,8 @@ From the repository root (Node 26; the toolchain uses the shared lockfile):
 ```sh
 pnpm install --frozen-lockfile
 cd brief/worker
-npm run lint && npm run typecheck && npm test   # unit tests: registry, schedule, feeds, grounding, the SDK over a fake stream, render, ledger, ops-v1 golden bytes
-npm run test:runtime                            # workerd: a real BriefState, a synthetic web, fake Claude, Workers AI and Resend; CPU and rows at the bounds
+npm run lint && npm run typecheck && npm test   # unit tests: registry, schedule, feeds, grounding, the common Model Router over a synthetic service binding, render, ledger, ops-v1 golden bytes
+npm run test:runtime                            # workerd: a real BriefState, a synthetic web, fake Model Router and Resend; CPU and rows at the bounds
 node --test ../deploy/test/*.test.mjs
 ```
 
@@ -77,10 +76,10 @@ its deployment must follow Brief's deployment of the same commit. See [`HANDOFF.
 
 The wrapper sets `MODE` (the GitHub variable `BRIEF_MODE`: `off`, `archive`, `shadow` or `live`) and `BUILD_SHA`, and
 writes the Worker secrets `ACCESS_OWNER` and `ACCESS_OWNER_ALIASES` (from the dashboard's secrets: one owner),
-`CSRF_SIGNING_KEY`, `FEEDBACK_SIGNING_KEY`, `MAIL_FROM` and `MAIL_TO` (from `BRIEF_*` secrets). It never writes, needs
-or deletes `ANTHROPIC_API_KEY` or `RESEND_API_KEY`: the owner manages them in the Cloudflare dashboard or from their
-own machine (`npx wrangler secret put ANTHROPIC_API_KEY --config ../wrangler.toml` from `worker/`), and `wrangler deploy
---secrets-file` keeps them (`deploy/test/secrets-kept.test.mjs`). Never paste a key into a chat, an issue or GitHub.
+`CSRF_SIGNING_KEY`, `FEEDBACK_SIGNING_KEY`, `MAIL_FROM` and `MAIL_TO` (from `BRIEF_*` secrets). It never writes, needs or deletes `RESEND_API_KEY`; the owner manages that secret locally. Model credentials
+belong to Model Router, with a dedicated Brief Claude connection. The `MODEL_ROUTER` service binding carries the
+Brief caller identity. Provider credentials and native request payloads do not enter this Worker. Never paste a key
+into chat, an issue or GitHub.
 
 The release checks that production runs the commit, that Access answers the archive and the owner API with its login
 page, and that exactly `/feedback` reaches the Worker without it (a 404 for an invalid token).

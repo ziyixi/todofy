@@ -105,7 +105,7 @@ describe('GetRegistry', () => {
     const first = await h.view<Registry>('registry');
     expect(first).toMatchObject({ status: 200, etag: '"test"' });
     expect(first.bytes).toBeLessThanOrEqual(VIEW_BODY_BUDGET.registry);
-    expect(first.body?.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'links', 'watch', 'website', 'notion-publish', 'newsletter', 'home', 'fleet', 'platform-runtime', 'mailsort', 'recall', 'brief', 'tasks', 'personal-mcp', 'codex-gateway', 'self-hosted']);
+    expect(first.body?.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'links', 'watch', 'website', 'notion-publish', 'newsletter', 'home', 'fleet', 'platform-runtime', 'mailsort', 'recall', 'brief', 'tasks', 'personal-mcp', 'codex-gateway', 'model-router', 'self-hosted']);
     expect(first.body?.entries.find((entry) => entry.id === 'personal-mcp')).toMatchObject({
       group: 'services', access: true, status_type: 'ops_v1', scripts: ['personal-mcp'],
     });
@@ -139,6 +139,7 @@ describe('GetHomeView and RefreshHomeView', () => {
       brief: ['unknown', 'never_checked'],
       tasks: ['unknown', 'never_checked'],
       'personal-mcp': ['unknown', 'never_checked'],
+      'model-router': ['unknown', 'never_checked'],
     });
     expect(home.cloudflare).toMatchObject({ usage_status: 'unavailable', quota: [], workers: 0, errors_today: 0 });
     expect(h.outboundLog).toEqual([]);
@@ -406,6 +407,7 @@ describe('GetFlowsView, GetOpsView and the mutations', () => {
       ['tasks', true, 'tasks'],
       ['personal-mcp', true, 'personal-mcp'],
       ['codex-gateway', true, 'codex-gateway'],
+      ['model-router', true, 'model-router'],
     ]);
     expect(ops.canary).toMatchObject({ id: 'mail-todofy', enabled: true, manual_limit: 3 });
     expect(ops.digest.enabled).toBe(true);

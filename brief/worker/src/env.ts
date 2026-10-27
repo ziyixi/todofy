@@ -2,24 +2,20 @@
  * Bindings, vars and secrets of the Worker "brief" (../../wrangler.toml, ../../docs/design.md §1).
  */
 import type { BriefState } from './state.ts';
+import type { ModelBinding } from '@ziyixi/model-router-client';
 
 /** The name of the single BriefState instance. */
 export const BRIEF_OBJECT = 'brief-v1';
 /** The header the Worker passes its request ID to BriefState in. */
 export const REQUEST_ID_HEADER = 'x-brief-request-id';
 
-/** What the brief needs of the Workers AI binding: one method (the tests replace it with a fake entrypoint). */
-export interface AiRunner {
-  run(model: string, input: Record<string, unknown>): Promise<unknown>;
-}
-
 export interface Env {
   /** The single SQLite-backed object "brief-v1": sources, items, issues, the ledger, costs and the scheduler. */
   readonly BRIEF: DurableObjectNamespace<BriefState>;
   /** The archive UI's static files (web/dist). */
   readonly ASSETS: Fetcher;
-  /** Workers AI, for bge-m3 embeddings only. */
-  readonly AI?: AiRunner;
+  /** Private Model Router binding for generation and embeddings. */
+  readonly MODEL_ROUTER?: ModelBinding;
 
   // vars (committed in ../../wrangler.toml; BUILD_SHA and MODE added at deploy by deploy/deploy-vars.mjs)
   /** The app's host, brief.ziyixi.science: the CSRF Origin, the feedback links' host, and a host never fetched. */
@@ -42,7 +38,6 @@ export interface Env {
   readonly MAIL_TO?: string;
 
   // secrets the owner puts with `wrangler secret put` from their own machine; never in GitHub, kept by every deploy
-  readonly ANTHROPIC_API_KEY?: string;
   readonly RESEND_API_KEY?: string;
 
   // local development and tests only (.dev.vars, ../../wrangler.test.toml, the workerd harness); never in production
@@ -76,11 +71,8 @@ export function buildSha(env: Pick<Env, 'BUILD_SHA'>): string {
   return /^[0-9a-f]{7,40}$|^dev$|^test(-[a-z0-9]{1,16})?$/.test(sha) ? sha : 'dev';
 }
 
-/** The Claude API key, or null when none is set. */
-export function anthropicKey(env: Pick<Env, 'ANTHROPIC_API_KEY'>): string | null {
-  const key = (env.ANTHROPIC_API_KEY ?? '').trim();
-  return key === '' ? null : key;
-}
+/** A binding configures the application transport; ListModels checks the actual model connection. */
+export function modelRouter(env: Pick<Env, 'MODEL_ROUTER'>): ModelBinding | null { return env.MODEL_ROUTER ?? null; }
 
 const ADDRESS = /^(?=[\x21-\x7e ]+$)[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
 const NAMED_ADDRESS = /^[^<>\r\n]{0,80}<[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+>$/;
@@ -129,23 +121,4 @@ export function upstreamFetch(env: Pick<Env, 'DEV_FAKE_UPSTREAM' | 'DEV_AUTH_BYP
     headers.set(ORIGINAL_URL_HEADER, request.url);
     return fetch(new Request(`${origin}${target.pathname}${target.search}`, { method: request.method, headers, body: request.body, redirect: 'manual', signal: request.signal }));
   };
-}
-
-/** The Workers AI runner: the binding, or in local development the loopback fake's `POST /ai/run/<model>`; else null. */
-export function aiRunner(env: Pick<Env, 'AI' | 'DEV_FAKE_UPSTREAM' | 'DEV_AUTH_BYPASS'>, fetcher: typeof fetch = fetch): AiRunner | null {
-  const origin = devUpstream(env);
-  if (origin !== null) {
-    return {
-      async run(model, input) {
-        const response = await fetcher(`${origin}/ai/run/${model}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
-        const body: unknown = await response.json();
-        if (!response.ok) {
-          const message = typeof body === 'object' && body !== null && typeof (body as { error?: unknown }).error === 'string' ? (body as { error: string }).error : 'ai_error';
-          throw new Error(message);
-        }
-        return body;
-      },
-    };
-  }
-  return env.AI ?? null;
 }

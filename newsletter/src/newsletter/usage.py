@@ -1,9 +1,8 @@
 """Provider-reported usage, isolated from model content and durable via a sink.
 
-Codex emits cumulative thread/tokenUsage/updated snapshots. Each execute
-starts a new thread; correction turns reuse it. Replace its total, never add
-snapshots or add cached/reasoning subsets again. SDK turn counts are not counts
-of underlying model requests. Missing or interrupted reports are not zero.
+The router returns per-call counts. Correction calls share one invocation and
+add their distinct final receipts once. Missing/interrupted usage is unknown.
+Historical stored provider labels and invocation IDs remain unchanged.
 """
 
 from __future__ import annotations
@@ -15,6 +14,8 @@ import copy
 import logging
 from typing import cast, Literal, TypedDict
 import uuid
+
+import model_router_client as models
 
 import newsletter.diagnostics as diagnostics
 
@@ -32,10 +33,10 @@ class TokenCounts(TypedDict):
 
 
 class UsageRecord(TypedDict):
-    """Latest cumulative counters and completeness for one Codex invocation."""
+    """Normalized totals and completeness for one model invocation."""
 
     id: str
-    provider: Literal["codex"]
+    provider: Literal["codex", "model_router"]
     model: str
     stage: str
     thread_id: str | None
@@ -61,9 +62,6 @@ UsageSink = Callable[[UsageRecord], None]
 _SCOPE: contextvars.ContextVar[tuple[UsageSink, str] | None] = (
     contextvars.ContextVar("usage_scope", default=None)
 )
-_CODEX: contextvars.ContextVar[CodexUsage | None] = contextvars.ContextVar(
-    "codex_usage", default=None
-)
 _CountField = Literal[
     "input_tokens",
     "cached_input_tokens",
@@ -71,24 +69,13 @@ _CountField = Literal[
     "reasoning_output_tokens",
     "total_tokens",
 ]
-_FIELDS: dict[_CountField, str] = {
-    "input_tokens": "inputTokens",
-    "cached_input_tokens": "cachedInputTokens",
-    "output_tokens": "outputTokens",
-    "reasoning_output_tokens": "reasoningOutputTokens",
-    "total_tokens": "totalTokens",
-}
-
-
-def _counts(value: object) -> TokenCounts | None:
-    if not isinstance(value, dict):
-        return None
-    fields = {name: value.get(wire) for name, wire in _FIELDS.items()}
-    if any(
-        type(n) is not int or not 0 <= n <= 2**63 - 1 for n in fields.values()
-    ):
-        return None
-    return cast(TokenCounts, fields)
+_FIELDS: tuple[_CountField, ...] = (
+    "input_tokens",
+    "cached_input_tokens",
+    "output_tokens",
+    "reasoning_output_tokens",
+    "total_tokens",
+)
 
 
 def _consistent(counts: TokenCounts) -> bool:
@@ -110,15 +97,15 @@ def usage_scope(sink: UsageSink, stage: str) -> Iterator[None]:
         _SCOPE.reset(token)
 
 
-class CodexUsage:
-    """One ephemeral thread, including all its bounded correction turns."""
+class ModelUsage:
+    """One remote context, including its bounded correction calls."""
 
     def __init__(self, model: str) -> None:
         scope = _SCOPE.get()
         self.sink = scope[0] if scope else None
         self.record = UsageRecord(
             id=str(uuid.uuid4()),
-            provider="codex",
+            provider="model_router",
             model=model,
             stage=scope[1] if scope else "unscoped",
             thread_id=None,
@@ -131,8 +118,8 @@ class CodexUsage:
             partial=True,
         )
         self.turn_id: str | None = None
-        self._turn_has_usage = False
         self._gap = False
+        self._seen: set[str] = set()
 
     def _save(self) -> None:
         if self.sink is not None:
@@ -152,7 +139,6 @@ class CodexUsage:
     def start_turn(self) -> None:
         """Persist a new turn attempt before the provider is invoked."""
         self.turn_id = None
-        self._turn_has_usage = False
         self.record["turns_started"] += 1
         self.record["partial"] = True
         self._save()
@@ -163,53 +149,35 @@ class CodexUsage:
         if thread_id is not None:
             self.record["thread_id"] = thread_id
 
-    def observe(self, method: str, payload: object) -> None:
-        """Persist trusted cumulative events and retain gaps as partial usage.
-
-        Malformed, decreasing, or unrelated counters never replace a trusted
-        snapshot. A valid but inconsistent subset is retained with a gap flag.
-        """
-        if not isinstance(payload, dict):
+    def observe_generation(self, generation: models.Generation) -> None:
+        """Add one normalized call once; cached/reasoning remain subsets."""
+        if generation.name in self._seen:
             return
-        if method == "thread/tokenUsage/updated":
-            if (
-                self.turn_id is not None
-                and payload.get("turnId") != self.turn_id
-            ) or (
-                self.record["thread_id"] is not None
-                and payload.get("threadId") != self.record["thread_id"]
-            ):
-                return
-            usage = payload.get("tokenUsage")
-            counts = (
-                _counts(usage.get("total")) if isinstance(usage, dict) else None
+        self._seen.add(generation.name)
+        self.record["turns_completed"] += 1
+        reported = generation.usage
+        if reported is None or not reported.available:
+            self._gap = True
+        else:
+            values = TokenCounts(
+                input_tokens=reported.input_tokens,
+                cached_input_tokens=reported.cached_input_tokens,
+                output_tokens=reported.output_tokens,
+                reasoning_output_tokens=reported.reasoning_output_tokens,
+                total_tokens=reported.total_tokens,
             )
             previous = self.record["usage"]
-            if counts is None or (
-                previous is not None
-                and any(counts[key] < previous[key] for key in _FIELDS)
-            ):
-                # Retain the last trusted snapshot, but never claim completeness
-                # after malformed data, a counter reset, or protocol drift.
-                self._gap = True
-                self.record["partial"] = True
-                self._save()
-                return
-            if not _consistent(counts):
-                # Preserve provider-reported totals verbatim, flag inconsistent
-                # subsets instead of manufacturing a replacement total.
-                self._gap = True
-            self.record["usage"] = counts
+            self.record["usage"] = cast(
+                TokenCounts,
+                {
+                    key: values[key] + (previous[key] if previous else 0)
+                    for key in _FIELDS
+                },
+            )
             self.record["usage_events"] += 1
-            if not self._turn_has_usage:
-                self.record["turns_with_usage"] += 1
-                self._turn_has_usage = True
-            self._save()
-        elif method == "turn/completed":
-            self.record["turns_completed"] += 1
-            if not self._turn_has_usage:
-                self._gap = True
-            self._save()
+            self.record["turns_with_usage"] += 1
+            self._gap |= not _consistent(values)
+        self._save()
 
     def finish(self, success: bool) -> None:
         """Persist invocation completion without inventing missing counters."""
@@ -226,26 +194,15 @@ class CodexUsage:
 
 
 @contextlib.contextmanager
-def codex_usage(model: str) -> Iterator[CodexUsage]:
+def model_usage(model: str) -> Iterator[ModelUsage]:
     """Track one invocation and finalize its partial state on interruption."""
-    usage = CodexUsage(model)
-    token = _CODEX.set(usage)
+    usage = ModelUsage(model)
     success = False
     try:
         yield usage
         success = True
     finally:
-        try:
-            usage.finish(success)
-        finally:
-            _CODEX.reset(token)
-
-
-def observe_codex_usage(method: str, payload: object) -> None:
-    """Route a provider notification to this task's active usage tracker."""
-    usage = _CODEX.get()
-    if usage is not None:
-        usage.observe(method, payload)
+        usage.finish(success)
 
 
 def summarize_usage(records: Sequence[UsageRecord]) -> UsageSummary:
@@ -341,6 +298,6 @@ def usage_footer(
     if summary["partial"] or not consistent:
         detail += "；部分用量，未含未返回用量的调用"
     return (
-        f"Codex 已记录 {usage['total_tokens']:,} tokens（{detail}）"
+        f"模型已记录 {usage['total_tokens']:,} tokens（{detail}）"
         " · Todofy/Gemini 用量未计入。"
     )

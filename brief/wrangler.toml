@@ -73,6 +73,13 @@ new_sqlite_classes = ["BriefState"]
 [ai]
 binding = "AI"
 
+# Authenticated per-caller inference over the shared private ModelService.
+[[services]]
+binding = "MODEL_ROUTER"
+service = "model-router"
+entrypoint = "Inference"
+props = { app = "brief" }
+
 [vars]
 # The app's host: the only origin a mutation may come from (CSRF), the feedback links' host, and a zone never fetched.
 PUBLIC_HOST = "brief.ziyixi.science"

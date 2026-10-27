@@ -56,24 +56,24 @@ describe('the dry run of a shadow weekday', () => {
     const [policy, profile] = await Promise.all([readFile(join(CONFIG, 'policy.md'), 'utf8'), readFile(join(CONFIG, 'profile.md'), 'utf8')]);
     for (const request of h.claude.requests) {
       const body = request.body;
-      expect(body['stream']).toBe(true);
-      expect(body['messages']).toHaveLength(1);
+      expect(body).not.toHaveProperty('stream');
+      expect(typeof body['input']).toBe('string');
       for (const key of ['thinking', 'temperature', 'top_p', 'top_k']) expect(body).not.toHaveProperty(key);
-      expect((body['output_config'] as { format: { type: string } }).format.type).toBe('json_schema');
+      expect(JSON.parse(String(body['outputSchemaJson']))).toMatchObject({ type: 'object' });
       const opus = request.step !== 'gate' && request.step !== 'entail';
-      expect(body['model']).toBe(opus ? 'claude-opus-5-5' : 'claude-haiku-5-5');
-      expect(body['fallbacks']).toBe(opus ? 'default' : undefined);
-      expect((body['output_config'] as { effort: string }).effort).toBe({ gate: 'low', entail: 'low', pick: 'medium' }[request.step as string] ?? 'high');
+      expect(body['model']).toBe(opus ? 'models/claude-opus-5-5' : 'models/claude-haiku-5-5');
+      expect((body['parameters'] as { allowFallback: boolean }).allowFallback).toBe(opus);
+      expect((body['parameters'] as { effort: string }).effort).toBe({ gate: 'low', entail: 'low', pick: 'medium' }[request.step as string] ?? 'high');
     }
     // The writer's frozen prefix, policy.md then profile.md, ends in the one breakpoint; its own rules follow uncached.
     for (const step of ['write', 'repair']) {
-      const system = h.claude.requests.find((request) => request.step === step)?.body['system'] as { text: string; cache_control?: unknown }[];
-      expect(system[0]).toEqual({ type: 'text', text: `${policy.trim()}\n\n${profile.trim()}`, cache_control: { type: 'ephemeral' } });
-      expect(system[1]?.cache_control).toBeUndefined();
+      const system = h.claude.requests.find((request) => request.step === step)?.body['instructions'] as { text: string; cache?: boolean }[];
+      expect(system[0]).toEqual(expect.objectContaining({ text: `${policy.trim()}\n\n${profile.trim()}`, cache: true }));
+      expect(system[1]?.cache).toBe(false);
     }
     // The repair got the overstated item with its code and the offending number.
-    const repair = h.claude.requests.find((request) => request.step === 'repair')?.body['messages'] as { content: string }[];
-    expect(repair[0]?.content).toContain('number_unsupported (paragraph 1): 3');
+    const repair = h.claude.requests.find((request) => request.step === 'repair')?.body['input'] ?? '';
+    expect(repair).toContain('number_unsupported (paragraph 1): 3');
     const [run] = await h.sql<{ step: string; error_code: string }>(`SELECT step, error_code FROM runs WHERE issue = ?`, ISSUE);
     expect(run).toEqual({ step: 'done', error_code: '' });
     expect(alarms.some((alarm) => alarm.code === 'repaired')).toBe(true);

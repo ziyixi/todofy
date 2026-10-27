@@ -182,7 +182,7 @@ def test_a_backup_from_before_the_planning_store_restores_into_it(tmp_path):
     then = [
         table._replace(columns=table.columns[:7]) if table is sql.SUMMARIES else table
         for table in sql.TABLES.values()
-        if not table.name.startswith("plan_")
+        if not table.name.startswith("plan_") and table.name != "model_settings"
     ]
     then += [backed_up(old, name) for name in ("plus_settings", "plus_weeks")]
     backup_of(old, tmp_path, schema_version=before[-1].name, release=then)
@@ -203,7 +203,9 @@ def test_a_backup_from_before_the_briefs_restores_them_as_never_derived(tmp_path
     old = database(migrations=before)
     seed(old)
     then = [
-        table._replace(columns=table.columns[:-1]) if table is sql.SUMMARIES else table for table in sql.TABLES.values()
+        table._replace(columns=table.columns[:-1]) if table is sql.SUMMARIES else table
+        for table in sql.TABLES.values()
+        if table.name != "model_settings"
     ]
     backup_of(old, tmp_path, schema_version=before[-1].name, release=then)
     write_sql(tmp_path, tmp_path / "restore.sql", legacy_text=True)
@@ -252,7 +254,12 @@ def test_retired_tables_restore_until_a_migration_drops_them(tmp_path, monkeypat
     old.execute("INSERT INTO plan_settings VALUES ('week', '{\"current\":\"2026-09-28\"}', 1)")
     planning = [backed_up(old, name) for name in PLANNING]
     copied = [backed_up(old, name) for name in COPIED]
-    release = [*sql.TABLES.values(), *copied, *planning, *IDLE_PLUS]
+    release = [
+        *[table for table in sql.TABLES.values() if table.name != "model_settings"],
+        *copied,
+        *planning,
+        *IDLE_PLUS,
+    ]
     backup_of(old, tmp_path, schema_version=before[-1].name, release=release)
     # A checkout before 0012 restores them like every other table. Its 0011 drops plan_task_state, then renames the
     # rebuilt copy back: the table stays.

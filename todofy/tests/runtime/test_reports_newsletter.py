@@ -12,7 +12,7 @@ from typing import Any
 import httpx
 import pytest
 
-from tests.fakes.gemini_fake import GeminiFake, error_reply, text_reply
+from tests.fakes.model_router_fake import ModelRouterFake, error_reply, text_reply
 from tests.runtime.conftest import pipeline_vars
 from tests.runtime.harness import Worker, start_gateway
 from tests.runtime.owner_support import assert_contract
@@ -24,7 +24,7 @@ from tests.runtime.reports_support import (  # noqa: F401
     digest,
     probe_fixture,
 )
-from todofy.core import gemini_wire, prompts
+from todofy.core import model_input, prompts
 from todofy.core.report_schema import EMPTY_WINDOW_SUMMARY
 
 HOUR = 3600
@@ -41,7 +41,7 @@ def auth_failures(worker: Worker) -> int | None:
 
 
 def start_newsletter(
-    tmp_path_factory: pytest.TempPathFactory, gemini: GeminiFake, digests: str | None
+    tmp_path_factory: pytest.TempPathFactory, gemini: ModelRouterFake, digests: str | None
 ) -> Iterator[Worker]:
     """A fresh gateway and core: the failure count and the gateway's lock last an hour."""
     variables = pipeline_vars(gemini)
@@ -52,7 +52,7 @@ def start_newsletter(
 
 
 @pytest.fixture(name="newsletter")
-def newsletter_fixture(tmp_path_factory: pytest.TempPathFactory, gemini: GeminiFake) -> Iterator[Worker]:
+def newsletter_fixture(tmp_path_factory: pytest.TempPathFactory, gemini: ModelRouterFake) -> Iterator[Worker]:
     yield from start_newsletter(tmp_path_factory, gemini, f"{digest(*NEWSLETTER)},{digest(*ROTATED)}")
 
 
@@ -98,7 +98,7 @@ def stored_summary(text: str = "旧的日报") -> dict[str, Any]:
     }
 
 
-def test_missing_or_wrong_credentials_are_401_and_counted(newsletter: Worker, gemini: GeminiFake):
+def test_missing_or_wrong_credentials_are_401_and_counted(newsletter: Worker, gemini: ModelRouterFake):
     for auth in (None, ("newsletter", "wrong")):
         response = newsletter.hooks.get("/api/summary", auth=auth)
         assert response.status_code == 401
@@ -161,7 +161,7 @@ def test_summary_is_computed_on_demand_then_served_from_the_stored_row(probe):
     assert call.system == prompts.SUMMARY_RANGE
     assert call.response_schema is None
     report_input = prompts.report_input(["报税截止 10 月 15 日", "护照下周到期"])
-    assert call.user == gemini_wire.user_turn(report_input)
+    assert call.user == model_input.user_turn(report_input)
 
     assert get(probe, "/api/summary").json() == first
     assert len(probe.gemini.calls()) == 1

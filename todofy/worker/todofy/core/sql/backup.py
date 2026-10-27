@@ -136,6 +136,7 @@ TABLES = {
         AUTH_FAILURES,
         DAILY_METRICS,
         LEGACY_MAIL_TEXT,
+        Table("model_settings", ("id", "email_model", "report_model", "version"), ("id",), 1),
     )
 }
 

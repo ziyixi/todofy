@@ -244,18 +244,18 @@ def test_ownership_retains_lock_inode_and_releases_after_exception(tmp_path):
             {"PRIVATE_IMPORT"},
         ),
         (
-            "import newsletter._codex_runtime",
-            "src/newsletter/codex_runtime.py",
-            set(),
+            "import newsletter._removed_runtime",
+            "src/newsletter/model_client.py",
+            {"PRIVATE_IMPORT"},
         ),
         (
-            "import newsletter._codex_runtime",
-            "tests/test_codex_runtime.py",
-            set(),
+            "import newsletter._removed_runtime",
+            "tests/test_model_client.py",
+            {"PRIVATE_IMPORT"},
         ),
         (
             "import newsletter._other",
-            "tests/test_codex_runtime.py",
+            "tests/test_model_client.py",
             {"PRIVATE_IMPORT"},
         ),
         (

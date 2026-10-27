@@ -40,7 +40,7 @@ from todofy.core.report_schema import (
     summary_report,
 )
 from todofy.core.sql import reports as sql
-from todofy.runtime import gemini, metrics
+from todofy.runtime import metrics, model, model_settings
 from todofy.runtime.config import flag, integer, report_default_top, var
 from todofy.runtime.http import Result, failed, ok
 from todofy.runtime.interop import now_ms
@@ -309,14 +309,15 @@ async def _generate(
     used = reserved  # if the call dies midway, keep the whole reservation counted
     started = now_ms()
     try:
-        result = await gemini.generate(
+        result = await model.generate(
             env,
             system=system,
             user=user,
             deadline_ms=started + budget_ms,
+            model=(await model_settings.get(env)).report_model,
             response_schema=None if kind == SUMMARY else recommendation_response_schema(top_n),
         )
-        used = result.tokens
+        used = result.tokens if result.usage_available else reserved
     finally:
         coordinator.settle_tokens(reserved, used, now)
     coordinator.record_step(metrics.gemini_point(Step.REPORT, result, now_ms() - started), now)

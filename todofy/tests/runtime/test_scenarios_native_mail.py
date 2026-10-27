@@ -3,7 +3,7 @@ entry (test_mail_entry.py)."""
 
 import pytest
 
-from tests.fakes.gemini_fake import GeminiFake
+from tests.fakes.model_router_fake import ModelRouterFake
 from tests.runtime.conftest import Launch
 from tests.runtime.harness import Worker, mail_event, transitions
 
@@ -14,7 +14,7 @@ def worker(launch: Launch) -> Worker:
 
 
 def test_a_summary_is_stored_without_a_task_and_a_duplicate_arrival_changes_nothing(
-    worker: Worker, fresh_gemini: GeminiFake
+    worker: Worker, fresh_gemini: ModelRouterFake
 ) -> None:
     event_id, body = mail_event(subject="Synthetic native Mail only")
     assert worker.post_event(body).status_code == 204

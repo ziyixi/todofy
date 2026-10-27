@@ -24,8 +24,8 @@ from todofy.core.metrics import Step, StepPoint
 from todofy.core.sql import metrics as sql
 from todofy.core.vocab import EventState
 from todofy.runtime.config import source_id
-from todofy.runtime.gemini import GeminiResult
 from todofy.runtime.interop import to_js
+from todofy.runtime.model import ModelResult
 
 DO_SCHEMA = (
     # Counters of days not yet written to D1, by UTC day of the event.
@@ -64,7 +64,7 @@ MAX_API_DAYS = 90
 MAX_KEYS_PER_DAY = 16
 
 
-def gemini_point(step: Step, result: GeminiResult, upstream_ms: int) -> StepPoint:
+def gemini_point(step: Step, result: ModelResult, upstream_ms: int) -> StepPoint:
     verdict = result.verdict
     return StepPoint(
         step,

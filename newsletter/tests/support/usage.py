@@ -1,8 +1,9 @@
-"""Shared offline usage builders and fakes."""
+"""Synthetic normalized model receipts shared by usage tests."""
 
-from __future__ import annotations
+import uuid
 
-import newsletter.types as types
+import model_router_client as models
+
 import newsletter.usage as newsletter_usage
 
 
@@ -12,52 +13,32 @@ def notification(
     cached: int = 60,
     reasoning: int = 10,
     **extra: object,
-) -> types.Payload:
-    """Build cumulative SDK usage, allowing malformed wire-field overrides."""
-    counts = {
-        "inputTokens": input_tokens,
-        "cachedInputTokens": cached,
-        "outputTokens": output_tokens,
-        "reasoningOutputTokens": reasoning,
-        "totalTokens": input_tokens + output_tokens,
-        **extra,
-    }
-    return {
-        "threadId": "thread-test",
-        "turnId": "turn-test",
-        "tokenUsage": {
-            "total": counts,
-            "last": counts,
-            "modelContextWindow": 200000,
-        },
-    }
-
-
-def observe(payload: types.Payload | None = None) -> None:
-    """Submit a synthetic token-usage update to the active recorder."""
-    newsletter_usage.observe_codex_usage(
-        "thread/tokenUsage/updated", payload or notification()
-    )
-
-
-def complete() -> None:
-    """Mark the synthetic recorder turn completed."""
-    newsletter_usage.observe_codex_usage(
-        "turn/completed", {"turn": {"id": "turn-test", "status": "completed"}}
+) -> models.Generation:
+    """Build one provider-neutral final usage receipt."""
+    return models.Generation(
+        name="requests/" + str(uuid.uuid4()),
+        state="succeeded",
+        usage=models.Usage(
+            available=True,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cached_input_tokens=cached,
+            reasoning_output_tokens=reasoning,
+            total_tokens=input_tokens + output_tokens,
+        ),
     )
 
 
 def record_one(
-    payload: types.Payload | None = None,
+    payload: models.Generation | None = None,
 ) -> list[newsletter_usage.UsageRecord]:
-    """Capture one synthetic invocation through the real usage sink."""
+    """Capture one synthetic invocation through the real durable sink."""
     records: list[newsletter_usage.UsageRecord] = []
     with (
         newsletter_usage.usage_scope(records.append, "research:synthetic"),
-        newsletter_usage.codex_usage("fixture-model") as usage,
+        newsletter_usage.model_usage("fixture-model") as usage,
     ):
         usage.start_turn()
-        usage.bind_turn("thread-test", "turn-test")
-        observe(payload)
-        complete()
+        usage.bind_turn("conversations/fixture", "request-test")
+        usage.observe_generation(payload or notification())
     return records

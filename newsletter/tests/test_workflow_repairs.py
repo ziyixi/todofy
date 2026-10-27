@@ -133,7 +133,7 @@ def test_stored_repair_is_reported_as_a_continuation(source, tmp_path):
     pipeline = newsletter_workflow_pipeline.DagPipeline(
         runs,
         tmp_path / "jobs",
-        editor=newsletter_editor.CodexEditor(tmp_path / "unused-auth"),
+        editor=newsletter_editor.ModelEditor(tmp_path / "unused-auth"),
     )
     workflow = pipeline.receipt(run["id"])["workflow"]
     assert workflow["id"] == "daily-newsletter"

@@ -13,6 +13,7 @@ COPY codex-gateway/pyproject.toml ./codex-gateway/pyproject.toml
 COPY platform/pyproject.toml ./platform/pyproject.toml
 COPY todofy/pyproject.toml ./todofy/pyproject.toml
 COPY proto/python/pyproject.toml ./proto/python/pyproject.toml
+COPY packages/model-router-client/python/pyproject.toml ./packages/model-router-client/python/pyproject.toml
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --package personal-codex-gateway --no-dev --no-install-workspace
 

@@ -58,6 +58,7 @@ ZONES = (load_profile(REPO)["zone"],)
 
 # Each deploy-vars wrapper: language, file, and which Worker gets its vars and its secrets (per mode for Todofy).
 WRAPPERS = {
+    "model-router": {"language": "js", "file": "model-router/tools/deploy-vars.mjs", "vars": "model-router", "secrets": "model-router"},
     "mail-hero": {"language": "js", "file": "mail-hero/deploy/deploy-vars.mjs", "vars": "mail-hero", "secrets": "mail-hero"},
     "dashboard": {"language": "js", "file": "dashboard/deploy/deploy-vars.mjs", "vars": "home", "secrets": "home"},
     "links": {"language": "js", "file": "links/deploy/deploy-vars.mjs", "vars": "links", "secrets": "links"},

@@ -19,11 +19,11 @@ SUMMARY_GIVE_UP_ATTEMPTS = 12
 SUMMARY_RETRY_WINDOW = 7 * DAY
 MAX_RETRY_AFTER = DAY
 SUMMARY_CRASH_LIMIT = 3
-WATCHDOG = 2 * MINUTE
+WATCHDOG = 7 * MINUTE
 
 GEMINI_MODEL_TIMEOUT = 60
-GEMINI_STEP_BUDGET = 90
-REPORT_ON_DEMAND_BUDGET = 40
+GEMINI_STEP_BUDGET = 180
+REPORT_ON_DEMAND_BUDGET = 180
 
 # Outages and quota heal with time, so they get the week-long window; a
 # rejected request is retried only up to the attempt floor.

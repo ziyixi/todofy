@@ -13,7 +13,7 @@
 | 采集、整期状态流转 | `collection/`、`workflow/pipeline.py` | 不绕过冻结的证据/投递策略或直接发送 |
 | 选题采编、独立审校 | `workflow/story_editor.py`、`story_nodes.py` | 不把私有事件交给公开研究 |
 | 版本/checkpoint、确定性拼版 | `workflow/publication.py` | 不将未审内容或被明确撤回的版本自动提升为已核实 |
-| SDK调用、离线演示总编 | `editor.py` | 不把旧整期HOLD重新施加到新选题流程 |
+| 统一模型调用、离线演示总编 | `editor.py` | 不把旧整期HOLD重新施加到新选题流程 |
 | 模型结构、JSON和工作目录 | `model_schema.py`、`model_io.py` | 不从另一个角色的 schema 内层取字段，不借用其私有 helper |
 | 邮件、预览、图表 | `rendering.py`、`templates/`、`charts.py` | 不让排版依赖 HTTP app，不执行模型 HTML |
 | 供应商、事务与队列 | `adapters.py`、`todofy.py`、`store.py`、`worker.py` | 不为未来假设的后端建立通用框架 |
@@ -77,7 +77,7 @@ schema、模板安全与冻结配置校验仍留在各自调用边界。
 
 GitHub wheel URL 属于 `tool.uv.sources`，不是 PyPI 索引。只把 newsletter wheel 交给普通 `pip install`，无法自动发现这个仅在 GitHub 发布的依赖；部署使用本仓库的 `uv.lock`。安装包 smoke 会先从同一锁导出带 hash 的依赖并安装，再在源码目录外安装 newsletter wheel，验证真实分包边界。
 
-移动渲染逻辑时，在同一环境保留改动前的 HTML/text/PNG/hash 并逐字比较；字体差异意味着跨系统 PNG hash 不宜硬编码成统一 golden。模型流程重构同时比较提示词、SDK 参数和 schema 字段顺序，不能只看新代码自己的测试是否通过。
+移动渲染逻辑时，在同一环境保留改动前的 HTML/text/PNG/hash 并逐字比较；字体差异意味着跨系统 PNG hash 不宜硬编码成统一 golden。模型流程重构同时比较提示词、公共模型参数和 schema 字段顺序，不能只看新代码自己的测试是否通过。
 
 源码与资源在 src/，回归在 tests/，可重复运行的验证工具在 scripts/。本机缓存、dist、demo 和一次性对比证据只进被忽略的 `.artifacts/`；保留一个 `.venv`。凭据、登录缓存、真实服务数据与预览使用仓库和同步盘之外的私有目录。不要把临时调查脚本提升为长期工具，除非确实需要重复运行。
 

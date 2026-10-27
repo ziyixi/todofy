@@ -242,7 +242,7 @@ def main(payload: ProbeInput) -> None:
                 "source_files_exact": len(payload["source_hashes"]),
                 "proto_version": metadata.version("ziyixi-protos"),
                 "production_distributions": len(list(metadata.distributions())),
-                "real_codex_startups": 2,
+                "model_router_client_checks": 2,
                 "mock_http": "ready/preview",
                 "mail_files": 0,
                 "external_network": False,

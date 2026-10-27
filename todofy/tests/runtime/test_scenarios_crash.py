@@ -8,14 +8,14 @@ import time
 
 import pytest
 
-from tests.fakes.gemini_fake import GeminiFake
+from tests.fakes.model_router_fake import ModelRouterFake
 from tests.fakes.server import Reply
 from tests.runtime.conftest import Launch
 from tests.runtime.harness import Worker, mail_event
 from todofy.core.backoff import SUMMARY_CRASH_LIMIT
 
 # Long upstream deadlines keep every call in flight until the process dies.
-SLOW = {"GEMINI_TIMEOUT_MS": "60000"}
+SLOW = {"MODEL_TIMEOUT_MS": "60000"}
 
 
 @pytest.fixture(scope="module")
@@ -29,7 +29,7 @@ def _restart_and_wake(worker: Worker) -> None:
 
 
 @pytest.mark.reaches("processing_interrupted_limit")
-def test_three_interrupted_summaries_stop_automatic_retries(worker: Worker, fresh_gemini: GeminiFake) -> None:
+def test_three_interrupted_summaries_stop_automatic_retries(worker: Worker, fresh_gemini: ModelRouterFake) -> None:
     for _ in range(SUMMARY_CRASH_LIMIT):
         fresh_gemini.queue_generate(Reply(hang=True))
     event_id, body = mail_event()

@@ -26,12 +26,7 @@ _EXTERNAL_MODULES = frozenset(
         "fastapi.testclient",
     }
 )
-# This bootstrap runs under -I without package imports; only its public
-# composition module and dedicated launch-boundary tests may bridge into it.
-_PRIVATE_BRIDGES = {
-    "src/newsletter/codex_runtime.py": {"newsletter._codex_runtime"},
-    "tests/test_codex_runtime.py": {"newsletter._codex_runtime"},
-}
+_PRIVATE_BRIDGES: dict[str, set[str]] = {}
 
 
 @dataclasses.dataclass(frozen=True)

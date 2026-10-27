@@ -91,7 +91,7 @@ describe('budget and health pages', () => {
   it('shows Gemini usage and no Todoist window', async () => {
     mockApi({})
     renderApp('/budget')
-    const gemini = await screen.findByRole('region', { name: 'Gemini' })
+    const gemini = await screen.findByRole('region', { name: '模型用量' })
     expect(within(gemini).getByRole('meter', { name: '今日 token' })).toHaveAttribute('aria-valuenow', String(181_233 + 4096))
     expect(gemini).toHaveTextContent('gemini-3.8-flash')
     expect(screen.queryByRole('region', { name: 'Todoist' })).not.toBeInTheDocument()
@@ -102,7 +102,7 @@ describe('budget and health pages', () => {
     const reportsModels = overview().gemini!.models!
     mockApi({ 'GET /api/v1/serviceStatus': overview({ gemini: { ...overview().gemini, email_models: emailModels } }) })
     renderApp('/budget')
-    const gemini = await screen.findByRole('region', { name: 'Gemini' })
+    const gemini = await screen.findByRole('region', { name: '模型用量' })
     const orders = within(gemini).getAllByRole('list')
     expect(within(gemini).getByText('逐封邮件摘要模型顺序')).toBeInTheDocument()
     expect(within(gemini).getByText('日报与推荐模型顺序')).toBeInTheDocument()
@@ -117,7 +117,7 @@ describe('budget and health pages', () => {
   it('shows an old response without an email chain as unavailable', async () => {
     mockApi({})
     renderApp('/budget')
-    const gemini = await screen.findByRole('region', { name: 'Gemini' })
+    const gemini = await screen.findByRole('region', { name: '模型用量' })
     const emailFact = within(gemini).getByText('逐封邮件摘要模型顺序').parentElement!
     expect(emailFact).toHaveTextContent('未提供')
     expect(within(emailFact).queryByRole('list')).not.toBeInTheDocument()
@@ -150,7 +150,7 @@ describe('setup page', () => {
     const secrets = screen.getByRole('region', { name: '密钥与配置' })
     expect(within(secrets).queryByText('TODOIST_API_KEY')).not.toBeInTheDocument()
     expect(within(secrets).queryByText('TODOIST_DEFAULT_PROJECT_ID')).not.toBeInTheDocument()
-    expect(within(secrets).getByText('GEMINI_API_KEY').closest('li')).toHaveTextContent('已配置')
+    expect(within(secrets).getByText('MODEL_ROUTER').closest('li')).toHaveTextContent('已配置')
   })
 })
 

@@ -51,16 +51,20 @@ renamed_classes = [{ from = "TodofyCoordinator", to = "TodofyCore" }]
 binding = "METRICS"
 dataset = "todofy_metrics"
 
+# Authenticated per-caller inference over the shared private ModelService.
+[[services]]
+binding = "MODEL_ROUTER"
+service = "model-router"
+entrypoint = "Inference"
+props = { app = "todofy" }
+
 [vars]
 # A fixed upstream, never a variable, so a bad setting cannot send the API key elsewhere (tests pin it).
-GEMINI_API_BASE = "https://generativelanguage.googleapis.com"
 # Home's tile links to the owner UI on this host (the gateway's TODOFY_PUBLIC_HOST).
 TODOFY_PUBLIC_HOST = "todofy.ziyixi.science"
 # The mail.received.v1 source this consumer accepts.
 MAIL_SOURCE_ID = "mail-hero-personal"
 # Gemini models, tried in order (at most 5).
-GEMINI_MODELS = "gemini-3.8-flash,gemini-3.7-flash,gemini-3.5-flash-lite"
-GEMINI_EMAIL_MODELS = "gemini-3.5-flash-lite,gemini-3.8-flash,gemini-3.7-flash"
 GEMINI_DAILY_TOKEN_BUDGET = "3000000"
 REPORT_DEFAULT_TOP = "10"
 REPORT_PRECOMPUTE_UTC = "13:30"

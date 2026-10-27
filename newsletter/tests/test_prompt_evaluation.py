@@ -88,8 +88,8 @@ def no_network(monkeypatch):
 
 @pytest.fixture
 def harness(tmp_path):
-    codex_home = tmp_path / "dedicated-auth"
-    codex_home.mkdir(mode=0o700)
+    private_auth = tmp_path / "codex-auth"
+    private_auth.mkdir(mode=0o700)
     state = types.SimpleNamespace(
         calls=[], constructors=[], replies=[], progress=[]
     )
@@ -103,16 +103,11 @@ def harness(tmp_path):
             state.calls.append((prompt, schema, instructions, workspace))
             assert state.replies, "No hidden retries or unexpected model calls"
             print("private-diagnostic-sentinel")
-            with newsletter_usage.codex_usage(self.model) as usage:
+            with newsletter_usage.model_usage(self.model) as usage:
                 usage.start_turn()
                 usage.bind_turn("thread-test", "turn-test")
-                usage.observe(
-                    "thread/tokenUsage/updated",
-                    tests_support_usage.notification(),
-                )
-                usage.observe(
-                    "thread/tokenUsage/updated",
-                    tests_support_usage.notification(150, 30, cached=90),
+                usage.observe_generation(
+                    tests_support_usage.notification(150, 30, cached=90)
                 )
                 response = state.replies.pop(0)
                 if isinstance(response, BaseException):
@@ -120,13 +115,12 @@ def harness(tmp_path):
                 if response == "wait":
                     await asyncio.sleep(30)
                     pytest.fail("Timeout did not cancel the model task")
-                usage.observe("turn/completed", {"turn": {"id": "turn-test"}})
                 return response
 
     async def run(cases=None, **overrides):
         kwargs = {
             "output": tmp_path / "results",
-            "codex_home": codex_home,
+            "client": state.client,
             "allow_model_calls": True,
             "editor_factory": FakeEditor,
             "progress": state.progress.append,
@@ -137,7 +131,8 @@ def harness(tmp_path):
         )
 
     state.run = run
-    state.home = codex_home
+    state.home = private_auth
+    state.client = object()
     state.output = tmp_path / "results"
     return state
 
@@ -217,7 +212,7 @@ async def test_case_inputs_outputs_latest_usage_and_private_modes_are_durable(
     assert len(harness.calls) == 2
     assert len({call[-1] for call in harness.calls}) == 2
     assert all(
-        home == harness.home and model == "gpt-6.1-sol" and timeout == 300
+        home == harness.client and model == "models/sol-6-1" and timeout == 300
         for home, model, timeout in harness.constructors
     )
     # Cumulative 120 -> 180 snapshots replace one another, never sum to 300.
@@ -409,9 +404,9 @@ async def test_existing_production_correction_recorded_not_hidden_as_one_turn(
             pass
 
         async def execute(self, *args):
-            with newsletter_usage.codex_usage("fixture-model") as usage:
+            with newsletter_usage.model_usage("fixture-model") as usage:
                 for index, (input_tokens, output_tokens) in enumerate(
-                    [(100, 20), (250, 50)], 1
+                    [(100, 20), (150, 30)], 1
                 ):
                     turn_id = f"turn-{index}"
                     usage.start_turn()
@@ -419,9 +414,7 @@ async def test_existing_production_correction_recorded_not_hidden_as_one_turn(
                     event = tests_support_usage.notification(
                         input_tokens, output_tokens
                     )
-                    event["turnId"] = turn_id
-                    usage.observe("thread/tokenUsage/updated", event)
-                    usage.observe("turn/completed", {"turn": {"id": turn_id}})
+                    usage.observe_generation(event)
             return selection_reply(), set(), False
 
     result = await harness.run(editor_factory=CorrectionEditor)
@@ -460,8 +453,6 @@ def test_cli_does_not_read_suite_or_env_before_explicit_opt_in(
                 str(tmp_path / "missing.json"),
                 "--output",
                 str(tmp_path / "output"),
-                "--codex-home",
-                str(tmp_path / "auth"),
             ]
         )
     assert error.value.code == 2
@@ -500,14 +491,13 @@ def test_cli_uses_only_explicit_configuration_not_environment_or_dotenv(
                 str(suite),
                 "--output",
                 str(tmp_path / "output"),
-                "--codex-home",
-                str(tmp_path / "explicit-auth"),
                 "--allow-model-calls",
             ]
         )
         == 0
     )
-    assert received[0]["codex_home"] == tmp_path / "explicit-auth"
+    assert "client" not in received[0]
     assert (
-        received[0]["model"] == "gpt-6.1-sol" and received[0]["timeout"] == 300
+        received[0]["model"] == "models/sol-6-1"
+        and received[0]["timeout"] == 300
     )

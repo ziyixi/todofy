@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from tests.fakes.gemini_fake import GeminiFake
+from tests.fakes.model_router_fake import ModelRouterFake
 from tests.runtime.conftest import Launch
 from tests.runtime.harness import AUTH, HOOKS_HOST, Worker, mail_event, reason
 
@@ -27,7 +27,9 @@ def _arrive(worker: Worker) -> str:
 
 
 @pytest.mark.reaches("llm_budget_exhausted")
-def test_an_exhausted_token_budget_defers_every_event_to_the_next_day(launch: Launch, fresh_gemini: GeminiFake) -> None:
+def test_an_exhausted_token_budget_defers_every_event_to_the_next_day(
+    launch: Launch, fresh_gemini: ModelRouterFake
+) -> None:
     worker = launch(GEMINI_DAILY_TOKEN_BUDGET="100")
     events = [_arrive(worker) for _ in range(2)]
 
@@ -44,7 +46,7 @@ def test_an_exhausted_token_budget_defers_every_event_to_the_next_day(launch: La
 
 @pytest.mark.reaches("maintenance", "MAINTENANCE")
 def test_maintenance_refuses_mail_and_owner_writes_and_stops_the_alarm(
-    launch: Launch, fresh_gemini: GeminiFake
+    launch: Launch, fresh_gemini: ModelRouterFake
 ) -> None:
     worker = launch(MAINTENANCE_MODE="true")
     event_id, _ = mail_event()
@@ -67,7 +69,7 @@ def test_maintenance_refuses_mail_and_owner_writes_and_stops_the_alarm(
     assert int(response.headers["retry-after"]) > 0
 
 
-def test_processing_paused_accepts_mail_but_does_no_work(launch: Launch, fresh_gemini: GeminiFake) -> None:
+def test_processing_paused_accepts_mail_but_does_no_work(launch: Launch, fresh_gemini: ModelRouterFake) -> None:
     worker = launch(PROCESSING_PAUSED="true")
     event_id = _arrive(worker)
 

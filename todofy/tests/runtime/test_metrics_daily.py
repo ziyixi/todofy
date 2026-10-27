@@ -17,7 +17,7 @@ import pytest
 from ziyixi_proto.todofy.ui.v1 import todofy_ui_service_pb as pb
 
 from tests import mail_contract
-from tests.fakes.gemini_fake import GeminiFake
+from tests.fakes.model_router_fake import ModelRouterFake
 from tests.runtime.harness import Worker, mail_event, transitions, wait_until
 from tests.runtime.owner_support import assert_message, assert_status
 
@@ -54,7 +54,7 @@ def _patch_object(worker: Worker, *statements: tuple[str, tuple[object, ...]]) -
     worker.start()
 
 
-def test_a_finished_day_is_written_once_and_served(worker: Worker, fresh_gemini: GeminiFake) -> None:
+def test_a_finished_day_is_written_once_and_served(worker: Worker, fresh_gemini: ModelRouterFake) -> None:
     # The first alarm starts counting at the newest transition and forgets its partial day.
     _complete_one_mail(worker)
     # Count the whole ledger from here on, and hold the flush while the next mail runs.
@@ -119,7 +119,7 @@ def test_neighbouring_paths_are_not_found(worker: Worker, path: str) -> None:
     assert worker.owner.get(path).status_code == 404
 
 
-def test_a_failing_counter_write_never_fails_the_step(worker: Worker, fresh_gemini: GeminiFake) -> None:
+def test_a_failing_counter_write_never_fails_the_step(worker: Worker, fresh_gemini: ModelRouterFake) -> None:
     _complete_one_mail(worker)  # the object and its storage exist from here on
     # Every insert into the object's step counters fails, as with a full object storage.
     _patch_object(
@@ -153,7 +153,7 @@ def test_a_failing_counter_write_never_fails_the_step(worker: Worker, fresh_gemi
 
 @pytest.mark.parametrize("new_mail", [True, False], ids=["ids_reused", "ids_lower"])
 def test_a_restored_database_restarts_counting_instead_of_writing_zeros(
-    worker: Worker, fresh_gemini: GeminiFake, new_mail: bool
+    worker: Worker, fresh_gemini: ModelRouterFake, new_mail: bool
 ) -> None:
     _complete_one_mail(worker)  # the object and its storage exist from here on
     # Hold the flush while the mails run.

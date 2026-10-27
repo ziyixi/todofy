@@ -10,7 +10,7 @@
  * Without embeddings (the quota, the cap, Home's guard) items deduplicate by key only, each world story is its own
  * cluster, the hold-back is by key only, and a refused research candidate stays unscored. Pure but for `embed`.
  */
-import type { AiRunner } from './env.ts';
+import { createModelClient, type ModelBinding } from '@ziyixi/model-router-client';
 import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, NEURONS_PER_M_TOKENS } from './limits.ts';
 import { estimateTokens } from './prices.ts';
 
@@ -32,11 +32,6 @@ export class AiError extends Error {
   }
 }
 
-export function isQuotaError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
-  return /\b4006\b|daily free allocation|neurons|quota/i.test(message);
-}
-
 /** The neurons an embedding call of `texts` is estimated to cost (from the input's length). */
 export function embeddingNeurons(texts: readonly string[]): number {
   const tokens = texts.reduce((sum, text) => sum + estimateTokens(text), 0);
@@ -44,19 +39,17 @@ export function embeddingNeurons(texts: readonly string[]): number {
 }
 
 /** Unit vectors of `texts` (one batched bge-m3 call) and the estimated neurons. */
-export async function embed(ai: AiRunner, texts: readonly string[]): Promise<{ vectors: Float32Array[]; neurons: number }> {
-  let answer: unknown;
-  try {
-    answer = await ai.run(EMBEDDING_MODEL, { text: [...texts] });
-  } catch (error) {
-    if (isQuotaError(error)) throw new AiQuotaError();
-    throw new AiError('embedding_unavailable');
-  }
-  const data = (answer as { data?: unknown } | null)?.data;
-  if (!Array.isArray(data) || data.length !== texts.length) throw new AiError('embedding_bad_answer');
+export async function embed(ai: ModelBinding, texts: readonly string[]): Promise<{ vectors: Float32Array[]; neurons: number }> {
+  let answer;
+  try { answer = await createModelClient(ai).embed({ requestId: crypto.randomUUID(), model: EMBEDDING_MODEL, inputs: [...texts] }); }
+  catch { throw new AiError('embedding_unavailable'); }
+  if (answer.error?.reason === 'MODEL_QUOTA') throw new AiQuotaError();
+  if (answer.error) throw new AiError('embedding_unavailable');
+  const data = answer.vectors.map(vector => vector.values);
+  if (data.length !== texts.length) throw new AiError('embedding_bad_answer');
   const vectors = data.map((row) => {
     if (!Array.isArray(row) || row.length !== EMBEDDING_DIMENSIONS || !row.every((value) => typeof value === 'number' && Number.isFinite(value))) throw new AiError('embedding_bad_answer');
-    return unit(Float32Array.from(row as number[]));
+    return unit(Float32Array.from(row));
   });
   return { vectors, neurons: embeddingNeurons(texts) };
 }

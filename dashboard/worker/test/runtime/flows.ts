@@ -10,6 +10,7 @@
  */
 import { expect } from 'vitest';
 import personalMcpOk from '../fixtures/personal-mcp-ok.json';
+import modelRouterOk from '../fixtures/model-router-ok.json';
 import type { GuardState, OpsStatus } from '@ziyixi/proto/ops/v1/ops_wire';
 import type { CanaryRun, CsrfResponse, OverallLevel, Usage, ViewId } from '../../src/api-types.ts';
 import type { AppDetail, CloudflareView, OpsView } from '../../src/api-types.ts';
@@ -177,12 +178,12 @@ export async function startFlows(
     },
   });
   let csrf: { token: string; cookie: string } | null = null;
-  const pending: Record<StubApp, { app: StubApp; method: string; args: unknown[] }[]> = { 'mail-hero': [], todofy: [], watch: [], fleet: [], newsletter: [], 'codex-gateway': [], 'notion-publish': [], mailsort: [], recall: [], brief: [], tasks: [], 'personal-mcp': [] };
+  const pending: Record<StubApp, { app: StubApp; method: string; args: unknown[] }[]> = { 'mail-hero': [], todofy: [], watch: [], fleet: [], newsletter: [], 'codex-gateway': [], 'notion-publish': [], mailsort: [], recall: [], brief: [], tasks: [], 'personal-mcp': [], 'model-router': [] };
   const drain = async (app: StubApp) => {
     pending[app].push(...(await harness.calls(app)));
     return pending[app].splice(0);
   };
-  const scenarios: Record<StubApp, Record<string, StubAnswer>> = { 'mail-hero': {}, todofy: {}, watch: {}, fleet: {}, newsletter: {}, 'codex-gateway': {}, 'notion-publish': {}, mailsort: {}, recall: {}, brief: {}, tasks: {}, 'personal-mcp': {} };
+  const scenarios: Record<StubApp, Record<string, StubAnswer>> = { 'mail-hero': {}, todofy: {}, watch: {}, fleet: {}, newsletter: {}, 'codex-gateway': {}, 'notion-publish': {}, mailsort: {}, recall: {}, brief: {}, tasks: {}, 'personal-mcp': {}, 'model-router': {} };
   const flows: FlowHarness = {
     ...harness,
     analytics,
@@ -231,7 +232,7 @@ export async function startFlows(
           items: [...digestItems, ...ops.attention.info].map(({ source, code, severity }) => ({ source, code, severity })),
         },
         observed: ops.attention.items.flatMap((item) => (item.observed === undefined ? [] : [{ source: item.source, code: item.code, level: item.observed }])),
-        apps: { 'mail-hero': app('mail-hero'), todofy: app('todofy'), watch: app('watch'), fleet: app('fleet'), newsletter: app('newsletter'), 'codex-gateway': app('codex-gateway'), 'notion-publish': app('notion-publish'), mailsort: app('mailsort'), recall: app('recall'), brief: app('brief'), tasks: app('tasks'), 'personal-mcp': app('personal-mcp') },
+        apps: { 'mail-hero': app('mail-hero'), todofy: app('todofy'), watch: app('watch'), fleet: app('fleet'), newsletter: app('newsletter'), 'codex-gateway': app('codex-gateway'), 'notion-publish': app('notion-publish'), mailsort: app('mailsort'), recall: app('recall'), brief: app('brief'), tasks: app('tasks'), 'personal-mcp': app('personal-mcp'), 'model-router': app('model-router') },
         usage: cloudflare.usage,
         guard: ops.guard,
         canary: ops.canary,
@@ -279,7 +280,7 @@ export async function startFlows(
 
 /** A status built from the app's `-ok` fixture with `patch`, checked with the contract's rules before use. */
 export async function status(app: StubApp, patch: Partial<OpsStatus> = {}): Promise<OpsStatus> {
-  const base = (app === 'personal-mcp' ? personalMcpOk : await fixture(`OpsStatus/${app}-ok.json`)) as OpsStatus;
+  const base = (app === 'model-router' ? modelRouterOk : app === 'personal-mcp' ? personalMcpOk : await fixture(`OpsStatus/${app}-ok.json`)) as OpsStatus;
   const value = { ...base, ...patch };
   expect(contractErrors('OpsStatus', value)).toEqual([]);
   return value;

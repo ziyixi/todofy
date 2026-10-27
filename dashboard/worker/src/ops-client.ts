@@ -178,9 +178,10 @@ export const CALLED_METHODS = {
   brief: ['status', 'setGuard'],
   tasks: ['status', 'setGuard'],
   'personal-mcp': ['status', 'setGuard'],
+  'model-router': ['status', 'setGuard'],
 } as const;
 
-type Bindings = Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'CODEX_GATEWAY' | 'WEBSITE_SYNC' | 'MAILSORT' | 'RECALL' | 'BRIEF' | 'TASKS' | 'PERSONAL_MCP' | 'TASK_INBOX'>;
+type Bindings = Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'CODEX_GATEWAY' | 'WEBSITE_SYNC' | 'MAILSORT' | 'RECALL' | 'BRIEF' | 'TASKS' | 'PERSONAL_MCP' | 'MODEL_ROUTER' | 'TASK_INBOX'>;
 
 function missing(): Promise<never> {
   return Promise.reject(new MissingBinding('not_configured'));
@@ -198,13 +199,14 @@ export function opsStatus(env: Bindings, app: OpsApp): Promise<OpsCall<ops.OpsSt
     if (app === 'recall') return (env.RECALL as Bindings['RECALL'] | undefined)?.status() ?? missing();
     if (app === 'brief') return (env.BRIEF as Bindings['BRIEF'] | undefined)?.status() ?? missing();
     if (app === 'tasks') return (env.TASKS as Bindings['TASKS'] | undefined)?.status() ?? missing();
+    if (app === 'model-router') return env.MODEL_ROUTER?.status() ?? missing();
     if (app === 'personal-mcp') return (env.PERSONAL_MCP as Bindings['PERSONAL_MCP'] | undefined)?.status() ?? missing();
     return (env.TODOFY as Bindings['TODOFY'] | undefined)?.status() ?? missing();
   }, asStatus(app));
 }
 
 export async function opsSetGuard(env: Bindings, app: OpsApp, input: ops.SetGuardInput): Promise<OpsCall<ops.GuardState>> {
-  if (app === 'fleet' || app === 'newsletter' || app === 'codex-gateway' || app === 'notion-publish' || app === 'recall' || app === 'tasks' || app === 'personal-mcp') return refused;
+  if (app === 'fleet' || app === 'newsletter' || app === 'codex-gateway' || app === 'notion-publish' || app === 'recall' || app === 'tasks' || app === 'personal-mcp' || app === 'model-router') return refused;
   const args = encode(OpsService.method.setGuard, [input]);
   if (args === null) return refused;
   const sent = args[0] as ops.SetGuardInput;

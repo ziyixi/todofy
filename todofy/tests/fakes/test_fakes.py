@@ -6,7 +6,7 @@ from collections.abc import Iterator
 import httpx
 import pytest
 
-from tests.fakes.gemini_fake import API_KEY, GeminiFake, error_reply, model_path, text_reply
+from tests.fakes.model_router_fake import GENERATE_PATH, ModelRouterFake, error_reply
 from tests.fakes.server import (
     PASS,
     FakeServer,
@@ -16,7 +16,11 @@ from tests.fakes.server import (
     retry_after_seconds,
 )
 
-GEMINI_KEY = {"x-goog-api-key": API_KEY}
+MODEL_BODY = {
+    "request_id": "00000000-0000-4000-8000-000000000000",
+    "config": {"model": "models/gemini-email", "instructions": [{"text": "system prompt"}]},
+    "input": "mail body",
+}
 
 
 @pytest.fixture
@@ -27,8 +31,8 @@ def fake() -> Iterator[FakeServer]:
 
 
 @pytest.fixture
-def gemini() -> Iterator[GeminiFake]:
-    server = GeminiFake()
+def gemini() -> Iterator[ModelRouterFake]:
+    server = ModelRouterFake()
     yield server
     server.close()
 
@@ -132,47 +136,20 @@ def test_admin_endpoints_control_the_fake_over_http(fake: FakeServer) -> None:
     assert httpx.post(f"{fake.url}/admin/nope").status_code == 404
 
 
-def test_gemini_checks_the_api_key_and_records_the_request(gemini: GeminiFake) -> None:
-    url = gemini.url + model_path("model-a")
-    assert httpx.post(url, json={}).status_code == 401
-    body = {
-        "systemInstruction": {"parts": [{"text": "system prompt"}]},
-        "contents": [{"role": "user", "parts": [{"text": "mail body"}]}],
-        "generationConfig": {
-            "responseMimeType": "application/json",
-            "responseSchema": {"type": "ARRAY", "maxItems": 2},
-        },
-    }
-    response = httpx.post(url, json=body, headers=GEMINI_KEY).json()
-
-    items = response["candidates"][0]["content"]["parts"][0]["text"]
-    assert [item["rank"] for item in httpx.Response(200, content=items).json()] == [1, 2]
-    assert response["usageMetadata"]["totalTokenCount"] > 0
-    unauthorized, call = gemini.calls("model-a")
-    assert unauthorized.api_key is None
-    assert (call.api_key, call.system, call.user) == (API_KEY, "system prompt", "mail body")
-    assert (call.response_mime_type, call.response_schema) == ("application/json", {"type": "ARRAY", "maxItems": 2})
+def test_model_router_records_common_wire_and_normalized_usage(gemini: ModelRouterFake) -> None:
+    response = httpx.post(gemini.url + GENERATE_PATH, json=MODEL_BODY).json()
+    assert response["state"] == "succeeded"
+    assert response["usage"]["available"] and response["usage"]["total_tokens"] > 0
+    call = gemini.calls()[0]
+    assert (call.requested_model, call.system, call.user) == ("models/gemini-email", "system prompt", "mail body")
 
 
-def test_gemini_default_summary_and_count_tokens(gemini: GeminiFake) -> None:
-    body = {"contents": [{"parts": [{"text": "x" * 400}]}]}
-    summary = httpx.post(gemini.url + model_path("m"), json=body, headers=GEMINI_KEY).json()
-    assert summary["candidates"][0]["content"]["parts"][0]["text"].startswith("合成摘要")
-    counted = httpx.post(gemini.url + model_path("m", "countTokens"), json=body, headers=GEMINI_KEY).json()
-    assert counted["totalTokens"] == summary["usageMetadata"]["totalTokenCount"]
-
-
-def test_gemini_queues_per_model_before_any_model(gemini: GeminiFake) -> None:
+def test_model_router_queues_normalized_errors_before_default(gemini: ModelRouterFake) -> None:
     gemini.queue_generate(error_reply(429, retry_after_seconds(5)))
-    gemini.queue_generate(text_reply("for b", tokens=7), model="model-b")
-
-    b = httpx.post(gemini.url + model_path("model-b"), json={}, headers=GEMINI_KEY)
-    a = httpx.post(gemini.url + model_path("model-a"), json={}, headers=GEMINI_KEY)
-    again = httpx.post(gemini.url + model_path("model-a"), json={}, headers=GEMINI_KEY)
-
-    assert b.json()["usageMetadata"]["totalTokenCount"] == 7
-    assert (a.status_code, a.headers["retry-after"], a.json()["error"]["status"]) == (429, "5", "RESOURCE_EXHAUSTED")
-    assert again.status_code == 200
+    response = httpx.post(gemini.url + GENERATE_PATH, json=MODEL_BODY).json()
+    assert response["error"]["reason"] == "MODEL_QUOTA"
+    assert response["error"]["retry_after_seconds"] == 5
+    assert httpx.post(gemini.url + GENERATE_PATH, json=MODEL_BODY).json()["state"] == "succeeded"
 
 
 def test_applied_reply_runs_the_route_but_answers_differently(counter: Counter) -> None:

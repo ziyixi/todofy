@@ -69,14 +69,15 @@ describe('classification provider settings and status', () => {
       ('codex_error', 'codex_503'), ('codex_last_request_at', ?), ('codex_last_success_at', ?), ('next_model_at', ?)`,
     JSON.stringify({ classificationProvider: 'codex' }), String(T0), String(T0 - HOUR), String(T0 + HOUR));
     await h.sql(`INSERT INTO claude_usage (day, requests, input_tokens, output_tokens, cost_micros) VALUES ('2026-10-01', 1, 500, 100, 20000000)`);
+    h.up.codex.configured = false;
     const status = await h.api.getServiceStatus({ name: 'serviceStatus' });
     expect(status).toMatchObject({
-      decisionModel: 'gpt-6.1-sol',
+      decisionModel: 'models/sol-6-1',
       classifier: {
-        provider: ClassificationProvider.CODEX, model: 'gpt-6.1-sol', effort: 'medium', configured: false,
+        provider: ClassificationProvider.CODEX, model: 'models/sol-6-1', effort: 'medium', configured: false,
         nextBatchTime: timestampFromMs(T0 + HOUR), lastSuccessTime: timestampFromMs(T0 - HOUR),
       },
-      claudeBudget: { model: 'claude-opus-5-5', spentUsd: 20, providerLimitReached: true, lastErrorCode: 'claude_spend_limit' },
+      claudeBudget: { model: 'models/claude-opus-5-5', spentUsd: 20, providerLimitReached: true, lastErrorCode: 'claude_spend_limit' },
     });
     expect(status.classifier?.lastErrorCode).not.toBe('claude_spend_limit');
     expect(status.claudeBudget?.nextBatchTime).toBeUndefined();
@@ -87,28 +88,20 @@ describe('classification provider settings and status', () => {
   it('does not interpret a historical request timestamp as a successful answer', async () => {
     await h.sql(`INSERT INTO meta (key, value) VALUES ('claude_last_request_at', ?), ('claude_error', 'claude_invalid')`, String(T0));
     const status = await h.api.getServiceStatus({ name: 'serviceStatus' });
-    expect(status.classifier).toMatchObject({ provider: ClassificationProvider.CLAUDE, model: 'claude-opus-5-5', effort: 'medium', configured: true, lastErrorCode: 'claude_invalid' });
+    expect(status.classifier).toMatchObject({ provider: ClassificationProvider.CLAUDE, model: 'models/claude-opus-5-5', effort: 'medium', configured: true, lastErrorCode: 'claude_invalid' });
     expect(status.classifier?.lastSuccessTime).toBeUndefined();
     expect(status.claudeBudget?.lastRequestTime).toEqual(timestampFromMs(T0));
   });
 });
 
-it.each([
-  { url: 'https://codex.example.net/classify', token: 'synthetic-codex-token', configured: true },
-  { url: 'http://codex.example.net/classify', token: 'synthetic-codex-token', configured: false },
-  { url: 'not-a-url', token: 'synthetic-codex-token', configured: false },
-  { url: 'https://codex.example.net/classify', token: '', configured: false },
-])('reports Codex configuration ($url, configured=$configured) without a network check', async ({ url, token, configured }) => {
-  const h = await startHarness({ bindings: { CODEX_ENDPOINT_URL: url, CODEX_ENDPOINT_TOKEN: token } });
+it.each([true, false])('reports Router catalog configuration (%s) without a model call', async configured => {
+  const h = await startHarness();
   try {
+    h.up.codex.configured = configured;
     await h.sql(`INSERT INTO meta (key, value) VALUES ('settings', '{"classificationProvider":"codex"}')`);
     const status = await h.api.getServiceStatus({ name: 'serviceStatus' });
     expect(status.classifier).toMatchObject({ provider: ClassificationProvider.CODEX, configured, lastErrorCode: configured ? '' : 'codex_not_configured' });
     expect(h.up.gmail.calls).toHaveLength(0);
-    expect(h.up.claude.calls).toHaveLength(0);
-    if (token !== '') expect(JSON.stringify(status)).not.toContain(token);
-    expect(JSON.stringify(status)).not.toContain(url);
-  } finally {
-    await h.dispose();
-  }
+    expect(h.up.codex.calls).toHaveLength(0);
+  } finally { await h.dispose(); }
 });

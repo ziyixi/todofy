@@ -33,11 +33,11 @@ import { create, type DescMessage, type JsonValue, type MessageShape } from '@zi
 import { EmptySchema, timestampFromMs, timestampMs } from '@ziyixi/proto/protobuf/wkt';
 import { RpcError } from '@ziyixi/proto/rpc-status';
 import { fromWire, toWire } from '@ziyixi/proto/wire-json';
-import type { ModeName } from './env.ts';
+import { modelRouterBinding, type ModeName } from './env.ts';
 import { ClassificationPromptSchema } from '@ziyixi/proto/mailsort/ui/v2/prompt_pb';
 import { classificationPromptMessage, readClassificationPrompt, saveClassificationPrompt, validClassificationPrompt } from './classification-prompt.ts';
-import { CLASSIFICATION_EFFORT, CODEX_MODEL, codexEndpoint } from './classifier-config.ts';
-import { CLAUDE_MODEL } from './claude.ts';
+import { CLASSIFICATION_EFFORT, CODEX_MODEL, CLAUDE_MODEL, CLASSIFIER_MODELS } from './classifier-config.ts';
+import { createModelClient, type ModelBinding } from '@ziyixi/model-router-client';
 import { deleteExample, deleteExamplesOfLabel } from './examples.ts';
 import { setVerdict } from './feedback.ts';
 import { FLOW_RANGES, readFlow } from './flow.ts';
@@ -80,9 +80,9 @@ export interface ApiContext {
   readonly build: string;
   readonly ceiling: ModeName;
   readonly env: Parameters<typeof authState>[1] & {
-    readonly ANTHROPIC_API_KEY?: string;
-    readonly CODEX_ENDPOINT_URL?: string;
-    readonly CODEX_ENDPOINT_TOKEN?: string;
+    readonly MODEL_ROUTER?: ModelBinding;
+    readonly DEV_FAKE_UPSTREAM?: string;
+    readonly DEV_AUTH_BYPASS?: string;
   };
   readonly transact: <T>(fn: () => T) => T;
   /** Brings the alarm forward (a new mode, a rebuild, a write left for a retry). */
@@ -402,9 +402,13 @@ const CLASSIFICATION_PROVIDERS: Readonly<Record<ClassificationProviderName, Clas
   codex: ClassificationProvider.CODEX,
 };
 
-function classifierConfigured(provider: ClassificationProviderName, env: ApiContext['env']): boolean {
-  if (provider === 'claude') return (env.ANTHROPIC_API_KEY ?? '').trim() !== '';
-  return codexEndpoint(env) !== null;
+async function configuredModels(env: ApiContext['env']): Promise<ReadonlySet<string>> {
+  const binding = modelRouterBinding(env);
+  if (!binding) return new Set();
+  try {
+    const { models } = await createModelClient(binding).listModels({});
+    return new Set(models.filter(model => model.configured).map(model => model.name));
+  } catch { return new Set(); }
 }
 
 function settingsMessage(ctx: ApiContext, value: SettingsValue): Settings {
@@ -997,7 +1001,8 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
     const nextBatch = Number(store.getMeta('next_model_at') ?? 0);
     const provider = settings.classificationProvider;
     const model = provider === 'codex' ? CODEX_MODEL : CLAUDE_MODEL;
-    const configured = classifierConfigured(provider, ctx.env);
+    const connections = await configuredModels(ctx.env);
+    const configured = connections.has(CLASSIFIER_MODELS[provider]);
     const lastSuccess = Number(store.getMeta(`${provider}_last_success_at`) ?? 0);
     return create(ServiceStatusSchema, {
       name: 'serviceStatus',
@@ -1035,7 +1040,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
         ...(claude.thinking_tokens === null ? {} : { thinkingTokens: claude.thinking_tokens }),
         ...(lastRequest > 0 ? { lastRequestTime: timestampFromMs(lastRequest) } : {}),
         ...(provider === 'claude' && Number.isFinite(nextBatch) && nextBatch > 0 ? { nextBatchTime: timestampFromMs(nextBatch) } : {}),
-        lastErrorCode: store.getMeta('claude_error') ?? (classifierConfigured('claude', ctx.env) ? '' : 'claude_not_configured'),
+        lastErrorCode: store.getMeta('claude_error') ?? (connections.has(CLAUDE_MODEL) ? '' : 'claude_not_configured'),
         providerLimitReached: store.getMeta('claude_limited_month') === month,
       },
       codexUsage: {

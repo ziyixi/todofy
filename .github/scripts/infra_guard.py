@@ -42,6 +42,7 @@ ALLOWED_TYPES = frozenset({
     "cloudflare_zero_trust_access_policy",
     "cloudflare_d1_database",
     "cloudflare_r2_bucket",
+    "cloudflare_r2_bucket_lifecycle",
     "cloudflare_zero_trust_access_service_token",
     "cloudflare_zero_trust_tunnel_cloudflared",
     "cloudflare_zero_trust_tunnel_cloudflared_config",
@@ -51,6 +52,7 @@ ALLOWED_TYPES = frozenset({
 })
 # New network resources are scoped by address as well as type. No unrelated DNS or tunnel is managed.
 PLATFORM_OBJECTS = frozenset({
+    "cloudflare_r2_bucket_lifecycle.model_router_request_bodies",
     "cloudflare_zero_trust_access_service_token.codex_gateway",
     "cloudflare_zero_trust_access_service_token.platform_deploy",
     "cloudflare_zero_trust_tunnel_cloudflared.platform",

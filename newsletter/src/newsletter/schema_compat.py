@@ -6,9 +6,8 @@ general (notably uniqueItems) need not be supported by the model endpoint. Keep
 semantic validation in the parsers. Updating this allowlist requires an opt-in
 live acceptance probe; never silently strip unfamiliar schema constraints.
 
-Reference: https://developers.openai.com/api/docs/guides/structured-outputs
-The deployed ChatGPT-auth endpoint also accepts minLength and maxLength.
-This was verified with the exact production writer schema on 2026-09-06.
+The application keeps its existing schema vocabulary and semantic validators.
+Provider-specific schema translation and acceptance belong to the router.
 """
 
 from typing import Literal
@@ -97,9 +96,9 @@ def validate_output_schema(schema: types.Payload) -> None:
 def production_output_schemas() -> dict[str, types.Payload]:
     """Enumerate every model operation the service can still request.
 
-    Imports are local because StoryEditor itself uses CodexEditor. Nonempty
+    Imports are local because StoryEditor itself uses ModelEditor. Nonempty
     identifiers exercise dynamic enum and citation-pattern construction; the
-    actual request is independently checked by CodexEditor.execute.
+    actual request is independently checked by ModelEditor.execute.
     """
     # Break the documented schema catalog -> editor -> validator import cycle.
     import newsletter.workflow.schema as newsletter_workflow_schema  # noqa: PLC0415

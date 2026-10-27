@@ -22,7 +22,7 @@ on:
         description: App to check and (on main) deploy
         type: choice
         # both = Todofy and Mail Hero (as before the dashboard existed); all = every app.
-        options: [both, all, todofy, mail-hero, dashboard, website, links, watch, newsletter, fleet, platform, codex-gateway, mailsort, recall, brief, tasks, personal-mcp]
+        options: [both, all, todofy, mail-hero, dashboard, website, links, watch, newsletter, fleet, platform, codex-gateway, mailsort, recall, brief, tasks, personal-mcp, model-router]
         default: both
       resume_vps_release:
         description: Explicitly resume a held VPS release after investigating its safe error
@@ -68,6 +68,8 @@ jobs:
       recall_check: ${{ steps.decide.outputs.recall_check }}
       brief_check: ${{ steps.decide.outputs.brief_check }}
       tasks_check: ${{ steps.decide.outputs.tasks_check }}
+      model_router_check: ${{ steps.decide.outputs.model_router_check }}
+      model_router_deploy: ${{ steps.decide.outputs.model_router_deploy }}
       personal_mcp_check: ${{ steps.decide.outputs.personal_mcp_check }}
       personal_mcp_deploy: ${{ steps.decide.outputs.personal_mcp_deploy }}
       tasks_deploy: ${{ steps.decide.outputs.tasks_deploy }}
@@ -488,6 +490,19 @@ jobs:
       - name: Run fleet-checks steps
         uses: ./.github/actions/check-fleet
 
+  model-router-checks:
+    name: Model Router checks
+    needs: changes
+    if: needs.changes.outputs.model_router_check == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run Model Router checks
+        uses: ./.github/actions/check-model-router
+
   personal-mcp-checks:
     name: Personal MCP checks
     needs: changes
@@ -632,7 +647,7 @@ jobs:
 
   gate:
     name: CI gate
-    needs: [changes, shared-packages, todofy-static, todofy-runtime, todofy-checks, mail-hero-checks, dashboard-checks, website-checks, tasks-checks, links-checks, watch-checks, fleet-checks, mailsort-checks, recall-checks, brief-checks, newsletter-checks, newsletter-image, platform-checks, codex-gateway-checks, personal-mcp-checks, contracts, infra-checks, proto-checks]
+    needs: [changes, shared-packages, todofy-static, todofy-runtime, todofy-checks, mail-hero-checks, dashboard-checks, website-checks, tasks-checks, links-checks, watch-checks, fleet-checks, mailsort-checks, recall-checks, brief-checks, newsletter-checks, newsletter-image, platform-checks, codex-gateway-checks, personal-mcp-checks, model-router-checks, contracts, infra-checks, proto-checks]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -651,6 +666,7 @@ jobs:
           LINKS: ${{ needs.links-checks.result }}
           WATCH: ${{ needs.watch-checks.result }}
           FLEET: ${{ needs.fleet-checks.result }}
+          MODEL_ROUTER: ${{ needs.model-router-checks.result }}
           PERSONAL_MCP: ${{ needs.personal-mcp-checks.result }}
           MAILSORT: ${{ needs.mailsort-checks.result }}
           RECALL: ${{ needs.recall-checks.result }}
@@ -677,7 +693,7 @@ jobs:
           for pair in "Changes=$CHANGES" "Shared packages=$PACKAGES" "Todofy static checks=$TODOFY_STATIC" \
             "Todofy runtime=$TODOFY_RUNTIME" "Todofy checks=$TODOFY" "Mail Hero checks=$MAIL_HERO" \
             "Dashboard checks=$DASHBOARD" "Website checks=$WEBSITE" "Links checks=$LINKS" "Watch checks=$WATCH" "Fleet checks=$FLEET" "Mailsort checks=$MAILSORT" \
-            "Tasks checks=$TASKS" "Recall checks=$RECALL" "Brief checks=$BRIEF" "Personal MCP checks=$PERSONAL_MCP" \
+            "Tasks checks=$TASKS" "Recall checks=$RECALL" "Brief checks=$BRIEF" "Personal MCP checks=$PERSONAL_MCP" "Model Router checks=$MODEL_ROUTER" \
             "Newsletter checks=$NEWSLETTER" "Newsletter image checks=$NEWSLETTER_IMAGE" "Platform checks=$PLATFORM" "Codex gateway checks=$CODEX_GATEWAY" \
             "Contracts=$CONTRACTS" "Infra checks=$INFRA" "Proto checks=$PROTO"; do
             echo "$pair"
@@ -820,7 +836,7 @@ jobs:
 
   vps-deploy:
     name: VPS deploy
-    needs: [changes, platform-checks, newsletter-deploy, platform-image, vps-bootstrap-bundle, fleet-deploy, gate]
+    needs: [changes, platform-checks, newsletter-deploy, platform-image, vps-bootstrap-bundle, fleet-deploy, gate, model-router-deploy]
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
@@ -832,6 +848,7 @@ jobs:
           && needs.newsletter-deploy.result == 'success' && needs.platform-image.result == 'success'
           && needs.vps-bootstrap-bundle.result == 'success'))
       && (needs.fleet-deploy.result == 'success' || needs.fleet-deploy.result == 'skipped')
+      && (needs.model-router-deploy.result == 'success' || needs.model-router-deploy.result == 'skipped')
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
@@ -865,7 +882,7 @@ jobs:
 
   codex-gateway-deploy:
     name: Codex gateway deploy
-    needs: [changes, codex-gateway-checks, codex-gateway-image, vps-deploy, fleet-deploy, gate]
+    needs: [changes, codex-gateway-checks, codex-gateway-image, fleet-deploy, gate]
     if: >-
       ${{ !cancelled() && needs.changes.result == 'success'
       && (needs.codex-gateway-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.codex-gateway-checks.result == 'skipped'))
@@ -873,7 +890,6 @@ jobs:
           && needs.codex-gateway-image.result == 'skipped')
         || (!(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release)
           && needs.codex-gateway-image.result == 'success'))
-      && (needs.vps-deploy.result == 'success' || needs.vps-deploy.result == 'skipped')
       && (needs.fleet-deploy.result == 'success' || needs.fleet-deploy.result == 'skipped')
       && needs.gate.result == 'success' && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
@@ -909,7 +925,7 @@ jobs:
     name: Todofy deploy
     # Every Todofy job, named here even though "Todofy checks" already requires the other two. Before Tasks: Tasks
     # binds Todofy's Mail entry, which Todofy serves first.
-    needs: [changes, todofy-static, todofy-runtime, todofy-checks, gate]
+    needs: [changes, todofy-static, todofy-runtime, todofy-checks, gate, model-router-deploy]
     # Keep the status function and the results explicit. "gate" needs Mail Hero checks (and Dashboard checks),
     # which are skipped when only Todofy changed; a bare condition gets an implicit success() that looks at the whole needs
     # chain, sees that skipped job and skips this deploy too (actions/runner#491, #2205).
@@ -921,6 +937,7 @@ jobs:
       && (needs.todofy-static.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.todofy-static.result == 'skipped'))
       && (needs.todofy-runtime.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.todofy-runtime.result == 'skipped'))
       && (needs.todofy-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.todofy-checks.result == 'skipped'))
+      && (needs.model-router-deploy.result == 'success' || needs.model-router-deploy.result == 'skipped')
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
@@ -960,12 +977,13 @@ jobs:
     # After the app deploys: the service bindings MAIL_HERO, TODOFY, WATCH, FLEET, MAILSORT, RECALL and BRIEF name their "Ops"
     # entrypoints, which must be live first. An app deploy that did not run (nothing of that app changed) is fine; one that
     # failed or was cancelled stops this job.
-    needs: [changes, dashboard-checks, gate, todofy-deploy, mail-hero-deploy, watch-deploy, fleet-deploy, mailsort-deploy, recall-deploy, brief-deploy, tasks-deploy, website-relay-deploy, personal-mcp-deploy]
+    needs: [changes, dashboard-checks, gate, todofy-deploy, mail-hero-deploy, watch-deploy, fleet-deploy, mailsort-deploy, recall-deploy, brief-deploy, tasks-deploy, website-relay-deploy, personal-mcp-deploy, model-router-deploy]
     # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
       && (needs.dashboard-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.dashboard-checks.result == 'skipped'))
+      && (needs.model-router-deploy.result == 'success' || needs.model-router-deploy.result == 'skipped')
       && needs.gate.result == 'success'
       && (needs.todofy-deploy.result == 'success' || needs.todofy-deploy.result == 'skipped')
       && (needs.mail-hero-deploy.result == 'success' || needs.mail-hero-deploy.result == 'skipped')
@@ -1061,12 +1079,13 @@ jobs:
 
   mailsort-deploy:
     name: Mailsort deploy
-    needs: [changes, mailsort-checks, gate]
+    needs: [changes, mailsort-checks, gate, model-router-deploy]
     # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
       && (needs.mailsort-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.mailsort-checks.result == 'skipped'))
+      && (needs.model-router-deploy.result == 'success' || needs.model-router-deploy.result == 'skipped')
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
@@ -1193,12 +1212,13 @@ jobs:
   # yet, so Home's deploy does not wait for this job.
   brief-deploy:
     name: Brief deploy
-    needs: [changes, brief-checks, gate]
+    needs: [changes, brief-checks, gate, model-router-deploy]
     # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
       && (needs.brief-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.brief-checks.result == 'skipped'))
+      && (needs.model-router-deploy.result == 'success' || needs.model-router-deploy.result == 'skipped')
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
@@ -1230,6 +1250,27 @@ jobs:
     uses: ./.github/workflows/worker-release.yml
     with:
       app: fleet
+      source_sha: ${{ github.sha }}
+    secrets: inherit
+
+  model-router-deploy:
+    name: Model Router deploy
+    needs: [changes, model-router-checks, gate, codex-gateway-deploy]
+    if: >-
+      ${{ !cancelled()
+      && needs.changes.result == 'success'
+      && (needs.model-router-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.model-router-checks.result == 'skipped'))
+      && (needs.codex-gateway-deploy.result == 'success' || needs.codex-gateway-deploy.result == 'skipped')
+      && needs.gate.result == 'success'
+      && github.ref == 'refs/heads/main'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && needs.changes.outputs.model_router_deploy == 'true' }}
+    permissions:
+      contents: read
+      deployments: write
+    uses: ./.github/workflows/worker-release.yml
+    with:
+      app: model-router
       source_sha: ${{ github.sha }}
     secrets: inherit
 

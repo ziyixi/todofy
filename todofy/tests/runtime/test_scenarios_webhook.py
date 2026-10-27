@@ -6,7 +6,7 @@ import time
 import pytest
 
 from tests import mail_contract
-from tests.fakes.gemini_fake import GeminiFake
+from tests.fakes.model_router_fake import ModelRouterFake
 from tests.runtime.harness import PREVIOUS_WEBHOOK_TOKEN, WEBHOOK_TOKEN, Worker, error_code, mail_event, sha256_hex
 
 FIXTURES = mail_contract.fixtures()
@@ -99,7 +99,7 @@ def test_every_shape_mail_hero_emits_is_accepted(worker: Worker, name: str) -> N
     assert worker.post_event(body).status_code == 204
 
 
-def test_a_replay_of_an_imported_row_is_acknowledged_without_new_work(worker: Worker, gemini: GeminiFake) -> None:
+def test_a_replay_of_an_imported_row_is_acknowledged_without_new_work(worker: Worker, gemini: ModelRouterFake) -> None:
     event_id, body = mail_event()
     old = int(time.time()) - 30 * 86400
     worker.d1(

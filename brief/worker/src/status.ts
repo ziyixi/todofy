@@ -6,7 +6,7 @@
 import { Mode, ServiceStatus_KeyState, ServiceStatusSchema, type ServiceStatus } from '@ziyixi/proto/brief/ui/v1/status_pb';
 import { create } from '@ziyixi/proto/protobuf';
 import { daySpend, monthSpend, rejectedState } from './claude.ts';
-import { anthropicKey, mailSettings, mode, type Env } from './env.ts';
+import { modelRouter, mailSettings, mode, type Env } from './env.ts';
 import { healthCounts, type HealthCounts } from './health.ts';
 import { KEY_STATES, MODES, time } from './model.ts';
 import type { Registry } from './registry.ts';
@@ -44,7 +44,7 @@ export function statusNumbers(store: Store, registry: Registry, env: Env, now: n
   return {
     mode: mode(env),
     paused: settings.paused,
-    keyState: anthropicKey(env) === null ? 'not_configured' : rejected === null ? 'ok' : 'rejected',
+    keyState: modelRouter(env) === null || store.getMeta('model_configured') === '0' ? 'not_configured' : rejected === null ? 'ok' : 'rejected',
     rejectedStatus: rejected?.status ?? 0,
     rejectedType: rejected?.type ?? '',
     mailConfigured: mailSettings(env) !== null,

@@ -674,19 +674,15 @@ def test_real_service_restart_keeps_frozen_gate(tmp_path):
 
 
 @pytest.mark.parametrize("cleanup_error", [RuntimeError, TimeoutError])
-async def test_sdk_timeout_and_failed_cleanup_hold_outer_worker_activity(
-    tmp_path, fake_sdk, monkeypatch, cleanup_error
+async def test_remote_timeout_and_failed_cleanup_hold_outer_worker_activity(
+    tmp_path, fake_router, monkeypatch, cleanup_error
 ):
     path = tmp_path / "newsletter.sqlite3"
     with contextlib.closing(storage.Store(path, "live")) as database:
         edition = queued(database)
-        fake_sdk.turn.hang = True
-        fake_sdk.close_error = cleanup_error("synthetic cleanup failure")
+        fake_router.turn.hang = True
+        fake_router.close_error = cleanup_error("synthetic cleanup failure")
 
-        async def failed_interrupt():
-            raise RuntimeError("synthetic interrupt failure")
-
-        monkeypatch.setattr(fake_sdk.turn, "interrupt", failed_interrupt)
         background = worker.Worker(
             database,
             ExecutingEditor(
@@ -697,31 +693,36 @@ async def test_sdk_timeout_and_failed_cleanup_hold_outer_worker_activity(
             30,
         )
         pending = asyncio.create_task(background.step())
-        await fake_sdk.turn.started.wait()
+        await fake_router.turn.started.wait()
         database.deployment.begin("release")
         assert await pending
         assert database.get(edition["id"])["state"] == "failed"
-        assert not fake_sdk.closed
+        assert not fake_router.closed
         assert database.deployment.status()["inflight"]["activities"] == 1
         with pytest.raises(drain.DrainError, match="deployment_busy"):
             database.deployment.freeze("release")
-    # Old service ownership has ended; production also stops its child runtime.
+    # Local ownership alone cannot establish that a remote SDK context stopped.
     with contextlib.closing(storage.Store(path, "live")) as database:
         database.recover()
+        database.deployment.recover()
+        with pytest.raises(drain.DrainError, match="deployment_busy"):
+            database.deployment.freeze("release")
+        fake_router.close_error = None
+        await database.deployment.recover_model_contexts(fake_router)
         database.deployment.recover()
         frozen = database.deployment.freeze("release")
         assert frozen["unknown"]["interrupted_activities"] == 1
 
 
-async def test_outer_timeout_during_sdk_close_cannot_clear_uncertainty(
-    tmp_path, fake_sdk
+async def test_outer_timeout_during_remote_close_cannot_clear_uncertainty(
+    tmp_path, fake_router
 ):
     with contextlib.closing(
         storage.Store(tmp_path / "newsletter.sqlite3", "live")
     ) as database:
         edition = queued(database)
-        fake_sdk.turn.hang = True
-        fake_sdk.close_hang = True
+        fake_router.turn.hang = True
+        fake_router.close_hang = True
         background = worker.Worker(
             database,
             ExecutingEditor(
@@ -733,7 +734,7 @@ async def test_outer_timeout_during_sdk_close_cannot_clear_uncertainty(
         )
         assert await background.step()
         assert database.get(edition["id"])["state"] == "failed"
-        assert not fake_sdk.closed
+        assert not fake_router.closed
         database.deployment.begin("release")
         with pytest.raises(drain.DrainError, match="deployment_busy"):
             database.deployment.freeze("release")

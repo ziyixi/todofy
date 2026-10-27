@@ -51,7 +51,8 @@ def test_live_lifespan_checks_active_configuration_before_advertising_readiness(
         data_dir=tmp_path / "service",
         mode="live",
         editor_backend="codex",
-        codex_home=tmp_path / "nonexistent-fixture-auth",
+        model_router_url="https://models.example.test",
+        model_router_token="synthetic-token",
         workflow_backend="dag",
         content_config_dir=root,
         notion_backend="disabled",
@@ -71,7 +72,7 @@ def test_live_lifespan_checks_active_configuration_before_advertising_readiness(
         )
 
     monkeypatch.setattr(preflight, "preflight", offline_provider_preflight)
-    monkeypatch.setattr(editor.CodexEditor, "execute", forbidden)
+    monkeypatch.setattr(editor.ModelEditor, "execute", forbidden)
     monkeypatch.setattr(newsletter_worker.Worker, "run", forbidden)
     app = newsletter_app.create_app(settings, start_worker=False)
     if state == "valid":
@@ -257,7 +258,7 @@ async def test_frozen_config_drives_pipeline_despite_midrun_switch(
     monkeypatch.setattr(
         sources.PublicMetadataFeed, "fetch", empty_public_metadata
     )
-    monkeypatch.setattr(editor.CodexEditor, "execute", provider)
+    monkeypatch.setattr(editor.ModelEditor, "execute", provider)
     monkeypatch.setattr(collector.MockCollector, "collect", forbidden)
     monkeypatch.setattr(story_editor.StoryEditor, "prepare", prepare_story)
     try:
@@ -265,7 +266,7 @@ async def test_frozen_config_drives_pipeline_despite_midrun_switch(
         pipeline = newsletter_workflow_pipeline.DagPipeline(
             runs,
             tmp_path / "collection",
-            editor=editor.CodexEditor(tmp_path / "nonexistent-auth"),
+            editor=editor.ModelEditor(tmp_path / "nonexistent-auth"),
         )
         settings = newsletter_settings.Settings(
             workflow_backend="dag", content_config_dir=config_root

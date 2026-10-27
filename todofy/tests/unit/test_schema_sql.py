@@ -86,6 +86,7 @@ def test_tables_and_indexes_are_exactly_the_planned_ones(db):
     objects = dict(db.execute("SELECT name, type FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"))
     assert {name for name, kind in objects.items() if kind == "table"} == {
         "mail_events",
+        "model_settings",
         "event_transitions",
         "mail_reminders",
         "summaries",

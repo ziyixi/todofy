@@ -87,6 +87,11 @@
           "source": "deploy"
         },
         {
+          "name": "MODEL_ROUTER",
+          "type": "service",
+          "source": "config"
+        },
+        {
           "name": "PUBLIC_HOST",
           "type": "plain_text",
           "source": "config"
@@ -269,6 +274,11 @@
         },
         {
           "name": "MAIL_HERO",
+          "type": "service",
+          "source": "config"
+        },
+        {
+          "name": "MODEL_ROUTER",
           "type": "service",
           "source": "config"
         },
@@ -624,8 +634,136 @@
           "source": "deploy"
         },
         {
+          "name": "MODEL_ROUTER",
+          "type": "service",
+          "source": "config"
+        },
+        {
           "name": "PUBLIC_HOST",
           "type": "plain_text",
+          "source": "config"
+        }
+      ],
+      "personal": []
+    },
+    "model-router": {
+      "config": "model-router/wrangler.toml",
+      "workers_dev": false,
+      "preview_urls": false,
+      "custom_domains": [
+        "models.ziyixi.science"
+      ],
+      "routes": [],
+      "crons": [
+        "47 4 * * *"
+      ],
+      "bindings": [
+        {
+          "name": "ACCESS_AUDIENCE",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "ACCESS_ISSUER",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "ACCESS_OWNER",
+          "type": "secret_text",
+          "source": "deploy"
+        },
+        {
+          "name": "ACCESS_OWNER_ALIASES",
+          "type": "secret_text",
+          "source": "deploy",
+          "optional": true
+        },
+        {
+          "name": "AI",
+          "type": "ai",
+          "source": "config"
+        },
+        {
+          "name": "ANTHROPIC_API_KEY_BRIEF",
+          "type": "secret_text",
+          "source": "manual",
+          "optional": true
+        },
+        {
+          "name": "ANTHROPIC_API_KEY_MAILSORT",
+          "type": "secret_text",
+          "source": "manual",
+          "optional": true
+        },
+        {
+          "name": "ASSETS",
+          "type": "assets",
+          "source": "config"
+        },
+        {
+          "name": "BUILD_SHA",
+          "type": "plain_text",
+          "source": "deploy"
+        },
+        {
+          "name": "CODEX_ACCESS_CLIENT_ID",
+          "type": "secret_text",
+          "source": "manual",
+          "optional": true
+        },
+        {
+          "name": "CODEX_ACCESS_CLIENT_SECRET",
+          "type": "secret_text",
+          "source": "manual",
+          "optional": true
+        },
+        {
+          "name": "CODEX_EXECUTOR_ORIGIN",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "CODEX_EXECUTOR_TOKEN",
+          "type": "secret_text",
+          "source": "manual",
+          "optional": true
+        },
+        {
+          "name": "CSRF_SIGNING_KEY",
+          "type": "secret_text",
+          "source": "deploy"
+        },
+        {
+          "name": "DB",
+          "type": "d1",
+          "source": "config"
+        },
+        {
+          "name": "ENGINE",
+          "type": "durable_object_namespace",
+          "source": "config"
+        },
+        {
+          "name": "GEMINI_API_KEY_TODOFY",
+          "type": "secret_text",
+          "source": "manual",
+          "optional": true
+        },
+        {
+          "name": "MODEL_ROUTER_NEWSLETTER_TOKEN",
+          "type": "secret_text",
+          "source": "manual",
+          "optional": true
+        },
+        {
+          "name": "PUBLIC_HOST",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "REQUEST_BODIES",
+          "type": "r2_bucket",
           "source": "config"
         }
       ],
@@ -1000,27 +1138,13 @@
           "source": "config"
         },
         {
-          "name": "GEMINI_API_BASE",
-          "type": "plain_text",
-          "source": "config"
-        },
-        {
           "name": "GEMINI_API_KEY",
           "type": "secret_text",
-          "source": "manual"
+          "source": "manual",
+          "optional": true
         },
         {
           "name": "GEMINI_DAILY_TOKEN_BUDGET",
-          "type": "plain_text",
-          "source": "config"
-        },
-        {
-          "name": "GEMINI_EMAIL_MODELS",
-          "type": "plain_text",
-          "source": "config"
-        },
-        {
-          "name": "GEMINI_MODELS",
           "type": "plain_text",
           "source": "config"
         },
@@ -1042,6 +1166,11 @@
         {
           "name": "METRICS",
           "type": "analytics_engine",
+          "source": "config"
+        },
+        {
+          "name": "MODEL_ROUTER",
+          "type": "service",
           "source": "config"
         },
         {

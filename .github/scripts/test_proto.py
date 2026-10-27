@@ -88,18 +88,26 @@ def app_of(path: Path) -> str:
 
 
 def consuming_apps(manifest: Path) -> set[str]:
-    """A shared package's descriptors ship in its workspace consumers, not a separate deployed app."""
+    """Attribute shared TypeScript and Python descriptor imports to actual workspace consumers."""
     if app_of(manifest) != "packages":
         return {app_of(manifest)}
+    python = manifest.name == "pyproject.toml"
+    name = (tomllib.loads(manifest.read_text())["project"]["name"] if python
+            else json.loads(manifest.read_text())["name"])
     result = set()
-    for candidate in tracked("*package.json"):
+    for candidate in tracked("*pyproject.toml" if python else "*package.json"):
         if app_of(candidate) in {"packages", "proto"}:
             continue
-        dependencies = json.loads(candidate.read_text()).get("dependencies", {})
-        for spec in dependencies.values():
-            if isinstance(spec, str) and spec.startswith("file:"):
-                if (candidate.parent / spec[5:]).resolve() == manifest.parent.resolve():
-                    result.add(app_of(candidate))
+        if python:
+            dependencies = tomllib.loads(candidate.read_text()).get("project", {}).get("dependencies", [])
+            if name in {re.split(r"[\s<>=!~;\[]", dependency, maxsplit=1)[0] for dependency in dependencies}:
+                result.add(app_of(candidate))
+        else:
+            dependencies = json.loads(candidate.read_text()).get("dependencies", {})
+            if name in dependencies or any(isinstance(spec, str) and spec.startswith("file:")
+                    and (candidate.parent / spec[5:]).resolve() == manifest.parent.resolve()
+                    for spec in dependencies.values()):
+                result.add(app_of(candidate))
     return result
 
 
@@ -237,8 +245,9 @@ def value_importers() -> dict[str, set[str]]:
         if not py_bundled(data):
             continue
         for source in py_production_sources(pyproject):
-            for module in re.findall(r"^\s*(?:from|import)\s+(ziyixi_proto(?:\.\w+)*)", source.read_text(), re.MULTILINE):
-                found.setdefault(app_of(pyproject), set()).update({"python", "proto/" + "/".join(module.split(".")[1:])})
+            for module in re.findall(r"^\s*(?:from|import)\s+(ziyixi_proto(?:\.\w+)*)\b", source.read_text(), re.MULTILINE):
+                for app in consuming_apps(pyproject):
+                    found.setdefault(app, set()).update({"python", "proto/" + "/".join(module.split(".")[1:])})
     return {app: proto_import_closure(paths) for app, paths in found.items()}
 
 
@@ -504,7 +513,7 @@ class Users(unittest.TestCase):
     def test_ops_descriptors_include_the_embedded_website_sync_package(self):
         imports = value_importers()
         users = {app for app, paths in imports.items() if any(path.startswith("proto/ops/") for path in paths)}
-        self.assertEqual(users, {"mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp"})
+        self.assertEqual(users, {"mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp", "model-router"})
         for app in users:
             with self.subTest(app=app):
                 self.assertIn("proto/website/sync/v1/sync.proto", imports[app])

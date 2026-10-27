@@ -320,7 +320,12 @@ def test_complete_worker_secrets_overlay_personal_fields_without_logging_values(
     assert main(["secrets", worker, str(path)], env) == 0
     assert secrets_file_problem(worker, path) is None
     assert private not in capsys.readouterr().out
-    for value in ("not json", "[]", "null", "{}", json.dumps({"UNKNOWN": private}), json.dumps({names[0]: 7})):
+    invalid = ["not json", "[]", "null", json.dumps({"UNKNOWN": private})]
+    if names:
+        invalid += ["{}", json.dumps({names[0]: 7})]
+    else:
+        assert generate_secrets(worker, VALID | {map_name: "{}"}) == {}
+    for value in invalid:
         with pytest.raises(SettingError, match=map_name) as caught:
             generate_secrets(worker, VALID | {map_name: value})
         assert private not in str(caught.value)

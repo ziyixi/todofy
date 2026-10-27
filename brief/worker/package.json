@@ -21,7 +21,7 @@
     "dev": "wrangler dev --config ../wrangler.test.toml --ip 127.0.0.1 --port 8799 --local-upstream 127.0.0.1:8799"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "catalog:",
+    "@ziyixi/model-router-client": "workspace:*",
     "@ziyixi/edge-auth": "workspace:*",
     "@ziyixi/proto": "workspace:*"
   },

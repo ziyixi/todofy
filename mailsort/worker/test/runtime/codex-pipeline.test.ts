@@ -7,13 +7,13 @@ import { ClassificationPromptSchema } from '@ziyixi/proto/mailsort/ui/v2/prompt_
 import { ClassificationProvider, Mode, SettingsSchema, UnreadClassification_State } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
 import { PRIORITY_LABELS } from '../../src/priority.ts';
 import { MAILS, type SyntheticMail } from '../fakes/fixtures.ts';
-import { CODEX_ENDPOINT, ORIGINAL_URL_HEADER } from '../fakes/upstream.ts';
+import { MODEL_ENDPOINT } from '../fakes/upstream.ts';
 import { HOUR, MINUTE, op, startHarness, T0, type Harness } from './harness.ts';
 import { checkGoogleCalls, decision, deliver, gmailLabels, modifies, setMode } from './helpers.ts';
 
 let h: Harness;
 async function initialize(bindings: Record<string, string | undefined> = {}): Promise<void> {
-  h = await startHarness({ bindings: { CODEX_ENDPOINT_URL: CODEX_ENDPOINT, CODEX_ENDPOINT_TOKEN: 'synthetic-endpoint-token', ...bindings } });
+  h = await startHarness({ bindings });
   for (const [i, label] of PRIORITY_LABELS.entries()) {
     const gmail = h.up.gmail.createUserLabel(label.displayName, true);
     await h.sql(`INSERT INTO labels (id, seq, display_name, description, enabled, gmail_id, gmail_state, keep_in_inbox, create_time, update_time, etag) VALUES (?, ?, ?, ?, 1, ?, 'linked', ?, ?, ?, 'e')`, label.id, i + 1, label.displayName, label.description, gmail, label.keepInInbox ? 1 : 0, T0, T0);
@@ -49,7 +49,7 @@ describe('Codex priority pipeline', () => {
     const requested = new Promise<void>(resolve => { started = resolve; });
     const handle = h.up.handle.bind(h.up);
     h.up.handle = async (request) => {
-      if ((request.headers.get(ORIGINAL_URL_HEADER) ?? request.url) === CODEX_ENDPOINT) {
+      if (request.url === MODEL_ENDPOINT) {
         started();
         await held;
       }
@@ -94,7 +94,7 @@ describe('Codex priority pipeline', () => {
       expect(await decision(h, input.id)).toMatchObject({ outcome: 'applied', label_id: bucket.toLowerCase(), decider: 'codex', model: 'gpt-6.1-sol', confidence: null, probabilities: '{}', probabilities2: '{}' });
     }
     expect(h.up.codex.calls).toHaveLength(4);
-    expect(h.up.codex.requests.every(request => request.model === 'gpt-6.1-sol')).toBe(true);
+    expect(h.up.codex.requests.every(request => request.config?.model === 'models/sol-6-1')).toBe(true);
     expect(h.up.claude.calls).toEqual([]);
     expect(h.up.ai.calls).toEqual([]);
     expect(await h.sql(`SELECT requests FROM claude_usage`)).toEqual([]);
@@ -102,7 +102,7 @@ describe('Codex priority pipeline', () => {
     expect(flow.counts.filter(row => row.stage === MailFlow_Stage.CODEX).reduce((sum, row) => sum + row.mailCount, 0)).toBe(4);
     expect(flow.counts.some(row => row.stage === MailFlow_Stage.CLAUDE)).toBe(false);
     const status = await h.api.getServiceStatus({ name: 'serviceStatus' });
-    expect(status.classifier).toMatchObject({ provider: ClassificationProvider.CODEX, model: 'gpt-6.1-sol', effort: 'medium', configured: true, lastErrorCode: '', lastSuccessTime: timestampFromMs(T0 + 3 * HOUR + 2 * MINUTE) });
+    expect(status.classifier).toMatchObject({ provider: ClassificationProvider.CODEX, model: 'models/sol-6-1', effort: 'medium', configured: true, lastErrorCode: '', lastSuccessTime: timestampFromMs(T0 + 3 * HOUR + 2 * MINUTE) });
     expect(status.codexUsage).toMatchObject({ month: '2026-10', requestCount: 4, successCount: 4, failureCount: 0, usageReportedCount: 4, inputTokens: 4800, outputTokens: 480, lastRequestTime: timestampFromMs(T0 + 3 * HOUR + 2 * MINUTE) });
     await h.clock(T0 + 3 * HOUR + 3 * MINUTE);
     await h.api.startUnreadClassification({ name: 'unreadClassification', recheckInitial100: true, requestId: op() });
@@ -124,7 +124,7 @@ describe('Codex priority pipeline', () => {
     deliver(h, mail(13, { text: 'Synthetic account owner@example.com uses https://example.com/private?secret=1 for 12345678.' }), T0 + MINUTE);
     await h.step(T0 + 2 * MINUTE);
     expect(h.up.codex.calls[0]?.map(email => email.id)).toEqual([mail(12).id, mail(13).id]);
-    expect(h.up.codex.requests[0]?.instructions).toBe('Saved synthetic classification base.\n\nSynthetic owner rules: personal reports are P3.');
+    expect(h.up.codex.requests[0]?.config?.instructions.map(block => block.text).join('\n\n')).toBe('Saved synthetic classification base.\n\nSynthetic owner rules: personal reports are P3.');
     expect(JSON.stringify(h.up.codex.calls)).not.toContain('owner@example.com');
     expect(JSON.stringify(h.up.codex.calls)).not.toContain('/private?secret');
     expect(await decision(h, mail(11).id)).toBeUndefined();
@@ -133,7 +133,7 @@ describe('Codex priority pipeline', () => {
     await savePrompt('Updated synthetic base.', 'Updated synthetic rules.');
     deliver(h, mail(14), T0 + HOUR + MINUTE);
     await h.step(T0 + HOUR + 2 * MINUTE);
-    expect(h.up.codex.requests[1]?.instructions).toBe('Updated synthetic base.\n\nUpdated synthetic rules.');
+    expect(h.up.codex.requests[1]?.config?.instructions.map(block => block.text).join('\n\n')).toBe('Updated synthetic base.\n\nUpdated synthetic rules.');
     expect(h.up.codex.calls.flat().map(email => email.id)).toEqual([mail(12).id, mail(13).id, mail(14).id]);
     expect(modifies(h)).toHaveLength(3);
   });
@@ -175,13 +175,13 @@ describe('Codex priority pipeline', () => {
     await select(ClassificationProvider.CODEX);
     h.up.codex.badItems = true;
     deliver(h, mail(31), T0 + MINUTE);
-    expect(await h.step(T0 + 2 * MINUTE)).toMatchObject({ code: 'codex_bad_items', decided: 0, applied: 0 });
+    expect(await h.step(T0 + 2 * MINUTE)).toMatchObject({ code: 'codex_bad_answer', decided: 0, applied: 0 });
     expect(await h.sql(`SELECT attempts, not_before FROM pending`)).toEqual([{ attempts: 1, not_before: T0 + 7 * MINUTE }]);
     expect(await decision(h, mail(31).id)).toBeUndefined();
     expect(modifies(h)).toEqual([]);
     expect(h.up.claude.calls).toEqual([]);
     expect(await h.sql(`SELECT requests FROM claude_usage`)).toEqual([]);
-    expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).classifier?.lastErrorCode).toBe('codex_bad_items');
+    expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).classifier?.lastErrorCode).toBe('codex_bad_answer');
     expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).codexUsage).toMatchObject({ requestCount: 1, successCount: 0, failureCount: 1, usageReportedCount: 1, inputTokens: 1200, outputTokens: 120 });
     h.up.codex.badItems = false;
     expect(await h.step(T0 + 7 * MINUTE)).toMatchObject({ decided: 1, applied: 1 });
@@ -191,7 +191,8 @@ describe('Codex priority pipeline', () => {
   });
 
   it('leaves missing Codex configuration pending without trying the configured Claude API', async () => {
-    await initialize({ CODEX_ENDPOINT_TOKEN: undefined });
+    await initialize();
+    h.up.codex.configured = false;
     await select(ClassificationProvider.CODEX);
     deliver(h, mail(41), T0 + MINUTE);
     expect(await h.step(T0 + 2 * MINUTE)).toMatchObject({ code: 'codex_not_configured', decided: 0, applied: 0 });
@@ -206,9 +207,10 @@ describe('Codex priority pipeline', () => {
   it('records an HTTP failure as one attempted request without inventing token usage', async () => {
     await initialize();
     await select(ClassificationProvider.CODEX);
-    h.up.codex.status = 503;
+    h.up.codex.errorReason = 'MODEL_UNAVAILABLE';
+    h.up.codex.errorCode = 14;
     deliver(h, mail(42), T0 + MINUTE);
-    expect(await h.step(T0 + 2 * MINUTE)).toMatchObject({ code: 'codex_http_503', decided: 0, applied: 0 });
+    expect(await h.step(T0 + 2 * MINUTE)).toMatchObject({ code: 'codex_unavailable', decided: 0, applied: 0 });
     expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).codexUsage).toMatchObject({ requestCount: 1, successCount: 0, failureCount: 1, usageReportedCount: 0, inputTokens: 0, outputTokens: 0, lastRequestTime: timestampFromMs(T0 + 2 * MINUTE) });
     expect(modifies(h)).toEqual([]);
   });

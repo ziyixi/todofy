@@ -113,7 +113,7 @@ class DagPipeline:
         runs: repository.RunRepository,
         workspace: pathlib.Path,
         *,
-        editor: newsletter_editor.CodexEditor,
+        editor: newsletter_editor.ModelEditor,
         packet_projection: bool = True,
     ) -> None:
         self.runs = runs
@@ -276,8 +276,8 @@ class DagPipeline:
                 return True
             # The frozen run's model, not a newly edited setting, owns this
             # attempt.
-            editor = newsletter_editor.CodexEditor(
-                self.editor.codex_home,
+            editor = newsletter_editor.ModelEditor(
+                self.editor.client,
                 model=snapshot["inputs"]["model"],
                 timeout_seconds=900,
             )

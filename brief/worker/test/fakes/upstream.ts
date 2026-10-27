@@ -4,7 +4,8 @@
  * Claude API that answers each step with grounded synthetic JSON built from the request it gets (or what a test
  * scripts instead), and a fake Resend that records every send. Nothing here is a real article, address or key.
  */
-import { apiError, sseResponse, stepOf, type FakeMessage } from './claude.ts';
+import { jsonAnswer, modelError, modelResponse, stepOf, type FakeMessage } from './claude.ts';
+import type { GenerateRequest } from '@ziyixi/proto/modelrouter/inference/v1/inference_pb';
 
 export const SYNTHETIC_REGISTRY = `version: 1
 sources:
@@ -161,8 +162,7 @@ export class SyntheticWeb {
 // ---- the fake Claude API's default answers ---------------------------------------------------------------------------------
 
 function userJson(body: Record<string, unknown>, marker: string): unknown {
-  const messages = body['messages'] as { content: string }[];
-  const content = messages[0]?.content ?? '';
+  const content = (typeof body['input'] === 'string' ? body['input'] : '');
   const at = content.indexOf(marker);
   if (at < 0) return null;
   // Each JSON block is one line (JSON.stringify).
@@ -199,7 +199,7 @@ function writtenItem(packet: Packet, deep: boolean): Record<string, unknown> {
 export function defaultClaude(body: Record<string, unknown>): FakeMessage {
   const step = stepOf(body);
   const model = String(body['model']);
-  const json = (value: unknown): FakeMessage => ({ model, blocks: [{ type: 'thinking' }, { type: 'text', text: JSON.stringify(value) }], usage: { input_tokens: 4000, output_tokens: 3000, cache_read_input_tokens: step === 'gate' ? 2000 : 0 }, pings: true });
+  const json = (value: unknown): FakeMessage => jsonAnswer(value, model, { inputTokens: 6000, outputTokens: 3000, totalTokens: 9000, cachedInputTokens: step === 'gate' ? 2000 : 0 });
   if (step === 'gate') {
     const candidates = userJson(body, '候选：\n') as { id: string; section: string; title: string }[];
     return json({
@@ -246,8 +246,7 @@ export function defaultClaude(body: Record<string, unknown>): FakeMessage {
     return json(writtenItem(packet, true));
   }
   if (step === 'entail') {
-    const messages = body['messages'] as { content: string }[];
-    const cases = JSON.parse(messages[0]?.content ?? '[]') as { item: string; n: number }[];
+    const cases = JSON.parse((typeof body['input'] === 'string' ? body['input'] : '[]')) as { item: string; n: number }[];
     return json({ verdicts: cases.map((entry, i) => ({ item: entry.item, n: entry.n, verdict: i === 0 ? 'overstated' : 'supported' })) });
   }
   return json({});
@@ -260,13 +259,14 @@ export class FakeClaude {
   readonly requests: { step: ReturnType<typeof stepOf>; body: Record<string, unknown> }[] = [];
   script: ClaudeScript | null = null;
 
-  answer(body: Record<string, unknown>): Response {
+  answer(request: GenerateRequest): Response {
+    const body: Record<string, unknown> = { ...request.config, input: request.input };
     const step = stepOf(body);
     this.requests.push({ step, body });
     const scripted = this.script?.(body, step) ?? null;
     if (scripted instanceof Response) return scripted;
-    if (scripted === 'stall') return sseResponse({ blocks: [{ type: 'thinking' }], stallAfterBlocks: 1 });
-    return sseResponse(scripted ?? defaultClaude(body));
+    if (scripted === 'stall') return modelResponse(request, modelError('MODEL_TIMEOUT', 4, true));
+    return modelResponse(request, scripted ?? defaultClaude(body));
   }
 
   steps(): string[] {
@@ -274,4 +274,4 @@ export class FakeClaude {
   }
 }
 
-export { apiError };
+export { modelError };

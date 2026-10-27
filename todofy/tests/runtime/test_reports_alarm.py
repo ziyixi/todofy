@@ -8,8 +8,7 @@ from typing import Any
 
 import pytest
 
-from tests.fakes.gemini_fake import API_KEY as GEMINI_KEY
-from tests.fakes.gemini_fake import GeminiFake
+from tests.fakes.model_router_fake import ModelRouterFake
 from tests.runtime.harness import Worker, start_gateway
 from tests.runtime.owner_support import assert_contract
 from tests.runtime.reports_support import NEWSLETTER, digest
@@ -18,7 +17,7 @@ NOW = int(time.time())
 
 
 class Stack:
-    def __init__(self, worker: Worker, gemini: GeminiFake) -> None:
+    def __init__(self, worker: Worker, gemini: ModelRouterFake) -> None:
         self.worker = worker
         self.gemini = gemini
 
@@ -32,10 +31,9 @@ class Stack:
 
 @pytest.fixture(scope="module")
 def stack(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Stack]:
-    gemini = GeminiFake()
+    gemini = ModelRouterFake()
     variables = {
-        "GEMINI_API_BASE": gemini.url,
-        "GEMINI_API_KEY": GEMINI_KEY,
+        "MODEL_ROUTER_FAKE_ORIGIN": gemini.url,
         "REPORT_BASIC_AUTH_SHA256": digest(*NEWSLETTER),
         "REPORT_PRECOMPUTE_UTC": "00:00",
     }
@@ -72,7 +70,7 @@ def test_newsletter_reads_the_precomputed_reports(stack):
     stack.until(lambda: len(stack.worker.d1("SELECT day FROM daily_reports")) == 2)
     calls = len(stack.gemini.calls())
     summary = assert_contract(stack.worker.hooks.get("/api/summary", auth=NEWSLETTER), "/api/summary")
-    assert (summary["status"], summary["task_count"], summary["model"]) == ("ok", 2, "model-a")
+    assert (summary["status"], summary["task_count"], summary["model"]) == ("ok", 2, "gemini-probe")
     recommendation = assert_contract(
         stack.worker.hooks.get("/api/recommendation?top=10", auth=NEWSLETTER), "/api/recommendation"
     )

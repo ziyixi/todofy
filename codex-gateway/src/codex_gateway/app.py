@@ -7,6 +7,7 @@ import pathlib
 import re
 import time
 from collections.abc import Awaitable, Callable
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any
 
@@ -59,6 +60,56 @@ def _baked_source_sha() -> str | None:
     return sha if isinstance(sha, str) and re.fullmatch(r"[a-f0-9]{40}", sha) else None
 
 
+def authorized_home(request: Request) -> pathlib.Path:
+    token = os.getenv("CODEX_GATEWAY_TOKEN", "").strip()
+    if not token:
+        raise RpcError(
+            "UNAVAILABLE", "GATEWAY_NOT_CONFIGURED", "Inference is not configured"
+        )
+    headers = request.headers.getlist("authorization")
+    if len(headers) != 1 or not hmac.compare_digest(
+        headers[0].encode(), ("Bearer " + token).encode()
+    ):
+        raise RpcError(
+            "UNAUTHENTICATED",
+            "INFERENCE_NOT_AUTHORIZED",
+            "Inference authorization required",
+        )
+    home = os.getenv("CODEX_HOME", "")
+    if (
+        not home
+        or not pathlib.Path(home).is_absolute()
+        or not pathlib.Path(home).is_dir()
+    ):
+        raise RpcError(
+            "UNAVAILABLE", "GATEWAY_NOT_CONFIGURED", "Inference is not configured"
+        )
+    return pathlib.Path(home)
+
+
+async def request_bytes(
+    request: Request,
+    *,
+    reason: str = "INVALID_MODEL_REQUEST",
+    max_bytes: int = MAX_BODY_BYTES,
+) -> bytes:
+    if (
+        request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+        != "application/json"
+    ):
+        raise RpcError("INVALID_ARGUMENT", reason, "Use application/json")
+    raw = bytearray()
+    async for chunk in request.stream():
+        if len(raw) + len(chunk) > max_bytes:
+            raise RpcError(
+                "INVALID_ARGUMENT",
+                reason,
+                "Inference request exceeds limit",
+            )
+        raw.extend(chunk)
+    return bytes(raw)
+
+
 def create_app(
     *,
     monitor_db: pathlib.Path,
@@ -66,8 +117,21 @@ def create_app(
     checker: Checker = check_runtime,
     clock: Callable[[], datetime] = utc_now,
     monotonic: Callable[[], float] = time.monotonic,
+    model_executor: Any = None,
 ) -> FastAPI:
-    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    from codex_gateway.model_api import install_model_routes
+    from codex_gateway.modelrouter import ModelExecutor
+
+    executor = model_executor or ModelExecutor(monitor_db)
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        try:
+            yield
+        finally:
+            await executor.shutdown()
+
+    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     bindings = {item.path_template: item for item in HTTP_BINDINGS}
     source_sha = _baked_source_sha()
     monitor = InferenceMonitor(monitor_db, clock=clock, monotonic=monotonic)
@@ -93,38 +157,11 @@ def create_app(
 
     async def run(request: Request) -> JSONResponse:
         binding = bindings[request.url.path]
-        token = os.getenv("CODEX_GATEWAY_TOKEN", "").strip()
-        if not token:
-            raise RpcError(
-                "UNAVAILABLE", "GATEWAY_NOT_CONFIGURED", "Inference is not configured"
-            )
-        headers = request.headers.getlist("authorization")
-        if len(headers) != 1 or not hmac.compare_digest(
-            headers[0].encode(), ("Bearer " + token).encode()
-        ):
-            raise RpcError(
-                "UNAUTHENTICATED",
-                "INFERENCE_NOT_AUTHORIZED",
-                "Inference authorization required",
-            )
-        if (
-            request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
-            != "application/json"
-        ):
-            raise RpcError(
-                "INVALID_ARGUMENT", "INVALID_INFERENCE_REQUEST", "Use application/json"
-            )
-        raw = bytearray()
-        async for chunk in request.stream():
-            if len(raw) + len(chunk) > MAX_BODY_BYTES:
-                raise RpcError(
-                    "INVALID_ARGUMENT",
-                    "INVALID_INFERENCE_REQUEST",
-                    "Inference request exceeds limit",
-                )
-            raw.extend(chunk)
+        home = authorized_home(request)
         try:
-            decoded = _json(bytes(raw))
+            decoded = _json(
+                await request_bytes(request, reason="INVALID_INFERENCE_REQUEST")
+            )
             message = decode_request(
                 binding, request.url.path, request.query_params.multi_items(), decoded
             )
@@ -142,21 +179,13 @@ def create_app(
                 "INVALID_INFERENCE_REQUEST",
                 "Invalid inference request",
             ) from None
-        home = os.getenv("CODEX_HOME", "")
-        if (
-            not home
-            or not pathlib.Path(home).is_absolute()
-            or not pathlib.Path(home).is_dir()
-        ):
-            raise RpcError(
-                "UNAVAILABLE", "GATEWAY_NOT_CONFIGURED", "Inference is not configured"
-            )
         if isinstance(message, RunInferenceRequest):
-            answer = await monitor.run(message, pathlib.Path(home), runner)
+            answer = await monitor.run(message, home, runner)
         else:
-            answer = await checker(pathlib.Path(home))
+            answer = await checker(home)
         return JSONResponse(to_wire(answer), headers=PRIVATE_HEADERS)
 
     for binding in HTTP_BINDINGS:
         app.add_api_route(binding.path_template, run, methods=[binding.method])
+    install_model_routes(app, executor, monitor)
     return app

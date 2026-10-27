@@ -20,6 +20,10 @@ import { BriefUiService } from '@ziyixi/proto/brief/ui/v1/brief_ui_service_pb';
 import { createHttpClient, type HttpCall, type HttpClient } from '@ziyixi/proto/http-client';
 import type { ShapeOf } from '@ziyixi/proto/http-transcoder';
 import { FakeClaude, SyntheticWeb, SYNTHETIC_REGISTRY } from '../fakes/upstream.ts';
+import { GenerateRequestSchema, EmbeddingSchema, ListModelsResponseSchema } from '@ziyixi/proto/modelrouter/inference/v1/inference_pb';
+import { fromWire, toWire } from '@ziyixi/proto/wire-json';
+import { create } from '@ziyixi/proto/protobuf';
+import { fakeVector } from '../fakes/ai.ts';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -44,7 +48,6 @@ export const SYNTHETIC_BINDINGS: Readonly<Record<string, string>> = {
   ACCESS_OWNER_ALIASES: '',
   CSRF_SIGNING_KEY: 'cd'.repeat(32),
   FEEDBACK_SIGNING_KEY: FEEDBACK_KEY,
-  ANTHROPIC_API_KEY: 'sk-ant-synthetic-test-key',
   RESEND_API_KEY: 're_synthetic_test_key',
   MAIL_FROM: 'Brief <brief@example.com>',
   MAIL_TO: 'owner@example.com',
@@ -85,6 +88,7 @@ export interface SentMail {
 }
 
 export interface HarnessOptions {
+  readonly modelConfigured?: boolean;
   readonly bindings?: Record<string, string | undefined>;
   readonly inspectorPort?: number;
   /** Runs BriefState in a Worker of its own, as Cloudflare runs a Durable Object apart from its caller. */
@@ -135,7 +139,8 @@ export interface Harness {
 
 export async function startHarness(options: HarnessOptions = {}): Promise<Harness> {
   const temp = options.persist ?? (await mkdtemp(join(tmpdir(), 'brief-runtime-')));
-  const [script, aiScript] = await Promise.all([workerBundle(), workerBundle('test/fakes/ai-entrypoint.ts')]);
+  const script = await workerBundle();
+  let quota = false;
   const logs: string[] = [];
   let clockNow = 0;
   const web = new SyntheticWeb({ now: () => clockNow });
@@ -146,9 +151,6 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     const url = request.url;
     const route = options.routes?.get(url);
     if (route !== undefined) return route();
-    if (url === 'https://api.anthropic.com/v1/messages?beta=true' || url === 'https://api.anthropic.com/v1/messages') {
-      return claude.answer(await request.json<Record<string, unknown>>());
-    }
     if (url === 'https://api.resend.com/emails') {
       sent.push({ key: request.headers.get('idempotency-key'), body: await request.json<SentMail['body']>() });
       const next = resend.shift() ?? { status: 200, body: { id: `msg-synthetic-${String(sent.length)}` } };
@@ -166,7 +168,20 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     durableObjects: { BRIEF: { className: 'BriefState', useSQLite: true, ...(split ? { scriptName: objectWorker } : {}) } },
     serviceBindings: {
       ASSETS: () => new Response(TEST_PAGE, { headers: { 'content-type': 'text/html; charset=utf-8' } }),
-      AI: { name: 'fake-ai', entrypoint: 'FakeAiBinding' },
+      MODEL_ROUTER: async (request: Request) => {
+        const path = new URL(request.url).pathname;
+        if (path === '/api/model/v1/models') return Response.json(toWire(ListModelsResponseSchema, create(ListModelsResponseSchema, { models: [
+          { name: 'models/claude-opus-5-5', configured: options.modelConfigured !== false, connectionRevision: 'synthetic-connection', reservationInputMicrousdPerToken: 5, reservationOutputMicrousdPerToken: 25 },
+          { name: 'models/claude-haiku-5-5', configured: options.modelConfigured !== false, connectionRevision: 'synthetic-connection', reservationInputMicrousdPerToken: 0.5, reservationOutputMicrousdPerToken: 2.5 },
+        ] })));
+        if (path === '/api/model/v1/embeddings:embed') {
+          const input = await request.json<{ request_id: string; inputs: string[] }>();
+          return Response.json(toWire(EmbeddingSchema, create(EmbeddingSchema, { name: `requests/${input.request_id}`, model: 'models/bge-m3', dimensions: 1024,
+            ...(quota ? { error: { code: 8, reason: 'MODEL_QUOTA', message: 'Synthetic quota.' } } : { vectors: input.inputs.map(text => ({ values: fakeVector(text) })) }) })));
+        }
+        if (path === '/api/model/v1/generations:generate') return claude.answer(fromWire(GenerateRequestSchema, await request.json()).message);
+        return new Response('unexpected model route', { status: 404 });
+      },
     },
     bindings,
     outboundService: outbound,
@@ -185,13 +200,12 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
       workers: [
         brief('brief', split),
         ...(split ? [brief(objectWorker, false)] : []),
-        { name: 'fake-ai', modules: true, script: aiScript, compatibilityDate: COMPATIBILITY_DATE },
         {
           name: 'probe',
           modules: true,
           compatibilityDate: COMPATIBILITY_DATE,
           durableObjects: { BRIEF: { className: 'BriefState', scriptName: split ? objectWorker : 'brief', useSQLite: true } },
-          serviceBindings: { OPS: { name: 'brief', entrypoint: 'Ops' }, AI_CONTROL: 'fake-ai' },
+          serviceBindings: { OPS: { name: 'brief', entrypoint: 'Ops' } },
           script: `export default { async fetch(request, env) {
             const { op, args } = await request.json()
             const stub = env.BRIEF.get(env.BRIEF.idFromName('brief-v1'))
@@ -203,7 +217,6 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
               if (op === 'meter') return Response.json({ ok: await stub.takeRowMeter() })
               if (op === 'ops_status') return Response.json({ ok: await env.OPS.status() })
               if (op === 'ops_guard') return Response.json({ ok: await env.OPS.setGuard(args[0]) })
-              if (op === 'ai_quota') return Response.json({ ok: await (await env.AI_CONTROL.fetch('http://ai/', { method: 'POST', body: JSON.stringify({ quota: args[0] }) })).json() })
               return Response.json({ error: 'unknown op' })
             } catch (error) { return Response.json({ error: error instanceof Error ? error.message : 'not_an_error' }) }
           } }`,
@@ -275,8 +288,9 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     },
     opsStatus: async () => (await probe('ops_status', [])) as Record<string, unknown>,
     opsSetGuard: (input) => probe('ops_guard', [input]),
-    async aiQuota(on) {
-      await probe('ai_quota', [on]);
+    aiQuota(on) {
+      quota = on;
+      return Promise.resolve();
     },
     async dispose() {
       await mf.dispose();

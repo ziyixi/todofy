@@ -25,16 +25,3 @@ export function fakeVector(text: string): number[] {
   if (words.length === 0) vector[0] = 1;
   return vector;
 }
-
-export class FakeAi {
-  quota = false;
-  calls = 0;
-
-  run(model: string, input: Record<string, unknown>): Record<string, unknown> {
-    if (model !== '@cf/baai/bge-m3') throw new Error(`unexpected model ${model}`);
-    if (this.quota) throw new Error('4006: you have used up your daily free allocation of 10,000 neurons');
-    this.calls++;
-    const texts = Array.isArray(input['text']) ? (input['text'] as string[]) : [];
-    return { shape: [texts.length, DIMENSIONS], data: texts.map(fakeVector) };
-  }
-}

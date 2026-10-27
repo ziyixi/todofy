@@ -1,0 +1,13 @@
+{
+  "version": "ops-v1",
+  "app": "model-router",
+  "generated_at": "2026-09-29T12:00:00Z",
+  "health": "ok",
+  "modes": { "maintenance": false },
+  "guard": { "level": "normal", "reason": null, "until": null, "set_at": null, "deferred": [] },
+  "signals": [],
+  "counters": { "requests_today": 3, "succeeded_today": 3, "failed_today": 0, "interrupted": 0 },
+  "last_backup_at": null,
+  "ui_url": "https://models.example.test/",
+  "capabilities": []
+}

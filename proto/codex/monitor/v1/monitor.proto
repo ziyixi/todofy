@@ -193,7 +193,12 @@ message InferenceRequestSample {
   // Configured effort.
   string effort = 4 [
     (google.api.field_behavior) = REQUIRED,
-    (common.wire.v1.field).allowed = "medium"
+    (common.wire.v1.field).allowed = "default",
+    (common.wire.v1.field).allowed = "low",
+    (common.wire.v1.field).allowed = "medium",
+    (common.wire.v1.field).allowed = "high",
+    (common.wire.v1.field).allowed = "xhigh",
+    (common.wire.v1.field).allowed = "max"
   ];
   // Full request wall duration, measured with a monotonic clock.
   // (-- api-linter: core::0142::time-field-type=disabled

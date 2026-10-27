@@ -10,8 +10,7 @@ from collections.abc import Callable, Iterator
 
 import pytest
 
-from tests.fakes.gemini_fake import API_KEY as GEMINI_KEY
-from tests.fakes.gemini_fake import GeminiFake
+from tests.fakes.model_router_fake import ModelRouterFake
 from tests.runtime.harness import (
     CSRF_SIGNING_KEY,
     GATEWAY_AUTH_CONFIG,
@@ -36,11 +35,10 @@ def pytest_configure(config: pytest.Config) -> None:
     # pytest-xdist may only hand out whole files (--dist loadfile): the rootdir conftest.py refuses the rest.
 
 
-def pipeline_vars(gemini: GeminiFake) -> dict[str, str]:
+def pipeline_vars(gemini: ModelRouterFake) -> dict[str, str]:
     """Secrets and upstream URLs for a fully configured Worker (timings are in the core's wrangler.test.toml)."""
     return {
-        "GEMINI_API_BASE": gemini.url,
-        "GEMINI_API_KEY": GEMINI_KEY,
+        "MODEL_ROUTER_FAKE_ORIGIN": gemini.url,
         "MAIL_WEBHOOK_TOKEN_SHA256": sha256_hex(WEBHOOK_TOKEN),
         "MAIL_WEBHOOK_TOKEN_SHA256_PREVIOUS": sha256_hex(PREVIOUS_WEBHOOK_TOKEN),
         "REPORT_BASIC_AUTH_SHA256": sha256_hex(f"{REPORT_USER}:{REPORT_PASSWORD}"),
@@ -49,14 +47,14 @@ def pipeline_vars(gemini: GeminiFake) -> dict[str, str]:
 
 
 @pytest.fixture(scope="module")
-def gemini() -> Iterator[GeminiFake]:
-    server = GeminiFake()
+def gemini() -> Iterator[ModelRouterFake]:
+    server = ModelRouterFake()
     yield server
     server.close()
 
 
 @pytest.fixture(scope="module")
-def launch(tmp_path_factory: pytest.TempPathFactory, gemini: GeminiFake) -> Iterator[Launch]:
+def launch(tmp_path_factory: pytest.TempPathFactory, gemini: ModelRouterFake) -> Iterator[Launch]:
     """Start the gateway, core and Tasks wired to this module's fakes; ``NAME=None`` drops a var, others
     override."""
     running: list[Iterator[Worker]] = []
@@ -78,7 +76,7 @@ def worker(launch: Launch) -> Worker:
 
 
 @pytest.fixture
-def fresh_gemini(gemini: GeminiFake) -> GeminiFake:
+def fresh_gemini(gemini: ModelRouterFake) -> ModelRouterFake:
     gemini.reset()
     return gemini
 

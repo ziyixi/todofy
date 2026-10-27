@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ziyixi-model-router-client"
+version = "0.1.0"
+description = "Async transport-injected client for modelrouter.inference.v1"
+requires-python = ">=3.14"
+dependencies = ["ziyixi-proto"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+model_router_client = ["py.typed"]

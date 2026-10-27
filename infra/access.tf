@@ -61,6 +61,7 @@ locals {
     "links"        = { name = "links", domain = "s.ziyixi.science/_/*", more = ["s.ziyixi.science/_"], session = "168h" }
     "mail-hero"    = { name = "Mail Hero", domain = "mail-hero.ziyixi.science", more = [], session = "24h" }
     "mailsort"     = { name = "mailsort", domain = "sort.ziyixi.science", more = [], session = "24h" }
+    "model-router" = { name = "Model Router", domain = "models.ziyixi.science", more = [], session = "24h" }
     "personal-mcp" = { name = "Personal MCP", domain = "mcp.ziyixi.science", more = [], session = "24h" }
     "recall"       = { name = "recall", domain = "recall.ziyixi.science", more = [], session = "24h" }
     "tasks"        = { name = "tasks", domain = "tasks.ziyixi.science", more = [], session = "168h" }
@@ -222,6 +223,47 @@ resource "cloudflare_zero_trust_access_application" "brief_feedback" {
   session_duration            = "24h"
   policies                    = [{ id = cloudflare_zero_trust_access_policy.brief_feedback.id, precedence = 1 }]
 
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# --- Model Router external inference -----------------------------------------------------------------
+locals {
+  model_router_hostname = "models.${local.platform_zone}"
+}
+# Only the public ModelService paths bypass interactive Access. The Worker independently authenticates the
+# Newsletter Bearer identity; owner request history, usage, session and static assets remain owner-only.
+resource "cloudflare_zero_trust_access_policy" "model_router_inference" {
+  account_id = var.account_id
+  name       = "Model Router inference token only"
+  decision   = "bypass"
+  include    = [{ everyone = {} }]
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "cloudflare_zero_trust_access_application" "model_router_inference" {
+  account_id = var.account_id
+  name       = "Model Router external inference"
+  type       = "self_hosted"
+  domain     = "${local.model_router_hostname}/api/model/v1/models"
+  destinations = [
+    { type = "public", uri = "${local.model_router_hostname}/api/model/v1/models" },
+    { type = "public", uri = "${local.model_router_hostname}/api/model/v1/generations:generate" },
+    { type = "public", uri = "${local.model_router_hostname}/api/model/v1/embeddings:embed" },
+    { type = "public", uri = "${local.model_router_hostname}/api/model/v1/conversations" },
+    { type = "public", uri = "${local.model_router_hostname}/api/model/v1/conversations/*" },
+  ]
+  allow_authenticate_via_warp = false
+  app_launcher_visible        = false
+  auto_redirect_to_identity   = false
+  enable_binding_cookie       = false
+  http_only_cookie_attribute  = true
+  options_preflight_bypass    = false
+  session_duration            = "24h"
+  policies                    = [{ id = cloudflare_zero_trust_access_policy.model_router_inference.id, precedence = 1 }]
   lifecycle {
     prevent_destroy = true
   }

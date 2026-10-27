@@ -25,14 +25,17 @@ import re
 import time
 from typing import Any
 
+import model_router_client as models
 import ziyixi_protos.newsletter.editorial_pb2 as editorial_pb2
 
 import newsletter.contracts as contracts
 import newsletter.diagnostics as failure_diagnostics
 import newsletter.editor as newsletter_editor
 import newsletter.errors as errors
+import newsletter.model_client as model_client
 import newsletter.model_io as model_io
 import newsletter.schema_compat as schema_compat
+import newsletter.settings as settings
 import newsletter.types as types
 import newsletter.usage as usage
 import newsletter.workflow.content as content
@@ -200,18 +203,13 @@ def _absolute(path: pathlib.Path) -> pathlib.Path:
     return path
 
 
-def private_output(
-    output: pathlib.Path, codex_home: pathlib.Path
-) -> tuple[pathlib.Path, pathlib.Path]:
+def private_output(output: pathlib.Path) -> pathlib.Path:
     """Create private results outside Git, cloud storage and auth homes."""
-    output, codex_home = _absolute(output), _absolute(codex_home)
+    output = _absolute(output)
     user_home = pathlib.Path.home().resolve()
     if (
         output.exists()
         or not output.parent.is_dir()
-        or not codex_home.is_dir()
-        or codex_home == user_home / ".codex"
-        or output.is_relative_to(codex_home)
         or output.is_relative_to(user_home / ".codex")
         or output.is_relative_to(user_home / "Library" / "CloudStorage")
         or output.is_relative_to(user_home / "Library" / "Mobile Documents")
@@ -224,7 +222,7 @@ def private_output(
     ):
         raise EvaluationError("unsafe_path")
     output.mkdir(mode=0o700, exist_ok=False)
-    return output, codex_home
+    return output
 
 
 def _write(path: pathlib.Path, text: str, *, append: bool = False) -> None:
@@ -247,7 +245,11 @@ def _json(path: pathlib.Path, value: Any, *, append: bool = False) -> None:
 
 def _versions() -> dict[str, Any]:
     packages = {}
-    for name in ("personal-newsletter", "openai-codex", "ziyixi-protos"):
+    for name in (
+        "personal-newsletter",
+        "ziyixi-model-router-client",
+        "ziyixi-protos",
+    ):
         try:
             packages[name] = metadata.version(name)
         except metadata.PackageNotFoundError:
@@ -259,7 +261,7 @@ def _versions() -> dict[str, Any]:
         "src/newsletter/workflow/content.py",
         "src/newsletter/workflow/story_editor.py",
         "src/newsletter/schema_compat.py",
-        "src/newsletter/codex_runtime.py",
+        "src/newsletter/model_client.py",
     ]
     return {
         "runner": RUNNER_VERSION,
@@ -312,13 +314,13 @@ async def evaluate(
     suite: dict[str, Any],
     *,
     output: pathlib.Path,
-    codex_home: pathlib.Path,
+    client: models.ModelClient | None = None,
     allow_model_calls: bool,
-    model: str = "gpt-6.1-sol",
+    model: str = "models/sol-6-1",
     timeout: float = 300,
     editor_factory: Callable[
-        ..., newsletter_editor.CodexEditor
-    ] = newsletter_editor.CodexEditor,
+        ..., newsletter_editor.ModelEditor
+    ] = newsletter_editor.ModelEditor,
     progress: Callable[[str], None] = print,
 ) -> dict[str, Any]:
     """Run authorized local cases with private artifacts and no retries."""
@@ -332,7 +334,10 @@ async def evaluate(
     ):
         raise EvaluationError("invalid_configuration")
     suite = validate_suite(suite)
-    output, codex_home = private_output(output, codex_home)
+    output = private_output(output)
+    client = client or model_client.configured_client(
+        settings.Settings.from_env()
+    )
     _json(output / "suite.json", suite)
     _json(
         output / "manifest.json",
@@ -407,7 +412,7 @@ async def evaluate(
             ):
                 try:
                     editor = editor_factory(
-                        codex_home, model, timeout_seconds=timeout
+                        client, model, timeout_seconds=timeout
                     )
                     with usage.usage_scope(observe, f"evaluation:{index}"):
                         async with asyncio.timeout(timeout):
@@ -489,8 +494,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--suite", required=True, type=pathlib.Path)
     parser.add_argument("--output", required=True, type=pathlib.Path)
-    parser.add_argument("--codex-home", required=True, type=pathlib.Path)
-    parser.add_argument("--model", default="gpt-6.1-sol")
+    parser.add_argument("--model", default="models/sol-6-1")
     parser.add_argument("--timeout", type=float, default=300)
     parser.add_argument("--allow-model-calls", action="store_true")
     args = parser.parse_args(argv)
@@ -508,7 +512,6 @@ def main(argv: list[str] | None = None) -> int:
             evaluate(
                 suite,
                 output=args.output,
-                codex_home=args.codex_home,
                 allow_model_calls=args.allow_model_calls,
                 model=args.model,
                 timeout=args.timeout,

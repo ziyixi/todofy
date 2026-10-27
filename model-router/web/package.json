@@ -1,0 +1,47 @@
+{
+  "name": "model-router-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Private ModelRouter request console and inference playground",
+  "engines": {
+    "node": "26.x"
+  },
+  "scripts": {
+    "postinstall": "node ../../proto/tools/ensure.mjs",
+    "predev": "node ../../proto/tools/ensure.mjs",
+    "dev": "vite",
+    "pretypecheck": "node ../../proto/tools/ensure.mjs",
+    "typecheck": "tsc --noEmit",
+    "prelint": "node ../../proto/tools/ensure.mjs",
+    "lint": "eslint .",
+    "pretest": "node ../../proto/tools/ensure.mjs",
+    "test": "vitest run",
+    "prebuild": "node ../../proto/tools/ensure.mjs",
+    "build": "tsc --noEmit && vite build"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "catalog:",
+    "@ziyixi/proto": "workspace:*",
+    "lucide-react": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  },
+  "devDependencies": {
+    "@eslint/js": "catalog:",
+    "@testing-library/dom": "catalog:",
+    "@testing-library/jest-dom": "catalog:",
+    "@testing-library/react": "catalog:",
+    "@testing-library/user-event": "catalog:",
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
+    "eslint": "catalog:",
+    "jsdom": "catalog:",
+    "typescript": "catalog:",
+    "typescript-eslint": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  }
+}

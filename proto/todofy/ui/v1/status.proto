@@ -256,6 +256,8 @@ message ConfiguredSecrets {
   bool todoist_api_key = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Retired on 2026-10-21 (TODOIST_DEFAULT_PROJECT_ID, the Tasks project of Todofy's mail tasks): always false.
   bool todoist_project = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Private Model Router binding (todofy-core).
+  bool model_router = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // Why a daily reminder's call failed (vocab.py REMINDER_ERROR_CODES). The last two were written only by the

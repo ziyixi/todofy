@@ -163,7 +163,7 @@ export async function seedVectors(h: Harness, now: number): Promise<void> {
 
 /** A JSON block of the request's user message (one line each, as the request builders write them). */
 function userJson(body: Record<string, unknown>, marker: string): unknown {
-  const content = (body['messages'] as { content: string }[])[0]?.content ?? '';
+  const content = (typeof body['input'] === 'string' ? body['input'] : '');
   const at = content.indexOf(marker);
   return at < 0 ? null : (JSON.parse(content.slice(at + marker.length).split('\n')[0] ?? 'null') as unknown);
 }
@@ -215,5 +215,5 @@ export function largestWrite(body: Record<string, unknown>): FakeMessage {
     }
     return { packet: packet.packet, section: world ? 'world' : 'research', title: world ? '各方回应新的局势' : '一项新的研究', paragraphs, why: '可用于对比已有的观测结果。', claims };
   });
-  return jsonAnswer({ items, omitted: [] }, 'claude-opus-5-5', { input_tokens: 60_000, output_tokens: 12_000 });
+  return jsonAnswer({ items, omitted: [] }, 'claude-opus-5-5', { inputTokens: 60_000, outputTokens: 12_000 });
 }

@@ -14,7 +14,7 @@ import js
 from pyodide.ffi import create_proxy
 from workers import Response, WorkerEntrypoint
 
-from todofy.runtime import gemini
+from todofy.runtime import model
 from todofy.runtime.interop import now_ms, read_capped, to_js
 
 
@@ -64,15 +64,15 @@ class Default(WorkerEntrypoint):
         env = Overlay(self.env, args.get("vars", {}))
         started = now_ms()
         match path:
-            case "/gemini":
-                result = await gemini.generate(
+            case "/model":
+                result = await model.generate(
                     env,
                     system=args["system"],
                     user=args["user"],
                     deadline_ms=started + args["budget_ms"],
                     response_schema=args.get("response_schema"),
                     preface=args.get("preface", ""),
-                    models=args.get("models"),
+                    model=args.get("model", "models/gemini-email"),
                 )
                 data = {
                     "ok": result.verdict.ok,
@@ -84,6 +84,7 @@ class Default(WorkerEntrypoint):
                     "tokens": result.tokens,
                     "prompt_tokens": result.prompt_tokens,
                     "attempts": result.attempts,
+                    "usage_available": result.usage_available,
                 }
             case "/read-capped":
                 data = await read_from_stub(args["chunk"], args["chunks"], args["limit"])

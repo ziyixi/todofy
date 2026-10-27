@@ -284,7 +284,7 @@ def test_explicit_private_archive_is_complete_and_after_public_sources():
     assert (
         text.index("来源与核对")
         < text.index("TODOFY / 与你有关")
-        < text.index("Codex 已记录")
+        < text.index("模型已记录")
     )
     assert "PRIVATE RENDERED BODY" not in text
     assert result.properties["contains_personal"] == {"checkbox": True}

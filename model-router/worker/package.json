@@ -1,0 +1,7 @@
+{
+  "name":"model-router-worker","private":true,"type":"module","version":"0.1.0",
+  "scripts":{"postinstall":"node ../../proto/tools/ensure.mjs","pretest":"node ../../proto/tools/ensure.mjs","prelint":"node ../../proto/tools/ensure.mjs","pretypecheck":"node ../../proto/tools/ensure.mjs","prebuild":"node ../../proto/tools/ensure.mjs","test":"vitest run","typecheck":"tsc --noEmit","lint":"eslint src test","build":"wrangler deploy --dry-run --config ../wrangler.toml --outdir ../build/worker"},
+  "dependencies":{"@anthropic-ai/sdk":"catalog:","@cfworker/json-schema":"catalog:","@ziyixi/edge-auth":"workspace:*","@ziyixi/proto":"workspace:*"},
+  "devDependencies":{"@cloudflare/workers-types":"catalog:","@types/node":"catalog:","@eslint/js":"catalog:","eslint":"catalog:","typescript-eslint":"catalog:","esbuild":"catalog:","jose":"catalog:","miniflare":"catalog:","typescript":"catalog:","vitest":"catalog:","wrangler":"catalog:"},
+  "engines":{"node":"26.x"}
+}

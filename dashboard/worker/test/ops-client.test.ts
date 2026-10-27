@@ -76,7 +76,7 @@ const EVENT_ID = '6d3b2f0e-4c1a-4b7e-8a52-0c9e7f1d2a31';
 type Calls = { app: OpsApp; method: string; args: unknown[] }[];
 
 /** A binding that records every property called on it and answers from `answers`. */
-function recordingEnv(answers: Record<string, () => unknown>): { env: Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'CODEX_GATEWAY' | 'WEBSITE_SYNC' | 'MAILSORT' | 'RECALL' | 'BRIEF' | 'TASKS' | 'PERSONAL_MCP'>; calls: Calls } {
+function recordingEnv(answers: Record<string, () => unknown>): { env: Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'CODEX_GATEWAY' | 'WEBSITE_SYNC' | 'MAILSORT' | 'RECALL' | 'BRIEF' | 'TASKS' | 'PERSONAL_MCP' | 'MODEL_ROUTER'>; calls: Calls } {
   const calls: Calls = [];
   const binding = (app: OpsApp): unknown =>
     new Proxy(
@@ -92,12 +92,12 @@ function recordingEnv(answers: Record<string, () => unknown>): { env: Pick<Env, 
         },
       },
     );
-  return { env: { MAIL_HERO: binding('mail-hero'), TODOFY: binding('todofy'), WATCH: binding('watch'), FLEET: binding('fleet'), NEWSLETTER: binding('newsletter'), CODEX_GATEWAY: binding('codex-gateway'), WEBSITE_SYNC: binding('notion-publish'), MAILSORT: binding('mailsort'), RECALL: binding('recall'), BRIEF: binding('brief'), TASKS: binding('tasks'), PERSONAL_MCP: binding('personal-mcp') } as Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'CODEX_GATEWAY' | 'WEBSITE_SYNC' | 'MAILSORT' | 'RECALL' | 'BRIEF' | 'TASKS' | 'PERSONAL_MCP'>, calls };
+  return { env: { MAIL_HERO: binding('mail-hero'), TODOFY: binding('todofy'), WATCH: binding('watch'), FLEET: binding('fleet'), NEWSLETTER: binding('newsletter'), CODEX_GATEWAY: binding('codex-gateway'), WEBSITE_SYNC: binding('notion-publish'), MAILSORT: binding('mailsort'), RECALL: binding('recall'), BRIEF: binding('brief'), TASKS: binding('tasks'), PERSONAL_MCP: binding('personal-mcp'), MODEL_ROUTER: binding('model-router') } as Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'CODEX_GATEWAY' | 'WEBSITE_SYNC' | 'MAILSORT' | 'RECALL' | 'BRIEF' | 'TASKS' | 'PERSONAL_MCP' | 'MODEL_ROUTER'>, calls };
 }
 
 const guardInput = { level: 'shed', reason: 'quota_d1_rows_read', until: '2026-09-30T00:10:00.000Z' } as const;
 
-type Wrapper = (env: Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'CODEX_GATEWAY' | 'WEBSITE_SYNC' | 'MAILSORT' | 'RECALL' | 'BRIEF' | 'TASKS' | 'PERSONAL_MCP'>) => Promise<OpsCall<unknown>>;
+type Wrapper = (env: Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'CODEX_GATEWAY' | 'WEBSITE_SYNC' | 'MAILSORT' | 'RECALL' | 'BRIEF' | 'TASKS' | 'PERSONAL_MCP' | 'MODEL_ROUTER'>) => Promise<OpsCall<unknown>>;
 const WRAPPERS: readonly { app: OpsApp; method: string; call: Wrapper; valid: unknown }[] = [
   { app: 'fleet', method: 'status', call: (env) => opsStatus(env, 'fleet'), valid: fleetOk },
   { app: 'notion-publish', method: 'status', call: (env) => opsStatus(env, 'notion-publish'), valid: notionPublishOk },
@@ -105,6 +105,7 @@ const WRAPPERS: readonly { app: OpsApp; method: string; call: Wrapper; valid: un
   { app: 'newsletter', method: 'status', call: (env) => opsStatus(env, 'newsletter'), valid: newsletterOk },
   { app: 'recall', method: 'status', call: (env) => opsStatus(env, 'recall'), valid: recallOk },
   { app: 'tasks', method: 'status', call: (env) => opsStatus(env, 'tasks'), valid: tasksOk },
+  { app: 'model-router', method: 'status', call: (env) => opsStatus(env, 'model-router'), valid: { ...tasksOk, app: 'model-router', ui_url: 'https://models.example.com/' } },
   { app: 'personal-mcp', method: 'status', call: (env) => opsStatus(env, 'personal-mcp'), valid: personalMcpOk },
   { app: 'brief', method: 'status', call: (env) => opsStatus(env, 'brief'), valid: briefOk },
   { app: 'brief', method: 'setGuard', call: (env) => opsSetGuard(env, 'brief', { level: 'normal', reason: 'quota_normal', until: null }), valid: guardNormal },
@@ -121,7 +122,7 @@ const WRAPPERS: readonly { app: OpsApp; method: string; call: Wrapper; valid: un
 
 describe('only the methods of the services each app implements', () => {
   it('knows exactly the apps of the IDL (OpsStatus.app is open on the wire, OpsApp is this list), but those it does not bind yet', () => {
-    expect(OPS_APPS).toEqual(['mail-hero', 'todofy', 'watch', 'fleet', 'newsletter', 'codex-gateway', 'notion-publish', 'mailsort', 'recall', 'brief', 'tasks', 'personal-mcp'] satisfies readonly OpsApp[]);
+    expect(OPS_APPS).toEqual(['mail-hero', 'todofy', 'watch', 'fleet', 'newsletter', 'codex-gateway', 'notion-publish', 'mailsort', 'recall', 'brief', 'tasks', 'personal-mcp', 'model-router'] satisfies readonly OpsApp[]);
     expect(Object.keys(CALLED_METHODS)).toEqual([...OPS_APPS]);
     expect(UNBOUND_OPS_APPS).toEqual([]);
     expect(fieldRules(OpsStatusSchema.field.app).allowed).toEqual([...OPS_APPS, ...UNBOUND_OPS_APPS]);
@@ -129,7 +130,7 @@ describe('only the methods of the services each app implements', () => {
 
   it('never forwards guard mutations to read-only Fleet or Newsletter monitor bindings, or to recall, which has no guard', async () => {
     const { env, calls } = recordingEnv({});
-    for (const app of ['fleet', 'newsletter', 'codex-gateway', 'notion-publish', 'recall'] as const) {
+    for (const app of ['fleet', 'newsletter', 'codex-gateway', 'notion-publish', 'recall', 'model-router'] as const) {
       expect(await opsSetGuard(env, app, guardInput)).toEqual({ ok: false, code: 'invalid_input' });
     }
     expect(calls).toEqual([]);
@@ -203,7 +204,7 @@ describe('error handling for every method', () => {
       expect(await wrapper.call(notAnError.env)).toEqual({ ok: false, code: 'unavailable' });
       // An older release without the method: the RPC receiver rejects.
       expect(await wrapper.call(recordingEnv({}).env)).toEqual({ ok: false, code: 'unavailable' });
-      expect(await wrapper.call({} as Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'CODEX_GATEWAY' | 'WEBSITE_SYNC' | 'MAILSORT' | 'RECALL' | 'BRIEF' | 'TASKS' | 'PERSONAL_MCP'>)).toEqual({ ok: false, code: 'not_configured' });
+      expect(await wrapper.call({} as Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'CODEX_GATEWAY' | 'WEBSITE_SYNC' | 'MAILSORT' | 'RECALL' | 'BRIEF' | 'TASKS' | 'PERSONAL_MCP' | 'MODEL_ROUTER'>)).toEqual({ ok: false, code: 'not_configured' });
       const bad = recordingEnv({ [wrapper.method]: () => ({ unexpected: true }) });
       expect(await wrapper.call(bad.env)).toEqual({ ok: false, code: 'invalid_output' });
       const huge = recordingEnv({ [wrapper.method]: () => ({ ...(wrapper.valid as object), padding: 'x'.repeat(40_000) }) });
