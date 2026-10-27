@@ -31,7 +31,9 @@ tools. Generic historical failures are not relabeled busy or successful. No new 
 Limited Todofy state read found no active mail backlog and today's summary wasok; recommendation precompute
 had no row. No real content was read and no real report was recomputed. Local Worker81 and console25 tests,
 types/lint, targeted native schema/backfill tests and Gateway50 tests passed (one Linux-only skip).
-Branch CI, normal same-SHA publication and matching reconcile remain required; production is still the prior
+The first branch CI40540505450 caught an existing process-test race: the child exited between/proc existence
+and read. The helper now reads once and treats a disappeared status file as the observed exit; production
+process behavior is unchanged. Corrected branch CI, same-SHA publication and matching reconcile remain required; production is still the prior
 8ada application. Model keys, budgets, modes and backup retention are unchanged.
 
 

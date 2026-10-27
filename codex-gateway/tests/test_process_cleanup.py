@@ -8,6 +8,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 from codex_gateway import _launch
 
@@ -18,12 +19,24 @@ def running(pid: int) -> bool:
     except ProcessLookupError:
         return False
     status = pathlib.Path(f"/proc/{pid}/stat")
-    if sys.platform == "linux" and status.exists():
-        return status.read_text().split(")", 1)[1].strip().split()[0] != "Z"
+    if sys.platform == "linux":
+        try:
+            stat = status.read_text()
+        except FileNotFoundError:
+            return False
+        return stat.split(")", 1)[1].strip().split()[0] != "Z"
     return True
 
 
 class ProcessCleanupTests(unittest.TestCase):
+    def test_a_process_that_exits_during_the_status_read_is_not_running(self):
+        with (
+            patch.object(sys, "platform", "linux"),
+            patch.object(os, "kill"),
+            patch.object(pathlib.Path, "read_text", side_effect=FileNotFoundError),
+        ):
+            self.assertFalse(running(12345))
+
     def run_supervisor(self, directory: pathlib.Path, *, nested_parent: bool):
         receipt = directory / "pids"
         child = (
