@@ -11,7 +11,7 @@
  *
  * - the transport outside the service: GET /api/csrf (CsrfResponse), GET /health (HealthResponse), and the error
  *   envelope of the retired /api/v2 routes, which answer 410 with a reload message for one release (LegacyApiError);
- * - OpsApp, the apps this build binds (the IDL's list is open: an app may join within ops-v1);
+ * - OpsApp, the apps this build binds (the registry's ops_v1 entries; OpsStatus.app is open on the wire);
  * - the constants of the dashboard's rules (thresholds, budgets, bounds), which are behaviour, not wire.
  *
  * The value lists of the IDL's enums and allowed lists are read from the descriptors where code needs them
@@ -225,10 +225,9 @@ export type AppStatusView = Omit<AppDetail, 'entry'>;
 export type CanaryState = Omit<CanaryView, 'id'>;
 
 /**
- * An app of ops-v1 that this dashboard calls: OpsStatus.app's allowed list in proto/ops/v1/ops.proto without the apps it
- * does not bind yet (OPS_APPS reads it, UNBOUND_OPS_APPS names the rest; ops-client.test.ts holds them equal). The list
- * is open on the wire (an app may join within ops-v1), so the generated type of `app` is a string; this dashboard knows
- * exactly the apps it binds.
+ * An app of ops-v1 that this dashboard calls: an ops_v1 entry of the registry (OPS_APPS reads them; ops-client.test.ts
+ * holds them equal). OpsStatus.app is open on the wire (any app may answer ops-v1), so its generated type is a string;
+ * this dashboard knows exactly the apps it binds.
  */
 export type OpsApp = 'mail-hero' | 'todofy' | 'watch' | 'fleet' | 'newsletter' | 'codex-gateway' | 'notion-publish' | 'mailsort' | 'recall' | 'brief' | 'tasks' | 'personal-mcp' | 'model-router';
 
@@ -334,10 +333,10 @@ export const VIEW_ROWS_READ: Readonly<Record<ViewId, number>> = { home: 40, flow
 export const VIEW_ROWS_READ_MAX = 320;
 
 /**
- * Outbound calls one tick may make, computed from the registry (tested). Free: 50 subrequests. Model Router adds one read-only status() call.
- * (13 status, 2 probes, 1 GraphQL, 4 setGuard, 2 canary, 1 createInboxTask, 12 drift = 35).
+ * Outbound calls one tick may make: a fixed margin under Free's 50 subrequests. What a tick makes is computed from the
+ * registry (outboundPerTick() in registry.ts, tested against this bound), so a new app does not change it.
  */
-export const MAX_OUTBOUND_PER_TICK = 35;
+export const MAX_OUTBOUND_PER_TICK = 45;
 /** Outbound calls one owner refresh may make (tested). */
 export const MAX_OUTBOUND_PER_REFRESH = 20;
 

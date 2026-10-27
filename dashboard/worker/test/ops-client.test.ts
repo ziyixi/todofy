@@ -7,8 +7,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import { OpsStatusSchema } from '@ziyixi/proto/ops/v1/ops_pb';
-import { fieldRules } from '@ziyixi/proto/wire-json';
 import type { OpsApp } from '../src/api-types.ts';
+import { REGISTRY } from '../src/registry.ts';
 import mailHeroOk from '../../../contracts/ops-v1/fixtures/OpsStatus/mail-hero-ok.json';
 import mailHeroDegraded from '../../../contracts/ops-v1/fixtures/OpsStatus/mail-hero-degraded.json';
 import mailHeroMaintenance from '../../../contracts/ops-v1/fixtures/OpsStatus/mail-hero-maintenance.json';
@@ -67,7 +67,6 @@ import {
   opsSetGuard,
   opsStartCanary,
   opsStatus,
-  UNBOUND_OPS_APPS,
   type OpsCall,
 } from '../src/ops-client.ts';
 
@@ -121,16 +120,26 @@ const WRAPPERS: readonly { app: OpsApp; method: string; call: Wrapper; valid: un
 ];
 
 describe('only the methods of the services each app implements', () => {
-  it('knows exactly the apps of the IDL (OpsStatus.app is open on the wire, OpsApp is this list), but those it does not bind yet', () => {
-    expect(OPS_APPS).toEqual(['mail-hero', 'todofy', 'watch', 'fleet', 'newsletter', 'codex-gateway', 'notion-publish', 'mailsort', 'recall', 'brief', 'tasks', 'personal-mcp', 'model-router'] satisfies readonly OpsApp[]);
-    expect(Object.keys(CALLED_METHODS)).toEqual([...OPS_APPS]);
-    expect(UNBOUND_OPS_APPS).toEqual([]);
-    expect(fieldRules(OpsStatusSchema.field.app).allowed).toEqual([...OPS_APPS, ...UNBOUND_OPS_APPS]);
+  it('calls exactly the registry\'s ops_v1 entries (OpsStatus.app is open on the wire, OpsApp is this list)', () => {
+    const entries = REGISTRY.entries.filter((entry) => entry.status.type === 'ops_v1').map((entry) => entry.id);
+    expect(OPS_APPS).toEqual(entries);
+    expect([...OPS_APPS].sort()).toEqual(['brief', 'codex-gateway', 'fleet', 'mail-hero', 'mailsort', 'model-router', 'newsletter', 'notion-publish', 'personal-mcp', 'recall', 'tasks', 'todofy', 'watch'] satisfies readonly OpsApp[]);
+    expect(Object.keys(CALLED_METHODS).sort()).toEqual([...OPS_APPS].sort());
   });
 
-  it('never forwards guard mutations to read-only Fleet or Newsletter monitor bindings, or to recall, which has no guard', async () => {
+  it('calls each app through the binding its registry entry names', async () => {
+    for (const app of OPS_APPS) {
+      const { env, calls } = recordingEnv({});
+      await opsStatus(env, app);
+      expect(calls.map((call) => [call.app, call.method])).toEqual([[app, 'status']]);
+    }
+  });
+
+  it('never forwards a guard mutation to an entry the registry does not guard', async () => {
     const { env, calls } = recordingEnv({});
-    for (const app of ['fleet', 'newsletter', 'codex-gateway', 'notion-publish', 'recall', 'model-router'] as const) {
+    const unguarded = REGISTRY.entries.flatMap((entry) => (entry.status.type === 'ops_v1' && !entry.status.guard ? [entry.id as OpsApp] : []));
+    expect(unguarded).toEqual(expect.arrayContaining(['fleet', 'newsletter', 'codex-gateway', 'notion-publish', 'mailsort', 'recall', 'tasks', 'personal-mcp', 'model-router']));
+    for (const app of unguarded) {
       expect(await opsSetGuard(env, app, guardInput)).toEqual({ ok: false, code: 'invalid_input' });
     }
     expect(calls).toEqual([]);
@@ -167,12 +176,6 @@ describe('only the methods of the services each app implements', () => {
     expect(WRAPPERS.filter((w) => w.app === 'todofy').map((w) => w.method).sort()).toEqual(declaredMethods('todofy'));
     expect(WRAPPERS.filter((w) => w.app === 'watch').map((w) => w.method).sort()).toEqual(declaredMethods('watch'));
     expect(WRAPPERS.filter((w) => w.app === 'brief').map((w) => w.method).sort()).toEqual(declaredMethods('brief'));
-  });
-
-  it('never sends a guard mutation to read-only Tasks', async () => {
-    const { env, calls } = recordingEnv({});
-    expect(await opsSetGuard(env, 'tasks', guardInput)).toEqual({ ok: false, code: 'invalid_input' });
-    expect(calls).toEqual([]);
   });
 
   it('never sends an input the contract refuses: the call answers invalid_input, as the app would', async () => {

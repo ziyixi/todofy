@@ -306,12 +306,11 @@ the strip's observed items, §4), the canary rows or the reminder ledger. The me
 older estimates; reads grow with retained decisions while views continue to poll every five minutes.
 A partial index (`canary_runs_active`) keeps the "run in progress" lookup at one row for ticks and views.
 
-Per tick: 13 `status()` (Mail Hero, Todofy, the watch app, the website relay, Fleet, Newsletter, mailsort, recall, the
-brief, Tasks, Personal MCP, Codex gateway and Model Router) + 2 probes (website, links) + 1 GraphQL + ≤ 4 `setGuard` + ≤ 2 canary calls + ≤ 1 `createInboxTask` + ≤ 12
-read-only drift calls (§10) = 35 outbound calls, including the read-only Codex gateway status.
-Mailsort's Claude budget is independent of account Workers AI shedding.
-(`outboundPerTick`, tested ≤ `MAX_OUTBOUND_PER_TICK` = 35 and asserted per tick in workerd; Free allows 50). The probes run in parallel with the
-status polls. GraphQL stays one query per tick (48/day) plus refreshes ≤ 1/min. DO rows written grow by ~3 per tick
+Per tick: at most `outboundPerTick()` outbound calls, computed from the registry: one `status()` per ops_v1 entry, one
+GET per enabled probe, 1 GraphQL, ≤ 1 `setGuard` per guarded entry, ≤ 2 canary calls, ≤ 1 `createInboxTask` and
+≤ `DRIFT_CALLS_PER_TICK` read-only drift calls (§10). It is tested ≤ `MAX_OUTBOUND_PER_TICK`, a fixed margin under
+Free's 50, and asserted per tick in workerd, so a new app changes neither constant. Mailsort's Claude budget is
+independent of account Workers AI shedding. The probes run in parallel with the status polls. GraphQL stays one query per tick (48/day) plus refreshes ≤ 1/min. DO rows written grow by ~3 per tick
 (`cf_scripts` and one `probe:<entry>` per probe). The links probe is one request of its Worker per tick (≤ 144 a day with refreshes, no D1 query); the website's is a static asset. Everything else as in
 [`limits.md`](limits.md).
 
@@ -398,7 +397,7 @@ also redeploys the dashboard with the new desired state.
 
 At most `DRIFT_CALLS_PER_TICK` (12) calls per tick: the account step (four calls) and two Workers on the first
 tick, four Workers on each next one, so a check of the 11 Workers takes four ticks, 2 + 4 + 4 + 1 (a tick then
-makes at most 27 outbound calls in all, §5). A failed step is retried by the next tick; after `DRIFT_MAX_ATTEMPTS` (3)
+stays within `outboundPerTick()`, §5). A failed step is retried by the next tick; after `DRIFT_MAX_ATTEMPTS` (3)
 failed attempts the day is given up (`consecutive_failed_days` + 1), and a run left unfinished at the end
 of its UTC day counts as a failed day too, as does a `drift_run` document that would pass
 `DRIFT_RUN_MAX_BYTES` (60,000 bytes, under the 64 KiB row limit; this account's is about 6 KB). Every answer is reduced at once to names, types and flags:

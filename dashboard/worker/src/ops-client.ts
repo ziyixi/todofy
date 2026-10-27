@@ -29,6 +29,8 @@ import type * as inbox from '@ziyixi/proto/tasks/inbox/v1/task_inbox_wire';
 import { fieldRules, formatMatches, fromWire, fromWireArguments, toWire, toWireArguments, wireEnum, WireJsonError, type WireOf } from '@ziyixi/proto/wire-json';
 import type { AppErrorCode, OpsApp } from './api-types.ts';
 import type { Env } from './env.ts';
+import { REGISTRY } from './registry.ts';
+import type { StatusSource } from './registry-types.ts';
 
 export const OPS_TIMEOUT_MS = 10_000;
 /** An answer larger than this (as JSON) is `invalid_output`; the contract's bounds keep real ones far smaller. */
@@ -36,13 +38,14 @@ export const OPS_MAX_JSON_CHARS = 32_768;
 
 // ---- the contract's values, read from the IDL ------------------------------------------------------
 
-/**
- * ops-v1 apps of the contract that this build does not bind yet: an app answers ops-v1 (its name is in OpsStatus.app's
- * allowed list, which it must be to write a valid status) before Home binds its entrypoint. Every current application, including Tasks, has its named binding.
- */
-export const UNBOUND_OPS_APPS: readonly string[] = [];
-/** Every ops-v1 app Home binds, in the descriptor's registered producer order. */
-export const OPS_APPS = fieldRules(OpsStatusSchema.field.app).allowed.filter((app) => !UNBOUND_OPS_APPS.includes(app)) as readonly OpsApp[];
+/** An ops_v1 entry's status source: its binding and whether it takes setGuard. */
+type OpsSource = Extract<StatusSource, { type: 'ops_v1' }>;
+/** The registry's ops_v1 entries by app: the one map of what Home calls, and through which binding. */
+const OPS_SOURCES: ReadonlyMap<string, OpsSource> = new Map(
+  REGISTRY.entries.flatMap((entry) => (entry.status.type === 'ops_v1' ? [[entry.id, entry.status] as const] : [])),
+);
+/** Every ops-v1 app Home binds, in registry order (OpsStatus.app is open: any app may answer ops-v1). */
+export const OPS_APPS = [...OPS_SOURCES.keys()] as readonly OpsApp[];
 /** The guard's levels by wire name. */
 export const GUARD_LEVELS: readonly ops.GuardLevel[] = wireEnum(GuardLevelSchema, GuardLevel).names;
 /** The codes an Ops method rejects with (`new Error(code)`). */
@@ -181,42 +184,29 @@ export const CALLED_METHODS = {
   'model-router': ['status', 'setGuard'],
 } as const;
 
-type Bindings = Pick<Env, 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'CODEX_GATEWAY' | 'WEBSITE_SYNC' | 'MAILSORT' | 'RECALL' | 'BRIEF' | 'TASKS' | 'PERSONAL_MCP' | 'MODEL_ROUTER' | 'TASK_INBOX'>;
+type Bindings = Pick<Env, OpsSource['binding'] | 'TASK_INBOX'>;
 
 function missing(): Promise<never> {
   return Promise.reject(new MissingBinding('not_configured'));
 }
 
-export function opsStatus(env: Bindings, app: OpsApp): Promise<OpsCall<ops.OpsStatus>> {
-  return callOps(() => {
-    if (app === 'mail-hero') return (env.MAIL_HERO as Bindings['MAIL_HERO'] | undefined)?.status() ?? missing();
-    if (app === 'watch') return (env.WATCH as Bindings['WATCH'] | undefined)?.status() ?? missing();
-    if (app === 'fleet') return (env.FLEET as Bindings['FLEET'] | undefined)?.status() ?? missing();
-    if (app === 'newsletter') return (env.NEWSLETTER as Bindings['NEWSLETTER'] | undefined)?.status() ?? missing();
-    if (app === 'codex-gateway') return (env.CODEX_GATEWAY as Bindings['CODEX_GATEWAY'] | undefined)?.status() ?? missing();
-    if (app === 'notion-publish') return (env.WEBSITE_SYNC as Bindings['WEBSITE_SYNC'] | undefined)?.status() ?? missing();
-    if (app === 'mailsort') return (env.MAILSORT as Bindings['MAILSORT'] | undefined)?.status() ?? missing();
-    if (app === 'recall') return (env.RECALL as Bindings['RECALL'] | undefined)?.status() ?? missing();
-    if (app === 'brief') return (env.BRIEF as Bindings['BRIEF'] | undefined)?.status() ?? missing();
-    if (app === 'tasks') return (env.TASKS as Bindings['TASKS'] | undefined)?.status() ?? missing();
-    if (app === 'model-router') return env.MODEL_ROUTER?.status() ?? missing();
-    if (app === 'personal-mcp') return (env.PERSONAL_MCP as Bindings['PERSONAL_MCP'] | undefined)?.status() ?? missing();
-    return (env.TODOFY as Bindings['TODOFY'] | undefined)?.status() ?? missing();
-  }, asStatus(app));
+/** The app's `Ops` entrypoint, through the binding its registry entry names; undefined when this deployment lacks it. */
+function opsBinding(env: Bindings, app: OpsApp): ops.OpsService | undefined {
+  const source = OPS_SOURCES.get(app);
+  return source === undefined ? undefined : env[source.binding];
 }
 
+export function opsStatus(env: Bindings, app: OpsApp): Promise<OpsCall<ops.OpsStatus>> {
+  return callOps(() => opsBinding(env, app)?.status() ?? missing(), asStatus(app));
+}
+
+/** setGuard only on an entry the registry guards (`status.guard`); any other is refused before a call. */
 export async function opsSetGuard(env: Bindings, app: OpsApp, input: ops.SetGuardInput): Promise<OpsCall<ops.GuardState>> {
-  if (app === 'fleet' || app === 'newsletter' || app === 'codex-gateway' || app === 'notion-publish' || app === 'recall' || app === 'tasks' || app === 'personal-mcp' || app === 'model-router') return refused;
+  if (OPS_SOURCES.get(app)?.guard !== true) return refused;
   const args = encode(OpsService.method.setGuard, [input]);
   if (args === null) return refused;
   const sent = args[0] as ops.SetGuardInput;
-  return callOps(() => {
-    if (app === 'mail-hero') return (env.MAIL_HERO as Bindings['MAIL_HERO'] | undefined)?.setGuard(sent) ?? missing();
-    if (app === 'watch') return (env.WATCH as Bindings['WATCH'] | undefined)?.setGuard(sent) ?? missing();
-    if (app === 'mailsort') return (env.MAILSORT as Bindings['MAILSORT'] | undefined)?.setGuard(sent) ?? missing();
-    if (app === 'brief') return (env.BRIEF as Bindings['BRIEF'] | undefined)?.setGuard(sent) ?? missing();
-    return (env.TODOFY as Bindings['TODOFY'] | undefined)?.setGuard(sent) ?? missing();
-  }, asGuardState);
+  return callOps(() => opsBinding(env, app)?.setGuard(sent) ?? missing(), asGuardState);
 }
 
 export async function opsStartCanary(env: Bindings, input: ops.StartCanaryInput): Promise<OpsCall<ops.StartCanaryResult>> {
