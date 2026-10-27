@@ -7,7 +7,8 @@ import { CLASSIFICATION_EFFORT, CLASSIFIER_MODELS } from './classifier-config.ts
 import type { ClassificationProviderName } from './settings.ts';
 import { DRAIN_MAX } from './limits.ts';
 
-export const CLAUDE_CACHE_TTL_MS = 5 * 60_000;
+// Hint reuse across adjacent batches; the adapter owns whether and how caching is applied.
+export const PROMPT_REUSE_WINDOW_MS = 5 * 60_000;
 export interface ClassificationUsage {
   readonly inputTokens: number;
   readonly outputTokens: number;
@@ -41,8 +42,8 @@ export class ClassificationError extends Error {
   }
 }
 
-function usageOf(usage: Usage | undefined, provider: ClassificationProviderName): ClassificationUsage | undefined {
-  if (!usage?.available || (provider === 'claude' && usage.estimatedCostMicrousd === undefined)) return undefined;
+function usageOf(usage: Usage | undefined): ClassificationUsage | undefined {
+  if (!usage?.available || (usage.billingKind === 'api' && usage.estimatedCostMicrousd === undefined)) return undefined;
   return { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cacheWriteTokens: usage.cacheWriteTokens, cacheReadTokens: usage.cachedInputTokens, thinkingTokens: usage.reasoningOutputTokens, costMicros: usage.estimatedCostMicrousd ?? 0 };
 }
 
@@ -56,18 +57,18 @@ export async function classifyEmails(
   const ids = new Set(emails.map(email => email.id));
   if (!emails.length || emails.length > DRAIN_MAX || ids.size !== emails.length || ids.has('') || !prompt.basePrompt.trim()) throw new ClassificationError(provider, 'MODEL_INVALID_ANSWER', { configuration: true });
   const config = generationConfig(CLASSIFIER_MODELS[provider], prompt.basePrompt, CLASSIFICATION_OUTPUT_SCHEMA);
-  config.instructions = instructions(...[prompt.basePrompt, prompt.personalRules].filter(text => text.trim()).map(text => ({ text, cache: provider === 'claude' && prompt.cachePrompt === true })));
-  config.parameters = create(ParametersSchema, { effort: CLASSIFICATION_EFFORT, ...(provider === 'claude' ? { maxOutputTokens: 16_384 } : {}) });
+  config.instructions = instructions(...[prompt.basePrompt, prompt.personalRules].filter(text => text.trim()).map(text => ({ text, cache: prompt.cachePrompt === true })));
+  config.parameters = create(ParametersSchema, { effort: CLASSIFICATION_EFFORT });
   let result;
   try {
     result = await createModelClient(binding).generate(modelRequest(JSON.stringify({ emails }), config, 120_000));
   } catch {
     throw new ClassificationError(provider, 'MODEL_UNAVAILABLE', { attempted: true });
   }
-  const usage = usageOf(result.usage, provider);
+  const usage = usageOf(result.usage);
   const options = { attempted: result.attemptCount > 0, ...(usage === undefined ? {} : { usage }) };
-  if (result.error) throw new ClassificationError(provider, result.error.reason, { ...options, configuration: result.error.reason !== 'MODEL_REFUSED' && [3, 7, 9].includes(result.error.code) });
-  if (result.state !== 'succeeded' || result.parameters?.effort !== CLASSIFICATION_EFFORT || (provider === 'claude' && usage === undefined)) throw new ClassificationError(provider, 'MODEL_INVALID_ANSWER', options);
+  if (result.error) throw new ClassificationError(provider, result.error.reason, { ...options, configuration: result.error.reason !== 'MODEL_REFUSED' && [3, 7, 9, 16].includes(result.error.code) });
+  if (result.state !== 'succeeded' || result.parameters?.effort !== CLASSIFICATION_EFFORT || (result.usage?.billingKind === 'api' && usage === undefined)) throw new ClassificationError(provider, 'MODEL_INVALID_ANSWER', options);
   let output: unknown;
   try { output = JSON.parse(result.output); } catch { throw new ClassificationError(provider, 'MODEL_INVALID_ANSWER', options); }
   const items = classificationItems(output, ids);

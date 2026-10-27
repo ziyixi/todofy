@@ -11,3 +11,8 @@ build/
 tasks/web/dist/
 tasks/web/test-results/
 __pycache__/
+
+# Model Router build outputs
+model-router/web/dist/
+model-router/build/
+model-router/.wrangler/

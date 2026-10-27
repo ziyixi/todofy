@@ -24,8 +24,10 @@ import { GenerateRequestSchema, EmbeddingSchema, ListModelsResponseSchema } from
 import { fromWire, toWire } from '@ziyixi/proto/wire-json';
 import { create } from '@ziyixi/proto/protobuf';
 import { fakeVector } from '../fakes/ai.ts';
+import { estimateTokens } from '../../src/prices.ts';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+const QUOTA_RATE = 0.001075;
 
 export const ORIGIN = 'http://127.0.0.1';
 export const PUBLIC_HOST = 'brief.example.org';
@@ -173,10 +175,12 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
         if (path === '/api/model/v1/models') return Response.json(toWire(ListModelsResponseSchema, create(ListModelsResponseSchema, { models: [
           { name: 'models/claude-opus-5-5', configured: options.modelConfigured !== false, connectionRevision: 'synthetic-connection', reservationInputMicrousdPerToken: 5, reservationOutputMicrousdPerToken: 25 },
           { name: 'models/claude-haiku-5-5', configured: options.modelConfigured !== false, connectionRevision: 'synthetic-connection', reservationInputMicrousdPerToken: 0.5, reservationOutputMicrousdPerToken: 2.5 },
+          { name: 'models/bge-m3', configured: true, embeddings: true, dimensions: 1024, reservationQuotaUnitsPerToken: QUOTA_RATE },
         ] })));
         if (path === '/api/model/v1/embeddings:embed') {
           const input = await request.json<{ request_id: string; inputs: string[] }>();
           return Response.json(toWire(EmbeddingSchema, create(EmbeddingSchema, { name: `requests/${input.request_id}`, model: 'models/bge-m3', dimensions: 1024,
+            usage: { available: false, billingKind: 'platform_quota', estimatedQuotaUnits: input.inputs.reduce((sum, text) => sum + estimateTokens(text), 0) * QUOTA_RATE },
             ...(quota ? { error: { code: 8, reason: 'MODEL_QUOTA', message: 'Synthetic quota.' } } : { vectors: input.inputs.map(text => ({ values: fakeVector(text) })) }) })));
         }
         if (path === '/api/model/v1/generations:generate') return claude.answer(fromWire(GenerateRequestSchema, await request.json()).message);

@@ -11,7 +11,7 @@
  * cluster, the hold-back is by key only, and a refused research candidate stays unscored. Pure but for `embed`.
  */
 import { createModelClient, type ModelBinding } from '@ziyixi/model-router-client';
-import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, NEURONS_PER_M_TOKENS } from './limits.ts';
+import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL } from './limits.ts';
 import { estimateTokens } from './prices.ts';
 
 /** The account's daily Workers AI allocation is used up: retry after 00:00 UTC. */
@@ -33,9 +33,18 @@ export class AiError extends Error {
 }
 
 /** The neurons an embedding call of `texts` is estimated to cost (from the input's length). */
-export function embeddingNeurons(texts: readonly string[]): number {
+export function embeddingNeurons(texts: readonly string[], quotaUnitsPerToken: number): number {
   const tokens = texts.reduce((sum, text) => sum + estimateTokens(text), 0);
-  return (tokens * NEURONS_PER_M_TOKENS) / 1_000_000;
+  return tokens * quotaUnitsPerToken;
+}
+
+export async function embeddingQuotaRate(ai: ModelBinding): Promise<number> {
+  let models;
+  try { ({ models } = await createModelClient(ai).listModels({})); }
+  catch { throw new AiError('embedding_unavailable'); }
+  const model = models.find(model => model.name === EMBEDDING_MODEL);
+  if (!model?.configured || !model.embeddings || !Number.isFinite(model.reservationQuotaUnitsPerToken) || model.reservationQuotaUnitsPerToken < 0) throw new AiError('embedding_unavailable');
+  return model.reservationQuotaUnitsPerToken;
 }
 
 /** Unit vectors of `texts` (one batched bge-m3 call) and the estimated neurons. */
@@ -45,13 +54,15 @@ export async function embed(ai: ModelBinding, texts: readonly string[]): Promise
   catch { throw new AiError('embedding_unavailable'); }
   if (answer.error?.reason === 'MODEL_QUOTA') throw new AiQuotaError();
   if (answer.error) throw new AiError('embedding_unavailable');
+  const neurons = answer.usage?.estimatedQuotaUnits;
+  if (neurons === undefined || !Number.isFinite(neurons) || neurons < 0) throw new AiError('embedding_bad_answer');
   const data = answer.vectors.map(vector => vector.values);
   if (data.length !== texts.length) throw new AiError('embedding_bad_answer');
   const vectors = data.map((row) => {
     if (!Array.isArray(row) || row.length !== EMBEDDING_DIMENSIONS || !row.every((value) => typeof value === 'number' && Number.isFinite(value))) throw new AiError('embedding_bad_answer');
     return unit(Float32Array.from(row));
   });
-  return { vectors, neurons: embeddingNeurons(texts) };
+  return { vectors, neurons };
 }
 
 /** `vector` scaled to length 1 (a zero vector stays zero). */

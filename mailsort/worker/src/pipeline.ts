@@ -4,7 +4,7 @@
  * The selected engine classifies a bounded batch in one request. Historical learning and replay remain readable.
  * Existing write gates and Gmail request limits apply to every step.
  */
-import { CLAUDE_CACHE_TTL_MS, ClassificationError, classifyEmails, type ClassificationBatchResult } from './classification-model.ts';
+import { PROMPT_REUSE_WINDOW_MS, ClassificationError, classifyEmails, type ClassificationBatchResult } from './classification-model.ts';
 import type { ClassificationEmail as ClaudeEmail, ClassificationItem as ClaudeItem } from './classification-result.ts';
 import { readClassificationPrompt } from './classification-prompt.ts';
 import { modelRouterBinding, modeCeiling, type Env, type ModeName } from './env.ts';
@@ -530,7 +530,7 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
       if (prepared.length > 0) {
         const at = deps.now();
         const prompt = readClassificationPrompt(store);
-        const recentCache = Number(store.getMeta('claude_prompt_cache_at') ?? 0) > at - CLAUDE_CACHE_TTL_MS;
+        const recentCache = Number(store.getMeta('claude_prompt_cache_at') ?? 0) > at - PROMPT_REUSE_WINDOW_MS;
         const cachePrompt = store.count(`SELECT count(*) AS n FROM pending WHERE not_before <= ?`, at) > prepared.length || recentCache;
         let answer: ClassificationBatchResult | null = null;
         try {
@@ -541,8 +541,9 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
             time_zone: 'America/Los_Angeles', body: Array.from(g.features.body).slice(0, 12000).join(''),
             body_truncated: read.bodyTruncated === true || Array.from(read.body).length > 12000,
           }));
+          const recorded = await classifyEmails(modelRouterBinding(deps.env), provider, emails, { basePrompt: prompt.baseText, personalRules: prompt.personalRules, cachePrompt });
+          answer = recorded;
           if (provider === 'codex') {
-            const recorded = await classifyEmails(modelRouterBinding(deps.env), provider, emails, { basePrompt: prompt.baseText, personalRules: prompt.personalRules });
             transact(() => {
               store.addCodexUsage(utcDay(at), true, recorded.usageAvailable ? recorded : undefined);
               store.setMeta('codex_last_request_at', String(at));
@@ -550,10 +551,7 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
               store.setMeta('codex_last_success_at', String(at));
               store.deleteMeta('codex_error');
             });
-            answer = recorded;
           } else {
-            const recorded = await classifyEmails(modelRouterBinding(deps.env), provider, emails, { basePrompt: prompt.baseText, personalRules: prompt.personalRules, cachePrompt });
-            answer = recorded;
             transact(() => {
               store.addClaudeUsage(utcDay(at), recorded);
               if (recorded.cacheWriteTokens + recorded.cacheReadTokens > 0) store.setMeta('claude_prompt_cache_at', String(at));

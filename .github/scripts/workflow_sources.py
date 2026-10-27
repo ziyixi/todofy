@@ -1,7 +1,7 @@
 """Read local composite steps for the repository's existing workflow safety tests.
 
 This is a test reader, not a workflow generator or a GitHub expression interpreter.
-Only explicit local action calls and scalar inputs are expanded. Native job gates,
+Only explicit local action calls, scalar inputs and exact app selectors are expanded. Native job gates,
 permissions and concurrency remain in the real workflow and are tested separately.
 """
 
@@ -93,11 +93,14 @@ def release_jobs():
         if not app_match:
             continue
         app = app_match.group(1)
-        selected = [
-            step
-            for step in calls
-            if ".github/actions/release-" not in step or step == call
-        ]
+        selected = []
+        for step in calls:
+            if ".github/actions/release-" in step and step != call:
+                continue
+            target = re.search(r"^        if: inputs.app == '([a-z-]+)'$", step, re.M)
+            if target and target.group(1) != app:
+                continue
+            selected.append(step)
         concrete = header.replace("${{ inputs.app }}", app)
         concrete = re.sub(
             r"^      url: .*",

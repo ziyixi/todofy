@@ -75,6 +75,9 @@ export async function startHarness({ ownerBypass = true }: { ownerBypass?: boole
         upstream_started: true,
         attempt_count: 1,
         finish_reason: 'complete',
+        ...((data.config as { web_research?: boolean } | undefined)?.web_research === true
+          ? { observations: { searched: true, opened_urls: ['https://example.test/synthetic-research-evidence'] } }
+          : {}),
       }
       return new Response(
         `event: ready\ndata: {}\n\nevent: heartbeat\ndata: {}\n\nevent: result\ndata: ${JSON.stringify(output)}\n\n`,

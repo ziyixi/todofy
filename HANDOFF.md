@@ -1,6 +1,6 @@
 # Handoff
 
-Updated 2026-10-26 UTC. Active work, open acceptance and dated compatibility only; move completed rollout detail to
+Updated 2026-10-27 UTC. Active work, open acceptance and dated compatibility only; move completed rollout detail to
 a dated record and link it here. Rules are in [AGENTS](AGENTS.md); entry points in [README](README.md). Never put
 private content, credentials or raw production output here.
 
@@ -27,13 +27,13 @@ Implementation checkpoint: common proto, TS/Python clients, Cloudflare engine/co
 Mailsort/Brief/Newsletter migrations are implemented. Todofy model selection is persisted in D1 and included in
 backups; existing results stay frozen. Router uses one `router-v1` DO with concurrent independent requests and
 per-conversation turns. Input/output seven days, metadata90 days. No public token streaming or vendor escape hatch.
-Local evidence so far: Mailsort184 units+123 workerd+smoke; Brief105 units+41 workerd; providers24;
-Newsletter2263 tests+wheel+mypy; TS client11 and Python client4; Router13 runtime/SSE cases; private console17
+Local evidence so far: Mailsort188 units+123 workerd+smoke; Brief109 units+41 workerd; providers27;
+Newsletter2263 tests+wheel+mypy; TS client11 and Python client4; Router45 tests including18 real runtime/SSE/Ops cases; private console17
 and synthetic desktop/mobile checks. Final combined checks and Linux image/parent-death checks remain CI gates.
 Additive IaC was applied through extend bootstrap: six creates,42 no-op, no existing resource writes. Actual IDs
 are in config/resources.toml. No application deployment or production model switch has happened yet. First
-namespace capture and matching main reconcile remain required. New provider connections and deployment-credential
-writes await owner confirmation; do not bypass that boundary. Newsletter needs its new URL/token installed in
+namespace capture and matching main reconcile remain required. Owner chose Todofy Claude to share Brief's existing $80/month workspace (same key under both Router bindings, no new limit). Provider connection and deployment-credential
+writes still await owner confirmation; do not bypass that boundary. Newsletter needs its new URL/token installed in
 its existing runtime settings before the migrated image starts. Preserve its current archive/paused state.
 
 

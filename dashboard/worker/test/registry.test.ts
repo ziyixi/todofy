@@ -39,6 +39,7 @@ function contractSignals(): Record<string, string[]> {
     fleet: row('Fleet'),
     newsletter: row('Newsletter'),
     'codex-gateway': row('Codex gateway'),
+    'model-router': row('Model Router'),
   };
 }
 

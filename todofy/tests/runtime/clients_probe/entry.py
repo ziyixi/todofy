@@ -77,7 +77,6 @@ class Default(WorkerEntrypoint):
                 data = {
                     "ok": result.verdict.ok,
                     "code": result.verdict.code,
-                    "next_model": result.verdict.next_model,
                     "retry_after": result.verdict.retry_after,
                     "text": result.text,
                     "model": result.model,

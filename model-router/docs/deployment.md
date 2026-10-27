@@ -66,8 +66,10 @@ The bootstrap generates a missing CSRF key once and preserves the value on subse
 
 Provider credentials are owner-machine secrets, excluded from GitHub maps and preserved by deployment:
 
-- `ANTHROPIC_API_KEY_MAILSORT`, `ANTHROPIC_API_KEY_BRIEF` and `GEMINI_API_KEY_TODOFY` retain each application's
-  separate connection and budget.
+- `ANTHROPIC_API_KEY_MAILSORT`, `ANTHROPIC_API_KEY_BRIEF`, `ANTHROPIC_API_KEY_TODOFY` and
+  `GEMINI_API_KEY_TODOFY` select each caller's connection. Mailsort and Brief retain their original workspaces;
+  The owner chose to share Brief's existing $80/month workspace with Todofy; configure the same Brief key
+  under both `ANTHROPIC_API_KEY_BRIEF` and `ANTHROPIC_API_KEY_TODOFY`. No extra workspace or limit is added.
 - `CODEX_EXECUTOR_TOKEN`, `CODEX_ACCESS_CLIENT_ID` and `CODEX_ACCESS_CLIENT_SECRET` authenticate the existing
   private VPS executor. Its public origin derives from the cloud profile. There is no new VPS service.
 - `MODEL_ROUTER_NEWSLETTER_TOKEN` is the Router's independent external caller credential; Newsletter uses
@@ -75,7 +77,7 @@ Provider credentials are owner-machine secrets, excluded from GitHub maps and pr
   runtime configuration.
 
 The Playground starts with the Console billing profile. Selecting another profile is explicit and
-uses that app's connection and budget. The recorded caller remains `console`; running inference does
+uses that app's connection and provider-side quota, separately from its local business ledger. The recorded caller remains `console`; running inference does
 not invoke application business actions.
 
 ## Checks and release
@@ -90,3 +92,8 @@ validates the bundle, runs the existing hostname guard, applies compatible D1 mi
 the Worker. Provider identity, pending migrations and anonymous owner-Access probes are verified before
 recording success. The matching `Personal cloud reconcile` must also pass. Deployment, synthetic model
 acceptance and each application's business acceptance remain separate checks.
+
+On the first publication, Router uploads before its owner-machine connection secrets can be installed.
+The release then fails its connection-name gate and leaves migrated callers skipped. After the owner
+installs every declared connection secret, rerun the same SHA. The gate also runs when preflight selects
+no upload. It reads secret names only; provider access and model execution require separate acceptance.

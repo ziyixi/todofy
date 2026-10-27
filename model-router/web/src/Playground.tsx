@@ -149,7 +149,7 @@ export function Playground({
             </select>
           </label>
           <p className="small muted billing-note">
-            使用所选应用的模型连接与预算。请求来源仍为本控制台，不执行该应用的业务操作。
+            使用所选连接的供应商额度，不计入应用的业务预算。请求来源为本控制台，不执行该应用的业务操作。
           </p>
           {billingModels.isFetching && billingApp !== 'console' && (
             <p className="small muted" role="status">

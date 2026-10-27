@@ -1528,6 +1528,17 @@ class DeployConditions(unittest.TestCase):
                             condition,
                         )
 
+                        self.assertEqual(condition.count(f"needs.{need}.result == 'skipped'"), 1)
+                    else:
+                        self.assertIn(f"needs.{need}.result == 'success'", condition)
+                        if (name == "vps-deploy" and need in {"newsletter-deploy", "platform-image", "vps-bootstrap-bundle"}) or (name == "codex-gateway-deploy" and need == "codex-gateway-image"):
+                            self.assertIn(f"needs.{need}.result == 'skipped'", condition)
+                            self.assertIn("github.event_name == 'workflow_dispatch' && inputs.resume_vps_release", condition)
+                            self.assertIn("!(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release)", condition)
+                        else:
+                            self.assertNotIn(f"needs.{need}.result == 'skipped'", condition)
+                self.assertIn("github.ref == 'refs/heads/main'", condition)
+
     def test_model_router_rollout_orders_executor_before_migrated_callers(self):
         jobs = self.jobs()
         executor = self.needs(jobs["codex-gateway-deploy"])
@@ -1541,16 +1552,6 @@ class DeployConditions(unittest.TestCase):
             self.assertIn("model-router-deploy", self.needs(jobs[app + "-deploy"]))
         for name in ("codex-gateway-deploy", "model-router-deploy", "vps-deploy"):
             self.assertIn("gate", self.needs(jobs[name]))
-                        self.assertEqual(condition.count(f"needs.{need}.result == 'skipped'"), 1)
-                    else:
-                        self.assertIn(f"needs.{need}.result == 'success'", condition)
-                        if (name == "vps-deploy" and need in {"newsletter-deploy", "platform-image", "vps-bootstrap-bundle"}) or (name == "codex-gateway-deploy" and need == "codex-gateway-image"):
-                            self.assertIn(f"needs.{need}.result == 'skipped'", condition)
-                            self.assertIn("github.event_name == 'workflow_dispatch' && inputs.resume_vps_release", condition)
-                            self.assertIn("!(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release)", condition)
-                        else:
-                            self.assertNotIn(f"needs.{need}.result == 'skipped'", condition)
-                self.assertIn("github.ref == 'refs/heads/main'", condition)
 
     def test_resume_skips_build_artifacts_and_publication_but_keeps_source_checks(self):
         jobs = self.jobs()

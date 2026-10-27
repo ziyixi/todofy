@@ -1,7 +1,7 @@
 # Todofy
 
 Todofy summarises the owner's mail for [Tasks](../tasks/README.md). [Mail Hero](../mail-hero/) (in the same
-monorepo, an independent app) receives the mail and POSTs a `mail.received.v1` webhook; Todofy stores it, asks Gemini
+monorepo, an independent app) receives the mail and POSTs a `mail.received.v1` webhook; Todofy stores it, calls the shared Model Router
 for a short summary, and keeps the summary for the Mail page in Tasks, where the owner turns it into a task or
 deletes it. It also serves a daily summary and ranked recommendations to the owner's newsletter and has a small owner
 UI for anything that needs a human. It writes no task since 2026-10-21: Tasks makes a mail's task itself, Home sends
@@ -10,7 +10,7 @@ the daily reminder, and Tasks keeps GTD.
 It runs entirely on Cloudflare's Workers Free plan: a thin TypeScript gateway Worker (`todofy`: hosts,
 credentials, static assets, cron), a Python Worker (`todofy-core`) hosting one SQLite-backed Durable
 Object (`TodofyCore`, instance `inbox-v1`) as the single ledger writer and scheduler, one D1
-database, and a private R2 bucket (`todofy-backups`) for weekly D1 backups. All D1 and Gemini work runs in the
+database, and a private R2 bucket (`todofy-backups`) for weekly D1 backups. All D1 work and model invocation coordination run in the
 Durable Object, which gets 30 s of CPU per call;
 a plain Worker request gets 10 ms on the Free plan, too little for Python. The UI is React/TypeScript,
 built into static assets the gateway serves.
@@ -20,7 +20,7 @@ built into static assets the gateway serves.
                       Worker todofy (TypeScript gateway)       Worker todofy-core (Python)
 Mail Hero --Bearer--> hooks host POST /hooks/mail      --+
 newsletter --Basic--> hooks host GET /api/summary, ... --+--> Durable Object inbox-v1 --> D1
-owner --Access------> UI host: JWT, CSRF, assets,       |     |--> Gemini (summary, reports)
+owner --Access------> UI host: JWT, CSRF, assets,       |     |--> Model Router (summary, reports)
                       /api/v1/* with the owner  --------+     '--> R2 todofy-backups (weekly D1 backups)
 Tasks, MCP --RPC----> entrypoint Mail (todofy.mail.v1) -+
 cron */10 ----------> scheduled() -------------------------> wake() (RPC)
@@ -36,29 +36,31 @@ cron */10 ----------> scheduled() -------------------------> wake() (RPC)
 Any other host or path is a 404. `workers.dev` and preview URLs are off. Tasks and the Personal MCP reach the Mail
 API only through the private `Mail` entrypoint ([Mail in Tasks](#mail-in-tasks)).
 
-## Gemini model order
+## Model selection
 
-Single-email summaries and the email Canary use `gemini-3.5-flash-lite`, then
-`gemini-3.8-flash`, then `gemini-3.7-flash`. Daily summaries and Top 5/Top 10 recommendations
-keep `gemini-3.8-flash`, then `gemini-3.7-flash`, then `gemini-3.5-flash-lite`.
-These orders are committed as `GEMINI_EMAIL_MODELS` and `GEMINI_MODELS` in `wrangler.toml`;
-an older config without `GEMINI_EMAIL_MODELS` inherits the default chain. The Budget page shows
-both orders, and each result records the model that answered. Token budget and fallback rules
-remain shared; completed email summaries are not recomputed when the config changes.
+Todofy calls `modelrouter.inference.v1` through the private `MODEL_ROUTER` service binding.
+Provider credentials and fallback policy belong to the Router. The core has no provider API key or
+configurable HTTP model endpoint.
+
+The owner UI saves separate mail and daily-report choices in D1 `model_settings`, using the Router's
+configured catalog. Before an owner choice is saved, `models/gemini-email` and `models/gemini-report`
+preserve the initial mail/report routes. Choose `models/sol-6-1` from the catalog when switching to Sol.
+Changes apply to future model calls; completed mail keeps its frozen summary and model. Results retain
+the provider-reported model when available, otherwise the public route.
+
+The physical budget setting remains `GEMINI_DAILY_TOKEN_BUDGET` (3,000,000 tokens/day); this legacy name
+also remains in existing metric fields. Model selection does not reset its usage or change business retries.
 
 Since 2026-10 the email summary starts with a one-sentence brief on its own line (one deliberate prompt line,
 read back by a pure function, no new call); Tasks' Mail shows it. Mail summarised before that line
 gets a model-written brief once, in the background, within half of the day's token budget.
 
-To restore Flash as the preferred email model, set `GEMINI_EMAIL_MODELS` to the same order as
-`GEMINI_MODELS` and publish through the normal branch CI and main Actions flow.
-
 ## Event states
 
 | State | Meaning |
 |---|---|
-| `pending` | stored, waiting for a summary (also after a retryable Gemini failure) |
-| `summarizing` | Gemini call in flight |
+| `pending` | stored, waiting for a summary (also after a retryable model failure) |
+| `summarizing` | model call in flight |
 | `complete` | done; the mail body is dropped, the summary row feeds the reports and the Mail page in Tasks (no time-based deletion) |
 | `ignored` | dismissed by the owner; the ledger row stays as the dedupe record |
 | `failed_summary` | automatic summary attempts stopped (or Mail Hero flagged the mail for review) |
@@ -76,7 +78,7 @@ Open the event in the UI (Attention page). The buttons shown are exactly the act
 
 | Row | Action | Effect |
 |---|---|---|
-| `failed_summary` (not `mail_needs_review`) | **retry_summary** | Gemini is called again (counts against the day's token budget) |
+| `failed_summary` (not `mail_needs_review`) | **retry_summary** | the selected model is called again (counts against the day's token budget) |
 | `failed_summary` | **dismiss** | the event becomes `ignored`; the ledger row stays as the dedupe record |
 
 Every action is a compare-and-set on the version you saw; if the event moved on you get a conflict and a
@@ -131,7 +133,7 @@ Tasks (`backups/<job start>/tasks/`) rotate out within six weeks. The bucket hol
 ## Metrics
 
 The budget page shows the last 30 finished UTC days (mail received, completed and failed, arrival-to-
-completion time, Gemini tokens by model, Gemini calls and Tasks writes) from the D1 table `daily_metrics`,
+completion time, model tokens by model, model calls and Tasks writes) from the D1 table `daily_metrics`,
 which the Durable Object writes a few minutes after each UTC midnight (Tasks writes count only days before
 2026-10-21). Both Workers also write one
 Workers Analytics Engine point per request or upstream step to the dataset `todofy_metrics`, for ad-hoc
@@ -145,7 +147,7 @@ The gateway exports a named entrypoint `Ops` ([contracts/ops-v1](../contracts/op
 dashboard Worker in the same account: `status()` (health, switches, signals and counters; codes and
 numbers only), `setGuard()` (a `shed` guard defers only the weekly backup, retention and the metrics
 rollup, each within a bound) and `canaryResult()`. It has no `reportOps()` since 2026-10-21: Home creates the
-daily reminder in Tasks itself. A `mail.received.v1` event with `canary` is summarised by Gemini like mail and
+daily reminder in Tasks itself. A `mail.received.v1` event with `canary` is summarised through the selected mail route and
 then ends: it never appears in reports, lists or counts; its event page is marked 金丝雀.
 
 Task intents (task-intent-v1, retired with its contract) left Todofy on 2026-10-21: the watch app creates its tasks
@@ -195,8 +197,8 @@ retired class `TodofyCoordinator` is recorded in [docs/gateway-contract.md](docs
 ## Repository
 
 ```
-worker/todofy/core/     pure Python rules (vocabulary, contract, prompts, classification, SQL)
-worker/todofy/runtime/  todofy-core: Durable Object, D1 ledger, Gemini client, Mail entry, owner API
+worker/todofy/core/     pure Python rules (vocabulary, contract, prompts, retry rules, SQL)
+worker/todofy/runtime/  todofy-core: Durable Object, D1 ledger, Model Router client, Mail entry, owner API
 gateway/                the gateway Worker todofy (TypeScript): routing, Access, CSRF, webhook, assets,
                         the transcoders of the owner API (todofy.ui.v1) and the Mail entry (todofy.mail.v1)
                         (Access, CSRF and private headers from ../packages/edge-auth, compiled in)

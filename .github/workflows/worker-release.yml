@@ -224,6 +224,12 @@ jobs:
           required: ${{ steps.preflight.outputs.required }}
           cf-api-token: ${{ secrets.CF_API_TOKEN }}
           website-relay-worker-secrets: ${{ secrets.WEBSITE_RELAY_WORKER_SECRETS }}
+      - name: Require Model Router owner connections before releasing callers
+        if: inputs.app == 'model-router'
+        working-directory: .release-source
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: python3 model-router/tools/check_connections.py
       - name: Verify provider identities and record successful deployment
         if: steps.preflight.outputs.required == 'true'
         working-directory: .

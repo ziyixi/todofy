@@ -284,7 +284,7 @@ const ENTRIES: readonly EntryDef[] = [
   {
     id: 'model-router',
     name: 'Model Router',
-    description: '各应用的模型调用、请求记录与推理试运行',
+    description: '模型调用、请求记录与试运行',
     group: 'apps',
     icon: 'gauge',
     accent: 'green',
@@ -292,7 +292,7 @@ const ENTRIES: readonly EntryDef[] = [
     access: true,
     status: { type: 'ops_v1', binding: 'MODEL_ROUTER', guard: false },
     tile_metric: null,
-    app_only_signals: [],
+    app_only_signals: ['model_execution_unknown'],
     order: 31,
   },
   // END service-catalog entries

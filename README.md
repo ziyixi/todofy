@@ -16,10 +16,11 @@ Home is the daily starting point. Services run and release independently, sharin
 | Tasks | 主任务库、子任务与 Plan/Focus / Primary task store, subtasks and Plan/Focus | Cloudflare Worker + D1, desktop PWA | [tasks/](tasks/README.md) |
 | Links | 私人短链接 / Personal short links | Cloudflare Worker + D1 | [links/](links/README.md) |
 | Watch | 网页变化收件箱 / Web change inbox | Cloudflare Worker + DO | [watch/](watch/README.md) |
-| Mailsort | Gmail 自动分拣 / Gmail priority sorting | Cloudflare Worker + DO, Claude API or VPS Codex | [mailsort/](mailsort/README.md) |
+| Mailsort | Gmail 自动分拣 / Gmail priority sorting | Cloudflare Worker + DO, Model Router | [mailsort/](mailsort/README.md) |
+| Model Router | 统一推理、用量与请求详情 / Unified inference, usage and request details | Cloudflare Worker + DO + D1 + R2 | [model-router/](model-router/README.md) |
 | Codex Gateway | 私有结构化推理 / Private structured inference | VPS k3s, independent image | [codex-gateway/](codex-gateway/README.md) |
 | Recall | 浏览记录、全文搜索与 Dropbox 归档 / Browsing record, full-text search and an archive in Dropbox (synced to the NAS) | Cloudflare Worker + DO + R2, Chrome extension | [recall/](recall/README.md) |
-| Brief | 每日研究前沿与世界简报、周六深读 / Daily research and world brief, a Saturday deep read | Cloudflare Worker + DO + Workers AI, Claude API | [brief/](brief/README.md) |
+| Brief | 每日研究前沿与世界简报、周六深读 / Daily research and world brief, a Saturday deep read | Cloudflare Worker + DO, Model Router | [brief/](brief/README.md) |
 | Website | Notion 驱动的个人网站 / Personal website from Notion | Cloudflare static assets + relay | [website/](website/README.md) |
 | Newsletter | 生成并发送简报 / Build and send the newsletter | VPS k3s, separate image | [newsletter/](newsletter/README.md) |
 | Fleet | VPS、daemon 与发布状态 / VPS, daemons and release status | Cloudflare Worker + DO | [fleet/](fleet/README.md) |

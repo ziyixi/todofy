@@ -129,8 +129,6 @@ export const EMBED_SUMMARY_CHARS = 600;
 export const EMBED_BATCH = 50;
 export const EMBEDDING_MODEL = 'models/bge-m3';
 export const EMBEDDING_DIMENSIONS = 1024;
-/** Neurons per million input tokens (Workers AI pricing, 2026-10). */
-export const NEURONS_PER_M_TOKENS = 1075;
 /** The brief's own daily cap on neurons (the account's free 10,000 are mostly mailsort's). */
 export const DAILY_NEURON_CAP = 500;
 

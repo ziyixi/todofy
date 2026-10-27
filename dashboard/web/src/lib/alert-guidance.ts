@@ -8,6 +8,8 @@ export function alertGuidance(code: string, source?: string): AlertGuidance {
     if (code === 'source_unavailable') return { explanation: '个人 MCP 无法读取来源服务的当前状态。', next: '查看来源服务的检查状态，恢复后会继续检查。' }
   }
   switch (code) {
+    case 'model_execution_unknown':
+      return { explanation: '有推理请求超过 15 分钟没有留下最终结果。', next: '先在 Model Router 查看对应请求的时间与结果，核对后再发起新请求。' }
     case 'website_sync_stale':
       return { explanation: '超过 26 小时没有完整的 Notion 内容检查记录。网站可访问不能证明内容同步正常。', next: '在首页点击立即同步；查看本次 Actions，处理失败原因后刷新状态。' }
     case 'website_sync_failed':

@@ -3,7 +3,7 @@
 How to work on Todofy: local commands, repo layout, the Python Workers idioms this code relies on, and
 the contracts between modules. Todofy is two Workers: the TypeScript gateway `todofy` (`gateway/`: host
 routing, Access, CSRF, webhook and Basic credentials, assets, cron) and the Python `todofy-core`
-(`worker/`), which hosts the `TodofyCore` Durable Object where all D1 and Gemini work runs. Todofy writes no
+(`worker/`), which hosts the `TodofyCore` Durable Object where D1 work and model invocation coordination run. Todofy writes no
 task since 2026-10-21 (Tasks converts mail through the `Mail` entrypoint); the column names that still say
 `todoist` are frozen identities, and neither Worker binds Tasks (Tasks backs itself up). `gateway-contract.md` is the contract between them. Plans and decisions live in `cloudflare-migration-plan.md` (v2, §0.1
 overrides) and `implementation-order.md`; where they disagree with this file on a name or interface,
@@ -54,14 +54,11 @@ Running the runtime suite in parallel:
 - Shared state in the checkout is prepared under file locks in `.wrangler/`: `pywrangler sync` (once per
   process) and the first Pyodide download. `uv run python -m tests.runtime.warm_up` does both once, up
   front; CI runs it before each shard.
-- `test_alarm.py::test_timeout_really_closes_a_hanging_upstream_connection` measures the gap between
-  the fake receiving the hung call and the fallback call against the 1.5 s `GEMINI_TIMEOUT_MS`. workerd
-  arms `AbortSignal.timeout` on the isolate's clock, which stands still while Pyodide builds the
-  request, so the gap on the real clock is 1.5 s give or take the Worker's CPU time around the two calls
-  (1.4968–1.523 s measured; the fake's own stamps are within 1 ms of arrival). The bound is therefore
-  `1.45 <=`: 50 ms of slack still proves the call waited out the timeout. It used to be `1.5 <=` and
-  failed now and then, in parallel and serial runs alike. CI still runs `test_alarm.py` alone after each
-  shard's xdist run (`.github/scripts/todofy-runtime-serial.txt`, [ci-cd.md](ci-cd.md)).
+- `test_alarm.py::test_timeout_really_closes_a_hanging_upstream_connection` and
+  `test_clients_model.py::test_hanging_binding_is_cancelled_at_the_step_deadline` exercise real
+  cancellation through the local `MODEL_ROUTER` binding and its loopback bridge. The client bounds
+  both headers and body by the step deadline, with explicit async timeout and abort cleanup.
+  Test configs use `MODEL_TIMEOUT_MS=1500`; CI also runs the alarm test serially after each shard.
 - Longest first: xdist hands out files in the order pytest collects them, so pass the files heaviest
   first. The CI plan prints them in that order; to run shard `I` of 3 exactly as CI does:
 
@@ -138,8 +135,8 @@ api/                           machine-api-v1.openapi.yaml (the hooks hosts' rou
                                generated from proto/mailhero/webhook/v1; core/contract.py reads every body
                                with its generated Python codec)
 worker/todofy/core/            pure stdlib Python, host-testable, no `js`/`workers` imports
-  vocab.py api_errors.py contract.py render.py prompts.py backoff.py classify.py report_schema.py
-  gemini_wire.py carryover.py mailbox.py metrics.py backup.py ops.py owner_ui.py
+  vocab.py api_errors.py contract.py render.py prompts.py backoff.py report_schema.py
+  model_input.py carryover.py mailbox.py metrics.py backup.py ops.py owner_ui.py
   sql/                         every D1 statement, one module per owning runtime module
 worker/todofy/runtime/         runs only inside workerd (imports `js`, `workers`, `pyodide`)
 tests/unit/                    host tests for core/, the migration and the API contract (golden/ = Go captures)
@@ -189,7 +186,7 @@ Host routing, credentials and assets live in the gateway (`gateway/src`, gateway
   turns into the HTTP response (gateway-contract.md §3).
 
 Env, secrets, bindings (core)
-- `config.var(env, NAME, default)`, `flag()` (== "true"), `csv()` (lowercased list). A missing binding
+- `config.var(env, NAME, default)`, `flag()` (== "true") and `integer()`. A missing binding
   raises on the JsProxy; `var` uses getattr with a default. Secrets read exactly like vars.
 - Dev-only switches (`DEV_AUTH_BYPASS`, `DEV_ACCESS_LOOPBACK_ISSUER`) are gateway vars and only work when
   `TODOFY_PUBLIC_HOST` ends with `.localhost`; no production config holds `DEV_*` (tests check it).
@@ -226,20 +223,16 @@ Durable Object (SQLite-backed)
   tables in `__init__` with `IF NOT EXISTS`.
 - Alarms: `await self.ctx.storage.getAlarm()` (None or epoch ms), `await self.ctx.storage.setAlarm(ms)`;
   handler `async def alarm(self, alarm_info=None)`.
-- `interop.now_ms()` / `interop.utc_now()`. Time does not advance during pure CPU work in workerd, so
+- `interop.now_ms()` / `interop.now_s()`. Time does not advance during pure CPU work in workerd, so
   CPU cannot be timed inside the isolate; production CPU comes from Workers Logs.
 
-Outbound calls (`runtime/interop.py`)
-- `await fetch_with_timeout(url, timeout_ms=..., method=, headers={}, body=str|bytes)` → `Upstream(status,
-  body: bytes, failure: Failure | None, retry_after: str | None)`. The deadline (`AbortSignal.timeout`)
-  covers the body read and really closes the socket (runtime-tested against a hanging fake).
-- Pyodide raises AbortError (an OSError) for every fetch failure. Only `signal.aborted` separates a
-  timeout (`Failure.TIMEOUT`) from anything else, and nothing proves a failed request was never sent, so
-  every other failure is `Failure.LOST`. `Failure.NOT_SENT` is never produced by a fetch; a reliable
-  pre-send signal could add one, with a runtime test using a refused port.
-- `upstream.outcome()` → `core.classify.HttpOutcome` (parses Retry-After) — feed it to `classify_*`.
-- `to_js(value)` makes plain JS objects (default conversion builds a Map); `ArrayBuffer.to_bytes()`;
-  `sha256_hex(bytes)` uses WebCrypto.
+Python/JavaScript conversions (`runtime/interop.py`)
+- `to_js(value)` builds plain JS objects (the default conversion would build a Map).
+- `read_capped(stream, limit)` reads a JS ReadableStream up to the byte limit and cancels an oversized
+  stream without buffering the rest. Runtime tests keep the early-stop and cancellation checks.
+- `sha256_hex(bytes)` uses WebCrypto. `now_ms()` and `now_s()` expose the isolate clock.
+- Model transport belongs to `runtime/model.py`: the shared client calls `MODEL_ROUTER`, bounds both
+  headers and body by the deadline, and aborts the binding call on timeout or cancellation.
 
 Local runtime quirks (not production behaviour)
 - Local cron: `GET /cdn-cgi/local/scheduled?cron=...` (`Worker.trigger_cron`). `/__scheduled` and
@@ -348,11 +341,11 @@ module seams. Signatures are the contract between modules — change one togethe
 
 | Owner | Files |
 |---|---|
-| **P – pipeline** | `runtime/coordinator.py`, `runtime/ledger.py`, `runtime/gemini.py`, `core/sql/ledger.py`, `config.py`, `interop.py` |
+| **P – pipeline** | `runtime/coordinator.py`, `runtime/ledger.py`, `runtime/model.py`, `runtime/model_settings.py`, `core/sql/ledger.py`, `config.py`, `interop.py` |
 | **O – owner API and Mail** | `runtime/api.py`, `runtime/owner_ui.py`, `runtime/mail.py`, `core/sql/views.py`, `core/sql/mailbox.py` |
 | **G – gateway** | `gateway/` (TypeScript: routing, Access, CSRF, webhook and Basic credentials, assets, cron) |
 | **R – reports & retention** | `runtime/reports.py`, `runtime/retention.py`, `core/sql/{reports,retention}.py`, `core/carryover.py` |
-| **T – runtime tests** | `tests/fakes/gemini_fake.py`, `tests/runtime/test_*.py` scenarios (v2 §6.2 + impl-order §1.5), `wrangler.test.toml` and `gateway/wrangler.test*.toml` vars |
+| **T – runtime tests** | `tests/fakes/model_router_fake.py`, `tests/runtime/test_*.py` scenarios (v2 §6.2 + impl-order §1.5), `wrangler.test.toml` and `gateway/wrangler.test*.toml` vars |
 
 `entry.py`, `http.py`, `core/*` and the migration stay with the lead; a new `ApiError` or a schema change
 goes through the lead. The signatures below are as built (S5/S6 done); the spike code is gone.
@@ -364,22 +357,26 @@ class Default(WorkerEntrypoint):
 ```
 
 ### config.py (P)
-Existing `var/flag/csv`, plus small typed readers as needed:
+Small readers for the active Worker configuration:
 ```python
+def var(env, name: str, default: str = "") -> str
+def flag(env, name: str) -> bool
 def integer(env, name: str, default: int) -> int
 def source_id(env) -> str                           # MAIL_SOURCE_ID, default "mail-hero-personal"
-def gemini_models(env) -> list[str]                 # GEMINI_MODELS csv, first is preferred
-def gemini_email_models(env) -> list[str]           # GEMINI_EMAIL_MODELS, unset inherits GEMINI_MODELS
+def report_default_top(env) -> int                  # REPORT_DEFAULT_TOP, 1-10
 ```
-Vars (plain, with defaults): `MAIL_SOURCE_ID`, `GEMINI_API_BASE`, `GEMINI_MODELS`, `GEMINI_EMAIL_MODELS`,
-`GEMINI_TIMEOUT_MS` (60000), `GEMINI_DAILY_TOKEN_BUDGET` (3000000), `BACKOFF_BASE_MS` (60000),
-`WATCHDOG_MS` (120000), `REPORT_DEFAULT_TOP` (10), `REPORT_PRECOMPUTE_UTC` ("13:30"), `REPORT_CARRYOVER_DAYS`
-(14; 0 turns the carryover off), `LEGACY_TEXT_RETENTION_DAYS`, `MAINTENANCE_MODE`, `PROCESSING_PAUSED`,
-`BUILD_SHA` and `TODOFY_PUBLIC_HOST` (the ops status's UI link). The core's one secret set by the owner:
-`GEMINI_API_KEY`. The gateway's vars and secrets (`ACCESS_*`, `TODOFY_HOOKS_HOSTS`,
-`MAIL_WEBHOOK_TOKEN_SHA256(_PREVIOUS)`, `REPORT_BASIC_AUTH_SHA256`, `CSRF_SIGNING_KEY`) are listed in
-gateway-contract.md §1. Test configs shorten `*_MS` values (including the gateway's
-`JWKS_REFRESH_COOLDOWN_MS`); production never sets them.
+Vars (plain, with defaults): `MAIL_SOURCE_ID`, `MODEL_TIMEOUT_MS` (180000),
+`GEMINI_DAILY_TOKEN_BUDGET` (3000000; physical legacy budget key), `BACKOFF_BASE_MS` (60000),
+`WATCHDOG_MS` (420000), `REPORT_DEFAULT_TOP` (10), `REPORT_PRECOMPUTE_UTC` ("13:30"),
+`REPORT_CARRYOVER_DAYS` (14; 0 disables carryover), `LEGACY_TEXT_RETENTION_DAYS`,
+`MAINTENANCE_MODE`, `PROCESSING_PAUSED`, `BUILD_SHA` and `TODOFY_PUBLIC_HOST`.
+
+The core calls `MODEL_ROUTER` (`service=model-router`, `entrypoint=Inference`, `props.app=todofy`);
+provider credentials stay in the Router. Mail/report choices are stored in D1 `model_settings` and
+updated through the owner API with an etag and request ID. The gateway's vars and secrets
+(`ACCESS_*`, `TODOFY_HOOKS_HOSTS`, `MAIL_WEBHOOK_TOKEN_SHA256(_PREVIOUS)`,
+`REPORT_BASIC_AUTH_SHA256`, `CSRF_SIGNING_KEY`) are listed in gateway-contract.md §1.
+Test configs shorten `*_MS` values; production keeps their code defaults.
 
 ### coordinator.py (P) — the only writer of the ledger
 RPC methods, called only by the gateway's binding (gateway-contract.md §3; `fetch` answers 404). Each
@@ -458,31 +455,39 @@ hash → 409). A recompute stores only a computed report (200); a failure (429, 
 claim whose run never finished is taken over after `RECOMPUTE_CLAIM_STALE_S` (120 s), so repeating the same
 `request_id` after a retryable error computes it then (AIP-155).
 
-### gemini.py (P; used by R)
+### model.py and model_settings.py (P; used by R)
 ```python
 @dataclass(frozen=True, slots=True)
-class GeminiResult:
-    verdict: GeminiVerdict          # core.classify, from the last model tried
-    text: str                       # first candidate text when ok
-    model: str                      # model that answered (or the last one tried)
-    tokens: int                     # usageMetadata.totalTokenCount summed over attempts
+class ModelVerdict:
+    ok: bool
+    code: Code | None
+    retry_after: float
 
-async def generate(env, *, system: str, user: str, deadline_ms: int,   # deadline_ms: absolute epoch ms
-                   response_schema: dict | None = None, preface: str = "",
-                   models: list[str] | None = None) -> GeminiResult
+@dataclass(frozen=True, slots=True)
+class ModelResult:
+    verdict: ModelVerdict           # normalized result mapped to existing business codes
+    text: str                       # final text, empty on failure
+    model: str                      # reported model when available, otherwise public route
+    tokens: int                     # normalized total for this call
+    prompt_tokens: int
+    attempts: int                   # upstream attempt count reported by the Router
+    usage_available: bool
+
+async def generate(env, *, system: str, user: str, deadline_ms: int, model: str,
+                   response_schema: dict | None = None, preface: str = "") -> ModelResult
 ```
-Tries the supplied `models`, or `gemini_models(env)` when omitted, in order while `verdict.next_model`, each attempt capped by
-`GEMINI_TIMEOUT_MS` and the remaining `deadline_ms`. No retries across alarms here; the caller applies
-`backoff`. `user` is always framed by `core.gemini_wire` between `<<<BEGIN_CONTENT>>>` and
-`<<<END_CONTENT>>>` (markers inside the content are neutralised; golden-tested); trusted `preface` text,
-such as the truncation notice, goes before the fence. Summary step: `system=prompts.SUMMARY_EMAIL`,
-`user=gemini_wire.summary_content(event)`, `preface=render.content_notice(event)`,
-`models=gemini_email_models(env)`. Email and Canary prefer Flash-Lite; daily summaries and all
-recommendation sizes keep the default Flash-first chain. Both share the same deadline and daily
-token budget. A completed email keeps its frozen summary and model through a config change.
-`SUMMARY_EMAIL` differs from Go's bytes in one deliberate line (2026-10): the summary starts with a
-one-sentence brief, which `core/mailbox.brief_of` reads back and `COMPLETE_SUMMARY` stores in
-`summaries.brief`. The one-time brief backfill of older summaries ran in an earlier release and is gone.
+`generate` makes one shared-client call through the private service binding and returns the final result.
+The Router owns provider formats and any configured fallback; business retries across alarms remain
+with the caller. The deadline covers the binding response and body read. Unknown usage keeps the
+call's conservative token reservation.
+
+`core.model_input` frames untrusted mail between `<<<BEGIN_CONTENT>>>` and `<<<END_CONTENT>>>`,
+neutralising embedded markers. Trusted `preface` text, such as a truncation notice, stays before the fence.
+The summary step uses `prompts.SUMMARY_EMAIL`, `model_input.summary_content(event)` and
+`render.content_notice(event)` with the saved email route. Reports use the saved report route and
+standard JSON Schema where needed. A completed mail keeps its frozen summary and model after a choice changes.
+`SUMMARY_EMAIL` retains the one deliberate brief line introduced in 2026-10; `core/mailbox.brief_of`
+reads it and `COMPLETE_SUMMARY` stores it in `summaries.brief`.
 
 ### reports.py (R)
 ```python
@@ -652,11 +657,11 @@ canaries, recovery, the watchdog, report precompute and the cron wake.
 "oldest due row" signal lives in the Overview `oldest_due_at`.
 
 ### Fakes (T)
-Extend `tests/fakes/server.py` rather than forking it: `gemini_fake.py` (x-goog-api-key check,
-`generateContent` queue, `usageMetadata`, records `systemInstruction`/`responseSchema`; seeds 429 with
-`Retry-After` in seconds and HTTP-date forms, `delay_ms`, and `hang`). Todofy binds no other app; its runtime
-harness starts only todofy-core and the gateway (with a test-only probe Worker in front where a test needs one)
-against the Gemini fake.
+Extend `tests/fakes/server.py` for loopback control. `model_router_fake.py` records the common
+Generate request and serves normalized final output, usage, attempt counts and safe errors.
+The runtime harness adds a test-only Worker bridge under `MODEL_ROUTER`, so the production client
+uses the same service-binding seam. Delays and hangs verify deadlines and socket cleanup; no provider
+credentials, provider wire payloads or production HTTP escape are needed.
 
 ## 6. Metrics and ops queries
 

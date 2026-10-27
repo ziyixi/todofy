@@ -232,8 +232,6 @@ def generated_files(root: Path) -> dict[str, str]:
             replacements["WEBHOOK_ALLOWED_HOSTS"] = "daily." + profile["zone"]
         if name == "model-router":
             replacements["CODEX_EXECUTOR_ORIGIN"] = "https://" + profile["vps"]["platform_runtime_host"]
-        if name == "mailsort":
-            replacements["CODEX_ENDPOINT_URL"] = "https://" + profile["vps"]["platform_runtime_host"] + "/api/codex/v1/inference:run"
         for variable, value in replacements.items():
             if variable in variables:
                 text = literal_field(text, variable, value, "vars")

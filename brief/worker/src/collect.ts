@@ -23,7 +23,7 @@
  */
 import type { StepBudget } from './budget.ts';
 import { callModel, type CallContext } from './claude.ts';
-import { addToCentroid, AiError, AiQuotaError, embed, embeddingNeurons, embeddingText, nearest, unit } from './cluster.ts';
+import { addToCentroid, AiError, AiQuotaError, embed, embeddingNeurons, embeddingQuotaRate, embeddingText, nearest, unit } from './cluster.ts';
 import type { ModelBinding } from '@ziyixi/model-router-client';
 import type { FeedEntry } from './fetch/feeds.ts';
 import type { Clock, Hosts } from './fetch/hosts.ts';
@@ -390,6 +390,15 @@ async function embedPhase(env: CollectEnv): Promise<{ embedded: number; remainin
     return { embedded: 0, remaining: 0 };
   }
   const ai = env.ai;
+  if (!env.budget.take()) return { embedded: 0, remaining: pending() };
+  let quotaUnitsPerToken: number;
+  try { quotaUnitsPerToken = await embeddingQuotaRate(ai); }
+  catch (error) {
+    if (!(error instanceof AiError)) throw error;
+    skipAll(2);
+    env.transact(() => { env.store.pushError(error.code); });
+    return { embedded: 0, remaining: 0 };
+  }
   let embedded = 0;
   try {
     await ensureTopicVectors(env, ai);
@@ -410,7 +419,7 @@ async function embedPhase(env: CollectEnv): Promise<{ embedded: number; remainin
     const batch = env.store.all<ItemRow>(`SELECT * FROM items WHERE embedded = 0 ORDER BY fetched_ms LIMIT ?`, EMBED_BATCH);
     if (batch.length === 0) break;
     const texts = batch.map((item) => embeddingText(item.title, item.summary, EMBED_SUMMARY_CHARS));
-    const estimate = embeddingNeurons(texts);
+    const estimate = embeddingNeurons(texts, quotaUnitsPerToken);
     if (env.store.usage(env.day).neurons + estimate > DAILY_NEURON_CAP) {
       skipAll(2);
       env.transact(() => { env.store.pushError('neuron_cap'); });

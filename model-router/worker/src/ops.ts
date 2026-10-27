@@ -8,15 +8,34 @@ import type { Env } from './types.ts';
 
 export class Ops extends WorkerEntrypoint<Env> implements wire.OpsService {
   async status(): Promise<wire.OpsStatus> {
-    const row = await this.env.DB.prepare("SELECT count(*) AS requests, sum(state = 'succeeded') AS succeeded, sum(state IN ('failed','cancelled','interrupted')) AS failed, sum(state = 'running' AND started_ms < ?) AS stale FROM requests WHERE started_ms >= ?")
-      .bind(Date.now() - 15 * 60000, Date.now() - DAY).first<{ requests: number; succeeded: number; failed: number; stale: number }>();
-    return toWire(OpsStatusSchema, create(OpsStatusSchema, {
-      version: 'ops-v1', app: 'model-router', generatedAt: new Date().toISOString(),
-      uiUrl: `https://${this.env.PUBLIC_HOST}/`, health: row?.stale ? Health.DEGRADED : Health.OK,
-      capabilities: [], modes: { maintenance: false }, guard: { level: GuardLevel.NORMAL },
-      counters: { requests_today: row?.requests ?? 0, succeeded_today: row?.succeeded ?? 0, failed_today: row?.failed ?? 0, interrupted: row?.stale ?? 0 },
-      signals: row?.stale ? [{ code: 'model_execution_unknown', severity: Severity.WARNING, metrics: { count: row.stale } }] : [],
-    }));
+    const now = Date.now();
+    const row = await this.env.DB.prepare(
+      "SELECT count(*) AS requests, sum(state = 'succeeded') AS succeeded, sum(state IN ('failed','cancelled','interrupted')) AS failed, sum(state = 'running' AND started_ms < ?) AS stale FROM requests WHERE started_ms >= ?",
+    )
+      .bind(now - 15 * 60000, Math.floor(now / DAY) * DAY)
+      .first<{ requests: number; succeeded: number; failed: number; stale: number }>();
+    return toWire(
+      OpsStatusSchema,
+      create(OpsStatusSchema, {
+        version: 'ops-v1',
+        app: 'model-router',
+        generatedAt: new Date(now).toISOString(),
+        uiUrl: `https://${this.env.PUBLIC_HOST}/`,
+        health: row?.stale ? Health.DEGRADED : Health.OK,
+        capabilities: [],
+        modes: { maintenance: false },
+        guard: { level: GuardLevel.NORMAL },
+        counters: {
+          requests_today: row?.requests ?? 0,
+          succeeded_today: row?.succeeded ?? 0,
+          failed_today: row?.failed ?? 0,
+          interrupted: row?.stale ?? 0,
+        },
+        signals: row?.stale
+          ? [{ code: 'model_execution_unknown', severity: Severity.WARNING, metrics: { count: row.stale } }]
+          : [],
+      }),
+    );
   }
   setGuard(input: wire.SetGuardInput): Promise<wire.GuardState> {
     if (input.level !== 'normal') throw new Error('invalid_input');

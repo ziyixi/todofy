@@ -177,6 +177,8 @@ service TodofyUiService {
   //     aip.dev/not-precedent: The existing settings field and fixed singleton path are preserved for current UI callers. --)
   // (-- api-linter: core::0134::method-signature=disabled
   //     aip.dev/not-precedent: The existing settings field and fixed singleton path are preserved for current UI callers. --)
+  // (-- api-linter: client-libraries::4232::required-fields=disabled
+  //     aip.dev/not-precedent: the masked settings singleton carries its revision separately from resource fields. --)
   rpc UpdateModelSettings(UpdateModelSettingsRequest) returns (ModelSettings) {
     option (google.api.http) = {
       patch: "/api/v1/{settings.name=modelSettings}"
@@ -218,6 +220,12 @@ message GetModelSettingsResponse {
   repeated modelrouter.inference.v1.Model models = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 // A bounded, idempotent owner settings change.
+// (-- api-linter: core::0134::request-required-fields=disabled
+//     aip.dev/not-precedent: this owner operation always checks its current revision. --)
+// (-- api-linter: core::0134::request-unknown-fields=disabled
+//     aip.dev/not-precedent: etag remains outside the masked resource fields in this wire profile. --)
+// (-- api-linter: core::0154::no-duplicate-etag=disabled
+//     aip.dev/not-precedent: the resource etag is read metadata; the request revision survives field masking. --)
 message UpdateModelSettingsRequest {
   // New selection and current revision.
   // (-- api-linter: core::0134::request-resource-field=disabled

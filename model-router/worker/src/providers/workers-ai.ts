@@ -1,6 +1,6 @@
 import type { EmbeddingResult, ProviderContext } from '../types.ts';
 import { providerStatus } from './common.ts';
-import { record, unknownUsage } from './usage.ts';
+import { estimateTokens, record, unknownUsage } from './usage.ts';
 
 const DIMENSIONS = 1024;
 
@@ -20,6 +20,7 @@ export async function embedWorkersAI(inputs: readonly string[], context: Provide
     const message = error instanceof Error ? error.message : '';
     return /\b4006\b|daily free allocation|neurons|quota/i.test(message) ? fail(8, 'embedding_quota') : fail(14, 'embedding_unavailable');
   }
+  base.usage.estimatedQuotaUnits = inputs.reduce((sum, text) => sum + estimateTokens(text), 0) * (context.route.quotaUnitsPerToken ?? 0);
   if (context.signal.aborted) return fail(1, 'embedding_cancelled');
   if (context.deadlineMs <= Date.now()) return fail(4, 'embedding_deadline');
   const data = record(value)?.['data'];

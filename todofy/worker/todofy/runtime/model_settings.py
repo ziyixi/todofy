@@ -31,7 +31,7 @@ async def update(env: Any, owner: str, request: pb.UpdateModelSettingsRequest) -
     desired = request.settings
     if desired is None or desired.name != "modelSettings":
         raise UiError(Reason.BAD_REQUEST)
-    mask = set(request.update_mask.split(",") if request.update_mask else ("email_model", "report_model"))
+    mask = set(request.update_mask or ("email_model", "report_model"))
     if not mask or mask - {"email_model", "report_model"}:
         raise UiError(Reason.BAD_REQUEST)
     digest = hashlib.sha256(

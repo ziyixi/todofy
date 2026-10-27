@@ -15,5 +15,6 @@
 #
 # The reminder links to the local owner UI (the same host the tests use).
 TODOFY_PUBLIC_HOST=todofy.localhost
-# Worker secret, only to call the real Gemini from a local core:
-# GEMINI_API_KEY=
+# Model calls use the MODEL_ROUTER service binding from wrangler.toml. The router owns provider
+# credentials and fallback policy; this core has no provider key or HTTP upstream setting.
+# For synthetic inference use the runtime harness's local service-binding fake (tests/runtime).

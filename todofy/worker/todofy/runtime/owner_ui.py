@@ -24,6 +24,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
+from model_router_client import ModelRouterError
 from pyodide.ffi import JsException
 from ziyixi_proto.todofy.ui.v1 import mail_event_pb, reports_pb
 from ziyixi_proto.todofy.ui.v1 import todofy_ui_service_pb as pb
@@ -254,3 +255,10 @@ async def _answer(
     except JsException:
         # D1 or object storage failed; the platform logs carry the details.
         return _refusal(UiError(Reason.UNAVAILABLE))
+    except ModelRouterError as error:
+        reason = (
+            Reason.NOT_CONFIGURED
+            if error.code in {"UNAUTHENTICATED", "PERMISSION_DENIED", "FAILED_PRECONDITION"}
+            else Reason.UNAVAILABLE
+        )
+        return _refusal(UiError(reason))

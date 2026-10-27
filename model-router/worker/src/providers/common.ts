@@ -11,9 +11,16 @@ export function providerStatus(code: number, message: string, reason?: string, r
   return { code, message, reason: reason ?? reasons[code] ?? 'MODEL_UNAVAILABLE', retryAfterSeconds, details: [] };
 }
 
-export function httpError(provider: string, status: number): ReturnType<typeof providerStatus> {
+/** Delta seconds or HTTP-date, with the caller's existing one-day backoff ceiling. */
+export function parseRetryAfter(value: string | null, nowMs = Date.now()): number {
+  const text = (value ?? '').trim();
+  const seconds = /^[+-]?\d+$/.test(text) ? Number(text) : (Date.parse(text) - nowMs) / 1000;
+  return Number.isNaN(seconds) ? 0 : Math.max(0, Math.min(86_400, Math.ceil(seconds)));
+}
+
+export function httpError(provider: string, status: number, headers?: Headers): ReturnType<typeof providerStatus> {
   const code = status === 401 || status === 403 ? 7 : status === 429 ? 8 : status === 408 ? 4 : status >= 500 || status === 409 ? 14 : 9;
-  return providerStatus(code, `${provider}_http_${String(status)}`, status === 429 ? 'MODEL_RATE_LIMIT' : undefined);
+  return providerStatus(code, `${provider}_http_${String(status)}`, status === 429 ? 'MODEL_RATE_LIMIT' : undefined, parseRetryAfter(headers?.get('retry-after') ?? null));
 }
 
 export function parseSchema(value: string): Record<string, unknown> | null {

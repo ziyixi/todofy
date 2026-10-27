@@ -408,7 +408,7 @@ class DriftAcceptance(unittest.TestCase):
 
     def test_a_retired_binding_is_one_the_app_no_longer_declares(self):
         # Only these exact owner-approved retirements may pass a normal release.
-        self.assertEqual(control.RETIRED_BINDINGS, {"todofy": {"TASKS"}, "mailsort": {"AI"}})
+        self.assertEqual(control.RETIRED_BINDINGS, {"todofy": {"TASKS"}, "mailsort": {"AI", "CODEX_ENDPOINT_URL"}, "brief": {"AI"}})
         for app, names in control.RETIRED_BINDINGS.items():
             for path in control.WORKERS[app]:
                 config = control.read_toml(ROOT / path)

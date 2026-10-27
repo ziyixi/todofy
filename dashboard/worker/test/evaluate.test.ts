@@ -44,6 +44,12 @@ describe('levels', () => {
 });
 
 describe('entry health (the tile: the entry\'s own health, Q2)', () => {
+  it('places an unconfirmed model execution on the registered Router Ops detail', () => {
+    const doc = status('model-router', { health: 'degraded', signals: [signal('model_execution_unknown', 'warning', { count: 1 })] });
+    expect(entry('model-router').app_only_signals).toContain('model_execution_unknown');
+    expect(state('model-router', { statuses: { 'model-router': doc } })).toMatchObject({ level: 'warning', reason: 'model_execution_unknown' });
+    expect(targetOf('model-router', 'model_execution_unknown')).toEqual({ view: 'ops', entry: 'model-router' });
+  });
   it('shows the mockup day: apps ok with their counter, link-only hosts, the site\'s latency, Notion\'s last hour', () => {
     const tiles = Object.fromEntries(withLinkOnly().entries.map((e) => [e.id, entryState(e, input())]));
     expect(tiles['mail-hero']).toMatchObject({ level: 'ok', reason: null, metric: { kind: 'counter', name: 'ingest_today_messages', value: 41 }, top_signals: [] });

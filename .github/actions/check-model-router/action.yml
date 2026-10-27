@@ -11,7 +11,9 @@ runs:
     - name: Check deployment values and production boundaries
       working-directory: model-router
       shell: bash -e {0}
-      run: node --test tools/test/*.test.mjs
+      run: |
+        node --test tools/test/*.test.mjs
+        python3 -m unittest discover -s tools/test -p 'test_*.py'
     - name: Lint, typecheck and test the Worker
       working-directory: model-router/worker
       shell: bash -e {0}

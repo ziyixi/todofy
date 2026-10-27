@@ -30,10 +30,78 @@ describe('Router with real D1, private R2 and SQLite Durable Objects', () => {
     harness.geminiOutputs.length = 0
   })
 
+  it('requires the signed owner CSRF cookie, token and Origin before generating with a billing profile', async () => {
+    const body = JSON.stringify({
+      request_id: crypto.randomUUID(),
+      config: { model: gemini },
+      input: 'Synthetic owner billing input',
+      metadata: { billing_app: 'todofy' },
+    })
+    const blocked = await harness.mf.dispatchFetch(origin + generatePath, {
+      method: 'POST',
+      headers: { origin, 'content-type': 'application/json' },
+      body: '{ malformed synthetic body',
+    })
+    expect(blocked.status).toBe(403)
+    const error = (await blocked.json()) as { error: { details: { reason?: string }[] } }
+    expect(error.error.details.some((detail) => detail.reason === 'CSRF_FAILED')).toBe(true)
+    expect(harness.calls).toHaveLength(0)
+    const session = await harness.mf.dispatchFetch(`${origin}/api/session`)
+    expect(session.status).toBe(200)
+    const token = ((await session.json()) as { csrf_token: string }).csrf_token
+    const setCookie = session.headers.get('set-cookie') ?? ''
+    expect(token.length).toBeGreaterThan(0)
+    expect(setCookie).toContain('model_router_csrf=')
+    expect(setCookie).toContain('HttpOnly')
+    const cookie = setCookie.split(';')[0] ?? ''
+    const headers = { cookie, 'x-csrf-token': token, 'content-type': 'application/json' }
+    const foreign = await harness.mf.dispatchFetch(origin + generatePath, {
+      method: 'POST',
+      headers: { ...headers, origin: 'https://untrusted.example.test' },
+      body,
+    })
+    expect(foreign.status).toBe(403)
+    expect(harness.calls).toHaveLength(0)
+    const response = await harness.mf.dispatchFetch(origin + generatePath, {
+      method: 'POST',
+      headers: { ...headers, origin },
+      body,
+    })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      state: 'succeeded',
+      app: 'console',
+      metadata: { billing_app: 'todofy' },
+    })
+    expect(harness.calls).toHaveLength(1)
+    const stored = await harness.owner.listRequests({ app: 'console' })
+    expect(stored.requests).toHaveLength(1)
+    expect(stored.requests[0]?.app).toBe('console')
+  })
+
+  it('rejects unknown models and unsupported controls before starting or billing an execution', async () => {
+    await expect(
+      harness.models.generate({
+        requestId: crypto.randomUUID(),
+        config: { model: 'models/missing' },
+        input: 'Synthetic input',
+      }),
+    ).rejects.toMatchObject({ status: { httpStatus: 400, reason: 'MODEL_NOT_FOUND' } })
+    await expect(
+      harness.models.generate({
+        requestId: crypto.randomUUID(),
+        config: { model: sol, parameters: { maxOutputTokens: 32 } },
+        input: 'Synthetic input',
+      }),
+    ).rejects.toMatchObject({ status: { httpStatus: 400, reason: 'PARAMETER_UNSUPPORTED' } })
+    expect(harness.calls).toHaveLength(0)
+    expect(await harness.db.prepare('SELECT count(*) AS n FROM requests').first('n')).toBe(0)
+  })
+
   it('returns final JSON, persists private bodies separately, and reuses one execution for the same request', async () => {
     const request = {
       requestId: crypto.randomUUID(),
-      config: { model: sol, outputSchemaJson: schema },
+      config: { model: sol, outputSchemaJson: schema, webResearch: true },
       input: 'Synthetic private input',
     }
     const [first, repeated] = await Promise.all([harness.models.generate(request), harness.models.generate(request)])
@@ -46,6 +114,7 @@ describe('Router with real D1, private R2 and SQLite Durable Objects', () => {
     expect(first.usage?.estimatedCostMicrousd).toBeUndefined()
     expect(repeated.output).toBe(first.output)
     expect(persisted.output).toBe(first.output)
+    expect(persisted.observations?.openedUrls).toEqual(['https://example.test/synthetic-research-evidence'])
     expect(harness.calls).toHaveLength(1)
     expect(harness.calls[0]).toMatchObject({ caller: 'console', bearer: 'Bearer synthetic-executor-token' })
     const row = await harness.db
@@ -54,12 +123,14 @@ describe('Router with real D1, private R2 and SQLite Durable Objects', () => {
       .first<{ generation_json: string; body_key: string }>()
     expect(row?.generation_json).not.toContain('Synthetic private input')
     expect(row?.generation_json).not.toContain('synthetic executor result')
+    expect(row?.generation_json).not.toContain('https://example.test/synthetic-research-evidence')
     const stored = await harness.bucket.get(row!.body_key)
     expect(await stored?.text()).toContain('Synthetic private input')
     const detail = await harness.owner.getRequest({ name: first.name })
     expect(detail.contentAvailable).toBe(true)
     expect(detail.generation?.output).toBe(first.output)
     expect(detail.input).toBe(request.input)
+    expect(detail.generation?.observations?.openedUrls).toEqual(persisted.observations?.openedUrls)
     await expect(harness.models.generate({ ...request, input: 'A different synthetic input' })).rejects.toMatchObject({
       status: { httpStatus: 409 },
     })
@@ -165,7 +236,10 @@ describe('Router with real D1, private R2 and SQLite Durable Objects', () => {
 
   it('preserves two executor turns and close over the existing private Codex alias', async () => {
     const client = harness.forCaller('brief')
-    const conversation = await client.createConversation({ requestId: crypto.randomUUID(), conversation: { config: { model: sol, outputSchemaJson: schema }, timeoutMs: 60_000 } })
+    const conversation = await client.createConversation({
+      requestId: crypto.randomUUID(),
+      conversation: { config: { model: sol, outputSchemaJson: schema }, timeoutMs: 60_000 },
+    })
     expect(conversation.state).toBe('open')
     for (const input of ['Synthetic executor first round', 'Synthetic executor second round']) {
       const result = await client.generate({ requestId: crypto.randomUUID(), conversation: conversation.name, input })
@@ -177,8 +251,14 @@ describe('Router with real D1, private R2 and SQLite Durable Objects', () => {
     const closed = await client.closeConversation({ name: conversation.name, requestId: crypto.randomUUID() })
     expect(closed.state).toBe('closed')
     expect(harness.calls).toHaveLength(4)
-    expect(harness.calls.every((call) => call.path.startsWith('/api/codex/v1/model/') && call.caller === 'brief')).toBe(true)
-    expect(harness.calls.filter((call) => call.path.endsWith('generations:generate')).every((call) => call.body.conversation === conversation.name && call.body.config === undefined)).toBe(true)
+    expect(harness.calls.every((call) => call.path.startsWith('/api/codex/v1/model/') && call.caller === 'brief')).toBe(
+      true,
+    )
+    expect(
+      harness.calls
+        .filter((call) => call.path.endsWith('generations:generate'))
+        .every((call) => call.body.conversation === conversation.name && call.body.config === undefined),
+    ).toBe(true)
   })
 
   it('paginates bounded metadata and keeps subscription usage separate from unavailable USD estimates', async () => {
@@ -316,6 +396,32 @@ describe('Router with real D1, private R2 and SQLite Durable Objects', () => {
     })
     expect(guard.status).toBe(400)
     expect(harness.calls).toHaveLength(1)
+  })
+
+  it('counts Ops today from UTC midnight instead of the preceding twenty-four hours', async () => {
+    const previous = await harness.models.generate({
+      requestId: crypto.randomUUID(),
+      config: { model: sol },
+      input: 'Synthetic previous-day request',
+    })
+    const current = await harness.models.generate({
+      requestId: crypto.randomUUID(),
+      config: { model: sol },
+      input: 'Synthetic current-day request',
+    })
+    const midnight = Math.floor(Date.now() / 86_400_000) * 86_400_000
+    await harness.db.batch([
+      harness.db
+        .prepare('UPDATE requests SET started_ms = ? WHERE id = ?')
+        .bind(midnight - 1, previous.name.replace('requests/', '')),
+      harness.db
+        .prepare('UPDATE requests SET started_ms = ? WHERE id = ?')
+        .bind(midnight + 1, current.name.replace('requests/', '')),
+    ])
+    const probe = await harness.mf.getWorker('router-ops-probe')
+    expect(await (await probe.fetch(origin)).json()).toMatchObject({
+      counters: { requests_today: 1, succeeded_today: 1, failed_today: 0 },
+    })
   })
 })
 

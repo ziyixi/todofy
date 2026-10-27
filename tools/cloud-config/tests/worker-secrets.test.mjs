@@ -49,12 +49,14 @@ for (const [app, worker] of Object.entries(applications)) {
   })
 }
 
-test('manual upstream keys are mandatory for a supplied Todofy core or Mail Hero map', () => {
-  for (const worker of ['todofy-core', 'mail-hero']) {
-    const spec = workerSecretSpec(worker)
-    assert.throws(() => mergeWorkerSecrets(worker, { [spec.github_secret]: '{}' }, {}, SettingError),
-      (error) => error.setting === spec.github_secret)
-  }
+test('Mail Hero retains its required keys while Todofy accepts its optional retired provider key', () => {
+  const mail = workerSecretSpec('mail-hero')
+  assert.throws(() => mergeWorkerSecrets('mail-hero', { [mail.github_secret]: '{}' }, {}, SettingError),
+    (error) => error.setting === mail.github_secret)
+  const core = workerSecretSpec('todofy-core')
+  assert.deepEqual(mergeWorkerSecrets('todofy-core', { [core.github_secret]: '{}' }, {}, SettingError), {})
+  const legacy = { GEMINI_API_KEY: privateValue }
+  assert.deepEqual(mergeWorkerSecrets('todofy-core', { [core.github_secret]: JSON.stringify(legacy) }, {}, SettingError), legacy)
 })
 
 test('the relay cutover strips exactly the three retired inputs and preserves its dispatch token', async () => {

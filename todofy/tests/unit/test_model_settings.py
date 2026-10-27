@@ -8,6 +8,7 @@ import uuid
 import model_router_client as models
 import pytest
 from ziyixi_proto.todofy.ui.v1 import todofy_ui_service_pb as pb
+from ziyixi_proto.wire_json import from_wire, to_wire
 
 from tests.unit.host_support import D1, stubbed_pyodide
 from todofy.core.owner_ui import UiError
@@ -36,9 +37,10 @@ def settings_api(monkeypatch):
 
 
 def request(settings, *, mask=None):
-    return pb.UpdateModelSettingsRequest(
+    value = pb.UpdateModelSettingsRequest(
         settings=settings, request_id=str(uuid.uuid4()), update_mask=mask, etag=settings.etag
     )
+    return from_wire(pb.UpdateModelSettingsRequest, to_wire(value), strict=True).message
 
 
 def test_initial_route_choices_and_configured_catalog(settings_api):
@@ -64,7 +66,9 @@ def test_masked_update_changes_only_the_requested_choice(settings_api):
     current = asyncio.run(module.get(env))
     result = asyncio.run(
         module.update(
-            env, "owner", request(dataclasses.replace(current, email_model=SOL, report_model=SOL), mask="email_model")
+            env,
+            "owner",
+            request(dataclasses.replace(current, email_model=SOL, report_model=SOL), mask=("email_model",)),
         )
     )
     assert (result.email_model, result.report_model) == (SOL, REPORT)

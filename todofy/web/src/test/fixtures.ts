@@ -126,7 +126,8 @@ export function setup(patch: Partial<Integration> = {}): Integration {
     webhook_path: '/hooks/mail',
     mail_source_id: 'synthetic-source',
     access_owner: 'owner@example.com',
-    configured: { mail_webhook_token: true, report_basic_auth: true, gemini_api_key: true, todoist_project: true },
+    configured: { mail_webhook_token: true, report_basic_auth: true, gemini_api_key: false,
+      model_router: true, todoist_project: true },
     ...patch,
   }
 }

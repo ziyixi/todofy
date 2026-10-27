@@ -59,7 +59,7 @@ export async function generateGemini(config: GenerationConfig, input: string, co
       if (!response.ok) {
         await response.body?.cancel();
         usage = { ...(usage ?? unknownUsage()), available: false };
-        base = { ...base, error: httpError('gemini', response.status), usage };
+        base = { ...base, error: httpError('gemini', response.status, response.headers), usage };
         if (response.status === 404 || response.status === 429 || response.status >= 500) continue;
         return base;
       }

@@ -14,6 +14,18 @@ export function unknownUsage(billingKind = 'api'): TokenUsage {
   return { available: false, inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0, reasoningOutputTokens: 0, billingKind };
 }
 
+/** The retained text estimate: roughly one token per CJK character, others per 3.5 code units. */
+export function estimateTokens(text: string): number {
+  let cjk = 0;
+  let other = 0;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if ((code >= 0x3000 && code <= 0x9fff) || (code >= 0xac00 && code <= 0xd7af) || (code >= 0xff00 && code <= 0xffef)) cjk++;
+    else other++;
+  }
+  return cjk + Math.ceil(other / 3.5);
+}
+
 interface Price {
   input: number;
   output: number;

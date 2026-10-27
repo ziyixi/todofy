@@ -36,11 +36,6 @@
           "optional": true
         },
         {
-          "name": "AI",
-          "type": "ai",
-          "source": "config"
-        },
-        {
           "name": "ANTHROPIC_API_KEY",
           "type": "secret_text",
           "source": "manual",
@@ -594,11 +589,6 @@
           "type": "secret_text",
           "source": "manual",
           "optional": true
-        },
-        {
-          "name": "CODEX_ENDPOINT_URL",
-          "type": "plain_text",
-          "source": "config"
         },
         {
           "name": "CSRF_SIGNING_KEY",

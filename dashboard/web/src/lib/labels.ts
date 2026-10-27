@@ -173,6 +173,7 @@ const SIGNALS: Readonly<Record<string, string>> = {
   codex_unavailable: 'Mailsort Codex 推理暂不可用',
   codex_bad_answer: 'Mailsort Codex 返回格式无效',
   codex_gateway_unavailable: 'Codex 推理服务暂不可用',
+  model_execution_unknown: '推理结果待核对',
   // recall
   device_stale: '有浏览器超过 24 小时未上传',
   archive_not_connected: '浏览记录还没连上 Dropbox 备份',

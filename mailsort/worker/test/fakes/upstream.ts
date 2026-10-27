@@ -111,7 +111,7 @@ export class FakeUpstream {
         state: reason ? 'failed' : 'succeeded', output: reason ? '' : JSON.stringify({ items }), parameters: input.config?.parameters,
         upstreamStarted: !reason, attemptCount: engine.configured ? 1 : 0, finishReason: reason ? '' : 'complete',
         ...(reason ? { error: { code, reason, message: 'Synthetic model failure.' } } : {}),
-        usage: { available: !reason && (isClaude || this.codex.usageAvailable), inputTokens: reason ? 0 : inputTokens, outputTokens: reason ? 0 : engine.outputTokens,
+        usage: { available: !reason && (isClaude || this.codex.usageAvailable), billingKind: isClaude ? 'api' : 'subscription', inputTokens: reason ? 0 : inputTokens, outputTokens: reason ? 0 : engine.outputTokens,
           totalTokens: reason ? 0 : inputTokens + engine.outputTokens, cacheWriteTokens: cacheWrite, cachedInputTokens: cacheRead,
           reasoningOutputTokens: isClaude ? this.claude.thinkingTokens ?? 0 : 0, ...(isClaude ? { estimatedCostMicrousd: cost } : {}) },
       })));

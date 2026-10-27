@@ -53,8 +53,9 @@ RETIRED_WEBSITE_BINDINGS = {
 # Remove each entry in a later change after a verified release has removed those bindings.
 # Todofy no longer writes Tasks through its TASKS service binding (2026-10-21).
 # Mailsort replaces Workers AI with its native Claude API client (2026-10-24).
+# Model Router owns the migrated caller connections: Mailsort's direct executor URL and Brief's AI binding retire.
 # Secrets never go here: deploy keeps unnamed secrets, so retire those separately before release.
-RETIRED_BINDINGS: dict[str, set[str]] = {"todofy": {"TASKS"}, "mailsort": {"AI"}}
+RETIRED_BINDINGS: dict[str, set[str]] = {"todofy": {"TASKS"}, "mailsort": {"AI", "CODEX_ENDPOINT_URL"}, "brief": {"AI"}}
 
 
 def read_toml(path):

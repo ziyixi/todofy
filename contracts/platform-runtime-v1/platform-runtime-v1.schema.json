@@ -360,7 +360,14 @@
                   },
                   "effort": {
                     "description": "Configured effort.",
-                    "const": "medium"
+                    "enum": [
+                      "default",
+                      "low",
+                      "medium",
+                      "high",
+                      "xhigh",
+                      "max"
+                    ]
                   },
                   "duration_ms": {
                     "description": "Full request wall duration, measured with a monotonic clock.",

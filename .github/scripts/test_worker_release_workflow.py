@@ -58,6 +58,17 @@ class WorkerReleaseWorkflow(unittest.TestCase):
             with self.subTest(app=app):
                 self.assertEqual(self.caller_data[app + "-deploy"]["permissions"], permissions)
 
+    def test_router_connections_gate_runs_after_publish_even_when_upload_is_not_required(self):
+        recipe = self.release_data["jobs"]["release"]["steps"]
+        gate = next(step for step in recipe if "check_connections.py" in step.get("run", ""))
+        upload = next(step for step in recipe if step.get("uses") == "./.github/actions/release-model-router")
+        record = next(step for step in recipe if "control.py record " in step.get("run", ""))
+        self.assertEqual(gate["if"], "inputs.app == 'model-router'")
+        self.assertEqual(gate["working-directory"], ".release-source")
+        self.assertEqual(gate["env"], {"CLOUDFLARE_API_TOKEN": "${{ secrets.CF_API_TOKEN }}"})
+        self.assertLess(recipe.index(upload), recipe.index(gate))
+        self.assertLess(recipe.index(gate), recipe.index(record))
+
     def test_source_selection_is_inside_the_app_lock_and_production_environment(self):
         for app in APPS:
             with self.subTest(app=app):
@@ -105,6 +116,11 @@ class WorkerReleaseWorkflow(unittest.TestCase):
                 for step in recipe[recipe.index(preflight) + 1:]:
                     # Cleanup only removes temporary local secrets; it has no provider write.
                     if re.search(r"(?m)^        run: rm -f ", step):
+                        continue
+                    # The Router connection gate performs one metadata GET even without an upload.
+                    if "run: python3 model-router/tools/check_connections.py" in step:
+                        self.assertEqual(app, "model-router")
+                        self.assertEqual(field(step, "if"), "inputs.app == 'model-router'")
                         continue
                     self.assertIn(field(step, "if"), {
                         REQUIRED,

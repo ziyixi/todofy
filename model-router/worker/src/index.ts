@@ -10,11 +10,16 @@ export { Ops } from './ops.ts';
 export class Inference extends WorkerEntrypoint<Env, { app?: string }> {
   override async fetch(request: Request): Promise<Response> {
     const app = this.ctx.props.app;
-    if (!app || !['mailsort','todofy','brief'].includes(app)) return errorResponse(new RpcError(Code.PERMISSION_DENIED, 'CALLER_NOT_CONFIGURED', 'Model client is not configured.'));
+    if (!app || !['mailsort', 'todofy', 'brief'].includes(app))
+      return errorResponse(
+        new RpcError(Code.PERMISSION_DENIED, 'CALLER_NOT_CONFIGURED', 'Model client is not configured.'),
+      );
     return forward(request, this.env, app);
   }
 }
 export default {
   fetch: handleRequest,
-  scheduled: async (_event, env) => { await new Store(env).cleanup(); },
+  scheduled: async (_event, env) => {
+    await new Store(env).cleanup();
+  },
 } satisfies ExportedHandler<Env>;

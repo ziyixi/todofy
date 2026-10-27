@@ -4,9 +4,9 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ProviderContext } from '../src/types.ts';
 import { routeFor } from '../src/catalog.ts';
 import { generateClaude } from '../src/providers/claude.ts';
-import { apiKey } from '../src/providers/common.ts';
+import { apiKey, parseRetryAfter } from '../src/providers/common.ts';
 import { generateGemini } from '../src/providers/gemini.ts';
-import { claudeUsage, geminiUsage } from '../src/providers/usage.ts';
+import { claudeUsage, estimateTokens, geminiUsage } from '../src/providers/usage.ts';
 import { embedWorkersAI } from '../src/providers/workers-ai.ts';
 
 const schema = { type: 'array', items: { type: 'object', properties: { value: { type: 'string' } }, required: ['value'], additionalProperties: false } };
@@ -163,6 +163,14 @@ function createParameters(value: Partial<NonNullable<GenerationConfig['parameter
 }
 
 describe('Gemini adapter', () => {
+  it('preserves Retry-After from a quota response for the caller backoff', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ error: { message: 'private provider message' } }, { status: 429, headers: { 'retry-after': '120' } }));
+    const result = await generateGemini(config(), 'synthetic', context('gemini', fetcher));
+    expect(result.error).toMatchObject({ code: 8, reason: 'MODEL_RATE_LIMIT', retryAfterSeconds: 120 });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(result.output).toBe('');
+  });
+
   it('uses standard schemas, excludes thoughts and preserves model defaults', async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json(geminiMessage()));
     const result = await generateGemini(config({ outputSchemaJson: JSON.stringify(schema) }), 'synthetic', context('gemini', fetcher));
@@ -220,6 +228,16 @@ describe('Gemini adapter', () => {
 });
 
 describe('provider isolation and usage', () => {
+  it('keeps Retry-After delta/date semantics and the existing daily ceiling', () => {
+    const now = Date.parse('2026-10-26T12:00:00Z');
+    expect(parseRetryAfter('+12', now)).toBe(12);
+    expect(parseRetryAfter(new Date(now + 120_000).toUTCString(), now)).toBe(120);
+    expect(parseRetryAfter(new Date(now - 120_000).toUTCString(), now)).toBe(0);
+    expect(parseRetryAfter('invalid', now)).toBe(0);
+    expect(parseRetryAfter('-12', now)).toBe(0);
+    expect(parseRetryAfter('999999', now)).toBe(86_400);
+  });
+
   it('never falls back to another application credential', () => {
     const ctx = context('anthropic');
     expect(apiKey({ ...ctx, caller: 'brief' }, 'ANTHROPIC')).toBeNull();
@@ -253,6 +271,12 @@ describe('Workers AI embeddings', () => {
     expect(result.vectors.map(vector => vector[0])).toEqual([1, 2]);
     expect(result.dimensions).toBe(1024);
     expect(result.usage).toMatchObject({ available: false, billingKind: 'platform_quota' });
+    expect(result.usage.estimatedQuotaUnits).toBeCloseTo(0.01075);
+    expect(result.usage.totalTokens).toBe(0);
+  });
+
+  it('keeps the retained CJK/3.5 estimate separate from reported consumption', () => {
+    expect(estimateTokens('abcd中文')).toBe(4);
   });
 
   it('rejects incorrect dimensions instead of returning partial vectors', async () => {

@@ -59,12 +59,11 @@ entrypoint = "Inference"
 props = { app = "todofy" }
 
 [vars]
-# A fixed upstream, never a variable, so a bad setting cannot send the API key elsewhere (tests pin it).
 # Home's tile links to the owner UI on this host (the gateway's TODOFY_PUBLIC_HOST).
 TODOFY_PUBLIC_HOST = "todofy.ziyixi.science"
 # The mail.received.v1 source this consumer accepts.
 MAIL_SOURCE_ID = "mail-hero-personal"
-# Gemini models, tried in order (at most 5).
+# Daily model token budget; the physical key is retained for existing configuration and history.
 GEMINI_DAILY_TOKEN_BUDGET = "3000000"
 REPORT_DEFAULT_TOP = "10"
 REPORT_PRECOMPUTE_UTC = "13:30"

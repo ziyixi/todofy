@@ -18,7 +18,6 @@ from model_router_client import (
 )
 
 from todofy.core import model_input
-from todofy.core.classify import GeminiVerdict
 from todofy.core.vocab import Code
 from todofy.runtime.config import integer
 from todofy.runtime.interop import now_ms, read_capped, to_js
@@ -58,8 +57,15 @@ def client(env: Any, deadline_ms: int | None = None) -> ModelClient:
 
 
 @dataclass(frozen=True, slots=True)
+class ModelVerdict:
+    ok: bool
+    code: Code | None = None
+    retry_after: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
 class ModelResult:
-    verdict: GeminiVerdict
+    verdict: ModelVerdict
     text: str
     model: str
     tokens: int
@@ -81,7 +87,7 @@ async def generate(
     import json
 
     if deadline_ms <= now_ms():
-        return ModelResult(GeminiVerdict(False, Code.SUMMARY_FAILED), "", model, 0, usage_available=True)
+        return ModelResult(ModelVerdict(False, Code.SUMMARY_FAILED), "", model, 0, usage_available=True)
 
     deadline_ms = min(deadline_ms, now_ms() + integer(env, "MODEL_TIMEOUT_MS", 180000))
     request = GenerateRequest(
@@ -106,7 +112,7 @@ async def generate(
             if error.code == "RESOURCE_EXHAUSTED"
             else Code.SUMMARY_FAILED
         )
-        return ModelResult(GeminiVerdict(False, code), "", model, 0, usage_available=rejected)
+        return ModelResult(ModelVerdict(False, code), "", model, 0, usage_available=rejected)
     error = answer.error
     code = (
         None
@@ -121,7 +127,7 @@ async def generate(
     )
     usage = answer.usage
     return ModelResult(
-        GeminiVerdict(
+        ModelVerdict(
             error is None and answer.state == "succeeded",
             code,
             retry_after=0 if error is None else error.retry_after_seconds,

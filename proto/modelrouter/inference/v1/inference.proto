@@ -162,6 +162,8 @@ message Model {
   double reservation_output_microusd_per_token = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Opaque connection revision, useful for clearing a rejected-connection hold after replacement.
   string connection_revision = 16 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Configured platform quota units per estimated input token, for an application's reservation.
+  double reservation_quota_units_per_token = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // Generic parameters. Unsupported explicit values are rejected before a model call.
@@ -242,6 +244,8 @@ message Usage {
   string billing_kind = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Provider total for this call, excluding duplicate cached/reasoning subsets.
   int32 total_tokens = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Estimated platform quota units when the model has a configured rate; separate from reported tokens.
+  optional double estimated_quota_units = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // Facts observed by the execution backend, never inferred from generated text.

@@ -143,7 +143,7 @@ describe('budget and health pages', () => {
 
 describe('setup page', () => {
   it('shows webhook addresses and which secrets are configured, never their values', async () => {
-    const configured = { mail_webhook_token: true, report_basic_auth: true, gemini_api_key: true }
+    const configured = { mail_webhook_token: true, report_basic_auth: true, model_router: true }
     mockApi({ 'GET /api/v1/integration': setup({ configured }) })
     renderApp('/setup')
     expect(await screen.findByText('https://todofy-hooks.example.test/hooks/mail')).toBeInTheDocument()

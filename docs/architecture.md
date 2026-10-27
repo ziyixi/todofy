@@ -25,7 +25,15 @@ flowchart LR
   Chrome[Owner's Chrome extension] -->|recall.ingest.v1, ingest token| Recall[recall]
   Recall -->|recall-archive-v1 feed, export token| NAS[NAS archive]
   Sources[Public feeds and pages] -->|polite polls, honest UA| Brief[Brief]
-  Brief -->|Messages API| Claude[Claude API]
+  Todo -->|ModelService binding| Router[Model Router]
+  Sort -->|ModelService binding| Router
+  Brief -->|ModelService binding| Router
+  News -->|ModelService HTTPS| Router
+  Router --> Claude[Claude API]
+  Router --> Gemini[Gemini API]
+  Router --> AI[Workers AI]
+  Router --> Executor[Official Codex SDK on VPS]
+  Home -->|Ops binding| Router
   Brief -->|shadow or live, at most one email a day| Resend[Resend]
   Home -->|Ops binding| Brief
   Home -->|Fleet and Newsletter Ops bindings| Fleet[Fleet]
@@ -213,13 +221,17 @@ accepted report nor a ready deployment receipt proves successful Newsletter deli
   URLs. One digest after 14:00 UTC plus at most nine urgent tasks keep to its own budget of ten a day (TaskInbox
   refuses a source's 21st).
   BROKEN and automatic pauses enter the digest; status/guard reach Home through Ops.
-- **Mailsort:** one SQLite DO/Alarm, no D1/R2 or cron. Hourly unread batches use Claude Opus 5.5 medium and one
-  maintained prompt, with a dedicated $20/month Anthropic workspace. It
+- **Model Router:** one Cloudflare Worker/SQLite DO, D1 request metadata and private R2 bodies. All model clients
+  use `modelrouter.inference.v1`; only Router knows provider protocols, credentials, cache, fallback and rates.
+  Its private console shows requests and usage. The VPS executor runs the official Codex SDK and returns actual
+  research observations; applications own their workflows and budgets. See [design](../model-router/docs/design.md).
+- **Mailsort:** one SQLite DO/Alarm, no D1/R2 or cron. Configurable 5/15/30/60-minute batches process unclassified
+  Inbox mail from the last 48 hours, including read mail, through Model Router and one maintained prompt. The
+  saved Claude connection retains its dedicated $20/month workspace. It
   reads the owner's Gmail with the owner's own OAuth grant and only ever adds or removes its own labels (created by it
   or adopted, owned by ID) and INBOX, through the closed operation table of `gmail.ts`; it never marks mail read, deletes, sends or changes
   settings. Every write is a ledger row first and can be undone. Shadow mode (the default) only records; the
-  deployment variable `MODE` and the breaker can only lower the mode. Gmail and Claude credentials are owner-written
-  Worker secrets and never pass through GitHub. Account Workers AI shedding does not affect its model.
+  deployment variable `MODE` and the breaker can only lower the mode. Gmail credentials stay in Mailsort; model credentials are owner-written Router secrets. Neither passes through GitHub. Account Workers AI shedding does not affect its model.
   See [AGENTS](../mailsort/AGENTS.md) and [design](../mailsort/docs/design.md).
 - **recall:** one SQLite DO (records, the bigram FTS5 index, the compacted change feed) and one private R2 bucket (the
   texts of a rolling retention window, a year by default; a text leaves only after the Dropbox archive confirmed it), no
@@ -230,16 +242,16 @@ accepted report nor a ready deployment receipt proves successful Newsletter deli
   Dropbox app folder (OAuth with PKCE, connected in 设置), which the NAS syncs with its own Dropbox support: nothing of
   recall's runs on the NAS. Its Access applications and bucket exist since 2026-10-10 and CI deploys it like any app;
   Home binds its Ops entrypoint. See [AGENTS](../recall/AGENTS.md) and [design](../recall/docs/design.md).
-- **Brief:** one SQLite DO that schedules itself with alarms (no D1, R2 or cron), plus the Workers AI binding (bge-m3
-  only). It fetches the registry's public feeds and pages itself (an honest user agent, per-host pacing, never a
-  paywall or a login), screens with Claude Haiku, picks and writes with Claude Opus through the official SDK (the only
-  caller is `claude.ts`), checks every quote and number in code, and sends at most one email a day through a ledger
-  (`send.ts`; an unknown outcome is never sent again). The Claude and Resend keys are put by the owner and never pass
+- **Brief:** one SQLite DO that schedules itself with alarms (no D1, R2 or cron). Model Router supplies both
+  generation and bge-m3 embeddings. It fetches the registry's public feeds and pages itself (an honest user agent, per-host pacing, never a
+  paywall or a login), screens with Claude Haiku, picks and writes with Claude Opus through the common ModelService (the local call ledger is `claude.ts`), checks every quote and number in code, and sends at most one email a day through a ledger
+  (`send.ts`; an unknown outcome is never sent again). The Claude key belongs to Router and the Resend key to Brief; both are owner-written and never pass
   through GitHub; `BRIEF_MODE` and 暂停 can only lower what it does. Its first deployment (`7bea3ec`) runs in archive
   mode: public-source fetching and paid Claude calls can run, with no email sent. Home monitors its Ops entrypoint;
   resource registration and Home rollout acceptance are tracked in [HANDOFF](../HANDOFF.md). See
   [AGENTS](../brief/AGENTS.md) and [design](../brief/docs/design.md).
-- **Newsletter:** runs as an independent k3s image because its workflow uses Codex CLI. It reads Todofy's machine
+- **Newsletter:** runs its persistent editorial workflows in an independent k3s image and invokes models
+  through the same Router API. It installs no model SDK or CLI. It reads Todofy's machine
   reports through existing HTTPS/Basic auth and keeps its own persistent state. It does not import Todofy's
   implementation. Its external `ziyixi-protos`/wire JSON runtime and private drain/monitor adapters stay intact.
   A daily CronJob owns the schedule; config-sync independently downloads validated editorial bundles. Its

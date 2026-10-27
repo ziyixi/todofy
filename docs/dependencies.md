@@ -10,7 +10,8 @@ dependency selection, images and release scope; shared versions and resolution l
 
 Member Node manifests use `catalog:` for external dependencies and `workspace:*` for internal packages.
 Python members declare the dependencies and extras they actually need; exact common versions are root constraints.
-The official Codex Python SDK pins its corresponding CLI runtime, so both services resolve the same pair.
+The official Codex Python SDK pins its corresponding CLI runtime in the VPS executor. Newsletter uses the
+shared provider-neutral Model Router client and installs no SDK or CLI of its own.
 Do not create member `package-lock.json`, `pnpm-lock.yaml` or `uv.lock` files.
 
 ## Install and run

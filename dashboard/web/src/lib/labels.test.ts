@@ -12,6 +12,7 @@ import {
   signalLabel,
   usageErrorLabel,
 } from './labels'
+import { alertGuidance } from './alert-guidance'
 import mailHeroDegraded from '../../../../contracts/ops-v1/fixtures/OpsStatus/mail-hero-degraded.json'
 import todofyDegraded from '../../../../contracts/ops-v1/fixtures/OpsStatus/todofy-degraded.json'
 import mailHeroOk from '../../../../contracts/ops-v1/fixtures/OpsStatus/mail-hero-ok.json'
@@ -30,6 +31,13 @@ import report from '../../../../contracts/ops-v1/fixtures/OpsReport/daily.json'
 const QUOTA_RESOURCES = wireEnum(QuotaResourceSchema, QuotaResource).names
 
 describe('labels', () => {
+  it('names unconfirmed model execution and points to its request record', () => {
+    expect(signalLabel('model_execution_unknown')).toBe('推理结果待核对')
+    const guidance = alertGuidance('model_execution_unknown', 'model-router')
+    expect(guidance.explanation).toContain('15 分钟')
+    expect(guidance.next).toContain('Model Router')
+    expect(guidance.next).toContain('对应请求')
+  })
   it('names every quota resource', () => {
     for (const id of QUOTA_RESOURCES) expect(QUOTA[id]).toBeTruthy()
     expect(signalLabel('d1_rows_read_high')).toBe('D1 读取行数用量高')
