@@ -38,10 +38,6 @@ spec:
               value: gpt-6.1-sol
             - name: NEWSLETTER_DATA_DIR
               value: /var/lib/newsletter
-            - name: CODEX_HOME
-              value: /var/lib/newsletter-auth
-            - name: NEWSLETTER_CODEX_HOME
-              value: /var/lib/newsletter-auth
             - name: NEWSLETTER_CONTENT_CONFIG_DIR
               value: /var/lib/newsletter-config
             - name: NEWSLETTER_BOOTSTRAP_DRAIN_KEY
@@ -79,8 +75,6 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/newsletter
-            - name: auth
-              mountPath: /var/lib/newsletter-auth
             - name: config
               mountPath: /var/lib/newsletter-config
               readOnly: true
@@ -88,9 +82,6 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: newsletter-data
-        - name: auth
-          persistentVolumeClaim:
-            claimName: newsletter-auth
         - name: config
           persistentVolumeClaim:
             claimName: newsletter-config

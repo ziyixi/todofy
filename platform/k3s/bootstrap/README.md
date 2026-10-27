@@ -30,7 +30,7 @@ Five static PV/PVC pairs prebind the exact existing single-node directories:
 | `observer-state` | `/srv/todofy/observer` | observer sequence and frozen pending receipt |
 | `platform-state` | `/srv/todofy/platform` | daemon SQLite release ledger |
 | `newsletter-data` | `/srv/todofy/newsletter/data` | Newsletter's existing persistent state |
-| `newsletter-auth` | `/srv/todofy/newsletter/auth` | Newsletter's existing provider login state |
+| `newsletter-auth` | `/srv/todofy/newsletter/auth` | Codex gateway's subscription login (the claim keeps its original name) |
 | `newsletter-config` | `/srv/todofy/newsletter/config` | public content configuration; writable by config sync, read-only in engine |
 
 `hostPath.type: Directory` makes a missing directory fail instead of silently creating an empty

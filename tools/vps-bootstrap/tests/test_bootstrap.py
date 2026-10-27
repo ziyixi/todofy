@@ -38,8 +38,6 @@ IMAGES = {
 }
 PATHS = {
     "NEWSLETTER_DATA_DIR": "/var/lib/newsletter",
-    "CODEX_HOME": "/var/lib/newsletter-auth",
-    "NEWSLETTER_CODEX_HOME": "/var/lib/newsletter-auth",
     "NEWSLETTER_CONTENT_CONFIG_DIR": "/var/lib/newsletter-config",
 }
 
@@ -159,7 +157,7 @@ class BootstrapTests(unittest.TestCase):
         env = runtime["items"][0]["spec"]["template"]["spec"]["containers"][0]["env"]
         variables = {item["name"]: item["value"] for item in env}
         self.assertEqual(variables["NEWSLETTER_BOOTSTRAP_DRAIN_KEY"], "release-" + SHA)
-        self.assertEqual(variables["CODEX_HOME"], "/var/lib/newsletter-auth")
+        self.assertNotIn("CODEX_HOME", variables)
         k3s_unit = (bundle / "units/k3s.service").read_text()
         self.assertIn("iptables-restore --noflush", k3s_unit)
         self.assertIn("ip6tables-restore --noflush", k3s_unit)
@@ -331,7 +329,6 @@ with patch.object(socket, "socket", side_effect=AssertionError("Network use is f
                     mounts,
                     {
                         "data": PATHS["NEWSLETTER_DATA_DIR"],
-                        "auth": PATHS["NEWSLETTER_CODEX_HOME"],
                         "config": PATHS["NEWSLETTER_CONTENT_CONFIG_DIR"],
                     },
                 )
@@ -438,7 +435,7 @@ with patch.object(socket, "socket", side_effect=AssertionError("Network use is f
         ):
             config.credentials(path, allowed)
         path.chmod(0o600)
-        for key in ("HOME", "OPENAI_API_KEY", "NEWSLETTER_CODEX_HOME"):
+        for key in ("HOME", "OPENAI_API_KEY", "NEWSLETTER_DATA_DIR"):
             changed = json.loads(json.dumps(value))
             changed["newsletter_env"][key] = "private-value"
             path.write_text(json.dumps(changed))

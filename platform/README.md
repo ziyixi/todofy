@@ -43,7 +43,7 @@ CronJob use the same platform image. No application executable or Python depende
 the host. If k3s stops, Fleet marks observations stale or missing rather than guessing unit states.
 
 The Codex gateway has its own one-target release path. It does not change Newsletter admission or
-its daily trigger, and uses the existing Codex login volume with an independent inference bearer.
+its daily trigger, and it is the only Pod that mounts the existing Codex login volume.
 The existing platform Tunnel routes its exact inference prefix through a separate path-scoped
 Access application. Gateway process health is separate from login, quota and actual inference results.
 
