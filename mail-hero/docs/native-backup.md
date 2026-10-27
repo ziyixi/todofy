@@ -70,6 +70,9 @@ Workers Free 对一次 DO 调用的限制是30秒CPU、15分钟、1,000次Cloudf
 | `GET /artifacts/list-v2` | 已完成副本清单 |
 | `GET /artifacts/list-v2-objects`、`GET/HEAD /artifacts/object` | 已鉴权下载，精确路径、no-store/nosniff |
 
+另有 `GET /writers` 列出 API 写入租约，`POST /reconcile-writer` 只在维护模式下按精确 ID 清理遗留租约。
+旧 v1 收集器的采集接口（begin、status、各导出、finish、cancel）已删除；快照导出只由 DO 内的执行器调用。
+
 [下载/恢复工具](../deploy/backup/README.md)把快照保存到新的私有目录，校验后恢复到隔离目录。
 新版不需要GPG。旧 v1 加密包仍使用原来的GPG恢复命令。
 恢复保留 event ID/payload、应用及目标停发；取得最新删除清单并对账后，才另行导入新Cloudflare资源。

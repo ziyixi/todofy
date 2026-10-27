@@ -79,6 +79,7 @@ async function script() {
     export default { async fetch(request, env, ctx) {
       const url = new URL(request.url)
       if (url.pathname.startsWith('/__probe/')) return coordinator(env).fetch(new Request('https://coordinator' + url.pathname, request))
+      if (url.pathname.startsWith('/__test/coordinator/')) return coordinator(env).fetch(new Request('https://coordinator/' + url.pathname.slice('/__test/coordinator/'.length) + url.search, request))
       if (url.pathname === '/__test/wake') return coordinator(env).fetch('https://coordinator/wake', { method: 'POST' })
       if (url.pathname === '/__test/ops-log') return Response.json(opsLog.splice(0))
       if (url.pathname === '/__test/enqueue') { await enqueue(env, await request.json()); return new Response(null, { status: 204 }) }
@@ -251,12 +252,12 @@ test('workerd Ops: status and setGuard over the service binding, bounded and con
   // Unknown methods are not part of the entrypoint; internal helpers are not reachable.
   assert.match((await ops('buildStatus', 'OpsStatus')).error, /not_an_error|does not implement|not a function|RPC/i)
   // A snapshot lease shows as a mode and an info signal.
-  const auth = { Authorization: 'Bearer ' + BACKUP_TOKEN, 'Content-Type': 'application/json' }
-  const begun = await request('/api/internal/backup/begin', { method: 'POST', headers: auth, body: JSON.stringify({ lease_seconds: 300 }) })
+  const headers = { 'Content-Type': 'application/json' }
+  const begun = await request('/__test/coordinator/backup/begin', { method: 'POST', headers, body: JSON.stringify({ lease_seconds: 300 }) })
   const backup = await ops('status', 'OpsStatus')
   assert.equal(backup.value.modes.backup_active, true)
   assert.ok(backup.value.signals.some(signal => signal.code === 'backup_active' && signal.severity === 'info'))
-  await request('/api/internal/backup/cancel', { method: 'POST', headers: auth, body: JSON.stringify({ backup_id: begun.backup_id }) })
+  await request('/__test/coordinator/backup/cancel', { method: 'POST', headers, body: JSON.stringify({ backup_id: begun.backup_id }) })
 })
 
 test('workerd Ops: canary queued once per run, delivered with the golden marker, held runs create nothing', { timeout: 120000 }, async t => {
@@ -325,10 +326,10 @@ test('workerd Ops: canary queued once per run, delivered with the golden marker,
     { event_id: null, state: 'paused', reason: 'endpoint_blocked' })
   await held('archive', () => db.prepare("UPDATE app_settings SET mode='archive'").run(), () => db.prepare("UPDATE app_settings SET mode='forward'").run(),
     { event_id: null, state: 'unavailable', reason: 'no_endpoint' })
-  const auth = { Authorization: 'Bearer ' + BACKUP_TOKEN, 'Content-Type': 'application/json' }
+  const headers = { 'Content-Type': 'application/json' }
   let lease
-  await held('backup', async () => { lease = await request('/api/internal/backup/begin', { method: 'POST', headers: auth, body: JSON.stringify({ lease_seconds: 300 }) }) },
-    () => request('/api/internal/backup/cancel', { method: 'POST', headers: auth, body: JSON.stringify({ backup_id: lease.backup_id }) }),
+  await held('backup', async () => { lease = await request('/__test/coordinator/backup/begin', { method: 'POST', headers, body: JSON.stringify({ lease_seconds: 300 }) }) },
+    () => request('/__test/coordinator/backup/cancel', { method: 'POST', headers, body: JSON.stringify({ backup_id: lease.backup_id }) }),
     { event_id: null, state: 'unavailable', reason: 'backup_active' })
   await held('capacity', () => db.prepare('UPDATE app_settings SET logical_limit_bytes=logical_bytes').run(),
     () => db.prepare('UPDATE app_settings SET logical_limit_bytes=5368709120').run(), { event_id: null, state: 'unavailable', reason: 'capacity' })

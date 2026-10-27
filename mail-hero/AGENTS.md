@@ -128,11 +128,11 @@ D1 Time Travel Free7天只恢复D1，不恢复R2、DO或secrets。完整备份�
 
 ## 8. 仓库与发布边界
 
-- 保留 `cloudflare/` 原生Worker/D1迁移与测试、`web/`、静态构建输出位置 `uiassets/dist/`、通用事件合同和部署/备份工具。不要恢复已经移除的Go服务、PostgreSQL schema、SMTP服务器或中转Worker。`deploy/backup/` 保留旧 v1 恢复兼容和 v2 离线下载/恢复工具；原生备份不依赖这里的 Dockerfile。
+- 保留 `cloudflare/` 原生Worker/D1迁移与测试、`web/`、静态构建输出位置 `uiassets/dist/`、通用事件合同和部署/备份工具。不要恢复已经移除的Go服务、PostgreSQL schema、SMTP服务器或中转Worker。`deploy/backup/` 只保留旧 v1 恢复兼容和 v2 离线下载/恢复工具；不再有收集器镜像，Worker 也不再提供 v1 采集接口。
 - 正式发布从GitHub Actions的同一已验证提交构建UI、应用向后兼容的D1 migration并发布Worker。PR不使用生产密钥。`production` environment只用于授权的main发布；暂停和维护配置需同步GitHub variables，避免下次发布覆盖运维状态。其余静态配置只在 `mail-hero/wrangler.toml` 修改（公开提交）；不得手动 `wrangler deploy`（会删除注入的vars），应急手动发布只用 `deploy/deploy-vars.mjs exec`；不得添加 `[env.*]` 或 `keep_vars`。
 - Todofy在同一仓库的 `todofy/`，由根工作流的 `Todofy checks`/`Todofy deploy` 独立检查和发布。Mail Hero不构建、不部署Todofy，也不因Todofy改动而发布。
 - 应用之间互不导入；共享代码只在根目录 `contracts/` 与 `packages/`。`cloudflare/package.json` 以 `file:../../packages/edge-auth` 依赖共享鉴权包并由打包器编译进Worker；`packages/edge-auth/` 改动会重新检查并发布Mail Hero（及其他使用它的应用）。`jose` 仅作为测试签发合成JWT的devDependency。
-- 原生备份随 Mail Hero Worker 的同一 green SHA 检查与发布；离线恢复测试只用合成数据。旧备份镜像和 retained ciphertext 不自动删除、不再作为运行依赖。
+- 原生备份随 Mail Hero Worker 的同一 green SHA 检查与发布；离线恢复测试只用合成数据。GHCR 中的旧收集器镜像和 retained ciphertext 不自动删除、不再作为运行依赖。
 - 仓库清理不删除任何生产数据库、桶、邮件、源邮箱转发设置或其他项目资源；不自动导入真实邮件。部署成功、HTTP接管和完整Todofy/Tasks业务验收分别记录。
 
 ## 9. ops-v1 运维入口
