@@ -4,7 +4,9 @@ Plan Review uses the existing Parked area for work ready to arrange. A task appe
 prerequisites are complete, or its Deadline's start-ahead window has opened, including an overdue deadline.
 An empty dependency list is not a trigger. Plan hides explicit Waiting/Blocked tasks and tasks with unfinished
 prerequisites, including their descendants. They stay stored, with their stages and queues intact; there is no
-Waiting column. Active tasks do not resurface. Existing recurrence completion semantics are unchanged.
+Waiting column. Task details show a saved Waiting flag as a chip that only clears it, and choosing a stage there
+clears it too, so held work can return to Plan. Active tasks do not resurface. Existing recurrence completion
+semantics are unchanged.
 
 This is derived from the same task read, without a scheduler, database migration or automatic task writes.
 An existing planning stage remains saved, although the card appears in Parked until picked up. Committed work
@@ -54,11 +56,4 @@ Task deletion confirmations focus their Delete action: Enter activates that butt
 confirmation and returns focus to its trigger. These keys are scoped to the confirmation, so they do not
 submit the underlying task form or close its editor. Pointer deletion keeps the same confirmation.
 
-This behavior is deployed from `f3a689fa519977f824b3045b4649fff6d9c5cc94`. The complete branch gate,
-same-source production release and matching configuration reconcile passed; see
-[verification](verification.md#planning-readiness-and-task-details-october-26).
-
-Tasks was subsequently republished with the same behavior in monorepo source `42897d14`. The
-[main release](https://github.com/ziyixi/todofy/actions/runs/40259875945) and
-[matching reconcile](https://github.com/ziyixi/todofy/actions/runs/40260037384) passed; verified Worker version
-is `f9b85a6d-6e94-4e1f-a3ce-beca97913e3d`.
+What its release established is in [verification](verification.md#planning-readiness-and-task-details-october-26).
