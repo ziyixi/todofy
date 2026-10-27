@@ -216,6 +216,7 @@ export class Store {
       cache_write_tokens: number;
       estimated_cost_microusd: number | null;
       usage_available_count: number;
+      cost_available_count: number;
     }
     const rows = await this.env.DB.prepare(`WITH selected AS (
       SELECT *, COALESCE(json_extract(generation_json,'$.generation'),generation_json) AS result FROM requests WHERE ${where.join(' AND ')}
@@ -224,7 +225,8 @@ export class Store {
       count(*) AS request_count, sum(state = 'succeeded') AS success_count,
       sum(state IN ('failed','cancelled','interrupted')) AS failure_count,
       ${tokenSums},
-      CASE WHEN count(json_extract(result,'$.usage.estimated_cost_microusd')) = count(*) THEN ${count('estimated_cost_microusd')} ELSE NULL END AS estimated_cost_microusd,
+      CASE WHEN count(json_extract(result,'$.usage.estimated_cost_microusd')) > 0 THEN ${count('estimated_cost_microusd')} ELSE NULL END AS estimated_cost_microusd,
+      count(json_extract(result,'$.usage.estimated_cost_microusd')) AS cost_available_count,
       ${count('available')} AS usage_available_count
       FROM selected GROUP BY time,model,billing_kind ORDER BY time,model,billing_kind`).bind(...values).all<Bucket>();
     return create(UsageSummarySchema, {
@@ -242,6 +244,7 @@ export class Store {
         cacheWriteTokens: row.cache_write_tokens,
         ...(row.estimated_cost_microusd !== null ? { estimatedCostMicrousd: row.estimated_cost_microusd } : {}),
         usageAvailableCount: row.usage_available_count,
+        costAvailableCount: row.cost_available_count,
       })),
     });
   }

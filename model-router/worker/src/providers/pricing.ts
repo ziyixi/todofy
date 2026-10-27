@@ -17,10 +17,11 @@ interface CacheCreation {
 // USD per million tokens equals micro-USD per token. No tool, storage or service-tier charges.
 function tokenPrice(model: string, inputTokens: number): TokenPrice | undefined {
   switch (model) {
-    // Standard, <=272K input tokens. This is the reference API value for subscription use.
+    // Subscription usage totals can span several model calls. Value them at the Standard
+    // reference rate; the aggregate does not reveal each call's context length or tool fees.
     // https://developers.openai.com/api/docs/models/gpt-6.1-sol
     case 'gpt-6.1-sol':
-      return inputTokens <= 272_000 ? { input: 2, output: 10, cachedInput: 0.1 } : undefined;
+      return { input: 2, output: 10, cachedInput: 0.1 };
 
     // https://platform.claude.com/docs/en/about-claude/pricing
     case 'claude-opus-5-5':

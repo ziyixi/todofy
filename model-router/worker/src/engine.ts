@@ -20,7 +20,7 @@ import {
 } from '@ziyixi/proto/modelrouter/inference/v1/inference_pb';
 import { ConsoleService, RequestRecordSchema } from '@ziyixi/proto/modelrouter/inference/v1/console_pb';
 import { Store, DAY, CONTENT_DAYS, timestamp } from './store.ts';
-import { validateConfig, validateOutput, budget, MAX_INPUT_BYTES } from './schema.ts';
+import { validateConfig, validateOutput, providerOutputSchema, callerOutput, budget, MAX_INPUT_BYTES } from './schema.ts';
 import { modelCatalog, providerFor, routeFor } from './catalog.ts';
 import { executorClient } from './executor.ts';
 import { generateClaude } from './providers/claude.ts';
@@ -117,6 +117,7 @@ export class RouterEngine extends DurableObject<Env> {
       });
     }
     validateConfig(effective);
+    const providerRequest = { ...effective, outputSchemaJson: providerOutputSchema(effective.outputSchemaJson) };
     const route = routeFor(effective.model);
     const started = Date.now();
     const duration = Math.min(budget(req.timeoutMs), context ? context.expireMs - started : 840000);
@@ -144,7 +145,9 @@ export class RouterEngine extends DurableObject<Env> {
     try {
       let result: ProviderResult;
       if (route.provider === 'codex') {
-        const answer = await executorClient(this.env, controller.signal).generate({ ...req, timeoutMs: duration });
+        const answer = await executorClient(this.env, controller.signal).generate({
+          ...(req.conversation ? req : providerRequest), timeoutMs: duration,
+        });
         result = {
           output: answer.output,
           reportedModel: '',
@@ -155,7 +158,7 @@ export class RouterEngine extends DurableObject<Env> {
         result.usage.estimatedCostMicrousd = estimateCostMicrousd(route.upstreamModel, result.usage);
       } else {
         const provider = route.provider === 'anthropic' ? generateClaude : generateGemini;
-        result = await provider(effective, {
+        result = await provider(providerRequest, {
           env: this.env,
           caller: app,
           route,
@@ -167,7 +170,7 @@ export class RouterEngine extends DurableObject<Env> {
       value = create(GenerationSchema, {
         name: value.name,
         model: result.reportedModel || route.upstreamModel,
-        output: result.output,
+        output: result.error ? result.output : callerOutput(effective.outputSchemaJson, result.output),
         usage: create(UsageSchema, result.usage),
         observations: create(ObservationsSchema, result.observations),
         contributingModels: result.contributingModels ?? [],
@@ -194,7 +197,8 @@ export class RouterEngine extends DurableObject<Env> {
         reason = error.reason;
       } else if (error instanceof RpcStatusError || error instanceof HttpResponseError) {
         code = error instanceof RpcStatusError ? Code[error.status.status ?? 'UNAVAILABLE'] : Code.UNAVAILABLE;
-        if (code === Code.UNAUTHENTICATED || code === Code.PERMISSION_DENIED) reason = 'MODEL_AUTH';
+        if (error instanceof RpcStatusError && error.status.reason) reason = error.status.reason;
+        else if (code === Code.UNAUTHENTICATED || code === Code.PERMISSION_DENIED) reason = 'MODEL_AUTH';
         else if (code === Code.RESOURCE_EXHAUSTED) reason = 'MODEL_QUOTA';
         else reason = 'MODEL_UNAVAILABLE';
       }
@@ -230,7 +234,7 @@ export class RouterEngine extends DurableObject<Env> {
     const expireMs = Date.now() + budget(req.timeoutMs || 840000);
     await this.ctx.storage.put(req.name, { app, request: req, expireMs } satisfies Context);
     await this.wakeAt(expireMs);
-    await executorClient(this.env).createConversation(req);
+    await executorClient(this.env).createConversation({ ...req, outputSchemaJson: providerOutputSchema(req.outputSchemaJson) });
     return create(EmptySchema);
   }
   async closeConversation(name: string, app: string) {

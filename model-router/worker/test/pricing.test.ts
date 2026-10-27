@@ -15,9 +15,10 @@ describe('native model token prices', () => {
     expect(usage.estimatedCostMicrousd).toBeUndefined();
   });
 
-  it('does not silently apply short-context Sol pricing above 272K', () => {
+  it('values cumulative SDK tokens at the stated Standard reference rate', () => {
     expect(estimateCostMicrousd('gpt-6.1-sol', reported({ inputTokens: 272_000 }))).toBe(544_500);
-    expect(estimateCostMicrousd('gpt-6.1-sol', reported({ inputTokens: 272_001 }))).toBeUndefined();
+    expect(estimateCostMicrousd('gpt-6.1-sol', reported({ inputTokens: 272_001 }))).toBe(544_502);
+    expect(estimateCostMicrousd('gpt-6.1-sol', reported({ inputTokens: 534_327, cachedInputTokens: 454_400, outputTokens: 1526 }))).toBe(220_554);
   });
 
   it.each([

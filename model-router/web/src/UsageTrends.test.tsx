@@ -7,8 +7,9 @@ const buckets = [
   {
     time: '2026-10-26T00:00:00Z',
     billing_kind: 'api',
-    request_count: 1,
-    usage_available_count: 1,
+    request_count: 3,
+    usage_available_count: 3,
+    cost_available_count: 1,
     input_tokens: 14,
     output_tokens: 5,
     estimated_cost_microusd: 50,
@@ -35,6 +36,8 @@ test('charts offer keyboard-readable hourly values and keep unknown costs unknow
   const costFigure = screen.getByRole('img', { name: /^费用趋势/ }).closest('figure')!
   await user.click(within(costFigure).getByText('数据表', { selector: 'summary' }))
   const row = within(costFigure).getByRole('rowheader', { name: '2026-10-26 01:00' }).closest('tr')!
-  expect(within(row).getByText('未提供')).toBeInTheDocument()
+  expect(within(row).getByText('未提供 · 1 次未计入')).toBeInTheDocument()
+  const priced = within(costFigure).getByRole('rowheader', { name: '2026-10-26 00:00' }).closest('tr')!
+  expect(within(priced).getByText('US$0.000050 · 2 次未计入')).toBeInTheDocument()
   expect(within(costFigure).getByRole('columnheader', { name: '订阅 API 等价' })).toBeInTheDocument()
 })

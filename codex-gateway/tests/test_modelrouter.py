@@ -9,6 +9,7 @@ import uuid
 from unittest.mock import patch
 
 from model_fixtures import FakeSdk, FakeTurn
+from openai_codex.errors import CodexRpcError, InvalidParamsError, ServerBusyError
 from ziyixi_proto.modelrouter.inference.v1.inference_pb import (
     CreateConversationRequest,
     GenerateRequest,
@@ -212,32 +213,163 @@ class ModelRouterTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_bad_output_tool_and_provider_errors_are_safe_and_cleaned_up(self):
         cases = [
-            (FakeTurn(output="not json"), '{"type":"object"}', 13),
-            (FakeTurn(tools=({"type": "commandExecution"},)), "", 13),
             (
-                FakeTurn(error=RuntimeError("401 synthetic private provider text")),
+                FakeTurn(output="not json"),
+                '{"type":"object"}',
+                13,
+                "MODEL_INVALID_ANSWER",
+            ),
+            (
+                FakeTurn(output="{}"),
+                '{"type":"object","required":["ok"]}',
+                13,
+                "MODEL_INVALID_ANSWER",
+            ),
+            (
+                FakeTurn(output='{"ok":NaN}'),
+                '{"type":"object"}',
+                13,
+                "MODEL_INVALID_ANSWER",
+            ),
+            (
+                FakeTurn(tools=({"type": "commandExecution"},)),
+                "",
+                13,
+                "MODEL_UNSUPPORTED_TOOL",
+            ),
+            (
+                FakeTurn(
+                    error=CodexRpcError(
+                        -32000,
+                        "Synthetic private provider text",
+                        {"codexErrorInfo": "unauthorized"},
+                    )
+                ),
                 "",
                 16,
+                "MODEL_AUTH",
             ),
             (
-                FakeTurn(error=RuntimeError("429 synthetic private provider text")),
+                FakeTurn(
+                    error=CodexRpcError(
+                        -32000,
+                        "Synthetic private provider text",
+                        {"codexErrorInfo": "usageLimitExceeded"},
+                    )
+                ),
                 "",
                 8,
+                "MODEL_QUOTA",
             ),
-            (FakeTurn(error=RuntimeError("synthetic private provider text")), "", 14),
+            (
+                FakeTurn(
+                    error=ServerBusyError(-32000, "Synthetic private provider text")
+                ),
+                "",
+                14,
+                "MODEL_BUSY",
+            ),
+            (
+                FakeTurn(error=ValueError("Synthetic private SDK value error")),
+                "",
+                14,
+                "MODEL_UNAVAILABLE",
+            ),
         ]
-        for turn, schema, code in cases:
-            with self.subTest(code=code):
+        for turn, schema, code, reason in cases:
+            with self.subTest(reason=reason):
                 sdk = FakeSdk(turn)
                 answer = await self.executor(sdk).generate(
                     GenerateRequest(model=MODEL, input="x", output_schema_json=schema),
                     self.home,
                 )
                 self.assertEqual(answer.error.code, code)
+                self.assertEqual(answer.error.reason, reason)
                 self.assertEqual(answer.output, "")
                 self.assertNotIn("private provider", answer.error.message)
                 self.assertTrue(sdk.closed)
                 self.assertFalse(pathlib.Path(sdk.thread_options["cwd"]).exists())
+
+    async def test_failed_turn_keeps_known_sdk_category_and_reported_usage(self):
+        for info, code, reason in (
+            ("serverOverloaded", 14, "MODEL_BUSY"),
+            ("rateLimitExceeded", 8, "MODEL_RATE_LIMIT"),
+            ("unauthorized", 16, "MODEL_AUTH"),
+            ("badRequest", 3, "MODEL_INVALID_REQUEST"),
+            ({"httpConnectionFailed": {"httpStatusCode": 401}}, 16, "MODEL_AUTH"),
+            ("other", 14, "MODEL_UNAVAILABLE"),
+        ):
+            with self.subTest(info=info):
+                sdk = FakeSdk(FakeTurn(failure_info=info))
+                answer = await self.executor(sdk).generate(
+                    GenerateRequest(model=MODEL, input="synthetic"), self.home
+                )
+                self.assertEqual(
+                    (answer.error.code, answer.error.reason), (code, reason)
+                )
+                self.assertTrue(answer.usage.available)
+                self.assertEqual(answer.usage.input_tokens, 101)
+                self.assertEqual(answer.output, "")
+                self.assertNotIn("private", answer.error.message)
+                self.assertNotIn("synthetic.invalid", answer.error.message)
+                self.assertTrue(sdk.closed)
+
+    async def test_sdk_rejecting_schema_is_an_invalid_request_not_invalid_output(self):
+        sdk = FakeSdk(
+            FakeTurn(
+                error=InvalidParamsError(-32602, "Private synthetic schema rejection")
+            )
+        )
+        answer = await self.executor(sdk).generate(
+            GenerateRequest(
+                model=MODEL,
+                input="synthetic",
+                output_schema_json='{"type":"array","items":{"type":"string"}}',
+            ),
+            self.home,
+        )
+        self.assertEqual(
+            (answer.error.code, answer.error.reason), (3, "MODEL_INVALID_REQUEST")
+        )
+        self.assertFalse(answer.usage.available)
+        self.assertEqual(answer.output, "")
+        self.assertTrue(sdk.closed)
+
+    async def test_busy_during_context_setup_preserves_reason_and_cleans_up(self):
+        sdk = FakeSdk()
+        executor = self.executor(sdk)
+        request = CreateConversationRequest(name=context_name(), model=MODEL)
+        with patch.object(
+            sdk,
+            "__aenter__",
+            side_effect=ServerBusyError(-32000, "Synthetic private details"),
+        ):
+            with self.assertRaises(RpcError) as busy:
+                await executor.create(request, self.home)
+        self.assertEqual(
+            (busy.exception.code, busy.exception.reason), ("UNAVAILABLE", "MODEL_BUSY")
+        )
+        self.assertNotIn("private", str(busy.exception))
+        self.assertTrue(sdk.closed)
+        self.assertEqual(executor.contexts, {})
+
+    async def test_invalid_request_during_context_setup_preserves_http400(self):
+        sdk = FakeSdk()
+        executor = self.executor(sdk)
+        request = CreateConversationRequest(name=context_name(), model=MODEL)
+        with patch.object(
+            sdk,
+            "__aenter__",
+            side_effect=InvalidParamsError(-32602, "Private synthetic rejection"),
+        ):
+            with self.assertRaises(RpcError) as invalid:
+                await executor.create(request, self.home)
+        self.assertEqual(invalid.exception.code, "INVALID_ARGUMENT")
+        self.assertEqual(invalid.exception.http_status, 400)
+        self.assertEqual(invalid.exception.reason, "MODEL_INVALID_REQUEST")
+        self.assertNotIn("Private", str(invalid.exception))
+        self.assertTrue(sdk.closed)
+        self.assertEqual(executor.contexts, {})
 
     async def test_context_rejects_option_overrides_and_concurrent_turns(self):
         turn = FakeTurn(block=True)

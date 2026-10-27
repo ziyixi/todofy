@@ -47,6 +47,26 @@ export function stateLabel(value: string | undefined): string {
   )
 }
 
+export function modelErrorExplanation(reason: string | undefined): string | undefined {
+  return (
+    {
+      MODEL_UNAVAILABLE: '模型调用失败；此错误未细分具体原因。',
+      MODEL_INVALID_REQUEST: '模型服务拒绝了请求，请检查 JSON Schema 或请求选项。',
+      MODEL_INVALID_ANSWER: '模型输出未通过 JSON 或 Schema 校验。',
+      MODEL_UNSUPPORTED_TOOL: '模型请求了当前不支持的工具。',
+      MODEL_BUSY: '模型服务正忙。',
+      MODEL_AUTH: '模型连接认证失败。',
+      MODEL_RATE_LIMIT: '模型服务触发了请求频率限制。',
+      MODEL_QUOTA: '模型连接的用量配额不足或已受限。',
+      MODEL_TIMEOUT: '模型调用未在限定时间内完成。',
+      MODEL_CANCELLED: '本次模型调用已取消。',
+      MODEL_NOT_CONFIGURED: '所选模型尚未配置连接。',
+      MODEL_INTERNAL: '模型执行发生内部错误。',
+      MODEL_OUTPUT_LIMIT: '模型输出超过本次请求限制。',
+    } as Record<string, string>
+  )[reason ?? '']
+}
+
 export function billingLabel(kind: string | undefined): string {
   return (
     ({ api: 'API', subscription: '订阅用量', platform_quota: '平台配额' } as Record<string, string>)[

@@ -7,6 +7,17 @@ import pathlib
 import sys
 from typing import Any
 
+from openai_codex.errors import (
+    InvalidParamsError,
+    InvalidRequestError,
+    JsonRpcError,
+    RetryLimitExceededError,
+    ServerBusyError,
+)
+from openai_codex.generated.v2_all import TurnError
+from ziyixi_proto.modelrouter.inference.v1.inference_pb import ModelError
+from ziyixi_proto.rpc_status import RpcError
+
 MODEL = "gpt-6.1-sol"
 SYSTEM_SKILLS = (
     "imagegen",
@@ -106,34 +117,68 @@ def runtime_config(
     )
 
 
-def failure_code(error: object) -> str:
-    """Inspect vendor diagnostics locally; return only a fixed safe code."""
-    text = str(error).lower()
-    if any(
-        word in text
-        for word in (
-            "unauthorized",
-            "unauthenticated",
-            "authentication",
-            "not logged in",
-            "401",
-            "403",
+def execution_error(error: BaseException) -> ModelError:
+    """Normalize only known SDK categories; never expose diagnostic text."""
+    data = error.data if isinstance(error, JsonRpcError) else None
+    if error.args and isinstance(error.args[0], TurnError):
+        data = error.args[0].model_dump(mode="json", by_alias=True)
+    info = data
+    if isinstance(data, dict):
+        info = (
+            data.get("codexErrorInfo")
+            or data.get("codex_error_info")
+            or data.get("errorInfo")
         )
+    category = info.replace("_", "").lower() if isinstance(info, str) else ""
+    http_status = None
+    if isinstance(info, dict):
+        for variant in (
+            "httpConnectionFailed",
+            "responseStreamConnectionFailed",
+            "responseStreamDisconnected",
+            "responseTooManyFailedAttempts",
+        ):
+            detail = info.get(variant)
+            if isinstance(detail, dict) and type(detail.get("httpStatusCode")) is int:
+                http_status = detail["httpStatusCode"]
+                break
+    if (
+        category == "unauthorized"
+        or http_status in (401, 403)
+        or isinstance(error, RpcError)
+        and error.code in ("UNAUTHENTICATED", "PERMISSION_DENIED")
     ):
-        return "codex_auth"
-    if any(
-        word in text
-        for word in (
-            "usage_limit",
-            "usagelimit",
-            "rate_limit",
-            "rate limit",
-            "quota",
-            "429",
+        return ModelError(
+            code=16, reason="MODEL_AUTH", message="Model authentication unavailable"
         )
+    if category in ("usagelimitexceeded", "sessionbudgetexceeded"):
+        return ModelError(
+            code=8, reason="MODEL_QUOTA", message="Model usage limit reached"
+        )
+    if category == "ratelimitexceeded" or http_status == 429:
+        return ModelError(
+            code=8, reason="MODEL_RATE_LIMIT", message="Model request rate is limited"
+        )
+    if (
+        category == "badrequest"
+        or http_status in (400, 422)
+        or isinstance(error, (InvalidRequestError, InvalidParamsError))
     ):
-        return "codex_quota"
-    return "codex_unavailable"
+        return ModelError(
+            code=3,
+            reason="MODEL_INVALID_REQUEST",
+            message="Model rejected the invocation",
+        )
+    if category == "serveroverloaded" or (
+        isinstance(error, ServerBusyError)
+        and not isinstance(error, RetryLimitExceededError)
+    ):
+        return ModelError(
+            code=14, reason="MODEL_BUSY", message="Model is temporarily busy"
+        )
+    return ModelError(
+        code=14, reason="MODEL_UNAVAILABLE", message="Model execution unavailable"
+    )
 
 
 def _login_home(home: pathlib.Path) -> None:

@@ -14,7 +14,8 @@ Router 选择供应商、调用模型、归一用量，把结果一次返回。�
 
 目前业务需要的可选项只有 `instructions`（含稳定块缓存提示）、`effort`、`max_output_tokens`、
 `output_schema_json`、`allow_fallback` 和 `timeout_ms`。Newsletter 的后续 turn 传 `conversation + input`。
-没有 temperature、metadata、客户端 request ID、通用消息历史或参数回显。每次普通调用都是一次新调用；
+没有 temperature、metadata、客户端 request ID、通用消息历史或参数回显。
+现有推荐的数组根 Schema 由 Router 内部包装为模型需要的对象，返回前解包并按原 Schema 校验。每次普通调用都是一次新调用；
 Router 生成日志 ID，不维护客户端请求去重账本。结果返回 `name`、实际选用的 `model`、`output`、`usage`、
 必要的 `error`，以及业务需要的 web observations 和 native fallback writers。
 
@@ -43,7 +44,8 @@ D1 保存内容之外的请求记录 90 天，私有 R2 保存输入/输出 7 �
 
 一天视图按小时聚合，较长范围按 UTC 日聚合；图表分模型展示请求、成功/失败、输入/输出和缓存 token。
 API 估价与订阅的假设 API 价值分开显示。后者不会进入 Mailsort/Brief 的 API 消费账本。
-未知用量或缺失价格保持未知；金额是 token 参考估价，不包含工具、存储、税费或服务档位附加费。
+费用按已知请求求小计，另标出未计入的请求数；未知用量不按零计算。订阅金额统一按 Standard 文本价折算，
+SDK 累计 token 不能确定每次内部调用的上下文档位。金额不包含工具、长上下文、存储、税费或服务档位附加费。
 Claude 的 native fallback 按实际 writer 和缓存 TTL 逐段估价。
 
 费率集中在 `worker/src/providers/pricing.ts`，注明官方来源和核对日期。Google Flash 3.8 当前优惠价到

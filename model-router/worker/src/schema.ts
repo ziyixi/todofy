@@ -4,6 +4,26 @@ import { invalid } from './errors.ts';
 import { routeFor } from './catalog.ts';
 const encoder = new TextEncoder();
 export const MAX_INPUT_BYTES = 2 * 1024 * 1024;
+
+/** Providers require an object root; Todofy's existing recommendation contract is an array. */
+export function providerOutputSchema(schemaJson: string): string {
+  if (!schemaJson) return schemaJson;
+  const schema = JSON.parse(schemaJson) as { type?: string };
+  if (schema.type !== 'array') return schemaJson;
+  return JSON.stringify({ type: 'object', properties: { result: schema }, required: ['result'], additionalProperties: false });
+}
+
+/** Keep the provider's envelope private and validate the caller's original format afterward. */
+export function callerOutput(schemaJson: string, output: string): string {
+  if (!schemaJson || (JSON.parse(schemaJson) as { type?: string }).type !== 'array') return output;
+  try {
+    const value = JSON.parse(output) as Record<string, unknown> | null;
+    return value && typeof value === 'object' && !Array.isArray(value) && 'result' in value
+      ? JSON.stringify(value.result) : output;
+  } catch {
+    return output;
+  }
+}
 export function validateConfig(config: GenerateRequest): void {
   let route;
   try {

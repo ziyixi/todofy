@@ -2,17 +2,49 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { vi } from 'vitest'
 import { App } from './App'
-import { mockApi, summary } from './test/fixtures'
+import { mockApi, summary, usage } from './test/fixtures'
 import { renderApp } from './test/harness'
 
 test('overview separates reported tokens, incomplete subscription estimates and API usage estimates', async () => {
   renderApp(<App api={mockApi()} />)
   expect(await screen.findByText('1 次提供用量 · 1 次未完整提供')).toBeInTheDocument()
-  expect(screen.getByText('订阅 API 等价估算').closest('article')).toHaveTextContent('未完整提供')
+  expect(screen.getByText('订阅 API 等价估算').closest('article')).toHaveTextContent('估算未提供')
   expect(screen.getAllByText('API 费用估算')[0]?.closest('article')).toHaveTextContent('US$0.000220')
   expect(screen.getByRole('heading', { name: '模型与连接' })).toBeInTheDocument()
   expect(screen.getByText('连接已配置不代表模型实时可用。')).toBeInTheDocument()
   expect(screen.getAllByText('已配置')).toHaveLength(3)
+})
+
+test('overview keeps known API and subscription subtotals visible with request-level missing coverage', async () => {
+  const apiBucket = usage.buckets![0]!
+  const subscriptionBucket = usage.buckets![1]!
+  const api = mockApi({
+    getUsage: vi
+      .fn()
+      .mockResolvedValue({
+        buckets: [
+          apiBucket,
+          {
+            ...apiBucket,
+            model: 'gemini-3.8-flash',
+            provider: 'google',
+            request_count: 2,
+            cost_available_count: 0,
+            estimated_cost_microusd: undefined,
+          },
+          { ...subscriptionBucket, request_count: 2, cost_available_count: 2, estimated_cost_microusd: 500 },
+          { ...subscriptionBucket, time: '2026-10-27T00:00:00Z', request_count: 2, cost_available_count: 0 },
+        ],
+      }),
+  })
+  renderApp(<App api={api} />)
+  const apiMetric = (await screen.findAllByText('API 费用估算'))[0]!.closest('article')!
+  const subscriptionMetric = screen.getByText('订阅 API 等价估算').closest('article')!
+  expect(apiMetric).toHaveTextContent('已知估算 US$0.000220')
+  expect(apiMetric).toHaveTextContent('1 次有估算 · 2 次未计入')
+  expect(subscriptionMetric).toHaveTextContent('已知估算 US$0.000500')
+  expect(subscriptionMetric).toHaveTextContent('2 次有估算 · 2 次未计入')
+  expect(apiMetric).not.toHaveTextContent('US$0.000720')
 })
 
 test('request pagination and filters use bounded API calls and reset to the first page', async () => {

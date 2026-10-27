@@ -1,7 +1,7 @@
 import { AlertCircle, Check, Copy, LoaderCircle } from 'lucide-react'
 import { useState } from 'react'
 import type { Generation, Usage } from '@ziyixi/proto/modelrouter/inference/v1/inference_wire'
-import { billingLabel, cost, count, prettyJson, stateLabel } from './format'
+import { billingLabel, cost, count, modelErrorExplanation, prettyJson, stateLabel } from './format'
 
 export function Status({ state }: { state: string | undefined }) {
   return (
@@ -116,17 +116,26 @@ export function UsageDetails({ usage }: { usage: Usage | undefined }) {
 }
 
 export function GenerationOutput({ generation }: { generation: Generation }) {
+  const explanation = modelErrorExplanation(generation.error?.reason)
   return (
     <>
       {generation.error && (
         <div className="notice danger" role="alert">
           <AlertCircle size={17} aria-hidden="true" />
-          <p>
-            {generation.error.message || '推理失败'}
-            {generation.error.code !== undefined && (
-              <span className="small">（错误码 {generation.error.code}）</span>
+          <div>
+            {explanation && <p>{explanation}</p>}
+            <p>
+              {generation.error.message || '推理失败'}
+              {generation.error.code !== undefined && (
+                <span className="small">（错误码 {generation.error.code}）</span>
+              )}
+            </p>
+            {generation.error.reason && (
+              <p className="small">
+                <code>{generation.error.reason}</code>
+              </p>
             )}
-          </p>
+          </div>
         </div>
       )}
       {generation.output && <CodeBlock title="输出" text={generation.output} json />}

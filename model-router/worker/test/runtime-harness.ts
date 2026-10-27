@@ -51,8 +51,10 @@ export async function startHarness({ ownerBypass = true, maintenance = false }: 
   const directory = await mkdtemp(join(tmpdir(), 'model-router-runtime-'))
   const calls: UpstreamCall[] = []
   const geminiOutputs: string[] = []
+  const executorOutputs: string[] = []
   const conversations = new Map<string, string>()
   let closeFailures = 0
+  let generationFailureReason = ''
   async function outbound(request: Request): Promise<Response> {
     const url = new URL(request.url)
     if (url.href === `${issuer}/cdn-cgi/access/certs`) return Response.json((await signingKeys).jwks)
@@ -78,10 +80,15 @@ export async function startHarness({ ownerBypass = true, maintenance = false }: 
     if (url.hostname !== 'executor.example.test')
       return new Response('Synthetic external request denied', { status: 599 })
     if (url.pathname.endsWith('generations:generate')) {
+      if (generationFailureReason) {
+        const reason = generationFailureReason
+        generationFailureReason = ''
+        return Response.json({ error: { code: 503, status: 'UNAVAILABLE', message: 'Synthetic unavailable', details: [{ '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason, domain: 'modelrouter.inference.v1' }] } }, { status: 503 })
+      }
       const output = {
         name: `requests/${crypto.randomUUID()}`,
         model: 'gpt-6.1-sol',
-        output: '{"answer":"synthetic executor result"}',
+        output: executorOutputs.shift() ?? '{"answer":"synthetic executor result"}',
         usage: { available: true, input_tokens: 14, output_tokens: 5, billing_kind: 'subscription' },
         ...(data.conversation ? { observations: { searched: true, opened_urls: ['https://example.test/synthetic-research-evidence'] } } : {}),
       }
@@ -206,7 +213,9 @@ export async function startHarness({ ownerBypass = true, maintenance = false }: 
     forCaller,
     calls,
     geminiOutputs,
+    executorOutputs,
     failNextClose() { closeFailures += 1 },
+    failNextGeneration(reason: string) { generationFailureReason = reason },
     caller,
     async dispose() {
       await mf.dispose()

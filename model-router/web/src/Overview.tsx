@@ -35,7 +35,7 @@ function Metric({
 }
 function amount(value: Estimate): string {
   if (!value.requests) return '暂无调用'
-  return value.value === undefined ? '未完整提供' : money(value.value)
+  return value.value === undefined ? '估算未提供' : `已知估算 ${money(value.value)}`
 }
 function Metrics({ buckets }: { buckets: readonly UsageBucket[] }) {
   const total = totals(buckets)
@@ -56,17 +56,13 @@ function Metrics({ buckets }: { buckets: readonly UsageBucket[] }) {
       <Metric
         label="API 费用估算"
         value={amount(total.api)}
-        note={
-          total.api.missing
-            ? `${total.api.missing} 个模型时间区间的费用未完整提供`
-            : '按 API 用量与单价估算，不代表账单'
-        }
+        note={`${count(total.api.known)} 次有估算 · ${count(total.api.missing)} 次未计入；不代表账单`}
         Icon={Coins}
       />
       <Metric
         label="订阅 API 等价估算"
         value={amount(total.subscription)}
-        note={`${count(total.subscription.requests)} 次订阅请求 · 仅供比较，不计入 API 费用`}
+        note={`${count(total.subscription.known)} 次有估算 · ${count(total.subscription.missing)} 次未计入；不计入 API 费用`}
         Icon={Clock3}
       />
     </div>
@@ -154,6 +150,10 @@ function ModelBreakdown({ buckets }: { buckets: readonly UsageBucket[] }) {
                     </td>
                     <td>
                       {cost({ billing_kind: bucket.billing_kind, estimated_cost_microusd: amount.value })}
+                      <span className="small muted">
+                        {' '}
+                        · {count(amount.known)} 次有估算 · {count(amount.missing)} 次未计入
+                      </span>
                     </td>
                   </tr>
                 )

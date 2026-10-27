@@ -25,13 +25,13 @@ from ziyixi_proto.modelrouter.inference.v1.inference_pb import (
 )
 from ziyixi_proto.rpc_status import RpcError
 
-from codex_gateway.model_events import TurnEvents
+from codex_gateway.model_events import TurnEvents, UnsupportedToolError
 from codex_gateway.runtime import (
     MODEL,
     _assert_no_skills,
     _interrupt,
     _login_home,
-    failure_code,
+    execution_error,
     runtime_config,
 )
 
@@ -187,7 +187,9 @@ class ModelExecutor:
         await context.client.__aenter__()
         account = await context.client.account(refresh_token=False)
         if getattr(getattr(account.account, "root", None), "type", None) != "chatgpt":
-            raise RuntimeError("authentication")
+            raise RpcError(
+                "UNAUTHENTICATED", "MODEL_AUTH", "Subscription account required"
+            )
         await _assert_no_skills(context.client, workspace)
         context.thread = await context.client.thread_start(
             cwd=str(workspace),
@@ -233,14 +235,13 @@ class ModelExecutor:
                 raise RpcError(
                     "DEADLINE_EXCEEDED", "MODEL_TIMEOUT", "Model setup timed out"
                 ) from None
-            code = (
-                "UNAUTHENTICATED"
-                if failure_code(error) == "codex_auth"
-                else "UNAVAILABLE"
-            )
-            raise RpcError(
-                code, "MODEL_UNAVAILABLE", "Model setup unavailable"
-            ) from None
+            failure = execution_error(error)
+            status = {
+                3: "INVALID_ARGUMENT",
+                8: "RESOURCE_EXHAUSTED",
+                16: "UNAUTHENTICATED",
+            }.get(failure.code, "UNAVAILABLE")
+            raise RpcError(status, failure.reason, failure.message) from None
 
     async def _expire(self, context: ExecutionContext) -> None:
         await asyncio.sleep(max(0, context.deadline - time.monotonic()))
@@ -351,13 +352,24 @@ class ModelExecutor:
                 context.turns += 1
                 await events.collect(context.turn)
                 if len(events.output.encode()) > MAX_GENERATION_OUTPUT_BYTES:
-                    raise ValueError("output_too_large")
-                if options.output_schema_json:
-                    decoded = json.loads(events.output)
-                    json.dumps(decoded, allow_nan=False)
-                    jsonschema.Draft202012Validator(
-                        json.loads(options.output_schema_json)
-                    ).validate(decoded)
+                    error = ModelError(
+                        code=13,
+                        reason="MODEL_OUTPUT_LIMIT",
+                        message="Model output exceeded its size limit",
+                    )
+                elif options.output_schema_json:
+                    try:
+                        decoded = json.loads(events.output)
+                        json.dumps(decoded, allow_nan=False)
+                        jsonschema.Draft202012Validator(
+                            json.loads(options.output_schema_json)
+                        ).validate(decoded)
+                    except (ValueError, TypeError, jsonschema.ValidationError):
+                        error = ModelError(
+                            code=13,
+                            reason="MODEL_INVALID_ANSWER",
+                            message="Model output did not match the requested JSON schema",
+                        )
         except asyncio.CancelledError:
             cancelled = True
             error = ModelError(
@@ -371,19 +383,14 @@ class ModelExecutor:
             )
             if context.turn is not None:
                 await _interrupt(context.turn)
-        except (ValueError, TypeError, jsonschema.ValidationError):
+        except UnsupportedToolError:
             error = ModelError(
                 code=13,
-                message="Model returned an invalid answer",
-                reason="MODEL_INVALID_ANSWER",
+                reason="MODEL_UNSUPPORTED_TOOL",
+                message="Model returned an unsupported tool event",
             )
         except Exception as exc:
-            kind = failure_code(exc)
-            code = 16 if kind == "codex_auth" else 8 if kind == "codex_quota" else 14
-            reason = {16: "MODEL_AUTH", 8: "MODEL_QUOTA", 14: "MODEL_UNAVAILABLE"}[code]
-            error = ModelError(
-                code=code, message="Model execution unavailable", reason=reason
-            )
+            error = execution_error(exc)
         finally:
             context.totals = None if events.usage_invalid else events.latest
             if standalone:

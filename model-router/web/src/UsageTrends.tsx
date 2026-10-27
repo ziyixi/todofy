@@ -7,6 +7,7 @@ import { usagePoints, type UsagePoint } from './usage'
 interface Series {
   label: string
   values: readonly (number | null)[]
+  unpriced?: readonly number[]
 }
 const WIDTH = 600
 const HEIGHT = 150
@@ -51,6 +52,11 @@ function Trend({
         return segment
       })
       .join(' ')
+  }
+  function valueText(item: Series, index: number): string {
+    const value = item.values[index]
+    const unpriced = item.unpriced?.[index] ?? 0
+    return `${value === null ? '未提供' : format(value ?? 0)}${unpriced ? ` · ${count(unpriced)} 次未计入` : ''}`
   }
   function hover(event: PointerEvent<SVGSVGElement>) {
     const bounds = event.currentTarget.getBoundingClientRect()
@@ -146,7 +152,7 @@ function Trend({
             <strong>{points[active]?.time.slice(0, 16).replace('T', ' ')} UTC</strong>
             {series.map((item) => (
               <span key={item.label}>
-                {item.label}：{item.values[active] === null ? '未提供' : format(item.values[active] ?? 0)}
+                {item.label}：{valueText(item, active)}
               </span>
             ))}
           </>
@@ -173,9 +179,7 @@ function Trend({
                 <tr key={point.time}>
                   <th scope="row">{point.time.slice(0, hourly ? 16 : 10).replace('T', ' ')}</th>
                   {series.map((item) => (
-                    <td key={item.label}>
-                      {item.values[index] === null ? '未提供' : format(item.values[index] ?? 0)}
-                    </td>
+                    <td key={item.label}>{valueText(item, index)}</td>
                   ))}
                 </tr>
               ))}
@@ -222,11 +226,19 @@ export function UsageTrends({
         {...shared}
         title="费用趋势"
         series={[
-          { label: 'API 费用估算', values: points.map((point) => point.apiCost) },
-          { label: '订阅 API 等价', values: points.map((point) => point.subscriptionCost) },
+          {
+            label: 'API 费用估算',
+            values: points.map((point) => point.apiCost),
+            unpriced: points.map((point) => point.apiUnpriced),
+          },
+          {
+            label: '订阅 API 等价',
+            values: points.map((point) => point.subscriptionCost),
+            unpriced: points.map((point) => point.subscriptionUnpriced),
+          },
         ]}
         format={money}
-        note="两条估算分别显示；订阅参考金额不计入 API 费用，也不代表账单。"
+        note="显示已知估算小计，未计入次数随数值列出；订阅参考金额不计入 API 费用，也不代表账单。"
       />
     </div>
   )

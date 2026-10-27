@@ -4,6 +4,8 @@ import contextlib
 from dataclasses import dataclass, field
 from typing import Any
 
+from openai_codex.errors import CodexError
+from openai_codex.generated.v2_all import TurnError
 from ziyixi_proto.modelrouter.inference.v1.inference_pb import Observations, Usage
 
 COUNTERS = {
@@ -12,6 +14,10 @@ COUNTERS = {
     "cached_input_tokens": "cachedInputTokens",
     "cache_write_tokens": "cacheWriteInputTokens",
 }
+
+
+class UnsupportedToolError(Exception):
+    """The SDK returned a tool item outside this execution mode."""
 
 
 def plain(value: Any) -> Any:
@@ -87,15 +93,18 @@ class TurnEvents:
                 ):
                     self.opened_urls.add(action["url"])
             elif kind not in {"userMessage", "agentMessage", "reasoning"}:
-                raise ValueError("unexpected_tool")
+                raise UnsupportedToolError("Unsupported tool event")
         elif method == "model/rerouted":
             if isinstance(payload.get("toModel"), str):
                 # Fallback is never implicitly authorized by a research turn.
-                raise ValueError("unexpected_model_fallback")
+                raise CodexError("Unexpected model fallback")
         elif method == "turn/completed":
             result = payload.get("turn") or {}
             if result.get("status") != "completed":
-                raise RuntimeError(str(result.get("error") or "unavailable"))
+                if isinstance(result.get("error"), dict):
+                    # Retain the pinned SDK type for classification, without stringifying its message.
+                    raise RuntimeError(TurnError.model_validate(result["error"]))
+                raise CodexError("Incomplete model turn")
             self.completed = True
 
     async def collect(self, turn: Any) -> None:
@@ -103,7 +112,7 @@ class TurnEvents:
             async for event in stream:
                 payload = plain(event.payload)
                 if not isinstance(payload, dict):
-                    raise ValueError("invalid_event")
+                    raise CodexError("Invalid SDK event")
                 self.observe(event.method, payload, turn)
         if not self.completed or not isinstance(self.output, str):
-            raise ValueError("missing_final_answer")
+            raise CodexError("Missing final model response")

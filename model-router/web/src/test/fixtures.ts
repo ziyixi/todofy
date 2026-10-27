@@ -80,6 +80,7 @@ export const usage: UsageSummary = {
       cached_input_tokens: 60,
       usage_available_count: 1,
       estimated_cost_microusd: 220,
+      cost_available_count: 1,
     },
     {
       time: '2026-10-26T00:00:00Z',

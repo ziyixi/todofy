@@ -12,6 +12,29 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
+### Router cost visibility and recommendation schema (`codex/router-cost-visibility`)
+
+Owner reported missing estimates and failed requests after the Router rollout. Read-only metadata showed
+known prices were hidden by all-or-nothing SQL/UI aggregation; six Newsletter SDK totals above272K were
+unpriced although usage was known. One owner-only coverage counter now supports known subtotals and explicit
+unpriced-request counts. Sol uses a stated Standard token reference, without inferring per-request context
+tiers from SDK aggregates. Migration0003 derives only missing price metadata; it changes no prompts,
+answers, token counts or business results.
+
+Five production failures were retained: four Todofy generic unavailability records and one Newsletter
+invalid-answer record. A public-code synthetic matched control reproduced recommendation root-array schema
+failure (4.27s, no usage) while the object-root control succeeded (6.124s). Router now envelopes array schemas
+internally and returns/validates the original array. Callers and the minimal inference API stay unchanged.
+Gateway preserves typed SDK categories and distinguishes invalid requests, invalid answers and unsupported
+tools. Generic historical failures are not relabeled busy or successful. No new queue/retry/diagnostic DB.
+
+Limited Todofy state read found no active mail backlog and today's summary wasok; recommendation precompute
+had no row. No real content was read and no real report was recomputed. Local Worker81 and console25 tests,
+types/lint, targeted native schema/backfill tests and Gateway50 tests passed (one Linux-only skip).
+Branch CI, normal same-SHA publication and matching reconcile remain required; production is still the prior
+8ada application. Model keys, budgets, modes and backup retention are unchanged.
+
+
 ### Unified Model Router (released, `codex/model-router`)
 
 Source `8adaf08921f14dc3ff684f241f8e9757f9533861` passed full branch40481469379, same-source

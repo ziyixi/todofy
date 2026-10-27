@@ -61,6 +61,28 @@ test('copy uses private retained inputs and preserves generic configuration', as
   expect(within(detail).getByText('由身份认证确定')).toBeInTheDocument()
 })
 
+test('explains a historical unavailable failure while preserving its original error codes', async () => {
+  const api = mockApi({
+    getRequest: vi.fn().mockResolvedValue({
+      ...record,
+      state: 'failed',
+      content_available: false,
+      generation: {
+        ...generation,
+        output: '',
+        error: { code: 14, reason: 'MODEL_UNAVAILABLE', message: 'The model execution did not complete.' },
+      },
+    }),
+  })
+  renderApp(<RequestDetail name={generation.name!} api={api} onClose={vi.fn()} onCopy={vi.fn()} />)
+  const failure = await screen.findByRole('alert')
+  expect(failure).toHaveTextContent('模型调用失败；此错误未细分具体原因。')
+  expect(failure).toHaveTextContent('MODEL_UNAVAILABLE')
+  expect(failure).toHaveTextContent('错误码 14')
+  expect(failure).toHaveTextContent('The model execution did not complete.')
+  expect(failure).not.toHaveTextContent('正忙')
+})
+
 test('a detail fetch failure can be retried without losing the selected request identity', async () => {
   const user = userEvent.setup()
   const api = mockApi({

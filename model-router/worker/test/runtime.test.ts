@@ -126,7 +126,32 @@ describe('Router with native D1, private R2 and SQLite Durable Objects', () => {
     await harness.db.prepare('UPDATE requests SET generation_json = ? WHERE id = ?').bind(JSON.stringify(record), answer.name.slice(9)).run()
     const point = (await harness.owner.getUsage({ days: 1 })).buckets[0]!
     expect(point.usageAvailableCount).toBe(0)
+    expect(point.costAvailableCount).toBe(0)
     expect(point.estimatedCostMicrousd).toBeUndefined()
+  })
+
+  it('keeps known cost subtotals and coverage with priced and unpriced failures in one D1 bucket', async () => {
+    const answers = []
+    for (let index = 0; index < 4; index++) answers.push(await harness.models.generate({ model: sol, input: 'Synthetic mixed cost coverage' }))
+    const started = Math.floor(Date.now() / 3_600_000) * 3_600_000 + 1
+    await harness.db.prepare('UPDATE requests SET started_ms = ?').bind(started).run()
+    for (const [index, usage] of [
+      [1, { available: true, input_tokens: 14, output_tokens: 5, billing_kind: 'subscription', estimated_cost_microusd: 78 }],
+      [2, { available: true, input_tokens: 0, output_tokens: 0, billing_kind: 'subscription', estimated_cost_microusd: 0 }],
+      [3, { available: false, billing_kind: 'subscription' }],
+    ] as const) {
+      const id = answers[index]!.name.slice(9)
+      const row = await harness.db.prepare('SELECT generation_json FROM requests WHERE id = ?').bind(id).first<{ generation_json: string }>()
+      const record = JSON.parse(row!.generation_json) as { state: string; generation: { usage: object } }
+      record.state = 'failed'
+      record.generation.usage = usage
+      await harness.db.prepare("UPDATE requests SET generation_json = ?,state = 'failed' WHERE id = ?").bind(JSON.stringify(record), id).run()
+    }
+    const point = (await harness.owner.getUsage({ days: 1 })).buckets[0]!
+    expect(point).toMatchObject({ requestCount: 4, successCount: 1, failureCount: 3, usageAvailableCount: 3, costAvailableCount: 3, estimatedCostMicrousd: 156 })
+    // Reported zero is priced; an unpriced failure is still distinguishable from zero.
+    await harness.db.prepare('DELETE FROM requests WHERE id != ?').bind(answers[2]!.name.slice(9)).run()
+    expect((await harness.owner.getUsage({ days: 1 })).buckets[0]).toMatchObject({ costAvailableCount: 1, estimatedCostMicrousd: 0 })
   })
 
   it('retains metadata after body expiry and bounds cleanup to old history', async () => {

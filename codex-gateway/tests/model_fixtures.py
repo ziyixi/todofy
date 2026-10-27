@@ -21,12 +21,14 @@ class FakeTurn:
         output="answer",
         error=None,
         counters=None,
+        failure_info=None,
     ):
         self.id = f"turn-{number}"
         self.thread_id = "synthetic-thread"
         self.number = number
         self.block, self.tools, self.has_usage = block, tools, usage
         self.output, self.error, self.counters = output, error, counters
+        self.failure_info = failure_info
         self.interrupted = False
         self.started = asyncio.Event()
 
@@ -59,6 +61,20 @@ class FakeTurn:
             )
         for tool in self.tools:
             yield SimpleNamespace(method="item/completed", payload={"item": tool})
+        if self.failure_info is not None:
+            yield SimpleNamespace(
+                method="turn/completed",
+                payload={
+                    "turn": {
+                        "status": "failed",
+                        "error": {
+                            "message": "Synthetic private provider text https://synthetic.invalid/info",
+                            "codexErrorInfo": self.failure_info,
+                        },
+                    }
+                },
+            )
+            return
         yield SimpleNamespace(
             method="item/completed",
             payload={

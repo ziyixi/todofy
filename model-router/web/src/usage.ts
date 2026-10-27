@@ -3,20 +3,21 @@ import type { TimeRange } from './api'
 
 export interface Estimate {
   requests: number
+  known: number
   missing: number
   value?: number
 }
 export function estimate(buckets: readonly UsageBucket[], kind: string): Estimate {
   const selected = buckets.filter((bucket) => bucket.billing_kind === kind)
   const requests = selected.reduce((sum, bucket) => sum + (bucket.request_count ?? 0), 0)
-  const missing = selected.filter((bucket) => bucket.estimated_cost_microusd === undefined).length
+  const priced = selected.filter((bucket) => (bucket.cost_available_count ?? 0) > 0)
+  const known = priced.reduce((sum, bucket) => sum + (bucket.cost_available_count ?? 0), 0)
   return {
     requests,
-    missing,
-    ...(selected.length && !missing
-      ? {
-          value: selected.reduce((sum, bucket) => sum + (bucket.estimated_cost_microusd ?? 0), 0),
-        }
+    known,
+    missing: requests - known,
+    ...(known
+      ? { value: priced.reduce((sum, bucket) => sum + (bucket.estimated_cost_microusd ?? 0), 0) }
       : {}),
   }
 }
@@ -49,6 +50,8 @@ export interface UsagePoint {
   output: number | null
   apiCost: number | null
   subscriptionCost: number | null
+  apiUnpriced: number
+  subscriptionUnpriced: number
 }
 
 /** The API selects UTC hours for today and UTC days for longer ranges. Empty bins have no calls. */
@@ -68,18 +71,19 @@ export function usagePoints(buckets: readonly UsageBucket[], days: TimeRange, un
     const rows = groups.get(stamp) ?? []
     const total = totals(rows)
     const complete = total.known === total.requests
-    const costAt = (kind: string) => {
-      const result = estimate(rows, kind)
-      return result.requests === 0 ? 0 : (result.value ?? null)
-    }
+    const api = estimate(rows, 'api')
+    const subscription = estimate(rows, 'subscription')
+    const costAt = (value: Estimate) => (value.requests === 0 ? 0 : (value.value ?? null))
     points.push({
       time: new Date(stamp).toISOString(),
       requests: total.requests,
       failures: total.failed,
       input: complete ? rows.reduce((sum, row) => sum + (row.input_tokens ?? 0), 0) : null,
       output: complete ? rows.reduce((sum, row) => sum + (row.output_tokens ?? 0), 0) : null,
-      apiCost: costAt('api'),
-      subscriptionCost: costAt('subscription'),
+      apiCost: costAt(api),
+      subscriptionCost: costAt(subscription),
+      apiUnpriced: api.missing,
+      subscriptionUnpriced: subscription.missing,
     })
   }
   return points

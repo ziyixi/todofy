@@ -13,6 +13,7 @@ const bucket: UsageBucket = {
   cached_input_tokens: 60,
   usage_available_count: 1,
   estimated_cost_microusd: 220,
+  cost_available_count: 1,
 }
 
 describe('usage projections', () => {
@@ -35,13 +36,30 @@ describe('usage projections', () => {
       subscription: { value: 500 },
     })
   })
-  it('does not present a partial cost sum as a complete estimate and preserves reported zero', () => {
-    expect(estimate([bucket, { ...bucket, estimated_cost_microusd: undefined }], 'api')).toEqual({
-      requests: 2,
+  it('keeps known subtotals with unpriced request counts and preserves reported zero', () => {
+    expect(
+      estimate(
+        [
+          bucket,
+          { ...bucket, request_count: 2, estimated_cost_microusd: undefined, cost_available_count: 0 },
+        ],
+        'api',
+      ),
+    ).toEqual({ requests: 3, known: 1, missing: 2, value: 220 })
+    expect(estimate([{ ...bucket, estimated_cost_microusd: 0 }], 'api')).toEqual({
+      requests: 1,
+      known: 1,
+      missing: 0,
+      value: 0,
+    })
+    expect(estimate([], 'subscription')).toEqual({ requests: 0, known: 0, missing: 0 })
+  })
+  it('does not infer coverage from a legacy amount without the new count field', () => {
+    expect(estimate([{ ...bucket, cost_available_count: undefined }], 'api')).toEqual({
+      requests: 1,
+      known: 0,
       missing: 1,
     })
-    expect(estimate([{ ...bucket, estimated_cost_microusd: 0 }], 'api').value).toBe(0)
-    expect(estimate([], 'subscription')).toEqual({ requests: 0, missing: 0 })
   })
   it('groups native models into UTC hours and leaves unknown consumption and cost as gaps', () => {
     const points = usagePoints(
@@ -52,6 +70,7 @@ describe('usage projections', () => {
           time: '2026-10-26T01:00:00Z',
           usage_available_count: 0,
           estimated_cost_microusd: undefined,
+          cost_available_count: 0,
         },
       ],
       1,
@@ -65,7 +84,7 @@ describe('usage projections', () => {
       output: 20,
       apiCost: 220,
     })
-    expect(points[1]).toMatchObject({ requests: 1, input: null, output: null, apiCost: null })
+    expect(points[1]).toMatchObject({ requests: 1, input: null, output: null, apiCost: null, apiUnpriced: 1 })
     expect(points[2]).toMatchObject({ requests: 0, input: 0, output: 0, apiCost: 0 })
   })
   it('uses daily bins for longer ranges and refuses to graph incomplete token totals as complete', () => {

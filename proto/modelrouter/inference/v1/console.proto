@@ -168,10 +168,12 @@ message UsageBucket {
   int32 cached_input_tokens = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Known cache writes.
   int32 cache_write_tokens = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Sum only when all estimates in this bucket are known.
+  // Known estimate subtotal; absent when no request in this bucket has an estimate.
   optional int32 estimated_cost_microusd = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Requests with complete token usage.
   int32 usage_available_count = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Requests with a known numeric cost estimate, including reported zero.
+  int32 cost_available_count = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 // Time-series points; the UI derives totals from this one result.
 message UsageSummary {
