@@ -74,9 +74,10 @@ test("GTD tabs keep the chosen month, date and area and reuse its report", async
     await expect(page.getByRole("tabpanel")).toHaveAttribute("aria-busy", "false");
     expect(reportReads(state)).toHaveLength(reads);
   }
+  // GTD reads its report only, never a ListTasks view.
   expect(
     state.tasksRequests.some((request) =>
-      /^\/api\/tasks\/v1\/(?:gtdDays|weeklyReviews)(?:\?|$)/u.test(request.path),
+      request.path.startsWith("/api/tasks/v1/tasks?"),
     ),
   ).toBe(false);
 });

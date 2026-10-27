@@ -71,7 +71,8 @@ calendar cards show its configured time, or Quick when no time is set, without a
 with a Deadline stays out of the Quick tray until its start-ahead window opens, unless already active; zero lead opens
 on the Deadline day.
 Task editors no longer offer manual In progress, Waiting, On hold or Parked controls. Their saved flags still
-affect planning and survive unrelated edits; choosing a planning stage still takes a task out of Parked.
+affect planning and survive unrelated edits. Task details show a saved Waiting or On hold as a chip that can only
+clear it; choosing a planning stage there takes a task out of Parked and Waiting.
 A Step cannot contain children. Task details can add, complete, reopen or delete either kind
 of child. A dependency names its prerequisite; Blocked is derived from unfinished prerequisites. A task waits
 for at most 5 tasks, the account holds at most 300 dependencies, and none may close a cycle.

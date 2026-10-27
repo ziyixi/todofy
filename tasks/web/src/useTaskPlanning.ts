@@ -6,7 +6,10 @@ import {
   type ExecutionMode,
 } from "@ziyixi/planning-ui/ExecutionFields";
 
-/** The dialog's planning draft, from the task as GetTask answered it; it is saved with the task. */
+/**
+ * The dialog's planning draft, from the task as GetTask answered it; it is saved with the task. Choosing a stage
+ * takes the task out of Parked and Waiting, which Plan would otherwise keep it in or hide it for.
+ */
 export function useTaskPlanning(task?: Task) {
   const [draft, setDraft] = useState<PlanningDraft>(() => planningDraft(task));
   function patch<K extends keyof PlanningDraft>(
@@ -19,7 +22,7 @@ export function useTaskPlanning(task?: Task) {
       ...(field === "quick" && value === true ? { singleAction: true } : {}),
       ...((field === "stage" && value !== "none") ||
       (field === "active" && value === true)
-        ? { parked: false }
+        ? { parked: false, waiting: false }
         : {}),
       ...(field === "parked" && value === true
         ? { stage: "none", active: false }

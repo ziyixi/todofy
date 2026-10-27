@@ -2,10 +2,47 @@ import {
   ExecutionFields,
   type ExecutionMode,
 } from "@ziyixi/planning-ui/ExecutionFields";
-import { ChevronDown, Folder, Target } from "lucide-react";
+import { ChevronDown, Folder, Target, X } from "lucide-react";
 import type { PlanningDraft } from "../task-planning";
 import type { ReactNode } from "react";
 import "./task-planning.css";
+
+/** Flags that details offer no switch for: a saved one shows as a chip that can only clear it. */
+const CLEARABLE = [
+  ["waiting", "Waiting"],
+  ["onHold", "On hold"],
+] as const;
+
+export function SavedPlanningFlags({
+  value,
+  onClear,
+  disabled,
+}: {
+  value: PlanningDraft;
+  onClear: (field: (typeof CLEARABLE)[number][0]) => void;
+  disabled: boolean;
+}) {
+  const saved = CLEARABLE.filter(([field]) => value[field]);
+  if (!saved.length) return null;
+  return (
+    <div className="selected-labels task-planning-flags">
+      {saved.map(([field, label]) => (
+        <span className="selected-label" key={field}>
+          {label}
+          <button
+            type="button"
+            aria-label={`Clear ${label}`}
+            title={`Clear ${label}`}
+            disabled={disabled}
+            onClick={() => onClear(field)}
+          >
+            <X size={12} />
+          </button>
+        </span>
+      ))}
+    </div>
+  );
+}
 
 export function TaskPlanningFields({
   value,
@@ -72,6 +109,11 @@ export function TaskPlanningFields({
           </span>
         </label>
       </div>
+      <SavedPlanningFlags
+        value={value}
+        onClear={(field) => onChange(field, false)}
+        disabled={disabled}
+      />
       {goal && <div className="task-goal-field">{goal}</div>}
       <ExecutionFields
         mode={mode}

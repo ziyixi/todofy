@@ -673,7 +673,7 @@ test("a named dependency blocks a task until its real prerequisite is completed"
   );
 });
 
-test("legacy manual flags survive unrelated edits, while choosing a stage unparks and clearing a deadline clears its lead", async ({
+test("legacy manual flags survive unrelated edits, while choosing a stage leaves Parked and Waiting and clearing a deadline clears its lead", async ({
   page,
   request,
 }) => {
@@ -699,6 +699,10 @@ test("legacy manual flags survive unrelated edits, while choosing a stage unpark
       dialog.getByRole("checkbox", { name, exact: true }),
     ).toHaveCount(0);
   await expect(stage).toHaveValue("none");
+  for (const name of ["Clear Waiting", "Clear On hold"])
+    await expect(
+      dialog.getByRole("button", { name, exact: true }),
+    ).toBeVisible();
   await expect(
     dialog.getByRole("switch", { name: "Routine", exact: true }),
   ).toBeChecked();
@@ -741,12 +745,7 @@ test("legacy manual flags survive unrelated edits, while choosing a stage unpark
   expect(cleared.deadline || "").toBe("");
   expect(cleared.stage).toBe("committed");
   expect(cleared.lead_days ?? 0).toBe(0);
-  expect(cleared.planning_flags).toEqual([
-    "waiting",
-    "onhold",
-    "routine",
-    "task",
-  ]);
+  expect(cleared.planning_flags).toEqual(["onhold", "routine", "task"]);
   expect(cleared).toMatchObject({
     due_date: "2030-03-15",
     area: "personal",

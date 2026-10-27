@@ -86,7 +86,7 @@ Step、Standalone 和 Quick 在 Plan、Focus 中共用估时面板，原生任�
 
 原生任务详情和 Plan 的任务编辑器共用 `ExecutionFields`（`src/ExecutionFields.tsx`）：Execution 的分段单选为 Steps、Standalone、Quick，旁边是独立的 Routine 开关。Steps 安排任务下的小步骤，清除 `task`、`quick`；Standalone 直接安排任务，设置 `task` 并清除 `quick`；Quick 同时设置两项。这不会改变 `kind`，已有 `quick` 也按可独立安排处理。
 
-任务编辑器不再提供进行中、等待中、暂缓或搁置的手动开关。保存的 `active`、`waiting`、`onhold`、`parked` 保留原有含义，修改 Execution、Routine 或其他无关字段时不清除它们。选择规划范围仍移出搁置；看板的“开始”和拖动、依赖与截止日期规则照旧。原生详情的 Steps、Subtasks 各在标题行提供 Add step、Add subtask，展开对应输入框。
+任务编辑器不再提供进行中、等待中、暂缓或搁置的手动开关。保存的 `active`、`waiting`、`onhold`、`parked` 保留原有含义，修改 Execution、Routine 或其他无关字段时不清除它们。选择规划范围仍移出搁置；Tasks 原生详情把保存的 Waiting、On hold 显示为只能清除的小标签，在那里选择规划范围也同时清除 `waiting`（Plan 隐藏等待项，看不到它们）。看板的“开始”和拖动、依赖与截止日期规则照旧。原生详情的 Steps、Subtasks 各在标题行提供 Add step、Add subtask，展开对应输入框。
 
 布局参照 Tasks 的[已确认界面](../../../tasks/docs/images/task-interface-approved.png)；侧栏的分组和项目树由 [Tasks](../../../tasks/docs/design.md#task-interface) 管理。
 

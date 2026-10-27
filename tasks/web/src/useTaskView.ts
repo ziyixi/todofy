@@ -6,7 +6,7 @@ import {
   useState,
 } from "react";
 import { api, describeError, type Task } from "./api";
-import type { Route } from "./routes";
+import { isListView, type Route } from "./routes";
 
 export function useTaskView(
   route: Route,
@@ -23,11 +23,11 @@ export function useTaskView(
   const visibleView = useRef("");
   const loadedPages = useRef(0);
   const loadedRows = useRef(0);
-  const isListView = !["goals", "plan", "focus", "mail", "catalog"].includes(route.page);
+  const listView = isListView(route.page);
   /** One page, or, with `keepRows`, the first pages until they hold that many rows (at most five). */
   const read = useCallback(
     async (pageToken = "", keepRows = 0) => {
-      if (!isListView || (route.page === "search" && !search.trim())) {
+      if (!listView || (route.page === "search" && !search.trim())) {
         generation.current += 1;
         setTasks([]);
         setNextPage("");
@@ -83,7 +83,7 @@ export function useTaskView(
         if (generation.current === request) setLoading(false);
       }
     },
-    [route.page, route.id, search, date, orderBy, includeCompleted, isListView],
+    [route.page, route.id, search, date, orderBy, includeCompleted, listView],
   );
   const latestRead = useRef(read);
   useLayoutEffect(() => {
@@ -102,7 +102,7 @@ export function useTaskView(
     [],
   );
   useEffect(() => {
-    if (!isListView) return;
+    if (!listView) return;
     if (route.page === "search" && !search.trim()) {
       void read();
       return;
@@ -124,7 +124,7 @@ export function useTaskView(
       window.clearTimeout(timer);
       generation.current += 1;
     };
-  }, [read, route.page, route.id, isListView]);
+  }, [read, route.page, route.id, listView]);
   const replace = useCallback(
     (task: Task) =>
       setTasks((current) =>

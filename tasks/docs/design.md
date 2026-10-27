@@ -40,7 +40,8 @@ the optional estimate for all three. Quick keeps clock-time editing; calendar ca
 configured time and timezone, or the Quick label if untimed.
 Missing Quick estimates do not count as unknown, while stored estimates and time records remain intact. Task editors omit manual In progress,
 Waiting, On hold and Parked controls; saved flags retain their planning behavior and survive unrelated edits.
-Choosing a planning stage still clears Parked, and Plan's existing Start and drag actions remain available.
+Native details show a saved Waiting or On hold as a small chip whose only action clears it, since Plan hides
+Waiting work. Choosing a planning stage there clears Parked and Waiting; Plan's Start and drag actions remain.
 
 The sidebar places Search and Add task first, followed by Tasks (Inbox, Today, Upcoming, Mail), Planning
 (Plan, Focus, GTD), Favorites and My projects. Project branches expand independently and remember their open

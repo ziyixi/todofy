@@ -25,6 +25,16 @@ it("routes Goals and its result links without loading an ordinary task view", as
   expect(result.current.tasks).toEqual([]);
 });
 
+it("reads no ListTasks view for GTD, on open or after a write", async () => {
+  const requests = vi.spyOn(api, "listTasks");
+  const { result } = renderHook(() =>
+    useTaskView(readRoute("#/gtd/time"), "", "", "sort_order", false),
+  );
+  await result.current.read();
+  await result.current.refresh();
+  expect(requests).not.toHaveBeenCalled();
+});
+
 it("keeps previous search results on failure without offering that query's stale next page", async () => {
   const task = create(TaskSchema, {
     id: "before",
