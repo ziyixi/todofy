@@ -215,6 +215,17 @@ describe('Gemini adapter', () => {
     expect(result.usage.available).toBe(false);
   });
 
+  it.each([
+    [{ status: 'INVALID_ARGUMENT', details: [{ '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: 'API_KEY_INVALID' }] }, 7, 'MODEL_AUTH'],
+    [{ status: 'FAILED_PRECONDITION' }, 9, 'MODEL_NOT_CONFIGURED'],
+    [{ status: 'INVALID_ARGUMENT' }, 3, 'MODEL_INVALID_REQUEST'],
+  ])('reads a Gemini 400 that is configuration, not the request: %j', async (error, code, reason) => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ error: { code: 400, message: 'private provider text', ...error } }, { status: 400 }));
+    const result = await generateGemini(config(), 'synthetic', context('gemini', fetcher));
+    expect(result.error).toMatchObject({ code, reason, message: 'gemini_http_400' });
+    expect(JSON.stringify(result)).not.toContain('private provider text');
+  });
+
   it('reports an already expired Router deadline as a timeout', async () => {
     const result = await generateGemini(config(), 'synthetic', { ...context('gemini'), signal: AbortSignal.abort(new DOMException('deadline', 'TimeoutError')) });
     expect(result.error).toMatchObject({ code: 4, reason: 'MODEL_TIMEOUT' });

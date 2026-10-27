@@ -277,9 +277,11 @@ message ModelError {
   // configuration, anything else infrastructure.
   //
   // Configuration; hold the work without spending per-item attempts:
-  // MODEL_AUTH (16 or 7), MODEL_NOT_CONFIGURED (9: provider 404, missing key
-  // or route), MODEL_NOT_ALLOWED (7: this caller may not use that model or
-  // operation), MODEL_SPEND_LIMIT (8: provider spend cap or credit).
+  // MODEL_AUTH (16 or 7, a Gemini key rejected with 400 included),
+  // MODEL_NOT_CONFIGURED (9: provider 404, a Gemini 400 FAILED_PRECONDITION,
+  // missing key or route), MODEL_NOT_ALLOWED (7: this caller may not use
+  // that model or operation), MODEL_SPEND_LIMIT (8: provider spend cap or
+  // credit).
   //
   // Content-dependent; count per-item attempts with a small cap:
   // MODEL_INVALID_REQUEST (3: provider 400, 413 or 422, or an option the

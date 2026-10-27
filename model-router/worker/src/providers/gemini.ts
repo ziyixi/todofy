@@ -17,6 +17,14 @@ function firstCandidate(value: Record<string, unknown>): { text: string; finish:
   return { text, finish, blocked };
 }
 
+/** Gemini also answers a bad key (API_KEY_INVALID) or an account it will not serve (FAILED_PRECONDITION) with 400. */
+async function configuration400(response: Response): Promise<number | null> {
+  const error = record(record(await readJson(response, 65_536).catch(() => null))?.['error']);
+  const details = Array.isArray(error?.['details']) ? error['details'].map(record) : [];
+  if (details.some(detail => typeof detail?.['reason'] === 'string' && detail['reason'].startsWith('API_KEY_'))) return 7;
+  return error?.['status'] === 'FAILED_PRECONDITION' ? 9 : null;
+}
+
 export async function generateGemini(request: GenerateRequest, context: ProviderContext): Promise<ProviderResult> {
   const base: ProviderResult = { output: '', reportedModel: '', usage: unknownUsage(), observations: { searched: false, openedUrls: [] } };
   const fail = (code: number, message: string): ProviderResult => ({ ...base, error: providerStatus(code, message) });
@@ -43,8 +51,10 @@ export async function generateGemini(request: GenerateRequest, context: Provider
       method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': key }, body, signal: deadline.signal, redirect: 'manual',
     });
     if (!response.ok) {
-      await response.body?.cancel();
+      const configuration = response.status === 400 ? await configuration400(response) : null;
+      if (response.status !== 400) await response.body?.cancel();
       if (refusedBeforeGeneration(response.status)) base.usage = zeroUsage();
+      if (configuration !== null) return { ...base, error: providerStatus(configuration, 'gemini_http_400') };
       return { ...base, error: httpError('gemini', response.status, response.headers) };
     }
     const value = record(await readJson(response));

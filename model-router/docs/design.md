@@ -44,8 +44,8 @@ Todofy 自己维护邮件与日报的 Gemini fallback 顺序。Gemini 3.7 已自
 google.rpc.Status，携带同样的原因名。完整清单和 code 在 `inference.proto` 的 `ModelError.reason` 注释里。
 调用方按原因分四类处理：
 
-- 配置（暂停，不消耗单条尝试）：`MODEL_AUTH`、`MODEL_NOT_CONFIGURED`（供应商 404、缺 key 或路由）、
-  `MODEL_NOT_ALLOWED`、`MODEL_SPEND_LIMIT`。
+- 配置（暂停，不消耗单条尝试）：`MODEL_AUTH`（含 Gemini 以 400 拒绝的 key）、`MODEL_NOT_CONFIGURED`
+  （供应商 404、Gemini 400 `FAILED_PRECONDITION`、缺 key 或路由）、`MODEL_NOT_ALLOWED`、`MODEL_SPEND_LIMIT`。
 - 内容相关（单条计数，小上限）：`MODEL_INVALID_REQUEST`（供应商 400/413/422）、`MODEL_INVALID_ANSWER`、
   `MODEL_REFUSED`、`MODEL_OUTPUT_LIMIT`、`MODEL_UNSUPPORTED_TOOL`。
 - `MODEL_TIMEOUT` 表示超过期限，包括 Router 自己的截止时间；`MODEL_CANCELLED` 只表示调用方真的取消。
