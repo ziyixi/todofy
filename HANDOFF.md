@@ -12,71 +12,34 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
-### Unified Model Router (`codex/model-router`)
+### Unified Model Router (released, `codex/model-router`)
 
-Cloudflare Router owns `modelrouter.inference.v1`, D1 metadata (90 days), private R2 bodies (7 days) and the
-private console. Existing VPS `codex-gateway` runs the pinned official SDK. Apps retain prompts, budgets,
-history and modes. The owner/Claude checkout is untouched. Architecture and active setup are in
-[deployment](model-router/docs/deployment.md); real synthetic evidence is in
-[verification](docs/model-router-verification.md).
+Source `8adaf08921f14dc3ff684f241f8e9757f9533861` passed full branch40481469379, same-source
+main40486158347 and matching reconcile40489298406, including resolved infrastructure drift and resource
+registration. The failed-job CPU rerun and transient Home asset-upload rerun are recorded in
+[verification](docs/model-router-verification.md). Maintenance is false. VPS/Newsletter and all migrated
+Workers are ready; no sudo, login renewal or private business recomputation was needed for this rollout.
 
-Exactly one shared Claude API key uses the original Brief workspace's verified $80/month cap. Owner approved
-and created its no-expiry replacement. It and one existing Gemini key were moved directly through browser memory
-into Router secrets, then the temporary browser values were cleared. Neither current provider key entered a local
-file, GitHub or VPS. Original caller keys have been retired. Same-account bindings have no tokens;
-owner JSON writes use exact Origin, a custom header and JSON content type. VPS inference validates Access JWTs;
-privileged deployment identity and the subscription login stay separate. Newsletter keeps one inference token.
+The public inference API is flat/native, with seven final-result fields. Unused temperature, metadata,
+client replay IDs, hashes, parameter echo, public conversation lookup and generic non-Codex history are gone.
+Owner history/usage has its own proto file. Model IDs/providers are real; Todofy owns its email/report policy.
+The console has hourly/daily request/token/cost charts and clearly separate subscription API-equivalent values.
+Keys remain one per API provider in Router only; the existing Claude workspace cap is$80/month. Subscription
+login/PVC and app budgets/modes/history are unchanged. The owner/Claude checkout is untouched.
 
-All migration/resource code is published at `dfc814d7e1bdc0e7f51343f83c163cf5d2a367c3`: full branch CI40456441169
-and same-SHA main40457569495 passed. Earlier real canaries at3c4 passed Sol6.1, Claude Opus5.5, Gemini Flash-Lite,
-Newsletter two-turn context with actual public-page observation/close, and BGE-M3. See the verification record.
-The SDK does not report Sol's model identity; leave it unavailable. No real work was recomputed for acceptance.
+Synthetic live calls passed Sol, Opus5.5, Gemini Flash-Lite, ordered BGE vectors, same-context two-turn markers,
+observed search and independent literal-URL open, and cleanup. The two API estimates total$0.001190; subscription
+reference values are not API bills. SDK-reported Sol identity remains unavailable. No real mail/task content
+was used for acceptance. See the linked evidence for trace IDs, local suite scope and verification limits.
 
-RouterEngine's real namespace is registered and FIRST_DEPLOY_PENDING is empty. Infra apply40448340660 recorded
-one public output with zero resource actions and a clean post-plan. Owner completed the Newsletter URL/token
-patch and k3s restart; four Pods then matched current host addresses and were ready. The NEW-SHA Gateway release
-used the updated Platform renderer and removed its redundant bearer environment reference without sudo.
+The existing create-only bootstrap added the backup bucket/lifecycle:2creates,48no-ops,50 managed objects.
+The first cloud copy completed10:27:51.790UTC:18 records/18 bodies/908,979bytes in9.309s; a known synthetic
+body matched its source byte-for-byte. Daily04:47UTC backs up metadata and retained bodies for seven days,
+without provider keys or execution contexts. Native local copy and fresh SQLite/body restore passed;
+next natural cron and fresh-account cloud restore were not exercised. [Operation/recovery](model-router/docs/backup.md).
+The read-only catalog and authenticated context cleanup remain available during maintenance for Newsletter
+startup/recovery; only new Generate/Embed/Create are held. There is no extra compatibility protocol or retry layer.
 
-Todofy now persists Sol6.1 for both future email summaries and reports/recommendations; full reload and budget
-readback verified it. Home canary `canary-manual-20261027T061058Z` passed through the normal controller.
-The final copy and credential-retirement release is `b875e4a353b9a3eafd34120bbec535f49c9b1d71`:
-main40462978874 and matching reconcile40463377396 passed, including resolved infrastructure drift.
-The unused Kubernetes Secret can wait for ordinary privileged maintenance; it is no longer referenced.
-
-Owner requests a smaller invocation contract, actual native model names, provider labels, time-series
-usage and separate API estimates/subscription-equivalent values, plus daily seven-copy backups including
-retained request bodies. Unused fields are deleted directly, without reserved tags. The unchanged-wire
-maintenance preparation `904b018b1b7c2a27e84d198de5d358955686e66d` passed full branch40471880589,
-main40473499431 and matching reconcile40473867682. Production maintenance remains false.
-
-The new source now has a flat model/input call, a seven-field final result, native model catalog and
-separate owner-history proto. Four consumers are updated; their application budgets, stored business
-history and modes remain intact. The new console has hourly/daily SVG charts, providers and separate
-subscription reference values. Router/Gateway replay hashes, public GetConversation, generic provider
-histories, temperature and unused controls are gone. Completed old request bodies remain readable.
-
-Local checks: Worker77; console22 plus synthetic desktop/mobile browser checks and real Chrome preview;
-providers52; TS/Python clients6/5; Mailsort190 unit/123 runtime; Brief109 unit/41 runtime;
-Newsletter2265; Gateway42 plus Linux-only skip and offline image probe; Todofy UI85, full runtime361
-then39 affected corrected fixture tests. All affected types/lint/format checks passed. API lint77 files,
-scoped breaking checks, catalog/config generation and Infra tests48+102 passed. These are local checks;
-the new API has not yet been published. First branch CI40476771338 caught two stale native-model
-assertions and the missing Home backup-resource registration. Those are corrected; the 16-app registry now
-uses a 20KiB soft response budget (64KiB hard stress budget unchanged). Corrected full branch CI remains required.
-
-Backup copies completed D1 request rows and retained bodies in bounded steps. Seven-day lifecycle uses
-one new private bucket, with initial backup armed through Ops and daily04:47UTC trigger. Synthetic tests
-include native workerd D1/R2 copy and exact SQLite/body restore. Read-only bootstrap plan confirms exactly
-2creates (`model-router-backups` and its lifecycle),48existing no-ops; the create-only bootstrap has now applied those two resources, preserving all48existing objects.
-The exporter changed only resource-key ordering, without identity changes.
-Corrected full branch40477848308 passed at22d1c2a6. Final startup review found Newsletter reads the
-model catalog and first recovers locally registered context names. Maintenance therefore blocks only new
-generation, embedding and context creation; authenticated catalog/Close remain available. Native-runtime
-startup/cleanup regressions pass. An independent release audit found no other startup/health/drain dependency
-on inference. The final complete branch gate is required before cutover.
-Pause the checked current Router only
-for the coordinated rollout, release all consumers and resume. Verify native calls, backup completion,
-actual UI and matching-main resolved drift before recording delivery. No provider keys are in backups.
 
 ### Tasks Sunday planning week (`codex/tasks-next-step-estimate`)
 
