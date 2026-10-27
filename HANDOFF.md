@@ -70,8 +70,10 @@ include native workerd D1/R2 copy and exact SQLite/body restore. Read-only boots
 2creates (`model-router-backups` and its lifecycle),48existing no-ops; the create-only bootstrap has now applied those two resources, preserving all48existing objects.
 The exporter changed only resource-key ordering, without identity changes.
 Corrected full branch40477848308 passed at22d1c2a6. Final startup review found Newsletter reads the
-model catalog before becoming ready; maintenance now preserves that read-only path while blocking inference
-writes. The targeted native-runtime regression passes; its new complete branch gate is required before cutover.
+model catalog and first recovers locally registered context names. Maintenance therefore blocks only new
+generation, embedding and context creation; authenticated catalog/Close remain available. Native-runtime
+startup/cleanup regressions pass. An independent release audit found no other startup/health/drain dependency
+on inference. The final complete branch gate is required before cutover.
 Pause the checked current Router only
 for the coordinated rollout, release all consumers and resume. Verify native calls, backup completion,
 actual UI and matching-main resolved drift before recording delivery. No provider keys are in backups.
