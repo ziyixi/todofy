@@ -161,11 +161,9 @@ async function runtime(t, bindings = {}) {
     for (const secret of SECRETS) assert.ok(!text.includes(secret), `${method} output leaks ${secret}: ${text}`)
     return { value: result.ok, statements }
   }
-  const csrf = await mf.dispatchFetch('http://localhost/api/csrf')
-  const token = (await csrf.json()).token, cookie = (csrf.headers.get('set-cookie') ?? '').split(';')[0]
   /** mailhero.ui.v2 through the Worker (the owner's view); a refusal fails the test. */
   const api = (path, method = 'GET', body) => request(`/api/v2${path}`, { method,
-    headers: { Origin: 'http://localhost', Cookie: cookie, 'X-CSRF-Token': token, 'Content-Type': 'application/json' },
+    headers: { Origin: 'http://localhost', 'X-CSRF-Token': '1', 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body) })
   async function receive(raw = secretMail) {
     const response = await mf.dispatchFetch('http://localhost/__test/email', { method: 'POST', headers: { 'x-raw-size': String(Buffer.byteLength(raw)) }, body: raw })

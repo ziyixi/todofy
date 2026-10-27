@@ -35,7 +35,6 @@ test('every /api/v1 path answers 410 reload_required in the old envelope, after 
   const v2 = await handleAPI(new Request('https://mail.example.org/api/v2/settings'), env)
   assert.equal(v2.status, 401)
   assert.equal(reasonOf(await v2.json()), 'UNAUTHORIZED')
-  assert.equal((await handleAPI(new Request('https://mail.example.org/api/csrf'), env)).status, 401)
 })
 
 test('the transcoder behind Access: Status errors, 405 with Allow, OPTIONS, HEAD, strict reads and the body limit', async () => {

@@ -8,7 +8,7 @@ import { endpoint, environment, message, session, withRevision } from './native-
 import { MAX_ZONE_SEGMENTS, zoneSegments } from '../src/native/api-delivery-stats.ts'
 import { ROUTE_BLOCK_COOLDOWN_MS, ROUTE_BLOCK_GRACE_MS, ROUTE_BLOCK_MAX_RECHECKS, buildPayload, runJob, runMaintenance, syntheticTestMail } from '../src/native/pipeline.ts'
 import { alertSignals, alertSnapshot } from '../src/native/alerts.ts'
-import { authenticate, csrfResponse, decryptCredential, encryptCredential, HttpError, privateResponse, requireCSRF } from '../src/native/security.ts'
+import { authenticate, decryptCredential, encryptCredential, HttpError, privateResponse, requireCSRF } from '../src/native/security.ts'
 
 /** SummarizeDeliveryAttempts' query for a range, a granularity (`hour`, `day`) and a zone. */
 function summarize(from, to, granularity, timeZone) {
@@ -531,12 +531,7 @@ test('a cached opaque header and a real Access login pass handleAPI through the 
   assert.equal(status.details.find(detail => detail['@type'].endsWith('LocalizedMessage')).message, '请刷新页面后再试')
 })
 
-test('CSRF compatibility is static and cookie-free; JSON checks do not depend on CREDENTIAL_KEY', async () => {
-  const issued = csrfResponse()
-  assert.equal(issued.headers.get('Set-Cookie'), null)
-  assert.equal(issued.headers.get('Cache-Control'), 'no-store')
-  assert.equal(issued.headers.get('X-Content-Type-Options'), 'nosniff')
-  assert.deepEqual(await issued.json(), { token: '1' })
+test('CSRF checks are keyless and cookie-free: Origin, a nonempty header and JSON', async () => {
   const request = (value, mediaType = 'application/json') => new Request('https://mail.example.org/api/v2/settings', { method: 'PATCH',
     headers: { Origin: 'https://mail.example.org', 'X-CSRF-Token': value, 'Content-Type': mediaType } })
   await requireCSRF(request('1'))
@@ -544,11 +539,6 @@ test('CSRF compatibility is static and cookie-free; JSON checks do not depend on
   const csrfFailed = error => error instanceof HttpError && error.status === 403 && error.code === 'csrf_failed'
   await assert.rejects(requireCSRF(request('')), csrfFailed)
   await assert.rejects(requireCSRF(request('1', 'text/plain')), csrfFailed)
-  const noKey = { ...environment(), CREDENTIAL_KEY: '' }
-  const compatibility = await handleAPI(new Request('http://127.0.0.1:8787/api/csrf'), noKey)
-  assert.equal(compatibility.status, 200)
-  assert.deepEqual(await compatibility.json(), { token: '1' })
-  assert.equal(compatibility.headers.get('set-cookie'), null)
 })
 
 test('private responses carry the exact Mail Hero headers, including the sandboxed-HTML frame-src', async () => {

@@ -14,7 +14,6 @@
 //   the service (they stream bytes; mail_hero_ui_service.proto says why), behind the same authentication. The Worker
 //   streams the raw message itself; an attachment's R2 key is in the parsed record (the same 4 MiB of JSON), so the
 //   Worker checks the path and forwards it like a DELEGATED read, and the coordinator streams the attachment back;
-// - GET /api/csrf: static compatibility token `1`, without a cookie (transport, not part of the service);
 // - /api/v1/*, the hand-written owner API before mailhero.ui.v2: 410 `reload_required` in its old error envelope, so a
 //   tab still running the old UI tells the owner to reload (until 2026-11-01, then NOT_FOUND like any other path).
 //
@@ -29,7 +28,7 @@ import type { Env } from './types.ts'
 import { API_PREFIX, fromHttpError, handlers, isReason, mhError, REASONS, unexpected, type ApiContext } from './api-v2.ts'
 import { downloadMessage } from './api-messages.ts'
 import { withDependencies } from './dependencies.ts'
-import { authenticate, csrfResponse, HttpError, json, privateResponse, requireCSRF } from './security.ts'
+import { authenticate, HttpError, json, privateResponse, requireCSRF } from './security.ts'
 import { warmUp } from './warmup.ts'
 import { parseStatus } from '@ziyixi/proto/rpc-status'
 
@@ -37,9 +36,8 @@ import { parseStatus } from '@ziyixi/proto/rpc-status'
 export const API_DOMAIN = 'mail-hero.ziyixi.science'
 /** The largest request body the transcoder reads (the old API's limit). */
 export const MAX_BODY_BYTES = 64 * 1024
-/** The old API's paths, answered 410 reload_required for one release (remove after 2026-11-01: HANDOFF.md). */
+/** The old API's paths, answered 410 reload_required until 2026-11-01 (docs/history.md, HANDOFF.md). */
 const LEGACY_PREFIX = '/api/v1'
-const CSRF_PATH = '/api/csrf'
 const DOWNLOAD = /^\/api\/v2\/messages\/([^/]+)\/(?:raw|attachments\/([^/]+))$/
 /** The reads the coordinator answers (GetMessageContent, SummarizeDeliveryAttempts): their GET bindings' paths. */
 const DELEGATED = [/^\/api\/v2\/messages\/[^/]+\/content$/, /^\/api\/v2\/deliveries\/[^/]+\/attempts:summarize$/]
@@ -60,7 +58,7 @@ export function newRequestId(): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(8)), byte => byte.toString(16).padStart(2, '0')).join('')
 }
 
-/** The transcoder's authorize hook: a mutation needs maintenance off, then Origin and the owner's CSRF token. */
+/** The transcoder's authorize hook: a mutation needs maintenance off, then Origin and the CSRF header. */
 async function authorize(request: Request, route: RouteInfo, ctx: Context): Promise<void> {
   if (route.safe) return
   if (ctx.env.MAINTENANCE_MODE === 'true') throw mhError('MAINTENANCE')
@@ -146,14 +144,6 @@ async function route(request: Request, env: Env, requestId: string): Promise<Rou
   if (legacy) return { response: legacyError(410, 'reload_required', 'Mail Hero 已更新，请刷新页面', requestId), reason: 'RELOAD_REQUIRED' }
   const ctx: Context = { env: withDependencies(env), owner, request, requestId }
   const fail = (error: RpcError): Routed => ({ response: api.errorResponse(error, requestId, head), reason: error.reason })
-  if (url.pathname === CSRF_PATH) {
-    if (request.method !== 'GET') return fail(mhError('METHOD_NOT_ALLOWED', { httpStatus: 405, headers: { allow: 'GET' } }))
-    try {
-      return { response: csrfResponse() }
-    } catch (error) {
-      return fail(unexpected(error))
-    }
-  }
   const downloadMatch = DOWNLOAD.exec(url.pathname)
   if (downloadMatch !== null) {
     const target = downloadTarget(request, url, downloadMatch)

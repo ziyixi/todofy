@@ -90,16 +90,10 @@ test('native workerd: durable archive, protected API, stable retry identity and 
     assert.equal(reasonOf(await publicRequest.json()), 'ACCESS_NOT_CONFIGURED');
     const spoofed = await mf.dispatchFetch('http://localhost/api/v2/messages', { headers: { 'CF-Ray': 'spoof' } });
     assert.equal(spoofed.status, 503);
-    const csrf = await mf.dispatchFetch('http://localhost/api/csrf');
-    assert.equal(csrf.status, 200);
-    const csrfValue = (await csrf.json()).token;
-    assert.equal(csrfValue, '1');
-    assert.equal(csrf.headers.get('set-cookie'), null);
-    const cookie = '';
     /** mailhero.ui.v2 through the Worker, as the UI calls it; a refusal fails the test. */
     async function api(path, method = 'GET', body) {
       const response = await mf.dispatchFetch(`http://localhost/api/v2${path}`, { method,
-        headers: { Origin: 'http://localhost', Cookie: cookie, 'X-CSRF-Token': csrfValue, 'Content-Type': 'application/json' },
+        headers: { Origin: 'http://localhost', 'X-CSRF-Token': '1', 'Content-Type': 'application/json' },
         body: body === undefined ? undefined : JSON.stringify(body) });
       const result = await response.json();
       assert.ok(response.ok, `${method} ${path}: ${response.status} ${JSON.stringify(result)}`);
@@ -180,7 +174,7 @@ test('native workerd: durable archive, protected API, stable retry identity and 
     const beforeReplay = await api(`/messages/${message.id}`);
     // The coordinator creates the delivery (/deliveries/create); its refusal reaches the owner as before.
     const stale = await mf.dispatchFetch(`http://localhost/api/v2/deliveries/${event.event_id}:resend`, { method: 'POST',
-      headers: { Origin: 'http://localhost', Cookie: cookie, 'X-CSRF-Token': csrfValue, 'Content-Type': 'application/json' },
+      headers: { Origin: 'http://localhost', 'X-CSRF-Token': '1', 'Content-Type': 'application/json' },
       body: JSON.stringify({ endpoint: endpoint.name, message_etag: String(Number(beforeReplay.etag) + 1), request_id: crypto.randomUUID() }) });
     assert.equal(stale.status, 409);
     const staleBody = await stale.json();
@@ -292,12 +286,10 @@ test('native workerd: MAINTENANCE_MODE refuses a mutation before Access, with a 
   }));
   try {
     // No login at all: maintenance answers first, as before; the owner API's answer is a Status, every other path's the envelope.
-    for (const path of ['/api/v2/settings?update_mask=send_paused', '/api/csrf']) {
-      const response = await mf.dispatchFetch(`https://mail.example.org${path}`, { method: 'PATCH', body: '{}' });
-      assert.equal(response.status, 503, path);
-      assert.equal(reasonOf(await response.json()), 'MAINTENANCE', path);
-      assert.equal(response.headers.get('Cache-Control'), 'no-store');
-    }
+    const refused = await mf.dispatchFetch('https://mail.example.org/api/v2/settings?update_mask=send_paused', { method: 'PATCH', body: '{}' });
+    assert.equal(refused.status, 503);
+    assert.equal(reasonOf(await refused.json()), 'MAINTENANCE');
+    assert.equal(refused.headers.get('Cache-Control'), 'no-store');
     const other = await mf.dispatchFetch('https://mail.example.org/api/v1/settings', { method: 'PATCH', body: '{}' });
     assert.deepEqual([other.status, (await other.json()).error.code], [503, 'maintenance']);
     const read = await mf.dispatchFetch('https://mail.example.org/api/v2/settings');
