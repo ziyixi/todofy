@@ -40,7 +40,7 @@ no request or response content. The Router and gateway receive no Gmail authoriz
 | Legacy review content | 14 days after arrival |
 | Non-content decisions and write ledger; sender as salted hash | 180 days |
 | Historical replay metadata | 7 days |
-| Daily aggregate counters, Codex request outcomes/reported tokens and returned Claude usage | 400 days |
+| Daily aggregate counters, returned Claude usage and historical Codex usage rows | 400 days |
 | Historical masked examples and embeddings | Owner deletion; a new or withdrawn verdict deletes its mail's example |
 | Fixed labels and Gmail identities | Until explicit app-data removal |
 | Saved base prompt and personal rules | Until replaced or app-data removal |
@@ -128,28 +128,21 @@ at most one month's rows. Pricing and native token normalization belong to Route
 unavailable usage or cost stays unknown. Even an invalid result counts when returned usage reports consumption.
 
 Stable instruction blocks remain base first, then nonempty personal rules; message-specific email/time data follows
-them. Mailsort sends generic cache hints when more prepared work follows, or when actual cache activity began within
-its existing five-minute reuse window. That timestamp remains in existing metadata. Router owns native cache
-breakpoints, provider minimums and pricing. Prefix edits invalidate the affected cache naturally; a rules edit can
-still reuse the base. No padding, prewarming or keepalive calls are used. Reported cache counts distinguish an
-actual hit from a hint. See [Router design](../../model-router/docs/design.md).
+them. Mailsort never sends a cache hint: a five-minute cache write costs about a quarter more than the prefix, and
+batches at the configured interval rarely reuse it. Cache reads/writes the provider reports anyway are still recorded
+and priced. See [Router design](../../model-router/docs/design.md).
 
 At recorded Claude cost >= $20, new Claude calls wait until the next UTC month. A provider spend refusal does the same even if
 local accounting is lower. Network responses lost before usage is read and out-of-app calls may be absent locally;
 Anthropic's console is the billing authority. Config/auth failures stay visible and do not assign fallback P1.
-Claude's monthly cap and explicit cache policy do not apply to Codex. Selecting Codex preserves those records as
+Claude's monthly cap does not apply to Codex. Selecting Codex preserves those records as
 history. Codex uses the existing ChatGPT subscription, subject to its account/model availability and usage limits;
 the app does not convert Codex tokens into Claude API fees. A saved login or a healthy process cannot establish
 successful model access. Verify a real synthetic inference separately.
 
-The existing SQLite store also keeps one Codex usage row per UTC day, with HTTP classification attempts, valid responses,
-failures, responses that reported usage and input/output token totals. The owner API sums only the current month's rows;
-daily cleanup removes rows after 400 days. An attempt starts when the HTTP fetch to the VPS is made, so missing local
-configuration is excluded. Each completed attempt is recorded once before Gmail writes. A bad classification still counts
-its reported tokens; network/HTTP failures without usage increment failures without inventing tokens. The gateway's
-`usage_available` distinguishes a reported zero from missing usage; a legacy positive token total also confirms a report.
-Older all-zero responses remain unknown. Historical calls before this accounting release are not reconstructed from mail
-decisions or retry counts. These are this app's observations, without subscription-price conversion or account balance.
+Model Router records Codex usage and its console is the only Codex usage view. Mailsort no longer writes its daily
+`codex_usage` rows or reports `ServiceStatus.codex_usage`; existing rows stay until daily cleanup removes them after
+400 days.
 
 Mailsort's owner-machine secrets are its Gmail OAuth credentials: `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET` and `GMAIL_REFRESH_TOKEN`,
 put from the owner's machine and excluded from GitHub maps. Model Router alone holds shared provider keys and the
@@ -175,9 +168,7 @@ refuses every owner mutation but settings with CONSOLIDATION_ACTIVE, so no prior
 
 概览 shows Gmail freshness separately from the configured classification interval and next-batch time, the current model/effort, recorded monthly
 Claude cost/tokens, actual Claude cache reads/writes and the selected provider/config error. While Codex is selected,
-Claude figures are labelled history. A separate Codex card shows the UTC month's attempts, successes/failures, reported
-input/output tokens, missing-usage count and most recent request. It stays visible as history when Claude is selected;
-an older server response with no Codex record says usage is unavailable. `ServiceStatus.classifier` reports the selected provider, fixed model/effort,
+Claude figures are labelled history and the card points to the Model Router console for Codex usage. `ServiceStatus.classifier` reports the selected provider, fixed model/effort,
 local configuration, next batch time, safe error and last successful response; configuration presence does not check
 network reachability or authentication. 分级 shows the four queues and explicit unread-batch progress. 设置 shows
 the persistent provider and 5/15/30/60-minute interval selectors, the fresh next-batch time and editable personal rules with a collapsed base-prompt field, alongside mode/write

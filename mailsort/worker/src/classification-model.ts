@@ -5,8 +5,6 @@ import { CLASSIFICATION_EFFORT, CLASSIFIER_MODELS } from './classifier-config.ts
 import type { ClassificationProviderName } from './settings.ts';
 import { DRAIN_MAX } from './limits.ts';
 
-// Hint reuse across adjacent batches; the adapter owns whether and how caching is applied.
-export const PROMPT_REUSE_WINDOW_MS = 5 * 60_000;
 export interface ClassificationUsage {
   readonly inputTokens: number;
   readonly outputTokens: number;
@@ -18,7 +16,6 @@ export interface ClassificationUsage {
 export interface ClassificationBatchResult extends ClassificationUsage {
   readonly model: string;
   readonly items: readonly ClassificationItem[];
-  readonly usageAvailable: boolean;
 }
 export class ClassificationError extends Error {
   readonly code: string;
@@ -49,13 +46,14 @@ export async function classifyEmails(
   binding: ModelBinding | undefined,
   provider: ClassificationProviderName,
   emails: readonly ClassificationEmail[],
-  prompt: { readonly basePrompt: string; readonly personalRules: string; readonly cachePrompt?: boolean },
+  prompt: { readonly basePrompt: string; readonly personalRules: string },
 ): Promise<ClassificationBatchResult> {
   if (binding === undefined) throw new ClassificationError(provider, 'MODEL_NOT_CONFIGURED');
   const ids = new Set(emails.map(email => email.id));
   if (!emails.length || emails.length > DRAIN_MAX || ids.size !== emails.length || ids.has('') || !prompt.basePrompt.trim()) throw new ClassificationError(provider, 'MODEL_INVALID_ANSWER', { configuration: true });
   const options = { model: CLASSIFIER_MODELS[provider], effort: CLASSIFICATION_EFFORT, outputSchemaJson: JSON.stringify(CLASSIFICATION_OUTPUT_SCHEMA),
-    instructions: instructions(...[prompt.basePrompt, prompt.personalRules].filter(text => text.trim()).map(text => ({ text, cache: prompt.cachePrompt === true }))) };
+    // No cache hint: a cache write costs more than the rare reuse between batches saves. Reported cache usage still counts.
+    instructions: instructions(...[prompt.basePrompt, prompt.personalRules].filter(text => text.trim())) };
   let result;
   try {
     result = await createModelClient(binding).generate(modelRequest(JSON.stringify({ emails }), options, 120_000));
@@ -70,6 +68,6 @@ export async function classifyEmails(
   try { output = JSON.parse(result.output); } catch { throw new ClassificationError(provider, 'MODEL_INVALID_ANSWER', outcome); }
   const items = classificationItems(output, ids);
   if (items === null) throw new ClassificationError(provider, 'MODEL_INVALID_ANSWER', outcome);
-  return { model: result.model, items, usageAvailable: usage !== undefined,
+  return { model: result.model, items,
     inputTokens: usage?.inputTokens ?? 0, outputTokens: usage?.outputTokens ?? 0, cacheWriteTokens: usage?.cacheWriteTokens ?? 0, cacheReadTokens: usage?.cacheReadTokens ?? 0, thinkingTokens: usage?.thinkingTokens ?? null, costMicros: usage?.costMicros ?? 0 };
 }

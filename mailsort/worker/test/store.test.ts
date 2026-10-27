@@ -405,7 +405,7 @@ it('adds zero cache counters to prior Claude usage and aggregates actual cache u
   expect(s.claudeUsage('2026-10')).toMatchObject({ input_tokens: 2600, cache_write_tokens: 200, cache_read_tokens: 400, output_tokens: 200, cost_micros: 13080 });
 });
 
-it('migrates version 11 with an empty Codex usage table while preserving Claude history', () => {
+it('migrates version 11 with an empty, historical Codex usage table while preserving Claude history', () => {
   const sql = memorySql();
   for (const statement of [...SCHEMA_V1, ...SCHEMA_V2, ...SCHEMA_V3, ...SCHEMA_V4, ...SCHEMA_V5, ...SCHEMA_V6, ...SCHEMA_V7, ...SCHEMA_V8, ...SCHEMA_V10, ...SCHEMA_V11]) sql.exec(statement);
   sql.exec(`INSERT INTO meta (key, value) VALUES ('schema_version', '11')`);
@@ -414,22 +414,14 @@ it('migrates version 11 with an empty Codex usage table while preserving Claude 
   s.migrate(transactional(sql));
   s.migrate(transactional(sql));
   expect(s.schemaVersion()).toBe(SCHEMA_VERSION);
-  expect(s.codexUsage('2026-10')).toEqual({ requests: 0, successes: 0, failures: 0, usage_reported: 0, input_tokens: 0, output_tokens: 0 });
+  expect(s.count(`SELECT count(*) AS n FROM codex_usage`)).toBe(0);
   expect(s.claudeUsage('2026-10')).toMatchObject({ requests: 1, input_tokens: 1000, output_tokens: 100, cost_micros: 6000 });
 });
 
-it('counts Codex attempts once, separates unavailable usage and bounds month and retention reads', () => {
+it('keeps historical Codex usage rows for their 400 days without writing new ones', () => {
   const s = store();
-  s.addCodexUsage('2026-10-06', true, { inputTokens: 1200, outputTokens: 120 });
-  s.addCodexUsage('2026-10-06', false, { inputTokens: 600, outputTokens: 60 });
-  s.addCodexUsage('2026-10-06', false);
-  s.addCodexUsage('2026-10-07', true, { inputTokens: 0, outputTokens: 0 });
-  s.addCodexUsage('2026-09-30', true, { inputTokens: 10, outputTokens: 1 });
-  expect(s.codexUsage('2026-10')).toEqual({ requests: 4, successes: 2, failures: 2, usage_reported: 3, input_tokens: 1800, output_tokens: 180 });
-  expect(s.codexUsage('2026-09')).toMatchObject({ requests: 1, input_tokens: 10 });
   const oldDay = new Date(T0 - 401 * DAY).toISOString().slice(0, 10);
-  s.addCodexUsage(oldDay, true, { inputTokens: 5, outputTokens: 2 });
+  s.run(`INSERT INTO codex_usage (day, requests, successes) VALUES ('2026-10-06', 4, 3), (?, 1, 1)`, oldDay);
   s.prune(T0);
-  expect(s.count(`SELECT count(*) AS n FROM codex_usage WHERE day = ?`, oldDay)).toBe(0);
-  expect(s.codexUsage('2026-10').requests).toBe(4);
+  expect(s.all(`SELECT day, requests FROM codex_usage`)).toEqual([{ day: '2026-10-06', requests: 4 }]);
 });

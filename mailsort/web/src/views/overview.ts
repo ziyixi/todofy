@@ -99,30 +99,12 @@ function budget(status: ServiceStatus, now: number): HTMLElement {
     meter(usage.spentUsd, usage.limitUsd, '本月 Claude 费用', active && (usage.providerLimitReached || exhausted) ? 'danger' : ''),
     el('p', { class: 'hint' }, `本应用记录的 API 用量：输入总计（含缓存）${String(usage.inputTokens)} token · 输出（含思考）${String(usage.outputTokens)} token · 思考明细${usage.thinkingTokens === undefined ? '未提供' : ` ${String(usage.thinkingTokens)} token`}`),
     el('p', { class: 'hint' }, `缓存读取 ${String(usage.cacheReadTokens)} token · 缓存写入 ${String(usage.cacheWriteTokens)} token，均已计入输入总计。`),
-    el('p', { class: 'hint' }, '缓存有效期为 5 分钟，连续批次可能命中；间隔超过 5 分钟的单批通常不会命中。用量以 API 实际返回为准。'),
+    el('p', { class: 'hint' }, '本应用不请求提示缓存；缓存用量以 API 实际返回为准。'),
     el('p', { class: 'hint' }, '费用按这些用量及标价估算，不含赠金、折扣或本应用以外的调用；工作区消费以 Anthropic 账单为准。'),
-    active ? el('p', { class: 'hint' }, usage.nextBatchTime === undefined ? '下批判断时间尚未提供' : `下批判断最早在 ${relative(usage.nextBatchTime, now)}（${when(usage.nextBatchTime)}）。`) : el('p', { class: 'hint' }, '当前使用 VPS Codex；这里保留 Claude API 的费用记录与月上限。'),
+    active ? el('p', { class: 'hint' }, usage.nextBatchTime === undefined ? '下批判断时间尚未提供' : `下批判断最早在 ${relative(usage.nextBatchTime, now)}（${when(usage.nextBatchTime)}）。`) : el('p', { class: 'hint' }, '当前使用 VPS Codex，其用量见 Model Router 控制台；这里保留 Claude API 的费用记录与月上限。'),
     el('p', { class: 'meta' }, usage.lastRequestTime === undefined ? '尚无已记录用量的 Claude 响应' : `最近用量记录 ${when(usage.lastRequestTime)}`),
     usage.lastErrorCode === '' ? null : el('p', { class: active ? 'hint warn' : 'hint' }, `${active ? '最近一次请求' : 'Claude 历史请求'}：${claudeErrorMessage(usage.lastErrorCode)}`),
     !active || (note === '' && waiting === '') ? null : el('p', { class: 'hint' }, [note, waiting].filter((text) => text !== '').join('；')),
-  )
-}
-
-function codexUsage(status: ServiceStatus): HTMLElement {
-  const usage = status.codexUsage
-  const active = classificationProvider(status.classifier?.provider) === ClassificationProvider.CODEX
-  const title = active ? 'Codex 用量' : 'Codex 历史用量（当前未使用）'
-  if (usage === undefined) return card(title, '', el('p', { class: 'hint' }, 'Codex 用量未提供，请刷新或等待服务更新。'))
-  const missing = usage.requestCount - usage.usageReportedCount
-  return card(
-    title,
-    usage.month || '月份未提供',
-    el('p', { class: 'hint' }, `${usage.model || '模型未提供'} · ${usage.effort || 'effort 未提供'}`),
-    el('p', {}, `本月请求 ${String(usage.requestCount)} 次 · 成功 ${String(usage.successCount)} 次 · 失败 ${String(usage.failureCount)} 次`),
-    el('p', { class: 'hint' }, `已报告输入（含缓存）${String(usage.inputTokens)} token · 输出 ${String(usage.outputTokens)} token`),
-    el('p', { class: 'hint' }, `有用量报告 ${String(usage.usageReportedCount)} 次${missing > 0 ? `；${String(missing)} 次请求未返回用量，未计入 token 总计。` : '。'}`),
-    el('p', { class: 'hint' }, '仅记录本应用的请求与返回用量，升级前历史未补录；不代表 ChatGPT 账户剩余额度，不换算美元费用。'),
-    el('p', { class: 'meta' }, usage.lastRequestTime === undefined ? '尚无已记录的 Codex 请求' : `最近请求 ${when(usage.lastRequestTime)}`),
   )
 }
 
@@ -148,11 +130,7 @@ export async function renderOverview(ctx: ViewContext): Promise<void> {
       ),
       el('p', { class: 'hint' }, '大字与流程图为今日累计处理记录；7 天小字及下表按最新判断计数。重判保留历史处理记录。'),
       card('今天的流程', graph.total === 0 ? '' : `共 ${String(graph.total)} 封`, sankeyChart(graph, classificationProvider(status.classifier?.provider)), graph.total === 0 ? el('p', { class: 'hint' }, '今天还没有邮件') : null),
-      el('div', { class: 'two' }, labelTable(week, labels), el('div', { class: 'usage-cards' },
-        ...(classificationProvider(status.classifier?.provider) === ClassificationProvider.CODEX
-          ? [codexUsage(status), budget(status, ctx.host.now())]
-          : [budget(status, ctx.host.now()), codexUsage(status)]),
-      )),
+      el('div', { class: 'two' }, labelTable(week, labels), el('div', { class: 'usage-cards' }, budget(status, ctx.host.now()))),
     )
     // Where the diagram is wider than its box (a phone), it starts at its right end: the labels, 都不是, 拿不准.
     const scroll = body.querySelector('.flow-scroll')

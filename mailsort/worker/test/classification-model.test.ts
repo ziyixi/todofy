@@ -21,28 +21,21 @@ function binding(overrides: Partial<Omit<Generation, '$typeName' | '$unknown'>> 
 describe('Mailsort Model Router calls', () => {
   it.each(['claude', 'codex'] as const)('uses one common structured call for the saved %s selection', async provider => {
     const router = binding();
-    const result = await classifyEmails(router, provider, EMAILS, { ...PROMPT, cachePrompt: true });
+    const result = await classifyEmails(router, provider, EMAILS, PROMPT);
     const request = router.fetch.mock.calls[0]?.[0];
     expect(request?.url).toBe('https://model-router.internal/api/model/v1/generations:generate');
     expect(request?.headers.get('authorization')).toBeNull();
     const sent = fromWire(GenerateRequestSchema, await request?.clone().json()).message;
     expect(sent.model).toBe(CLASSIFIER_MODELS[provider]);
+    // Never a cache hint; reported cache reads and writes are still counted below.
     expect(sent.instructions.map(block => ({ text: block.text, cache: block.cache }))).toEqual([
-      { text: PROMPT.basePrompt, cache: true }, { text: PROMPT.personalRules, cache: true },
+      { text: PROMPT.basePrompt, cache: false }, { text: PROMPT.personalRules, cache: false },
     ]);
     expect(sent).toMatchObject({ effort: 'medium', allowFallback: false });
     expect(sent.maxOutputTokens).toBe(0);
     expect(JSON.parse(sent.input)).toEqual({ emails: EMAILS });
     expect(JSON.parse(sent.outputSchemaJson)).toMatchObject({ properties: { items: { items: { required: ['id', 'bucket', 'reason'] } } } });
     expect(result).toMatchObject({ items: [{ id: 'synthetic-a', bucket: 'P3' }], costMicros: 1506, inputTokens: 150, cacheWriteTokens: 20, cacheReadTokens: 30, thinkingTokens: null });
-  });
-
-  it('keeps normal single batches uncached', async () => {
-    const router = binding();
-    await classifyEmails(router, 'claude', EMAILS, PROMPT);
-    const request = router.fetch.mock.calls[0]?.[0];
-    const sent = fromWire(GenerateRequestSchema, await request?.clone().json()).message;
-    expect(sent.instructions.every(block => !block.cache)).toBe(true);
   });
 
   it.each(['MODEL_SPEND_LIMIT', 'MODEL_AUTH', 'MODEL_NOT_CONFIGURED', 'MODEL_QUOTA', 'MODEL_INVALID_ANSWER', 'MODEL_REFUSED', 'MODEL_OUTPUT_LIMIT'])('maps common reason %s without interpreting vendor payloads', async reason => {
@@ -60,7 +53,7 @@ describe('Mailsort Model Router calls', () => {
 
   it('does not claim subscription token usage when it is unavailable', async () => {
     const router = binding({ usage: { $typeName: 'modelrouter.inference.v1.Usage', available: false, inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0, billingKind: 'subscription' } });
-    expect((await classifyEmails(router, 'codex', EMAILS, PROMPT)).usageAvailable).toBe(false);
+    expect(await classifyEmails(router, 'codex', EMAILS, PROMPT)).toMatchObject({ inputTokens: 0, outputTokens: 0, costMicros: 0 });
   });
 
   it.each(['claude', 'codex'] as const)('requires an API cost from common billing metadata under the saved %s choice', async provider => {
@@ -70,12 +63,12 @@ describe('Mailsort Model Router calls', () => {
 
   it.each(['claude', 'codex'] as const)('accepts subscription usage without an API price under the saved %s choice', async provider => {
     const router = binding({ usage: { $typeName: 'modelrouter.inference.v1.Usage', available: true, inputTokens: 150, outputTokens: 50, cachedInputTokens: 30, cacheWriteTokens: 0, billingKind: 'subscription' } });
-    expect(await classifyEmails(router, provider, EMAILS, PROMPT)).toMatchObject({ usageAvailable: true, inputTokens: 150, outputTokens: 50, costMicros: 0 });
+    expect(await classifyEmails(router, provider, EMAILS, PROMPT)).toMatchObject({ inputTokens: 150, outputTokens: 50, costMicros: 0 });
   });
 
   it.each(['claude', 'codex'] as const)('keeps subscription reference value out of API spend under the saved %s choice', async provider => {
     const router = binding({ usage: { $typeName: 'modelrouter.inference.v1.Usage', available: true, inputTokens: 150, outputTokens: 50, cachedInputTokens: 30, cacheWriteTokens: 0, estimatedCostMicrousd: 999, billingKind: 'subscription' } });
-    expect(await classifyEmails(router, provider, EMAILS, PROMPT)).toMatchObject({ usageAvailable: true, inputTokens: 150, outputTokens: 50, costMicros: 0 });
+    expect(await classifyEmails(router, provider, EMAILS, PROMPT)).toMatchObject({ inputTokens: 150, outputTokens: 50, costMicros: 0 });
   });
 
   it('refuses a missing binding before sending any input', async () => {

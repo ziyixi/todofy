@@ -102,7 +102,8 @@ describe('Codex priority pipeline', () => {
     expect(flow.counts.some(row => row.stage === MailFlow_Stage.CLAUDE)).toBe(false);
     const status = await h.api.getServiceStatus({ name: 'serviceStatus' });
     expect(status.classifier).toMatchObject({ provider: ClassificationProvider.CODEX, model: 'gpt-6.1-sol', effort: 'medium', configured: true, lastErrorCode: '', lastSuccessTime: timestampFromMs(T0 + 3 * HOUR + 2 * MINUTE) });
-    expect(status.codexUsage).toMatchObject({ month: '2026-10', requestCount: 4, successCount: 4, failureCount: 0, usageReportedCount: 4, inputTokens: 4800, outputTokens: 480, lastRequestTime: timestampFromMs(T0 + 3 * HOUR + 2 * MINUTE) });
+    expect(status.codexUsage).toBeUndefined();
+    expect(await h.sql(`SELECT count(*) AS n FROM codex_usage`)).toEqual([{ n: 0 }]);
     expect(h.up.claude.calls).toEqual([]);
   });
 
@@ -145,8 +146,6 @@ describe('Codex priority pipeline', () => {
     expect(await h.step(T0 + 3 * MINUTE)).toMatchObject({ decided: 1, applied: 1 });
     expect(await decision(h, mail(21).id)).toMatchObject({ decider: 'codex', model: 'gpt-6.1-sol' });
     expect(await h.sql(`SELECT * FROM claude_usage`)).toEqual(usage);
-    const codexUsage = (await h.api.getServiceStatus({ name: 'serviceStatus' })).codexUsage;
-    expect(codexUsage).toMatchObject({ requestCount: 1, successCount: 1, usageReportedCount: 1, inputTokens: 1200, outputTokens: 120 });
     const flow = await h.api.getMailFlow({ name: 'mailFlows/today' });
     expect(flow.counts.filter(row => row.stage === MailFlow_Stage.DEFERRED).reduce((sum, row) => sum + row.mailCount, 0)).toBe(0);
     expect(flow.counts.filter(row => row.stage === MailFlow_Stage.CODEX).reduce((sum, row) => sum + row.mailCount, 0)).toBe(1);
@@ -158,7 +157,6 @@ describe('Codex priority pipeline', () => {
     expect(h.up.claude.calls).toEqual([]);
     expect(await h.sql(`SELECT * FROM claude_usage`)).toEqual(usage);
     expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).claudeBudget).toMatchObject({ spentUsd: 20, providerLimitReached: true });
-    expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).codexUsage).toEqual(codexUsage);
     expect(await decision(h, mail(22).id)).toBeUndefined();
     expect(modifies(h)).toHaveLength(1);
   });
@@ -175,11 +173,9 @@ describe('Codex priority pipeline', () => {
     expect(h.up.claude.calls).toEqual([]);
     expect(await h.sql(`SELECT requests FROM claude_usage`)).toEqual([]);
     expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).classifier?.lastErrorCode).toBe('codex_bad_answer');
-    expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).codexUsage).toMatchObject({ requestCount: 1, successCount: 0, failureCount: 1, usageReportedCount: 1, inputTokens: 1200, outputTokens: 120 });
     h.up.codex.badItems = false;
     expect(await h.step(T0 + 7 * MINUTE)).toMatchObject({ decided: 1, applied: 1 });
     expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).classifier?.lastErrorCode).toBe('');
-    expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).codexUsage).toMatchObject({ requestCount: 2, successCount: 1, failureCount: 1, usageReportedCount: 2, inputTokens: 2400, outputTokens: 240 });
     expect(h.up.claude.calls).toEqual([]);
   });
 
@@ -194,33 +190,6 @@ describe('Codex priority pipeline', () => {
     expect(h.up.claude.calls).toEqual([]);
     expect(modifies(h)).toEqual([]);
     expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).classifier).toMatchObject({ provider: ClassificationProvider.CODEX, configured: false, lastErrorCode: 'codex_not_configured' });
-    expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).codexUsage).toMatchObject({ requestCount: 0, failureCount: 0 });
-  });
-
-  it('records an HTTP failure as one attempted request without inventing token usage', async () => {
-    await initialize();
-    await select(ClassificationProvider.CODEX);
-    h.up.codex.errorReason = 'MODEL_UNAVAILABLE';
-    h.up.codex.errorCode = 14;
-    deliver(h, mail(42), T0 + MINUTE);
-    expect(await h.step(T0 + 2 * MINUTE)).toMatchObject({ code: 'codex_unavailable', decided: 0, applied: 0 });
-    expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).codexUsage).toMatchObject({ requestCount: 1, successCount: 0, failureCount: 1, usageReportedCount: 0, inputTokens: 0, outputTokens: 0, lastRequestTime: timestampFromMs(T0 + 2 * MINUTE) });
-    expect(modifies(h)).toEqual([]);
-  });
-
-  it('keeps a valid classification with unavailable legacy token usage separate from reported zero tokens', async () => {
-    await initialize();
-    await select(ClassificationProvider.CODEX);
-    h.up.codex.inputTokens = 0;
-    h.up.codex.outputTokens = 0;
-    h.up.codex.usageAvailable = false;
-    deliver(h, mail(43), T0 + MINUTE);
-    await h.step(T0 + 2 * MINUTE);
-    expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).codexUsage).toMatchObject({ requestCount: 1, successCount: 1, usageReportedCount: 0 });
-    h.up.codex.usageAvailable = true;
-    deliver(h, mail(44), T0 + HOUR + MINUTE);
-    await h.step(T0 + HOUR + 2 * MINUTE);
-    expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).codexUsage).toMatchObject({ requestCount: 2, successCount: 2, usageReportedCount: 1, inputTokens: 0, outputTokens: 0 });
   });
 
   it('switches only the model and its deferred work while retaining write limits and Gmail retry times', async () => {

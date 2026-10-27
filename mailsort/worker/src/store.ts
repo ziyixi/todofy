@@ -67,15 +67,6 @@ export const SCHEMA_V12: readonly string[] = [
   )`,
 ];
 
-export interface CodexUsageRow extends Record<string, SqlStorageValue> {
-  requests: number;
-  successes: number;
-  failures: number;
-  usage_reported: number;
-  input_tokens: number;
-  output_tokens: number;
-}
-
 export interface ClaudeUsageRow extends Record<string, SqlStorageValue> {
   input_tokens: number;
   cache_write_tokens: number;
@@ -815,24 +806,6 @@ export class Store {
         cache_read_tokens = cache_read_tokens + excluded.cache_read_tokens`, day, usage.inputTokens, usage.outputTokens, usage.thinkingTokens, usage.costMicros, usage.cacheWriteTokens, usage.cacheReadTokens);
   }
 
-  /** HTTP classification attempts and returned tokens, summed for one UTC calendar month. */
-  codexUsage(month: string): CodexUsageRow {
-    return this.one<CodexUsageRow>(`SELECT coalesce(sum(requests), 0) AS requests,
-      coalesce(sum(successes), 0) AS successes, coalesce(sum(failures), 0) AS failures,
-      coalesce(sum(usage_reported), 0) AS usage_reported,
-      coalesce(sum(input_tokens), 0) AS input_tokens, coalesce(sum(output_tokens), 0) AS output_tokens
-      FROM codex_usage WHERE day >= ? AND day < ?`, `${month}-01`, `${month}-32`)
-      ?? { requests: 0, successes: 0, failures: 0, usage_reported: 0, input_tokens: 0, output_tokens: 0 };
-  }
-
-  addCodexUsage(day: string, success: boolean, usage?: { readonly inputTokens: number; readonly outputTokens: number }): void {
-    this.run(`INSERT INTO codex_usage (day, requests, successes, failures, usage_reported, input_tokens, output_tokens) VALUES (?, 1, ?, ?, ?, ?, ?)
-      ON CONFLICT(day) DO UPDATE SET requests = requests + 1, successes = successes + excluded.successes,
-        failures = failures + excluded.failures, usage_reported = usage_reported + excluded.usage_reported,
-        input_tokens = input_tokens + excluded.input_tokens, output_tokens = output_tokens + excluded.output_tokens`,
-    day, success ? 1 : 0, success ? 0 : 1, usage === undefined ? 0 : 1, usage?.inputTokens ?? 0, usage?.outputTokens ?? 0);
-  }
-
   // ---- labels -----------------------------------------------------------------------------------------------------------
 
   labels(): LabelRow[] {
@@ -960,6 +933,7 @@ export class Store {
     this.run(`DELETE FROM ledger WHERE create_time < ? AND state IN ('applied', 'failed', 'undone')`, records);
     this.run(`DELETE FROM usage WHERE day < ?`, utcDay(now - FLOW_KEPT_DAYS * DAY));
     this.run(`DELETE FROM claude_usage WHERE day < ?`, utcDay(now - FLOW_KEPT_DAYS * DAY));
+    // Mailsort no longer writes codex_usage (Model Router records Codex usage); its older rows age out as before.
     this.run(`DELETE FROM codex_usage WHERE day < ?`, utcDay(now - FLOW_KEPT_DAYS * DAY));
     this.run(`DELETE FROM flow WHERE day < ?`, utcDay(now - FLOW_KEPT_DAYS * DAY));
     // A retired ID is free again once neither the decisions nor the flow counters can still name it.

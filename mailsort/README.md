@@ -61,10 +61,9 @@ authority; out-of-app calls and calls with a lost response may not appear in the
 leaves Claude work pending for the next UTC month. These limits apply only while Claude is selected; its usage and
 cache records remain visible as history while Codex is selected.
 
-Consecutive batches can reuse five-minute Claude prompt caches. Only the stable base/rules prefix is marked;
-emails and evaluation times follow it. Ordinary scheduled single batches do not request a cache write. The usage card
-shows actual cache reads/writes, and cost uses their separate prices. There is no prewarming or extra API call.
-This explicit cache policy applies only to Claude.
+Mailsort never asks for a prompt cache: a cache write costs more than the occasional reuse between batches saves.
+The stable base/rules prefix still comes first. Cache reads/writes the API reports still appear on the usage card and
+cost uses their separate prices.
 
 Both choices use the private `MODEL_ROUTER` service binding and the shared `modelrouter.inference.v1` contract.
 Mailsort sends trusted instruction blocks, masked input and a standard JSON Schema through
@@ -72,15 +71,12 @@ Mailsort sends trusted instruction blocks, masked input and a standard JSON Sche
 VPS executor connection. Its authenticated caller identity attributes usage; all Claude callers share the Router's single key in the existing $80/month workspace. No model receives Gmail credentials or business tools. Model availability and successful real inference
 remain separate checks from a configured route.
 
-The app records Codex HTTP classification attempts, valid/failed responses and reported input/output tokens by UTC day,
-retains those counters for 400 days and shows the current UTC month's totals. A response with an invalid classification
-still contributes its reported tokens. Failed requests without returned usage count as attempts with unknown token use;
-the UI shows how many requests supplied usage. Input totals include cached input. These records start with this release,
-preserve both providers' history on a switch and do not estimate subscription cost or the ChatGPT account's remaining allowance.
+Model Router records Codex usage; its console is the only Codex usage view. Mailsort keeps no Codex ledger, and its
+older daily Codex rows only age out with their 400-day retention.
 
 ## UI and existing data
 
-- 概览: mode, Gmail status, selected classifier/configuration, next model batch, flow and separate Codex/Claude usage history.
+- 概览: mode, Gmail status, selected classifier/configuration, next model batch, flow and Claude usage history.
 - 分级: four fixed queues, counts and explicit unread-batch progress. A manual start queues immediately; existing
   P1-P4 mail is skipped. While an active batch is visible, progress updates every 30 seconds. It stops on completion
   or leaving the page, and a reached daily write cap shows its UTC-reset time in the browser timezone.

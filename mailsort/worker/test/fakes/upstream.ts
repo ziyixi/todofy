@@ -40,7 +40,6 @@ export class FakeUpstream {
     badItems: false,
     inputTokens: 1200,
     outputTokens: 120,
-    usageAvailable: true,
   };
   /** Requests that were neither Google nor Model Router. */
   readonly strays: string[] = [];
@@ -76,7 +75,6 @@ export class FakeUpstream {
     this.codex.badItems = false;
     this.codex.inputTokens = 1200;
     this.codex.outputTokens = 120;
-    this.codex.usageAvailable = true;
     this.strays.length = 0;
   }
 
@@ -106,7 +104,7 @@ export class FakeUpstream {
       return Response.json(toWire(GenerationSchema, create(GenerationSchema, {
         name: `requests/${crypto.randomUUID()}`, model: isClaude ? 'claude-opus-5-5' : 'gpt-6.1-sol', output: reason ? '' : JSON.stringify({ items }),
         ...(reason ? { error: { code, reason, message: 'Synthetic model failure.' } } : {}),
-        usage: { available: !reason && (isClaude || this.codex.usageAvailable), billingKind: isClaude ? 'api' : 'subscription', inputTokens: reason ? 0 : inputTokens, outputTokens: reason ? 0 : engine.outputTokens,
+        usage: { available: !reason, billingKind: isClaude ? 'api' : 'subscription', inputTokens: reason ? 0 : inputTokens, outputTokens: reason ? 0 : engine.outputTokens,
           cacheWriteTokens: cacheWrite, cachedInputTokens: cacheRead,
           ...(isClaude ? { estimatedCostMicrousd: cost } : {}) },
       })));

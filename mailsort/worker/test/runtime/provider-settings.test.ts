@@ -81,8 +81,8 @@ describe('classification provider settings and status', () => {
     });
     expect(status.classifier?.lastErrorCode).not.toBe('claude_spend_limit');
     expect(status.claudeBudget?.nextBatchTime).toBeUndefined();
-    expect(status.codexUsage).toMatchObject({ requestCount: 0, successCount: 0, failureCount: 0, usageReportedCount: 0 });
-    expect(status.codexUsage?.lastRequestTime).toBeUndefined();
+    // Model Router records Codex usage; Mailsort keeps no ledger of its own.
+    expect(status.codexUsage).toBeUndefined();
   });
 
   it('does not interpret a historical request timestamp as a successful answer', async () => {

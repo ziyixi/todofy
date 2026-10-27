@@ -177,11 +177,11 @@ message ServiceStatus {
   google.protobuf.Timestamp gmail_write_resume_time = 25 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The selected classification provider's readiness, errors and batch schedule.
   ClassifierStatus classifier = 26 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Persisted Codex classification request and reported-token totals for the current UTC month.
+  // Retired: Model Router records Codex usage, so this is no longer reported.
   CodexUsage codex_usage = 27 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
-// Application-observed Codex usage, retained independently of the selected provider. No price or account quota.
+// Retired application-observed Codex usage (ServiceStatus.codex_usage, no longer reported).
 message CodexUsage {
   // Configured model for new classification requests.
   string model = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
