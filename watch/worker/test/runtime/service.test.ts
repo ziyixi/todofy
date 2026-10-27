@@ -1,7 +1,7 @@
 /** Private Watch API and cursor feed over real service bindings, SQLite and synthetic pages. */
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { createHttpClient } from '@ziyixi/proto/http-client';
-import { WatchUiService } from '@ziyixi/proto/watch/ui/v1/watch_ui_service_pb';
+import { WatchEvent_Kind, WatchUiService } from '@ziyixi/proto/watch/ui/v1/watch_ui_service_pb';
 import { Watch_NotifyPolicy } from '@ziyixi/proto/watch/ui/v1/watch_pb';
 import { page } from '../fake-sites.ts';
 import { DAY, HOUR, MINUTE, op, reasonOf, rejection, resetWatches, startHarness, T0, type Harness } from './harness.ts';
@@ -16,7 +16,7 @@ function privateClient(harness: Harness) {
   }));
 }
 
-beforeAll(async () => { h = await startHarness({ tasks: true }); client = privateClient(h); });
+beforeAll(async () => { h = await startHarness({ tasks: true, evidence: true }); client = privateClient(h); });
 afterEach(async () => { await resetWatches(h); await h.sql('DELETE FROM intents'); await h.tasks({}); await h.tasksState(); });
 afterAll(async () => { await h.dispose(); });
 
@@ -52,25 +52,26 @@ describe('WatchApi', () => {
     expect(updated.notifyPolicy).toBe(Watch_NotifyPolicy.NONE);
   });
 
-  it('orders by confirmation, keeps NONE out of Tasks and remains readable after Tasks delivery', async () => {
+  it('orders evidence changes as captured, keeps NONE out of Tasks and remains readable after Tasks delivery', async () => {
     await at(T0 + 3 * DAY);
     const slow = await create('slow', Watch_NotifyPolicy.NONE, true);
     const fast = await create('fast', Watch_NotifyPolicy.DIGEST);
-    changed(slow.uri, 2);
-    await at(clock + 2 * HOUR);
-    // Its candidate exists before the subscription, but is not confirmed yet.
     const baseline = await client.pollWatchEvents({ baseline: true });
     expect(baseline.events).toEqual([]);
+    changed(slow.uri, 2);
+    await at(clock + 2 * HOUR);
     changed(fast.uri, 2);
     await client.checkWatch({ name: fast.name, requestId: op() });
     await at(clock + 20 * MINUTE);
+    // The slow watch's change is still awaiting its confirmation: the feed carries what was captured, not confirmed.
     const first = await client.pollWatchEvents({ cursor: baseline.cursor, pageSize: 1 });
-    expect(first.events.map(event => event.watch)).toEqual([fast.name]);
+    expect(first.events.map(event => event.watch)).toEqual([slow.name]);
+    expect(first.hasMore).toBe(true);
     await at(clock + 60 * MINUTE);
     const rest = await client.pollWatchEvents({ cursor: first.cursor });
     const events = [...first.events, ...rest.events];
-    expect(events.map(event => event.watch).sort()).toEqual([fast.name, slow.name].sort());
-    expect(events.every(event => event.change.startsWith(`${event.watch}/changes/`))).toBe(true);
+    expect(events.map(event => event.watch)).toEqual([slow.name, fast.name]);
+    expect(events.every(event => event.kind === WatchEvent_Kind.EVIDENCE_CHANGED && event.afterSnapshot.startsWith(`${event.watch}/snapshots/`))).toBe(true);
     expect(events.map(event => Number(event.sequence))).toEqual(events.map(event => Number(event.sequence)).sort((a, b) => a - b));
     await at(T0 + 3 * DAY + 15 * HOUR);
     const tasks = await h.tasksState();
@@ -90,12 +91,10 @@ describe('WatchApi', () => {
   it('freezes context independently of pruned snapshots and keeps intent edits out of the baseline', async () => {
     await at(T0 + 5 * DAY);
     const watch = await create('evidence');
-    const baseline = await client.pollWatchEvents({ baseline: true });
     const [before] = await h.sql<{ baseline_id: number }>('SELECT baseline_id FROM watches WHERE id = ?', 'evidence');
     changed(watch.uri, 2);
     await at(clock + 2 * HOUR);
-    const events = await client.pollWatchEvents({ cursor: baseline.cursor });
-    const name = events.events[0]?.change ?? '';
+    const name = (await client.listChanges({ parent: watch.name })).changes[0]?.name ?? '';
     const evidence = await client.getChange({ name });
     expect(evidence.contextAvailable).toBe(true);
     expect(evidence.contextTruncated).toBe(false);

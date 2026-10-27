@@ -385,6 +385,7 @@ enum FailureReason {
   // The check stopped on an unexpected error after its fetch (a bug, or a storage error): it counts toward BROKEN
   // like any failure and is retried with a growing delay, never sooner than 15 minutes after the fetch.
   FAILURE_REASON_INTERNAL_ERROR = 17;
-  // Reading evidence could not be saved to its private storage.
+  // Reading evidence could not be saved to its private storage. Older builds only: a check now continues
+  // without its capture.
   FAILURE_REASON_EVIDENCE_UNAVAILABLE = 18;
 }

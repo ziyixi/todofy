@@ -1,8 +1,9 @@
 /**
- * Fetch tier 3 in workerd (../../../docs/design.md §4), behind its feature flag: with a (fake) browser binding, a
- * FETCHER_BROWSER watch is rendered through the `content` quick action; the app's own ledger stops renders at 480
- * seconds a day and a 429 from Browser Run marks the day exhausted, which shows as JS_QUOTA_EXHAUSTED until 00:00 UTC,
- * never as "no change". A failed render is charged too, and where the browser ended up obeys the redirect rule.
+ * Fetch tier 3 in workerd (../../../docs/design.md §4): with a (fake) browser binding, a FETCHER_BROWSER watch is
+ * rendered by the production renderer on a synthetic launcher (../stubs/browser-state.ts); the app's own ledger stops
+ * renders at 480 seconds a day and a 429 from Browser Run marks the day exhausted, which shows as JS_QUOTA_EXHAUSTED
+ * until 00:00 UTC, never as "no change". A failed render is charged too, where the browser ended up obeys the redirect
+ * rule, and a rendered page with too little text fails like any page, its screenshot notwithstanding.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { FailureReason, Watch_Fetcher } from '@ziyixi/proto/watch/ui/v1/watch_pb';
@@ -12,7 +13,7 @@ import { DAY, HOUR, op, startHarness, T0, type Harness } from './harness.ts';
 let h: Harness;
 
 beforeAll(async () => {
-  h = await startHarness({ browser: true });
+  h = await startHarness({ browser: true, evidence: true });
 });
 
 afterAll(async () => {
@@ -109,6 +110,19 @@ describe('the browser tier', () => {
     await h.api.createWatch({ watchId: 'moving', requestId: op(), watch: { displayName: 'm', uri: url, fetcher: Watch_Fetcher.BROWSER } });
     await h.run(day);
     expect((await h.api.getWatch({ name: 'watches/moving' })).health?.lastFailure).toBe(FailureReason.REDIRECT_REFUSED);
+  });
+
+  it('fails a render with too little text as TOO_SHORT, keeping its screenshot as evidence', async () => {
+    const day = T0 + 7 * DAY;
+    const url = 'https://shell-spa.example.com/app';
+    h.browser.pages.set(url, '<html><body><div id="root"></div></body></html>');
+    h.browser.msUsed = 10_000;
+    await h.clock(day);
+    await h.api.createWatch({ watchId: 'shell', requestId: op(), watch: { displayName: 'shell', uri: url, fetcher: Watch_Fetcher.BROWSER } });
+    await h.run(day);
+    const watch = await h.api.getWatch({ name: 'watches/shell' });
+    expect(watch.health?.lastFailure).toBe(FailureReason.TOO_SHORT);
+    expect((await h.api.getSnapshot({ name: watch.latestSnapshot })).imageAvailable).toBe(true);
   });
 
   it('refuses a browser interval under 6 hours', async () => {

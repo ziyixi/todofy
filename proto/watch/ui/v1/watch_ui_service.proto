@@ -201,11 +201,11 @@ service WatchUiService {
     option (google.api.method_signature) = "name";
   }
 
-  // Private service-binding feed, independent of Tasks delivery. Public owner HTTP refuses this method.
-  // A baseline skips history. Events are ordered by when they were confirmed or their health transition
-  // occurred, including changes first detected before the baseline. The cursor must be saved only after
-  // the whole page is durably consumed. Retention is 30 days or 500 events; CURSOR_EXPIRED requires an
-  // explicit resynchronization, never an automatic history-skipping baseline.
+  // Private service-binding feed of reading-evidence changes and health transitions, independent of Tasks
+  // delivery and of the ordinary rules' confirmations. Public owner HTTP refuses this method. A baseline
+  // skips history. The cursor must be saved only after the whole page is durably consumed. Retention is 30
+  // days or 500 events; after CURSOR_EXPIRED a caller takes a new baseline and treats the gap as unknown
+  // history (the changes themselves stay readable through ListChanges).
   // (-- api-linter: core::0136::http-uri-suffix=disabled
   //     aip.dev/not-precedent: a private bounded event feed uses a custom collection read. --)
   rpc PollWatchEvents(PollWatchEventsRequest) returns (PollWatchEventsResponse) {
@@ -577,11 +577,14 @@ message PollWatchEventsRequest {
   bool baseline = 2 [(google.api.field_behavior) = OPTIONAL];
   // Default and maximum 100; values above 100 are read as 100.
   int32 page_size = 3 [(google.api.field_behavior) = OPTIONAL];
-  // Empty: confirmed changes and health. "evidence": evidence changes and health.
-  string filter = 4 [(google.api.field_behavior) = OPTIONAL];
+  // Deprecated: ignored. The feed carries evidence changes and health only, as "evidence" once selected.
+  string filter = 4 [
+    deprecated = true,
+    (google.api.field_behavior) = OPTIONAL
+  ];
 }
 
-// An immutable transition record, addressed through its watch and optional change.
+// An immutable transition record, addressed through its watch and its evidence snapshots.
 // (-- api-linter: core::0123::resource-annotation=disabled
 //     aip.dev/not-precedent: a feed record of another resource has no independent address. --)
 message WatchEvent {
@@ -589,8 +592,9 @@ message WatchEvent {
   enum Kind {
     // Never written.
     KIND_UNSPECIFIED = 0;
-    // A deterministic candidate became confirmed.
-    KIND_CHANGE_CONFIRMED = 1;
+    // A rule confirmation: the feed carries evidence changes and health only.
+    reserved 1;
+    reserved "KIND_CHANGE_CONFIRMED";
     // Three checks failed consecutively.
     KIND_WATCH_BROKEN = 2;
     // The scheduler paused a watch after fourteen days of failures.
@@ -607,11 +611,9 @@ message WatchEvent {
     (google.api.field_behavior) = OUTPUT_ONLY,
     (google.api.resource_reference).type = "watch.ziyixi.science/Watch"
   ];
-  // The confirmed change; empty for a health transition.
-  string change = 4 [
-    (google.api.field_behavior) = OUTPUT_ONLY,
-    (google.api.resource_reference).type = "watch.ziyixi.science/Change"
-  ];
+  // The confirmed change of a rule confirmation, which the feed no longer carries.
+  reserved 4;
+  reserved "change";
   // When the transition was recorded.
   google.protobuf.Timestamp create_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Prior evidence snapshot, empty on first capture.

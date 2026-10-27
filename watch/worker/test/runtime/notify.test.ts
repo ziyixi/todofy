@@ -130,7 +130,7 @@ describe('the Tasks sink', () => {
     const client = createHttpClient(WatchUiService, call => h.serviceFetch(call.url, {
       method: call.httpMethod, ...(call.body === undefined ? {} : { body: call.body, headers: { 'content-type': 'application/json' } }),
     }));
-    const baseline = await client.pollWatchEvents({ baseline: true, filter: 'evidence' });
+    const baseline = await client.pollWatchEvents({ baseline: true });
     await h.sql(`WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i+1 FROM n WHERE i<?)
       INSERT INTO notifications (kind, watch_id, policy, created_at, delivered_at, evidence_only)
       SELECT 'change_confirmed', ?, 'digest', ?, ?, 1 FROM n`, NOTIFICATIONS_MAX, id, day + 3 * HOUR, day + 3 * HOUR);
@@ -142,8 +142,7 @@ describe('the Tasks sink', () => {
     expect(await h.sql('SELECT count(*) AS n FROM notifications WHERE evidence_only=1')).toEqual([{ n: NOTIFICATIONS_MAX }]);
     const [floor] = await h.sql<{ value: string }>("SELECT value FROM meta WHERE key='watch_events_floor'");
     expect(Number(floor?.value)).toBeGreaterThan(notification?.id ?? 0);
-    // A retained outbox row below the expired prefix must not make either filtered cursor look valid.
-    expect(reasonOf(await rejection(client.pollWatchEvents({ cursor: baseline.cursor, filter: 'evidence' })))).toBe('CURSOR_EXPIRED');
+    // A retained outbox row below the expired prefix must not make the cursor look valid.
     expect(reasonOf(await rejection(client.pollWatchEvents({ cursor: baseline.cursor })))).toBe('CURSOR_EXPIRED');
     expect(pruned.read).toBeLessThan(1500);
     expect(pruned.written).toBeLessThan(40);

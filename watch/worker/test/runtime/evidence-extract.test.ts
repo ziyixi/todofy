@@ -17,7 +17,7 @@ afterAll(async () => { await mf.dispose(); });
 const extract = async (input: unknown) => (await mf.dispatchFetch('https://probe.invalid/extract', { method: 'POST', body: JSON.stringify(input) })).json() as Promise<CaptureDocument>;
 interface BrowserProbe {
   result: { kind: string; failure?: string; refusal?: { kind: string }; finalUrl?: string; evidence?: CaptureDocument; browserMs?: number };
-  admitted: string[]; denied: string[]; gates: string[]; closed: boolean; viewport: unknown; screenshotOptions: unknown; axOptions: unknown;
+  admitted: string[]; denied: string[]; gates: string[]; closed: boolean; viewport: unknown; screenshotOptions: unknown;
   launches: number;
   error?: string;
 }
@@ -89,13 +89,11 @@ describe('unmasked native page evidence', () => {
 });
 
 describe('real renderer with injected browser primitives', () => {
-  it('captures text, bounded AX and JPEG in one page session, then closes it', async () => {
+  it('captures text and a JPEG in one page session, then closes it', async () => {
     const response = await render();
     expect(response.result.kind).toBe('rendered');
     expect(response.result.evidence?.markdown).toContain('Version 12');
     expect(response.result.evidence?.screenshot).toMatchObject({ width: 3, height: 2, mimeType: 'image/jpeg' });
-    expect(response.result.evidence?.accessibilityJson).toContain('Buy');
-    expect(response.axOptions).toEqual({ interestingOnly: true });
     expect(response.closed).toBe(true);
     expect(response.viewport).toEqual({ width: 1280, height: 960, deviceScaleFactor: 1 });
     expect(response.screenshotOptions).toMatchObject({ type: 'jpeg', quality: 65, fullPage: false });
@@ -162,10 +160,7 @@ describe('real renderer with injected browser primitives', () => {
     }
   });
 
-  it('reports truncated AX, oversized HTML, quota and timeout explicitly', async () => {
-    const ax = await render({ accessibilityLarge: true });
-    expect(ax.result.evidence?.truncated).toBe(true);
-    expect(ax.result.evidence?.errors).toContain('accessibility_too_large');
+  it('reports oversized HTML, quota and timeout explicitly', async () => {
     expect((await render({ contentLarge: true })).result).toMatchObject({ kind: 'failed', failure: 'TOO_LARGE' });
     expect((await render({ quota: true })).result.kind).toBe('quota');
     const timeout = await render({ timeout: true });

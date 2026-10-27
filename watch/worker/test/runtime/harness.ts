@@ -6,9 +6,9 @@
  *   - the outbound service "fake-net": every request the Worker makes goes to FakeSites (../fake-sites.ts), the
  *     synthetic websites, through ./fake-net.ts, which streams each body to the reader as it reads (never ahead of it);
  *     nothing leaves the process tree;
- *   - a fake ASSETS binding (the UI's page) and, when asked, a fake BROWSER binding (Browser Run's `content` action),
- *     through fake-net too, and the TASKS binding to "tasks", a stub of Tasks' `TaskInbox` entrypoint
- *     (../stubs/tasks-stub.ts).
+ *   - a fake ASSETS binding (the UI's page) and, when asked, a fake BROWSER binding (each render's page, through
+ *     fake-net too, played by the production renderer on a synthetic launcher: ../stubs/browser-state.ts), and the
+ *     TASKS binding to "tasks", a stub of Tasks' `TaskInbox` entrypoint (../stubs/tasks-stub.ts).
  * DEV_MANUAL_ALARMS=true: no alarm is ever armed and the tests drive the scheduler with explicit clocks; the owner is
  * signed in over loopback http by the dev bypass. All data is synthetic.
  */
@@ -92,7 +92,7 @@ export interface HarnessOptions {
   /** Bind a local private R2 bucket for captured evidence. */
   readonly evidence?: boolean;
   readonly bindings?: Record<string, string>;
-  /** Bind a fake BROWSER (Browser Run's content action). */
+  /** Bind a fake BROWSER, rendered through puppeteerRenderer on a synthetic launcher (../stubs/browser-state.ts). */
   readonly browser?: boolean;
   /** Bind TASKS to the stub of Tasks' TaskInbox entrypoint (the notification sink is then on). */
   readonly tasks?: boolean;
@@ -146,7 +146,7 @@ export interface Harness {
 
 export async function startHarness(options: HarnessOptions = {}): Promise<Harness> {
   const temp = await mkdtemp(join(tmpdir(), 'watch-runtime-'));
-  const script = await workerBundle();
+  const script = await workerBundle(options.browser === true ? 'test/stubs/browser-state.ts' : 'src/index.ts');
   const tasksScript = options.tasks === true ? await workerBundle('test/stubs/tasks-stub.ts') : '';
   const sites = new FakeSites();
   const browser: FakeBrowser = { pages: new Map(), finalUrls: new Map(), msUsed: 20_000, quota: false, calls: [] };

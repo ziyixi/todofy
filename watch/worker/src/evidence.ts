@@ -6,6 +6,7 @@ import { sha256Hex } from './config.ts';
 import { changeId } from './ids.ts';
 import { SNAPSHOTS_KEPT } from './limits.ts';
 import type { CaptureDocument } from './evidence-extract.ts';
+import { maskLine } from './normalize.ts';
 import type { Store } from './store.ts';
 
 interface EvidenceRow extends Record<string, SqlStorageValue> {
@@ -16,6 +17,17 @@ type SavedDocument = Omit<CaptureDocument, 'screenshot'> & {
 };
 export interface EvidencePair { before: string; after: string }
 const nameOf = (row: EvidenceRow) => `watches/${row.watch_id}/snapshots/${row.id}`;
+/** A Markdown link or image target's query string. Each run stops at a bracket or parenthesis, so the scan is linear. */
+const TARGET_QUERY = /(\]\([^()[\]\s?]*)\?[^()\s]*\)/g;
+
+/**
+ * What a capture is compared by: its title and Markdown after the default masks, without link and image query strings
+ * (per-request tokens and tracking). Links, metadata and the final URL are stored but not compared.
+ */
+function comparedText(document: CaptureDocument): string {
+  const lines = document.markdown.split('\n').map(line => maskLine(line.replace(TARGET_QUERY, '$1)'), false).text);
+  return JSON.stringify([document.title, lines]);
+}
 
 function latest(store: Store, watch: string): EvidenceRow | undefined {
   return store.one<EvidenceRow>('SELECT * FROM evidence_snapshots WHERE watch_id=? AND ready=1 ORDER BY id DESC LIMIT 1', watch);
@@ -30,8 +42,8 @@ export function latestEvidence(store: Store, watch: string): string {
 export async function saveEvidence(store: Store, bucket: R2Bucket, watch: string, readHash: string, now: number, document: CaptureDocument): Promise<EvidencePair | null> {
   const previous = latest(store, watch);
   const { screenshot, ...text } = document;
-  const contentHash = await sha256Hex(JSON.stringify(text));
-  const imageHash = screenshot ? Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', screenshot.bytes)), b => b.toString(16).padStart(2, '0')).join('') : '';
+  const contentHash = await sha256Hex(comparedText(document));
+  const imageHash = screenshot ? await sha256Hex(screenshot.bytes) : '';
   const hash = await sha256Hex(`${readHash}:${contentHash}:${imageHash}`);
   if (previous?.ready && previous.sha === hash) return { before: nameOf(previous), after: nameOf(previous) };
   const id = changeId(now);
@@ -103,7 +115,7 @@ export async function readEvidence(store: Store, bucket: R2Bucket | undefined, n
   const { row, document, error } = await documentOf(store, bucket, name);
   return create(SnapshotSchema, { name, createTime: row ? timestampFromMs(row.created_at) : undefined,
     uri: document?.finalUrl ?? '', title: document?.title ?? '', markdown: document?.markdown ?? '',
-    structureJson: document?.accessibilityJson ?? '', links: [...(document?.links ?? [])], metadata: [...(document?.metadata ?? [])],
+    links: [...(document?.links ?? [])], metadata: [...(document?.metadata ?? [])],
     contentAvailable: !!document && !document.errors.some(e => e.startsWith('EVIDENCE_') && !document.markdown), contentTruncated: document?.truncated ?? false, contentError: error || document?.errors.filter(e => !['screenshot_failed', 'too_large'].includes(e)).join(',') || '',
     imageAvailable: !!document?.imageHash, imageError: document?.imageError ?? error,
     imageWidth: document?.imageWidth ?? 0, imageHeight: document?.imageHeight ?? 0,

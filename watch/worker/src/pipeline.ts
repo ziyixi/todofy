@@ -1,5 +1,5 @@
 import { latestEvidence, saveEvidence, type EvidencePair } from './evidence.ts';
-import { extractCapture } from './evidence-extract.ts';
+import { extractCapture, structuredCapture } from './evidence-extract.ts';
 /**
  * One scheduled check of one watch (../../docs/design.md §5): the deterministic noise pipeline from the fetch to the
  * recorded change, in order.
@@ -32,13 +32,14 @@ import { extractCapture } from './evidence-extract.ts';
  * the owner's edit meanwhile. The check's other writes go in one transaction after every await (the page was fetched
  * and parsed, the snapshot gzipped), and only if the watch's settings did not change meanwhile (an owner's update wins;
  * the result is dropped). A check that throws after its fetch is recorded as INTERNAL_ERROR (`recordInternalError`):
- * it counts toward BROKEN and the auto-pause, and waits at least the URL's 15 minutes. Nothing here logs: the alarm
- * logs counts.
+ * it counts toward BROKEN and the auto-pause, and waits at least the URL's 15 minutes. Reading evidence is saved
+ * before the short-circuit, but its storage failing only leaves this check without capture refs (one log line with its
+ * code); the rule check goes on. Nothing else here logs: the alarm logs counts.
  */
 import { readConfig, settingsWatch, type WatchConfig } from './config.ts';
 import { buildContent, contentSha, viewOf, type Content } from './content.ts';
 import { confirmAt, earliestFetch, nextCheckAt, nextUtcMidnight } from './etiquette.ts';
-import { extract } from './extract/index.ts';
+import { extract, type Extraction } from './extract/index.ts';
 import type { FailureCode } from './health.ts';
 import { changeId } from './ids.ts';
 import type { ChangeJudge } from './judge.ts';
@@ -262,21 +263,25 @@ export async function runCheck(deps: CheckDeps, id: string, now: number, budget:
     return 'failed';
   }
 
-  // Reading evidence precedes text/raw-byte short-circuits: images and controls may change alone.
+  // Reading evidence precedes text/raw-byte short-circuits: images and controls may change alone. A feed's or JSON's
+  // capture is the rule extraction's own lines, so that source is parsed once.
   let capture: EvidencePair | null = null;
+  let structured: Extraction | null = null;
   if (obtained.kind === 'answer' && deps.evidenceStore) {
-    try {
-      const document = obtained.evidence ?? await extractCapture({ body: obtained.body, contentType: obtained.contentType, finalUrl: obtained.finalUrl, source: config.source });
-      capture = await saveEvidence(deps.store, deps.evidenceStore, id, current.read_hash, now, document);
-      const refreshed = deps.store.watch(id);
-      if (!capture || !refreshed || refreshed.check_hash !== current.check_hash) return 'stale';
-      current = { ...refreshed, evidence_before: capture.before, evidence_after: capture.after };
-    } catch {
-      const refreshed = deps.store.watch(id);
-      if (!refreshed || refreshed.check_hash !== current.check_hash) return 'stale';
-      applyFailure(deps, refreshed, config, at, 'EVIDENCE_UNAVAILABLE', obtained.status, null);
-      return 'failed';
+    if (config.source.kind !== 'html' && !obtained.evidence) {
+      structured = await extract({ source: config.source, contentType: obtained.contentType, body: obtained.body, url: obtained.finalUrl, blocks: false });
     }
+    try {
+      const document = obtained.evidence ?? (structured ? structuredCapture(structured, obtained.finalUrl)
+        : await extractCapture({ body: obtained.body, contentType: obtained.contentType, finalUrl: obtained.finalUrl, source: config.source }));
+      capture = await saveEvidence(deps.store, deps.evidenceStore, id, current.read_hash, now, document);
+      if (!capture) return 'stale';
+    } catch {
+      console.warn(JSON.stringify({ event: 'evidence_capture', watch: id, error_code: 'EVIDENCE_UNAVAILABLE' }));
+    }
+    const refreshed = deps.store.watch(id);
+    if (!refreshed || refreshed.check_hash !== current.check_hash) return 'stale';
+    current = capture === null ? refreshed : { ...refreshed, evidence_before: capture.before, evidence_after: capture.after };
   }
 
   // Stage 1: the short-circuit.
@@ -309,10 +314,7 @@ export async function runCheck(deps: CheckDeps, id: string, now: number, budget:
       return 'not_modified';
     }
     // Stages 2 and 3.
-    let extraction = await extract({ source: config.source, contentType: obtained.contentType, body: obtained.body, url: obtained.finalUrl, blocks: false });
-    if (!extraction.ok && extraction.failure === 'TOO_SHORT' && config.source.kind === 'html' && obtained.evidence?.screenshot) {
-      extraction = { ok: true, page: { lines: [], items: null, availability: null, truncated: false }, info: extraction.info };
-    }
+    const extraction = structured ?? await extract({ source: config.source, contentType: obtained.contentType, body: obtained.body, url: obtained.finalUrl, blocks: false });
     if (!extraction.ok) {
       applyFailure(deps, current, config, at, extraction.failure, obtained.status, null);
       return 'failed';

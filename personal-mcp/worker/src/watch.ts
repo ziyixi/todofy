@@ -162,22 +162,20 @@ export function registerWatchTools(server: McpServer, env: WatchToolEnv, work: W
 
   server.registerTool('watch_read', {
     title: 'Read a Watch snapshot',
-    description: 'Read a bounded window of stored page Markdown or structure JSON with capture metadata, links, completeness and image status. Use latest_snapshot from watch_get or frozen before_snapshot/after_snapshot refs. Follow next_offset using the same snapshot and representation. content_truncated describes capture loss; next_offset describes unread stored text. This never fetches a page or calls a model.',
-    inputSchema: z.strictObject({ snapshot: snapshotName, representation: z.enum(['markdown', 'structure']).default('markdown'),
+    description: 'Read a bounded window of stored page Markdown with capture metadata, links, completeness and image status. Use latest_snapshot from watch_get or frozen before_snapshot/after_snapshot refs. Follow next_offset using the same snapshot. content_truncated describes capture loss; next_offset describes unread stored text. This never fetches a page or calls a model.',
+    inputSchema: z.strictObject({ snapshot: snapshotName,
       offset: z.number().int().min(0).max(262144).default(0), limit: z.number().int().min(1).max(24000).default(12000) }),
     annotations: readOnly,
   }, input => answer('WATCH', async () => {
     const snapshot = await client.getSnapshot({ name: input.snapshot });
     const metadata = toWire(SnapshotSchema, snapshot);
     delete metadata['markdown'];
-    delete metadata['structure_json'];
-    const characters = Array.from(input.representation === 'markdown' ? snapshot.markdown : snapshot.structureJson);
+    const characters = Array.from(snapshot.markdown);
     const end = Math.min(characters.length, input.offset + input.limit);
     return { ...metadata, content_available: snapshot.contentAvailable, content_truncated: snapshot.contentTruncated,
       content_error: snapshot.contentError, image_available: snapshot.imageAvailable, image_error: snapshot.imageError,
-      representation: input.representation, offset: input.offset, total_characters: characters.length,
-      next_offset: end < characters.length ? end : null,
-      [input.representation === 'markdown' ? 'markdown' : 'structure_json']: characters.slice(input.offset, end).join('') };
+      offset: input.offset, total_characters: characters.length, next_offset: end < characters.length ? end : null,
+      markdown: characters.slice(input.offset, end).join('') };
   }));
 
   server.registerTool('watch_view', {

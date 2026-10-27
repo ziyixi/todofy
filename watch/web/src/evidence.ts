@@ -1,4 +1,4 @@
-/** Owner-only evidence readers. Page text and source structure are always literal text. */
+/** Owner-only evidence readers. Page text, links and metadata are always literal text. */
 import type { Change } from '@ziyixi/proto/watch/ui/v1/change_pb'
 import { api, ApiError, errorMessage } from './api.ts'
 import { button, el } from './dom.ts'
@@ -79,8 +79,7 @@ async function readSnapshot(name: string, label: string): Promise<HTMLElement> {
   if (snapshot.contentAvailable) {
     if (snapshot.contentError !== '') section.append(el('p', { class: 'warn' }, `页面提取有异常（${snapshot.contentError}），已保存的内容可能不完整。`))
     if (snapshot.markdown !== '' || snapshot.contentError === '') section.append(el('pre', { class: 'evidence-text', tabindex: '0' }, snapshot.markdown === '' ? '已保存的页面正文为空。' : snapshot.markdown))
-    const source = el('details', { class: 'evidence-source' }, el('summary', {}, '页面结构、链接和元数据'))
-    if (snapshot.structureJson !== '') source.append(el('pre', { class: 'evidence-text', tabindex: '0' }, snapshot.structureJson))
+    const source = el('details', { class: 'evidence-source' }, el('summary', {}, '链接和元数据'))
     if (snapshot.links.length > 0) source.append(el('h4', {}, '链接'), el('pre', { class: 'evidence-text', tabindex: '0' }, snapshot.links.map((link) => `${link.text}\n${link.url}`).join('\n\n')))
     if (snapshot.metadata.length > 0) source.append(el('h4', {}, '元数据'), el('pre', { class: 'evidence-text', tabindex: '0' }, snapshot.metadata.map((item) => `${item.name}: ${item.content}`).join('\n')))
     if (source.childElementCount > 1) section.append(source)

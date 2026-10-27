@@ -3,10 +3,10 @@ import type { SourceConfig } from './config.ts';
 import { FETCH_MAX_BYTES } from './limits.ts';
 import { decodeBody, detectCharset, mediaType } from './extract/charset.ts';
 import { decodeEntities } from './extract/entities.ts';
-import { extract } from './extract/index.ts';
+import { HEAD_CONTENT, SKIP, VOID } from './extract/html.ts';
+import { extract, type Extraction } from './extract/index.ts';
 
 export const CAPTURE_TEXT_MAX = 256 * 1024;
-export const CAPTURE_ACCESSIBILITY_MAX = 64 * 1024;
 export const CAPTURE_SCREENSHOT_MAX = 1024 * 1024;
 const LINKS_MAX = 100;
 const METADATA_MAX = 32;
@@ -20,7 +20,6 @@ export interface CaptureDocument {
   readonly markdown: string;
   readonly links: readonly { readonly text: string; readonly url: string }[];
   readonly metadata: readonly { readonly name: string; readonly content: string }[];
-  readonly accessibilityJson: string | null;
   readonly truncated: boolean;
   readonly errors: readonly string[];
   readonly screenshot: { readonly bytes: Uint8Array; readonly width: number; readonly height: number; readonly mimeType: 'image/jpeg' } | null;
@@ -36,7 +35,7 @@ export function captureText(text: string, maxBytes = CAPTURE_TEXT_MAX): { readon
 }
 
 export function emptyCapture(finalUrl: string): CaptureDocument {
-  return { title: '', finalUrl, markdown: '', links: [], metadata: [], accessibilityJson: null, truncated: false, errors: [], screenshot: null };
+  return { title: '', finalUrl, markdown: '', links: [], metadata: [], truncated: false, errors: [], screenshot: null };
 }
 
 function linkUrl(href: string, base: string): string | null {
@@ -65,9 +64,6 @@ function markdownLinks(text: string, base: string): CaptureDocument['links'] {
   return links;
 }
 
-const SKIP = new Set(['head', 'script', 'style', 'noscript', 'template', 'svg', 'iframe', 'textarea', 'object']);
-const HEAD_CONTENT = new Set(['base', 'link', 'meta', 'noscript', 'script', 'style', 'template', 'title']);
-const VOID = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
 const BLOCK = new Set(['address', 'article', 'aside', 'blockquote', 'div', 'dl', 'dt', 'dd', 'fieldset', 'figcaption', 'figure', 'footer', 'form', 'header', 'main', 'nav', 'p', 'section', 'summary', 'table', 'ul', 'ol']);
 interface Frame {
   readonly parent: Frame | null;
@@ -85,7 +81,11 @@ interface Frame {
   rows: number;
 }
 
-/** HTMLRewriter supplies parsing and selector matching; this pass only emits bounded reading structure. */
+/**
+ * HTMLRewriter supplies parsing and selector matching; this pass only emits bounded reading Markdown. It stays apart
+ * from extract/html.ts (headings, lists, tables, images and metadata here; the rules' plain lines there), sharing its
+ * element sets, so the rules' lines never depend on the evidence format.
+ */
 async function htmlCapture(html: string, finalUrl: string, source: SourceConfig | undefined): Promise<CaptureDocument> {
   const config = source?.kind === 'html' ? source : null;
   const parts: string[] = [];
@@ -224,16 +224,20 @@ async function htmlCapture(html: string, finalUrl: string, source: SourceConfig 
     truncated: status.truncated || status.failed || keptTitle.truncated, errors };
 }
 
+/** The capture of a feed, JSON or embedded source: its rule extraction's lines (the pipeline parses it once). */
+export function structuredCapture(result: Extraction, finalUrl: string): CaptureDocument {
+  if (!result.ok) return { ...emptyCapture(finalUrl), errors: [result.failure] };
+  const markdown = captureText(result.page.lines.join('\n\n'));
+  return { ...emptyCapture(finalUrl), markdown: markdown.text, truncated: result.page.truncated || markdown.truncated };
+}
+
 export async function extractCapture(input: { readonly body: Uint8Array; readonly contentType: string | null; readonly finalUrl: string; readonly source?: SourceConfig }): Promise<CaptureDocument> {
   if (input.body.byteLength > FETCH_MAX_BYTES) return { ...emptyCapture(input.finalUrl), truncated: true, errors: ['EVIDENCE_BODY_TOO_LARGE'] };
+  if (input.source !== undefined && input.source.kind !== 'html') {
+    return structuredCapture(await extract({ source: input.source, contentType: input.contentType, body: input.body, url: input.finalUrl, blocks: false }), input.finalUrl);
+  }
   const type = mediaType(input.contentType);
   const text = decodeBody(input.body, detectCharset(input.contentType, input.body).label);
-  if (input.source !== undefined && input.source.kind !== 'html') {
-    const result = await extract({ source: input.source, contentType: input.contentType, body: input.body, url: input.finalUrl, blocks: false });
-    if (!result.ok) return { ...emptyCapture(input.finalUrl), errors: [result.failure] };
-    const markdown = captureText(result.page.lines.join('\n\n'));
-    return { ...emptyCapture(input.finalUrl), markdown: markdown.text, truncated: result.page.truncated || markdown.truncated };
-  }
   if (type === 'text/html' || type === 'application/xhtml+xml' || type === '') return htmlCapture(text, input.finalUrl, input.source);
   const kept = captureText(text);
   if (type === 'text/markdown' || type === 'text/plain') return { ...emptyCapture(input.finalUrl),
