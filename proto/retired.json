@@ -5,7 +5,8 @@
     {"path": "mailsort/ui/v1/", "package": "mailsort.ui.v1", "since": "2026-10-10", "reason": "replaced by mailsort.ui.v2 (rules, live gating and the audit removed); the Worker and its UI moved together and /api/v1 answers 410 for one release"},
     {"path": "flowday/ui/v1/", "package": "flowday.ui.v1", "since": "2026-10-20", "reason": "the app that served it was removed"},
     {"path": "todofy/taskintent/v1/", "package": "todofy.taskintent.v1", "since": "2026-10-21", "reason": "Todofy writes no task: the watch app creates its tasks through Tasks' TaskInbox (tasks.inbox.v1); prototest/v1/intent.proto keeps the messages as the wire profile's test fixtures"},
-    {"path": "codex/inference/v1/", "package": "codex.inference.v1", "since": "2026-10-27", "reason": "all inference callers and the VPS executor use modelrouter.inference.v1; the old run/check endpoints have no consumer"}
+    {"path": "codex/inference/v1/", "package": "codex.inference.v1", "since": "2026-10-27", "reason": "all inference callers and the VPS executor use modelrouter.inference.v1; the old run/check endpoints have no consumer"},
+    {"path": "codex/monitor/v1/", "package": "codex.monitor.v1", "since": "2026-10-27", "reason": "the Model Router's request records are the one Codex usage ledger; the gateway, Platform, Fleet and Home stopped producing and reading the telemetry"}
   ],
   "files": [
     {"path": "todofy/ui/v1/plus_service.proto", "since": "2026-10-21", "reason": "Todofy's Mail entry (todofy.mail.v1) and Tasks (tasks.ui.v1: ConvertMailItem, the mail categories, the weekly review) replaced PlusService; no Worker serves or calls it"},
@@ -105,5 +106,9 @@
     {"message": "todofy.ui.v1.GtdDay", "since": "2026-10-21", "reason": "used only by a retired TodofyUiService method"},
     {"message": "todofy.ui.v1.GtdScope", "since": "2026-10-21", "reason": "used only by a retired TodofyUiService method"},
     {"message": "todofy.ui.v1.GtdReview", "since": "2026-10-21", "reason": "used only by a retired TodofyUiService method"}
+  ],
+  "fields": [
+    {"field": "ops.v1.OpsStatus.codex_inference", "number": 13, "since": "2026-10-27", "reason": "the retired codex.monitor.v1 telemetry; Fleet stopped writing it and Home stopped reading it"},
+    {"field": "platform.runtime.v1.WorkloadStatus.inference_status", "number": 11, "since": "2026-10-27", "reason": "the retired codex.monitor.v1 telemetry; Platform stopped writing it and Fleet stopped reading it"}
   ]
 }

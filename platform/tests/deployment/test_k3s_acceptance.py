@@ -38,18 +38,8 @@ class K3sAcceptance(unittest.TestCase):
         pod = deployment["spec"]["template"]["spec"]
         self.assertFalse(pod["automountServiceAccountToken"])
         self.assertEqual(
-            pod["volumes"][0]["persistentVolumeClaim"]["claimName"], "newsletter-auth"
-        )
-        self.assertEqual(
-            pod["volumes"][1]["persistentVolumeClaim"]["claimName"], "platform-state"
-        )
-        self.assertEqual(
-            pod["containers"][0]["volumeMounts"][1],
-            {
-                "name": "state",
-                "mountPath": "/var/lib/codex-gateway",
-                "subPath": "codex-gateway",
-            },
+            [volume["persistentVolumeClaim"]["claimName"] for volume in pod["volumes"]],
+            ["newsletter-auth"],
         )
 
     def test_real_ssa_restore_noop_conflict_and_persistent_objects(self):

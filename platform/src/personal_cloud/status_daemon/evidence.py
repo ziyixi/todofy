@@ -251,7 +251,6 @@ def workload(
         observed_at=when,
         active_count=business.active_count,
         unknown_count=business.unknown_count,
-        inference_status=business.inference_status,
     )
     # Check producer output with the shared strict profile; omitted observations remain absent, never fake zeros.
     return from_wire(pb.WorkloadStatus, to_wire(result), strict=True).message

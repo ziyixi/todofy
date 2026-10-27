@@ -1,7 +1,6 @@
 import { screen, within } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
 import type { OpsStatus } from '../../../worker/src/api-types.ts'
-import { degradedApps, guardShed, healthy, status, todofyUnreachable, withCodex, withLinkOnly, type Scenario } from '../test/fixtures'
+import { degradedApps, guardShed, healthy, status, todofyUnreachable, withLinkOnly, type Scenario } from '../test/fixtures'
 import { freezeClock, renderApp, serve } from '../test/harness'
 
 async function showOps(scenario: Scenario) {
@@ -14,32 +13,6 @@ async function showOps(scenario: Scenario) {
 const region = (name: string) => screen.getByRole('region', { name })
 
 describe('操作与记录', () => {
-  it('opens Codex directly as one app while retaining the existing ops tab and return path', async () => {
-    freezeClock()
-    serve(withCodex())
-    renderApp('#/ops/codex-gateway')
-    expect(await screen.findByRole('heading', { level: 1, name: 'Codex 推理' })).toBeInTheDocument()
-    expect(screen.getByRole('region', { name: 'Codex 推理' })).toBeInTheDocument()
-    expect(screen.queryByRole('region', { name: 'Mail Hero' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('region', { name: '降载与操作' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('region', { name: '构建与注册表' })).not.toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '操作与记录' })).toHaveAttribute('aria-current', 'page')
-    expect(document.title).toBe('Codex 推理 · 个人控制台')
-    await userEvent.click(screen.getByRole('link', { name: '← 返回操作与记录' }))
-    expect(await screen.findByRole('region', { name: '降载与操作' })).toBeInTheDocument()
-    expect(screen.getByRole('region', { name: '应用详情' })).toBeInTheDocument()
-    expect(document.getElementById('main')).toHaveFocus()
-  })
-
-  it('does not invent a detail for an entry missing from the registry', async () => {
-    freezeClock()
-    serve(healthy())
-    renderApp('#/ops/unregistered')
-    expect(await screen.findByText('没有找到该应用的监控详情。')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '← 返回操作与记录' })).toHaveAttribute('href', '#/ops')
-    expect(screen.queryByRole('region', { name: 'Mail Hero' })).not.toBeInTheDocument()
-  })
-
   it('shows MCP observations inside the existing app detail and keeps its alert controls', async () => {
     const scenario = healthy()
     const snapshot: OpsStatus = { ...status.mailHeroOk, app: 'personal-mcp', ui_url: null,

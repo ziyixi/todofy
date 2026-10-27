@@ -5,6 +5,7 @@
 import type { Flow as FlowDef, GuardView, RegistryEntry, Registry, StorageKind, Stage as StageDef, Target } from '../../../worker/src/api-types.ts'
 import { routeHash } from '../router'
 import { PLATFORM_SOURCES } from './labels'
+import { httpsUrl } from './url'
 
 export type Reg = Registry
 
@@ -79,7 +80,7 @@ export function targetHash(target: Target): string {
     case 'cloudflare':
       return routeHash(target.script ? { view: 'cloudflare', script: target.script } : { view: 'cloudflare' })
     case 'ops':
-      return routeHash(target.entry === 'codex-gateway' ? { view: 'ops', app: target.entry } : { view: 'ops' })
+      return routeHash({ view: 'ops' })
     case 'home':
       return routeHash({ view: 'home' })
   }
@@ -99,10 +100,12 @@ export function targetLabel(reg: Reg, target: Target, source: string): string {
 
 /**
  * Where a background service's row leads inside this page: its Worker (it has one), else the first
- * flow it takes part in, else 操作与记录.
+ * flow it takes part in, else 操作与记录. The Codex gateway keeps no usage of its own: its row opens the
+ * Model Router console (a new tab), where every Codex request is recorded.
  */
-export function entryPageHash(reg: Reg, entry: RegistryEntry): { hash: string; what: string } {
-  if (entry.id === 'codex-gateway') return { hash: routeHash({ view: 'ops', app: entry.id }), what: '查看推理监控' }
+export function entryPageHash(reg: Reg, entry: RegistryEntry): { hash: string; what: string; external?: true } {
+  const router = entry.id === 'codex-gateway' ? httpsUrl(entryOf(reg, 'model-router')?.url) : null
+  if (router) return { hash: router, what: '在 Model Router 查看用量（新标签页）', external: true }
   if (entry.id === 'notion-publish' || entry.id === 'personal-mcp') return { hash: routeHash({ view: 'ops' }), what: '查看操作与记录' }
   const script = entry.scripts[0]
   if (script !== undefined) return { hash: routeHash({ view: 'cloudflare', script }), what: '查看 Cloudflare 中的 Worker' }

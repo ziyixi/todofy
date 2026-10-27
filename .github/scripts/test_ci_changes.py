@@ -265,11 +265,13 @@ class Classify(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(push([path]), expect(F, F, T, F, F, codex_gateway_check=T))
 
-    def test_retired_codex_inference_proto_checks_without_publication(self):
-        result = push(["proto/codex/inference/v1/inference.proto"])
-        self.assertTrue(result["proto"])
-        self.assertEqual({app for app in ci_changes.APPS if result[f"{ci_changes.PREFIX[app]}_check"]}, set(ci_changes.PROTO_USERS))
-        self.assertEqual({key for key, value in result.items() if value and key.endswith(("_deploy", "_publish"))}, set())
+    def test_retired_codex_protos_check_without_publication(self):
+        for path in ("proto/codex/inference/v1/inference.proto", "proto/codex/monitor/v1/monitor.proto"):
+            with self.subTest(path=path):
+                result = push([path])
+                self.assertTrue(result["proto"])
+                self.assertEqual({app for app in ci_changes.APPS if result[f"{ci_changes.PREFIX[app]}_check"]}, set(ci_changes.PROTO_USERS))
+                self.assertEqual({key for key, value in result.items() if value and key.endswith(("_deploy", "_publish"))}, set())
         self.assertEqual(ci_changes.dispatched("codex-gateway"), expect(F, F, T, F, F, packages=T, proto=T, **CODEX_GATEWAY))
 
     def test_platform_release_changes_publish_its_independent_tested_image(self):

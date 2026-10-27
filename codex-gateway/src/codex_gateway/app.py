@@ -5,23 +5,18 @@ import json
 import os
 import pathlib
 import re
-import time
-from collections.abc import Callable
 from contextlib import asynccontextmanager
-from datetime import datetime
 from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from ziyixi_proto.rpc_status import RpcError, status_body
-from ziyixi_proto.wire_json import to_wire
 
 from codex_gateway.access import (
     AccessKeysUnavailable,
     AccessServiceVerifier,
     InvalidAccessToken,
 )
-from codex_gateway.monitoring import InferenceMonitor, utc_now
 
 MAX_BODY_BYTES = 3 * 1024 * 1024
 BUILD_INFO_FILE = pathlib.Path(__file__).with_name("build-info.json")
@@ -117,9 +112,6 @@ async def request_bytes(
 
 def create_app(
     *,
-    monitor_db: pathlib.Path,
-    clock: Callable[[], datetime] = utc_now,
-    monotonic: Callable[[], float] = time.monotonic,
     model_executor: Any = None,
     access_verifier: AccessServiceVerifier | None = None,
 ) -> FastAPI:
@@ -138,7 +130,6 @@ def create_app(
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.access_verifier = access_verifier
     source_sha = _baked_source_sha()
-    monitor = InferenceMonitor(monitor_db, clock=clock, monotonic=monotonic)
 
     @app.exception_handler(RpcError)
     async def rpc_error(_request: Request, error: RpcError) -> JSONResponse:
@@ -154,10 +145,9 @@ def create_app(
                 "status": "ok",
                 "source_sha": source_sha,
                 "release_request_id": os.getenv("CODEX_GATEWAY_RELEASE_REQUEST_ID", ""),
-                "inference_status": to_wire(monitor.snapshot()),
             },
             headers=PRIVATE_HEADERS,
         )
 
-    install_model_routes(app, executor, monitor)
+    install_model_routes(app, executor)
     return app

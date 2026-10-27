@@ -54,33 +54,9 @@ export function registry(): Registry {
   return registryView(BUILD)
 }
 
-export function codexInference(patch: Partial<NonNullable<OpsStatus['codex_inference']>> = {}): NonNullable<OpsStatus['codex_inference']> {
-  return {
-    observed_at: '2026-09-29T16:59:00.000Z', started_at: '2026-09-29T14:00:00.000Z',
-    model: 'gpt-6.1-sol', effort: 'medium', sdk_version: '0.163.0', request_count: 3,
-    success_count: 1, failure_count: 1, active_count: 1, input_tokens: 6_400, output_tokens: 200, usage_reported_count: 1,
-    last_completed_at: '2026-09-29T16:58:00.000Z', last_duration_ms: 110_000, average_duration_ms: 57_700,
-    last_error_code: 'codex_timeout',
-    history_since: '2026-09-28T14:00:00.000Z',
-    daily_usage: [
-      { day: '2026-09-29', request_count: 2, success_count: 1, failure_count: 1,
-        input_tokens: 6_400, output_tokens: 200, usage_reported_count: 1, total_duration_ms: 115_400 },
-      { day: '2026-09-28', request_count: 4, success_count: 4, failure_count: 0,
-        input_tokens: 10_000, output_tokens: 600, usage_reported_count: 4, total_duration_ms: 24_000 },
-    ],
-    recent_requests: [
-      { sequence: 2, completed_at: '2026-09-29T16:58:00.000Z', model: 'gpt-6.1-sol', effort: 'medium',
-        duration_ms: 110_000, error_code: 'codex_timeout', input_tokens: 0, output_tokens: 0, usage_available: false },
-      { sequence: 1, completed_at: '2026-09-29T16:54:00.000Z', model: 'gpt-6.1-sol', effort: 'medium',
-        duration_ms: 5_400, error_code: '', input_tokens: 6_400, output_tokens: 200, usage_available: true },
-    ],
-    ...patch,
-  }
-}
-
 export function withCodex(): Scenario {
   const scenario = healthy()
-  const snapshot: OpsStatus = { ...codexGatewayOk as unknown as OpsStatus, generated_at: NOW.toISOString(), codex_inference: codexInference() }
+  const snapshot: OpsStatus = { ...codexGatewayOk as unknown as OpsStatus, generated_at: NOW.toISOString() }
   return {
     ...scenario,
     home: { ...scenario.home, entries: [...scenario.home.entries, { id: 'codex-gateway', level: 'ok', reason: null,

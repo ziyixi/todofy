@@ -23,7 +23,7 @@ A context turn supplies `conversation` and `input`, without replacement model/op
 thread handles both turns. Contexts live only in the process, expire after at most 840 seconds, and are never
 resumed after restart. There is no context database, request deduplication, operation UUID or replay mechanism.
 A duplicate active context name is rejected. The retired `codex.inference.v1` package and its run/check routes
-have no consumers. Home continues to use the separate `codex.monitor.v1` contract.
+have no consumers.
 
 Each generation defaults to 110 seconds and can request up to 840 seconds, bounded by the remaining context
 lifetime. Concurrent operations on one context are rejected. Close can cancel an active turn or pending setup,
@@ -53,8 +53,8 @@ and [service-token claims](https://developers.cloudflare.com/cloudflare-one/acce
 
 The image bakes public issuer/audience from `config/cloud.toml` and `config/resources.toml` alongside its source
 SHA. No auth environment overrides or extra shared token are used. Privileged Platform authentication is separate.
-`/healthz` stays an unauthenticated, content-free local probe, with baked source SHA, release request ID and Home's
-existing inference observations. It does not verify login or model access.
+`/healthz` stays an unauthenticated, content-free local liveness probe with the baked source SHA and release request
+ID only. It does not verify login or model access.
 
 `CODEX_HOME` is the existing login-only mount. Startup makes a private temporary CLI home and links only
 `auth.json` into it; token refresh writes through that link. Caches, skills and SQLite files stay out of the
@@ -62,7 +62,7 @@ shared login directory. The SDK account must be the subscription account type. T
 versions, which CI checks.
 The final launch environment removes unrelated credentials. A dedicated process group covers hosted-tool
 children, and Linux parent-death notification handles abrupt server termination. Container restart discards
-its temporary files. Run one server process per state directory. Normal shutdown closes active contexts.
+its temporary files. Normal shutdown closes active contexts.
 No prompts, responses, private URLs, credentials or vendor error text are logged; access logging is disabled.
 
 Build from the repository root after generating the shared Python package:
@@ -72,17 +72,11 @@ node proto/tools/ensure.mjs
 docker build -f codex-gateway/Dockerfile --build-arg SOURCE_SHA=<full-commit-sha> .
 ```
 
-## Home observations
+## Home and usage
 
-The existing Home Codex page reads `/healthz` through the five-minute Platform/Fleet observer. Its generated
-`InferenceStatus` shape stays unchanged. The monitor consumes slim Generation/Usage directly, without an old
-inference response adapter. Samples record the actual effort (`default` when omitted) in `requested_effort`;
-the original monitor `effort` field remains medium for that existing wire contract.
-
-`DATA_DIR/inference-monitor.sqlite3` keeps UTC completion-day totals and the latest eight content-free samples.
-History survives app recreation; the response exposes the latest 30 recorded days. Earlier usage remains unknown.
-Process counters and active work reset on restart. Usage availability distinguishes reported zero from missing
-consumption. Storage failures do not fall back to memory. These observations are not a billing ledger.
+Home's Codex gateway row shows only the process and release evidence that the five-minute Platform/Fleet observer
+reads from `/healthz`, like Newsletter's. The gateway keeps no usage store. Requests, tokens, failures and
+durations are the Model Router's request records; its console is the one usage view.
 
 ## Offline checks
 
@@ -92,8 +86,8 @@ uv run --locked --package personal-codex-gateway ruff check codex-gateway/src co
 uv run --locked --package personal-codex-gateway ruff format --check codex-gateway/src codex-gateway/tests
 ```
 
-Tests use a fake SDK, real synthetic RSA-signed JWTs, local JWKS, temporary SQLite and synthetic processes.
+Tests use a fake SDK, real synthetic RSA-signed JWTs, local JWKS and synthetic processes.
 They cover two turns, web observations, usage gaps/deltas, JSON/SSE, Empty create/close replies, timeouts,
-cancellation, cleanup acknowledgement and Home persistence. They do not log in or call a model.
+cancellation and cleanup acknowledgement. They do not log in or call a model.
 The image probe runs under `--network none` with synthetic JWTs and a fake executor. Linux CI verifies parent-death
 process cleanup; that test is skipped on other platforms.

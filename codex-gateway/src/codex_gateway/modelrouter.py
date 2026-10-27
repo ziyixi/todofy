@@ -158,10 +158,6 @@ class ModelExecutor:
             )
         )
 
-    def effort_for(self, request: GenerateRequest) -> str:
-        context = self.contexts.get(request.conversation)
-        return context.options.effort if context else request.effort
-
     async def _open(self, context: ExecutionContext, home: pathlib.Path) -> None:
         sdk = self.sdk
         if sdk is None:

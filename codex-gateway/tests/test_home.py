@@ -27,7 +27,6 @@ class PrivateCliHome(unittest.TestCase):
             skill.write_text("newsletter skill")
             homes = []
             app = object()
-            data_dir = pathlib.Path(directory) / "persistent-monitor"
 
             def run(actual_app, **options):
                 self.assertIs(actual_app, app)
@@ -57,17 +56,12 @@ class PrivateCliHome(unittest.TestCase):
                 self.assertFalse((shared / "state.sqlite").exists())
 
             with (
-                patch.dict(
-                    os.environ,
-                    {"CODEX_HOME": str(shared), "DATA_DIR": str(data_dir)},
-                ),
+                patch.dict(os.environ, {"CODEX_HOME": str(shared)}),
                 patch.object(server, "create_app", return_value=app) as create_app,
                 patch.object(server.uvicorn, "run", side_effect=run),
             ):
                 server.main()
-                create_app.assert_called_once_with(
-                    monitor_db=data_dir / "inference-monitor.sqlite3"
-                )
+                create_app.assert_called_once_with()
                 self.assertEqual(os.environ["CODEX_HOME"], str(shared))
             self.assertEqual(len(homes), 1)
             self.assertFalse(homes[0].exists())
@@ -94,9 +88,7 @@ class PrivateCliHome(unittest.TestCase):
                 self.assertRaisesRegex(RuntimeError, "synthetic server failure"),
             ):
                 server.main()
-            create_app.assert_called_once_with(
-                monitor_db=pathlib.Path(".data/inference-monitor.sqlite3")
-            )
+            create_app.assert_called_once_with()
             self.assertEqual(len(homes), 1)
             self.assertFalse(homes[0].exists())
             self.assertEqual(auth.read_text(), "synthetic login")

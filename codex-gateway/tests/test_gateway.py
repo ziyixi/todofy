@@ -43,11 +43,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.jwks = local_jwks()
         self.jwks.start()
         self.executor = StubExecutor()
-        self.app = create_app(
-            monitor_db=self.home / "monitor.sqlite3",
-            model_executor=self.executor,
-            access_verifier=verifier(),
-        )
+        self.app = create_app(model_executor=self.executor, access_verifier=verifier())
         self.client = httpx.AsyncClient(
             transport=httpx.ASGITransport(app=self.app), base_url="http://test"
         )
@@ -148,11 +144,14 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(self.executor.calls, [])
 
-    async def test_health_keeps_home_shape_and_baked_release_identity(self):
+    async def test_health_is_liveness_with_baked_release_identity_only(self):
         response = await self.client.get("/healthz")
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            set(response.json()),
+            {"service", "status", "source_sha", "release_request_id"},
+        )
         self.assertEqual(response.json()["service"], "codex-gateway")
-        self.assertIn("inference_status", response.json())
         info = self.home / "build-info.json"
         info.write_text(json.dumps({"source_sha": "a" * 40}))
         with (
@@ -161,11 +160,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                 os.environ, {"CODEX_GATEWAY_RELEASE_REQUEST_ID": "synthetic-release"}
             ),
         ):
-            app = create_app(
-                monitor_db=self.home / "monitor.sqlite3",
-                model_executor=StubExecutor(),
-                access_verifier=verifier(),
-            )
+            app = create_app(model_executor=StubExecutor(), access_verifier=verifier())
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app), base_url="http://test"
             ) as client:
@@ -188,11 +183,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         sdk = FakeSdk(FakeTurn(1), FakeTurn(2))
         executor = ModelExecutor(sdk=sdk)
         name = f"conversations/{uuid.uuid4()}"
-        app = create_app(
-            monitor_db=self.home / "contexts.sqlite3",
-            model_executor=executor,
-            access_verifier=verifier(),
-        )
+        app = create_app(model_executor=executor, access_verifier=verifier())
         try:
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app), base_url="http://test"
@@ -223,9 +214,6 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(closed.json(), {})
                 self.assertTrue(sdk.closed)
                 self.assertFalse(workspace.exists())
-                snapshot = (await client.get("/healthz")).json()["inference_status"]
-                self.assertEqual(snapshot["request_count"], 2)
-                self.assertEqual(snapshot["input_tokens"], 202)
         finally:
             await executor.shutdown()
 

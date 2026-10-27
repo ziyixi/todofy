@@ -53,7 +53,6 @@ FIELD_MASK = ".google.protobuf.FieldMask"
 # step.
 PYTHON_PACKAGES = {
     "modelrouter.inference.v1": True,
-    "codex.monitor.v1": True,
     "todofy.report.v1": True,
     "ops.v1": True,
     "website.sync.v1": True,

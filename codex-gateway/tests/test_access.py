@@ -47,9 +47,7 @@ class AccessRouteTests(unittest.IsolatedAsyncioTestCase):
 
         executor = StubExecutor()
         self.calls = executor.calls
-        self.app = create_app(
-            monitor_db=self.root / "monitor.sqlite3", model_executor=executor
-        )
+        self.app = create_app(model_executor=executor)
         self.client = httpx.AsyncClient(
             transport=httpx.ASGITransport(app=self.app), base_url="http://127.0.0.1"
         )

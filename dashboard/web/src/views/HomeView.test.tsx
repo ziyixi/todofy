@@ -82,15 +82,11 @@ describe('首页', () => {
     expect(within(launcher()).getByRole('link', { name: '个人 MCP：正常，当前订阅 0，查看操作与记录' })).toHaveAttribute('href', '#/ops')
   })
 
-  it('opens the Codex service row directly in its inference monitor', async () => {
+  it('links the Codex service row to the Model Router console, where its usage is recorded', async () => {
     await showHome(withCodex())
-    const link = within(launcher()).getByRole('link', { name: 'Codex 推理：正常，查看推理监控' })
-    expect(link).toHaveAttribute('href', '#/ops/codex-gateway')
-    await userEvent.click(link)
-    expect(await screen.findByRole('heading', { level: 1, name: 'Codex 推理' })).toBeInTheDocument()
-    expect(screen.getByRole('table', { name: '每日推理用量（UTC）' })).toBeInTheDocument()
-    expect(screen.getByRole('table', { name: '最近完成的推理请求，最多 8 条' })).toBeInTheDocument()
-    expect(screen.queryByRole('region', { name: 'Mail Hero' })).not.toBeInTheDocument()
+    const link = within(launcher()).getByRole('link', { name: 'Codex 推理：正常，在 Model Router 查看用量（新标签页）' })
+    expect(link).toHaveAttribute('href', 'https://models.ziyixi.science/')
+    expect(link).toHaveAttribute('target', '_blank')
   })
 
   it('shows a link-only tile as its host: no status button, no fake green', async () => {

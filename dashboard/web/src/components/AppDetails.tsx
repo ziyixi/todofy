@@ -19,7 +19,6 @@ import { Card, Fact, Facts, Metrics, Notice, Pill, Time } from './ui'
 import { WebsiteSyncDetails } from './WebsiteSyncPanel'
 import { SignalActions } from './AttentionActions'
 import { PersonalMcpDetails } from './PersonalMcpDetails'
-import { CodexDetails } from './CodexDetails'
 
 /** A status older than this is marked as possibly outdated (the cron reads it every 30 minutes). */
 const STATUS_STALE_MS = 60 * 60_000
@@ -40,13 +39,11 @@ export function AppDetails({
   entry,
   guard,
   now,
-  level = 3,
 }: {
   card: AppDetail
   entry: RegistryEntry | undefined
   guard: GuardAppView | undefined
   now: Date
-  level?: 2 | 3
 }) {
   const name = entry?.name ?? card.entry
   const status = card.status
@@ -59,7 +56,6 @@ export function AppDetails({
     <Card
       id={id}
       title={name}
-      level={level}
       className="app-card"
       actions={
         link ? (
@@ -72,7 +68,6 @@ export function AppDetails({
       }
     >
       <div className="app-status">
-        {card.entry === 'codex-gateway' ? <span className="small muted">进程状态</span> : null}
         <Pill tone={head.tone} strong>
           {head.label}
         </Pill>
@@ -106,14 +101,12 @@ function StatusDetails({ status, source, guard, now }: { status: OpsStatus; sour
   const effective = guard?.state ?? status.guard
   const modes = Object.entries(status.modes)
   const all = Object.entries(status.counters)
-  const codex = status.app === 'codex-gateway'
 
   return (
     <>
       {status.website_sync ? <div className="subsection"><h4>网站同步</h4><WebsiteSyncDetails status={status.website_sync} now={now} /></div> : null}
       {status.app === 'personal-mcp' ? <PersonalMcpDetails status={status} now={now} /> : null}
-      {codex ? <CodexDetails status={status} now={now} /> : null}
-      {!codex ? <div className="subsection">
+      <div className="subsection">
         <h4>运行模式</h4>
         <ul className="chips" aria-label="运行模式">
           {modes.map(([mode, value]) => {
@@ -126,9 +119,9 @@ function StatusDetails({ status, source, guard, now }: { status: OpsStatus; sour
             )
           })}
         </ul>
-      </div> : null}
+      </div>
 
-      {!codex ? <div className="subsection">
+      <div className="subsection">
         <h4>降载</h4>
         <div className="row-wrap">
           {effective.level === 'shed' ? <Pill tone="warn">降载中</Pill> : <Pill tone="ok">正常</Pill>}
@@ -147,7 +140,7 @@ function StatusDetails({ status, source, guard, now }: { status: OpsStatus; sour
         {guard?.last_error ? (
           <Notice tone="warn">上次下发降载设置失败：{appErrorLabel(guard.last_error)}，下次定时检查会重试。</Notice>
         ) : null}
-      </div> : null}
+      </div>
 
       <div className="subsection">
         <h4>当前信号</h4>
@@ -179,7 +172,7 @@ function StatusDetails({ status, source, guard, now }: { status: OpsStatus; sour
         )}
       </div>
 
-      {!codex && status.app !== 'personal-mcp' ? <div className="subsection">
+      {status.app !== 'personal-mcp' ? <div className="subsection">
         <h4>计数</h4>
         {all.length === 0 ? (
           <p className="small muted">没有可读的计数。</p>
@@ -196,7 +189,7 @@ function StatusDetails({ status, source, guard, now }: { status: OpsStatus; sour
       </div> : null}
 
       <Facts>
-        {!codex ? <Fact label="上次备份">{status.last_backup_at ? <Time iso={status.last_backup_at} now={now} /> : '无记录'}</Fact> : null}
+        <Fact label="上次备份">{status.last_backup_at ? <Time iso={status.last_backup_at} now={now} /> : '无记录'}</Fact>
         <Fact label="应用状态生成于">
           <Time iso={status.generated_at} now={now} />
         </Fact>

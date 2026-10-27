@@ -346,24 +346,12 @@ gradients, no side-stripe cards, no emoji; inline lucide-style stroke SVGs (lock
 separate button ("<name> 状态：<level>，查看详情") opening a detail sheet; skeletons of the same size
 while loading; one failing source greys only its own tile. Times in the browser time zone.
 
-### Codex inference detail
+### Codex gateway
 
-`#/ops/<app>` focuses one registered app within the existing Ops tab and offers a return to `#/ops`.
-The Home Codex service row links directly to `#/ops/codex-gateway`. Its dedicated body replaces the
-generic mode, guard, counter and backup sections; process health and alert controls remain visible.
-The optional `OpsStatus.codex_inference` snapshot comes through Fleet and includes its actual observation
-time. Daily counts, reported tokens and total durations persist in the gateway's existing storage and
-are grouped by UTC completion day. Today is the default, with seven-day and thirty-day selections and
-a daily table, all computed from the same bounded snapshot. Counts include completed successful and failed
-requests; concurrency is separately labelled 采样时进行中. The page shows the history start and does not
-backfill earlier usage. Older snapshots without a history start explicitly remain process-only data.
-A snapshot over one hour old is explicitly historical,
-matching the existing app-status threshold and allowing the ordinary thirty-minute Home cache interval.
-Missing snapshots and usage remain unknown, and an unused period shows zero requests without warning.
-The persistent recent-request table shows at most eight completions, models, effort, durations, outcomes,
-safe error labels and reported tokens. It contains no prompts, output or account data. On a phone it
-scrolls inside the card. The existing five-minute view cache and refresh flow are unchanged; opening
-the detail starts no inference or independent polling.
+The Codex gateway's ops-v1 status comes through Fleet and carries process and release evidence only, like
+Newsletter's; its app details are the generic ones. Its Home service row opens the Model Router console in a
+new tab, since the Router's request records are the one Codex usage ledger. The old `#/ops/codex-gateway`
+path opens `#/ops`.
 
 ## 8. Decisions taken (owner-approved defaults)
 
