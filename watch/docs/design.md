@@ -327,11 +327,12 @@ reads all event rows, including those delivered to Tasks; it does not consume `d
 continue to default to DIGEST.
 
 `PollWatchEvents` starts from an explicit baseline and returns ascending transition sequences, a persistent opaque
-cursor and `has_more`; each page contains at most 100 events and no page content. Confirmation inserts its event
-at confirmation time, so a candidate detected before the baseline still appears if confirmed afterwards. The
-SQLite autoincrement sequence retains the head after deletion; pruning records the highest expired sequence.
-A cursor below that floor fails as `CURSOR_EXPIRED` instead of silently skipping history. Retention stays at
-30 days or 500 events; the private reader must reconcile a gap before taking a new baseline.
+cursor and `has_more`; each page contains at most 100 events and no page content. It carries reading-evidence
+changes (inserted when a capture is saved; see Page evidence) and health transitions, never the rule
+confirmations of Tasks' outbox. The SQLite autoincrement sequence retains the head after deletion; pruning records
+the highest expired sequence. A cursor below that floor fails as `CURSOR_EXPIRED` instead of silently skipping
+history. Retention stays at 30 days or 500 events; the private reader then takes a new baseline and reports the gap
+as unknown history (the changes stay readable through `ListChanges`).
 
 Each change freezes normalized context around changed lines while both compared texts exist: at most 40 lines,
 500 characters per line and 8 KiB JSON per side. Insertions and deletions include neighboring unchanged anchors
