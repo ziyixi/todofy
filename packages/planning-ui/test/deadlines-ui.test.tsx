@@ -138,9 +138,15 @@ it("puts automatic Parked left of the four stage lanes and hides waiting tasks",
   expect(cards("Parked")).toEqual([
     "Quarterly report draft, Work, No priority, 2 days late, Sun, Oct 11",
     "Submit the expense claim, Work, No priority, Deadline tomorrow, Wed, Oct 14",
-    "Prepare the next research check-in, Work, No priority, 2 days left, Thu, Oct 15",
-    "Prepare the visa documents, Work, No priority, 5 days left, Sun, Oct 18",
     "Plan a small balcony garden, Personal, No priority, No change in 53 days",
+  ]);
+  // Committed work in its start window keeps that status in its own lane, as Week lists it.
+  expect(cards("Committed")).toEqual([
+    "Ship the small website refresh, Work, No priority",
+    "Prepare the next research check-in, Work, No priority, 2 days left, Thu, Oct 15",
+    "Organize the experiment notes, Work, No priority",
+    "Prepare the visa documents, Work, No priority, 5 days left, Sun, Oct 18",
+    "Make the home desk comfortable, Personal, No priority",
   ]);
   const draft = lane("Parked").querySelector(".planning-outcome-card")!;
   expect(draft.querySelector(".planning-outcome-context")).toBeNull();
@@ -269,7 +275,7 @@ it("shows every automatically surfaced card before the first three manual Parked
   });
   render(<PlanView {...props} language="zh" />);
   const parked = lane("搁置");
-  // All four ready tasks remain visible before the manual backlog, whose first three are shown.
+  // Both ready tasks remain visible before the manual backlog, whose first three are shown.
   expect(
     [
       ...parked.querySelectorAll(
@@ -279,8 +285,6 @@ it("shows every automatically surfaced card before the first three manual Parked
   ).toEqual([
     "Quarterly report draft",
     "Submit the expense claim",
-    "Prepare the next research check-in",
-    "Prepare the visa documents",
     "Plan a small balcony garden",
     "Synthetic idea 1",
     "Synthetic idea 2",
@@ -288,14 +292,14 @@ it("shows every automatically surfaced card before the first three manual Parked
   const more = within(parked).getByRole("button", { name: "再显示 2 项" });
   expect(more.getAttribute("aria-expanded")).toBe("false");
   fireEvent.click(more);
-  expect(parked.querySelectorAll(".planning-outcome-card")).toHaveLength(9);
+  expect(parked.querySelectorAll(".planning-outcome-card")).toHaveLength(7);
   expect(more.textContent).toBe("收起");
   expect(parked.querySelector(".review-lane-header > span")!.textContent).toBe(
-    "9",
+    "7",
   );
 });
 
-it("surfaces ready staged tasks and date-rule candidates in Parked while hiding staged waiting cards", async () => {
+it("surfaces ready staged tasks and date-rule candidates in Parked, keeps committed ones in Committed and hides staged waiting cards", async () => {
   const { props } = await setup((data) => {
     const template = data.plan.tasks[0]!;
     data.plan.tasks.push({
@@ -323,6 +327,8 @@ it("surfaces ready staged tasks and date-rule candidates in Parked while hiding 
   );
   expect(cards("Committed")).toEqual([
     "Ship the small website refresh, Work, No priority",
+    "Prepare the next research check-in, Work, No priority, 2 days left, Thu, Oct 15",
+    "Prepare the visa documents, Work, No priority, 5 days left, Sun, Oct 18",
     "Make the home desk comfortable, Personal, No priority",
   ]);
   // The status takes the step counts' place; other cards keep their counts.
@@ -331,7 +337,12 @@ it("surfaces ready staged tasks and date-rule candidates in Parked while hiding 
     [...committed.querySelectorAll(".planning-outcome-meta")].map(
       (meta) => meta.lastElementChild!.textContent,
     ),
-  ).toEqual(["2 steps · 2 planned", "1 step · 0 planned"]);
+  ).toEqual([
+    "2 steps · 2 planned",
+    "2 days left",
+    "5 days left",
+    "1 step · 0 planned",
+  ]);
   expect(
     screen.queryByRole("button", { name: /^Organize the experiment notes,/u }),
   ).toBeNull();
@@ -381,8 +392,8 @@ it("marks a card in progress from its Start, in one confirmed write, and moves f
     "Start: Quarterly report draft",
     "Start: Submit the expense claim",
     "Start: Prepare the next research check-in",
-    "Start: Prepare the visa documents",
     "Start: Organize the experiment notes",
+    "Start: Prepare the visa documents",
   ]);
   // Start is drawn over the card on hover or focus only; the title row keeps no room for it.
   const row = lane("Parked").querySelector(".planning-outcome-title-row")!;
@@ -405,9 +416,6 @@ it("marks a card in progress from its Start, in one confirmed write, and moves f
   // In progress, it leaves automatic Parked and, with no saved stage, the board.
   expect(cards("Parked")).toEqual([
     "Submit the expense claim, Work, No priority, Deadline tomorrow, Wed, Oct 14",
-    "Prepare the next research check-in, Work, No priority, 2 days left, Thu, Oct 15",
-    "Prepare the visa documents, Work, No priority, 5 days left, Sun, Oct 18",
-    "Organize the experiment notes, Work, No priority, Prerequisites completed",
     "Plan a small balcony garden, Personal, No priority, No change in 53 days",
   ]);
   // Focus moves in an effect after the commit that says so.
@@ -416,7 +424,7 @@ it("marks a card in progress from its Start, in one confirmed write, and moves f
       "Start: Submit the expense claim",
     ),
   );
-  // A staged card stays in its lane, without the status or its Start.
+  // A committed card stays in its lane, without the status or its Start.
   fireEvent.click(
     screen.getByRole("button", { name: "Start: Prepare the visa documents" }),
   );
@@ -429,7 +437,7 @@ it("marks a card in progress from its Start, in one confirmed write, and moves f
   expect(
     screen.queryByRole("button", { name: "Start: Prepare the visa documents" }),
   ).toBeNull();
-  // Completed prerequisites offer the same Start action and return a staged task to its lane.
+  // Completed prerequisites offer the same Start action, which clears the status too.
   fireEvent.click(
     screen.getByRole("button", {
       name: "Start: Organize the experiment notes",
@@ -452,7 +460,20 @@ it("marks a card in progress from its Start, in one confirmed write, and moves f
 
 it("shows Focus's quiet line only for due tasks with nothing planned, and opens Plan's Parked", async () => {
   const actions = createPrototype();
-  const { data } = await setup(undefined, actions);
+  const { data } = await setup((data) => {
+    // Plan hides a waiting task's descendants, so the line does not count this one either.
+    const venue = data.plan.tasks.find((task) => task.id === "venue")!;
+    data.plan.tasks.push({
+      ...venue,
+      id: "venue-step",
+      title: "Compare the venue quotes",
+      parentId: venue.id,
+      planningFlags: [],
+      deadline: on(1),
+      leadDays: 3,
+      mustStart: true,
+    });
+  }, actions);
   const onShowStart = vi.fn();
   const props = {
     plan: data.plan,
@@ -568,11 +589,17 @@ it("takes the line to Parked when only staged tasks are ready", async () => {
     data.plan.tasks = data.plan.tasks.filter(
       (task) => !["draft", "claim"].includes(task.id),
     );
+    const research = data.plan.tasks.find((task) => task.id === "research")!;
+    research.stage = research.explicitStage = "monthly";
   });
   render(<PlanView {...props} showStart />);
   await waitFor(() => expect(document.activeElement).toBe(lane("Parked")));
   expect(cards("Parked")).toContain(
     "Prepare the next research check-in, Work, No priority, 2 days left, Thu, Oct 15",
+  );
+  // The committed visa says so beside it, in Committed.
+  expect(cards("Committed")).toContain(
+    "Prepare the visa documents, Work, No priority, 5 days left, Sun, Oct 18",
   );
 });
 

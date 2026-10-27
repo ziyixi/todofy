@@ -16,7 +16,7 @@ import { useSortable } from "@dnd-kit/react/sortable";
 import { SortableKeyboardPlugin } from "@dnd-kit/dom/sortable";
 import { pointerIntersection } from "@dnd-kit/collision";
 import { Flag, GripVertical } from "lucide-react";
-import { displayedTitle, effectiveArea } from "./domain";
+import { addDays, displayedTitle, effectiveArea } from "./domain";
 import { deadlineTitle, spokenDeadline } from "./deadlines";
 import { dependencyIndex } from "./dependencies";
 import {
@@ -374,8 +374,26 @@ export function ReviewBoard({
         if (!column || (!column.stage && to !== "parked")) return;
         const parking = to === "parked";
         const stage: Stage = column.stage ?? "none";
-        // Picking up an automatically surfaced card acknowledges it in the existing stage write.
-        const active = from === "parked" && !isParked(task) && !parking;
+        // Moving a ready card acknowledges it in the existing stage write: one surfaced in Parked,
+        // committed work in its start window, or a manually parked one whose start window has
+        // opened or whose prerequisites are done. Otherwise it would come straight back as ready.
+        const index = dependencyIndex(plan);
+        const state = cardState(
+          task,
+          currentDate,
+          index.waitingFor.get(task.id),
+          index.done.has(task.id),
+        );
+        const opens =
+          Boolean(task.deadline) &&
+          (task.deadline < currentDate ||
+            (task.leadDays > 0 &&
+              addDays(task.deadline, -task.leadDays) <= currentDate));
+        const active =
+          !parking &&
+          (state === "start" ||
+            state === "ready" ||
+            (isParked(task) && (index.done.has(task.id) || opens)));
         // Only manual parking owns a parked flag; automatic readiness is read-derived.
         const parked = parking
           ? true

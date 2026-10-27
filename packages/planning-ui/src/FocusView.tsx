@@ -38,6 +38,7 @@ import { FocusBlock, focusTitle, type FocusBlockProps } from "./FocusBlock";
 import type { RecordWrite } from "./FocusEntries";
 import { areaColor, outcomeForTask } from "./planning-outcomes";
 import { moved, pendingStep, predictMove, withRecord } from "./plan-updates";
+import { planVisibility } from "./plan-visibility";
 import { planningSensors } from "./row-drag";
 import { readableDate } from "./PlanningCalendar";
 import { LoggedTime } from "./StatusMarks";
@@ -386,8 +387,14 @@ function FocusDay({
   ).length;
   let stepLabel = language === "zh" ? "个步骤" : "steps";
   if (language === "en" && queue.length === 1) stepLabel = "step";
-  // A hint only: something that should have started has nothing planned this week.
-  const due = unplannedDue(plan.tasks, days, focus.date, plan.dependencies);
+  // A hint only: something that should have started has nothing planned this week. Only what
+  // Plan shows counts, so the jump to Review finds every one.
+  const due = unplannedDue(
+    planVisibility(plan).tasks,
+    days,
+    focus.date,
+    plan.dependencies,
+  );
   const openPlan = (
     <button className="plus-button" onClick={onOpenPlan}>
       <ArrowLeft size={15} />

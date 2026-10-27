@@ -39,9 +39,10 @@ export function cardState(
 
 /**
  * One card per task. Ready tasks surface in Parked before the manually parked backlog, without
- * rewriting their stages. Picking one up uses the existing active flag. Remaining tasks keep
- * their stage or date-candidate lane. Waiting tasks and their descendants are hidden. The old start
- * key remains readable in lane orders; the board no longer displays a separate Start now lane.
+ * rewriting their stages; committed work stays in Committed with its status, where Week lists it.
+ * Picking one up uses the existing active flag. Remaining tasks keep their stage or date-candidate
+ * lane. Waiting tasks and their descendants are hidden. The old start key remains readable in lane
+ * orders; the board no longer displays a separate Start now lane.
  */
 export function boardLanes(
   plan: Pick<PlanState, "tasks" | "dependencies" | "laneOrders">,
@@ -69,7 +70,10 @@ export function boardLanes(
   const ready = tasks
     .filter((task) => {
       const ready = state(task);
-      return ready === "start" || ready === "ready";
+      // As committedOutcomes lists it, committed work stays in its own lane.
+      return (
+        task.stage !== "committed" && (ready === "start" || ready === "ready")
+      );
     })
     .sort(
       (a, b) =>

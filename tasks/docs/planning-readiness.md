@@ -7,7 +7,8 @@ prerequisites, including their descendants. They stay stored, with their stages 
 Waiting column. Active tasks do not resurface. Existing recurrence completion semantics are unchanged.
 
 This is derived from the same task read, without a scheduler, database migration or automatic task writes.
-An existing planning stage remains saved, although the card appears in Parked until picked up. Its dates,
+An existing planning stage remains saved, although the card appears in Parked until picked up. Committed work
+is the exception: it stays in Committed with the same status and Start, as Week's commitments list it. Its dates,
 children, completion history and Focus queues are unchanged. A task satisfying both conditions has one card,
 with its deadline taking precedence as the reason. Automatic cards appear before the manual backlog and
 remain visible; only manual Parked cards fold after the first three. Waiting items are omitted from Review,
@@ -17,10 +18,13 @@ queues and records. A prerequisite completion makes the newly ready task visible
 Start acknowledges a surfaced task with the existing Active flag. Dragging it to a planning stage writes
 that stage and Active together. The condition then stops surfacing it on reload. This uses the same
 acknowledgement as the former Start now lane. A manual drop into Parked still sets the Parked flag and clears
-the stage and Active; dragging a manually parked task out clears that flag. No separate Start now column is shown.
+the stage and Active; dragging a manually parked task out clears that flag, and adds Active in the same write
+when its window has opened or its prerequisites are complete, so it does not come straight back. No separate
+Start now column is shown.
 
-Focus's today view counts unarranged ready tasks by deadline or completed-prerequisite reason. A task counts
-once, and not when it or an open descendant is in the displayed week's queues. Its hint opens Plan Review,
+Focus's today view counts unarranged ready tasks by deadline or completed-prerequisite reason, among the tasks
+Plan shows (not under a waiting task). A task counts once, and not when it or an open descendant is in the
+displayed week's queues. Its hint opens Plan Review,
 shows all areas and focuses Parked. The hint does not schedule work or send a timed notification.
 
 Task details keep editable Depends on and add read-only Dependents. Clicking a dependent opens it. The native
