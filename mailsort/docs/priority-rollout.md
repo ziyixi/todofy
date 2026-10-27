@@ -29,17 +29,14 @@ Already P1-P4-graded, no-longer-unread, gone and other normal incoming-mail excl
 members may replace their latest stored decision; earlier Gmail write ledgers remain. P1 puts an archived message in
 Inbox; ordinary undo restores its original Inbox position. Mail is never deleted or marked read.
 
-Modes, write caps and neuron budgets stay unchanged. Clef-flash begins at 70%; exhausted daily model quota or write
-allowance waits until the next UTC day. A paused mode leaves the batch waiting. Check applied, skipped, failed and
+Modes and write caps stay unchanged. A model failure follows the shared Model Router error contract
+([design](design.md)); an exhausted daily write allowance waits until the next UTC day. A paused mode leaves the batch waiting. Check applied, skipped, failed and
 pending/deferred counts in that card; **刷新进度** reads current status. A completed batch may include skips and failures. The newest batch's IDs,
 state, ledger links and scan progress contain no mail content and remain until the next batch or deletion of app data.
 Production batch results must be recorded separately from the initializer and synthetic checks below.
 
-The follow-up **重判保底 P1** action uses the same RPC with `recheck_fallback=true`. It selects only current-era,
-still-unread fallback P1 decisions without explicit owner verdicts and rereads Gmail before processing. Read mail
-or mail no longer carrying only P1 is skipped. A result that stays P1 updates evidence without another Gmail write;
-P2-P4 uses the existing ledger and archive operation. Check these results separately from the original batch.
-The candidate's calibration, release and live recheck remain pending in the
+The one-time follow-up rechecks (**重判保底 P1**, **重判最初100封**) are retired: their request fields answer
+RELOAD_REQUIRED, and a stored recheck batch still reports its unchanged results. Their history is in the
 [verification record](../../docs/mailsort-priority-verification.md#in-progress-priority-evidence-and-calibration).
 
 ## Local verification (2026-10-24 UTC)
