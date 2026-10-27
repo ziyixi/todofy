@@ -5,7 +5,7 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { create } from '@ziyixi/proto/protobuf';
-import { Mode, SettingsSchema } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
+import { ClassificationProvider, Mode, SettingsSchema } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
 import { PRIORITY_LABELS } from '../../src/priority.ts';
 import { MAILS, type SyntheticMail } from '../fakes/fixtures.ts';
 import { HOUR, MINUTE, op, startHarness, T0, type Harness } from './harness.ts';
@@ -108,7 +108,23 @@ describe('model failures', () => {
     await h.sql(`UPDATE meta SET value = '0' WHERE key = 'next_model_at'`);
     await h.step(at + 3 * MINUTE);
     expect(await h.sql(`SELECT attempts FROM pending`)).toEqual([{ attempts: 4 }]);
+    await h.sql(`UPDATE pending SET attempts = 6, not_before = 0`);
+    await h.sql(`UPDATE meta SET value = '0' WHERE key = 'next_model_at'`);
+    await h.step(at + 4 * MINUTE);
+    expect(await h.sql(`SELECT count(*) AS n FROM pending`)).toEqual([{ n: 0 }]);
+    expect(await decision(h, mail(2).id)).toMatchObject({ outcome: 'unsure', unsure_reason: 'model_unavailable' });
     expect(modifies(h)).toEqual([]);
+  });
+
+  it('holds a Codex spend limit hourly like configuration, not for the rest of the month', async () => {
+    await initialize();
+    await h.api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', classificationProvider: ClassificationProvider.CODEX }), updateMask: { paths: ['classification_provider'] }, requestId: op() });
+    Object.assign(h.up.codex, { errorReason: 'MODEL_SPEND_LIMIT', errorCode: 8 });
+    deliver(h, mail(1), T0 + MINUTE);
+    expect(await h.step(T0 + 2 * MINUTE)).toMatchObject({ code: 'codex_spend_limit', decided: 0, deferred: 0 });
+    expect(await h.sql(`SELECT attempts FROM pending`)).toEqual([{ attempts: 0 }]);
+    expect(await nextModelAt()).toBe(T0 + 2 * MINUTE + HOUR);
+    expect(await h.sql(`SELECT value FROM meta WHERE key = 'claude_limited_month'`)).toEqual([]);
   });
 
   it('retries a failed batch one mail at a time, so only the mail the model cannot answer is given up', async () => {

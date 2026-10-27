@@ -558,7 +558,7 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
               }
             }
           });
-          if (failure?.spendLimited === true) deferred = deferModel(store, nextUtcMonth(at), at, transact);
+          if (provider === 'claude' && failure?.spendLimited === true) deferred = deferModel(store, nextUtcMonth(at), at, transact);
           // A configuration fix comes from the owner: try hourly, or at once after a settings save (api.ts).
           else if (failure?.kind === 'configuration') hold = at + CONFIGURATION_RETRY_MS;
           else if (failure?.kind === 'infrastructure') {

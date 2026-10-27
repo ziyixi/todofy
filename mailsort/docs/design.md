@@ -118,7 +118,7 @@ for a reason this build does not know, by google.rpc.Code:
 
 | Kind | Reasons (code) | Handling |
 | --- | --- | --- |
-| Configuration | `MODEL_AUTH` (16), `MODEL_NOT_CONFIGURED` (9), `MODEL_NOT_ALLOWED` (7), `MODEL_SPEND_LIMIT` | No attempts; the next model pass waits an hour (a spend limit: the next UTC month). Any settings save retries at once. |
+| Configuration | `MODEL_AUTH` (16), `MODEL_NOT_CONFIGURED` (9), `MODEL_NOT_ALLOWED` (7), `MODEL_SPEND_LIMIT` | No attempts; the next model pass waits an hour, and after an auth or configuration failure any settings save retries at once. Claude's spend limit waits for the next UTC month. |
 | Content | `MODEL_INVALID_REQUEST` (3), `MODEL_INVALID_ANSWER`, `MODEL_REFUSED`, `MODEL_OUTPUT_LIMIT`, `MODEL_UNSUPPORTED_TOOL` | Per-mail attempts, at most three, with the per-mail backoff. |
 | Timeout | `MODEL_TIMEOUT` (4) | Per-mail attempts, at most seven (about five hours). |
 | Infrastructure | `MODEL_QUOTA`, `MODEL_RATE_LIMIT`, `MODEL_UNAVAILABLE`, `MODEL_BUSY`, `MODEL_MAINTENANCE`, `MODEL_STORAGE_UNAVAILABLE`, `MODEL_INTERNAL`, any other code, a transport failure | No attempts; the whole pass is deferred 5 minutes, doubling per consecutive deferred pass up to an hour, or longer for the Router's Retry-After; a quota at least an hour. Success resets the backoff. |
