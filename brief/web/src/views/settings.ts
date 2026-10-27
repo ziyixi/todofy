@@ -44,11 +44,11 @@ function runCard(settings: Settings, status: ServiceStatus, ctx: ViewContext, af
       ? el(
           'span',
           { class: 'key' },
-          el('span', { class: 'warn' }, `被拒（HTTP ${String(status.rejectedStatus)}${status.rejectedErrorType === '' ? '' : ` · ${status.rejectedErrorType}`}），模型调用已全部停止`),
+          el('span', { class: 'warn' }, `被拒（code ${String(status.rejectedStatus)}${status.rejectedErrorType === '' ? '' : ` · ${status.rejectedErrorType}`}），模型调用已全部停止`),
           button('恢复调用', resume, { class: 'primary small' }),
         )
       : status.keyState === ServiceStatus_KeyState.NOT_CONFIGURED
-        ? el('span', { class: 'warn' }, '未设置：owner 在本机用 wrangler secret put 写入')
+        ? el('span', { class: 'warn' }, '未绑定 Model Router')
         : el('span', {}, '正常')
   const current = issueDay(status.currentIssue)
   const run =

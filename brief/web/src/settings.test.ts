@@ -91,10 +91,10 @@ describe('设置', () => {
 
   it('resumes the model calls after a refusal, only once the owner confirms', async () => {
     const fake = new FakeServer()
-    fake.status = { keyState: ServiceStatus_KeyState.REJECTED, rejectedStatus: 402, rejectedErrorType: 'billing_error' }
+    fake.status = { keyState: ServiceStatus_KeyState.REJECTED, rejectedStatus: 7, rejectedErrorType: 'MODEL_AUTH' }
     const no = testHost(false)
     let root = await open(fake, '/settings', no)
-    expect(root.querySelector('.key .warn')?.textContent).toBe('被拒（HTTP 402 · billing_error），模型调用已全部停止')
+    expect(root.querySelector('.key .warn')?.textContent).toBe('被拒（code 7 · MODEL_AUTH），模型调用已全部停止')
     buttonNamed(root, '恢复调用').click()
     await settle()
     expect(no.asked).toHaveLength(1)
@@ -124,13 +124,13 @@ describe('设置', () => {
     const root = await open(fake, '/settings')
     expect(facts(root)).toEqual([
       ['模式', '影子发信，标题带“[影子版]”（部署变量 BRIEF_MODE）'],
-      ['Claude 密钥', '未设置：owner 在本机用 wrangler secret put 写入'],
+      ['Claude 密钥', '未绑定 Model Router'],
       ['发信', '未配置'],
       ['进行中', '正在制作 10月12日 周一 · 写作'],
       ['今日', '抓取 230 条 · 初筛 180 条 · 向量 64 神经元'],
       ['来源', '正常 40 · 失败 2 · 沉寂 1'],
     ])
-    expect(root.querySelector('.kv dd .warn')?.textContent).toBe('未设置：owner 在本机用 wrangler secret put 写入')
+    expect(root.querySelector('.kv dd .warn')?.textContent).toBe('未绑定 Model Router')
     const codes = root.querySelector('details.more')
     expect(codes?.querySelector('summary')?.textContent).toBe('最近的错误代码（2）')
     expect([...(codes?.querySelectorAll('li') ?? [])].map((node) => node.textContent)).toEqual(['write_attempts', 'resend_429'])
