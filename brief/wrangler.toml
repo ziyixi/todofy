@@ -5,8 +5,8 @@
 # here (the repository is public: nothing personal, no secret).
 #
 # Deployed only by CI through deploy/deploy-vars.mjs, which appends --var BUILD_SHA (the commit) and --var MODE (the
-# GitHub variable BRIEF_MODE: off, archive, shadow or live) and passes ACCESS_OWNER, ACCESS_OWNER_ALIASES,
-# CSRF_SIGNING_KEY, FEEDBACK_SIGNING_KEY, MAIL_FROM and MAIL_TO as Worker secrets with --secrets-file. A plain
+# GitHub variable BRIEF_MODE: off, archive, shadow or live) and passes ACCESS_OWNER and ACCESS_OWNER_ALIASES,
+# FEEDBACK_SIGNING_KEY, MAIL_FROM and MAIL_TO as Worker secrets with --secrets-file. A plain
 # `wrangler deploy` of this file DELETES BUILD_SHA and MODE (the Worker then reads MODE as off: no model call, no send).
 #
 # The Claude API key (ANTHROPIC_API_KEY) and the Resend key (RESEND_API_KEY) are NOT deployed: the owner puts them in the

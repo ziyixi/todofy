@@ -1035,9 +1035,7 @@ CSP).
    emptied; Home's entry becomes `status.type = "ops_v1"` with its `RECALL` binding (`UNBOUND_OPS_APPS` emptied, Home
    deploys after recall in that run, and its tick budget grows to 31 outbound calls), with recall's ops-v1 fixtures
    `OpsStatus/recall-ok.json` and `recall-degraded.json` and their golden test. The Bypass application's own AUD and ID
-   are not recorded: the Worker checks the machine tokens itself, and no check reads them. The CSRF key goes in before
-   the commit lands, by piping a random value straight into `gh secret set RECALL_CSRF_SIGNING_KEY`, never shown;
-   without it the deploy stops at its secrets step, and Home's with it.
+   are not recorded: the Worker checks the machine tokens itself, and no check reads them. Owner JSON mutations now use exact Origin and `X-CSRF-Token: 1`; the current deployment requires no CSRF signing secret.
 4. **After the first deploy**: the object's namespace ID as `[durable_objects]["recall-state"]`, `FIRST_DEPLOY_PENDING`
    emptied and the reconcile matrix's `exclude` removed in the same commit (the inventory refuses a recorded ID while
    the entry remains, and a guard test holds the exclude equal to it), the generated inventories refreshed (done:
@@ -1068,7 +1066,7 @@ CSP).
 5. The NAS (UGOS) → **Cloud Drives** → add **Dropbox** (the same account) → a sync task from `Apps/<app name>` to a
    shared folder, direction cloud → NAS.
 
-The CSRF key was set before the go-live commit (`gh secret set RECALL_CSRF_SIGNING_KEY`, done).
+The original go-live CSRF signing secret is retired by the keyless owner mutation release.
 
 **Checks after go-live**: an upload within five minutes of browsing, the device's heartbeat in 设置 and recall's tile
 on Home, the first texts searchable (a Chinese phrase among them), 设置 → 备份到 Dropbox `已全部备份` with the app

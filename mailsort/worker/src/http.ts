@@ -3,7 +3,7 @@
  * the owner's Access JWT itself on every path but /health:
  *
  * - /api/v2/*: MailsortUiService (proto/mailsort/ui/v2). Every method but GET, HEAD and OPTIONS needs the same-origin
- *   Origin and the signed double-submit CSRF token, checked here before the body is read; the request then goes to
+ *   Origin and the custom CSRF header and JSON media type, checked here before the body is read; the request then goes to
  *   MailsortState (state.ts), whose transcoder answers it. This handler stays thin (Workers Free: 10 ms of CPU): the
  *   JWT, the CSRF token and one call to the object;
  * - /api/v1/*: the API before 2026-10-10 (mailsort.ui.v1), which only a page loaded before the update calls: 410
@@ -16,9 +16,9 @@
  * Every response carries the private headers (no-store, nosniff, no referrer, never framed, the strict CSP). A refusal
  * is a google.rpc.Status body and one log line with the request ID, status and reason only, never a path or a URL.
  */
-import { issueCsrf, STRICT_CSP, withPrivateHeaders } from '@ziyixi/edge-auth';
+import { STRICT_CSP, withPrivateHeaders } from '@ziyixi/edge-auth';
 import { RpcError } from '@ziyixi/proto/rpc-status';
-import { authenticate, checkCsrf, CSRF_COOKIE, csrfKey } from './auth.ts';
+import { authenticate, checkCsrf } from './auth.ts';
 import { buildSha, MAILSORT_OBJECT, REQUEST_ID_HEADER, type Env } from './env.ts';
 import { MAX_BODY_BYTES } from './limits.ts';
 import { errorResponse, REASONS, sortError } from './reasons.ts';
@@ -92,19 +92,14 @@ async function route(request: Request, env: Env, url: URL, requestId: string): P
   }
   if (url.pathname === '/api/csrf') {
     if (request.method !== 'GET') return fail(methodNotAllowed('GET'));
-    const key = await csrfKey(env);
-    if (key === null) return fail(sortError('NOT_CONFIGURED'));
-    const issued = await issueCsrf(request, auth.owner, { cookieName: CSRF_COOKIE, key });
-    const response = Response.json({ token: issued.token });
-    response.headers.set('set-cookie', issued.setCookie);
+    const response = Response.json({ token: '1' });
     return { response, asset: false };
   }
   // Before the CSRF check: an old page's token may be stale too, and the answer is the same for every method.
   if (url.pathname === '/api/v1' || url.pathname.startsWith(OLD_API_PREFIX)) return fail(reloadRequired());
   if (url.pathname === '/api/v2' || url.pathname.startsWith(API_PREFIX)) {
     if (!SAFE.has(request.method)) {
-      const csrf = await checkCsrf(request, env, auth.owner, auth.bypassed);
-      if (csrf === 'no_key') return fail(sortError('NOT_CONFIGURED'));
+      const csrf = await checkCsrf(request, env, auth.bypassed);
       if (csrf === 'failed') return fail(sortError('CSRF_FAILED'));
       const length = Number(request.headers.get('content-length') ?? '0');
       if (Number.isFinite(length) && length > MAX_BODY_BYTES) return fail(new RpcError(REASONS.BAD_REQUEST.code, 'BAD_REQUEST', 'the request body is too large'));
@@ -135,7 +130,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   try {
     routed = await route(request, env, url, requestId);
   } catch {
-    // The assets binding or the CSRF key failed: unavailable, never a page.
+    // The assets binding failed: unavailable, never a page.
     const error = sortError('UNAVAILABLE');
     routed = { response: errorResponse(error, requestId, request.method === 'HEAD'), asset: false, reason: error.reason };
   }

@@ -83,20 +83,14 @@ class BootstrapTests(unittest.TestCase):
                 {"namespace": "personal-cloud", "fleet_host": "fleet.example.invalid"},
                 accepted,
             )
-        secret = next(
-            item
-            for item in apply.call_args.args[0]["items"]
-            if item["metadata"]["name"] == "codex-gateway-settings"
+        self.assertNotIn(
+            "codex-gateway-settings",
+            {item["metadata"]["name"] for item in apply.call_args.args[0]["items"]},
         )
-        self.assertEqual(set(secret["data"]), {"CODEX_GATEWAY_TOKEN"})
-        private["codex_gateway_env"]["CODEX_GATEWAY_TOKEN"] = private["platform_env"][
-            "PLATFORM_DEPLOY_TOKEN"
-        ]
+        self.assertNotIn("codex-gateway", allowed)
+        del private["codex_gateway_env"]
         path.write_text(json.dumps(private))
-        with self.assertRaisesRegex(
-            config.BootstrapError, "CODEX_GATEWAY_IDENTITY_NOT_DISTINCT"
-        ):
-            config.credentials(path, allowed)
+        self.assertEqual(config.credentials(path, allowed), private)
 
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()

@@ -4,9 +4,9 @@
 # value is committed here (the repository is public: nothing personal, no secret).
 #
 # Deployed only by CI ("Watch deploy" in .github/workflows/ci.yml) through deploy/deploy-vars.mjs, which appends
-# --var BUILD_SHA (the commit) and passes ACCESS_OWNER, ACCESS_OWNER_ALIASES and CSRF_SIGNING_KEY as Worker secrets
-# with --secrets-file (the dashboard's DASHBOARD_ACCESS_OWNER(_ALIASES), the same owner, and the watch app's own
-# WATCH_CSRF_SIGNING_KEY; README.md "Deploy"). A plain `wrangler deploy` of this file DELETES BUILD_SHA.
+# --var BUILD_SHA (the commit) and passes ACCESS_OWNER and ACCESS_OWNER_ALIASES as Worker secrets
+# with --secrets-file (the dashboard's DASHBOARD_ACCESS_OWNER(_ALIASES), the same owner; README.md "Deploy").
+# A plain `wrangler deploy` of this file DELETES BUILD_SHA.
 #
 # W2 (docs/design.md §11): the Access application "watch" (the whole host) was created by infra/ and "Infra apply"
 # (infra/README.md "Adding an app"); its AUD is committed below, and deploy/deploy-vars.mjs still refuses the

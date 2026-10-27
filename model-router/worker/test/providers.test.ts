@@ -2,7 +2,7 @@ import { create } from '@ziyixi/proto/protobuf';
 import { GenerationConfigSchema, type GenerationConfig } from '@ziyixi/proto/modelrouter/inference/v1/inference_pb';
 import { describe, expect, it, vi } from 'vitest';
 import type { ProviderContext } from '../src/types.ts';
-import { routeFor } from '../src/catalog.ts';
+import { modelCatalog, routeFor } from '../src/catalog.ts';
 import { generateClaude } from '../src/providers/claude.ts';
 import { apiKey, parseRetryAfter } from '../src/providers/common.ts';
 import { generateGemini } from '../src/providers/gemini.ts';
@@ -18,7 +18,7 @@ function config(value: Partial<Omit<GenerationConfig, '$typeName'>> = {}): Gener
 function context(provider: 'anthropic' | 'gemini' | 'workers_ai', fetcher: typeof fetch = vi.fn()): ProviderContext {
   const name = provider === 'anthropic' ? 'models/claude-opus-5-5' : provider === 'gemini' ? 'models/gemini-3-8-flash' : 'models/bge-m3';
   return {
-    env: { ANTHROPIC_API_KEY_MAILSORT: 'synthetic-claude-key', GEMINI_API_KEY_MAILSORT: 'synthetic-gemini-key' } as unknown as ProviderContext['env'],
+    env: { ANTHROPIC_API_KEY: 'synthetic-claude-key', GEMINI_API_KEY: 'synthetic-gemini-key' } as unknown as ProviderContext['env'],
     caller: 'mailsort', requestId: '00000000-0000-4000-8000-000000000001', signal: new AbortController().signal,
     deadlineMs: Date.now() + 110_000, fetcher,
     route: routeFor(name),
@@ -70,7 +70,7 @@ function geminiMessage(finishReason = 'STOP') {
 }
 
 describe('Claude adapter', () => {
-  it('preserves adaptive effort, cache blocks, schema, exact usage and caller credentials', async () => {
+  it('preserves adaptive effort, cache blocks, schema, exact usage and shared credentials', async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json(claudeMessage()));
     const result = await generateClaude(config({ instructions: [createInstruction('stable instructions', true)], outputSchemaJson: JSON.stringify(schema) }), 'synthetic input', context('anthropic', fetcher));
     const init = (vi.mocked(fetcher).mock.calls[0]?.[1]) as RequestInit;
@@ -238,12 +238,23 @@ describe('provider isolation and usage', () => {
     expect(parseRetryAfter('999999', now)).toBe(86_400);
   });
 
-  it('never falls back to another application credential', () => {
+  it('uses the same provider key for every authenticated calling app', () => {
     const ctx = context('anthropic');
-    expect(apiKey({ ...ctx, caller: 'brief' }, 'ANTHROPIC')).toBeNull();
-    const env = { ANTHROPIC_API_KEY: 'synthetic-global-key', ANTHROPIC_API_KEY_CONSOLE: 'synthetic-console-key' } as unknown as ProviderContext['env'];
-    expect(apiKey({ ...ctx, env, caller: 'brief' }, 'ANTHROPIC')).toBeNull();
-    expect(apiKey({ ...ctx, env, caller: 'console' }, 'ANTHROPIC')).toBe('synthetic-console-key');
+    for (const caller of ['console', 'mailsort', 'todofy', 'brief', 'newsletter']) {
+      expect(apiKey({ ...ctx, caller }, 'ANTHROPIC')).toBe('synthetic-claude-key');
+      expect(apiKey({ ...ctx, caller }, 'GEMINI')).toBe('synthetic-gemini-key');
+    }
+    expect(apiKey({ ...ctx, env: {} as ProviderContext['env'] }, 'ANTHROPIC')).toBeNull();
+  });
+
+  it('reports one shared catalog connection and requires the executor Access identity', async () => {
+    const ctx = context('anthropic');
+    const models = await modelCatalog(ctx.env);
+    expect(models.filter(model => model.provider === 'anthropic' || model.provider === 'gemini').every(model => model.configured)).toBe(true);
+    expect(new Set(models.filter(model => model.provider === 'anthropic').map(model => model.connectionRevision)).size).toBe(1);
+    const executor = (await modelCatalog({ ...ctx.env, CODEX_EXECUTOR_ORIGIN: 'https://synthetic-executor.example', CODEX_ACCESS_CLIENT_ID: 'synthetic-id', CODEX_ACCESS_CLIENT_SECRET: 'synthetic-secret' })).find(model => model.provider === 'codex');
+    expect(executor?.configured).toBe(true);
+    expect(executor?.connectionRevision).toMatch(/^[0-9a-f]{12}$/);
   });
 
   it('prices Claude fallback iterations at their own rates and handles cache TTLs', () => {

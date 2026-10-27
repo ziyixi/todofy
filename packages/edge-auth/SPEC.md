@@ -17,8 +17,7 @@ the one check that needs a real login is in §9.
   `"exports": {".": "./src/index.ts"}`, no `dependencies` (Web Crypto only). It is **not** a Worker: no
   service binding, no extra hop, no deploy of its own. Each app compiles it in through a `workspace:`
   dependency (§6), so npm never asks a registry for it.
-- **What it owns.** Access JWT verification (JWKS fetch and cache), signed double-submit CSRF (issue
-  and verify), the private-response header helper, and the primitives these need: HMAC key import and
+- **What it owns.** Access JWT verification (JWKS fetch and cache), same-origin JSON mutation checks, the private-response header helper, and the primitives these need: HMAC key import and
   HKDF derivation, base64url, cookie reading, a constant-time compare.
 - **What stays in each app.** Its `HttpError`, error envelopes, statuses, codes and messages; gate
   order, maintenance handling and routes; its CSP string (an input); and its own credentials (Mail
@@ -48,32 +47,28 @@ the one check that needs a real login is in §9.
   characters, policy numbers in range.
 - **Dev bypass** never applies to a request carrying `cf-ray` or to a hostname other than
   `localhost`, `127.0.0.1`, `[::1]` or `*.localhost`.
-- **CSRF.** Origin in the app's allow-list (case-insensitive, #27); header equal to the first cookie in
-  constant time and ≤ 1024 characters; the signature compared as canonical base64url text in constant
-  time; payload `kind: 'csrf'`, the authenticated owner, an integer `exp > now`. The cookie is
-  `HttpOnly; SameSite=Strict; Path=/`, plus `Secure` on HTTPS.
+- **Owner mutations.** Authenticate the Access JWT first. Before reading the body, require an exact
+  nonempty `Origin` from the app's allow-list, a nonempty `X-CSRF-Token` header (at most 1024 characters),
+  and media type `application/json` (charset parameters are allowed). Missing, `null` and foreign
+  Origins fail. Clients send the fixed value `1`, including on bodyless mutations. No permissive CORS
+  is added. The check uses no signing key, CSRF cookie, session token or body parsing.
 - **No throw on request input.** Every decoding, import or verify exception is `invalid_token`, every
   certs-fetch exception `keys_unavailable`. `constantTimeEqual` is an XOR loop over UTF-8 bytes (only
   the length can leak) and does not use workerd's `crypto.subtle.timingSafeEqual`, which Node lacks.
 
 ## 3. Formats that must not change
 
-### 3.1 CSRF tokens
+### 3.1 Owner mutation compatibility
 
-Claims `{kind: 'csrf', owner, nonce, exp}` in that key order, compact JSON; token
-`b64url(JSON) "." b64url(HMAC-SHA-256(key, b64url(JSON)))`, unpadded; `exp = floor(now) + ttl`
-(default 43,200 s). The key, nonce style and cookie name are per app (§5.4). Tokens already in
-browsers stay valid across deploys as long as these bytes do. The package tests and both older apps'
-tests accept these golden vectors (far-future `exp = 4102444800`):
+Owner JSON clients send `X-CSRF-Token: 1` directly. Authenticated compatibility GET endpoints
+(`/api/csrf`, `/_/api/csrf`, `/api/tasks/csrf`, or Router's `/api/session`) may return the static value
+`1` under their existing response field. They set no cookie and make no business change. Current
+clients do not call them. A bounded nonempty old header remains accepted for cached clients, subject
+to the same exact Origin and JSON checks; the old cookie/signature is ignored.
 
-```text
-Mail Hero, CREDENTIAL_KEY = "12"×32, owner owner@example.org, nonce 00000000-0000-4000-8000-000000000000:
-eyJraW5kIjoiY3NyZiIsIm93bmVyIjoib3duZXJAZXhhbXBsZS5vcmciLCJub25jZSI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMCIsImV4cCI6NDEwMjQ0NDgwMH0.PsGfEZ9TSpWDV8E-z6nAAyrq-o4zpAHqNtPXxFlC1ac
-Todofy, CSRF_SIGNING_KEY = "ab"×32, owner owner@example.com, compact JSON, nonce "A"×22:
-eyJraW5kIjoiY3NyZiIsIm93bmVyIjoib3duZXJAZXhhbXBsZS5jb20iLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJleHAiOjQxMDI0NDQ4MDB9.lfoeE-7aIjGjl7ay6lmgyn7btoKqiKIVBGkUjvNu65g
-Todofy, same key, Python json.dumps separators (the old core's tokens), nonce "test":
-eyJraW5kIjogImNzcmYiLCAib3duZXIiOiAib3duZXJAZXhhbXBsZS5jb20iLCAibm9uY2UiOiAidGVzdCIsICJleHAiOiA0MTAyNDQ0ODAwfQ.idEgvgFniPRSJdv7P7EcsU0evUgyoX35jRlO6dor7zA
-```
+This deliberate keyless change supersedes the signed-CSRF rules below as of the owner's request.
+Access JWT formats, Mail Hero preview/action signatures, Brief feedback signatures and encryption
+keys retain their existing contracts.
 
 ### 3.2 Private headers
 
@@ -116,17 +111,17 @@ or token the app issued could tell the difference; **App** = stays in the app.
 | 19 | Owner/alias syntax | any non-empty | any non-empty | **U→** `^[^\s@]+@[^\s@]+\.[^\s@]+$`, else `not_configured` |
 | 20 | Numeric claims | `typeof number` | same | **U→** also `Number.isFinite` |
 | 21 | Failure statuses/messages | its table | its table | **App** |
-| 22 | CSRF key source | HKDF from `CREDENTIAL_KEY` | raw `CSRF_SIGNING_KEY` | **P** `key` (a `CryptoKey` or a lazy function) plus `deriveHmacKeyHkdf`, `importHmacKeyHex`; key and token bytes unchanged |
-| 23 | CSRF key failure timing | issue 503; verify after the pre-checks → 403 | first → 503 | Via #22: a lazy key reports `key_unavailable` after the Origin/header/cookie checks; an app that resolves its key first keeps its 503 |
-| 24 | CSRF nonce | UUID | 16 bytes base64url | **P** `nonce` (default 16 bytes) |
-| 25 | CSRF cookie name | `mail_hero_csrf` | `todofy_csrf` | **P** `cookieName` |
+| 22 | CSRF key source | HKDF from `CREDENTIAL_KEY` | raw `CSRF_SIGNING_KEY` | **Retired for CSRF.** Owner JSON mutations use no signing key; other signing/encryption uses remain unchanged. |
+| 23 | CSRF key failure timing | issue 503; verify after the pre-checks → 403 | first → 503 | **Retired.** There is no CSRF key lookup or key-availability failure. |
+| 24 | CSRF nonce | UUID | 16 bytes base64url | **Retired.** Clients send the fixed header value `1`. |
+| 25 | CSRF cookie name | `mail_hero_csrf` | `todofy_csrf` | **Retired.** No CSRF cookie is read or issued. |
 | 26 | Allowed origins | the request URL's origin | the public host (+ local dev) | **P** `allowedOrigins`, computed by the app |
-| 27 | Origin case | exact | lowercased | **U→case-insensitive.** Browsers serialise `Origin` in lowercase (RFC 6454 §6.2), so browser behaviour is identical; only a non-browser client sending an uppercase `Origin` changes from 403 to accepted, and that client is outside the CSRF threat model. **Open owner decision**: if Mail Hero must stay byte-exact, add `originCase: 'exact'` |
-| 28 | Header/cookie compare | `!==` | constant time | **U→constant time** (same result) |
-| 29 | CSRF length cap | 4096 | 1024 | **U→1024**; Mail Hero tokens are about 190 characters. `issueCsrf` throws rather than issue a token `verifyCsrf` would refuse |
-| 30 | CSRF signature check | decode + `subtle.verify` | canonical text compare | **U→Todofy**; every issued token is canonical |
-| 31 | CSRF payload decode, `exp` | lenient; fractional | fatal UTF-8; integer | **U→Todofy**; both apps issue integer `exp` |
-| 32 | Issue response | `Response.json` | `jsonResponse` | **App**: the package returns `{token, setCookie}` |
+| 27 | Origin case | exact | lowercased | **U→exact.** The owner authorized exact allow-listed Origin comparison for the keyless JSON API. |
+| 28 | Header/cookie compare | `!==` | constant time | **Retired.** No header/cookie comparison; a nonempty custom header is required. |
+| 29 | CSRF length cap | 4096 | 1024 | **U→1024.** Bound legacy header acceptance; new clients always send `1`. |
+| 30 | CSRF signature check | decode + `subtle.verify` | canonical text compare | **Retired for CSRF.** General signed-claim primitives remain for their existing consumers. |
+| 31 | CSRF payload decode, `exp` | lenient; fractional | fatal UTF-8; integer | **Retired for CSRF.** No CSRF claims or expiry are decoded. |
+| 32 | Issue response | `Response.json` | `jsonResponse` | **App.** Compatibility routes return a static token field without `Set-Cookie`. |
 | 33 | CSP | extended | strict | **P** `csp`; `STRICT_CSP` exported (§3.2) |
 | 34 | Immutable asset cache | none | `/assets/` rule | **P** `cacheControl` override |
 | 35 | Gate order, maintenance, 405, routes | own | own | **App** |
@@ -208,38 +203,27 @@ export const ACCESS_MAX_TOKEN_CHARS = 16_000, ACCESS_MAX_ALIASES = 8, ACCESS_MAX
 7. **Claims** as in §2; the email compared with `===` after the fold of step 2.
 8. `{ok, owner: <canonical owner from step 2>, bypassed: false}`.
 
-### 5.2 CSRF and keys
+### 5.2 Owner mutations and signing primitives
 
 ```ts
+export interface CsrfPolicy { readonly allowedOrigins: readonly string[] }
+export type CsrfFailure = 'origin' | 'token' | 'content_type';
+export type CsrfResult = { readonly ok: true } | { readonly ok: false; readonly failure: CsrfFailure };
+export function verifyCsrf(request: Request, policy: CsrfPolicy): Promise<CsrfResult>;
+export const CSRF_HEADER = 'X-CSRF-Token', CSRF_TOKEN = '1', CSRF_MAX_TOKEN_CHARS = 1024;
+
 export type HmacKey = CryptoKey | (() => Promise<CryptoKey>);
-export interface CsrfIssuePolicy {
-  readonly cookieName: string;          // an RFC 6265 token, else TypeError
-  readonly key: HmacKey;
-  readonly nonce?: () => string;        // default: 16 random bytes, base64url (22 chars)
-  readonly ttlSeconds?: number;         // default 43200; 1 s–30 days
-}
-export interface CsrfPolicy extends CsrfIssuePolicy { readonly allowedOrigins: readonly string[] }
-export type CsrfFailure = 'origin' | 'token' | 'key_unavailable';
-
-export function issueCsrf(request: Request, owner: string, policy: CsrfIssuePolicy): Promise<{ token: string; setCookie: string }>;
-export function verifyCsrf(request: Request, owner: string, policy: CsrfPolicy):
-  Promise<{ readonly ok: true } | { readonly ok: false; readonly failure: CsrfFailure }>;
-export const CSRF_HEADER = 'X-CSRF-Token', CSRF_MAX_TOKEN_CHARS = 1024;
-
 export function signClaims(key: CryptoKey, claims: Record<string, unknown>): Promise<string>;
 export function verifySignedClaims(key: CryptoKey, token: string, maxChars?: number): Promise<Record<string, unknown> | null>;
-export function importHmacKeyHex(hex: string): Promise<CryptoKey | null>;   // ^[0-9a-fA-F]{64}$ → HMAC-SHA-256, ['sign']
+export function importHmacKeyHex(hex: string): Promise<CryptoKey | null>;
 export function deriveHmacKeyHkdf(ikm: Uint8Array<ArrayBuffer>, salt: string, info: string): Promise<CryptoKey>;
 ```
 
-- `issueCsrf` lets key errors propagate and throws if the token would exceed 1024 characters.
-  `setCookie` is `<name>=<token>; Path=/; HttpOnly; SameSite=Strict; Max-Age=<ttl>`, plus `; Secure`
-  when the request URL is `https:`.
-- `verifyCsrf` order: (1) lowercased `Origin` in the lowercased `allowedOrigins`, else `origin`;
-  (2) header non-empty, ≤ 1024, constant-time equal to the **first** cookie, else `token`; (3) resolve
-  the key, a throw → `key_unavailable`; (4) split at the first `.`, the signature text must equal the
-  canonical HMAC in constant time; (5) fatal-UTF-8 JSON object, `kind === 'csrf'`, `owner === owner`,
-  integer `exp > floor(now)`. Steps 4–5 fail with `token`.
+`verifyCsrf` performs only header checks, in order: exact allowed Origin, nonempty bounded custom
+header, JSON media type. It does not read the body, a cookie, an owner identity or a key. Its existing
+Promise-shaped result keeps authorizer callers compatible. Access authentication is a separate,
+required earlier gate. The general HMAC/signed-claim primitives retain their formats and behavior for
+preview tokens, feedback and other existing consumers.
 
 ### 5.3 Headers and helpers
 
@@ -251,8 +235,7 @@ export function readCookie(request: Request, name: string, occurrence: 'first' |
 export function constantTimeEqual(a: string, b: string): boolean;
 ```
 
-Also exported: `ACCESS_TOKEN_HEADER`, `ACCESS_TOKEN_COOKIE`, `CSRF_DEFAULT_TTL_SECONDS`,
-`SIGNED_TOKEN_MAX_CHARS`, `CsrfResult`, `PrivateHeaderOptions`, `base64UrlEncode`, `base64UrlDecode`.
+Also exported: `ACCESS_TOKEN_HEADER`, `ACCESS_TOKEN_COOKIE`, `SIGNED_TOKEN_MAX_CHARS`, `CsrfResult`, `PrivateHeaderOptions`, `base64UrlEncode`, `base64UrlDecode`.
 `readCookie` parses `;`-separated pairs, trims, splits at the first `=`, matches the name exactly and
 ignores a pair without `=`.
 
@@ -274,9 +257,6 @@ host is behind Access), checks CSRF in its fetch handler and forwards the owner 
 | `jwks` TTL / cooldown | 600,000 / 30,000 ms | 3,600,000 / 60,000 ms (cooldown from `JWKS_REFRESH_COOLDOWN_MS`, capped at the TTL) | 600,000 / 60,000 ms | 600,000 / 60,000 ms | 600,000 / 60,000 ms |
 | `loopbackIssuer` | – | local dev + `DEV_ACCESS_LOOPBACK_ISSUER` | – | – | – |
 | `devBypass` | `DEV_AUTH_BYPASS === 'true'`, `loopback-http`, principal `local-development`, `refuse` | local dev (`*.localhost` public host) + `DEV_AUTH_BYPASS`, `dot-localhost`, `asciiLowerCase(owner)`, `verify` | `DEV_AUTH_BYPASS === 'true'`, `loopback-http`, `asciiLowerCase(owner)`, `refuse` | same as the dashboard (`DEV_AUTH_BYPASS`; a short link only when it carries a token) | same as the dashboard |
-| CSRF key | lazy `deriveHmacKeyHkdf(CREDENTIAL_KEY, 'mail-hero', 'tokens-v1')` (also signs preview tokens and `actionHash`) | `importHmacKeyHex(CSRF_SIGNING_KEY)`, resolved first | `importHmacKeyHex(CSRF_SIGNING_KEY)`, resolved first | `importHmacKeyHex(CSRF_SIGNING_KEY)`, resolved first | `importHmacKeyHex(CSRF_SIGNING_KEY)`, resolved first |
-| `cookieName` | `mail_hero_csrf` | `todofy_csrf` | `home_csrf` | `links_csrf` | `watch_csrf` |
-| `nonce`, `ttlSeconds` | `crypto.randomUUID()`, 43200 | defaults | defaults | defaults | defaults |
 | `allowedOrigins` | `[new URL(request.url).origin]` | `https://<TODOFY_PUBLIC_HOST>` (+ the request origin in local dev) | `https://<PUBLIC_HOST>` (+ the request origin when bypassed) | same as the dashboard | same as the dashboard |
 | CSP / cache | Mail Hero CSP; always `no-store` | `STRICT_CSP`; immutable for a 200 non-HTML `ASSETS` answer under `/assets/` | same as Todofy | `STRICT_CSP`; `private, no-store` on every answer (the launcher files under `/_/assets/` bypass the Worker, `_headers`) | same as Todofy (the UI under `/assets/`) |
 
@@ -289,7 +269,6 @@ Failure mapping (each app's own codes and messages):
 | `missing_token` | 401 `unauthorized` "需要通过 Cloudflare Access 登录" | 401 `unauthorized` | 401 `unauthorized` | 401 `unauthorized` | 401 `unauthorized` |
 | `invalid_token` | 401 `unauthorized` "Access 登录无效或无权限" | 401 `unauthorized` | 401 `unauthorized` | 401 `unauthorized` | 401 `unauthorized` |
 | `keys_unavailable` | 401, as `invalid_token` | 503 `unavailable` | 503 `unavailable` | 503 `unavailable` | 503 `unavailable` |
-| CSRF key missing | issue 503 `service_unavailable`; verify 403 | 503 `not_configured` | 503 `not_configured` | 503 `not_configured` | 503 `not_configured` |
 | CSRF failure | 403 `csrf_failed` | 403 `csrf_failed` | 403 `csrf_failed` | 403 `csrf_failed` | 403 `csrf_failed` |
 
 The dashboard (and the links app and the watch app, which copy its adapter) also refuses non-ASCII owners in
@@ -307,8 +286,8 @@ Not observable for real Access tokens or tokens an app issued:
   three), which bounds import work under the Free plan's 10 ms CPU. A verifier caches at most 8 issuers
   (oldest dropped).
 - The duplicate-kid rule counts every object member with that `kid` before the other filters.
-- `issueCsrf`/`verifyCsrf` throw `TypeError` for an invalid cookie name, TTL or nonce type: adapter
-  bugs, never request-dependent.
+- Mutation origin lists come only from the app's configured public host and its established local-dev rule.
+  Request bodies are decoded only after JWT and mutation-header checks pass.
 - The bare padding strings `=` and `==` decode to no bytes; no JSON segment can use this.
 
 ## 6. Consumption and source rules
@@ -350,13 +329,13 @@ production secret reaches the package job.
   1024-bit key, JWK `use: enc`, `alg: RS512`, `key_ops: ['sign']`, duplicate kid, non-object member;
   certs 302/500/non-JSON/throw/timeout → `keys_unavailable`; cache TTL and cooldown; token sources and
   the 16,000-character edge; config fail-closed cases including non-ASCII and the KELVIN SIGN; dev
-  bypass under both host rules, with `cf-ray`, `refuse` vs `verify`; CSRF golden vectors (§3.1),
-  both nonce styles, every failure, the `Secure` flag, a throwing key and `key_unavailable` ordering;
+  bypass under both host rules, with `cf-ray`, `refuse` vs `verify`; the exact Origin/custom-header/JSON matrix, missing and opaque Origins, legacy-header compatibility,
+  bodyless mutations and refusal before body consumption;
   headers byte for byte.
 - **Mail Hero**: `native-api.test.mjs` signs with jose (an independent implementation, now a dev
-  dependency) through `createAccessVerifier({fetch})`; the golden vector through `handleAPI`; the
+  dependency) through `createAccessVerifier({fetch})`; the owner mutation checks through `handleAPI`; the
   tightenings and the certs failure as 401; the workerd runtime tests.
-- **Todofy**: `gateway/test/access.test.ts` and `owner.test.ts` (including the golden vectors) and
+- **Todofy**: `gateway/test/access.test.ts` and `owner.test.ts` (including mutation-header checks) and
   `tests/runtime/test_access.py` against workerd.
 - **Dashboard**: `worker/test/http.test.ts` (a real RSA test JWKS, aliases and ASCII folding, CSRF and
   Origin, private headers) and the runtime suite's end-to-end Access check with the JWKS served
@@ -364,9 +343,11 @@ production secret reaches the package job.
 
 ## 9. Rollout, verification, rollback
 
-- A package change redeploys every user in one CI run, each in its own concurrency group. CSRF keys,
-  formats and cookies are pinned by the golden vectors, and Access sessions are Cloudflare's cookies,
-  so browser state survives a deploy. Mail Hero's preview tokens stay on its own code.
+- A package change redeploys every user in one CI run, each in its own concurrency group. Access
+  sessions remain Cloudflare's cookies. Cached clients' nonempty old headers remain accepted with
+  exact Origin and JSON checks. New clients send `1` without a token-fetch roundtrip. Remove obsolete
+  Worker signing secrets only after verifying the keyless release; an older signed-CSRF revision
+  would need its key restored. Mail Hero preview tokens and Brief feedback are unchanged.
 - The tightenings (#6–#12, #14, #19, #20, #36) should be invisible for real Access tokens. After a
   deploy that changes them, the owner opens each UI and makes one write that passes Origin and CSRF
   (for example a Mail Hero settings save, a Todofy dismiss, a confirmed 解除降载 on the dashboard,
@@ -375,5 +356,5 @@ production secret reaches the package job.
   a non-ASCII character (the generators refuse one).
 - A 401 on a real login means reverting the package commit, which redeploys every user, and comparing
   the real token's header and claims (never logged) against §2 and §5.1.
-- Open owner decisions: #27 (Origin case for Mail Hero); the optional later unifications #16 (Todofy
-  JWKS TTL down to 10 min) and #17 (token source).
+- Optional Access-policy unifications remain #16 (Todofy JWKS TTL down to 10 min) and #17 (token source).
+  This mutation change does not alter them.

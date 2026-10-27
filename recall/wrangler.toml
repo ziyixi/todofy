@@ -5,7 +5,7 @@
 # is committed here (the repository is public: nothing personal, no secret).
 #
 # Deployed only by CI through deploy/deploy-vars.mjs, which appends --var BUILD_SHA (the commit) and passes
-# ACCESS_OWNER, ACCESS_OWNER_ALIASES and CSRF_SIGNING_KEY as Worker secrets with --secrets-file. A plain
+# ACCESS_OWNER, ACCESS_OWNER_ALIASES as Worker secrets with --secrets-file. A plain
 # `wrangler deploy` of this file DELETES BUILD_SHA.
 #
 # The machine tokens are NOT deployed: the owner makes them in recall's 设置 → 插件口令, and RecallState keeps only their

@@ -15,7 +15,6 @@ export interface Env {
   ACCESS_AUDIENCE?: string;
   ACCESS_OWNER?: string;
   ACCESS_OWNER_ALIASES?: string;
-  CSRF_SIGNING_KEY?: string;
   DEV_AUTH_BYPASS?: string;
   BUILD_SHA?: string;
 }

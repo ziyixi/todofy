@@ -115,7 +115,7 @@ describe('the launcher', () => {
     submit(root)
     await until(() => keys(root).includes('new'))
     const [call] = server.mutations('/_/api/v1/links')
-    expect(call?.headers['x-csrf-token']).toBe('synthetic-token')
+    expect(call?.headers['x-csrf-token']).toBe('1')
     expect(call?.path).toMatch(/link_id=new&request_id=[0-9a-f-]{36}$/)
     expect(call?.body).toEqual({ target: 'https://new.example.com/', path_mode: 'exact', visibility: 'public', tags: ['a', 'b'] })
     expect(document.querySelector('.toast')?.textContent).toContain('已创建 s/new')

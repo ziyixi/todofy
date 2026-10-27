@@ -19,18 +19,17 @@ function environment() {
     GITHUB_SHA: 'c'.repeat(40),
     RECALL_ACCESS_OWNER: 'owner@example.org',
     RECALL_ACCESS_OWNER_ALIASES: 'alias@example.org, second@example.net',
-    RECALL_CSRF_SIGNING_KEY: 'd'.repeat(64),
   }
 }
 
 test('the marker lists every input of each mode', () => {
   const marked = {}
   for (const [, mode, names] of readFileSync(WRAPPER, 'utf8').matchAll(/^\/\/ deploy-vars-inputs (\w+): (.+)$/gm)) {
-    marked[mode] = [...(marked[mode] ?? []), ...names.split(' ')]
+    marked[mode] = [...(marked[mode] ?? []), ...names.trim().split(/\s+/)]
   }
   assert.deepEqual(marked, {
     exec: INJECTED.map(({ from }) => from),
-    secrets: ['RECALL_ACCESS_OWNER', 'RECALL_ACCESS_OWNER_ALIASES', 'RECALL_CSRF_SIGNING_KEY'],
+    secrets: ['RECALL_ACCESS_OWNER', 'RECALL_ACCESS_OWNER_ALIASES'],
   })
 })
 
@@ -45,17 +44,15 @@ test('the build becomes the one --var flag: the 40-hex commit', () => {
   }
 })
 
-test('the secrets file holds the owner, aliases and CSRF key; invalid values are refused by name', () => {
+test('the secrets file holds the owner and aliases; invalid values are refused by name', () => {
   assert.deepEqual(generateSecrets(environment()), {
     ACCESS_OWNER: 'owner@example.org',
     ACCESS_OWNER_ALIASES: 'alias@example.org,second@example.net',
-    CSRF_SIGNING_KEY: 'd'.repeat(64),
   })
   assert.equal(generateSecrets({ ...environment(), RECALL_ACCESS_OWNER_ALIASES: '' }).ACCESS_OWNER_ALIASES, ' ')
   for (const [name, value] of [
     ['RECALL_ACCESS_OWNER', undefined], ['RECALL_ACCESS_OWNER', 'not-an-email'], ['RECALL_ACCESS_OWNER', 'ówner@example.org'],
     ['RECALL_ACCESS_OWNER_ALIASES', 'a@example.org,a@example.org'], ['RECALL_ACCESS_OWNER_ALIASES', undefined],
-    ['RECALL_CSRF_SIGNING_KEY', 'd'.repeat(63)], ['RECALL_CSRF_SIGNING_KEY', undefined],
   ]) {
     const env = { ...environment(), [name]: value }
     if (value === undefined) delete env[name]
@@ -123,8 +120,8 @@ test('exec runs the deploy (or dry-run) unchanged plus the --var flag; secrets w
     const again = spawnSync(process.execPath, [WRAPPER, 'secrets', secrets], { env, encoding: 'utf8' })
     assert.equal(again.status, 1)
     const bad = join(dir, 'bad.json')
-    const invalid = spawnSync(process.execPath, [WRAPPER, 'secrets', bad], { env: { ...env, RECALL_CSRF_SIGNING_KEY: 'secret-looking-value' }, encoding: 'utf8' })
-    assert.equal(invalid.stderr.trim(), 'Invalid or missing deploy setting: RECALL_CSRF_SIGNING_KEY')
+    const invalid = spawnSync(process.execPath, [WRAPPER, 'secrets', bad], { env: { ...env, RECALL_ACCESS_OWNER: 'secret-looking-value' }, encoding: 'utf8' })
+    assert.equal(invalid.stderr.trim(), 'Invalid or missing deploy setting: RECALL_ACCESS_OWNER')
     assert.ok(!existsSync(bad))
 
     const printed = [result, refused, written, again, invalid].map(({ stdout, stderr }) => stdout + stderr).join('\n')
@@ -145,7 +142,8 @@ test("a machine token's digest never enters a secrets file: a RECALL_WORKER_SECR
   }
   // A complete map without the digests is accepted (a cold bootstrap's), the personal inputs taking precedence.
   const map = { ...environment(), RECALL_WORKER_SECRETS: JSON.stringify({ CSRF_SIGNING_KEY: 'e'.repeat(64), ACCESS_OWNER: 'other@example.org' }) }
-  assert.equal(generateSecrets(map).CSRF_SIGNING_KEY, 'd'.repeat(64))
+  assert.equal(Object.hasOwn(generateSecrets(map), 'CSRF_SIGNING_KEY'), false)
+  assert.equal(generateSecrets(map).ACCESS_OWNER, environment().RECALL_ACCESS_OWNER)
 })
 
 test('the public GitHub secrets spec leaves the digests out; app.toml declares them owner-machine only', () => {

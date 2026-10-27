@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { AttentionItem } from '../../../worker/src/api-types.ts'
 import { apiError, json, renderApp, serve } from '../test/harness'
@@ -41,7 +41,7 @@ describe('owner reminder actions', () => {
     expect(screen.queryByText('全部正常')).toBeNull()
     expect(screen.getByRole('link', { name: '业务流程' })).toBeInTheDocument()
     const post = calls.find(call => call.path === path)
-    expect(post?.headers['x-csrf-token']).toBe('token-1')
+    expect(post?.headers['x-csrf-token']).toBe('1')
     const body = JSON.parse(post?.body ?? '{}') as { etag: string; request_id: string }
     expect(body.etag).toBe(item.etag)
     expect(body.request_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
@@ -66,23 +66,16 @@ describe('owner reminder actions', () => {
     expect(within(screen.getByRole('list', { name: '需关注的项目' })).getByText(/它不等于失败邮件数/)).toBeInTheDocument()
   })
 
-  it('retries CSRF expiry with the identical occurrence and request ID', async () => {
+  it('keeps the alert visible and reports a CSRF refusal without retrying', async () => {
     const user = userEvent.setup()
-    const scenario = warned()
-    let count = 0
-    const calls = serve(scenario, () => {
-      if (++count === 1) return apiError(403, 'csrf_failed')
-      const dismissed = { ...item, dismissed_at: NOW.toISOString() }
-      scenario.home = { ...scenario.home, attention: { level: 'ok', items: [], info: [], held: [], dismissed_items: [dismissed] } }
-      return json(dismissed)
-    })
+    const calls = serve(warned(), () => apiError(403, 'csrf_failed', '页面安全校验失败'))
     renderApp()
     await user.click(await screen.findByRole('button', { name: '不再提醒这批 32 条记录' }))
-    await waitFor(() => expect(screen.getByText('暂无未处理提醒')).toBeInTheDocument())
+    expect(await screen.findByRole('alert')).toHaveTextContent('页面安全校验失败')
+    expect(screen.queryByText('暂无未处理提醒')).toBeNull()
     const posts = calls.filter(call => call.path === path)
-    expect(posts).toHaveLength(2)
-    expect(posts[0]?.body).toBe(posts[1]?.body)
-    expect(posts.map(call => call.headers['x-csrf-token'])).toEqual(['token-1', 'token-2'])
+    expect(posts).toHaveLength(1)
+    expect(posts[0]?.headers['x-csrf-token']).toBe('1')
   })
 
   it('keeps a confirmed dismissal visible even if the following read fails', async () => {

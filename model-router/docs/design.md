@@ -4,7 +4,7 @@
 flowchart LR
   Apps[Mailsort / Todofy / Brief] -->|private service binding| Router[Cloudflare Model Router]
   Newsletter[VPS Newsletter] -->|root proto + dedicated token| Router
-  Owner[Private console] -->|Access + CSRF| Router
+  Owner[Private console] -->|Access + same-origin JSON| Router
   Router --> Engine[RouterEngine: router-v1]
   Engine --> APIs[Claude / Gemini / Workers AI]
   Engine -->|same proto, private transport| Executor[VPS official Codex SDK]
@@ -34,6 +34,6 @@ Brief and Mailsort keep their own budget ledgers and historical columns. Generic
 
 ## Connections and release
 
-Connections are scoped by authenticated application. `ANTHROPIC_API_KEY_MAILSORT` uses the existing Mailsort workspace; Brief uses its separate key. The owner Playground's explicit billing profile selects that same connection and its provider-side workspace cap; it does not spend through the app's local business ledger.
+Router owns one `ANTHROPIC_API_KEY` and one `GEMINI_API_KEY`, shared by all callers and the owner Playground. Claude reuses the existing Brief workspace and its aggregate $80/month provider cap. The authenticated app remains on every request and usage record; request metadata cannot select credentials. Applications keep their existing business budgets and historical ledgers. Provider keys are Router secrets only, never GitHub values, client credentials or VPS configuration.
 
 Publish using the existing green-SHA Actions flow and inspect the matching Personal cloud reconcile. The first deployment's DO namespace must be exported into the resource registry before acceptance. No app's paused/archive mode or historical result is changed as part of connection setup.

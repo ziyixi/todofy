@@ -226,8 +226,7 @@ accepted report nor a ready deployment receipt proves successful Newsletter deli
   Its private console shows requests and usage. The VPS executor runs the official Codex SDK and returns actual
   research observations; applications own their workflows and budgets. See [design](../model-router/docs/design.md).
 - **Mailsort:** one SQLite DO/Alarm, no D1/R2 or cron. Configurable 5/15/30/60-minute batches process unclassified
-  Inbox mail from the last 48 hours, including read mail, through Model Router and one maintained prompt. The
-  saved Claude connection retains its dedicated $20/month workspace. It
+  Inbox mail from the last 48 hours, including read mail, through Model Router and one maintained prompt. All Claude callers share Router's single key and provider-side $80/month workspace limit; the application's own local budget ledger remains. It
   reads the owner's Gmail with the owner's own OAuth grant and only ever adds or removes its own labels (created by it
   or adopted, owned by ID) and INBOX, through the closed operation table of `gmail.ts`; it never marks mail read, deletes, sends or changes
   settings. Every write is a ledger row first and can be undone. Shadow mode (the default) only records; the

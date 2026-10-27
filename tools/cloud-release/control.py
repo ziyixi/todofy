@@ -94,6 +94,9 @@ def release_inputs(source, app):
                 "type": "secret_text",
                 "optional": name in spec["optional"],
             }
+        # Only this retired secret may remain until owner deletion after the keyless rollout.
+        if config["name"] in {"home", "links", "watch", "mailsort", "recall", "brief", "tasks", "todofy", "model-router"}:
+            bindings.setdefault("CSRF_SIGNING_KEY", {"name": "CSRF_SIGNING_KEY", "type": "secret_text", "optional": True})
         wanted["bindings"] = list(bindings.values())
     return profile, resources, configs, desired
 

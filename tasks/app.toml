@@ -4,7 +4,7 @@ target = "cloudflare"
 
 [[workers]]
 config = "tasks/wrangler.toml"
-personal_secrets = ["ACCESS_OWNER", "ACCESS_OWNER_ALIASES", "CSRF_SIGNING_KEY"]
+personal_secrets = ["ACCESS_OWNER", "ACCESS_OWNER_ALIASES"]
 manual_secrets = []
 optional_secrets = ["ACCESS_OWNER_ALIASES"]
 hosts = ["tasks"]

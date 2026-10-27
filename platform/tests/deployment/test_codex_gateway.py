@@ -322,6 +322,6 @@ class GatewayRelease(Fixture, unittest.TestCase):
             for item in container["env"]
             if "valueFrom" in item
         ]
-        self.assertEqual(
-            secrets, [{"name": "codex-gateway-settings", "key": "CODEX_GATEWAY_TOKEN"}]
-        )
+        self.assertEqual(secrets, [])
+        self.assertNotIn("ACCESS_ISSUER", environment)
+        self.assertNotIn("ACCESS_AUDIENCE", environment)

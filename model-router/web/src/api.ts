@@ -5,7 +5,7 @@ import {
   RpcStatusError,
   type HttpCall,
 } from '@ziyixi/proto/http-client'
-import { parseStatus } from '@ziyixi/proto/rpc-status'
+
 import { fromWire, toWire } from '@ziyixi/proto/wire-json'
 import {
   ConsoleService,
@@ -36,7 +36,7 @@ export interface RequestFilters {
   toTime: string
 }
 export interface RouterApi {
-  listModels: (app?: string) => Promise<readonly Model[]>
+  listModels: () => Promise<readonly Model[]>
   listRequests: (filters: RequestFilters, pageToken?: string) => Promise<ListRequestsResponse>
   getRequest: (name: string) => Promise<RequestRecord>
   getUsage: (days: TimeRange, app?: string, model?: string) => Promise<UsageSummary>
@@ -68,7 +68,6 @@ function apiError(error: unknown): ApiError {
   return new ApiError('无法连接 ModelRouter，或登录已过期。请刷新页面后重试。', 'NETWORK_ERROR', 0)
 }
 
-let csrfToken: string | undefined
 
 async function sameOrigin(url: string, init: RequestInit = {}): Promise<Response> {
   try {
@@ -78,39 +77,13 @@ async function sameOrigin(url: string, init: RequestInit = {}): Promise<Response
   }
 }
 
-async function csrf(): Promise<string> {
-  if (csrfToken) return csrfToken
-  const response = await sameOrigin('/api/session', { headers: { Accept: 'application/json' } })
-  let body: unknown
-  try {
-    body = await response.json()
-  } catch {
-    throw new ApiError('无法取得页面安全令牌，请刷新后重试。', 'BAD_RESPONSE', response.status)
-  }
-  const token = body !== null && typeof body === 'object' && 'csrf_token' in body ? body.csrf_token : undefined
-  if (!response.ok || typeof token !== 'string' || !token)
-    throw new ApiError('无法取得页面安全令牌，请刷新后重试。', 'BAD_RESPONSE', response.status)
-  csrfToken = token
-  return token
-}
 
 export async function send(call: HttpCall): Promise<Response> {
-  const mutation = call.httpMethod !== 'GET'
-  for (let attempt = 0; ; attempt += 1) {
-    const headers: Record<string, string> = { Accept: 'application/json' }
-    if (call.body !== undefined) headers['Content-Type'] = 'application/json'
-    if (mutation) headers['X-CSRF-Token'] = await csrf()
-    const response = await sameOrigin(call.url, { method: call.httpMethod, headers, body: call.body })
-    if (!mutation || response.status !== 403 || attempt > 0) return response
-    let reason: string | undefined
-    try {
-      reason = parseStatus(403, await response.clone().json())?.reason
-    } catch {
-      return response
-    }
-    if (reason !== 'CSRF_FAILED') return response
-    csrfToken = undefined
-  }
+  const mutation = !['GET', 'HEAD', 'OPTIONS'].includes(call.httpMethod)
+  const headers: Record<string, string> = { Accept: 'application/json' }
+  if (mutation || call.body !== undefined) headers['Content-Type'] = 'application/json'
+  if (mutation) headers['X-CSRF-Token'] = '1'
+  return sameOrigin(call.url, { method: call.httpMethod, headers, ...(call.body === undefined ? {} : { body: call.body }) })
 }
 
 const model = createHttpClient(ModelService, send)
@@ -125,8 +98,7 @@ async function request<T>(operation: () => Promise<T>): Promise<T> {
 }
 
 export const api: RouterApi = {
-  listModels: (app = 'console') =>
-    request(async () => toWire(ListModelsResponseSchema, await model.listModels({ app })).models ?? []),
+  listModels: () => request(async () => toWire(ListModelsResponseSchema, await model.listModels({})).models ?? []),
   listRequests: (filters, pageToken = '') =>
     request(async () => {
       const toTime = new Date(filters.toTime)
@@ -147,8 +119,4 @@ export const api: RouterApi = {
     request(async () => toWire(UsageSummarySchema, await owner.getUsage({ days, app, model: modelName }))),
   generate: (input) =>
     request(async () => toWire(GenerationSchema, await model.generate(fromWire(GenerateRequestSchema, input).message))),
-}
-
-export function resetCsrfForTests() {
-  csrfToken = undefined
 }

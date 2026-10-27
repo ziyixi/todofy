@@ -9,16 +9,16 @@
  * - GET /health: the build, without data;
  * - everything else needs the owner's Access JWT, verified here (the whole host is behind Access as well):
  *   - /api/v1/*: BriefUiService (proto/brief/ui/v1). Every method but GET, HEAD and OPTIONS needs the same-origin Origin
- *     and the signed double-submit CSRF token, checked here before the body is read; BriefState's transcoder answers;
+ *     and the custom CSRF header and JSON media type, checked here before the body is read; BriefState's transcoder answers;
  *   - GET /api/csrf: the CSRF token and its cookie (transport, not part of the service);
  *   - everything else (GET and HEAD): the archive UI's static files, through the single-page fallback.
  *
  * Every response carries the private headers (no-store, nosniff, no referrer, never framed, the strict CSP). A refusal
  * is one log line with the request ID, status and reason only, never a path, a query or a token.
  */
-import { issueCsrf, STRICT_CSP, withPrivateHeaders } from '@ziyixi/edge-auth';
+import { STRICT_CSP, withPrivateHeaders } from '@ziyixi/edge-auth';
 import { RpcError } from '@ziyixi/proto/rpc-status';
-import { authenticate, checkCsrf, CSRF_COOKIE, csrfKey } from './auth.ts';
+import { authenticate, checkCsrf } from './auth.ts';
 import { BRIEF_OBJECT, buildSha, REQUEST_ID_HEADER, type Env } from './env.ts';
 import { confirmPage, FEEDBACK_HEADERS, feedbackKey, recordedPage, verifyFeedback } from './feedback.ts';
 import { readCapped } from './fetch/net.ts';
@@ -111,17 +111,12 @@ async function route(request: Request, env: Env, url: URL, requestId: string): P
   }
   if (url.pathname === '/api/csrf') {
     if (request.method !== 'GET') return fail(methodNotAllowed('GET'));
-    const key = await csrfKey(env);
-    if (key === null) return fail(briefError('NOT_CONFIGURED'));
-    const issued = await issueCsrf(request, auth.owner, { cookieName: CSRF_COOKIE, key });
-    const response = Response.json({ token: issued.token });
-    response.headers.set('set-cookie', issued.setCookie);
+    const response = Response.json({ token: '1' });
     return { response, asset: false };
   }
   if (url.pathname === '/api/v1' || url.pathname.startsWith(API_PREFIX)) {
     if (!SAFE.has(request.method)) {
-      const csrf = await checkCsrf(request, env, auth.owner, auth.bypassed);
-      if (csrf === 'no_key') return fail(briefError('NOT_CONFIGURED'));
+      const csrf = await checkCsrf(request, env, auth.bypassed);
       if (csrf === 'failed') return fail(briefError('CSRF_FAILED'));
       const length = Number(request.headers.get('content-length') ?? '0');
       if (Number.isFinite(length) && length > MAX_BODY_BYTES) return fail(briefError('BAD_REQUEST', [], 'the request body is too large'));

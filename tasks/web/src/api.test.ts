@@ -1,64 +1,25 @@
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { HttpCall } from "@ziyixi/proto/http-client";
-
-// Each test starts from a fresh tab, which has no CSRF token yet.
-let api: typeof import("./api");
-beforeEach(async () => {
-  vi.resetModules();
-  api = await import("./api");
+import { afterEach, expect, it, vi } from 'vitest';
+import type { HttpCall } from '@ziyixi/proto/http-client';
+import { send } from './api';
+afterEach(() => vi.unstubAllGlobals());
+it('sends the first write directly with a fixed custom header and same-origin credentials', async () => {
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({}));
+  vi.stubGlobal('fetch', fetcher);
+  await send({ httpMethod: 'POST', url: '/api/tasks/v1/tasks', body: '{}' } as HttpCall);
+  expect(fetcher).toHaveBeenCalledOnce();
+  const [path, init] = fetcher.mock.calls[0]!;
+  expect(path).toBe('/api/tasks/v1/tasks');
+  expect(init).toMatchObject({ credentials: 'same-origin', cache: 'no-store', redirect: 'error' });
+  expect(new Headers(init?.headers).get('X-CSRF-Token')).toBe('1');
+  expect(new Headers(init?.headers).get('Content-Type')).toBe('application/json');
 });
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
-
-/** Every request the tab sends, with a write's CSRF token; `csrf` answers the token reads. */
-function stubFetch(csrf: () => Response) {
-  const sent: string[] = [];
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (input: string, init: RequestInit) => {
-      const token = new Headers(init.headers).get("X-CSRF-Token");
-      sent.push(`${init.method ?? "GET"} ${input}${token ? ` ${token}` : ""}`);
-      return input === "/api/tasks/csrf" ? csrf() : Response.json({});
-    }),
-  );
-  return sent;
-}
-const write = {
-  httpMethod: "POST",
-  url: "/api/tasks/v1/tasks",
-  body: "{}",
-} as HttpCall;
-
-it("reads the CSRF token at startup, so the first write does not wait for it", async () => {
-  const sent = stubFetch(() => Response.json({ token: "synthetic-token" }));
-  api.prepareWrites();
-  // Sent before any write, beside the page's first reads; every write then reuses it.
-  expect(sent).toEqual(["GET /api/tasks/csrf"]);
-  await api.send(write);
-  await api.send(write);
-  expect(sent).toEqual([
-    "GET /api/tasks/csrf",
-    "POST /api/tasks/v1/tasks synthetic-token",
-    "POST /api/tasks/v1/tasks synthetic-token",
-  ]);
-});
-
-it("leaves the token to the first write when the startup read fails", async () => {
-  let reads = 0;
-  const sent = stubFetch(() =>
-    ++reads === 1
-      ? new Response("", { status: 503 })
-      : Response.json({ token: "synthetic-token" }),
-  );
-  api.prepareWrites();
-  await vi.waitFor(() => expect(reads).toBe(1));
-  // The failed read is forgotten, never thrown at the page.
-  await new Promise((resolve) => setTimeout(resolve));
-  await api.send(write);
-  expect(sent).toEqual([
-    "GET /api/tasks/csrf",
-    "GET /api/tasks/csrf",
-    "POST /api/tasks/v1/tasks synthetic-token",
-  ]);
+it('sends JSON metadata for a bodyless mutation and omits the custom header on GET', async () => {
+  const fetcher = vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(Response.json({})));
+  vi.stubGlobal('fetch', fetcher);
+  await send({ httpMethod: 'DELETE', url: '/api/tasks/v1/tasks/synthetic' } as HttpCall);
+  await send({ httpMethod: 'GET', url: '/api/tasks/v1/tasks' } as HttpCall);
+  expect(new Headers(fetcher.mock.calls[0]?.[1]?.headers).get('Content-Type')).toBe('application/json');
+  expect(new Headers(fetcher.mock.calls[0]?.[1]?.headers).get('X-CSRF-Token')).toBe('1');
+  expect(new Headers(fetcher.mock.calls[1]?.[1]?.headers).get('X-CSRF-Token')).toBeNull();
+  expect(fetcher).toHaveBeenCalledTimes(2);
 });

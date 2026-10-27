@@ -28,7 +28,6 @@ export const SYNTHETIC_BINDINGS: Readonly<Record<string, string>> = {
   ACCESS_AUDIENCE: 'c'.repeat(64),
   ACCESS_OWNER: OWNER,
   ACCESS_OWNER_ALIASES: '',
-  CSRF_SIGNING_KEY: 'ef'.repeat(32),
   BUILD_SHA: 'test',
   MAINTENANCE_MODE: 'false',
 };

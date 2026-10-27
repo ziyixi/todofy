@@ -152,7 +152,7 @@ async function session({ h, meter: worker, object }: BriefIsolate, index: number
   }, 1);
   const csrfToken = (await csrf.json<{ token: string }>()).token;
   if (index !== COLD_ISOLATES - 1) return [cold];
-  const mutationHeaders = { origin: `https://${PUBLIC_HOST}`, 'x-csrf-token': csrfToken, cookie: (csrf.headers.get('set-cookie') ?? '').split(';')[0] ?? '' };
+  const mutationHeaders = { 'content-type': 'application/json', origin: `https://${PUBLIC_HOST}`, 'x-csrf-token': csrfToken, cookie: (csrf.headers.get('set-cookie') ?? '').split(';')[0] ?? '' };
   const send = (call: HttpCall): Promise<Response> =>
     h.fetch(call.url, {
       method: call.httpMethod,

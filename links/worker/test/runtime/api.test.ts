@@ -421,7 +421,8 @@ describe('the transport', () => {
     const csrf = await h.fetch('/_/api/csrf');
     const token = (await csrf.json<{ token: string }>()).token;
     const cookie = (csrf.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
-    expect(cookie).toMatch(/^links_csrf=/);
+    expect(token).toBe('1');
+    expect(csrf.headers.get('set-cookie')).toBeNull();
     const otherOrigin = await h.fetch('/_/api/v1/links?link_id=a', {
       method: 'POST',
       headers: { 'content-type': 'application/json', origin: 'https://evil.example', 'x-csrf-token': token, cookie },

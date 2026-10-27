@@ -12,7 +12,7 @@ import { runView, newRun } from '../src/canary.ts';
 import type { Env } from '../src/env.ts';
 import worker from '../src/index.ts';
 import { REASONS } from '../src/api.ts';
-import { API_DOMAIN, CSRF_COOKIE, LEGACY_CODES, LEGACY_RELOAD_CODE, legacyCode, RELOAD_MESSAGE } from '../src/http.ts';
+import { API_DOMAIN, LEGACY_CODES, LEGACY_RELOAD_CODE, legacyCode, RELOAD_MESSAGE } from '../src/http.ts';
 import { accessClaims, testIssuer, type TestIssuer } from './jwt.ts';
 import { expectWire, VIEW_SCHEMAS } from './wire-conformance.ts';
 
@@ -123,7 +123,6 @@ function makeEnv(overrides: Partial<Env> = {}, answers: { startCanary?: unknown;
     ACCOUNT_ID: '0'.repeat(32),
     ACCESS_OWNER: OWNER,
     ACCESS_OWNER_ALIASES: 'second@example.org',
-    CSRF_SIGNING_KEY: 'ab'.repeat(32),
     BUILD_SHA: 'abc123',
     ...overrides,
   } as unknown as Env;
@@ -165,10 +164,10 @@ async function csrf(env: Env): Promise<{ token: string; cookie: string }> {
   const response = await call(env, PATHS.csrf);
   expect(response.status).toBe(200);
   expectPrivate(response);
+  expect(response.headers.get('set-cookie')).toBeNull();
   const body = await response.json<CsrfResponse>();
-  const setCookie = response.headers.get('set-cookie') ?? '';
-  expect(setCookie).toMatch(new RegExp(`^${CSRF_COOKIE}=[^;]+; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200; Secure$`));
-  return { token: body.token, cookie: setCookie.split(';')[0] ?? '' };
+  expect(body.token).toBe('1');
+  return { token: body.token, cookie: '' };
 }
 
 async function mutate(
@@ -177,7 +176,7 @@ async function mutate(
   body: unknown,
   options: { origin?: string; csrf?: { token: string; cookie: string } | null; headers?: Record<string, string> } = {},
 ): Promise<Response> {
-  const pair = options.csrf === undefined ? await csrf(env) : options.csrf;
+  const pair = options.csrf === undefined ? { token: '1', cookie: '' } : options.csrf;
   const headers: Record<string, string> = { 'content-type': 'application/json', origin: options.origin ?? ORIGIN, ...options.headers };
   if (pair !== null) {
     headers['x-csrf-token'] = pair.token;
@@ -309,11 +308,10 @@ describe('Access', () => {
 });
 
 describe('CSRF and mutations', () => {
-  it('issues a signed token and cookie at /api/csrf (GET only)', async () => {
+  it('keeps the static compatibility token at /api/csrf without a cookie (GET only)', async () => {
     const { env } = makeEnv();
     const pair = await csrf(env);
-    expect(pair.token.split('.')).toHaveLength(2);
-    expect(pair.cookie).toBe(`${CSRF_COOKIE}=${pair.token}`);
+    expect(pair).toEqual({ token: '1', cookie: '' });
     for (const method of ['POST', 'HEAD']) {
       const refused = await call(env, PATHS.csrf, { method });
       expect(refused.status, method).toBe(405);
@@ -334,39 +332,33 @@ describe('CSRF and mutations', () => {
     expect(calls.startCanary).toEqual([REQUEST_ID, null]);
   });
 
-  it('refuses a wrong Origin, a missing or foreign token, before reading the body or calling the object', async () => {
+  it('refuses missing or foreign Origin, missing header and non-JSON before body parsing or object calls', async () => {
     const { env, calls } = makeEnv();
-    const pair = await csrf(env);
-    const cases = [
-      await mutate(env, PATHS.canary, {}, { origin: 'https://evil.example.com', csrf: pair }),
-      await mutate(env, PATHS.canary, {}, { origin: 'http://home.example.com', csrf: pair }),
-      await mutate(env, PATHS.canary, {}, { csrf: null }),
-      await mutate(env, PATHS.canary, {}, { csrf: { token: pair.token, cookie: `${CSRF_COOKIE}=other` } }),
-      await mutate(env, PATHS.guard, 'not json', { csrf: { token: `${pair.token}x`, cookie: `${CSRF_COOKIE}=${pair.token}x` } }),
-      await mutate(env, PATHS.refreshHome, {}, { csrf: null }),
-      await mutate(env, PATHS.refreshCloudflare, {}, { origin: 'https://evil.example.com', csrf: pair }),
+    const invalidHeaders = [
+      { 'x-csrf-token': '1', 'content-type': 'application/json' },
+      { origin: 'null', 'x-csrf-token': '1', 'content-type': 'application/json' },
+      { origin: 'https://evil.example.com', 'x-csrf-token': '1', 'content-type': 'application/json' },
+      { origin: 'http://home.example.com', 'x-csrf-token': '1', 'content-type': 'application/json' },
+      { origin: ORIGIN, 'content-type': 'application/json' },
+      { origin: ORIGIN, 'x-csrf-token': '1', 'content-type': 'text/plain' },
     ];
-    for (const response of cases) {
+    for (const headers of invalidHeaders) {
+      const response = await call(env, PATHS.canary, { method: 'POST', headers, body: 'malformed json' });
       expect(response.status).toBe(403);
       expect(await reasonOf(response)).toBe('CSRF_FAILED');
     }
-    // A token minted with another key does not verify.
-    const other = makeEnv({ CSRF_SIGNING_KEY: 'cd'.repeat(32) });
-    expect((await mutate(env, PATHS.guard, { level: 'shed', app: 'mail-hero' }, { csrf: await csrf(other.env) })).status).toBe(403);
+    const unauthenticated = await call(env, PATHS.canary, { method: 'POST', jwt: null, body: 'malformed json' });
+    expect(unauthenticated.status).toBe(401);
     expect(calls.startCanary).toEqual([]);
     expect(calls.guard).toEqual([]);
     expect(calls.views).toEqual([]);
   });
 
-  it('needs a signing key for the CSRF token and every mutation', async () => {
-    const { env, calls } = makeEnv({ CSRF_SIGNING_KEY: 'short' });
-    expect(await reasonOf(await call(env, PATHS.csrf))).toBe('NOT_CONFIGURED');
-    const response = await mutate(env, PATHS.guard, { level: 'shed', app: 'mail-hero' }, { csrf: { token: 'a.b', cookie: `${CSRF_COOKIE}=a.b` } });
-    expect(response.status).toBe(503);
-    expect(await reasonOf(response)).toBe('NOT_CONFIGURED');
-    expect(calls.guard).toEqual([]);
-    // Reads keep working.
-    expect((await call(env, PATHS.home)).status).toBe(200);
+  it('accepts a cached opaque header without signing configuration or cookies', async () => {
+    const { env, calls } = makeEnv();
+    const response = await mutate(env, PATHS.guard, { level: 'normal', app: 'mail-hero' }, { csrf: { token: 'cached.opaque', cookie: '' } });
+    expect(response.status).toBe(200);
+    expect(calls.guard).toEqual(['mail-hero:normal:null']);
   });
 
   it('sets the guard override from {level, request_id}', async () => {

@@ -3,7 +3,7 @@ import { render } from '@testing-library/react'
 import { Code, RpcError, statusBody } from '@ziyixi/proto/rpc-status'
 import { vi } from 'vitest'
 import { App } from '../App'
-import { resetCsrfForTests } from '../api/client'
+import { resetViewCacheForTests } from '../api/client'
 import { NOW, type Scenario } from './fixtures'
 
 export interface Call {
@@ -59,7 +59,7 @@ export const PATHS = {
 /** Replaces fetch with a recorder; every call must be a same-origin path of the owner API or /api/csrf. */
 export function installFetch(handler: Handler): Call[] {
   const calls: Call[] = []
-  resetCsrfForTests()
+  resetViewCacheForTests()
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {

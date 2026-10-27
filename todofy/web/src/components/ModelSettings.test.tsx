@@ -26,7 +26,7 @@ describe('model settings', () => {
     const update = calls.find((call) => call.method === 'PATCH')!;
     expect(update.body).toMatchObject({ email_model: 'models/sol-6-1', report_model: 'models/gemini-report' });
     expect(new URLSearchParams(update.search).get('etag')).toBe('0');
-    expect(update.headers['x-csrf-token']).toBe('csrf-token-1');
+    expect(update.headers['x-csrf-token']).toBe('1');
     expect(new URLSearchParams(update.search).get('update_mask')).toBe('email_model,report_model');
     expect(calls.some((call) => call.path.includes('recompute'))).toBe(false);
   });

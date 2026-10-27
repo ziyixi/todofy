@@ -57,7 +57,6 @@ def allowed_keys(root):
             "NEWSLETTER_TIME_ZONE",
         ],
         "platform": ["PLATFORM_DEPLOY_TOKEN"],
-        "codex-gateway": ["CODEX_GATEWAY_TOKEN"],
         "controlled": sorted(CONTROLLED),
     }
 

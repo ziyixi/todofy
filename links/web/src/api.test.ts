@@ -1,13 +1,12 @@
 import { Code, RpcError, statusBody } from '@ziyixi/proto/rpc-status'
 import { vi } from 'vitest'
-import { api, ApiError, resetClientForTests, withRetry } from './api.ts'
+import { api, ApiError, withRetry } from './api.ts'
 
 function status(httpStatus: number, code: Code, reason: string): Response {
   return Response.json(statusBody(new RpcError(code, reason, reason, { httpStatus }), { domain: 's.ziyixi.science', localized: { locale: 'zh-CN', message: '服务器的说明' } }), { status: httpStatus })
 }
 
 describe('the transport', () => {
-  beforeEach(() => resetClientForTests())
 
   it('sends same-origin requests that never follow a redirect, with the CSRF token on mutations only', async () => {
     const fetch = vi.fn((url: string, init: RequestInit) => {
@@ -19,26 +18,16 @@ describe('the transport', () => {
     await api.listLinks({})
     expect((fetch.mock.calls[0]?.[1].headers as Record<string, string>)['X-CSRF-Token']).toBeUndefined()
     await api.deleteLink({ name: 'links/a' })
-    expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/_/api/v1/links', '/_/api/csrf', '/_/api/v1/links/a'])
-    expect((fetch.mock.calls[2]?.[1].headers as Record<string, string>)['X-CSRF-Token']).toBe('t1')
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual(['/_/api/v1/links', '/_/api/v1/links/a'])
+    expect(fetch.mock.calls[1]?.[1].headers).toMatchObject({ 'X-CSRF-Token': '1', 'Content-Type': 'application/json' })
   })
 
-  it('renews a refused CSRF token once and repeats the same request', async () => {
-    let tokens = 0
-    const bodies: string[] = []
-    vi.stubGlobal(
-      'fetch',
-      vi.fn((url: string, init: RequestInit) => {
-        if (url === '/_/api/csrf') return Promise.resolve(Response.json({ token: `t${String((tokens += 1))}` }))
-        bodies.push(`${(init.headers as Record<string, string>)['X-CSRF-Token'] ?? ''} ${typeof init.body === 'string' ? init.body : ''}`)
-        return Promise.resolve(bodies.length === 1 ? status(403, Code.PERMISSION_DENIED, 'CSRF_FAILED') : Response.json({ name: 'links/a', target: 'https://a.example/' }))
-      }),
-    )
-    await api.undeleteLink({ name: 'links/a', requestId: '11111111-1111-4111-8111-111111111111' })
-    expect(bodies).toEqual([
-      't1 {"request_id":"11111111-1111-4111-8111-111111111111"}',
-      't2 {"request_id":"11111111-1111-4111-8111-111111111111"}',
-    ])
+  it('does not retry a refused mutation or fetch a security token', async () => {
+    const fetcher = vi.fn<(url: string, init: RequestInit) => Promise<Response>>(() => Promise.resolve(status(403, Code.PERMISSION_DENIED, 'CSRF_FAILED')))
+    vi.stubGlobal('fetch', fetcher)
+    await expect(api.undeleteLink({ name: 'links/a', requestId: '11111111-1111-4111-8111-111111111111' })).rejects.toMatchObject({ status: 403, reason: 'CSRF_FAILED' })
+    expect(fetcher).toHaveBeenCalledOnce()
+    expect(fetcher.mock.calls[0]?.[1].headers).toMatchObject({ 'X-CSRF-Token': '1', 'Content-Type': 'application/json' })
   })
 
   it('turns failures into ApiErrors with the copy to show, and retries only transient ones', async () => {

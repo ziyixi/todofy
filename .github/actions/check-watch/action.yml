@@ -46,7 +46,6 @@ runs:
       env:
         WATCH_ACCESS_OWNER: owner@example.com
         WATCH_ACCESS_OWNER_ALIASES: ''
-        WATCH_CSRF_SIGNING_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
       shell: bash -e {0}
       run: |
         node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/watch-secrets.json"

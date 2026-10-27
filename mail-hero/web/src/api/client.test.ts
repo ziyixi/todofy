@@ -1,14 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Endpoint_AuthType } from '@ziyixi/proto/mailhero/ui/v2/endpoint_pb'
 import { SummarizeDeliveryAttemptsRequest_Granularity } from '@ziyixi/proto/mailhero/ui/v2/mail_hero_ui_service_pb'
 import { Code, RpcError, statusBody } from '@ziyixi/proto/rpc-status'
-import { api, ApiError, filterOf, loadMessage, NETWORK_MESSAGE, resetClientForTests, timestamp } from './client'
+import { api, ApiError, filterOf, loadMessage, NETWORK_MESSAGE, timestamp } from './client'
 
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } })
 const failure = (status: number, code: Code, reason: string, metadata: Record<string, string> = {}, localized = '服务端文案') => json(statusBody(new RpcError(code, reason, reason, { metadata, httpStatus: status }),
   { domain: 'mail-hero.ziyixi.science', requestId: '0123456789abcdef', localized: { locale: 'zh-CN', message: localized } }), status)
-
-beforeEach(() => resetClientForTests())
 afterEach(() => vi.unstubAllGlobals())
 
 /** The URL and init of every fetch, in order. */
@@ -36,30 +34,28 @@ describe('the mailhero.ui.v2 client', () => {
     expect(Object.fromEntries(url.searchParams)).toEqual({ start_time: '2026-09-01T07:00:00Z', end_time: '2026-09-02T07:00:00Z', granularity: 'day', time_zone: 'America/Los_Angeles' })
   })
 
-  it('gets the CSRF token once from /api/csrf, then sends it with every mutation', async () => {
+  it('sends JSON mutations with a fixed custom header without a security roundtrip', async () => {
     const created = { name: 'endpoints/created', display_name: 'Personal', uri: 'https://example.test/hook' }
-    const calls = stub(json({ token: 'signed-token' }), json(created), json({ endpoint: created, affected_revision_count: 2 }))
+    const calls = stub(json(created), json({ endpoint: created, affected_revision_count: 2 }))
     await api.createEndpoint({ endpoint: { displayName: 'Personal', uri: 'https://example.test/hook', authType: Endpoint_AuthType.BEARER, credential: 'secret' }, requestId: '9b2f0c1e-0000-4000-8000-000000000001' })
     await api.unblockEndpoint({ name: 'endpoints/endpoint-1', etag: '7' })
-    const [token, create, unblock] = calls()
-    expect(token).toMatchObject({ url: '/api/csrf' })
+    const [create, unblock] = calls()
     expect(create).toMatchObject({ url: '/api/v2/endpoints?request_id=9b2f0c1e-0000-4000-8000-000000000001', method: 'POST',
-      headers: { 'X-CSRF-Token': 'signed-token', 'Content-Type': 'application/json' }, body: { display_name: 'Personal', uri: 'https://example.test/hook', auth_type: 'bearer', credential: 'secret' } })
-    expect(unblock).toMatchObject({ url: '/api/v2/endpoints/endpoint-1:unblock', method: 'POST', headers: { 'X-CSRF-Token': 'signed-token' }, body: { etag: '7' } })
-    expect(calls()).toHaveLength(3)
+      headers: { 'X-CSRF-Token': '1', 'Content-Type': 'application/json' }, body: { display_name: 'Personal', uri: 'https://example.test/hook', auth_type: 'bearer', credential: 'secret' } })
+    expect(unblock).toMatchObject({ url: '/api/v2/endpoints/endpoint-1:unblock', method: 'POST', headers: { 'X-CSRF-Token': '1' }, body: { etag: '7' } })
+    expect(calls()).toHaveLength(2)
   })
 
   it('sends only the masked fields of an update, the etag among them', async () => {
-    const calls = stub(json({ token: 'signed-token' }), json({ name: 'settings', etag: '4' }))
+    const calls = stub(json({ name: 'settings', etag: '4' }))
     await api.updateSettings({ settings: { name: 'settings', etag: '3', sendPaused: true, rawRetentionDays: 9 }, updateMask: { paths: ['send_paused', 'etag'] } })
-    expect(calls()[1]).toMatchObject({ url: '/api/v2/settings?update_mask=send_paused%2Cetag', method: 'PATCH', body: { etag: '3', send_paused: true } })
+    expect(calls()[0]).toMatchObject({ url: '/api/v2/settings?update_mask=send_paused%2Cetag', method: 'PATCH', body: { etag: '3', send_paused: true } })
   })
 
-  it('renews a refused CSRF token once and repeats the same request', async () => {
-    const calls = stub(json({ token: 'old' }), failure(403, Code.PERMISSION_DENIED, 'CSRF_FAILED'), json({ token: 'new' }), json({ name: 'messages/m' }))
-    await api.reparseMessage({ name: 'messages/m', requestId: '9b2f0c1e-0000-4000-8000-000000000002' })
-    expect(calls().map(call => [call.url, call.headers['X-CSRF-Token']])).toEqual([['/api/csrf', undefined], ['/api/v2/messages/m:reparse', 'old'], ['/api/csrf', undefined], ['/api/v2/messages/m:reparse', 'new']])
-    expect(calls()[1].body).toEqual(calls()[3].body)
+  it('does not replay a refused mutation or obtain another header value', async () => {
+    const calls = stub(failure(403, Code.PERMISSION_DENIED, 'CSRF_FAILED'))
+    await expect(api.reparseMessage({ name: 'messages/m', requestId: '9b2f0c1e-0000-4000-8000-000000000002' })).rejects.toMatchObject({ status: 403, reason: 'CSRF_FAILED' })
+    expect(calls().map(call => [call.url, call.headers['X-CSRF-Token']])).toEqual([['/api/v2/messages/m:reparse', '1']])
   })
 
   it('turns every failure into an ApiError with the reason, the copy and the request ID', async () => {

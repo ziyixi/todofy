@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CSRF_KEY, errorCode, fakes, logged, OWNER, owner, send, statusReason, uiOk, uiRefusal, type CoreCall, type CoreReply, type StatusBody } from './helpers.ts';
+import { errorCode, fakes, logged, OWNER, owner, statusReason, uiOk, uiRefusal, type CoreCall, type CoreReply, type StatusBody } from './helpers.ts';
 
 const ORIGIN = 'http://todofy.localhost:8787';
 const EVENT = '0b8f5a4e-3c1d-4c52-9f0e-2d7c8b6a5f41';
@@ -7,30 +7,13 @@ const RECONCILE = `/api/v1/mailEvents/${EVENT}:reconcile`;
 const RECONCILE_BODY = JSON.stringify({ action: 'dismiss', etag: '3', request_id: '3b0d7a52-8f0e-4a8e-9a55-2f0f6c1d9e11' });
 const AT = '2026-09-28T08:00:00Z';
 
-function b64url(bytes: Uint8Array): string {
-  let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-/** A token in the Python format (json.dumps with its default ", " / ": " separators). */
-async function mintCsrf(overrides: Record<string, unknown> = {}, key = CSRF_KEY, raw?: string): Promise<string> {
-  const claims = { kind: 'csrf', owner: OWNER, nonce: 'test', exp: Math.floor(Date.now() / 1000) + 600, ...overrides };
-  const json = raw ?? JSON.stringify(claims).replace(/,"/g, ', "').replace(/":/g, '": ');
-  const payload = b64url(new TextEncoder().encode(json));
-  const bytes = Uint8Array.from(key.match(/../g) ?? [], (pair) => parseInt(pair, 16));
-  const hmac = await crypto.subtle.importKey('raw', bytes, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-  const signature = await crypto.subtle.sign('HMAC', hmac, new TextEncoder().encode(payload));
-  return `${payload}.${b64url(new Uint8Array(signature))}`;
-}
-
 function csrfHeaders(token: string, origin = ORIGIN): Record<string, string> {
-  return { origin, 'x-csrf-token': token, cookie: `todofy_csrf=${token}` };
+  return { origin, 'x-csrf-token': token };
 }
 
 /** A reconcile with a valid CSRF pair (or the given headers). */
 async function reconcile(env: Parameters<typeof owner>[0], headers?: Record<string, string>, body = RECONCILE_BODY): Promise<Response> {
-  return owner(env, RECONCILE, { method: 'POST', body, headers: { 'content-type': 'application/json', ...(headers ?? csrfHeaders(await mintCsrf())) } });
+  return owner(env, RECONCILE, { method: 'POST', body, headers: { 'content-type': 'application/json', ...(headers ?? csrfHeaders('1')) } });
 }
 
 function expectPrivate(response: Response, cacheControl = 'no-store'): void {
@@ -91,7 +74,7 @@ describe('private headers and assets', () => {
     expect(fallback.headers.get('content-type')).toBe('text/html');
     expectPrivate(fallback);
 
-    const post = await owner(env, '/assets/app-1a2b3c.js', { method: 'POST', headers: csrfHeaders(await mintCsrf()) });
+    const post = await owner(env, '/assets/app-1a2b3c.js', { method: 'POST', headers: csrfHeaders('1') });
     expect(post.status).toBe(405);
     expectPrivate(post);
   });
@@ -109,7 +92,7 @@ describe('todofy.ui.v1 through the transcoder', () => {
   it('passes the verified owner, the rpc and the decoded request, and nothing else from the client', async () => {
     const { env, core: calls } = fakes({}, core);
     const response = await reconcile(env, {
-      ...csrfHeaders(await mintCsrf()),
+      ...csrfHeaders('1'),
       authorization: 'Bearer x',
       'cf-access-jwt-assertion': 'jwt',
       'x-todofy-owner': 'intruder@example.com',
@@ -237,7 +220,7 @@ describe('todofy.ui.v1 through the transcoder', () => {
       expect(response.status, path).toBe(404);
       expect(await statusReason(response)).toBe('NOT_FOUND');
     }
-    const wrong = await owner(env, '/api/v1/serviceStatus', { method: 'DELETE', headers: csrfHeaders(await mintCsrf()) });
+    const wrong = await owner(env, '/api/v1/serviceStatus', { method: 'DELETE', headers: csrfHeaders('1') });
     expect(wrong.status).toBe(405);
     expect(wrong.headers.get('allow')).toBe('GET, HEAD, OPTIONS');
     expect(calls).toHaveLength(0);
@@ -344,105 +327,42 @@ describe('GetIntegration', () => {
   });
 });
 
-describe('CSRF', () => {
-  it('issues a signed token in the body and a strict HttpOnly cookie at /api/csrf', async () => {
+describe('same-origin JSON mutations', () => {
+  it('returns a static compatibility header without setting a cookie or requiring a key', async () => {
     const { env, core: calls } = fakes({}, core);
-    const before = Math.floor(Date.now() / 1000);
     const response = await owner(env, '/api/csrf');
     expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ token: '1' });
+    expect(response.headers.get('set-cookie')).toBeNull();
     expectPrivate(response);
-    const { token } = await response.json<{ token: string }>();
-    expect(response.headers.get('set-cookie')).toBe(`todofy_csrf=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200`);
-    const [payload = ''] = token.split('.');
-    const claims = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/'))) as Record<string, unknown>;
-    expect(Object.keys(claims)).toEqual(['kind', 'owner', 'nonce', 'exp']);
-    expect(claims).toMatchObject({ kind: 'csrf', owner: OWNER });
-    expect(claims.nonce).toMatch(/^[A-Za-z0-9_-]{22}$/);
-    expect(claims.exp).toBeGreaterThanOrEqual(before + 43200);
-    expect(token).not.toContain('=');
-
-    expect((await reconcile(env, csrfHeaders(token))).status).toBe(200);
-    expect(calls).toHaveLength(1);
-
-    const post = await owner(env, '/api/csrf', { method: 'POST', headers: csrfHeaders(token) });
-    expect(post.status).toBe(405);
-    expect(await statusReason(post)).toBe('METHOD_NOT_ALLOWED');
-  });
-
-  it('marks the cookie Secure over HTTPS and accepts the https origin there', async () => {
-    const { env, core: calls } = fakes({}, core);
-    const issued = await send(env, 'https://todofy.localhost/api/csrf');
-    expect(issued.headers.get('set-cookie')).toMatch(/; Max-Age=43200; Secure$/);
-    const write = await send(env, `https://todofy.localhost${RECONCILE}`, {
-      method: 'POST',
-      body: RECONCILE_BODY,
-      headers: { 'content-type': 'application/json', ...csrfHeaders(await mintCsrf(), 'HTTPS://TODOFY.LOCALHOST') },
-    });
-    expect(write.status).toBe(200);
+    expect((await reconcile(env, csrfHeaders('1'))).status).toBe(200);
     expect(calls).toHaveLength(1);
   });
-
-  it('accepts tokens already in browsers (golden vectors from before the shared package)', async () => {
-    // CSRF_SIGNING_KEY = "ab" x 32, owner owner@example.com, exp 4102444800 (packages/edge-auth/SPEC.md §3.1).
-    const golden = [
-      // Minted by the gateway: compact JSON, 22-character nonce.
-      'eyJraW5kIjoiY3NyZiIsIm93bmVyIjoib3duZXJAZXhhbXBsZS5jb20iLCJub25jZSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUEiLCJleHAiOjQxMDI0NDQ4MDB9.lfoeE-7aIjGjl7ay6lmgyn7btoKqiKIVBGkUjvNu65g',
-      // Minted by the former Python core: json.dumps separators.
-      'eyJraW5kIjogImNzcmYiLCAib3duZXIiOiAib3duZXJAZXhhbXBsZS5jb20iLCAibm9uY2UiOiAidGVzdCIsICJleHAiOiA0MTAyNDQ0ODAwfQ.idEgvgFniPRSJdv7P7EcsU0evUgyoX35jRlO6dor7zA',
-    ];
+  it('checks exact Origin, custom header and JSON media type before malformed JSON or core calls', async () => {
     const { env, core: calls } = fakes({}, core);
-    for (const token of golden) expect((await reconcile(env, csrfHeaders(token))).status).toBe(200);
-    expect(calls).toHaveLength(2);
-  });
-
-  it('rejects cross-site and forged writes with 403 before reading the body or calling the core', async () => {
-    const { env, core: calls } = fakes({}, core);
-    const token = await mintCsrf();
-    const other = await mintCsrf({ nonce: 'other' });
-    const [payload = ''] = token.split('.');
     const cases: Record<string, Record<string, string>> = {
-      'no origin': { 'x-csrf-token': token, cookie: `todofy_csrf=${token}` },
-      'cross-site origin': csrfHeaders(token, 'https://evil.example'),
-      'origin on another port': csrfHeaders(token, 'http://todofy.localhost:9999'),
-      'no header': { origin: ORIGIN, cookie: `todofy_csrf=${token}` },
-      'no cookie': { origin: ORIGIN, 'x-csrf-token': token },
-      'header differs from cookie': { origin: ORIGIN, 'x-csrf-token': token, cookie: `todofy_csrf=${other}` },
-      'first cookie wins': { origin: ORIGIN, 'x-csrf-token': token, cookie: `todofy_csrf=${other}; todofy_csrf=${token}` },
-      'too long': csrfHeaders(`${token}${'a'.repeat(1025 - token.length)}`),
-      'no signature': csrfHeaders(payload),
-      'signed with another key': csrfHeaders(await mintCsrf({}, '11'.repeat(32))),
-      expired: csrfHeaders(await mintCsrf({ exp: 1 })),
-      'another owner': csrfHeaders(await mintCsrf({ owner: 'owner.alias@example.net' })),
-      'not a csrf token': csrfHeaders(await mintCsrf({ kind: 'confirm' })),
-      'fractional exp': csrfHeaders(await mintCsrf({ exp: Math.floor(Date.now() / 1000) + 600.5 })),
-      'string exp': csrfHeaders(await mintCsrf({ exp: String(Math.floor(Date.now() / 1000) + 600) })),
-      'signed garbage': csrfHeaders(await mintCsrf({}, CSRF_KEY, 'not json')),
-      'signed array': csrfHeaders(await mintCsrf({}, CSRF_KEY, '["csrf"]')),
+      missingOrigin: { 'x-csrf-token': '1' }, nullOrigin: csrfHeaders('1', 'null'),
+      foreignOrigin: csrfHeaders('1', 'https://foreign.example.test'),
+      uppercaseOrigin: csrfHeaders('1', 'HTTP://TODOFY.LOCALHOST:8787'),
+      missingHeader: { origin: ORIGIN }, emptyHeader: csrfHeaders(''),
+      tooLong: csrfHeaders('x'.repeat(1025)),
+      form: { ...csrfHeaders('1'), 'content-type': 'application/x-www-form-urlencoded' },
+      text: { ...csrfHeaders('1'), 'content-type': 'text/plain' },
+      missingType: { ...csrfHeaders('1'), 'content-type': '' },
     };
     for (const [name, headers] of Object.entries(cases)) {
-      const response = await reconcile(env, headers, 'not even json');
+      const response = await reconcile(env, headers, 'not json');
       expect(response.status, name).toBe(403);
       expect(await statusReason(response), name).toBe('CSRF_FAILED');
-      expectPrivate(response);
     }
     expect(calls).toHaveLength(0);
   });
-
-  it('needs a well-formed signing key for issuing and writing, not for reading', async () => {
-    for (const key of [undefined, 'ab'.repeat(31), `${'ab'.repeat(31)}zz`]) {
-      const { env, core: calls } = fakes({ CSRF_SIGNING_KEY: key }, core);
-      for (const response of [await owner(env, '/api/csrf'), await reconcile(env)]) {
-        expect(response.status).toBe(503);
-        expect(await statusReason(response)).toBe('NOT_CONFIGURED');
-      }
-      expect((await owner(env, '/api/v1/serviceStatus')).status).toBe(200);
-      expect(calls).toHaveLength(1);
-    }
-  });
-
-  it('accepts an uppercase signing key', async () => {
-    const { env } = fakes({ CSRF_SIGNING_KEY: CSRF_KEY.toUpperCase() }, core);
-    expect((await reconcile(env)).status).toBe(200);
+  it('accepts cached opaque headers without a cookie while preserving owner authentication', async () => {
+    const { env, core: calls } = fakes({}, core);
+    expect((await reconcile(env, csrfHeaders('legacy.cached.header'))).status).toBe(200);
+    expect(calls[0]?.args[0]).toBe(OWNER);
+    const post = await owner(env, '/api/csrf', { method: 'POST' });
+    expect(post.status).toBe(405);
   });
 });
 

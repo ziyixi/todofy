@@ -42,7 +42,6 @@ export interface Env {
   readonly ACCESS_OWNER?: string;
   readonly ACCESS_OWNER_ALIASES?: string;
   /** 64 hex characters: HMAC key of the watch_csrf tokens. */
-  readonly CSRF_SIGNING_KEY?: string;
 
   // local development and tests only (.dev.vars, the workerd harness); never in the production config
   readonly DEV_AUTH_BYPASS?: string;

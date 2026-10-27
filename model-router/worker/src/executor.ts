@@ -47,7 +47,7 @@ export async function finalResponse(response: Response): Promise<Response> {
 
 export function executorClient(env: Env, app: string, signal?: AbortSignal, fetcher: typeof fetch = fetch) {
   const origin = env.CODEX_EXECUTOR_ORIGIN;
-  if (!origin || !env.CODEX_EXECUTOR_TOKEN)
+  if (!origin || !env.CODEX_ACCESS_CLIENT_ID || !env.CODEX_ACCESS_CLIENT_SECRET)
     precondition('MODEL_NOT_CONFIGURED', 'The model executor connection is not configured.');
   return createHttpClient(ModelService, async (call) => {
     const path = call.url.replace(/^\/api\/model\/v1\//, '/api/codex/v1/model/');
@@ -58,7 +58,6 @@ export function executorClient(env: Env, app: string, signal?: AbortSignal, fetc
       headers: {
         'content-type': 'application/json',
         accept: 'text/event-stream',
-        authorization: `Bearer ${env.CODEX_EXECUTOR_TOKEN}`,
         'x-inference-caller': app,
         ...(env.CODEX_ACCESS_CLIENT_ID ? { 'CF-Access-Client-Id': env.CODEX_ACCESS_CLIENT_ID } : {}),
         ...(env.CODEX_ACCESS_CLIENT_SECRET ? { 'CF-Access-Client-Secret': env.CODEX_ACCESS_CLIENT_SECRET } : {}),

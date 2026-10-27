@@ -24,7 +24,6 @@ import {
   type PreviewWatchResponse,
 } from '@ziyixi/proto/watch/ui/v1/watch_ui_service_pb'
 import { fromWire, toWire } from '@ziyixi/proto/wire-json'
-import { resetClientForTests } from '../api.ts'
 
 export interface Call {
   readonly method: string
@@ -94,7 +93,7 @@ export class FakeServer {
       domain: 'watch.ziyixi.science',
       maxBodyBytes: 64 * 1024,
       authorize: (request, route) => {
-        if (!route.safe && !request.headers.get('x-csrf-token')) fail(Code.PERMISSION_DENIED, 'CSRF_FAILED')
+        if (!route.safe && (request.headers.get('x-csrf-token') !== '1' || request.headers.get('content-type')?.split(';', 1)[0] !== 'application/json')) fail(Code.PERMISSION_DENIED, 'CSRF_FAILED')
       },
     })
   }
@@ -195,7 +194,7 @@ export class FakeServer {
 
   /** Replaces fetch with this server. */
   install(): this {
-    resetClientForTests()
+
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {

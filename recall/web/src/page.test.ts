@@ -277,7 +277,7 @@ describe('the ⋯ actions', () => {
     const update = fake.calls.find((call) => call.method === 'PATCH')
     expect(update?.path).toMatch(/^\/api\/v1\/settings\?update_mask=denylist_patterns%2Cetag&request_id=[0-9a-f-]{36}$/)
     expect(update?.body).toEqual({ denylist_patterns: ['bank.example', 'github.com'], etag: 's1' })
-    expect(update?.headers['x-csrf-token']).toBe('csrf-token')
+    expect(update?.headers['x-csrf-token']).toBe('1')
     expect(toastText(root)).toBe('以后不保存 github.com 的正文和截图')
     // Already there: nothing more is sent.
     buttonNamed(root, '页面操作').click()

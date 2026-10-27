@@ -90,10 +90,6 @@ def install(bundle, private_file):
         return
     allowed = read_json(Path(bundle) / "allowedkeys.json")
     private = credentials(private_file, allowed)
-    require(
-        "codex-gateway" not in public["images"] or "codex_gateway_env" in private,
-        "CODEX_GATEWAY_CREDENTIAL_REQUIRED",
-    )
     cloudflared = preflight(bundle)
     profile = public["profile"]
     event("inputs", "verified")

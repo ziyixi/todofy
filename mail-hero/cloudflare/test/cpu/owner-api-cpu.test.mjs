@@ -142,15 +142,9 @@ function start(script, outbound, keys) {
       assert.ok(response.ok, `GET ${path}: ${response.status} ${new TextDecoder().decode(body).slice(0, 300)}`)
       return body
     }
-    // The CSRF token comes after the measured first request: the session fetches it lazily.
-    let csrf
     const mutate = async (path, method, body) => {
-      if (!csrf) {
-        const response = await mf.dispatchFetch(`${ORIGIN}/api/csrf`, { headers })
-        csrf = { token: (await response.json()).token, cookie: response.headers.get('set-cookie').split(';')[0] }
-      }
       const response = await mf.dispatchFetch(`${ORIGIN}${path}`, { method, body: JSON.stringify(body),
-        headers: { ...headers, Origin: ORIGIN, Cookie: csrf.cookie, 'X-CSRF-Token': csrf.token, 'Content-Type': 'application/json' } })
+        headers: { ...headers, Origin: ORIGIN, 'X-CSRF-Token': '1', 'Content-Type': 'application/json' } })
       const text = await response.text()
       assert.ok(response.ok, `${method} ${path}: ${response.status} ${text.slice(0, 300)}`)
       return JSON.parse(text)

@@ -3,12 +3,14 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { CONFIG, generateSecrets, injectedVars, placeholderIn, refusal } from '../deploy-vars.mjs'
 
-const secrets = { ACCESS_OWNER: 'owner@example.test', CSRF_SIGNING_KEY: 'ab'.repeat(32) }
+const secrets = { ACCESS_OWNER: 'owner@example.test' }
 
 test('release requires its complete owner map and leaves owner-machine provider secrets out', () => {
   assert.deepEqual(generateSecrets({ MODEL_ROUTER_WORKER_SECRETS: JSON.stringify(secrets) }), { ...secrets, ACCESS_OWNER_ALIASES: ' ' })
   assert.throws(() => generateSecrets({}), /MODEL_ROUTER_WORKER_SECRETS/)
-  assert.throws(() => generateSecrets({ MODEL_ROUTER_WORKER_SECRETS: JSON.stringify({ ...secrets, ANTHROPIC_API_KEY_BRIEF: 'synthetic' }) }), /MODEL_ROUTER_WORKER_SECRETS/)
+  for (const name of ['ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'CODEX_ACCESS_CLIENT_ID', 'CODEX_ACCESS_CLIENT_SECRET', 'MODEL_ROUTER_NEWSLETTER_TOKEN']) {
+    assert.throws(() => generateSecrets({ MODEL_ROUTER_WORKER_SECRETS: JSON.stringify({ ...secrets, [name]: 'synthetic' }) }), /MODEL_ROUTER_WORKER_SECRETS/)
+  }
 })
 
 test('release identity uses the selected source SHA and refuses caller overrides', () => {

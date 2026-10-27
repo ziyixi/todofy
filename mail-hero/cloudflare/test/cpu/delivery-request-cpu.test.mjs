@@ -96,12 +96,9 @@ function start(script, outbound, keys) {
     const bucket = await mf.getR2Bucket('MAIL_STORE', 'mail-hero')
     const jwt = await new SignJWT({ email: ENV.ACCESS_OWNER }).setProtectedHeader({ alg: 'RS256', kid: KID }).setIssuer(ENV.ACCESS_ISSUER)
       .setAudience(ENV.ACCESS_AUDIENCE).setSubject('synthetic-user').setIssuedAt().setExpirationTime('30m').sign(keys.privateKey)
-    const csrf = await mf.dispatchFetch(`${ORIGIN}/api/csrf`, { headers: { 'Cf-Access-Jwt-Assertion': jwt } })
-    assert.equal(csrf.status, 200)
-    const token = (await csrf.json()).token, cookie = csrf.headers.get('set-cookie').split(';')[0]
     const api = async (path, method, body) => {
       const response = await mf.dispatchFetch(`${ORIGIN}/api/v2${path}`, { method,
-        headers: { 'Cf-Access-Jwt-Assertion': jwt, Origin: ORIGIN, Cookie: cookie, 'X-CSRF-Token': token, 'Content-Type': 'application/json' },
+        headers: { 'Cf-Access-Jwt-Assertion': jwt, Origin: ORIGIN, 'X-CSRF-Token': '1', 'Content-Type': 'application/json' },
         body: JSON.stringify(body) })
       const result = await response.json()
       assert.ok(response.ok, `${method} ${path}: ${response.status} ${JSON.stringify(result)}`)

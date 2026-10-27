@@ -13,10 +13,6 @@ inputs:
     description: "dashboard access owner aliases"
     required: false
     default: ''
-  watch-csrf-signing-key:
-    description: "watch csrf signing key"
-    required: false
-    default: ''
   watch-worker-secrets:
     description: "watch worker secrets"
     required: false
@@ -85,7 +81,6 @@ runs:
         WATCH_WORKER_SECRETS: ${{ inputs.watch-worker-secrets }}
         WATCH_ACCESS_OWNER: ${{ inputs.dashboard-access-owner }}
         WATCH_ACCESS_OWNER_ALIASES: ${{ inputs.dashboard-access-owner-aliases }}
-        WATCH_CSRF_SIGNING_KEY: ${{ inputs.watch-csrf-signing-key }}
       shell: bash -e {0}
       run: node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/watch-secrets.json"
     # deploy-vars.mjs adds BUILD_SHA as --var and refuses the all-zeros Access AUD; the bundle that ships is held to

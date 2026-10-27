@@ -212,16 +212,22 @@ inputs below and preserve unreadable runtime secrets when no full map is supplie
 replacement input and must contain every declared required secret. [Bootstrap](../tools/cloud-bootstrap/README.md)
 also initializes missing operational variables without overwriting existing pause or maintenance values.
 
+Owner JSON APIs use exact Origin, `X-CSRF-Token: 1` and `application/json` after Access authentication.
+They require no CSRF signing key or cookie. Existing encrypted GitHub maps may retain the retired
+`CSRF_SIGNING_KEY` field: deploy parsers drop that exact field before validating the remaining map.
+No other undeclared key is accepted. Release checks temporarily tolerate that old Worker binding;
+the owner deletes the live key only after the keyless release is verified. New bootstrap maps omit it.
+
 | Job | Variables | Secrets |
 | --- | --- | --- |
 | `Todofy deploy` | `TODOFY_MAINTENANCE_MODE`, `TODOFY_PROCESSING_PAUSED` (`TODOFY_REMINDER_ENABLED`, `TODOFY_FORCE_PAUSE_TODOIST` and `TODOFY_GTD_REVIEW_ENABLED` are read no more since 2026-10-21; delete them after that release) | `CF_API_TOKEN`, `TODOFY_ACCESS_OWNER`, `TODOFY_ACCESS_OWNER_ALIASES` (the `TODOFY_TODOIST_*_PROJECT_ID` secrets are read no more either) |
 | `Mail Hero deploy` | `MAIL_HERO_FORCE_SEND_PAUSED`, `MAIL_HERO_MAINTENANCE_MODE`, `MAIL_HERO_NATIVE_BACKUP_ENABLED` | `MAIL_HERO_CF_API_TOKEN`, `MAIL_HERO_RECEIVE_ADDRESS`, `MAIL_HERO_ACCESS_OWNER`, `MAIL_HERO_ACCESS_OWNER_ALIASES` |
 | Website release/relay | Website's settings stay in its workflow/config; optional `WEBSITE_BOOTSTRAP_APPROVAL` for an empty release registry | `CF_API_TOKEN`; release additionally uses `WEBSITE_NOTION_TOKEN`, `WEBSITE_NOTION_DATA_SOURCE_ID`; relay retains its existing Worker secrets |
-| Links, Watch deploys | Committed app configuration; owner pause settings remain app-owned | `CF_API_TOKEN`, `DASHBOARD_ACCESS_OWNER`, `DASHBOARD_ACCESS_OWNER_ALIASES`; respectively `LINKS_CSRF_SIGNING_KEY`, `WATCH_CSRF_SIGNING_KEY` |
-| `Recall deploy` | Committed config and `BUILD_SHA` from the release commit; no switch | `CF_API_TOKEN`, `DASHBOARD_ACCESS_OWNER`, `DASHBOARD_ACCESS_OWNER_ALIASES`, `RECALL_CSRF_SIGNING_KEY`; the machine tokens' digests are put from the owner's machine only, never through GitHub |
-| `Brief deploy` | `BRIEF_MODE` (`off`, `archive`, `shadow` or `live`) | `CF_API_TOKEN`, `DASHBOARD_ACCESS_OWNER`, `DASHBOARD_ACCESS_OWNER_ALIASES`, `BRIEF_CSRF_SIGNING_KEY`, `BRIEF_FEEDBACK_SIGNING_KEY`, `BRIEF_MAIL_FROM`, `BRIEF_MAIL_TO`; the owner manages Claude and Resend keys in Cloudflare settings or with the local CLI, never through GitHub |
+| Links, Watch deploys | Committed app configuration; owner pause settings remain app-owned | `CF_API_TOKEN`, `DASHBOARD_ACCESS_OWNER`, `DASHBOARD_ACCESS_OWNER_ALIASES` |
+| `Recall deploy` | Committed config and `BUILD_SHA` from the release commit; no switch | `CF_API_TOKEN`, `DASHBOARD_ACCESS_OWNER`, `DASHBOARD_ACCESS_OWNER_ALIASES`; the machine tokens' digests are put from the owner's machine only, never through GitHub |
+| `Brief deploy` | `BRIEF_MODE` (`off`, `archive`, `shadow` or `live`) | `CF_API_TOKEN`, `DASHBOARD_ACCESS_OWNER`, `DASHBOARD_ACCESS_OWNER_ALIASES`, `BRIEF_FEEDBACK_SIGNING_KEY`, `BRIEF_MAIL_FROM`, `BRIEF_MAIL_TO`; the owner manages Claude and Resend keys in Cloudflare settings or with the local CLI, never through GitHub |
 | `Fleet deploy` | Committed config and `BUILD_SHA` from the release commit | `CF_API_TOKEN`, `FLEET_ACCESS_OWNER`, `FLEET_ACCESS_OWNER_ALIASES`, `FLEET_REPORT_HMAC_KEY` |
-| `Dashboard deploy` | Required boolean `DASHBOARD_CANARY_ENABLED` | `CF_API_TOKEN`, `DASHBOARD_ACCESS_OWNER`, `DASHBOARD_ACCESS_OWNER_ALIASES`, `DASHBOARD_CSRF_SIGNING_KEY`, `DASHBOARD_CF_ANALYTICS_TOKEN` (separate least-privilege read-only token; [setup](../dashboard/docs/setup.md) §4) |
+| `Dashboard deploy` | Required boolean `DASHBOARD_CANARY_ENABLED` | `CF_API_TOKEN`, `DASHBOARD_ACCESS_OWNER`, `DASHBOARD_ACCESS_OWNER_ALIASES`, `DASHBOARD_CF_ANALYTICS_TOKEN` (separate least-privilege read-only token; [setup](../dashboard/docs/setup.md) §4) |
 | `VPS deploy` | `VPS_DEPLOY_ENABLED`; dispatch may explicitly select resume | `PLATFORM_ACCESS_CLIENT_ID`, `PLATFORM_ACCESS_CLIENT_SECRET`, `PLATFORM_DEPLOY_TOKEN`; no SSH or Kubernetes credential |
 
 [Website release](../.github/workflows/website-release.yml) keeps its separate `website-production`

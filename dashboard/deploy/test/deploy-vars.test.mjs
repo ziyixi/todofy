@@ -17,7 +17,6 @@ function environment() {
     DASHBOARD_CANARY_ENABLED: 'true',
     DASHBOARD_ACCESS_OWNER: 'owner@example.org',
     DASHBOARD_ACCESS_OWNER_ALIASES: 'alias@example.org, second@example.net',
-    DASHBOARD_CSRF_SIGNING_KEY: 'd'.repeat(64),
     DASHBOARD_CF_ANALYTICS_TOKEN: 'synthetic_analytics-token-0000000000000',
   }
 }
@@ -25,11 +24,11 @@ function environment() {
 test('the marker lists every input of each mode', () => {
   const marked = {}
   for (const [, mode, names] of readFileSync(WRAPPER, 'utf8').matchAll(/^\/\/ deploy-vars-inputs (\w+): (.+)$/gm)) {
-    marked[mode] = [...(marked[mode] ?? []), ...names.split(' ')]
+    marked[mode] = [...(marked[mode] ?? []), ...names.trim().split(/\s+/)]
   }
   assert.deepEqual(marked, {
     exec: INJECTED.map(({ from }) => from),
-    secrets: ['DASHBOARD_ACCESS_OWNER', 'DASHBOARD_ACCESS_OWNER_ALIASES', 'DASHBOARD_CSRF_SIGNING_KEY', 'DASHBOARD_CF_ANALYTICS_TOKEN'],
+    secrets: ['DASHBOARD_ACCESS_OWNER', 'DASHBOARD_ACCESS_OWNER_ALIASES', 'DASHBOARD_CF_ANALYTICS_TOKEN'],
   })
 })
 
@@ -59,11 +58,10 @@ test('the build must be the 40-hex commit', () => {
   }
 })
 
-test('the secrets file holds the owner, aliases, CSRF key and analytics token', () => {
+test('the secrets file holds the owner, aliases and analytics token', () => {
   assert.deepEqual(generateSecrets(environment()), {
     ACCESS_OWNER: 'owner@example.org',
     ACCESS_OWNER_ALIASES: 'alias@example.org,second@example.net',
-    CSRF_SIGNING_KEY: 'd'.repeat(64),
     CF_ANALYTICS_TOKEN: 'synthetic_analytics-token-0000000000000',
   })
   // An emptied alias list replaces the previous secret with a single space.
@@ -77,7 +75,6 @@ test('the secrets file holds the owner, aliases, CSRF key and analytics token', 
     ['DASHBOARD_ACCESS_OWNER_ALIASES', 'a@example.org,a@example.org'],
     ['DASHBOARD_ACCESS_OWNER_ALIASES', Array.from({ length: 9 }, (_, i) => `a${i}@example.org`).join(',')],
     ['DASHBOARD_ACCESS_OWNER_ALIASES', Array.from({ length: 8 }, (_, i) => `${'x'.repeat(300)}${i}@example.org`).join(',')],
-    ['DASHBOARD_CSRF_SIGNING_KEY', 'd'.repeat(63)], ['DASHBOARD_CSRF_SIGNING_KEY', undefined],
     ['DASHBOARD_CF_ANALYTICS_TOKEN', undefined], ['DASHBOARD_CF_ANALYTICS_TOKEN', 'short'], ['DASHBOARD_CF_ANALYTICS_TOKEN', 'token with spaces 000000000'],
   ]
   for (const [name, value] of cases) {
@@ -133,9 +130,9 @@ test('exec runs the command unchanged plus the --var flags; secrets writes 0600 
     assert.match(again.stderr, /already exists/)
 
     const bad = join(dir, 'bad.json')
-    const invalid = spawnSync(process.execPath, [WRAPPER, 'secrets', bad], { env: { ...env, DASHBOARD_CSRF_SIGNING_KEY: 'secret-looking-value' }, encoding: 'utf8' })
+    const invalid = spawnSync(process.execPath, [WRAPPER, 'secrets', bad], { env: { ...env, DASHBOARD_ACCESS_OWNER: 'secret-looking-value' }, encoding: 'utf8' })
     assert.equal(invalid.status, 1)
-    assert.equal(invalid.stderr.trim(), 'Invalid or missing deploy setting: DASHBOARD_CSRF_SIGNING_KEY')
+    assert.equal(invalid.stderr.trim(), 'Invalid or missing deploy setting: DASHBOARD_ACCESS_OWNER')
     assert.ok(!existsSync(bad))
 
     const printed = [result, written, again, invalid].map(({ stdout, stderr }) => stdout + stderr).join('\n')

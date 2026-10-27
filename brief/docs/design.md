@@ -73,7 +73,7 @@ One Worker `brief`, one SQLite Durable Object `BriefState` ("brief-v1"), the sha
 No D1, R2, KV, Queues, Workflows or cron trigger. Bindings: `BRIEF` (the object), `ASSETS`, `AI` (Workers AI, for
 bge-m3 only). Vars: `PUBLIC_HOST`, `ACCESS_ISSUER`, `ACCESS_AUDIENCE`, and from the deploy wrapper `BUILD_SHA` and
 `MODE` (the GitHub variable `BRIEF_MODE`: `off`, `archive`, `shadow` or `live`; anything else refused). Secrets from
-GitHub: `ACCESS_OWNER`, `ACCESS_OWNER_ALIASES`, `CSRF_SIGNING_KEY`, `FEEDBACK_SIGNING_KEY` (64 hex each),
+GitHub: `ACCESS_OWNER`, `ACCESS_OWNER_ALIASES`, `FEEDBACK_SIGNING_KEY` (64 hex),
 `MAIL_FROM`, `MAIL_TO` (personal values). Owner-machine secrets, put with `wrangler secret put` and never in GitHub
 (mailsort's `owner_machine_secrets` pattern): `ANTHROPIC_API_KEY`, `RESEND_API_KEY`. The SDK gets the key explicitly
 (`new Anthropic({ apiKey })`): its default credential chain does not exist in Workers.

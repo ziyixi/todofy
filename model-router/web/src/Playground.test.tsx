@@ -24,7 +24,7 @@ test('switching models clears unsupported parameters and sends only the common c
   expect(sent?.request_id).toMatch(/^[\da-f-]{36}$/)
   expect(sent?.input).toBe('Synthetic input')
   expect(sent?.config).toEqual({ model: 'models/subscription', instructions: [], parameters: {} })
-  expect(sent?.metadata).toEqual({ billing_app: 'console' })
+  expect(sent).not.toHaveProperty('metadata')
   expect(sent).not.toHaveProperty('app')
 })
 
@@ -106,23 +106,18 @@ test('copies the full neutral instruction configuration and disallows an unconfi
   expect(api.generate).not.toHaveBeenCalled()
 })
 
-test('paid connections require an explicit billing profile selection', async () => {
+test('uses shared configured models without selecting an application connection', async () => {
   const user = userEvent.setup()
-  const listModels = vi
-    .fn()
-    .mockResolvedValue([{ ...models[0], name: 'models/paid', display_name: 'Paid profile model', configured: true }])
-  const api = mockApi({ listModels })
+  const api = mockApi()
   renderApp(<Playground api={api} models={models} onGenerated={vi.fn()} />)
-  expect(screen.getByLabelText('计费配置')).toHaveValue('console')
-  expect(listModels).not.toHaveBeenCalled()
-  await user.selectOptions(screen.getByLabelText('计费配置'), 'brief')
-  await waitFor(() => expect(listModels).toHaveBeenCalledWith('brief'))
-  expect(await screen.findByRole('option', { name: 'Paid profile model' })).toBeInTheDocument()
-  await user.type(screen.getByLabelText('输入'), 'Synthetic paid-profile input')
+  expect(screen.queryByLabelText('计费配置')).not.toBeInTheDocument()
+  expect(screen.getByText(/Claude API 共用现有 US\$80\/月工作区额度/)).toBeInTheDocument()
+  expect(api.listModels).not.toHaveBeenCalled()
+  await user.type(screen.getByLabelText('输入'), 'Synthetic shared-connection input')
   await user.click(screen.getByRole('button', { name: '运行推理' }))
   await waitFor(() => expect(api.generate).toHaveBeenCalledOnce())
   const sent = vi.mocked(api.generate).mock.calls[0]?.[0]
-  expect(sent?.metadata).toEqual({ billing_app: 'brief' })
-  expect(sent?.config?.model).toBe('models/paid')
+  expect(sent?.config?.model).toBe(models[0]?.name)
+  expect(sent).not.toHaveProperty('metadata')
   expect(sent).not.toHaveProperty('app')
 })

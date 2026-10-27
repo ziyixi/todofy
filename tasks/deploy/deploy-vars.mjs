@@ -62,7 +62,6 @@ export function generateSecrets(env) {
   if (!env.TASKS_WORKER_SECRETS) throw new SettingError('TASKS_WORKER_SECRETS')
   const secrets = mergeWorkerSecrets('tasks', env, {}, SettingError)
   checked(secrets, 'ACCESS_OWNER', ACCESS_EMAIL)
-  checked(secrets, 'CSRF_SIGNING_KEY', /^[0-9a-fA-F]{64}$/)
   return { ...secrets, ACCESS_OWNER_ALIASES: aliases(secrets).join(',') || ' ' }
 }
 
@@ -114,7 +113,7 @@ export function run(argv, env = process.env) {
   }
   if (command === 'secrets' && rest.length === 1) {
     writeSecrets(rest[0], env)
-    console.log('Wrote the secrets file: ACCESS_OWNER, ACCESS_OWNER_ALIASES, CSRF_SIGNING_KEY (values not printed).')
+    console.log('Wrote the secrets file: ACCESS_OWNER, ACCESS_OWNER_ALIASES (values not printed).')
     return 0
   }
   if (command === 'exec' && rest[0] === '--') {

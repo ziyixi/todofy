@@ -55,7 +55,8 @@ class DependencyWorkspaces(unittest.TestCase):
         self.assertEqual([name for name in names if Path(name).name == "uv.lock"], ["uv.lock"])
         self.assertEqual([name for name in names if Path(name).name == ".python-version"], [".python-version"])
         self.assertRegex((ROOT / ".python-version").read_text().strip(), r"^3\.14\.\d+$")
-        pins = {pin.split("==", 1)[0] for pin in uv["constraint-dependencies"]}
+        pins = {pin.split("==", 1)[0].lower().replace("_", "-") for pin in uv["constraint-dependencies"]}
+        sources = {name.lower().replace("_", "-") for name in uv["sources"]}
         for member in uv["workspace"]["members"]:
             data = tomllib.loads((ROOT / member / "pyproject.toml").read_text())
             self.assertTrue(data["project"]["requires-python"].startswith(">=3.14"), member)
@@ -67,7 +68,8 @@ class DependencyWorkspaces(unittest.TestCase):
             for dependency in dependencies:
                 with self.subTest(member=member, dependency=dependency):
                     self.assertRegex(dependency, r"^[\w-]+(?:\[[\w,-]+\])?$")
-                    self.assertTrue(dependency in uv["sources"] or dependency in pins)
+                    name = dependency.split("[", 1)[0].lower().replace("_", "-")
+                    self.assertTrue(name in sources or name in pins)
         versions = defaultdict(set)
         for package in tomllib.loads((ROOT / "uv.lock").read_text())["package"]:
             versions[package["name"]].add(package["version"])

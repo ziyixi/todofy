@@ -1,4 +1,4 @@
-// The owner API (mailhero.ui.v2) as the tests call it: raw HTTP in the wire JSON profile, with the CSRF token and the
+// The owner API (mailhero.ui.v2) as the tests call it: raw HTTP in the wire JSON profile, with fixed header 1 and the
 // same-origin Origin the UI sends, through any `fetcher` (handleAPI with a test env, or a Miniflare's dispatchFetch).
 // Bodies and answers are the wire's own JSON (snake_case, lower-case enum names), so a test reads what the UI reads.
 
@@ -31,18 +31,14 @@ export function query(parameters) {
 }
 
 /**
- * A session: fetches the CSRF token from `${origin}/api/csrf` (with `headers`, e.g. an Access JWT) and answers
+ * A session: keeps `headers` (e.g. an Access JWT) and answers
  * `call(method, path, body?, extraHeaders?)` -> {response, status, data} for `${origin}/api/v2${path}`.
  */
 export async function ownerSession(fetcher, { origin = 'http://127.0.0.1:8787', headers = {} } = {}) {
-  const csrf = await fetcher(new Request(`${origin}/api/csrf`, { headers }))
-  if (csrf.status !== 200) throw new Error(`csrf: ${csrf.status} ${await csrf.text()}`)
-  const { token } = await csrf.json()
-  const cookie = csrf.headers.get('set-cookie').split(';')[0]
   return async function call(method, path, body, extra = {}) {
     const response = await fetcher(new Request(`${origin}${V2}${path}`, {
       method,
-      headers: { ...headers, Cookie: cookie, Origin: origin, 'X-CSRF-Token': token, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...extra },
+      headers: { ...headers, Origin: origin, ...(['GET', 'HEAD', 'OPTIONS'].includes(method) ? {} : { 'X-CSRF-Token': '1', 'Content-Type': 'application/json' }), ...extra },
       body: body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body),
     }))
     const text = await response.text()

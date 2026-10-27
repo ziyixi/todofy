@@ -18,7 +18,6 @@ CREATE TABLE IF NOT EXISTS conversations (
  app TEXT NOT NULL,
  model TEXT NOT NULL,
  provider TEXT NOT NULL,
- billing_app TEXT NOT NULL,
  state TEXT NOT NULL,
  config_key TEXT NOT NULL,
  history_key TEXT NOT NULL,

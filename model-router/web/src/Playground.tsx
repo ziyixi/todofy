@@ -1,5 +1,5 @@
 import { Play, Plus, Trash2 } from 'lucide-react'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation } from '@tanstack/react-query'
 import { useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import type {
   GenerateRequest,
@@ -43,7 +43,6 @@ export function Playground({
 }) {
   const form = useRef<HTMLFormElement>(null)
   const formId = useId()
-  const [billingApp, setBillingApp] = useState('console')
   const [selectedName, setSelectedName] = useState(initial.config?.model ?? '')
   const [instructions, setInstructions] = useState<Instruction[]>([
     ...(initial.config?.instructions?.length ? initial.config.instructions : [{ text: '' }]),
@@ -55,14 +54,7 @@ export function Playground({
   const [schema, setSchema] = useState(initial.config?.output_schema_json ?? '')
   const [webResearch, setWebResearch] = useState(initial.config?.web_research ?? false)
   const [validation, setValidation] = useState<string | null>(null)
-  const billingModels = useQuery({
-    queryKey: ['router-models', billingApp],
-    queryFn: () => api.listModels(billingApp),
-    enabled: billingApp !== 'console',
-  })
-  const generationModels = (billingApp === 'console' ? models : (billingModels.data ?? [])).filter(
-    (model) => model.generation,
-  )
+  const generationModels = models.filter((model) => model.generation)
   const selected =
     generationModels.find((model) => model.name === selectedName) ?? (!selectedName ? generationModels[0] : undefined)
   const generate = useMutation({
@@ -108,7 +100,7 @@ export function Playground({
       ...(selected.web_research && webResearch ? { web_research: true } : {}),
     }
     setValidation(null)
-    generate.mutate({ request_id: crypto.randomUUID(), config, input, metadata: { billing_app: billingApp } })
+    generate.mutate({ request_id: crypto.randomUUID(), config, input })
   }
 
   function shortcut(event: KeyboardEvent<HTMLFormElement>) {
@@ -132,31 +124,9 @@ export function Playground({
           <p className="notice subtle small">已复制请求 {initial.sourceRequest} 的输入。运行后会产生新的推理请求。</p>
         )}
         <form ref={form} onSubmit={submit} onKeyDown={shortcut}>
-          <label>
-            计费配置
-            <select
-              value={billingApp}
-              disabled={generate.isPending}
-              onChange={(event) => {
-                setBillingApp(event.target.value)
-              }}
-            >
-              <option value="console">Console（本控制台）</option>
-              <option value="mailsort">Mailsort</option>
-              <option value="todofy">Todofy</option>
-              <option value="brief">Brief</option>
-              <option value="newsletter">Newsletter</option>
-            </select>
-          </label>
-          <p className="small muted billing-note">
-            使用所选连接的供应商额度，不计入应用的业务预算。请求来源为本控制台，不执行该应用的业务操作。
+          <p className="small muted">
+            Claude API 共用现有 US$80/月工作区额度。请求来源为控制台，各应用的业务预算和历史保持不变。
           </p>
-          {billingModels.isFetching && billingApp !== 'console' && (
-            <p className="small muted" role="status">
-              正在读取此计费配置的模型…
-            </p>
-          )}
-          {billingModels.error && billingApp !== 'console' && <Failure error={billingModels.error} />}
           <label>
             模型
             <select

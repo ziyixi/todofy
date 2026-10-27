@@ -12,7 +12,7 @@ import { expect } from 'vitest';
 import personalMcpOk from '../fixtures/personal-mcp-ok.json';
 import modelRouterOk from '../fixtures/model-router-ok.json';
 import type { GuardState, OpsStatus } from '@ziyixi/proto/ops/v1/ops_wire';
-import type { CanaryRun, CsrfResponse, OverallLevel, Usage, ViewId } from '../../src/api-types.ts';
+import type { CanaryRun, OverallLevel, Usage, ViewId } from '../../src/api-types.ts';
 import type { AppDetail, CloudflareView, OpsView } from '../../src/api-types.ts';
 import { DESIRED } from '../../src/drift.ts';
 import { fakeCloudflare, type LiveTweaks } from '../drift-fixture.ts';
@@ -177,7 +177,6 @@ export async function startFlows(
       return fake ?? new Response('no outbound fetch expected', { status: 599 });
     },
   });
-  let csrf: { token: string; cookie: string } | null = null;
   const pending: Record<StubApp, { app: StubApp; method: string; args: unknown[] }[]> = { 'mail-hero': [], todofy: [], watch: [], fleet: [], newsletter: [], 'codex-gateway': [], 'notion-publish': [], mailsort: [], recall: [], brief: [], tasks: [], 'personal-mcp': [], 'model-router': [] };
   const drain = async (app: StubApp) => {
     pending[app].push(...(await harness.calls(app)));
@@ -241,15 +240,9 @@ export async function startFlows(
       };
     },
     async post(path, body) {
-      if (csrf === null) {
-        const response = await harness.fetch(PATHS.csrf);
-        expect(response.status).toBe(200);
-        const token = ((await response.json()) as CsrfResponse).token;
-        csrf = { token, cookie: (response.headers.get('set-cookie') ?? '').split(';')[0] ?? '' };
-      }
       return harness.fetch(path, {
         method: 'POST',
-        headers: { origin: 'http://127.0.0.1', 'x-csrf-token': csrf.token, cookie: csrf.cookie, 'content-type': 'application/json' },
+        headers: { origin: 'http://127.0.0.1', 'x-csrf-token': '1', 'content-type': 'application/json' },
         body: JSON.stringify(body),
       });
     },

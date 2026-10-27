@@ -1,12 +1,11 @@
 /**
  * The owner API client (proto/dashboard/ui/v1, docs/design-v2.md §5): DashboardUiService through the shared typed
  * client (proto/ts/http-client.ts), built from the same descriptors the Worker's transcoder routes with. Same-origin
- * only: every request goes to /api/v1/* or /api/csrf with the Access cookie; nothing else leaves the page.
+ * only: every request goes to /api/v1/* with the Access cookie; nothing else leaves the page.
  *
  * This file adds the transport and turns each answer into the wire JSON the pages render:
  *
- * - mutations (every POST, the refreshes included) carry the signed double-submit CSRF token (header X-CSRF-Token,
- *   cookie home_csrf, from GET /api/csrf); a refused token is renewed once (same body, so the same request_id);
+ * - mutations (every POST, the refreshes included) carry JSON and X-CSRF-Token: 1 directly;
  * - the views are `no-store`, so the transport keeps each view's last body and ETag itself: a repeat GET sends
  *   If-None-Match and a 304 returns the kept body; a refresh's answer replaces the kept view;
  * - the client reads every answer leniently (proto/README.md, HTTP APIs) and this file writes it back as the
@@ -26,12 +25,10 @@ import { RegistrySchema } from '@ziyixi/proto/dashboard/ui/v1/registry_pb'
 import { createHttpClient, HttpEncodeError, HttpResponseError, RpcStatusError, type HttpCall } from '@ziyixi/proto/http-client'
 import { GuardLevel as GuardLevelValue } from '@ziyixi/proto/ops/v1/ops_pb'
 import type { DescMessage, MessageShape } from '@ziyixi/proto/protobuf'
-import { parseStatus } from '@ziyixi/proto/rpc-status'
 import { toWire, WireJsonError, type WireOf } from '@ziyixi/proto/wire-json'
 import type {
   CloudflareView,
   AttentionItem,
-  CsrfResponse,
   FlowsView,
   GuardLevel,
   HomeView,
@@ -94,8 +91,6 @@ export function toApiError(error: unknown): ApiError {
   return unreadable(0)
 }
 
-let csrfToken: string | null = null
-
 async function fetchSameOrigin(url: string, init: RequestInit): Promise<Response> {
   try {
     // redirect: 'error' so an expired Access session surfaces as an error, not as the login page's HTML.
@@ -103,25 +98,6 @@ async function fetchSameOrigin(url: string, init: RequestInit): Promise<Response
   } catch {
     throw new ApiError(0, 'network_error', NETWORK_MESSAGE)
   }
-}
-
-async function csrf(): Promise<string> {
-  if (csrfToken) return csrfToken
-  const response = await fetchSameOrigin('/api/csrf', { headers: { Accept: 'application/json' } })
-  let body: unknown
-  try {
-    body = await response.json()
-  } catch {
-    // Not JSON: an error page from a proxy or Access.
-  }
-  const token = response.ok ? (body as Partial<CsrfResponse> | undefined)?.token : undefined
-  if (typeof token !== 'string' || token === '') {
-    // The Worker answers a google.rpc.Status (an expired login, a missing key): its reason and copy.
-    const status = response.ok ? null : parseStatus(response.status, body)
-    throw status === null ? new ApiError(response.status, 'bad_response', '无法取得页面安全令牌') : toApiError(new RpcStatusError(status))
-  }
-  csrfToken = token
-  return csrfToken
 }
 
 /**
@@ -139,36 +115,23 @@ function keptAnswer(text: string): Response {
   return new Response(text, { status: 200, headers: { 'content-type': 'application/json; charset=utf-8' } })
 }
 
-/**
- * The transport of every call. A GET of a kept view is conditional; a mutation carries the CSRF token, and a 403
- * CSRF_FAILED (expired token, lost cookie) drops the token and sends once more with a fresh one (same body).
- */
+/** Conditional GETs reuse the kept view; JSON mutations carry X-CSRF-Token: 1 directly. */
 async function send(call: HttpCall): Promise<Response> {
-  for (let attempt = 0; ; attempt += 1) {
-    const headers: Record<string, string> = { Accept: 'application/json' }
-    if (call.body !== undefined) headers['Content-Type'] = 'application/json'
-    const kept = call.httpMethod === 'GET' ? viewCache.get(call.url) : undefined
-    if (kept !== undefined) headers['If-None-Match'] = kept.etag
-    if (call.httpMethod !== 'GET') headers[CSRF_HEADER] = await csrf()
-    const response = await fetchSameOrigin(call.url, { method: call.httpMethod, headers, ...(call.body === undefined ? {} : { body: call.body }) })
-    if (response.status === 304 && kept !== undefined) return keptAnswer(kept.text)
-    const etag = response.headers.get('ETag')
-    if (response.ok && etag !== null) {
-      const text = await response.text()
-      viewCache.set(viewKey(call.url), { etag, text })
-      return keptAnswer(text)
-    }
-    if (response.status !== 403 || call.httpMethod === 'GET') return response
-    csrfToken = null
-    if (attempt > 0) return response
-    let reason: string | undefined
-    try {
-      reason = parseStatus(403, await response.clone().json())?.reason
-    } catch {
-      // Not a Status: answer it as it is.
-    }
-    if (reason !== 'CSRF_FAILED') return response
+  const mutation = !['GET', 'HEAD', 'OPTIONS'].includes(call.httpMethod)
+  const headers: Record<string, string> = { Accept: 'application/json' }
+  if (mutation || call.body !== undefined) headers['Content-Type'] = 'application/json'
+  const kept = call.httpMethod === 'GET' ? viewCache.get(call.url) : undefined
+  if (kept !== undefined) headers['If-None-Match'] = kept.etag
+  if (mutation) headers[CSRF_HEADER] = '1'
+  const response = await fetchSameOrigin(call.url, { method: call.httpMethod, headers, ...(call.body === undefined ? {} : { body: call.body }) })
+  if (response.status === 304 && kept !== undefined) return keptAnswer(kept.text)
+  const etag = response.headers.get('ETag')
+  if (response.ok && etag !== null) {
+    const text = await response.text()
+    viewCache.set(viewKey(call.url), { etag, text })
+    return keptAnswer(text)
   }
+  return response
 }
 
 const client = createHttpClient(DashboardUiService, send)
@@ -213,8 +176,7 @@ export const api = {
     wire(AttentionItemSchema, () => client.restoreAttention({ name, etag, requestId })),
 }
 
-/** Test hook: forget the cached CSRF token and the views' ETags. */
-export function resetCsrfForTests(): void {
-  csrfToken = null
+/** Test hook: forget the views and their ETags. */
+export function resetViewCacheForTests(): void {
   viewCache.clear()
 }

@@ -44,6 +44,8 @@ runs:
         tested_image=$(docker image inspect --format '{{.Id}}' "codex-gateway-ci:$GITHUB_SHA")
         docker run --rm --network none --env EXPECTED_SHA="$GITHUB_SHA" --entrypoint python "$tested_image" \
           -c 'import codex_gateway.app, codex_gateway.runtime, openai_codex; import importlib.resources, json, os; assert json.loads(importlib.resources.files("codex_gateway").joinpath("build-info.json").read_text())["source_sha"] == os.environ["EXPECTED_SHA"]'
+        docker run --rm -i --network none --env EXPECTED_SHA="$GITHUB_SHA" --entrypoint python "$tested_image" \
+          - < codex-gateway/tests/image_probe.py
         python3 tools/container-release/image.py save --image "$tested_image" --sha "$GITHUB_SHA" \
           --directory "$RUNNER_TEMP/codex-gateway-image"
     - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

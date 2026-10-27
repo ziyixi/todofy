@@ -59,7 +59,7 @@ async function refreshedView<T>(harness: FlowHarness, name: 'home' | 'cloudflare
 }
 
 describe('Access and CSRF on /api/v1', () => {
-  it('verifies Access JWTs on every path of the API and binds the CSRF token to the owner and PUBLIC_HOST', async () => {
+  it('verifies Access JWTs on every path of the API and requires same-origin JSON mutation headers', async () => {
     const ISSUER = SYNTHETIC_BINDINGS.ACCESS_ISSUER ?? '';
     const AUDIENCE = SYNTHETIC_BINDINGS.ACCESS_AUDIENCE ?? '';
     h = await startFlows({ bindings: { DEV_AUTH_BYPASS: 'false', CANARY_UTC_HOUR: '23' } });
@@ -83,15 +83,16 @@ describe('Access and CSRF on /api/v1', () => {
     }
     const csrf = await h.fetch(PATHS.csrf, { headers: { 'cf-access-jwt-assertion': jwt } });
     const { token } = (await csrf.json()) as { token: string };
-    const cookie = (csrf.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
+    expect(token).toBe('1');
+    expect(csrf.headers.get('set-cookie')).toBeNull();
     const guard = (origin: string, csrfToken = token) =>
       h?.fetch(PATHS.guard, {
         method: 'POST',
-        headers: { 'cf-access-jwt-assertion': jwt, origin, 'x-csrf-token': csrfToken, cookie, 'content-type': 'application/json' },
+        headers: { 'cf-access-jwt-assertion': jwt, origin, 'x-csrf-token': csrfToken, 'content-type': 'application/json' },
         body: '{"level":"normal","app":"mail-hero"}',
       });
     expect((await guard('https://evil.example.com'))?.status).toBe(403);
-    expect((await guard('https://home.example.com', 'forged.token'))?.status).toBe(403);
+    expect((await guard('https://home.example.com', ''))?.status).toBe(403);
     await h.tick(NOW); // Load the service capability before a guard mutation.
     const accepted = await guard('https://home.example.com');
     expect(accepted?.status).toBe(200);

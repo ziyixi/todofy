@@ -98,7 +98,8 @@ def generated_secrets(value: dict, *, generate: bool = True) -> dict:
     if not isinstance(configured, dict) or not all(isinstance(k, str) and isinstance(v, str)
                                                 for k, v in configured.items()):
         raise BootstrapError("GITHUB_SECRETS_INVALID")
-    result = dict(configured)
+    retired = {prefix + "_CSRF_SIGNING_KEY" for prefix in ("DASHBOARD", "LINKS", "WATCH", "MAILSORT", "RECALL", "BRIEF", "TASKS", "TODOFY", "MODEL_ROUTER")}
+    result = {name: value for name, value in configured.items() if name not in retired}
     worker_values = value.get("worker_secrets", {})
     if not isinstance(worker_values, dict):
         raise BootstrapError("WORKER_SECRETS_INVALID")
@@ -110,7 +111,7 @@ def generated_secrets(value: dict, *, generate: bool = True) -> dict:
         prefix = {"home": "DASHBOARD", "ziyixi-website": "WEBSITE", "ziyixi-notion-publish": "WEBSITE_RELAY"}.get(
             worker, worker.upper().replace("-", "_"))
         for name, item in bindings.items():
-            if name in {"CREDENTIAL_KEY", "CSRF_SIGNING_KEY", "BACKUP_TOKEN", "BACKUP_RECEIPT_KEY", "REPORT_HMAC_KEY",
+            if name in {"CREDENTIAL_KEY", "BACKUP_TOKEN", "BACKUP_RECEIPT_KEY", "REPORT_HMAC_KEY",
                         "CF_ANALYTICS_TOKEN", "RECEIVE_ADDRESS"}:
                 source = prefix + "_" + name
                 if source in result and result[source] != item:
@@ -144,9 +145,7 @@ def generated_secrets(value: dict, *, generate: bool = True) -> dict:
                  "NEWSLETTER_MONITOR_TOKEN", "MAIL_HERO_BACKUP_TOKEN"):
         if generate and not result.get(name):
             result[name] = secrets.token_urlsafe(32)
-    for name in ("FLEET_REPORT_HMAC_KEY", "MAIL_HERO_CREDENTIAL_KEY", "MAIL_HERO_BACKUP_RECEIPT_KEY",
-                 "TODOFY_CSRF_SIGNING_KEY", "DASHBOARD_CSRF_SIGNING_KEY", "LINKS_CSRF_SIGNING_KEY",
-                 "WATCH_CSRF_SIGNING_KEY", "MODEL_ROUTER_CSRF_SIGNING_KEY"):
+    for name in ("FLEET_REPORT_HMAC_KEY", "MAIL_HERO_CREDENTIAL_KEY", "MAIL_HERO_BACKUP_RECEIPT_KEY"):
         if generate and not result.get(name):
             result[name] = secrets.token_hex(32)
     owner = value.get("infra_values", {}).get("access_owner_emails", [])

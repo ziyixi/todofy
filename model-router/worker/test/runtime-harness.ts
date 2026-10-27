@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
+import { exportJWK, generateKeyPair, SignJWT } from 'jose'
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare'
 import { createHttpClient, type HttpCall } from '@ziyixi/proto/http-client'
 import { ConsoleService, ModelService } from '@ziyixi/proto/modelrouter/inference/v1/inference_pb'
@@ -16,6 +17,14 @@ export interface UpstreamCall {
   caller: string | null
   bearer: string | null
 }
+
+const issuer = 'https://synthetic.cloudflareaccess.com'
+const audience = 'b'.repeat(64)
+const ownerEmail = 'owner@example.test'
+const signingKeys = generateKeyPair('RS256').then(async ({ privateKey, publicKey }) => ({
+  privateKey,
+  jwks: { keys: [{ ...await exportJWK(publicKey), alg: 'RS256', use: 'sig', kid: 'synthetic-owner-key' }] },
+}))
 
 let bundle: Promise<string> | undefined
 function script() {
@@ -43,6 +52,7 @@ export async function startHarness({ ownerBypass = true }: { ownerBypass?: boole
   const conversations = new Map<string, string>()
   async function outbound(request: Request): Promise<Response> {
     const url = new URL(request.url)
+    if (url.href === `${issuer}/cdn-cgi/access/certs`) return Response.json((await signingKeys).jwks)
     const body: unknown = request.method === 'POST' ? await request.json() : {}
     if (body === null || typeof body !== 'object' || Array.isArray(body))
       throw new Error('Synthetic body is not an object')
@@ -110,14 +120,14 @@ export async function startHarness({ ownerBypass = true }: { ownerBypass?: boole
           durableObjects: { ENGINE: { className: 'RouterEngine', useSQLite: true } },
           bindings: {
             DEV_AUTH_BYPASS: ownerBypass ? 'true' : 'false',
-            ACCESS_OWNER: 'owner@example.test',
-            ACCESS_ISSUER: 'https://synthetic.cloudflareaccess.com',
-            ACCESS_AUDIENCE: 'b'.repeat(64),
+            ACCESS_OWNER: ownerEmail,
+            ACCESS_ISSUER: issuer,
+            ACCESS_AUDIENCE: audience,
             PUBLIC_HOST: 'models.example.test',
-            CSRF_SIGNING_KEY: 'cd'.repeat(32),
             CODEX_EXECUTOR_ORIGIN: 'https://executor.example.test',
-            CODEX_EXECUTOR_TOKEN: 'synthetic-executor-token',
-            GEMINI_API_KEY_TODOFY: 'synthetic-gemini-key',
+            CODEX_ACCESS_CLIENT_ID: 'synthetic-access-id',
+            CODEX_ACCESS_CLIENT_SECRET: 'synthetic-access-secret',
+            GEMINI_API_KEY: 'synthetic-gemini-key',
             MODEL_ROUTER_NEWSLETTER_TOKEN: machineToken,
           },
           serviceBindings: { ASSETS: () => new Response('Synthetic private assets') },
@@ -151,18 +161,10 @@ export async function startHarness({ ownerBypass = true }: { ownerBypass?: boole
       .filter(Boolean))
       await db.prepare(statement).run()
   }
-  let csrfToken = ''
-  let cookie = ''
   async function send(call: HttpCall) {
-    if (call.httpMethod !== 'GET' && !csrfToken) {
-      const session = await mf.dispatchFetch(`${origin}/api/session`)
-      const value = (await session.json()) as { csrf_token: string }
-      csrfToken = value.csrf_token
-      cookie = session.headers.get('set-cookie')?.split(';')[0] ?? ''
-    }
     return mf.dispatchFetch(origin + call.url, {
       method: call.httpMethod,
-      headers: { 'content-type': 'application/json', origin, cookie, 'x-csrf-token': csrfToken },
+      headers: { 'content-type': 'application/json', origin, 'x-csrf-token': '1' },
       ...(call.body === undefined ? {} : { body: call.body }),
     }) as unknown as Promise<Response>
   }
@@ -185,7 +187,14 @@ export async function startHarness({ ownerBypass = true }: { ownerBypass?: boole
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     })
   }
+  async function ownerToken() {
+    return new SignJWT({ email: ownerEmail })
+      .setProtectedHeader({ alg: 'RS256', kid: 'synthetic-owner-key' })
+      .setIssuer(issuer).setAudience(audience).setSubject('synthetic-owner')
+      .setIssuedAt().setExpirationTime('1h').sign((await signingKeys).privateKey)
+  }
   return {
+    ownerToken,
     mf,
     db,
     bucket,

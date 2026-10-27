@@ -249,6 +249,9 @@ def generated_files(root: Path) -> dict[str, str]:
             used_databases.add(database.get("database_name"))
         text = d1_fields(text, resources)
         outputs[relative] = text
+    # The VPS inference image bakes this public policy alongside its source SHA.
+    if "codex-gateway" in resources["access_audiences"]:
+        used_audiences.add("codex-gateway")
     require(used_audiences == set(resources["access_audiences"]), "Access audience coverage")
     require(used_databases == set(resources["d1_databases"]), "D1 identity coverage")
     outputs[IDENTITY_MODULE] = identity_module(profile, resources)

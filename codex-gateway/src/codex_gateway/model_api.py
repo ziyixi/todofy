@@ -100,7 +100,7 @@ def install_model_routes(
         return answer
 
     async def invoke(request: Request):
-        home = authorized_home(request)
+        home = await authorized_home(request)
         binding = request.scope["model_binding"]
         try:
             body = (

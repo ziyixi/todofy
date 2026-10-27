@@ -47,7 +47,6 @@ export interface ConversationRow {
   app: string;
   model: string;
   provider: string;
-  billing_app: string;
   state: string;
   config_key: string;
   history_key: string;

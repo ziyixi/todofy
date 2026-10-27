@@ -17,10 +17,6 @@ inputs:
     description: "dashboard cf analytics token"
     required: false
     default: ''
-  dashboard-csrf-signing-key:
-    description: "dashboard csrf signing key"
-    required: false
-    default: ''
   dashboard-worker-secrets:
     description: "dashboard worker secrets"
     required: false
@@ -88,7 +84,6 @@ runs:
         DASHBOARD_WORKER_SECRETS: ${{ inputs.dashboard-worker-secrets }}
         DASHBOARD_ACCESS_OWNER: ${{ inputs.dashboard-access-owner }}
         DASHBOARD_ACCESS_OWNER_ALIASES: ${{ inputs.dashboard-access-owner-aliases }}
-        DASHBOARD_CSRF_SIGNING_KEY: ${{ inputs.dashboard-csrf-signing-key }}
         DASHBOARD_CF_ANALYTICS_TOKEN: ${{ inputs.dashboard-cf-analytics-token }}
         CF_API_TOKEN: ${{ inputs.cf-api-token }}
       shell: bash -e {0}

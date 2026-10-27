@@ -41,7 +41,6 @@ export const SYNTHETIC_BINDINGS: Readonly<Record<string, string>> = {
   MODE: 'live',
   ACCESS_OWNER: 'owner@example.com',
   ACCESS_OWNER_ALIASES: '',
-  CSRF_SIGNING_KEY: 'cd'.repeat(32),
   DEV_AUTH_BYPASS: 'true',
   DEV_MANUAL_ALARMS: 'true',
   // Any loopback origin: the outbound service answers every request, whatever its address.
@@ -190,20 +189,10 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     return rows.map(row => ({ labelId: row.gmail_label_id, state: row.state, archived: row.archived === 1, baseInbox: row.base_inbox === 1, replaceLabels: (JSON.parse(row.base_labels) as string[]).filter(id => id !== row.gmail_label_id && ids.has(id)) }));
   };
   const fetchSort = (path: string, init?: RequestInit) => mf.dispatchFetch(`${ORIGIN}${path}`, { redirect: 'manual', ...init } as never) as unknown as Promise<Response>;
-  let csrf: { token: string; cookie: string } | undefined;
-  const csrfToken = async () => {
-    if (csrf === undefined) {
-      const response = await fetchSort('/api/csrf');
-      const { token } = await response.json<{ token: string }>();
-      csrf = { token, cookie: (response.headers.get('set-cookie') ?? '').split(';')[0] ?? '' };
-    }
-    return csrf;
-  };
   const send = async (call: HttpCall) => {
     const headers: Record<string, string> = {};
     if (call.httpMethod !== 'GET') {
-      const { token, cookie } = await csrfToken();
-      Object.assign(headers, { origin: ORIGIN, 'x-csrf-token': token, cookie });
+      Object.assign(headers, { origin: ORIGIN, 'x-csrf-token': '1', 'content-type': 'application/json' });
     }
     if (call.body !== undefined) headers['content-type'] = 'application/json';
     return fetchSort(call.url, { method: call.httpMethod, headers, ...(call.body === undefined ? {} : { body: call.body }) });
@@ -217,8 +206,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     opsSetGuard: (input) => probe('ops_guard', [input]),
     api: createHttpClient(MailsortUiService, send),
     async mutate(method, path, body) {
-      const { token, cookie } = await csrfToken();
-      const headers: Record<string, string> = { origin: ORIGIN, 'x-csrf-token': token, cookie };
+      const headers: Record<string, string> = { origin: ORIGIN, 'x-csrf-token': '1', 'content-type': 'application/json' };
       if (body !== undefined) headers['content-type'] = 'application/json';
       return fetchSort(path, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     },

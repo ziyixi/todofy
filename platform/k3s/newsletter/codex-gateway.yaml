@@ -31,11 +31,6 @@ spec:
               hostPort: 18766
               hostIP: 127.0.0.1
           env:
-            - name: CODEX_GATEWAY_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: codex-gateway-settings
-                  key: CODEX_GATEWAY_TOKEN
             - name: CODEX_HOME
               value: /var/lib/newsletter-auth
             - name: DATA_DIR

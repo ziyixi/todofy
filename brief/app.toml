@@ -4,7 +4,7 @@ target = "cloudflare"
 
 [[workers]]
 config = "brief/wrangler.toml"
-personal_secrets = ["ACCESS_OWNER", "ACCESS_OWNER_ALIASES", "CSRF_SIGNING_KEY", "FEEDBACK_SIGNING_KEY", "MAIL_FROM", "MAIL_TO"]
+personal_secrets = ["ACCESS_OWNER", "ACCESS_OWNER_ALIASES", "FEEDBACK_SIGNING_KEY", "MAIL_FROM", "MAIL_TO"]
 manual_secrets = []
 optional_secrets = ["ACCESS_OWNER_ALIASES"]
 # The Claude API key (its own Console workspace with a spend limit) and the Resend key (sending access only), put from

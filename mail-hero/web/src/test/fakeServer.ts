@@ -19,7 +19,6 @@ import {
 } from '@ziyixi/proto/mailhero/ui/v2/mail_hero_ui_service_pb'
 import { MessageContentSchema, type Message, type MessageContent } from '@ziyixi/proto/mailhero/ui/v2/message_pb'
 import { OverviewSchema, SettingsSchema, SetupStatusSchema, type Overview, type Settings, type SetupStatus } from '@ziyixi/proto/mailhero/ui/v2/settings_pb'
-import { resetClientForTests } from '../api/client'
 
 /** One decoded request: the rpc's name (`listMessages`) and its request message. */
 export interface Call { readonly method: string; readonly request: Record<string, unknown> }
@@ -129,10 +128,10 @@ export function installFakeServer(initial: Partial<FakeState> = {}): FakeServer 
     // The Worker localizes every reason in Chinese; here the copy names the reason so a test can see which one arrived.
     localize: reason => ({ locale: 'zh-CN', message: `服务端拒绝：${reason}` }),
     authorize: request => {
-      if (request.method !== 'GET' && request.headers.get('X-CSRF-Token') !== 'synthetic-csrf') throw rpcError(Code.PERMISSION_DENIED, 'CSRF_FAILED')
+      if (request.method !== 'GET' && (request.headers.get('X-CSRF-Token') !== '1' || request.headers.get('Content-Type')?.split(';', 1)[0] !== 'application/json')) throw rpcError(Code.PERMISSION_DENIED, 'CSRF_FAILED')
     },
   })
-  resetClientForTests()
+
   vi.stubGlobal('fetch', async (input: string, init: RequestInit = {}) => {
     const url = new URL(input, 'https://mail-hero.example.test')
     if (url.pathname === '/api/csrf') return Response.json({ token: 'synthetic-csrf' })

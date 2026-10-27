@@ -20,12 +20,12 @@
  * which would outlive an edit or a delete. Errors under /_/ are google.rpc.Status bodies, logged as one line with
  * the request ID, status and reason only; the short-link half logs nothing at all (never a key, a path or a target).
  */
-import { issueCsrf, STRICT_CSP, withPrivateHeaders } from '@ziyixi/edge-auth';
+import { STRICT_CSP, withPrivateHeaders } from '@ziyixi/edge-auth';
 import { HttpTranscoder, type RouteInfo } from '@ziyixi/proto/http-transcoder';
 import { LinksUiService } from '@ziyixi/proto/links/ui/v1/links_ui_service_pb';
 import { RpcError } from '@ziyixi/proto/rpc-status';
 import { handlers, isReason, linksError, REASONS, type ApiContext } from './api.ts';
-import { authenticate, checkCsrf, CSRF_COOKIE, csrfKey, isOwner } from './auth.ts';
+import { authenticate, checkCsrf, isOwner } from './auth.ts';
 import type { Env } from './env.ts';
 import { parseShortPath, type ShortPath } from './keys.ts';
 import { MAX_BODY_BYTES, REST_MAX } from './limits.ts';
@@ -52,8 +52,7 @@ export function newRequestId(): string {
 /** The transcoder's authorize hook: a mutation needs the same-origin Origin and this owner's CSRF token. */
 async function authorize(request: Request, route: RouteInfo, ctx: Context): Promise<void> {
   if (route.safe) return;
-  const result = await checkCsrf(request, ctx.env, ctx.owner, ctx.bypassed);
-  if (result === 'no_key') throw linksError('NOT_CONFIGURED');
+  const result = await checkCsrf(request, ctx.env, ctx.bypassed);
   if (result === 'failed') throw linksError('CSRF_FAILED');
 }
 
@@ -111,13 +110,8 @@ async function shortLink(request: Request, env: Env, url: URL): Promise<Response
 
 // ---- the owner's half ---------------------------------------------------------------------------------------------------
 
-async function csrfResponse(ctx: Context): Promise<Response> {
-  const key = await csrfKey(ctx.env);
-  if (key === null) throw linksError('NOT_CONFIGURED');
-  const issued = await issueCsrf(ctx.request, ctx.owner, { cookieName: CSRF_COOKIE, key });
-  const response = Response.json({ token: issued.token }, { headers: { 'cache-control': 'no-store' } });
-  response.headers.set('set-cookie', issued.setCookie);
-  return response;
+function csrfResponse(): Response {
+  return Response.json({ token: '1' }, { headers: { 'cache-control': 'no-store' } });
 }
 
 /** The launcher's page (web/dist/_/index.html, which the assets binding serves at /_/). */
@@ -150,7 +144,7 @@ async function owned(base: { request: Request; env: Env; url: URL; requestId: st
     }
     if (url.pathname === '/_/api/csrf') {
       if (request.method !== 'GET') return fail(methodNotAllowed('GET'));
-      return { response: await csrfResponse(ctx) };
+      return { response: csrfResponse() };
     }
     if (request.method !== 'GET' && !head) return fail(methodNotAllowed('GET, HEAD'));
     if (url.pathname === '/_/') return { response: await launcher(ctx, head) };

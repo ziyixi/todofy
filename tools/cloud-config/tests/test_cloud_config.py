@@ -201,6 +201,17 @@ SAFETY_BUDGET = "10"
             with self.subTest(field=old), self.assertRaises(cloud_profile.ProfileError):
                 generate.generated_files(root)
 
+    def test_gateway_is_the_only_additional_non_worker_access_audience(self):
+        for name in ("codex-gateway", "unregistered-vps"):
+            root = self.fixture()
+            baseline = generate.generated_files(root)["demo/wrangler.toml"]
+            (root / "config/resources.toml").write_text(RESOURCE.replace("[d1_databases]", f'{name} = "' + "f" * 64 + '"\n[d1_databases]'))
+            if name == "codex-gateway":
+                self.assertEqual(generate.generated_files(root)["demo/wrangler.toml"], baseline)
+            else:
+                with self.assertRaises(cloud_profile.ProfileError):
+                    generate.generated_files(root)
+
     def test_path_escape_and_symlinks_fail_before_any_write(self):
         for relative in ('../demo/wrangler.toml', '/demo/wrangler.toml', 'demo/../demo/wrangler.toml', 'other/wrangler.toml',
                          'demo/.private/wrangler.toml', 'demo//wrangler.toml', 'demo\\wrangler.toml'):
@@ -295,12 +306,12 @@ SAFETY_BUDGET = "10"
     def test_owner_machine_secrets_never_reach_the_github_maps_in_the_repository(self):
         """Provider credentials, Gmail grants and machine-token digests stay owner-machine only."""
         source = TOOL.parents[1]
+        # Legacy app declarations remain optional upload guards, not required live connections.
         grant = ['ANTHROPIC_API_KEY', 'CODEX_ACCESS_CLIENT_ID', 'CODEX_ACCESS_CLIENT_SECRET', 'CODEX_ENDPOINT_TOKEN',
                  'GMAIL_CLIENT_ID', 'GMAIL_CLIENT_SECRET', 'GMAIL_REFRESH_TOKEN']
         digests = ['EXPORT_TOKEN_SHA256', 'EXPORT_TOKEN_SHA256_PREVIOUS', 'INGEST_TOKEN_SHA256', 'INGEST_TOKEN_SHA256_PREVIOUS']
         keys = ['ANTHROPIC_API_KEY', 'RESEND_API_KEY']
-        router = sorted(['ANTHROPIC_API_KEY_MAILSORT', 'ANTHROPIC_API_KEY_BRIEF', 'GEMINI_API_KEY_TODOFY',
-                         'CODEX_EXECUTOR_TOKEN', 'CODEX_ACCESS_CLIENT_ID', 'CODEX_ACCESS_CLIENT_SECRET',
+        router = sorted(['ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'CODEX_ACCESS_CLIENT_ID', 'CODEX_ACCESS_CLIENT_SECRET',
                          'MODEL_ROUTER_NEWSLETTER_TOKEN'])
         expected = {'brief': keys, 'mailsort': grant, 'recall': digests, 'model-router': router}
         self.assertEqual(cloud_profile.owner_machine_secrets(source), expected)

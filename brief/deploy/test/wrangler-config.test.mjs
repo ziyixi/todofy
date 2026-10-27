@@ -1,6 +1,6 @@
 // The committed production config ../../wrangler.toml, read with the pinned wrangler's own raw-config reader
 // (worker/node_modules): the shape the Worker "brief" needs, nothing personal or injected, its one Custom Domain, one
-// SQLite Durable Object, Workers AI and the bundled content config, and no cron, D1, R2, KV, queue or service binding.
+// SQLite Durable Object, its Model Router binding and bundled content config; no direct model binding or cron.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
@@ -16,7 +16,7 @@ const config = read(CONFIG)
 const values = readFileSync(CONFIG, 'utf8').split('\n').filter((line) => !line.trimStart().startsWith('#')).join('\n')
 
 // Every key the Worker "brief" uses; a new one must be added here on purpose (and checked below).
-const KEYS = ['name', 'account_id', 'main', 'compatibility_date', 'workers_dev', 'preview_urls', 'routes', 'rules', 'observability', 'assets', 'durable_objects', 'migrations', 'ai', 'vars']
+const KEYS = ['name', 'account_id', 'main', 'compatibility_date', 'workers_dev', 'preview_urls', 'routes', 'rules', 'observability', 'assets', 'durable_objects', 'migrations', 'services', 'vars']
 
 test('the top level is the production Worker: known keys only, no cron, no workers.dev or preview URL, one Custom Domain', () => {
   assert.deepEqual(Object.keys(config).sort(), [...KEYS].sort())
@@ -43,14 +43,15 @@ test('every request reaches the Worker first (Access, the feedback token, privat
   assert.deepEqual(config.assets, { directory: 'web/dist', binding: 'ASSETS', run_worker_first: true, not_found_handling: 'single-page-application' })
 })
 
-test('one SQLite Durable Object, BriefState, and Workers AI; no D1, R2, KV, queue, browser or service binding', () => {
+test('one SQLite Durable Object and authenticated Model Router binding; no direct model resources', () => {
   assert.deepEqual(config.durable_objects, { bindings: [{ name: 'BRIEF', class_name: 'BriefState' }] })
   assert.deepEqual(config.migrations, [{ tag: 'v1', new_sqlite_classes: ['BriefState'] }])
-  assert.deepEqual(config.ai, { binding: 'AI' })
-  for (const key of ['d1_databases', 'r2_buckets', 'kv_namespaces', 'queues', 'browser', 'services', 'triggers']) assert.equal(config[key], undefined, key)
+  assert.equal(config.ai, undefined)
+  assert.deepEqual(config.services, [{ binding: 'MODEL_ROUTER', service: 'model-router', entrypoint: 'Inference', props: { app: 'brief' } }])
+  for (const key of ['d1_databases', 'r2_buckets', 'kv_namespaces', 'queues', 'browser', 'triggers']) assert.equal(config[key], undefined, key)
 })
 
-test("no secret is declared required: a deploy before the owner puts the Claude and Resend keys must work, and keeps them", () => {
+test("no secret is declared required: a deploy keeps the owner-machine Resend key", () => {
   assert.equal(config.secrets, undefined)
   for (const name of OWNER_ONLY_SECRETS) assert.ok(!values.includes(name), name)
 })
@@ -77,6 +78,7 @@ test('the development config is the production one without routes, account, Work
   assert.equal(dev.routes, undefined)
   assert.equal(dev.account_id, undefined)
   assert.equal(dev.ai, undefined)
+  assert.equal(dev.services, undefined)
   assert.deepEqual(dev.durable_objects, config.durable_objects)
   assert.deepEqual(dev.migrations, config.migrations)
   assert.deepEqual(dev.rules, config.rules)

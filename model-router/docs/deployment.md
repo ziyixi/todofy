@@ -61,24 +61,28 @@ Cloudflare callers bind the named `Inference` entrypoint with immutable `props.a
 `Ops` entrypoint, which reports content-free status and has no guard capability.
 
 `MODEL_ROUTER_WORKER_SECRETS` in the protected GitHub production environment contains only
-`ACCESS_OWNER`, optional `ACCESS_OWNER_ALIASES` and a separate 32-byte hexadecimal `CSRF_SIGNING_KEY`.
-The bootstrap generates a missing CSRF key once and preserves the value on subsequent runs.
+`ACCESS_OWNER` and optional `ACCESS_OWNER_ALIASES`. Owner JSON mutations require the exact console Origin,
+`X-CSRF-Token: 1` and `application/json` before body parsing. `/api/session` temporarily returns static `1` for
+cached clients, without a cookie or signing key.
 
 Provider credentials are owner-machine secrets, excluded from GitHub maps and preserved by deployment:
 
-- `ANTHROPIC_API_KEY_MAILSORT`, `ANTHROPIC_API_KEY_BRIEF`, `ANTHROPIC_API_KEY_TODOFY` and
-  `GEMINI_API_KEY_TODOFY` select each caller's connection. Mailsort and Brief retain their original workspaces;
-  The owner chose to share Brief's existing $80/month workspace with Todofy; configure the same Brief key
-  under both `ANTHROPIC_API_KEY_BRIEF` and `ANTHROPIC_API_KEY_TODOFY`. No extra workspace or limit is added.
-- `CODEX_EXECUTOR_TOKEN`, `CODEX_ACCESS_CLIENT_ID` and `CODEX_ACCESS_CLIENT_SECRET` authenticate the existing
-  private VPS executor. Its public origin derives from the cloud profile. There is no new VPS service.
+- `ANTHROPIC_API_KEY` is the existing Brief workspace key, shared by every Claude caller and the
+  Playground. All Claude calls together use that workspace's existing $80/month provider cap. Mailsort,
+  Todofy and Brief keep their current business budgets and usage history; there are no per-app keys or
+  workspace selectors.
+- `GEMINI_API_KEY` is the one shared Gemini key. Both provider keys live only in Router secrets, never
+  GitHub, client applications or the VPS.
+- `CODEX_ACCESS_CLIENT_ID` and `CODEX_ACCESS_CLIENT_SECRET` supply the existing Cloudflare Access machine
+  identity for the VPS executor. The executor verifies its Access JWT; no additional executor Bearer
+  token is configured. Its public origin derives from the cloud profile. There is no new VPS service.
 - `MODEL_ROUTER_NEWSLETTER_TOKEN` is the Router's independent external caller credential; Newsletter uses
   the corresponding `NEWSLETTER_MODEL_ROUTER_TOKEN` and `NEWSLETTER_MODEL_ROUTER_URL` in its own protected
   runtime configuration.
 
-The Playground starts with the Console billing profile. Selecting another profile is explicit and
-uses that app's connection and provider-side quota, separately from its local business ledger. The recorded caller remains `console`; running inference does
-not invoke application business actions.
+The Playground uses the same shared provider connections. Its recorded source is always `console`;
+running inference does not invoke an application's business actions. Request and usage filters still
+separate authenticated sources, independently of the shared provider billing account.
 
 ## Checks and release
 

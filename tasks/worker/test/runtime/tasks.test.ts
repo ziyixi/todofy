@@ -279,9 +279,10 @@ test('a change baseline skips history and preserves subsequent edits without acc
   expect(await conflict.text()).toContain('Baseline requires an empty change cursor');
 });
 
-test('the CSRF token lasts as long as the Access session', async () => {
+test('the compatibility token needs no signing key or cookie', async () => {
   const response = await harness.fetch('/api/tasks/csrf');
-  expect(response.headers.get('set-cookie')).toContain('Max-Age=604800');
+  expect(response.headers.get('set-cookie')).toBeNull();
+  expect(await response.json()).toEqual({ token: '1' });
 });
 
 test('rejects an unauthorized Origin before parsing malformed JSON', async () => {

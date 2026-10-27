@@ -40,7 +40,7 @@ describe('the inbox', () => {
     button(root, '已读').click()
     await until(() => root.querySelectorAll('article.change').length === 0)
     const [ack] = server.mutations(':acknowledge')
-    expect(ack?.headers['x-csrf-token']).toBe('synthetic-token')
+    expect(ack?.headers['x-csrf-token']).toBe('1')
     expect(ack?.body?.['request_id']).toMatch(/^[0-9a-f-]{36}$/)
     expect(text(root)).toContain('没有新变化')
   })

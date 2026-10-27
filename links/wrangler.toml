@@ -3,9 +3,9 @@
 # [env.*] or keep_vars. Every static value is committed here (the repository is public: nothing personal, no secret).
 #
 # Deployed only by CI ("Links deploy" in .github/workflows/ci.yml) through deploy/deploy-vars.mjs, which appends
-# --var BUILD_SHA (the commit) and passes ACCESS_OWNER, ACCESS_OWNER_ALIASES and CSRF_SIGNING_KEY as Worker secrets
-# with --secrets-file (the dashboard's DASHBOARD_ACCESS_OWNER(_ALIASES), the same owner, and the links app's own
-# LINKS_CSRF_SIGNING_KEY; README.md "Deploy"). A plain `wrangler deploy` of this file DELETES BUILD_SHA.
+# --var BUILD_SHA (the commit) and passes ACCESS_OWNER and ACCESS_OWNER_ALIASES as Worker secrets
+# with --secrets-file (the dashboard's DASHBOARD_ACCESS_OWNER(_ALIASES), the same owner; README.md "Deploy").
+# A plain `wrangler deploy` of this file DELETES BUILD_SHA.
 #
 # L2 (docs/design.md §11): the D1 database "links" and the path-scoped Access application "links" (destinations
 # s.ziyixi.science/_/* and the exact s.ziyixi.science/_) exist; their id and AUD are committed below, and

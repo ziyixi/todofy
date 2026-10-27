@@ -909,9 +909,9 @@ class Workflow(unittest.TestCase):
                         else:
                             self.assertRegex(value, r"^(''|placeholder|[a-z.-]*@([a-z-]+\.)*example\.com)$")
 
-    def test_links_deploy_reads_the_dashboard_owner_and_its_own_csrf_key(self):
+    def test_links_deploy_reads_the_dashboard_owner_without_a_csrf_secret(self):
         """The links app's owner addresses come from the dashboard's secrets (no LINKS_ACCESS_OWNER* secret exists); its
-        CSRF key is its own, never another app's. The secrets are read only where the secrets file is written."""
+        owner values are read only where the secrets file is written; no CSRF secret is required."""
         self.assertLessEqual(set(SHARED_SECRETS), PERSONAL_INPUTS)
         self.assertLessEqual(set(SHARED_SECRETS.values()), PERSONAL_INPUTS)
         read = {}
@@ -921,11 +921,11 @@ class Workflow(unittest.TestCase):
                     read.setdefault(name, set()).add(match.group(1))
         self.assertEqual(read["LINKS_ACCESS_OWNER"], {"DASHBOARD_ACCESS_OWNER"})
         self.assertEqual(read["LINKS_ACCESS_OWNER_ALIASES"], {"DASHBOARD_ACCESS_OWNER_ALIASES"})
-        self.assertEqual(read["LINKS_CSRF_SIGNING_KEY"], {"LINKS_CSRF_SIGNING_KEY"})
+        self.assertNotIn("LINKS_CSRF_SIGNING_KEY", read)
         self.assertEqual(read["CLOUDFLARE_API_TOKEN"], {"CF_API_TOKEN"})
         self.assertEqual(set(read), {*markers(WRAPPERS["links"][0])["secrets"], "LINKS_WORKER_SECRETS", "CLOUDFLARE_API_TOKEN"})
         self.assertNotRegex(effective_ci(), r"secrets\.LINKS_ACCESS_OWNER")
-        writers = [step["name"] for step in steps(self.jobs["links-deploy"]) if "LINKS_CSRF_SIGNING_KEY" in step["env"]]
+        writers = [step["name"] for step in steps(self.jobs["links-deploy"]) if "LINKS_ACCESS_OWNER" in step["env"]]
         self.assertEqual(writers, ["Write the Worker secrets file"])
 
     def test_links_deploy_applies_migrations_before_the_worker_and_then_checks_production_and_the_host(self):
@@ -970,10 +970,9 @@ class Workflow(unittest.TestCase):
                 self.assertIn('node ../deploy/bundle-size.mjs "$RUNNER_TEMP/links-bundle"', dry["run"])
                 self.assertLess(dry["run"].index("--outdir"), dry["run"].index("bundle-size.mjs"))
 
-    def test_watch_deploy_reads_the_dashboard_owner_and_its_own_csrf_key(self):
+    def test_watch_deploy_reads_the_dashboard_owner_without_a_csrf_secret(self):
         """The watch app's owner addresses come from the dashboard's secrets (no WATCH_ACCESS_OWNER* secret exists); its
-        CSRF key is its own (WATCH_CSRF_SIGNING_KEY), never another app's. The secrets are read only where the secrets
-        file is written."""
+        owner values are read only where the secrets file is written; no CSRF secret is required."""
         read = {}
         for step in steps(self.jobs["watch-deploy"]):
             for name, value in step["env"].items():
@@ -981,11 +980,11 @@ class Workflow(unittest.TestCase):
                     read.setdefault(name, set()).add(match.group(1))
         self.assertEqual(read["WATCH_ACCESS_OWNER"], {"DASHBOARD_ACCESS_OWNER"})
         self.assertEqual(read["WATCH_ACCESS_OWNER_ALIASES"], {"DASHBOARD_ACCESS_OWNER_ALIASES"})
-        self.assertEqual(read["WATCH_CSRF_SIGNING_KEY"], {"WATCH_CSRF_SIGNING_KEY"})
+        self.assertNotIn("WATCH_CSRF_SIGNING_KEY", read)
         self.assertEqual(read["CLOUDFLARE_API_TOKEN"], {"CF_API_TOKEN"})
         self.assertEqual(set(read), {*markers(WRAPPERS["watch"][0])["secrets"], "WATCH_WORKER_SECRETS", "CLOUDFLARE_API_TOKEN"})
         self.assertNotRegex(effective_ci(), r"secrets\.WATCH_ACCESS_OWNER")
-        writers = [step["name"] for step in steps(self.jobs["watch-deploy"]) if "WATCH_CSRF_SIGNING_KEY" in step["env"]]
+        writers = [step["name"] for step in steps(self.jobs["watch-deploy"]) if "WATCH_ACCESS_OWNER" in step["env"]]
         self.assertEqual(writers, ["Write the Worker secrets file"])
 
     def test_watch_deploy_guards_the_host_then_deploys_and_checks_production_and_access(self):

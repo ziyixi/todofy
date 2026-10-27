@@ -245,8 +245,8 @@ Bindings (`wrangler.toml`, `worker/src/env.ts`): `WATCH` (the object), `ASSETS`,
 entrypoint with `props = { source = "watch" }`: it creates tasks of this source only, and never reads, changes or
 deletes one; the notification sink); vars `PUBLIC_HOST`
 (`watch.ziyixi.science`, the CSRF origin), `ACCESS_ISSUER`, `ACCESS_AUDIENCE`, and `BUILD_SHA` at deploy; secrets
-`ACCESS_OWNER`, `ACCESS_OWNER_ALIASES` (the dashboard's owner, as for the links app) and the app's
-own `CSRF_SIGNING_KEY`. A `BROWSER` binding turns on tier 3 (§4). Local development and tests only:
+`ACCESS_OWNER`, `ACCESS_OWNER_ALIASES` (the dashboard's owner, as for the links app). Owner JSON
+mutations require exact Origin and the custom header `X-CSRF-Token: 1`; no signing key or cookie is used. A `BROWSER` binding turns on tier 3 (§4). Local development and tests only:
 `DEV_AUTH_BYPASS`, `DEV_MANUAL_ALARMS` (no alarm is armed; a clock the tests set; `/__dev/clock` and `/__dev/step`
 over loopback), `DEV_FAKE_UPSTREAM` (every page request goes to a loopback server of synthetic sites),
 `DEV_FETCH_TIMEOUT_MS`. The committed config never sets a `DEV_` var (`test_wrangler_configs.py`).
@@ -479,7 +479,7 @@ All hermetic: synthetic content only, the only network is loopback, clocks are i
   red with `vars.ACCESS_AUDIENCE differs` means a wrong AUD: fix it and push again:
   1. Resources: the Access application "watch" for the whole host `watch.ziyixi.science` (an `owner_apps` entry in
      `infra/access.tf`, session 24h as for the other owner apps, created by "Infra apply" before this commit:
-     `infra/README.md` "Adding an app"), its AUD committed as `ACCESS_AUDIENCE`; the `production` GitHub secret `WATCH_CSRF_SIGNING_KEY` (64 hex); the owner inputs come from
+     `infra/README.md` "Adding an app"), its AUD committed as `ACCESS_AUDIENCE`; the owner inputs come from
      the dashboard's `DASHBOARD_ACCESS_OWNER` and `DASHBOARD_ACCESS_OWNER_ALIASES`. W2 needed no D1 or R2;
      the later page-evidence release adds the private `watch-evidence` bucket.
   2. `wrangler.toml`: `routes = [{ pattern = "watch.ziyixi.science", custom_domain = true }]`.

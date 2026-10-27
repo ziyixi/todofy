@@ -9,7 +9,7 @@
 # (ACCESS_OWNER, ACCESS_OWNER_ALIASES; GitHub environment secrets) as Worker secrets with --secrets-file.
 # A plain `wrangler deploy` of this file DELETES BUILD_SHA and MAINTENANCE_MODE (and the wrapper refuses a
 # deploy without the secrets file). Other Worker secrets
-# (MAIL_WEBHOOK_TOKEN_SHA256[_PREVIOUS], REPORT_BASIC_AUTH_SHA256, CSRF_SIGNING_KEY) survive every deploy.
+# (MAIL_WEBHOOK_TOKEN_SHA256[_PREVIOUS], REPORT_BASIC_AUTH_SHA256) survive every deploy.
 #
 # Runtime tests use wrangler.test.toml and wrangler.test-auth.toml (next to this file). Local dev runs both
 # Workers in one process from todofy/ with local values (docs/dev-notes.md §1, .dev.vars.example):

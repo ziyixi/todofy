@@ -4,7 +4,7 @@
  * The gate, in order: Access JWT on every request (static assets included), then
  *
  * - /api/v1/*: the owner API, TodofyUiService (proto/todofy/ui/v1, ui.ts), served by the shared transcoder; for
- *   every method but GET its `authorize` hook checks the same-origin Origin and the signed double-submit CSRF token,
+ *   every method but GET its `authorize` hook checks the same-origin Origin and the custom CSRF header and JSON media type,
  *   then MAINTENANCE_MODE, before the body is read;
  * - GET /api/csrf: the CSRF token and its cookie (transport, not part of the service);
  * - GET /task/<id>: a 302 to that task in Tasks (TASKS_PUBLIC_URL), the link the UI shows for a task;
@@ -54,7 +54,7 @@ export function legacyPath(path: string): boolean {
 /** The transcoder's authorize hook: a mutation needs Origin and the owner's CSRF token, and no maintenance. */
 async function authorize(request: Request, route: RouteInfo, ctx: UiContext): Promise<void> {
   if (route.safe) return;
-  await verifyCsrf(request, ctx.env, ctx.owner);
+  await verifyCsrf(request, ctx.env);
   const refused = maintenance(ctx.env);
   if (refused !== null) throw refused;
 }
@@ -96,12 +96,7 @@ async function route(ctx: Context): Promise<Response> {
   if (legacyPath(path)) return errorEnvelope(ctx.requestId, 410, 'reload_required', RELOAD_MESSAGE);
   if (path === CSRF_PATH) {
     if (ctx.request.method !== 'GET') return statusResponse(ctx, methodNotAllowed('GET'));
-    try {
-      return await issueCsrf(ctx.request, ctx.env, owner);
-    } catch (error) {
-      if (error instanceof RpcError) return statusResponse(ctx, error);
-      throw error;
-    }
+    return issueCsrf();
   }
   if (path.startsWith(TASK_PREFIX)) {
     if (ctx.request.method !== 'GET' && ctx.request.method !== 'HEAD') return statusResponse(ctx, methodNotAllowed('GET, HEAD'));

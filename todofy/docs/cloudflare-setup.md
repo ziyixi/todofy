@@ -137,7 +137,6 @@ Gateway `todofy`:
 | `MAIL_WEBHOOK_TOKEN_SHA256` | lowercase hex SHA-256 of the Bearer token Mail Hero's target sends: `printf '%s' "$TOKEN" \| shasum -a 256`. The token itself stays in Mail Hero and the password manager. |
 | `MAIL_WEBHOOK_TOKEN_SHA256_PREVIOUS` | optional, the previous digest while rotating the token |
 | `REPORT_BASIC_AUTH_SHA256` | SHA-256 of `user:password` the newsletter sends (`printf '%s' "$USER:$PASSWORD" \| shasum -a 256`); list two digests, comma-separated, while rotating. The password must be random, at least 128 bits (`openssl rand -hex 32`): the failure lockout never blocks a correct credential, so it does not slow guessing. |
-| `CSRF_SIGNING_KEY` | 64 hex, `openssl rand -hex 32` |
 
 Core `todofy-core`:
 

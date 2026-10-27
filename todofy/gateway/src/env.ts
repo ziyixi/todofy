@@ -18,7 +18,6 @@ export interface Env {
   readonly MAIL_WEBHOOK_TOKEN_SHA256?: string;
   readonly MAIL_WEBHOOK_TOKEN_SHA256_PREVIOUS?: string;
   readonly REPORT_BASIC_AUTH_SHA256?: string;
-  readonly CSRF_SIGNING_KEY?: string;
   // Dev and test only; ignored unless the public host is a *.localhost name.
   readonly DEV_AUTH_BYPASS?: string;
   readonly DEV_ACCESS_LOOPBACK_ISSUER?: string;

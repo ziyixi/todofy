@@ -110,7 +110,6 @@ export const SYNTHETIC_BINDINGS: Readonly<Record<string, string>> = {
   BUILD_SHA: 'test',
   ACCESS_OWNER: 'owner@example.com',
   ACCESS_OWNER_ALIASES: '',
-  CSRF_SIGNING_KEY: 'ab'.repeat(32),
   CF_ANALYTICS_TOKEN: 'synthetic-analytics-token-000000000000',
 };
 

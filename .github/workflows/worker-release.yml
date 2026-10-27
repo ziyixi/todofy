@@ -119,7 +119,6 @@ jobs:
           dashboard-access-owner: ${{ secrets.DASHBOARD_ACCESS_OWNER }}
           dashboard-access-owner-aliases: ${{ secrets.DASHBOARD_ACCESS_OWNER_ALIASES }}
           dashboard-cf-analytics-token: ${{ secrets.DASHBOARD_CF_ANALYTICS_TOKEN }}
-          dashboard-csrf-signing-key: ${{ secrets.DASHBOARD_CSRF_SIGNING_KEY }}
           dashboard-worker-secrets: ${{ secrets.DASHBOARD_WORKER_SECRETS }}
       - name: Release links
         id: links
@@ -130,7 +129,6 @@ jobs:
           cf-api-token: ${{ secrets.CF_API_TOKEN }}
           dashboard-access-owner: ${{ secrets.DASHBOARD_ACCESS_OWNER }}
           dashboard-access-owner-aliases: ${{ secrets.DASHBOARD_ACCESS_OWNER_ALIASES }}
-          links-csrf-signing-key: ${{ secrets.LINKS_CSRF_SIGNING_KEY }}
           links-worker-secrets: ${{ secrets.LINKS_WORKER_SECRETS }}
       - name: Release tasks
         id: tasks
@@ -149,7 +147,6 @@ jobs:
           cf-api-token: ${{ secrets.CF_API_TOKEN }}
           dashboard-access-owner: ${{ secrets.DASHBOARD_ACCESS_OWNER }}
           dashboard-access-owner-aliases: ${{ secrets.DASHBOARD_ACCESS_OWNER_ALIASES }}
-          watch-csrf-signing-key: ${{ secrets.WATCH_CSRF_SIGNING_KEY }}
           watch-worker-secrets: ${{ secrets.WATCH_WORKER_SECRETS }}
       - name: Release mailsort
         id: mailsort
@@ -160,7 +157,6 @@ jobs:
           cf-api-token: ${{ secrets.CF_API_TOKEN }}
           dashboard-access-owner: ${{ secrets.DASHBOARD_ACCESS_OWNER }}
           dashboard-access-owner-aliases: ${{ secrets.DASHBOARD_ACCESS_OWNER_ALIASES }}
-          mailsort-csrf-signing-key: ${{ secrets.MAILSORT_CSRF_SIGNING_KEY }}
           mailsort-worker-secrets: ${{ secrets.MAILSORT_WORKER_SECRETS }}
       - name: Release recall
         id: recall
@@ -171,7 +167,6 @@ jobs:
           cf-api-token: ${{ secrets.CF_API_TOKEN }}
           dashboard-access-owner: ${{ secrets.DASHBOARD_ACCESS_OWNER }}
           dashboard-access-owner-aliases: ${{ secrets.DASHBOARD_ACCESS_OWNER_ALIASES }}
-          recall-csrf-signing-key: ${{ secrets.RECALL_CSRF_SIGNING_KEY }}
           recall-worker-secrets: ${{ secrets.RECALL_WORKER_SECRETS }}
       - name: Release brief
         id: brief
@@ -179,7 +174,6 @@ jobs:
         uses: ./.github/actions/release-brief
         with:
           required: ${{ steps.preflight.outputs.required }}
-          brief-csrf-signing-key: ${{ secrets.BRIEF_CSRF_SIGNING_KEY }}
           brief-feedback-signing-key: ${{ secrets.BRIEF_FEEDBACK_SIGNING_KEY }}
           brief-mail-from: ${{ secrets.BRIEF_MAIL_FROM }}
           brief-mail-to: ${{ secrets.BRIEF_MAIL_TO }}

@@ -8,7 +8,6 @@ DEV_AUTH_BYPASS=true
 DEV_MANUAL_ALARMS=true
 ACCESS_OWNER=owner@example.com
 # Locally generated 64-hex keys, e.g. `openssl rand -hex 32`:
-CSRF_SIGNING_KEY=0000000000000000000000000000000000000000000000000000000000000000
 FEEDBACK_SIGNING_KEY=1111111111111111111111111111111111111111111111111111111111111111
 # A loopback fake of the feeds, pages, Claude, Resend and Workers AI: every external request goes there, with its
 # original URL in the x-brief-original-url header; nothing reaches the internet.

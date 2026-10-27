@@ -241,10 +241,8 @@ test('reparse, attempts, payload and the message filter of ListDeliveries', asyn
 
 test('the typed client the UI uses round-trips every kind of call through the transcoder', async () => {
   const env = environment(), api = await session(env), target = await endpoint(api), id = await message(env)
-  const csrf = await handleAPI(new Request(`${ORIGIN}/api/csrf`), env)
-  const { token } = await csrf.json(), cookie = csrf.headers.get('set-cookie').split(';')[0]
   const client = createHttpClient(MailHeroUiService, call => handleAPI(new Request(`${ORIGIN}${call.url}`, { method: call.httpMethod, body: call.body,
-    headers: { Origin: ORIGIN, Cookie: cookie, 'X-CSRF-Token': token, ...(call.body === undefined ? {} : { 'Content-Type': 'application/json' }) } }), env))
+    headers: { Origin: ORIGIN, 'X-CSRF-Token': '1', 'Content-Type': 'application/json' } }), env))
   const listed = await client.listMessages({ filter: quote('独立服务'), pageSize: 10 })
   assert.deepEqual(listed.messages.map(item => item.name), [`messages/${id}`])
   const message_ = await client.getMessage({ name: `messages/${id}` })

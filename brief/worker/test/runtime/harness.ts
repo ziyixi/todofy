@@ -48,7 +48,6 @@ export const SYNTHETIC_BINDINGS: Readonly<Record<string, string>> = {
   MODE: 'live',
   ACCESS_OWNER: 'owner@example.com',
   ACCESS_OWNER_ALIASES: '',
-  CSRF_SIGNING_KEY: 'cd'.repeat(32),
   FEEDBACK_SIGNING_KEY: FEEDBACK_KEY,
   RESEND_API_KEY: 're_synthetic_test_key',
   MAIL_FROM: 'Brief <brief@example.com>',
@@ -237,20 +236,10 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     return result.ok;
   };
   const fetchBrief = (path: string, init?: RequestInit) => mf.dispatchFetch(`${ORIGIN}${path}`, { redirect: 'manual', ...init } as never) as unknown as Promise<Response>;
-  let csrf: { token: string; cookie: string } | undefined;
-  const csrfToken = async () => {
-    if (csrf === undefined) {
-      const response = await fetchBrief('/api/csrf');
-      const { token } = await response.json<{ token: string }>();
-      csrf = { token, cookie: (response.headers.get('set-cookie') ?? '').split(';')[0] ?? '' };
-    }
-    return csrf;
-  };
   const send = async (call: HttpCall) => {
     const headers: Record<string, string> = {};
     if (call.httpMethod !== 'GET') {
-      const { token, cookie } = await csrfToken();
-      Object.assign(headers, { origin: ORIGIN, 'x-csrf-token': token, cookie });
+      Object.assign(headers, { origin: ORIGIN, 'x-csrf-token': '1', 'content-type': 'application/json' });
     }
     if (call.body !== undefined) headers['content-type'] = 'application/json';
     return fetchBrief(call.url, { method: call.httpMethod, headers, ...(call.body === undefined ? {} : { body: call.body }) });

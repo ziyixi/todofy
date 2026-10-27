@@ -130,12 +130,12 @@ class DesiredState(unittest.TestCase):
         self.assertEqual(worker["personal"], [])
 
     def test_links_secrets_all_come_from_its_deploy(self):
-        """The links app's wrapper writes the owner addresses and the CSRF key with --secrets-file and adds BUILD_SHA as
-        a var; no secret is set by hand. Without its WRAPPERS entry these four would be missing from the desired state
+        """The links app's wrapper writes the owner addresses with --secrets-file and adds BUILD_SHA as
+        a var; no secret is set by hand. Without its WRAPPERS entry these owner bindings would be missing from the desired state
         and the daily check would report them. Its one hostname is the Custom Domain s.ziyixi.science (L2)."""
         worker = self.state["workers"]["links"]
         bindings = {b["name"]: b for b in worker["bindings"]}
-        secrets = ("ACCESS_OWNER", "ACCESS_OWNER_ALIASES", "CSRF_SIGNING_KEY")
+        secrets = ("ACCESS_OWNER", "ACCESS_OWNER_ALIASES")
         for name in secrets:
             with self.subTest(name=name):
                 self.assertEqual(bindings[name], {"name": name, "type": "secret_text", "source": "deploy",
@@ -153,6 +153,7 @@ class DesiredState(unittest.TestCase):
                 ("PUBLIC_HOST", "plain_text"),
             },
         )
+        self.assertNotIn("CSRF_SIGNING_KEY", bindings)
         self.assertNotIn("links", drift_desired.MANUAL_SECRETS)
         self.assertEqual((worker["workers_dev"], worker["preview_urls"], worker["crons"]), (False, False, []))
         self.assertEqual(worker["custom_domains"], ["s.ziyixi.science"])
@@ -160,13 +161,14 @@ class DesiredState(unittest.TestCase):
 
     def test_tasks_enrolls_its_complete_owner_secret_map_and_verified_build(self):
         bindings = {binding["name"]: binding for binding in self.state["workers"]["tasks"]["bindings"]}
-        secrets = {"ACCESS_OWNER", "ACCESS_OWNER_ALIASES", "CSRF_SIGNING_KEY"}
+        secrets = {"ACCESS_OWNER", "ACCESS_OWNER_ALIASES"}
         self.assertEqual({name for name, binding in bindings.items() if binding["source"] == "deploy"},
                          secrets | {"BUILD_SHA"})
         for name in secrets:
             self.assertEqual(bindings[name], {"name": name, "type": "secret_text", "source": "deploy",
                                                        **({"optional": True} if name == "ACCESS_OWNER_ALIASES" else {})})
         self.assertEqual(bindings["BUILD_SHA"], {"name": "BUILD_SHA", "type": "plain_text", "source": "deploy"})
+        self.assertNotIn("CSRF_SIGNING_KEY", bindings)
         self.assertNotIn("TASKS_WORKER_SECRETS", bindings)
         self.assertNotIn("tasks", drift_desired.MANUAL_SECRETS)
 

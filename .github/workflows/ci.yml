@@ -363,7 +363,6 @@ jobs:
         env:
           MAILSORT_ACCESS_OWNER: owner@example.com
           MAILSORT_ACCESS_OWNER_ALIASES: ''
-          MAILSORT_CSRF_SIGNING_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
           MAILSORT_MODE: shadow
         shell: bash -e {0}
         run: |
@@ -402,7 +401,6 @@ jobs:
         env:
           RECALL_ACCESS_OWNER: owner@example.com
           RECALL_ACCESS_OWNER_ALIASES: ''
-          RECALL_CSRF_SIGNING_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
         shell: bash -e {0}
         run: |
           node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/recall-secrets.json"

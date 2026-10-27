@@ -14,36 +14,26 @@ const request = {
 }
 
 describe('todofy.ui.v1 client', () => {
-  it('fetches a CSRF token once at /api/csrf and sends it with every mutation', async () => {
+  it('sends a fixed custom header directly on every mutation', async () => {
     const { calls } = mockApi({ [RECONCILE]: eventDetail() })
     await todofy.reconcileMailEvent(request)
     await todofy.reconcileMailEvent(request)
-    expect(calls.filter((call) => call.path === '/api/csrf')).toHaveLength(1)
+    expect(calls.filter((call) => call.path === '/api/csrf')).toHaveLength(0)
     const posts = calls.filter((call) => call.method === 'POST')
     expect(posts).toHaveLength(2)
     for (const post of posts) {
-      expect(post.headers['x-csrf-token']).toBe('csrf-token-1')
+      expect(post.headers['x-csrf-token']).toBe('1')
       expect(post.headers['content-type']).toBe('application/json')
       // The name is in the path; the body is the rest of the request in the wire JSON profile.
       expect(post.body).toEqual({ action: 'dismiss', etag: '5', request_id: request.requestId })
     }
   })
 
-  it('renews a refused CSRF token once and repeats the same request', async () => {
-    let first = true
-    const { calls } = mockApi({
-      [RECONCILE]: () => {
-        if (!first) return eventDetail()
-        first = false
-        return apiError(403, 'CSRF_FAILED')
-      },
-    })
-    const event = await todofy.reconcileMailEvent(request)
-    expect(event.etag).toBe('5')
-    expect(calls.filter((call) => call.path === '/api/csrf')).toHaveLength(2)
-    const posts = calls.filter((call) => call.method === 'POST').map((call) => call.body)
-    expect(posts).toHaveLength(2)
-    expect(posts[1]).toEqual(posts[0])
+  it('reports CSRF refusal without a token read or automatic mutation retry', async () => {
+    const { calls } = mockApi({ [RECONCILE]: apiError(403, 'CSRF_FAILED') })
+    await expect(todofy.reconcileMailEvent(request)).rejects.toMatchObject({ status: 403, reason: 'CSRF_FAILED' })
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.method).toBe('POST')
   })
 
   it('keeps the reason, the request ID, the copy and the current event of a Status', async () => {

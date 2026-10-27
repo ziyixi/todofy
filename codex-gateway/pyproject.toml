@@ -12,6 +12,7 @@ dependencies = [
   "uvicorn",
   "openai-codex",
   "ziyixi-proto",
+  "PyJWT[crypto]",
   "jsonschema",
 ]
 

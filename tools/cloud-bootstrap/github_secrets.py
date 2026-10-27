@@ -30,6 +30,8 @@ def worker_secret_values(private: dict, scalar: dict, specs: dict, *, complete: 
         if not isinstance(configured.get(worker, {}), dict):
             raise BootstrapError("WORKER_SECRETS_INVALID")
         bindings = dict(configured.get(worker, {}))
+        if worker in {"home", "links", "watch", "mailsort", "recall", "brief", "tasks", "todofy", "model-router"}:
+            bindings.pop("CSRF_SIGNING_KEY", None)
         prefix = spec["github_secret"].removesuffix("_WORKER_SECRETS")
         if worker in {"links", "watch", "mailsort", "recall", "brief", "model-router"}:
             identity_prefix = "DASHBOARD"

@@ -59,6 +59,23 @@ test('Mail Hero retains its required keys while Todofy accepts its optional reti
   assert.deepEqual(mergeWorkerSecrets('todofy-core', { [core.github_secret]: JSON.stringify(legacy) }, {}, SettingError), legacy)
 })
 
+test('keyless owner maps drop only the exact retired CSRF binding and preserve strict validation', () => {
+  for (const worker of ['home', 'links', 'watch', 'mailsort', 'recall', 'brief', 'tasks', 'todofy', 'model-router']) {
+    const spec = workerSecretSpec(worker)
+    const complete = Object.fromEntries(spec.required.map(name => [name, privateValue]))
+    const legacy = { ...complete, CSRF_SIGNING_KEY: 7 }
+    const env = { [spec.github_secret]: JSON.stringify(legacy) }
+    assert.deepEqual(mergeWorkerSecrets(worker, env, {}, SettingError), complete, worker)
+    assert.deepEqual(JSON.parse(env[spec.github_secret]), legacy)
+    for (const extra of ['csrf_signing_key', 'CSRF_SIGNING_KEY_EXTRA', 'UNDECLARED']) {
+      assert.throws(() => mergeWorkerSecrets(worker, { [spec.github_secret]: JSON.stringify({ ...legacy, [extra]: privateValue }) }, {}, SettingError),
+        error => error.setting === spec.github_secret && !error.message.includes(privateValue), `${worker}.${extra}`)
+    }
+    assert.throws(() => mergeWorkerSecrets(worker, { [spec.github_secret]: JSON.stringify({ ...legacy, [spec.required[0]]: 7 }) }, {}, SettingError),
+      error => error.setting === spec.github_secret, worker)
+  }
+})
+
 test('the relay cutover strips exactly the three retired inputs and preserves its dispatch token', async () => {
   const wrapper = await import('../../../website/relay/deploy/deploy-vars.mjs')
   const legacy = {

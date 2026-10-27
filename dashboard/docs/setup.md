@@ -63,7 +63,6 @@ setting without printing its value (a deploy without a var deletes it, so a miss
 | `DASHBOARD_CANARY_ENABLED` | variable | exactly `true` or `false`; unset, empty or any other value (`False`, `0`, `no`, a stray space) fails the deploy, so a deleted variable never turns stopped canaries back on | `--var CANARY_ENABLED` (§6, §7) |
 | `DASHBOARD_ACCESS_OWNER` | secret | printable-ASCII e-mail | Worker secret `ACCESS_OWNER`; `Links deploy` and `Watch deploy` read it too (same owner, `links/README.md` "Deploy", `watch/README.md` "Deploy") |
 | `DASHBOARD_ACCESS_OWNER_ALIASES` | secret, may be empty | ≤ 8 unique printable-ASCII e-mails, ≤ 2048 chars | Worker secret `ACCESS_OWNER_ALIASES` (a single space when empty, so an emptied list replaces the old one); `Links deploy` and `Watch deploy` read it too |
-| `DASHBOARD_CSRF_SIGNING_KEY` | secret | 64 hex (for example `openssl rand -hex 32`, run locally) | Worker secret `CSRF_SIGNING_KEY` |
 | `DASHBOARD_CF_ANALYTICS_TOKEN` | secret | `[A-Za-z0-9_-]{20,200}` | Worker secret `CF_ANALYTICS_TOKEN` (§4) |
 | `CF_API_TOKEN` | secret (existing, Todofy's deploy token) | – | `CLOUDFLARE_API_TOKEN` for the read-only hostname guard (`tools/cf-guard`) and `wrangler deploy` only; the secrets step also receives it, only to warn when `DASHBOARD_CF_ANALYTICS_TOKEN` equals it (never written anywhere) |
 
@@ -130,15 +129,14 @@ procedure with a new token.
 ```sh
 cd dashboard/worker && npm ci
 cd ../web && npm ci && npm run build            # web/dist, served by the Worker
-cp ../.dev.vars.example ../.dev.vars           # local values, gitignored; edit the CSRF key
+cp ../.dev.vars.example ../.dev.vars           # synthetic local values, gitignored
 cd ../worker && npm run dev                      # http://127.0.0.1:8787, local bindings only, never --remote
 ```
 
 `dashboard/wrangler.toml` is production, so local work always uses local bindings, and the local values
 come from the untracked `dashboard/.dev.vars` next to it (wrangler reads the `.dev.vars` beside the
 config), with synthetic values only: the local `PUBLIC_HOST`, `BUILD_SHA`, `CANARY_ENABLED`,
-`DEV_AUTH_BYPASS=true`, `ACCESS_OWNER=owner@example.com` and a locally generated 64-hex
-`CSRF_SIGNING_KEY` ([`.dev.vars.example`](../.dev.vars.example)). The bypass works only for
+`DEV_AUTH_BYPASS=true` and `ACCESS_OWNER=owner@example.com` ([`.dev.vars.example`](../.dev.vars.example)). The bypass works only for
 `http://localhost`, `127.0.0.1` or `[::1]` requests without `cf-ray`; anywhere else an enabled bypass
 answers 503. `npm run dev` (`worker/package.json`) pins the local origin with `--ip 127.0.0.1 --port 8787
 --local-upstream 127.0.0.1:8787`: wrangler dev otherwise takes the config's first route as every local

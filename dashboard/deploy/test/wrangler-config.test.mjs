@@ -51,6 +51,7 @@ test("the Durable Object, the Ops service bindings, Tasks' create-only TaskInbox
     // The digest's daily task: create only, under source home.
     { binding: 'TASK_INBOX', service: 'tasks', entrypoint: 'TaskInbox', props: { source: 'home' } },
     { binding: 'PERSONAL_MCP', service: 'personal-mcp', entrypoint: 'Ops' },
+    { binding: 'MODEL_ROUTER', service: 'model-router', entrypoint: 'Ops' },
   ])
   assert.deepEqual(config.triggers, { crons: ['*/30 * * * *'] })
 })

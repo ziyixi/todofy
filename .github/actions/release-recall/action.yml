@@ -13,10 +13,6 @@ inputs:
     description: "dashboard access owner aliases"
     required: false
     default: ''
-  recall-csrf-signing-key:
-    description: "recall csrf signing key"
-    required: false
-    default: ''
   recall-worker-secrets:
     description: "recall worker secrets"
     required: false
@@ -86,7 +82,6 @@ runs:
         RECALL_WORKER_SECRETS: ${{ inputs.recall-worker-secrets }}
         RECALL_ACCESS_OWNER: ${{ inputs.dashboard-access-owner }}
         RECALL_ACCESS_OWNER_ALIASES: ${{ inputs.dashboard-access-owner-aliases }}
-        RECALL_CSRF_SIGNING_KEY: ${{ inputs.recall-csrf-signing-key }}
       shell: bash -e {0}
       run: node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/recall-secrets.json"
     # deploy-vars.mjs adds BUILD_SHA as --var and refuses a config without the Access AUD; the bundle that ships is

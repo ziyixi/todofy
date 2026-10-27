@@ -1,6 +1,6 @@
 """Authenticated, bounded HTTP transport for the generated inference contract."""
 
-import hmac
+import asyncio
 import json
 import os
 import pathlib
@@ -24,6 +24,11 @@ from ziyixi_proto.http_routes import decode_request
 from ziyixi_proto.rpc_status import RpcError, status_body
 from ziyixi_proto.wire_json import WireJsonError, to_wire
 
+from codex_gateway.access import (
+    AccessKeysUnavailable,
+    AccessServiceVerifier,
+    InvalidAccessToken,
+)
 from codex_gateway.monitoring import InferenceMonitor, utc_now
 from codex_gateway.runtime import check_runtime, infer
 
@@ -60,21 +65,40 @@ def _baked_source_sha() -> str | None:
     return sha if isinstance(sha, str) and re.fullmatch(r"[a-f0-9]{40}", sha) else None
 
 
-def authorized_home(request: Request) -> pathlib.Path:
-    token = os.getenv("CODEX_GATEWAY_TOKEN", "").strip()
-    if not token:
+def _baked_access_verifier() -> AccessServiceVerifier:
+    try:
+        value = json.loads(BUILD_INFO_FILE.read_text())
+        return AccessServiceVerifier(value["access_issuer"], value["access_audience"])
+    except (OSError, ValueError, TypeError, KeyError):
         raise RpcError(
             "UNAVAILABLE", "GATEWAY_NOT_CONFIGURED", "Inference is not configured"
-        )
-    headers = request.headers.getlist("authorization")
-    if len(headers) != 1 or not hmac.compare_digest(
-        headers[0].encode(), ("Bearer " + token).encode()
-    ):
+        ) from None
+
+
+async def authorized_home(request: Request) -> pathlib.Path:
+    headers = request.headers.getlist("cf-access-jwt-assertion")
+    if len(headers) != 1 or not headers[0]:
         raise RpcError(
             "UNAUTHENTICATED",
             "INFERENCE_NOT_AUTHORIZED",
             "Inference authorization required",
         )
+    verifier = request.app.state.access_verifier
+    if verifier is None:
+        verifier = _baked_access_verifier()
+        request.app.state.access_verifier = verifier
+    try:
+        await asyncio.to_thread(verifier.verify, headers[0])
+    except InvalidAccessToken:
+        raise RpcError(
+            "UNAUTHENTICATED",
+            "INFERENCE_NOT_AUTHORIZED",
+            "Inference authorization required",
+        ) from None
+    except AccessKeysUnavailable:
+        raise RpcError(
+            "UNAVAILABLE", "ACCESS_KEYS_UNAVAILABLE", "Access signing keys unavailable"
+        ) from None
     home = os.getenv("CODEX_HOME", "")
     if (
         not home
@@ -118,6 +142,7 @@ def create_app(
     clock: Callable[[], datetime] = utc_now,
     monotonic: Callable[[], float] = time.monotonic,
     model_executor: Any = None,
+    access_verifier: AccessServiceVerifier | None = None,
 ) -> FastAPI:
     from codex_gateway.model_api import install_model_routes
     from codex_gateway.modelrouter import ModelExecutor
@@ -132,6 +157,7 @@ def create_app(
             await executor.shutdown()
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
+    app.state.access_verifier = access_verifier
     bindings = {item.path_template: item for item in HTTP_BINDINGS}
     source_sha = _baked_source_sha()
     monitor = InferenceMonitor(monitor_db, clock=clock, monotonic=monotonic)
@@ -157,7 +183,7 @@ def create_app(
 
     async def run(request: Request) -> JSONResponse:
         binding = bindings[request.url.path]
-        home = authorized_home(request)
+        home = await authorized_home(request)
         try:
             decoded = _json(
                 await request_bytes(request, reason="INVALID_INFERENCE_REQUEST")

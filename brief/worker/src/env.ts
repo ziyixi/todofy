@@ -30,7 +30,6 @@ export interface Env {
   readonly ACCESS_OWNER?: string;
   readonly ACCESS_OWNER_ALIASES?: string;
   /** 64 hex characters: HMAC key of the brief_csrf tokens. */
-  readonly CSRF_SIGNING_KEY?: string;
   /** 64 hex characters: HMAC key of the email's feedback links (its own: a machine route never inherits owner rights). */
   readonly FEEDBACK_SIGNING_KEY?: string;
   /** The sender and the recipient (personal values). */

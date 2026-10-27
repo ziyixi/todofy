@@ -13,10 +13,6 @@ inputs:
     description: "dashboard access owner aliases"
     required: false
     default: ''
-  mailsort-csrf-signing-key:
-    description: "mailsort csrf signing key"
-    required: false
-    default: ''
   mailsort-worker-secrets:
     description: "mailsort worker secrets"
     required: false
@@ -85,7 +81,6 @@ runs:
         MAILSORT_WORKER_SECRETS: ${{ inputs.mailsort-worker-secrets }}
         MAILSORT_ACCESS_OWNER: ${{ inputs.dashboard-access-owner }}
         MAILSORT_ACCESS_OWNER_ALIASES: ${{ inputs.dashboard-access-owner-aliases }}
-        MAILSORT_CSRF_SIGNING_KEY: ${{ inputs.mailsort-csrf-signing-key }}
       shell: bash -e {0}
       run: node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/mailsort-secrets.json"
     # deploy-vars.mjs adds MODE and BUILD_SHA as --var and refuses a config without the Access AUD; the bundle that

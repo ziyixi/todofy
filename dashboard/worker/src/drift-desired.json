@@ -57,11 +57,6 @@
           "source": "deploy"
         },
         {
-          "name": "CSRF_SIGNING_KEY",
-          "type": "secret_text",
-          "source": "deploy"
-        },
-        {
           "name": "FEEDBACK_SIGNING_KEY",
           "type": "secret_text",
           "source": "deploy"
@@ -248,11 +243,6 @@
           "source": "config"
         },
         {
-          "name": "CSRF_SIGNING_KEY",
-          "type": "secret_text",
-          "source": "deploy"
-        },
-        {
           "name": "FLEET",
           "type": "service",
           "source": "config"
@@ -364,11 +354,6 @@
         {
           "name": "BUILD_SHA",
           "type": "plain_text",
-          "source": "deploy"
-        },
-        {
-          "name": "CSRF_SIGNING_KEY",
-          "type": "secret_text",
           "source": "deploy"
         },
         {
@@ -591,11 +576,6 @@
           "optional": true
         },
         {
-          "name": "CSRF_SIGNING_KEY",
-          "type": "secret_text",
-          "source": "deploy"
-        },
-        {
           "name": "GMAIL_CLIENT_ID",
           "type": "secret_text",
           "source": "manual",
@@ -675,13 +655,7 @@
           "source": "config"
         },
         {
-          "name": "ANTHROPIC_API_KEY_BRIEF",
-          "type": "secret_text",
-          "source": "manual",
-          "optional": true
-        },
-        {
-          "name": "ANTHROPIC_API_KEY_MAILSORT",
+          "name": "ANTHROPIC_API_KEY",
           "type": "secret_text",
           "source": "manual",
           "optional": true
@@ -714,17 +688,6 @@
           "source": "config"
         },
         {
-          "name": "CODEX_EXECUTOR_TOKEN",
-          "type": "secret_text",
-          "source": "manual",
-          "optional": true
-        },
-        {
-          "name": "CSRF_SIGNING_KEY",
-          "type": "secret_text",
-          "source": "deploy"
-        },
-        {
           "name": "DB",
           "type": "d1",
           "source": "config"
@@ -735,7 +698,7 @@
           "source": "config"
         },
         {
-          "name": "GEMINI_API_KEY_TODOFY",
+          "name": "GEMINI_API_KEY",
           "type": "secret_text",
           "source": "manual",
           "optional": true
@@ -880,11 +843,6 @@
           "source": "deploy"
         },
         {
-          "name": "CSRF_SIGNING_KEY",
-          "type": "secret_text",
-          "source": "deploy"
-        },
-        {
           "name": "EXPORT_TOKEN_SHA256",
           "type": "secret_text",
           "source": "manual",
@@ -973,11 +931,6 @@
           "source": "deploy"
         },
         {
-          "name": "CSRF_SIGNING_KEY",
-          "type": "secret_text",
-          "source": "deploy"
-        },
-        {
           "name": "DB",
           "type": "d1",
           "source": "config"
@@ -1054,11 +1007,6 @@
           "name": "COORDINATOR",
           "type": "durable_object_namespace",
           "source": "config"
-        },
-        {
-          "name": "CSRF_SIGNING_KEY",
-          "type": "secret_text",
-          "source": "manual"
         },
         {
           "name": "MAIL_WEBHOOK_TOKEN_SHA256",
@@ -1259,11 +1207,6 @@
         {
           "name": "BUILD_SHA",
           "type": "plain_text",
-          "source": "deploy"
-        },
-        {
-          "name": "CSRF_SIGNING_KEY",
-          "type": "secret_text",
           "source": "deploy"
         },
         {

@@ -9,7 +9,6 @@ BUILD_SHA=dev
 DEV_AUTH_BYPASS=true
 ACCESS_OWNER=owner@example.com
 # A locally generated 64-hex key, e.g. `openssl rand -hex 32`:
-CSRF_SIGNING_KEY=0000000000000000000000000000000000000000000000000000000000000000
 # Synthetic sites instead of the internet: run `node test/runtime/serve-fake-sites.ts` in worker/ (it prints this origin).
 # Every page request then goes to that loopback server, which answers from test/fake-sites.ts. Remove this line to
 # watch real pages from your machine.

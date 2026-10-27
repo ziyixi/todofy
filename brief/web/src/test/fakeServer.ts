@@ -40,7 +40,6 @@ import { HttpTranscoder, type ServiceHandlers, type ShapeOf } from '@ziyixi/prot
 import { create } from '@ziyixi/proto/protobuf'
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt'
 import { Code, RpcError } from '@ziyixi/proto/rpc-status'
-import { resetClientForTests } from '../api.ts'
 
 /** 23:00 on Monday 12 October 2026 in the tests' zone (Asia/Shanghai, test/setup.ts); 08:00 in Los Angeles. */
 export const NOW = Date.parse('2026-10-12T15:00:00Z')
@@ -284,14 +283,14 @@ export class FakeServer {
 
   /** Installs this server as the page's fetch. */
   install(): void {
-    resetClientForTests()
+
     vi.stubGlobal('fetch', async (input: string, init: RequestInit = {}) => {
       if (!input.startsWith('/api/')) throw new Error(`a request outside the page's API: ${input}`)
       const headers = Object.fromEntries(new Headers(init.headers).entries())
       const body = typeof init.body === 'string' ? (JSON.parse(init.body) as Record<string, unknown>) : null
       this.calls.push({ method: init.method ?? 'GET', path: input, headers, body })
-      if (input === '/api/csrf') return Response.json({ token: 'csrf-token' })
-      if ((init.method ?? 'GET') !== 'GET' && headers['x-csrf-token'] !== 'csrf-token') return new Response('{}', { status: 403 })
+      if (input === '/api/csrf') return Response.json({ token: '1' })
+      if ((init.method ?? 'GET') !== 'GET' && (headers['x-csrf-token'] !== '1' || headers['content-type']?.split(';', 1)[0] !== 'application/json')) return new Response('{}', { status: 403 })
       const request = new Request(`https://brief.ziyixi.science${input}`, { method: init.method ?? 'GET', headers, ...(typeof init.body === 'string' ? { body: init.body } : {}) })
       const result = await this.transcoder.handle(request, null, 'req-1')
       return result?.response ?? new Response('{}', { status: 404 })

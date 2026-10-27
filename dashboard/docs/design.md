@@ -76,7 +76,6 @@ route `home.ziyixi.science` with `custom_domain = true`. One cron
 | `CANARY_ENABLED` | var | `true` or `false` (§5.4 "Switch"); unset or empty → `true`; any other value → `false` (the switch exists to stop canaries, so an unreadable value never starts one; `deploy-vars.mjs` sends only `true`/`false`) |
 | `BUILD_SHA` | var | the deployed commit (`dev` locally) |
 | `ACCESS_OWNER`, `ACCESS_OWNER_ALIASES` | secret | printable-ASCII emails, ≤ 8 aliases, ≤ 2048 chars; empty aliases uploaded as `" "` |
-| `CSRF_SIGNING_KEY` | secret | `^[0-9a-fA-F]{64}$` |
 | `CF_ANALYTICS_TOKEN` | secret | API token used **only** as `Authorization: Bearer` on `POST https://api.cloudflare.com/client/v4/graphql` and on the drift check's read-only `GET`s under `https://api.cloudflare.com/client/v4` (design-v2.md §10; URLs are constants, not config). Never logged, stored, echoed or sent elsewhere. Today a broader token is reused; replace it with an "Account Analytics: Read" token (setup.md) |
 | `DEV_AUTH_BYPASS` | local only | `true` enables the loopback bypass; never in the production config (tests check it) |
 | `DEV_NOW` | local only | an RFC 3339 UTC instant that a request the loopback bypass signed in takes as now (views, refreshes, manual canary, guard override); unset or anything else → the object's clock. Requests Access verified and cron ticks never read it; never in the production config, the deploy's `--var`s or its secrets (tests check it) |
@@ -406,11 +405,10 @@ The shapes are `worker/src/api-types.ts`. Details:
   whenNotLocal: 'refuse'}` (only `http://localhost|127.0.0.1|[::1]` without `cf-ray`). Failures:
   `not_configured` → 503 `access_not_configured`; `dev_bypass_refused` → 503 `access_not_configured`;
   `missing_token`/`invalid_token` → 401 `unauthorized`; `keys_unavailable` → 503 `unavailable`.
-- **CSRF**: key `importHmacKeyHex(CSRF_SIGNING_KEY)` resolved before anything else on `/api/v1/csrf`
-  and mutations (null → 503 `not_configured`); `issueCsrf(request, owner, {cookieName: 'home_csrf',
-  key})`; mutations `verifyCsrf(request, owner, {cookieName: 'home_csrf', key, allowedOrigins:
-  ['https://' + PUBLIC_HOST] (+ the request origin when bypassed)})` → 403 `csrf_failed`. The CSRF check
-  comes before reading the body.
+- **Owner JSON mutations**: after Access authentication and before reading the body, `verifyCsrf` requires
+  an exact origin from `['https://' + PUBLIC_HOST]` (plus the request origin only when bypassed), a nonempty
+  `X-CSRF-Token` header and `application/json`. Failure is 403 `csrf_failed`. Clients send header `1`
+  directly. Compatibility `GET /api/csrf` returns static `1` without a cookie or signing key.
 - **Headers**: every response through `withPrivateHeaders` with `STRICT_CSP` (no remote fonts, scripts
   or connections); API and errors `cache-control: no-store`; `/assets/*` 200 non-HTML may use
   `private, max-age=31536000, immutable` like Todofy. JSON is `application/json; charset=utf-8`.
@@ -537,8 +535,8 @@ durations in words.
   - 刷新: no dialog; disabled until `refresh.next_refresh_at`.
 - Data: `@tanstack/react-query`; overview refetched every 5 min while the page is visible; the client
   uses `credentials: 'same-origin'`, `redirect: 'error'` (an expired Access session shows
-  "登录已过期，请刷新页面"), fetches `/api/v1/csrf` once, sends `X-CSRF-Token`, and drops the token and
-  retries once on 403 `csrf_failed`.
+  "登录已过期，请刷新页面"), and sends `X-CSRF-Token: 1` and JSON directly on mutations.
+  Authorization refusals are returned without replay.
 - Labels live in `src/lib/labels.ts` (signals, counters, modes, quota ids, canary codes, guard reasons,
   API errors).
 
@@ -565,7 +563,7 @@ Unit (`worker`, vitest in Node, `cloudflare:workers` aliased to `test/cloudflare
   `contracts/ops-v1/fixtures/invalid/` is refused except the ones the consumer rules tolerate (an
   extra field is dropped, a new additive enum code is read).
 - `http`: Access via edge-auth with a test JWKS (Web Crypto RSA keys, stubbed `fetch`), alias and case
-  fold, missing/invalid token, CSRF (Origin, header/cookie, signature, key missing), private headers,
+  fold, missing/invalid token, CSRF (exact Origin, nonempty header, JSON media type, no cookie/key), private headers,
   error envelopes, 404/405, `/health` without auth, API shapes against `api-types.ts`, a chunked body
   without Content-Length cut off after 1 KiB.
 
@@ -602,7 +600,7 @@ sets another; `test/runtime/flows.ts`), and the eslint config refuses `Date.now(
 
 Web (vitest + testing-library + jsdom): rendering from a synthetic `OverviewResponse` fixture (all
 sections, unknown codes, null usage, dark/light independent), times in a fixed test time zone,
-confirmation dialogs and the exact requests they send (CSRF header, retry on 403), disabled refresh,
+confirmation dialogs and the exact requests they send (static CSRF header, no replay on 403), disabled refresh,
 keyboard flow; `npm run build`; the built files contain no `http(s)://` origin other than inert XML
 namespaces.
 
@@ -623,7 +621,6 @@ deploy by `deploy/deploy-vars.mjs` (Mail Hero's style; messages name settings, n
 | `GITHUB_SHA` | 40 hex | `--var BUILD_SHA` |
 | `DASHBOARD_ACCESS_OWNER` (secret) | printable-ASCII email | secrets file `ACCESS_OWNER` |
 | `DASHBOARD_ACCESS_OWNER_ALIASES` (secret) | ≤ 8, ≤ 2048 chars, unique, each printable-ASCII email | `ACCESS_OWNER_ALIASES` (`" "` when empty) |
-| `DASHBOARD_CSRF_SIGNING_KEY` (secret) | `^[0-9a-fA-F]{64}$` | `CSRF_SIGNING_KEY` |
 | `DASHBOARD_CF_ANALYTICS_TOKEN` (secret) | `^[A-Za-z0-9_-]{20,200}$` | `CF_ANALYTICS_TOKEN` |
 
 `secrets <path>` writes the secrets file for `--secrets-file` (mode 0600, never over an existing file,

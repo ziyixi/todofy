@@ -87,7 +87,7 @@ describe('an issue', () => {
     buttonNamed(root, '多来点').click()
     await settle()
     const [vote] = fake.mutations()
-    expect([vote?.method, vote?.path, vote?.headers['x-csrf-token'], vote?.body?.['vote']]).toEqual(['POST', `/api/v1/issues/${DAY}/items/r1:vote`, 'csrf-token', 'more'])
+    expect([vote?.method, vote?.path, vote?.headers['x-csrf-token'], vote?.body?.['vote']]).toEqual(['POST', `/api/v1/issues/${DAY}/items/r1:vote`, '1', 'more'])
     expect(vote?.body?.['request_id']).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
     expect(pressed()).toEqual([
       ['👍', 'false'],

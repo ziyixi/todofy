@@ -173,6 +173,7 @@ def load_bundle(directory):
 
 def credentials(path, allowed):
     value = read_json(path, private=True)
+    # Older recovery artifacts may carry the retired gateway environment; it is ignored and never applied.
     require(
         set(value) - {"codex_gateway_env"}
         == {
@@ -195,8 +196,6 @@ def credentials(path, allowed):
         ("trigger_env", "trigger"),
         ("platform_env", "platform"),
     )
-    if "codex_gateway_env" in value:
-        environments += (("codex_gateway_env", "codex-gateway"),)
     for field, application in environments:
         variables = value[field]
         require(
@@ -215,16 +214,6 @@ def credentials(path, allowed):
                 "CREDENTIAL_ENV_INVALID",
             )
     token = value["platform_env"].get("PLATFORM_DEPLOY_TOKEN", "")
-    if "codex_gateway_env" in value:
-        gateway = value["codex_gateway_env"].get("CODEX_GATEWAY_TOKEN", "")
-        require(
-            32 <= len(gateway) <= 512 and not any(c.isspace() for c in gateway),
-            "CODEX_GATEWAY_CREDENTIAL_INVALID",
-        )
-        require(
-            gateway not in {token, *value["newsletter_env"].values()},
-            "CODEX_GATEWAY_IDENTITY_NOT_DISTINCT",
-        )
     monitor = value["newsletter_env"].get("NEWSLETTER_MONITOR_TOKEN", "")
     require(
         32 <= len(token) <= 512 and not any(c.isspace() for c in token),

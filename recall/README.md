@@ -109,7 +109,7 @@ after `CI gate`; a version whose tag exists is skipped), and `npm run install-ex
 one ([extension README](extension/README.md#builds-github-releases)).
 
 The wrapper writes the Worker secrets `ACCESS_OWNER` and `ACCESS_OWNER_ALIASES` (from the dashboard's secrets: one
-owner) and `CSRF_SIGNING_KEY` (from `RECALL_CSRF_SIGNING_KEY`), and sets `BUILD_SHA`. recall has no operational switch.
+owner), and sets `BUILD_SHA`. recall has no operational switch.
 No deploy carries a machine token or anything of Dropbox: the owner makes the tokens in 设置 (RecallState keeps their
 digests) and connects Dropbox there (OAuth with PKCE: an App key, no secret; the refresh token stays in RecallState).
 A digest put by hand as a Worker secret (`INGEST_TOKEN_SHA256`, `EXPORT_TOKEN_SHA256` and their `_PREVIOUS`) is

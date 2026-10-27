@@ -8,6 +8,7 @@ output "access_aud" {
   value = merge(
     { for key, app in cloudflare_zero_trust_access_application.owner : key => app.aud },
     { for app in cloudflare_zero_trust_access_application.mail_hero_backup : "mail-hero-backup" => app.aud },
+    { "codex-gateway" = cloudflare_zero_trust_access_application.codex_gateway.aud },
   )
 }
 

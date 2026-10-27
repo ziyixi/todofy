@@ -8,7 +8,7 @@ const HEX_KEY = /^[0-9a-fA-F]{64}$/;
 
 /**
  * 64 hex characters (either case) as a 32-byte, non-extractable HMAC-SHA-256 key with usage
- * `['sign']` (Todofy's `CSRF_SIGNING_KEY`); null when the text is not exactly that. The caller trims.
+ * `['sign']` for application signatures; null when the text is not exactly that. The caller trims.
  */
 export async function importHmacKeyHex(hex: string): Promise<CryptoKey | null> {
   if (typeof hex !== 'string' || !HEX_KEY.test(hex)) return null;

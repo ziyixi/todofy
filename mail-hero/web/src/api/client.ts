@@ -1,10 +1,5 @@
-/**
- * The owner API client (proto/mailhero/ui/v2): MailHeroUiService through the shared typed client
- * (proto/ts/http-client.ts), built from the same descriptors the Worker's transcoder routes with. Same-origin only:
- * every request goes to /api/v2/* with the Access cookie; nothing else leaves the page. This file adds only the
- * transport (mutations carry the signed double-submit CSRF token: header X-CSRF-Token, cookie mail_hero_csrf, from GET
- * /api/csrf; a refused token is renewed once), the ApiError every failure becomes, and the small helpers the pages
- * share (resource names, timestamps, the reads that combine several calls).
+/** Same-origin owner API transport: Access cookies, JSON mutations and X-CSRF-Token: 1.
+ * Each action keeps its request_id; authorization failures are returned without automatic replay.
  */
 import { createHttpClient, HttpEncodeError, HttpResponseError, RpcStatusError, type HttpCall } from '@ziyixi/proto/http-client'
 import type { CommonReason } from '@ziyixi/proto/common/errors/v1/errors_pb'
@@ -13,7 +8,7 @@ import { MailHeroUiService } from '@ziyixi/proto/mailhero/ui/v2/mail_hero_ui_ser
 import type { Delivery, DeliveryAttempt, DeliveryPayload } from '@ziyixi/proto/mailhero/ui/v2/delivery_pb'
 import type { Message, MessageContent } from '@ziyixi/proto/mailhero/ui/v2/message_pb'
 import { quoteLiteral } from '@ziyixi/proto/filter'
-import { parseStatus } from '@ziyixi/proto/rpc-status'
+
 import { timestampDate, timestampFromDate, type Timestamp } from '@ziyixi/proto/protobuf/wkt'
 
 export const CSRF_HEADER = 'X-CSRF-Token'
@@ -68,8 +63,6 @@ export function toApiError(error: unknown): ApiError {
   return new ApiError(0, 'BAD_RESPONSE', '服务返回了无法识别的响应')
 }
 
-let csrfToken: string | null = null
-
 async function fetchSameOrigin(url: string, init: RequestInit): Promise<Response> {
   try {
     // redirect: 'error' so an expired Access session surfaces as an error, not as the login page's HTML.
@@ -79,38 +72,13 @@ async function fetchSameOrigin(url: string, init: RequestInit): Promise<Response
   }
 }
 
-async function csrf(): Promise<string> {
-  if (csrfToken) return csrfToken
-  const response = await fetchSameOrigin('/api/csrf', { headers: { Accept: 'application/json' } })
-  let body: unknown
-  try { body = await response.json() } catch { /* Not JSON: a proxy's or Access's page. */ }
-  if (!response.ok) {
-    const status = parseStatus(response.status, body)
-    throw status === null ? new ApiError(response.status, 'BAD_RESPONSE', '无法取得表单安全令牌') : toApiError(new RpcStatusError(status))
-  }
-  const token = (body as { token?: unknown } | undefined)?.token
-  if (typeof token !== 'string' || token === '') throw new ApiError(response.status, 'BAD_RESPONSE', '无法取得表单安全令牌')
-  csrfToken = token
-  return csrfToken
-}
-
-/**
- * The transport of every call. A mutation carries the CSRF token; a 403 CSRF_FAILED (an expired token, a lost cookie)
- * drops the token and sends once more with a fresh one (the same body, so the same request_id).
- */
+/** Send JSON mutation headers directly; the Worker checks Origin before parsing the body. */
 async function send(call: HttpCall): Promise<Response> {
-  for (let attempt = 0; ; attempt += 1) {
-    const headers: Record<string, string> = { Accept: 'application/json' }
-    if (call.body !== undefined) headers['Content-Type'] = 'application/json'
-    if (call.httpMethod !== 'GET') headers[CSRF_HEADER] = await csrf()
-    const response = await fetchSameOrigin(call.url, { method: call.httpMethod, headers, ...(call.body === undefined ? {} : { body: call.body }) })
-    if (response.status !== 403 || call.httpMethod === 'GET') return response
-    csrfToken = null
-    if (attempt > 0) return response
-    let reason: string | undefined
-    try { reason = parseStatus(403, await response.clone().json())?.reason } catch { reason = undefined }
-    if (reason !== 'CSRF_FAILED') return response
-  }
+  const mutation = !['GET', 'HEAD', 'OPTIONS'].includes(call.httpMethod)
+  const headers: Record<string, string> = { Accept: 'application/json' }
+  if (mutation || call.body !== undefined) headers['Content-Type'] = 'application/json'
+  if (mutation) headers['X-CSRF-Token'] = '1'
+  return fetchSameOrigin(call.url, { method: call.httpMethod, headers, ...(call.body === undefined ? {} : { body: call.body }) })
 }
 
 /** Every rpc of `client`, its failures turned into ApiErrors. */
@@ -126,9 +94,6 @@ function withApiErrors<C extends object>(client: C): C {
 export const api = withApiErrors(createHttpClient(MailHeroUiService, send))
 
 /** Test hook: forget the cached CSRF token. */
-export function resetClientForTests(): void {
-  csrfToken = null
-}
 
 // ---- names, times, filters ---------------------------------------------------------------------------------------
 

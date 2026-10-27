@@ -87,7 +87,7 @@ async function runtime(t) {
     assert.equal(response.status, 200, await response.clone().text())
     return response.json()
   }
-  const csrf = await mf.dispatchFetch('http://localhost/api/csrf'), token = (await csrf.json()).token, cookie = csrf.headers.get('set-cookie').split(';')[0]
+  const csrf = await mf.dispatchFetch('http://localhost/api/csrf'), token = (await csrf.json()).token, cookie = (csrf.headers.get('set-cookie') ?? '').split(';')[0]
   /** mailhero.ui.v2 through the Worker: {status, data} in the wire JSON. */
   const api = async (path, method = 'GET', input) => {
     const response = await mf.dispatchFetch('http://localhost/api/v2' + path, { method, body: input === undefined ? undefined : JSON.stringify(input),

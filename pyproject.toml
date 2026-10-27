@@ -26,6 +26,7 @@ constraint-dependencies = [
   "pytest-asyncio==1.4.0",
   "pytest-xdist==3.8.0",
   "pyyaml==6.0.3",
+  "PyJWT==2.15.1",
   "ruff==0.16.9",
   "types-protobuf==7.35.1.20260827",
   "types-pyyaml==6.0.12.20260906",

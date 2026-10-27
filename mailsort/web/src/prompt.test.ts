@@ -63,7 +63,7 @@ describe('classification prompt editor', () => {
     expect(decodeURIComponent(request?.path ?? '')).toContain('update_mask=base_text,personal_rules,etag')
     expect(request?.body).toMatchObject({ etag: 'initial', base_text: server.classificationPrompt.baseText, personal_rules: server.classificationPrompt.personalRules })
     expect(new URL(request?.path ?? '/', 'https://synthetic.example').searchParams.get('request_id')).toMatch(/^[0-9a-f-]{36}$/)
-    expect(request?.headers['x-csrf-token']).toBe('csrf-token')
+    expect(request?.headers['x-csrf-token']).toBe('1')
     expect(server.classificationPrompt.updateTime).toBeDefined()
     expect(card.textContent).toContain('已保存，从下一批开始使用')
     expect(button(card, '保存').disabled).toBe(true)

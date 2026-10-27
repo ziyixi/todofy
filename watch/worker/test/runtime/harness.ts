@@ -46,7 +46,6 @@ export const SYNTHETIC_BINDINGS: Readonly<Record<string, string>> = {
   BUILD_SHA: 'test',
   ACCESS_OWNER: 'owner@example.com',
   ACCESS_OWNER_ALIASES: '',
-  CSRF_SIGNING_KEY: 'cd'.repeat(32),
   DEV_AUTH_BYPASS: 'true',
   DEV_MANUAL_ALARMS: 'true',
   DEV_FETCH_TIMEOUT_MS: '500',
@@ -253,20 +252,10 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     return result.ok;
   };
   const fetchWatch = (path: string, init?: RequestInit) => mf.dispatchFetch(`${ORIGIN}${path}`, { redirect: 'manual', ...init } as never) as unknown as Promise<Response>;
-  let csrf: { token: string; cookie: string } | undefined;
-  const csrfToken = async () => {
-    if (csrf === undefined) {
-      const response = await fetchWatch('/api/csrf');
-      const { token } = await response.json<{ token: string }>();
-      csrf = { token, cookie: (response.headers.get('set-cookie') ?? '').split(';')[0] ?? '' };
-    }
-    return csrf;
-  };
   const send = async (call: HttpCall) => {
     const headers: Record<string, string> = {};
     if (call.httpMethod !== 'GET') {
-      const { token, cookie } = await csrfToken();
-      Object.assign(headers, { origin: ORIGIN, 'x-csrf-token': token, cookie });
+      Object.assign(headers, { origin: ORIGIN, 'x-csrf-token': '1', 'content-type': 'application/json' });
     }
     if (call.body !== undefined) headers['content-type'] = 'application/json';
     return fetchWatch(call.url, { method: call.httpMethod, headers, ...(call.body === undefined ? {} : { body: call.body }) });
@@ -293,8 +282,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
       return worker.fetch('http://probe/', { method: 'POST', body: JSON.stringify({ op: 'watch_api', args: [access, `https://watch.internal${path}`, init] }) }) as unknown as Promise<Response>;
     },
     async mutate(method, path, body) {
-      const { token, cookie } = await csrfToken();
-      const headers: Record<string, string> = { origin: ORIGIN, 'x-csrf-token': token, cookie };
+      const headers: Record<string, string> = { origin: ORIGIN, 'x-csrf-token': '1', 'content-type': 'application/json' };
       if (body !== undefined) headers['content-type'] = 'application/json';
       return fetchWatch(path, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     },

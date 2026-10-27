@@ -12,7 +12,6 @@ import {
   api,
   describeError,
   EMPTY_CATALOG,
-  prepareWrites,
   type Catalog,
   type CatalogItem,
   type CatalogKind,
@@ -156,7 +155,6 @@ export function App() {
     await loadCatalog();
   }, [loadCatalog]);
   useEffect(() => {
-    prepareWrites();
     void loadCatalog();
   }, [loadCatalog]);
   useEffect(

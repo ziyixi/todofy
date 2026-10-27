@@ -215,7 +215,7 @@ of the file. The page's text is Chinese; the short-link side's own pages (previe
 - **L2 (first deploy; steps 1-4 done in the commit "Deploy links on s.ziyixi.science (L2)", step 5 after its first
   `Links deploy`):** the lead created the D1 database `links` (WNAM), the Access application `links` (self-hosted,
   `s.ziyixi.science/_/*` and the exact `s.ziyixi.science/_`, the two shared owner policies, session 168 h) and
-  the `production` secret `LINKS_CSRF_SIGNING_KEY`; `s.ziyixi.science` had no DNS record, so the Custom Domain attaches
+  the original, now retired CSRF signing secret; `s.ziyixi.science` had no DNS record, so the Custom Domain attaches
   without a cf-guard allowance. The commit made every edit of step 4 except the `infra/` adoption: the dashboard
   registry names the Worker and the D1 database under a hidden entry 短链接 (no tile, status `none`), and the
   `Links deploy` job also checks the Worker's own anonymous answers (`/robots.txt`, and an unknown key's 302 to
@@ -227,8 +227,7 @@ of the file. The page's text is Chinese; the short-link side's own pages (previe
   2. Create the Access application for `s.ziyixi.science/_/*` with an extra destination for the exact
      `s.ziyixi.science/_`, a policy allowing exactly the owner's identities (the dashboard's), session duration 7 days;
      commit its AUD as `ACCESS_AUDIENCE`. The rest of the host stays outside Access.
-  3. Add the GitHub `production` secret `LINKS_CSRF_SIGNING_KEY` (64 hex, `openssl rand -hex 32`); the owner values
-     come from the dashboard's `DASHBOARD_ACCESS_OWNER` and `DASHBOARD_ACCESS_OWNER_ALIASES`.
+  3. The keyless owner API needs no CSRF secret. The owner values come from the dashboard's `DASHBOARD_ACCESS_OWNER` and `DASHBOARD_ACCESS_OWNER_ALIASES`.
   4. In one commit:
      - `routes = [{ pattern = "s.ziyixi.science", custom_domain = true }]` in `wrangler.toml`.
      - `.github/scripts/test_wrangler_configs.py`: move `links` from `UNDEPLOYED` to `PRODUCTION` and `WRAPPERS` (with
@@ -244,9 +243,8 @@ of the file. The page's text is Chinese; the short-link side's own pages (previe
        committed configs' expected hosts.
      - The drift check's desired state: `links` in `.github/scripts/drift_desired.py` `WORKERS` (test_drift_desired
        holds it equal to `PRODUCTION`) and in `WRAPPERS` as `{"language": "js", "file": "links/deploy/deploy-vars.mjs",
-       "vars": "links", "secrets": "links"}` (without it `BUILD_SHA`, `ACCESS_OWNER`, `ACCESS_OWNER_ALIASES` and
-       `CSRF_SIGNING_KEY` would be missing from the desired state and the daily check would report them;
-       `test_drift_desired.py` now checks all four); regenerate `dashboard/worker/src/drift-desired.json` (`python3 .github/scripts/drift_desired.py`); the
+       "vars": "links", "secrets": "links"}` (without it `BUILD_SHA`, `ACCESS_OWNER` and `ACCESS_OWNER_ALIASES` would be missing from the desired state and the daily check would report them;
+       `test_drift_desired.py` now checks all three); regenerate `dashboard/worker/src/drift-desired.json` (`python3 .github/scripts/drift_desired.py`); the
        9 Workers in `dashboard/worker/test/drift.test.ts` ("names every production Worker") and in
        `dashboard/docs/design-v2.md` (the drift check's "8 Workers ... three ticks": 9 still take three ticks, 3 + 4 + 2).
      - The dashboard registry (`dashboard/worker/src/registry.ts` `WORKERS` and `RESOURCES`: the Worker `links` and the

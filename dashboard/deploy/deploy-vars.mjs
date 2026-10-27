@@ -5,7 +5,7 @@
 //   commit) and CANARY_ENABLED (the GitHub environment variable DASHBOARD_CANARY_ENABLED; exactly "true" or
 //   "false": unset or empty is refused like every other switch, so a deleted variable can never turn the
 //   canaries back on, docs/setup.md §7);
-// - with `--secrets-file` (Worker secrets, hidden in wrangler's output): the owner's addresses, the CSRF key
+// - with `--secrets-file` (Worker secrets, hidden in wrangler's output): the owner's addresses
 //   and the analytics token (GitHub environment secrets, masked in the public Actions log).
 //
 // Wrangler silently DELETES a var that a deploy does not send (the config has no keep_vars), so this
@@ -20,7 +20,7 @@
 // must set each input of that mode (Actions sets GITHUB_* itself). The secrets step also gets CF_API_TOKEN,
 // optionally, only to warn when it is reused as the analytics token (it is never written).
 // deploy-vars-inputs exec: DASHBOARD_CANARY_ENABLED GITHUB_SHA
-// deploy-vars-inputs secrets: DASHBOARD_ACCESS_OWNER DASHBOARD_ACCESS_OWNER_ALIASES DASHBOARD_CSRF_SIGNING_KEY
+// deploy-vars-inputs secrets: DASHBOARD_ACCESS_OWNER DASHBOARD_ACCESS_OWNER_ALIASES
 // deploy-vars-inputs secrets: DASHBOARD_CF_ANALYTICS_TOKEN
 import { mergeWorkerSecrets } from '../../tools/cloud-config/worker-secrets.mjs'
 import { spawnSync } from 'node:child_process'
@@ -91,7 +91,6 @@ export function generateSecrets(env) {
     // --secrets-file only adds or replaces secrets: an emptied list is uploaded as one space (read as
     // no aliases) rather than left out, which would keep the previous aliases working.
     ACCESS_OWNER_ALIASES: list.join(',') || ' ',
-    CSRF_SIGNING_KEY: checked(env, 'DASHBOARD_CSRF_SIGNING_KEY', /^[0-9a-fA-F]{64}$/),
     // Used only for the GraphQL Analytics API; should be an "Account Analytics: Read" token (docs/setup.md §4).
     CF_ANALYTICS_TOKEN: checked(env, 'DASHBOARD_CF_ANALYTICS_TOKEN', /^[A-Za-z0-9_-]{20,200}$/),
   }
@@ -142,7 +141,7 @@ export function run(argv, env = process.env) {
   }
   if (command === 'secrets' && rest.length === 1) {
     writeSecrets(rest[0], env)
-    console.log('Wrote the secrets file: ACCESS_OWNER, ACCESS_OWNER_ALIASES, CF_ANALYTICS_TOKEN, CSRF_SIGNING_KEY (values not printed).')
+    console.log('Wrote the secrets file: ACCESS_OWNER, ACCESS_OWNER_ALIASES, CF_ANALYTICS_TOKEN (values not printed).')
     if (deployTokenReused(env)) {
       console.log('::warning title=Broad analytics token::DASHBOARD_CF_ANALYTICS_TOKEN is the deploy token CF_API_TOKEN; replace it with an "Account Analytics: Read" token (dashboard/docs/setup.md §4).')
     }

@@ -24,6 +24,8 @@ export function mergeWorkerSecrets(worker, env, personal, SettingError) {
   }
   let parsed
   try { parsed = JSON.parse(raw) } catch { throw new SettingError(spec.github_secret) }
+  if (['home', 'links', 'watch', 'mailsort', 'recall', 'brief', 'tasks', 'todofy', 'model-router'].includes(worker)
+    && parsed && typeof parsed === 'object' && !Array.isArray(parsed)) delete parsed.CSRF_SIGNING_KEY
   if (!validWorkerSecrets(worker, parsed, false)) throw new SettingError(spec.github_secret)
   const merged = { ...parsed, ...personal }
   if (!validWorkerSecrets(worker, merged, true)) throw new SettingError(spec.github_secret)

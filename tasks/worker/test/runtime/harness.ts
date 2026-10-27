@@ -96,7 +96,6 @@ export async function startHarness(
             ACCESS_OWNER: 'owner@example.test',
             ACCESS_ISSUER: 'https://synthetic.cloudflareaccess.com',
             ACCESS_AUDIENCE: 'b'.repeat(64),
-            CSRF_SIGNING_KEY: 'cd'.repeat(32),
             DEV_AUTH_BYPASS: options.bypass === false ? 'false' : 'true',
             ...(options.build ? { BUILD_SHA: options.build } : {}),
           },
@@ -162,23 +161,13 @@ export async function startHarness(
         ...Object.fromEntries(new Headers(init?.headers).entries()),
       },
     } as never) as unknown as Promise<Response>;
-  let csrf: { token: string; cookie: string } | undefined;
   async function mutate(method: string, path: string, body?: unknown) {
-    if (!csrf) {
-      const response = await fetch('/api/tasks/csrf');
-      const data = await response.json<{ token: string }>();
-      csrf = {
-        token: data.token,
-        cookie: (response.headers.get('set-cookie') ?? '').split(';')[0] ?? '',
-      };
-    }
     return fetch(path, {
       method,
       headers: {
         'content-type': 'application/json',
         origin: url.origin,
-        'x-csrf-token': csrf.token,
-        cookie: csrf.cookie,
+        'x-csrf-token': '1',
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });

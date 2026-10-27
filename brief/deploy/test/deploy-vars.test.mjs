@@ -20,7 +20,6 @@ function environment() {
     BRIEF_MODE: 'archive',
     BRIEF_ACCESS_OWNER: 'owner@example.org',
     BRIEF_ACCESS_OWNER_ALIASES: 'alias@example.org, second@example.net',
-    BRIEF_CSRF_SIGNING_KEY: 'd'.repeat(64),
     BRIEF_FEEDBACK_SIGNING_KEY: 'e'.repeat(64),
     BRIEF_MAIL_FROM: 'Synthetic Brief <brief@example.net>',
     BRIEF_MAIL_TO: 'reader@example.org',
@@ -30,11 +29,11 @@ function environment() {
 test('the marker lists every input of each mode', () => {
   const marked = {}
   for (const [, mode, names] of readFileSync(WRAPPER, 'utf8').matchAll(/^\/\/ deploy-vars-inputs (\w+): (.+)$/gm)) {
-    marked[mode] = [...(marked[mode] ?? []), ...names.split(' ')]
+    marked[mode] = [...(marked[mode] ?? []), ...names.trim().split(/\s+/)]
   }
   assert.deepEqual(marked, {
     exec: INJECTED.map(({ from }) => from),
-    secrets: ['BRIEF_ACCESS_OWNER', 'BRIEF_ACCESS_OWNER_ALIASES', 'BRIEF_CSRF_SIGNING_KEY', 'BRIEF_FEEDBACK_SIGNING_KEY', 'BRIEF_MAIL_FROM', 'BRIEF_MAIL_TO'],
+    secrets: ['BRIEF_ACCESS_OWNER', 'BRIEF_ACCESS_OWNER_ALIASES', 'BRIEF_FEEDBACK_SIGNING_KEY', 'BRIEF_MAIL_FROM', 'BRIEF_MAIL_TO'],
   })
 })
 
@@ -54,11 +53,10 @@ test('the mode and the build become --var flags; the mode is off, archive, shado
   }
 })
 
-test('the secrets file holds the owner, aliases, both keys and both addresses; invalid values are refused by name', () => {
+test('the secrets file holds the owner, aliases, feedback key and mail addresses; invalid values are refused by name', () => {
   assert.deepEqual(generateSecrets(environment()), {
     ACCESS_OWNER: 'owner@example.org',
     ACCESS_OWNER_ALIASES: 'alias@example.org,second@example.net',
-    CSRF_SIGNING_KEY: 'd'.repeat(64),
     FEEDBACK_SIGNING_KEY: 'e'.repeat(64),
     MAIL_FROM: 'Synthetic Brief <brief@example.net>',
     MAIL_TO: 'reader@example.org',
@@ -69,7 +67,6 @@ test('the secrets file holds the owner, aliases, both keys and both addresses; i
   for (const [name, value] of [
     ['BRIEF_ACCESS_OWNER', undefined], ['BRIEF_ACCESS_OWNER', 'not-an-email'], ['BRIEF_ACCESS_OWNER', 'ówner@example.org'],
     ['BRIEF_ACCESS_OWNER_ALIASES', 'a@example.org,a@example.org'],
-    ['BRIEF_CSRF_SIGNING_KEY', 'd'.repeat(63)], ['BRIEF_CSRF_SIGNING_KEY', undefined],
     ['BRIEF_FEEDBACK_SIGNING_KEY', 'e'.repeat(65)], ['BRIEF_FEEDBACK_SIGNING_KEY', undefined],
     ['BRIEF_MAIL_FROM', 'Brief <not an address>'], ['BRIEF_MAIL_FROM', 'Brief <brief@example.net>\r\nBcc: x@example.org'], ['BRIEF_MAIL_FROM', undefined],
     ['BRIEF_MAIL_TO', 'Reader <reader@example.org>'], ['BRIEF_MAIL_TO', 'two@example.org,three@example.org'], ['BRIEF_MAIL_TO', ''],
@@ -153,7 +150,7 @@ test('exec runs the deploy (or dry-run) unchanged plus the --var flags; secrets 
   assert.equal(run(['nonsense'], environment()), 2)
 })
 
-test('the Claude and Resend keys never enter a secrets file: a BRIEF_WORKER_SECRETS map that names one is refused', () => {
+test('the Resend and provider keys never enter a secrets file: a BRIEF_WORKER_SECRETS map that names one is refused', () => {
   const secrets = generateSecrets(environment())
   for (const name of OWNER_ONLY_SECRETS) assert.ok(!Object.hasOwn(secrets, name), name)
   const complete = { ACCESS_OWNER: 'owner@example.org', CSRF_SIGNING_KEY: 'd'.repeat(64), FEEDBACK_SIGNING_KEY: 'e'.repeat(64), MAIL_FROM: 'brief@example.net', MAIL_TO: 'reader@example.org' }
@@ -163,13 +160,14 @@ test('the Claude and Resend keys never enter a secrets file: a BRIEF_WORKER_SECR
   }
   // A complete map without them is accepted (a cold bootstrap's), the personal inputs taking precedence.
   const map = { ...environment(), BRIEF_WORKER_SECRETS: JSON.stringify({ ...complete, CSRF_SIGNING_KEY: 'f'.repeat(64) }) }
-  assert.equal(generateSecrets(map).CSRF_SIGNING_KEY, 'd'.repeat(64))
+  assert.equal(Object.hasOwn(generateSecrets(map), 'CSRF_SIGNING_KEY'), false)
+  assert.equal(generateSecrets(map).ACCESS_OWNER, environment().BRIEF_ACCESS_OWNER)
 })
 
-test('the public GitHub secrets spec leaves both keys out; app.toml declares them owner-machine only', () => {
+test('the public GitHub secrets spec excludes the owner-machine Resend key', () => {
   const specs = JSON.parse(readFileSync(new URL('../../../tools/cloud-config/worker-secrets.json', import.meta.url), 'utf8'))
   const spec = specs.brief
-  assert.deepEqual(spec, { github_secret: 'BRIEF_WORKER_SECRETS', optional: ['ACCESS_OWNER_ALIASES'], required: ['ACCESS_OWNER', 'CSRF_SIGNING_KEY', 'FEEDBACK_SIGNING_KEY', 'MAIL_FROM', 'MAIL_TO'] })
+  assert.deepEqual(spec, { github_secret: 'BRIEF_WORKER_SECRETS', optional: ['ACCESS_OWNER_ALIASES'], required: ['ACCESS_OWNER', 'FEEDBACK_SIGNING_KEY', 'MAIL_FROM', 'MAIL_TO'] })
   for (const name of OWNER_ONLY_SECRETS) assert.ok(![...spec.required, ...spec.optional].includes(name), name)
   const manifest = readFileSync(new URL('../../app.toml', import.meta.url), 'utf8')
   const line = manifest.split('\n').find((item) => item.startsWith('owner_machine_secrets = '))

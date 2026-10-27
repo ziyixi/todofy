@@ -49,11 +49,11 @@ describe('Model Router client helpers', () => {
 });
 
 describe('generated request transport', () => {
-  it('preserves catalog query parameters from call.url', async () => {
+  it('lists one shared configured catalog without billing-profile parameters', async () => {
     const { calls, client } = transport(() => Response.json(toWire(ListModelsResponseSchema, create(ListModelsResponseSchema, { models: [{ name: MODEL, configured: true }] }))));
-    const answer = await client.listModels({ app: 'brief' });
+    const answer = await client.listModels({});
     const request = callAt(calls);
-    expect(request.url).toBe('https://model-router.internal/api/model/v1/models?app=brief');
+    expect(request.url).toBe('https://model-router.internal/api/model/v1/models');
     expect(request.method).toBe('GET');
     expect(await request.text()).toBe('');
     expect(answer.models[0]?.configured).toBe(true);

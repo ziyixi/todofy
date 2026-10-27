@@ -3,7 +3,7 @@ import { secretFor } from '../catalog.ts';
 import { record } from './usage.ts';
 
 export function apiKey(context: ProviderContext, provider: 'ANTHROPIC' | 'GEMINI'): string | null {
-  return secretFor(context.env, provider === 'ANTHROPIC' ? 'anthropic' : 'gemini', context.caller) || null;
+  return secretFor(context.env, provider === 'ANTHROPIC' ? 'anthropic' : 'gemini') || null;
 }
 
 export function providerStatus(code: number, message: string, reason?: string, retryAfterSeconds = 0): { code: number; message: string; reason: string; retryAfterSeconds: number; details: [] } {

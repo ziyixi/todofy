@@ -1,50 +1,18 @@
 import { afterEach, vi } from 'vitest'
-import { api, ApiError, resetCsrfForTests } from './api'
+import { api, ApiError } from './api'
 import { generation } from './test/fixtures'
 
 afterEach(() => {
-  resetCsrfForTests()
   vi.unstubAllGlobals()
 })
 
-test('generation uses the shared wire contract and a same-origin CSRF session without browser secrets', async () => {
-  const fetcher = vi
-    .fn<typeof fetch>()
-    .mockResolvedValueOnce(Response.json({ csrf_token: 'synthetic-csrf-token' }))
-    .mockResolvedValueOnce(Response.json(generation))
+test('generation sends one same-origin JSON request with a static custom header', async () => {
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json(generation))
   vi.stubGlobal('fetch', fetcher)
-  const result = await api.generate({
-    request_id: '00000000-0000-4000-8000-000000000002',
-    config: { model: 'models/structured' },
-    input: 'Synthetic input',
-  })
+  const result = await api.generate({ request_id: '00000000-0000-4000-8000-000000000002', config: { model: 'models/structured' }, input: 'Synthetic input' })
   expect(result.name).toBe(generation.name)
-  expect(fetcher).toHaveBeenNthCalledWith(
-    1,
-    '/api/session',
-    expect.objectContaining({ credentials: 'same-origin', cache: 'no-store', redirect: 'error' }),
-  )
-  expect(fetcher).toHaveBeenNthCalledWith(
-    2,
-    '/api/model/v1/generations:generate',
-    expect.objectContaining({
-      method: 'POST',
-      credentials: 'same-origin',
-      cache: 'no-store',
-      redirect: 'error',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-        'X-CSRF-Token': 'synthetic-csrf-token',
-      },
-    }),
-  )
-  const sent = JSON.parse(fetcher.mock.calls[1]?.[1]?.body as string) as Record<string, unknown>
-  expect(sent).toEqual({
-    request_id: '00000000-0000-4000-8000-000000000002',
-    config: { model: 'models/structured' },
-    input: 'Synthetic input',
-  })
+  expect(fetcher).toHaveBeenCalledOnce()
+  expect(fetcher).toHaveBeenCalledWith('/api/model/v1/generations:generate', expect.objectContaining({ method: 'POST', credentials: 'same-origin', cache: 'no-store', redirect: 'error', headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-Token': '1' } }))
 })
 
 test('pagination keeps a fixed time window and uses descriptor-generated query parameters', async () => {

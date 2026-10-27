@@ -6,7 +6,6 @@ BUILD_SHA=dev
 DEV_AUTH_BYPASS=true
 ACCESS_OWNER=owner@example.com
 # A locally generated 64-hex key, e.g. `openssl rand -hex 32`:
-CSRF_SIGNING_KEY=0000000000000000000000000000000000000000000000000000000000000000
 # The machine tokens: make them in the local UI (设置 → 插件口令), as in production.
 # A loopback fake of Dropbox for 设置 → 备份到 Dropbox (honored only with DEV_AUTH_BYPASS=true), e.g. the smoke run's:
 # DEV_DROPBOX_ORIGIN=http://127.0.0.1:8798

@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta, timezone
 from unittest.mock import patch
 
 import httpx
+from auth_fixtures import AUDIENCE, ISSUER, access_headers, local_jwks, verifier
 from ziyixi_proto.codex.inference.v1.inference_pb import (
     CheckInferenceResponse,
     RunInferenceRequest,
@@ -26,7 +27,7 @@ from codex_gateway.runtime import EFFORT, MODEL
 
 START = datetime(2026, 10, 25, 12, tzinfo=UTC)
 PATH = "/api/codex/v1/inference:run"
-HEADERS = {"authorization": "Bearer synthetic-inference-token"}
+HEADERS = access_headers()
 BODY = {
     "instructions": "Private synthetic instructions",
     "input_json": '{"private":"synthetic input"}',
@@ -53,15 +54,19 @@ class MonitoringTests(unittest.IsolatedAsyncioTestCase):
             os.environ,
             {
                 "CODEX_HOME": str(self.home),
-                "CODEX_GATEWAY_TOKEN": "synthetic-inference-token",
+                "ACCESS_ISSUER": ISSUER,
+                "ACCESS_AUDIENCE": AUDIENCE,
             },
             clear=True,
         )
         self.environment.start()
+        self.jwks_mock = local_jwks()
+        self.jwks_mock.start()
         self.clock = Clock()
 
     async def asyncTearDown(self):
         self.environment.stop()
+        self.jwks_mock.stop()
         self.temp.cleanup()
 
     def app(self, runner):
@@ -69,6 +74,7 @@ class MonitoringTests(unittest.IsolatedAsyncioTestCase):
             return CheckInferenceResponse(model=MODEL, effort=EFFORT)
 
         return create_app(
+            access_verifier=verifier(),
             monitor_db=self.monitor_db,
             runner=runner,
             checker=checker,

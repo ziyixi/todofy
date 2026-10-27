@@ -5,7 +5,7 @@ target = "cloudflare"
 
 [[workers]]
 config = "dashboard/wrangler.toml"
-personal_secrets = ["ACCESS_OWNER", "ACCESS_OWNER_ALIASES", "CSRF_SIGNING_KEY", "CF_ANALYTICS_TOKEN"]
+personal_secrets = ["ACCESS_OWNER", "ACCESS_OWNER_ALIASES", "CF_ANALYTICS_TOKEN"]
 manual_secrets = []
 optional_secrets = ["ACCESS_OWNER_ALIASES"]
 hosts = ["home"]

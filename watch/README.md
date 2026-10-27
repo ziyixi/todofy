@@ -117,20 +117,14 @@ for the owner). The check of the AUD is "Infra drift", which the W2 push runs be
 `vars.ACCESS_AUDIENCE differs from access_aud` means the AUD is wrong: read it again (`infra/README.md` "Adding an
 app" step 4), fix it here and push; this job then ships the fix.
 
-The deploy token is `CF_API_TOKEN`, as for the links app. The wrapper writes three Worker secrets:
+The deploy token is `CF_API_TOKEN`, as for the links app. The wrapper writes two Worker secrets:
 
 | Worker secret | From the `production` environment secret | Why |
 | --- | --- | --- |
 | `ACCESS_OWNER` | `DASHBOARD_ACCESS_OWNER` | the watch app's owner is the dashboard's owner: one person with the same Access identities, so it reuses the dashboard's secret (as the links app does) |
 | `ACCESS_OWNER_ALIASES` | `DASHBOARD_ACCESS_OWNER_ALIASES` | as above |
-| `CSRF_SIGNING_KEY` | `WATCH_CSRF_SIGNING_KEY` (the watch app's own) | a separate key per app: a token of one app never verifies at another |
 
-The CSRF key is 64 hex characters, made where `gh` is logged in and never pasted anywhere; rotating it is the same
-command followed by a watch deploy (an open tab then fetches a new token):
-
-```sh
-openssl rand -hex 32 | gh secret set WATCH_CSRF_SIGNING_KEY -R ziyixi/todofy --env production
-```
+Owner mutations require exact Origin, `X-CSRF-Token: 1` and JSON. No CSRF signing key or cookie is used.
 
 **After the first deploy** (and after any deploy that changed the scheduler), check by hand that `WatchState`
 schedules itself: CI cannot, since every anonymous request stops at Access and the alarm is armed by the object
@@ -140,7 +134,7 @@ dashboard's next tick (every 30 minutes) calls `status()`, which arms a missing 
 if passes stop. Then add a watch of a page the owner controls (W2 step 8 in `docs/design.md` §11) and see its first
 check within a minute.
 
-The dashboard's daily drift check compares the live Worker with `dashboard/worker/src/drift-desired.json` (these three
+The dashboard's daily drift check compares the live Worker with `dashboard/worker/src/drift-desired.json` (these two
 secrets, `BUILD_SHA`, the bindings and the Custom Domain); its registry shows the 网页监视 tile (ops-v1 through the
 `WATCH` binding) and the Worker. The Access application "watch" is managed by `infra/` (`infra/README.md` "Adding an
 app"): change it there, not by hand, and "Infra drift" checks every day that `ACCESS_AUDIENCE` here equals its AUD.

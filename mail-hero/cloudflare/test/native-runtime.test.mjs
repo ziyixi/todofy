@@ -93,7 +93,9 @@ test('native workerd: durable archive, protected API, stable retry identity and 
     const csrf = await mf.dispatchFetch('http://localhost/api/csrf');
     assert.equal(csrf.status, 200);
     const csrfValue = (await csrf.json()).token;
-    const cookie = csrf.headers.get('set-cookie').split(';')[0];
+    assert.equal(csrfValue, '1');
+    assert.equal(csrf.headers.get('set-cookie'), null);
+    const cookie = '';
     /** mailhero.ui.v2 through the Worker, as the UI calls it; a refusal fails the test. */
     async function api(path, method = 'GET', body) {
       const response = await mf.dispatchFetch(`http://localhost/api/v2${path}`, { method,
@@ -104,9 +106,17 @@ test('native workerd: durable archive, protected API, stable retry identity and 
       return result;
     }
     const stats = (from, to, extra = {}) => `/deliveries/-/attempts:summarize${query({ start_time: from, end_time: to, granularity: 'hour', ...extra })}`;
-    const forbidden = await mf.dispatchFetch('http://localhost/api/v2/settings?update_mask=send_paused', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-    assert.equal(forbidden.status, 403, 'mutations require origin and CSRF');
-    assert.equal(reasonOf(await forbidden.json()), 'CSRF_FAILED');
+    for (const headers of [
+      { 'Content-Type': 'application/json', 'X-CSRF-Token': '1' },
+      { Origin: 'null', 'Content-Type': 'application/json', 'X-CSRF-Token': '1' },
+      { Origin: 'https://evil.example', 'Content-Type': 'application/json', 'X-CSRF-Token': '1' },
+      { Origin: 'http://localhost', 'Content-Type': 'application/json' },
+      { Origin: 'http://localhost', 'Content-Type': 'text/plain', 'X-CSRF-Token': '1' },
+    ]) {
+      const forbidden = await mf.dispatchFetch('http://localhost/api/v2/settings?update_mask=send_paused', { method: 'PATCH', headers, body: '{malformed' });
+      assert.equal(forbidden.status, 403, 'same-origin JSON headers are checked before the body');
+      assert.equal(reasonOf(await forbidden.json()), 'CSRF_FAILED');
+    }
     const legacy = await mf.dispatchFetch('http://localhost/api/v1/messages');
     assert.deepEqual([legacy.status, (await legacy.json()).error.code], [410, 'reload_required'], 'an old tab is asked to reload');
     async function receive() {

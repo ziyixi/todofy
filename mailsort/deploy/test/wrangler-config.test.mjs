@@ -1,6 +1,6 @@
 // The committed production config ../../wrangler.toml, read with the pinned wrangler's own raw-config reader
 // (worker/node_modules): the shape the Worker "mailsort" needs, nothing personal or injected, its one Custom Domain, one
-// SQLite Durable Object, a bundled prompt, and no cron, D1, R2, KV or service binding.
+// SQLite Durable Object, a bundled prompt and its authenticated Model Router binding; no direct model connection.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
@@ -16,7 +16,7 @@ const config = read(CONFIG)
 const values = readFileSync(CONFIG, 'utf8').split('\n').filter((line) => !line.trimStart().startsWith('#')).join('\n')
 
 // Every key the Worker "mailsort" uses; a new one must be added here on purpose (and checked below).
-const KEYS = ['name', 'account_id', 'main', 'compatibility_date', 'workers_dev', 'preview_urls', 'routes', 'rules', 'observability', 'assets', 'durable_objects', 'migrations', 'vars']
+const KEYS = ['name', 'account_id', 'main', 'compatibility_date', 'workers_dev', 'preview_urls', 'routes', 'rules', 'observability', 'assets', 'durable_objects', 'migrations', 'services', 'vars']
 
 test('the top level is the production Worker: known keys only, no cron, no workers.dev or preview URL, one Custom Domain', () => {
   assert.deepEqual(Object.keys(config).sort(), [...KEYS].sort())
@@ -38,12 +38,13 @@ test('every request reaches the Worker first (Access, private headers)', () => {
   assert.deepEqual(config.assets, { directory: 'web/dist', binding: 'ASSETS', run_worker_first: true, not_found_handling: 'single-page-application' })
 })
 
-test('one SQLite Durable Object and bundled prompt; no Workers AI, D1, R2, KV, queue, browser or service binding', () => {
+test('one SQLite Durable Object, bundled prompt and authenticated Model Router binding', () => {
   assert.deepEqual(config.durable_objects, { bindings: [{ name: 'MAILSORT', class_name: 'MailsortState' }] })
   assert.deepEqual(config.migrations, [{ tag: 'v1', new_sqlite_classes: ['MailsortState'] }])
   assert.equal(config.ai, undefined)
+  assert.deepEqual(config.services, [{ binding: 'MODEL_ROUTER', service: 'model-router', entrypoint: 'Inference', props: { app: 'mailsort' } }])
   assert.deepEqual(config.rules, [{ type: 'Text', globs: ['**/*.txt'], fallthrough: false }])
-  for (const key of ['d1_databases', 'r2_buckets', 'kv_namespaces', 'queues', 'browser', 'services']) assert.equal(config[key], undefined, key)
+  for (const key of ['d1_databases', 'r2_buckets', 'kv_namespaces', 'queues', 'browser']) assert.equal(config[key], undefined, key)
 })
 
 test("no secret is declared required: a deploy before the owner's first mint-token run must work, and keeps the grant", () => {
@@ -51,15 +52,11 @@ test("no secret is declared required: a deploy before the owner's first mint-tok
   for (const name of OWNER_ONLY_SECRETS) assert.ok(!values.includes(name), name)
 })
 
-test('vars: public host, Access identity and generated Codex endpoint; nothing injected or secret', () => {
+test('vars: public host and Access identity; no vendor endpoint, injected value or secret', () => {
   const names = Object.keys(config.vars).sort()
-  assert.ok(['ACCESS_ISSUER,CODEX_ENDPOINT_URL,PUBLIC_HOST', 'ACCESS_AUDIENCE,ACCESS_ISSUER,CODEX_ENDPOINT_URL,PUBLIC_HOST'].includes(names.join()), names.join())
+  assert.ok(['ACCESS_ISSUER,PUBLIC_HOST', 'ACCESS_AUDIENCE,ACCESS_ISSUER,PUBLIC_HOST'].includes(names.join()), names.join())
   assert.equal(config.vars.PUBLIC_HOST, 'sort.ziyixi.science')
   assert.match(config.vars.ACCESS_ISSUER, /^https:\/\/[a-z0-9-]+\.cloudflareaccess\.com$/)
-  const endpoint = new URL(config.vars.CODEX_ENDPOINT_URL)
-  assert.equal(endpoint.protocol, 'https:')
-  assert.equal(endpoint.pathname, '/api/codex/v1/inference:run')
-  assert.equal(endpoint.search, '')
   if (config.vars.ACCESS_AUDIENCE !== undefined) {
     assert.match(config.vars.ACCESS_AUDIENCE, /^[0-9a-f]{64}$/)
     assert.notEqual(config.vars.ACCESS_AUDIENCE, '0'.repeat(64))
@@ -68,13 +65,14 @@ test('vars: public host, Access identity and generated Codex endpoint; nothing i
   for (const name of names) assert.ok(!name.startsWith('DEV_'), name)
   for (const name of ['ACCESS_OWNER', 'ACCESS_OWNER_ALIASES', 'CSRF_SIGNING_KEY', 'MODE']) assert.ok(!names.includes(name), name)
   assert.ok(!values.includes('@'))
-  assert.deepEqual([...new Set(values.match(/[a-z0-9.-]*ziyixi\.science/g))], [config.vars.PUBLIC_HOST, endpoint.hostname])
+  assert.deepEqual([...new Set(values.match(/[a-z0-9.-]*ziyixi\.science/g))], [config.vars.PUBLIC_HOST])
 })
 
 test('the development config is the production one without AI, routes and secrets: never deployable', () => {
   const dev = read(fileURLToPath(new URL('wrangler.test.toml', APP)))
   assert.equal(dev.name, 'mailsort')
   assert.equal(dev.ai, undefined)
+  assert.equal(dev.services, undefined)
   assert.equal(dev.routes, undefined)
   assert.equal(dev.account_id, undefined)
   assert.deepEqual(dev.durable_objects, config.durable_objects)

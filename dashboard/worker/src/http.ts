@@ -2,7 +2,7 @@
  * The owner surface (docs/design.md §6, docs/design-v2.md §5): Access (edge-auth) on every path except /health, then
  *
  * - /api/v1/*: the owner API, DashboardUiService (proto/dashboard/ui/v1), served by the shared transcoder with the
- *   handlers of api.ts; every method but GET also needs the same-origin Origin and the signed double-submit CSRF
+ *   handlers of api.ts; every method but GET also needs the same-origin Origin and the custom CSRF header and JSON media type
  *   token (the transcoder's `authorize` hook runs before the body is read);
  * - GET /api/csrf: the CSRF token and its cookie (transport, not part of the service);
  * - the routes of the UI before dashboard.ui.v1 (/api/v2/home, ...): 410 with RELOAD_MESSAGE in their old error
@@ -21,8 +21,6 @@ import {
   STRICT_CSP,
   asciiLowerCase,
   createAccessVerifier,
-  importHmacKeyHex,
-  issueCsrf,
   verifyCsrf,
   withPrivateHeaders,
   type AccessPolicy,
@@ -35,7 +33,6 @@ import type { CsrfResponse, HealthResponse, LegacyApiError } from './api-types.t
 import { buildSha, devNow, publicHost } from './config.ts';
 import type { Env } from './env.ts';
 
-export const CSRF_COOKIE = 'home_csrf';
 export const MAX_BODY_BYTES = 1024;
 /** Access signing keys are cached for 10 minutes (the SPEC's stricter default; Todofy uses 1 h). */
 export const JWKS_TTL_MS = 600_000;
@@ -136,11 +133,6 @@ async function authenticate(ctx: Context): Promise<OwnerContext> {
 
 // ---- CSRF -----------------------------------------------------------------------------------------
 
-async function csrfKey(env: Env): Promise<CryptoKey> {
-  const key = await importHmacKeyHex((env.CSRF_SIGNING_KEY ?? '').trim());
-  if (key === null) throw dashboardError('NOT_CONFIGURED');
-  return key;
-}
 
 function allowedOrigins(ctx: OwnerContext): string[] {
   const host = publicHost(ctx.env);
@@ -153,18 +145,13 @@ function allowedOrigins(ctx: OwnerContext): string[] {
 /** The transcoder's authorize hook: a mutation needs Origin and the CSRF token of this owner (the key first). */
 async function authorize(request: Request, route: RouteInfo, ctx: OwnerContext): Promise<void> {
   if (route.safe) return;
-  const key = await csrfKey(ctx.env);
-  const result = await verifyCsrf(request, ctx.owner, { cookieName: CSRF_COOKIE, key, allowedOrigins: allowedOrigins(ctx) });
+  const result = await verifyCsrf(request, { allowedOrigins: allowedOrigins(ctx) });
   if (!result.ok) throw dashboardError('CSRF_FAILED');
 }
 
-async function csrfResponse(ctx: OwnerContext): Promise<Response> {
-  const key = await csrfKey(ctx.env);
-  const issued = await issueCsrf(ctx.request, ctx.owner, { cookieName: CSRF_COOKIE, key });
-  const body: CsrfResponse = { token: issued.token };
-  const response = Response.json(body, { headers: NO_STORE });
-  response.headers.set('set-cookie', issued.setCookie);
-  return response;
+function csrfResponse(): Response {
+  const body: CsrfResponse = { token: '1' };
+  return Response.json(body, { headers: NO_STORE });
 }
 
 // ---- routes ---------------------------------------------------------------------------------------
@@ -234,7 +221,7 @@ async function route(base: Context): Promise<Routed> {
     // GET only, as before: a token and its cookie are issued to a page that asks for one.
     if (request.method !== 'GET') return fail(methodNotAllowed('GET'));
     try {
-      return { response: await csrfResponse(ctx), asset: false };
+      return { response: csrfResponse(), asset: false };
     } catch (error) {
       return fail(error instanceof RpcError ? error : dashboardError('INTERNAL'));
     }

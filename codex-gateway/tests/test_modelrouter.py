@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import httpx
+from auth_fixtures import access_headers, local_jwks, verifier
 from ziyixi_proto.modelrouter.inference.v1.inference_pb import (
     Conversation,
     CreateConversationRequest,
@@ -144,11 +145,14 @@ class ModelRouterTests(unittest.IsolatedAsyncioTestCase):
         self.temp = tempfile.TemporaryDirectory(prefix="executor-test-")
         self.home = pathlib.Path(self.temp.name)
         self.executors = []
+        self.jwks_mock = local_jwks()
+        self.jwks_mock.start()
 
     async def asyncTearDown(self):
         for executor in self.executors:
             await executor.shutdown()
         self.temp.cleanup()
+        self.jwks_mock.stop()
 
     def executor(self, sdk):
         executor = ModelExecutor(self.home / "monitor.sqlite3", sdk=sdk)
@@ -457,12 +461,14 @@ class ModelRouterTests(unittest.IsolatedAsyncioTestCase):
         sdk = FakeSdk(FakeTurn(1), FakeTurn(1), FakeTurn(1))
         executor = self.executor(sdk)
         app = create_app(
-            monitor_db=self.home / "monitor.sqlite3", model_executor=executor
+            access_verifier=verifier(),
+            monitor_db=self.home / "monitor.sqlite3",
+            model_executor=executor,
         )
-        headers = {"authorization": "Bearer synthetic-token"}
+        headers = access_headers()
         with patch.dict(
             os.environ,
-            {"CODEX_HOME": str(self.home), "CODEX_GATEWAY_TOKEN": "synthetic-token"},
+            {"CODEX_HOME": str(self.home)},
         ):
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app), base_url="http://test"
@@ -515,13 +521,15 @@ class ModelRouterTests(unittest.IsolatedAsyncioTestCase):
     ):
         executor = self.executor(FakeSdk())
         app = create_app(
-            monitor_db=self.home / "monitor.sqlite3", model_executor=executor
+            access_verifier=verifier(),
+            monitor_db=self.home / "monitor.sqlite3",
+            model_executor=executor,
         )
-        headers = {"authorization": "Bearer synthetic-token"}
+        headers = access_headers()
         context = Conversation(name=f"conversations/{identifier()}", config=config())
         with patch.dict(
             os.environ,
-            {"CODEX_HOME": str(self.home), "CODEX_GATEWAY_TOKEN": "synthetic-token"},
+            {"CODEX_HOME": str(self.home)},
         ):
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app), base_url="http://test"
@@ -566,7 +574,9 @@ class ModelRouterTests(unittest.IsolatedAsyncioTestCase):
         sdk = FakeSdk(FakeTurn(1, output="synthetic " * 10000))
         executor = self.executor(sdk)
         app = create_app(
-            monitor_db=self.home / "monitor.sqlite3", model_executor=executor
+            access_verifier=verifier(),
+            monitor_db=self.home / "monitor.sqlite3",
+            model_executor=executor,
         )
         request = GenerateRequest(
             request_id=identifier(),
@@ -575,7 +585,7 @@ class ModelRouterTests(unittest.IsolatedAsyncioTestCase):
         )
         with patch.dict(
             os.environ,
-            {"CODEX_HOME": str(self.home), "CODEX_GATEWAY_TOKEN": "synthetic-token"},
+            {"CODEX_HOME": str(self.home)},
         ):
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app), base_url="http://test"
@@ -583,7 +593,7 @@ class ModelRouterTests(unittest.IsolatedAsyncioTestCase):
                 response = await client.post(
                     "/api/codex/v1/model/generations:generate",
                     json=to_wire(request),
-                    headers={"authorization": "Bearer synthetic-token"},
+                    headers=access_headers(),
                 )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["state"], "succeeded")

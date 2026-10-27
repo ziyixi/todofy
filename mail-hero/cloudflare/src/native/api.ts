@@ -3,7 +3,7 @@
 //
 // - /api/v2/*: the owner API, mailhero.ui.v2 MailHeroUiService (proto/mailhero/ui/v2), served by the shared transcoder
 //   with the handlers of api-v2.ts; every method but GET also needs MAINTENANCE_MODE off, the same-origin Origin and
-//   the signed double-submit CSRF token (the transcoder's `authorize` hook runs before the body is read), and runs under
+//   the custom CSRF header and JSON media type (the transcoder's `authorize` hook runs before the body is read), and runs under
 //   the coordinator's write lease;
 //   Two reads whose answers cost more CPU than a Worker request has on Workers Free (DELEGATED: a message's parsed
 //   content, up to about 4 MiB of JSON, and the delivery dashboard's numbers, whose first time zone in an isolate loads
@@ -64,7 +64,7 @@ export function newRequestId(): string {
 async function authorize(request: Request, route: RouteInfo, ctx: Context): Promise<void> {
   if (route.safe) return
   if (ctx.env.MAINTENANCE_MODE === 'true') throw mhError('MAINTENANCE')
-  await requireCSRF(request, ctx.env, ctx.owner)
+  await requireCSRF(request)
 }
 
 const api = new HttpTranscoder(MailHeroUiService, handlers, {
@@ -149,7 +149,7 @@ async function route(request: Request, env: Env, requestId: string): Promise<Rou
   if (url.pathname === CSRF_PATH) {
     if (request.method !== 'GET') return fail(mhError('METHOD_NOT_ALLOWED', { httpStatus: 405, headers: { allow: 'GET' } }))
     try {
-      return { response: await csrfResponse(request, ctx.env, owner) }
+      return { response: csrfResponse() }
     } catch (error) {
       return fail(unexpected(error))
     }

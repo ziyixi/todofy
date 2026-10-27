@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { generateSecrets, placeholderIn, refusal } from '../deploy-vars.mjs';
 
-const values = { ACCESS_OWNER: 'owner@example.test', CSRF_SIGNING_KEY: 'ab'.repeat(32) };
+const values = { ACCESS_OWNER: 'owner@example.test' };
 test('Tasks deploys from its own complete secret map without another application’s legacy inputs', () => {
   assert.deepEqual(generateSecrets({ TASKS_WORKER_SECRETS: JSON.stringify(values) }),
     { ...values, ACCESS_OWNER_ALIASES: ' ' });

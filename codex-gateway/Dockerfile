@@ -30,7 +30,8 @@ WORKDIR /opt/codex-gateway
 COPY --from=builder /opt/codex-gateway/.venv ./.venv
 COPY codex-gateway/src ./app
 COPY proto/python/src/ziyixi_proto ./app/ziyixi_proto
-RUN python -c 'import json, re, sys; from pathlib import Path; sha = sys.argv[1]; assert re.fullmatch("[a-f0-9]{40}", sha), "SOURCE_SHA must be a full commit SHA"; Path("app/codex_gateway/build-info.json").write_text(json.dumps({"source_sha": sha}))' "$SOURCE_SHA"
+COPY config/cloud.toml config/resources.toml ./public-build-config/
+RUN python -c 'import json, re, sys, tomllib; from pathlib import Path; from codex_gateway.access import AccessServiceVerifier; sha = sys.argv[1]; assert re.fullmatch("[a-f0-9]{40}", sha), "SOURCE_SHA must be a full commit SHA"; profile = tomllib.loads(Path("public-build-config/cloud.toml").read_text()); resources = tomllib.loads(Path("public-build-config/resources.toml").read_text()); issuer = profile["access_issuer"]; audience = resources["access_audiences"]["codex-gateway"]; AccessServiceVerifier(issuer, audience); Path("app/codex_gateway/build-info.json").write_text(json.dumps({"source_sha": sha, "access_issuer": issuer, "access_audience": audience}))' "$SOURCE_SHA"
 USER 10001:10001
 ENV HOME=/home/codex-gateway
 EXPOSE 8080

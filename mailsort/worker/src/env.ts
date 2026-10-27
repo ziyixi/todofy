@@ -36,7 +36,6 @@ export interface Env {
   readonly ACCESS_OWNER?: string;
   readonly ACCESS_OWNER_ALIASES?: string;
   /** 64 hex characters: HMAC key of the mailsort_csrf tokens. */
-  readonly CSRF_SIGNING_KEY?: string;
 
   // secrets the owner puts with `wrangler secret put` from their own machine (deploy/mint-token.mjs); never in GitHub,
   // never sent or removed by a deploy (--secrets-file keeps the secrets it does not name).

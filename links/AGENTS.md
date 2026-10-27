@@ -29,8 +29,7 @@ The root [`AGENTS.md`](../AGENTS.md) applies here too. Rules of the links app:
 - **The API is `links.ui.v1`** (`proto/links/ui/v1`, AIP-style, through the shared transcoder and client of
   `proto/ts`). Change the IDL there first (`npm run lint && npm run api-lint` in `proto/`), never hand-write a route
   under `/_/api/`.
-- **Auth** is `packages/edge-auth` (`src/auth.ts`, SPEC §5.4): Access on everything under `/_/`, Origin and the CSRF
-  token on every mutation. Do not reimplement or copy auth code.
+- **Auth** is `packages/edge-auth` (`src/auth.ts`, SPEC §5.4): Access on everything under `/_/`, exact Origin, a nonempty custom CSRF header and JSON media type on every mutation. Do not reimplement or copy auth code.
 - **Style.** English code comments; small modules. Before committing run, in `worker/`, `npm run lint`, `npm run
   typecheck`, `npm test` and `npm run test:runtime`; in `web/`, `npm run lint`, `npm run typecheck`, `npm test` and
   `npm run build`; in `links/`, `node --test deploy/test/*.test.mjs`.

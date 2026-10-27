@@ -162,7 +162,7 @@ async function runtime(t, bindings = {}) {
     return { value: result.ok, statements }
   }
   const csrf = await mf.dispatchFetch('http://localhost/api/csrf')
-  const token = (await csrf.json()).token, cookie = csrf.headers.get('set-cookie').split(';')[0]
+  const token = (await csrf.json()).token, cookie = (csrf.headers.get('set-cookie') ?? '').split(';')[0]
   /** mailhero.ui.v2 through the Worker (the owner's view); a refusal fails the test. */
   const api = (path, method = 'GET', body) => request(`/api/v2${path}`, { method,
     headers: { Origin: 'http://localhost', Cookie: cookie, 'X-CSRF-Token': token, 'Content-Type': 'application/json' },

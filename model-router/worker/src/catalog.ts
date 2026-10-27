@@ -103,19 +103,22 @@ export function routeFor(name: string): CatalogRoute {
   if (!route) invalid('MODEL_NOT_FOUND', 'Choose a configured model.');
   return route;
 }
-export function secretFor(env: Env, provider: 'anthropic' | 'gemini', caller: string): string {
-  const name = `${provider === 'anthropic' ? 'ANTHROPIC' : 'GEMINI'}_API_KEY_${caller.toUpperCase().replaceAll('-', '_')}`;
-  return typeof env[name] === 'string' ? env[name].trim() : '';
+export function secretFor(env: Env, provider: 'anthropic' | 'gemini'): string {
+  return (provider === 'anthropic' ? env.ANTHROPIC_API_KEY : env.GEMINI_API_KEY)?.trim() ?? '';
 }
-export async function modelCatalog(env: Env, caller: string): Promise<Model[]> {
+export async function modelCatalog(env: Env): Promise<Model[]> {
+  const executorConfigured = !!(env.CODEX_EXECUTOR_ORIGIN && env.CODEX_ACCESS_CLIENT_ID && env.CODEX_ACCESS_CLIENT_SECRET);
+  const executorConnection = executorConfigured
+    ? [env.CODEX_EXECUTOR_ORIGIN, env.CODEX_ACCESS_CLIENT_ID, env.CODEX_ACCESS_CLIENT_SECRET].join('\0')
+    : '';
   return Promise.all(
     ROUTES.map(async (route) => {
       const secret =
         route.provider === 'codex'
-          ? (env.CODEX_EXECUTOR_TOKEN ?? '')
+          ? executorConnection
           : route.provider === 'workers_ai'
             ? ''
-            : secretFor(env, route.provider, caller);
+            : secretFor(env, route.provider);
       const digest = secret
         ? new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(secret)))
         : new Uint8Array();
@@ -126,10 +129,10 @@ export async function modelCatalog(env: Env, caller: string): Promise<Model[]> {
         upstreamModel: route.upstreamModel,
         configured:
           route.provider === 'codex'
-            ? !!(env.CODEX_EXECUTOR_ORIGIN && env.CODEX_EXECUTOR_TOKEN)
+            ? executorConfigured
             : route.provider === 'workers_ai'
               ? !!env.AI
-              : !!secretFor(env, route.provider, caller),
+              : !!secretFor(env, route.provider),
         generation: route.generation,
         embeddings: route.embeddings,
         conversations: route.conversations,

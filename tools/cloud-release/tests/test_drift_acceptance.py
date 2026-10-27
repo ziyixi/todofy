@@ -213,6 +213,28 @@ class DriftAcceptance(unittest.TestCase):
         self.assert_readonly(fixture)
         self.assertEqual(len(fixture.deployments), 1)
 
+    def test_keyless_release_accepts_only_the_exact_retained_csrf_secret(self):
+        for app in ("dashboard", "links", "watch", "mailsort", "recall", "brief", "tasks", "todofy", "model-router"):
+            with self.subTest(app=app):
+                _, _, _, desired = release_inputs(ROOT, app)
+                worker = "home" if app == "dashboard" else app
+                binding = next(item for item in desired[worker]["bindings"]
+                               if item["name"] == "CSRF_SIGNING_KEY")
+                self.assertEqual(binding, {"name": "CSRF_SIGNING_KEY", "type": "secret_text", "optional": True})
+        fixture = self.fixture("dashboard")
+        retained = {"name": "CSRF_SIGNING_KEY", "type": "secret_text"}
+        fixture.bindings().append(retained)
+        output = io.StringIO()
+        with redirect_stdout(output):
+            required = preflight(ROOT, fixture.app, SHA, False, fixture.cloud, fixture.github)
+        self.assertTrue(required)
+        self.assertEqual(json.loads(output.getvalue()), {"state": "clean", "changes": []})
+        fixture.bindings().remove(retained)
+        fixture.bindings().append({"name": "CSRF_SIGNING_KEY_EXTRA", "type": "secret_text"})
+        with redirect_stdout(io.StringIO()), self.assertRaisesRegex(ReleaseError, "REPAIR_MANUAL_REQUIRED"):
+            preflight(ROOT, fixture.app, SHA, False, fixture.cloud, fixture.github)
+        self.assert_readonly(fixture)
+
     def test_cron_service_and_domain_drift_are_detected_before_publishing(self):
         fixture = self.fixture()
         original = deepcopy(fixture.values)

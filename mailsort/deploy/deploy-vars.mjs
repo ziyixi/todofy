@@ -6,9 +6,9 @@
 //   MAILSORT_MODE: `live`, `shadow` or `off`, the highest mode the deployment allows: the emergency switch) and
 //   BUILD_SHA (the commit);
 // - with `--secrets-file` (Worker secrets, hidden in wrangler's output): the owner's addresses and the CSRF key
-//   (inputs MAILSORT_ACCESS_OWNER, MAILSORT_ACCESS_OWNER_ALIASES, MAILSORT_CSRF_SIGNING_KEY, masked in the public
+//   (inputs MAILSORT_ACCESS_OWNER, MAILSORT_ACCESS_OWNER_ALIASES, masked in the public
 //   Actions log). The deploy job fills the first two from the dashboard's DASHBOARD_ACCESS_OWNER(_ALIASES) (the same
-//   owner, like the watch app) and the key from mailsort's own MAILSORT_CSRF_SIGNING_KEY (../README.md "Deploy").
+//   owner, like the watch app) and the key from mailsort's own (../README.md "Deploy").
 //
 // The Gmail grant (GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN) is never part of a deploy: the owner puts
 // it from their own machine (mint-token.mjs). The secrets file never names it, and this wrapper refuses a
@@ -30,7 +30,7 @@
 // .github/scripts/test_wrangler_configs.py reads the next lines: every CI step that runs `exec` or `secrets` must set
 // each input of that mode (Actions sets GITHUB_* itself).
 // deploy-vars-inputs exec: MAILSORT_MODE GITHUB_SHA
-// deploy-vars-inputs secrets: MAILSORT_ACCESS_OWNER MAILSORT_ACCESS_OWNER_ALIASES MAILSORT_CSRF_SIGNING_KEY
+// deploy-vars-inputs secrets: MAILSORT_ACCESS_OWNER MAILSORT_ACCESS_OWNER_ALIASES
 import { mergeWorkerSecrets } from '../../tools/cloud-config/worker-secrets.mjs'
 import { spawnSync } from 'node:child_process'
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs'
@@ -101,7 +101,6 @@ export function generateSecrets(env) {
     // --secrets-file only adds or replaces secrets: an emptied list is uploaded as one space (read as no
     // aliases) rather than left out, which would keep the previous aliases working.
     ACCESS_OWNER_ALIASES: list.join(',') || ' ',
-    CSRF_SIGNING_KEY: checked(env, 'MAILSORT_CSRF_SIGNING_KEY', /^[0-9a-fA-F]{64}$/),
   }
   const secrets = mergeWorkerSecrets('mailsort', env, personal, SettingError)
   if (OWNER_ONLY_SECRETS.some((name) => Object.hasOwn(secrets, name))) throw new SettingError('MAILSORT_WORKER_SECRETS')
@@ -159,7 +158,7 @@ export function run(argv, env = process.env) {
   }
   if (command === 'secrets' && rest.length === 1) {
     writeSecrets(rest[0], env)
-    console.log('Wrote the secrets file: ACCESS_OWNER, ACCESS_OWNER_ALIASES, CSRF_SIGNING_KEY (values not printed).')
+    console.log('Wrote the secrets file: ACCESS_OWNER, ACCESS_OWNER_ALIASES (values not printed).')
     return 0
   }
   if (command === 'exec' && rest[0] === '--') {

@@ -46,6 +46,7 @@ class PrivateInput(unittest.TestCase):
         first = private_input.generated_secrets(value)
         value["github_secrets"] = first
         self.assertEqual(private_input.generated_secrets(value), first)
+        self.assertFalse(any(name.endswith("_CSRF_SIGNING_KEY") for name in first))
         adopted = private_input.generated_secrets({"github_secrets": {"MAIL_HERO_CREDENTIAL_KEY": "existing"}}, generate=False)
         self.assertEqual(adopted, {"MAIL_HERO_CREDENTIAL_KEY": "existing"})
 
@@ -120,6 +121,23 @@ class GitHub(unittest.TestCase):
         maps, missing = github_secrets.worker_secret_values({"worker_secrets": {"app": {"KEY": "existing"}}}, {}, specs)
         self.assertEqual(json.loads(maps["APP_WORKER_SECRETS"]), {"KEY": "existing"})
         self.assertFalse(missing)
+
+    def test_worker_maps_drop_only_the_exact_retired_csrf_binding(self):
+        specs = {"links": {"github_secret": "LINKS_WORKER_SECRETS", "required": ["KEY"], "optional": []}}
+        private = {"worker_secrets": {"links": {"KEY": "existing", "CSRF_SIGNING_KEY": 7}}}
+        maps, missing = github_secrets.worker_secret_values(private, {}, specs)
+        self.assertEqual(json.loads(maps["LINKS_WORKER_SECRETS"]), {"KEY": "existing"})
+        self.assertEqual(private["worker_secrets"]["links"]["CSRF_SIGNING_KEY"], 7)
+        self.assertFalse(missing)
+        for name in ("csrf_signing_key", "CSRF_SIGNING_KEY_EXTRA", "UNDECLARED"):
+            value = {"worker_secrets": {"links": {"KEY": "existing", "CSRF_SIGNING_KEY": "retired", name: "synthetic-private"}}}
+            with self.subTest(name=name), self.assertRaises(BootstrapError) as caught:
+                github_secrets.worker_secret_values(value, {}, specs)
+            self.assertEqual(str(caught.exception), "WORKER_SECRET_NAME_INVALID")
+            self.assertNotIn("synthetic-private", str(caught.exception))
+        with self.assertRaises(BootstrapError) as caught:
+            github_secrets.worker_secret_values({"worker_secrets": {"links": {"KEY": 7}}}, {}, specs)
+        self.assertEqual(str(caught.exception), "WORKER_SECRET_VALUE_INVALID")
 
     def test_owner_machine_secrets_never_reach_github(self):
         specs = {"app": {"github_secret": "APP_WORKER_SECRETS", "required": ["KEY"], "optional": []}}
@@ -338,9 +356,9 @@ class Cloud(unittest.TestCase):
         self.assertEqual(report["creates"], [address])
         self.assertFalse(credentials)
 
-    def test_fresh_and_adopt_inventory_exclude_only_non_worker_audiences(self):
+    def test_fresh_and_adopt_inventory_retains_gateway_audience_and_drops_only_retired_backup(self):
         audiences = {"links": "worker-audience", "mail-hero": "mail-audience",
-                     "mail-hero-backup": "legacy-audience", "unexpected": "unexpected-audience"}
+                     "codex-gateway": "gateway-audience", "mail-hero-backup": "legacy-audience", "unexpected": "unexpected-audience"}
         plan = {"planned_values": {"outputs": {"access_aud": {"value": audiences},
                 "d1_database_ids": {"value": {}}}, "root_module": {"resources": []}}}
         previous = {"account_id": ACCOUNT, "zone_id": ZONE, "d1_databases": {}, "durable_objects": {}}
@@ -348,8 +366,8 @@ class Cloud(unittest.TestCase):
             with self.subTest(fresh=fresh):
                 exported = inventory.exported_resources(previous, plan, fresh=fresh)
                 self.assertEqual(exported["access_audiences"], {"links": "worker-audience",
-                                 "mail-hero": "mail-audience", "unexpected": "unexpected-audience"})
-        self.assertEqual(len(audiences), 4, "the full Terraform output remains available for drift checks")
+                                 "mail-hero": "mail-audience", "codex-gateway": "gateway-audience", "unexpected": "unexpected-audience"})
+        self.assertEqual(len(audiences), 5, "the full Terraform output remains available for drift checks")
 
     def test_only_missing_state_addresses_import_and_resume(self):
         calls = []

@@ -27,7 +27,7 @@ DO's bytes.
 | Public entry | custom domains: owner host + every `TODOFY_HOOKS_HOSTS` name; cron `*/10 * * * *` | none (`workers_dev = false`, `preview_urls = false`, no routes); the object's RPC methods (§3) for the gateway's binding; every `fetch` answers 404 `not_found` (for the RPC release only, the previous gateway's calls get 503, §6.4) |
 | Bindings | `ASSETS` (`uiassets/dist`), `COORDINATOR` → class `TodofyCore` in script `todofy-core`, `METRICS` (Analytics Engine `todofy_metrics`, one point per request and cron; dev-notes.md §6) | `DB` (D1 `todofy`), `BACKUPS` (private R2 bucket `todofy-backups`, weekly D1 backups; it holds mail content), `METRICS` (the same dataset, one point per upstream step); no other app since Tasks backs itself up (until then `TASKS`, Tasks' `TasksApi`, for the weekly backup's export). No DO binding: nothing in core calls the DO through a stub any more |
 | Vars | `TODOFY_PUBLIC_HOST`, `TODOFY_HOOKS_HOSTS`, `BUILD_SHA`, `ACCESS_ISSUER`, `ACCESS_AUDIENCE`, `MAINTENANCE_MODE`, `TASKS_PUBLIC_URL` (`/task/<id>`); dev/test only: `DEV_AUTH_BYPASS`, `DEV_ACCESS_LOOPBACK_ISSUER`, `JWKS_REFRESH_COOLDOWN_MS` | `BUILD_SHA`, `MAINTENANCE_MODE`, `TODOFY_PUBLIC_HOST` (the ops status's UI link), `PROCESSING_PAUSED`, `MAIL_SOURCE_ID`, `GEMINI_API_BASE`, `GEMINI_MODELS`, `GEMINI_EMAIL_MODELS`, `GEMINI_TIMEOUT_MS`, `GEMINI_DAILY_TOKEN_BUDGET`, `BACKOFF_BASE_MS`, `WATCHDOG_MS`, `REPORT_DEFAULT_TOP`, `REPORT_PRECOMPUTE_UTC`, `REPORT_CARRYOVER_DAYS`, `LEGACY_TEXT_RETENTION_DAYS` |
-| Secrets | `MAIL_WEBHOOK_TOKEN_SHA256`, `MAIL_WEBHOOK_TOKEN_SHA256_PREVIOUS`, `REPORT_BASIC_AUTH_SHA256`, `CSRF_SIGNING_KEY`, `ACCESS_OWNER`, `ACCESS_OWNER_ALIASES` (the last two from `--secrets-file` on every deploy) | `GEMINI_API_KEY` |
+| Secrets | `MAIL_WEBHOOK_TOKEN_SHA256`, `MAIL_WEBHOOK_TOKEN_SHA256_PREVIOUS`, `REPORT_BASIC_AUTH_SHA256`, `ACCESS_OWNER`, `ACCESS_OWNER_ALIASES` (the last two from `--secrets-file` on every deploy) | `GEMINI_API_KEY` |
 | DO class | none: migration `v2` deleted the Python-era `TodofyCoordinator` in a gateway-only release (§6.6) | `TodofyCore` (renamed from `TodofyCoordinator` by core migration `v2`), instance name `inbox-v1`, SQLite-backed |
 
 `BUILD_SHA` and `MAINTENANCE_MODE` are set on both from the same deploy value. The gateway never binds
@@ -188,27 +188,14 @@ The rules, as the package applies them with these values:
 
 ### 2.5 CSRF (`csrf.ts` → `packages/edge-auth`)
 
-`csrf.ts` resolves the key and the allowed origins and calls the package's `issueCsrf`/`verifyCsrf`
-(SPEC §5.2) with the cookie name `todofy_csrf` and the package's default nonce and TTL. The token
-format, key and cookie are unchanged, so tokens already in browsers stay valid
-(`gateway/test/owner.test.ts` accepts the golden tokens from SPEC §3.1).
+`csrf.ts` supplies the app's exact allowed origins to the shared `verifyCsrf` helper (SPEC §5.2).
+After Access authentication, every owner mutation requires an exact allowed `Origin`, a nonempty
+`X-CSRF-Token` (at most 1024 characters), and media type `application/json`, before reading the body.
+Missing, `null` and foreign origins fail with 403 `CSRF_FAILED`.
 
-- Key: `CSRF_SIGNING_KEY` trimmed must match `^[0-9a-fA-F]{64}$`, used as 32 raw bytes for HMAC-SHA256
-  (`importHmacKeyHex`). Missing or malformed → 503 `NOT_CONFIGURED` on `GET /api/csrf` and on every
-  write, checked before anything else (reads keep working).
-- Issue (`GET /api/csrf`; `GET /api/v1/csrf` until todofy.ui.v1): claims `{"kind":"csrf","owner":<owner>,"nonce":<16 random bytes
-  base64url>,"exp":<now s + 43200>}` as compact JSON in that key order; token =
-  `b64url(claims) "." b64url(HMAC(key, b64url(claims)))`, no padding. Body `{"token": token}`; header
-  `set-cookie: todofy_csrf=<token>; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200` plus `; Secure`
-  when the request URL is `https:`.
-- Verify (every method of the owner API but `GET`, in the transcoder's `authorize` hook): `origin` lowercased must be `https://<TODOFY_PUBLIC_HOST
-  lowercased>`, or under the `.localhost` rule also `http://<request URL host:port lowercased>`;
-  `x-csrf-token` non-empty, ≤ 1024 characters, equal to the first `todofy_csrf` cookie value;
-  signature text equal to the recomputed canonical one; payload a fatal-UTF-8 JSON object with
-  `kind == "csrf"`, `owner` equal to the canonical owner and an integer `exp` > now. Any failure →
-  403 `csrf_failed`. Compares are constant-time over the UTF-8 bytes (the package's own XOR loop;
-  only the length can leak). Tokens minted by the Python code (and by the tests' `mint_csrf`) verify
-  unchanged. A failure is 403 `CSRF_FAILED` on the owner API (the UI renews its token once on it).
+Clients send `X-CSRF-Token: 1` directly, including for bodyless mutations. `GET /api/csrf` returns
+`{"token":"1"}` for cached clients without a cookie or signing key. Their bounded opaque headers remain
+accepted under the same origin and JSON checks. A refused mutation is not automatically repeated.
 
 ## 3. The DO's RPC methods
 
@@ -661,7 +648,7 @@ same database the core reads.
 Runtime harness (`tests/runtime/harness.py`, as built: `start_gateway(state, variables, config,
 core=True)`; the test-only probes still use `start_worker` with a single config):
 - Split the test variables by name: gateway-only = `TODOFY_HOOKS_HOSTS`,
-  `ACCESS_*`, `CSRF_SIGNING_KEY`, `MAIL_WEBHOOK_TOKEN_SHA256*`, `REPORT_BASIC_AUTH_SHA256`, `DEV_*`,
+  `ACCESS_*`, `MAIL_WEBHOOK_TOKEN_SHA256*`, `REPORT_BASIC_AUTH_SHA256`, `DEV_*`,
   `JWKS_REFRESH_COOLDOWN_MS`; both = `MAINTENANCE_MODE`, `BUILD_SHA`, `TODOFY_PUBLIC_HOST`; everything
   else is core.
 - Core vars go into a generated `wrangler.test-run-<uuid>.json` at the repo root (the core test toml

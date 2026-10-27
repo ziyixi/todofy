@@ -32,9 +32,22 @@ Newsletter2263 tests+wheel+mypy; TS client11 and Python client4; Router45 tests 
 and synthetic desktop/mobile checks. Final combined checks and Linux image/parent-death checks remain CI gates.
 Additive IaC was applied through extend bootstrap: six creates,42 no-op, no existing resource writes. Actual IDs
 are in config/resources.toml. No application deployment or production model switch has happened yet. First
-namespace capture and matching main reconcile remain required. Owner chose Todofy Claude to share Brief's existing $80/month workspace (same key under both Router bindings, no new limit). Provider connection and deployment-credential
-writes still await owner confirmation; do not bypass that boundary. Newsletter needs its new URL/token installed in
-its existing runtime settings before the migrated image starts. Preserve its current archive/paused state.
+namespace capture and matching main reconcile remain required. Latest owner decisions supersede the earlier per-app key plan: one ANTHROPIC_API_KEY in Router uses the existing
+$80 Claude workspace for all callers; one GEMINI_API_KEY in Router. No model keys in GitHub, app services, the VPS
+Codex runtime or local persistent files. The unused Mailsort-specific key is disabled; its local temporary
+copy has been removed. Production callers are not switched. Owner authorized the revised implementation and
+credential setup. Owner authorized an equivalent shared-key replacement in the existing workspace; create it only when Router can receive it directly through the browser, without local/GitHub persistence. The workspace $80/month provider limit is saved and verified; old production keys remain until cutover.
+Non-model simplification: same-account bindings have no tokens; pure same-origin JSON owner writes use exact
+Origin+custom-header+content-type checks, without CSRF signing keys. VPS inference verifies Access JWTs before
+body reads, then drops its redundant Bearer. Privileged deployment identity and official VPS Codex login remain
+separate and unchanged. Newsletter keeps one inference-only Router token. Preserve its paused/archive state.
+Current key-reduction acceptance: edge-auth188, all ten browser suites and owner adapter type/lint checks pass;
+Router46, gateway57(56 plus local Linux-only skip), Brief41 workerd and the dedicated real-JWT owner journeys
+pass. Deployment/bootstrap tests retain exact retired-key rejection boundaries. Final combined CI/container
+verification and production remain pending. Provider keys have no local temporary copies; the $80 shared
+Claude workspace limit is configured, and the replacement key will be generated only after Router is ready.
+The prior Newsletter URL/token patch remains the single initial VPS Secret step; inference policy public
+issuer/audience are baked into the image, so no additional sudo is required for JWT configuration.
 
 
 ### Tasks Sunday planning week (`codex/tasks-next-step-estimate`)

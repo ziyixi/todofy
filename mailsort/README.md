@@ -69,8 +69,7 @@ This explicit cache policy applies only to Claude.
 Both choices use the private `MODEL_ROUTER` service binding and the shared `modelrouter.inference.v1` contract.
 Mailsort sends trusted instruction blocks, masked input and a standard JSON Schema through
 `@ziyixi/model-router-client`. The Router owns model connections, provider formats, usage normalization and the
-VPS executor connection. Its authenticated Mailsort caller uses a dedicated Claude connection; Brief's key remains
-separate. No model receives Gmail credentials or business tools. Model availability and successful real inference
+VPS executor connection. Its authenticated caller identity attributes usage; all Claude callers share the Router's single key in the existing $80/month workspace. No model receives Gmail credentials or business tools. Model availability and successful real inference
 remain separate checks from a configured route.
 
 The app records Codex HTTP classification attempts, valid/failed responses and reported input/output tokens by UTC day,
@@ -123,10 +122,10 @@ See [design](docs/design.md) and [collaboration rules](AGENTS.md).
 ## Release and credentials
 
 Pass the complete branch CI gate, then release the exact same SHA through main Actions. The deploy wrapper
-injects Access/CSRF material, `BUILD_SHA` and the `MAILSORT_MODE` ceiling. Gmail credentials remain owner-written Worker secrets, excluded from GitHub release secrets and preserved by
+injects the Access owner identity, `BUILD_SHA` and the `MAILSORT_MODE` ceiling. Gmail credentials remain owner-written Worker secrets, excluded from GitHub release secrets and preserved by
 the wrapper. Provider keys and Codex executor credentials belong to Model Router. The Worker receives a private
 `MODEL_ROUTER` binding with the Mailsort caller identity; it has no arbitrary endpoint setting or provider credential.
-Preserve the dedicated Mailsort Claude workspace and its $20 monthly provider cap when configuring the Router.
+Use Router's single Claude key in the shared $80/month workspace. Mailsort's existing local business budget and history stay intact; no separate provider key is configured here.
 
 The migration does not change the saved classifier choice, mode, prompt, pending work, write limits, breaker or
 usage history. Credential transfer, deployment and a real synthetic inference require separate release evidence.

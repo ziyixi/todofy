@@ -20,7 +20,7 @@ export async function mailRequest(request: Request, env: Env, requestId: string)
     return api.errorResponse(new RpcError(Code.NOT_FOUND, 'NOT_FOUND', UNKNOWN_ROUTE), requestId);
   if (!env.MAIL)
     return api.errorResponse(new RpcError(Code.UNAVAILABLE, 'UNAVAILABLE', 'Mail is not connected'), requestId);
-  // Access cookies and the owner's CSRF token end here; only the already-authorized request crosses.
+  // Access cookies and the owner's mutation headers end here; only the already-authorized request crosses.
   const answer = await env.MAIL.fetch(
     new Request(`https://mail.internal${url.pathname}${url.search}`, {
       method: request.method,

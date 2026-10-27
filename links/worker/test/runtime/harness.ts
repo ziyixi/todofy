@@ -27,7 +27,6 @@ export const SYNTHETIC_BINDINGS: Readonly<Record<string, string>> = {
   BUILD_SHA: 'test',
   ACCESS_OWNER: 'owner@example.com',
   ACCESS_OWNER_ALIASES: '',
-  CSRF_SIGNING_KEY: 'cd'.repeat(32),
   DEV_AUTH_BYPASS: 'true',
 };
 
@@ -158,7 +157,6 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     const text = await response.text();
     return { status: response.status, body: (text === '' ? null : JSON.parse(text)) as T, headers: response.headers };
   };
-  let csrf: { token: string; cookie: string } | null = null;
   return {
     mf,
     db,
@@ -169,14 +167,9 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
       return json<T>(await fetchLinks(path));
     },
     async mutate<T>(method: 'POST' | 'PATCH' | 'DELETE', path: string, body?: unknown) {
-      if (csrf === null) {
-        const response = await fetchLinks('/_/api/csrf');
-        const { token } = await response.json<{ token: string }>();
-        csrf = { token, cookie: (response.headers.get('set-cookie') ?? '').split(';')[0] ?? '' };
-      }
       const response = await fetchLinks(path, {
         method,
-        headers: { 'content-type': 'application/json', origin: ORIGIN, 'x-csrf-token': csrf.token, cookie: csrf.cookie },
+        headers: { 'content-type': 'application/json', origin: ORIGIN, 'x-csrf-token': '1' },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
       return json<T>(response);

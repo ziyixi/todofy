@@ -48,13 +48,25 @@ Failures before a model turn identify only their stage: `codex_configuration`, `
 `codex_account` or `codex_skills`. Authentication, quota and timeout codes take precedence. These codes
 never include vendor error text, local paths or request content.
 
-`POST /api/codex/v1/inference:check` uses the same bearer and Access identity. It reads the existing
+`POST /api/codex/v1/inference:check` uses the same verified Access identity. It reads the existing
 subscription login and one bounded model-catalog page, returning only model identifiers, supported
 efforts and a pagination flag. It does not start a thread or model turn, and returns no account identity,
 credentials, descriptions or cursor. A catalog entry does not prove that a model turn will succeed.
 
-Configure `CODEX_GATEWAY_TOKEN` as an inference-only bearer secret, `CODEX_HOME` as the existing login-only
-mount, and `DATA_DIR` as the writable monitor directory (`.data` for local runs). At process startup the
+Every inference/control route requires one `Cf-Access-Jwt-Assertion`. The backend uses PyJWT to verify
+RS256 signatures against the fixed issuer's cached JWKS, exact issuer/audience, expiry and issuance time.
+It then requires the documented service-token claims (`type=app`, a nonempty `common_name`, empty `sub`).
+A header's presence or a legacy Bearer value cannot authorize a direct localhost request.
+See [Cloudflare's validation contract](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/)
+and [service-token claims](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/application-token/).
+
+The image bakes public issuer/audience from `config/cloud.toml` and `config/resources.toml` into
+`build-info.json` beside the source SHA. They need no deployment secret or auth environment overrides.
+The Router keeps the existing Access service identity for the dedicated Tunnel path; the gateway needs
+no additional shared token. `/healthz` remains an unauthenticated, content-free local probe.
+
+Configure `CODEX_HOME` as the existing login-only mount and `DATA_DIR` as the writable monitor directory
+(`.data` for local runs). At process startup the
 service creates a private temporary CLI home and links only the shared `auth.json` into it. SDK token refresh writes through that link; cache, skills and SQLite files stay out
 of Newsletter's login directory. `SOURCE_SHA` is a Docker build argument baked into `build-info.json`; the release supplies
 `CODEX_GATEWAY_RELEASE_REQUEST_ID` separately. Authentication runs before reading the request body.
@@ -123,6 +135,10 @@ uv run --locked ruff check src tests
 uv run --locked ruff format --check src tests
 ```
 
-Tests use a fake SDK, temporary SQLite files, an in-process ASGI client and synthetic sleeping processes.
+Tests use a fake SDK, real synthetic RSA-signed JWTs, local JWKS fixtures, temporary SQLite files, an in-process ASGI client and synthetic sleeping processes.
 They check two-turn reuse, usage deltas, web observations, JSON/SSE transport, expiry, timeout, cancellation,
 restart receipts and cleanup acknowledgements. They do not log in or call a model.
+
+The image smoke feeds `tests/image_probe.py` to the built container under `--network none`. It exercises
+baked public policy and actual JWT verification with a synthetic JWKS and fake runner, verifies that an
+unauthenticated localhost request fails before body reading, and never opens the provider login.

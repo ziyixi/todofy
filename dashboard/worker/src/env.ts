@@ -63,7 +63,6 @@ export interface Env {
   readonly ACCESS_OWNER?: string;
   readonly ACCESS_OWNER_ALIASES?: string;
   /** 64 hex characters: HMAC key of the home_csrf tokens. */
-  readonly CSRF_SIGNING_KEY?: string;
   /**
    * Used only for POST https://api.cloudflare.com/client/v4/graphql (usage.ts) and the drift check's
    * read-only GETs under the same API (drift.ts); never logged or sent elsewhere.

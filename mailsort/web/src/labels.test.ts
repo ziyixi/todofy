@@ -185,7 +185,7 @@ describe('priority setup', () => {
     const calls = server.calls.filter((call) => call.path.endsWith(':initializePriorities'))
     expect(calls).toHaveLength(1)
     expect(String(calls[0]?.body?.['request_id'])).toMatch(/^[0-9a-f-]{36}$/)
-    expect(calls[0]?.headers['x-csrf-token']).toBe('csrf-token')
+    expect(calls[0]?.headers['x-csrf-token']).toBe('1')
     expect(root.querySelector<HTMLElement>('.priority-setup')?.hidden).toBe(true)
     expect(root.textContent).toContain('P1、P2、P3、P4 已启用')
     expect(server.settings).toEqual(originalSettings)

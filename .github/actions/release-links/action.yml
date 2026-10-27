@@ -13,10 +13,6 @@ inputs:
     description: "dashboard access owner aliases"
     required: false
     default: ''
-  links-csrf-signing-key:
-    description: "links csrf signing key"
-    required: false
-    default: ''
   links-worker-secrets:
     description: "links worker secrets"
     required: false
@@ -85,7 +81,6 @@ runs:
         LINKS_WORKER_SECRETS: ${{ inputs.links-worker-secrets }}
         LINKS_ACCESS_OWNER: ${{ inputs.dashboard-access-owner }}
         LINKS_ACCESS_OWNER_ALIASES: ${{ inputs.dashboard-access-owner-aliases }}
-        LINKS_CSRF_SIGNING_KEY: ${{ inputs.links-csrf-signing-key }}
       shell: bash -e {0}
       run: node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/links-secrets.json"
     # deploy-vars.mjs adds BUILD_SHA as --var and refuses the all-zeros D1 id or Access AUD; the bundle that ships is

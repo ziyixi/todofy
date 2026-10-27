@@ -18,16 +18,13 @@ export {
   type DevBypassPolicy,
 } from './access.ts';
 export {
-  CSRF_DEFAULT_TTL_SECONDS,
   CSRF_HEADER,
+  CSRF_TOKEN,
   CSRF_MAX_TOKEN_CHARS,
-  issueCsrf,
   verifyCsrf,
   type CsrfFailure,
-  type CsrfIssuePolicy,
   type CsrfPolicy,
   type CsrfResult,
-  type IssuedCsrf,
 } from './csrf.ts';
 export { SIGNED_TOKEN_MAX_CHARS, signClaims, verifySignedClaims } from './tokens.ts';
 export { deriveHmacKeyHkdf, importHmacKeyHex, type HmacKey } from './keys.ts';

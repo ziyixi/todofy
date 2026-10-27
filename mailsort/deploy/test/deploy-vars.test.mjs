@@ -19,18 +19,17 @@ function environment() {
     MAILSORT_MODE: 'shadow',
     MAILSORT_ACCESS_OWNER: 'owner@example.org',
     MAILSORT_ACCESS_OWNER_ALIASES: 'alias@example.org, second@example.net',
-    MAILSORT_CSRF_SIGNING_KEY: 'd'.repeat(64),
   }
 }
 
 test('the marker lists every input of each mode', () => {
   const marked = {}
   for (const [, mode, names] of readFileSync(WRAPPER, 'utf8').matchAll(/^\/\/ deploy-vars-inputs (\w+): (.+)$/gm)) {
-    marked[mode] = [...(marked[mode] ?? []), ...names.split(' ')]
+    marked[mode] = [...(marked[mode] ?? []), ...names.trim().split(/\s+/)]
   }
   assert.deepEqual(marked, {
     exec: INJECTED.map(({ from }) => from),
-    secrets: ['MAILSORT_ACCESS_OWNER', 'MAILSORT_ACCESS_OWNER_ALIASES', 'MAILSORT_CSRF_SIGNING_KEY'],
+    secrets: ['MAILSORT_ACCESS_OWNER', 'MAILSORT_ACCESS_OWNER_ALIASES'],
   })
 })
 
@@ -50,17 +49,15 @@ test('the mode and the build become --var flags; the mode is live, shadow or off
   }
 })
 
-test('the secrets file holds the owner, aliases and CSRF key; invalid values are refused by name', () => {
+test('the secrets file holds the owner and aliases; invalid values are refused by name', () => {
   assert.deepEqual(generateSecrets(environment()), {
     ACCESS_OWNER: 'owner@example.org',
     ACCESS_OWNER_ALIASES: 'alias@example.org,second@example.net',
-    CSRF_SIGNING_KEY: 'd'.repeat(64),
   })
   assert.equal(generateSecrets({ ...environment(), MAILSORT_ACCESS_OWNER_ALIASES: '' }).ACCESS_OWNER_ALIASES, ' ')
   for (const [name, value] of [
     ['MAILSORT_ACCESS_OWNER', undefined], ['MAILSORT_ACCESS_OWNER', 'not-an-email'], ['MAILSORT_ACCESS_OWNER', 'ówner@example.org'],
     ['MAILSORT_ACCESS_OWNER_ALIASES', 'a@example.org,a@example.org'],
-    ['MAILSORT_CSRF_SIGNING_KEY', 'd'.repeat(63)], ['MAILSORT_CSRF_SIGNING_KEY', undefined],
   ]) {
     const env = { ...environment(), [name]: value }
     if (value === undefined) delete env[name]
@@ -127,8 +124,8 @@ test('exec runs the deploy (or dry-run) unchanged plus the --var flag; secrets w
     const again = spawnSync(process.execPath, [WRAPPER, 'secrets', secrets], { env, encoding: 'utf8' })
     assert.equal(again.status, 1)
     const bad = join(dir, 'bad.json')
-    const invalid = spawnSync(process.execPath, [WRAPPER, 'secrets', bad], { env: { ...env, MAILSORT_CSRF_SIGNING_KEY: 'secret-looking-value' }, encoding: 'utf8' })
-    assert.equal(invalid.stderr.trim(), 'Invalid or missing deploy setting: MAILSORT_CSRF_SIGNING_KEY')
+    const invalid = spawnSync(process.execPath, [WRAPPER, 'secrets', bad], { env: { ...env, MAILSORT_ACCESS_OWNER: 'secret-looking-value' }, encoding: 'utf8' })
+    assert.equal(invalid.stderr.trim(), 'Invalid or missing deploy setting: MAILSORT_ACCESS_OWNER')
     assert.ok(!existsSync(bad))
 
     const printed = [result, refused, written, again, invalid].map(({ stdout, stderr }) => stdout + stderr).join('\n')
@@ -149,7 +146,8 @@ test("the owner's Gmail grant never enters a secrets file: a MAILSORT_WORKER_SEC
   }
   // A complete map without the grant is accepted (a cold bootstrap's), the personal inputs taking precedence.
   const map = { ...environment(), MAILSORT_WORKER_SECRETS: JSON.stringify({ CSRF_SIGNING_KEY: 'e'.repeat(64), ACCESS_OWNER: 'other@example.org' }) }
-  assert.equal(generateSecrets(map).CSRF_SIGNING_KEY, 'd'.repeat(64))
+  assert.equal(Object.hasOwn(generateSecrets(map), 'CSRF_SIGNING_KEY'), false)
+  assert.equal(generateSecrets(map).ACCESS_OWNER, environment().MAILSORT_ACCESS_OWNER)
 })
 
 test('the public GitHub secrets spec leaves the Gmail grant out; app.toml declares it owner-machine only', () => {

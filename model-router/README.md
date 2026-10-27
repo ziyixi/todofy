@@ -9,7 +9,7 @@
 
 ## 使用
 
-从 Home 打开 Model Router，或访问部署配置里的 `PUBLIC_HOST`。Playground 可选择模型、思考强度和 JSON Schema。付费连接需要明确选择计费配置；应用之间的 API key 和工作区限额分别保留。
+从 Home 打开 Model Router，或访问部署配置里的 `PUBLIC_HOST`。Playground 可选择模型、思考强度和 JSON Schema。所有应用和控制台共用 Router 的供应商连接，不再选择应用计费配置。Claude 使用现有 Brief 工作区的同一个 API key，所有 Claude 调用合计受该工作区 US$80/月上限约束；Gemini 使用一个共享 key。
 
 每次调用返回最终结果，不向应用提供 token 流。输入、指令和输出存入私有 R2，保留 7 天；D1 请求记录和统计保留 90 天。订阅请求展示 token，不折算成 API 美元；未报告的用量显示为未知。
 
@@ -17,6 +17,6 @@
 
 在仓库根目录安装固定 workspace 依赖，执行 `pnpm --filter model-router-worker test` 和 `pnpm --filter model-router-web test`。运行方式和 API 边界见 [设计](docs/design.md)。
 
-正式发布走根 Actions 的 `model-router` 范围；不能直接运行裸 `wrangler deploy`。新账户资源和公开 ID 由既有 bootstrap 导出。运行前需要为 Router 配置所属应用的连接，名称见 [app.toml](app.toml)；API key 不写进 GitHub 或请求记录。
+正式发布走根 Actions 的 `model-router` 范围；不能直接运行裸 `wrangler deploy`。新账户资源和公开 ID 由既有 bootstrap 导出。运行前只在 Router secrets 中配置供应商连接，名称见 [app.toml](app.toml)；API key 不写进 GitHub、客户端、VPS 或请求记录。
 
 各应用保留自己的提示词、预算、排空和业务处理。修改 Router 不会重算旧邮件、重发 Newsletter，或开启暂停中的工作。

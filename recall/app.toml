@@ -4,7 +4,7 @@ target = "cloudflare"
 
 [[workers]]
 config = "recall/wrangler.toml"
-personal_secrets = ["ACCESS_OWNER", "ACCESS_OWNER_ALIASES", "CSRF_SIGNING_KEY"]
+personal_secrets = ["ACCESS_OWNER", "ACCESS_OWNER_ALIASES"]
 manual_secrets = []
 optional_secrets = ["ACCESS_OWNER_ALIASES"]
 # Optional SHA-256 digests of the two machine tokens (the extension's ingest token, a feed program's export token) and

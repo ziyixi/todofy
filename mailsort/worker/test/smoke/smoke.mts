@@ -63,7 +63,6 @@ async function main(): Promise<void> {
     DEV_AUTH_BYPASS: 'true',
     DEV_MANUAL_ALARMS: 'true',
     ACCESS_OWNER: 'owner@example.com',
-    CSRF_SIGNING_KEY: 'ab'.repeat(32),
     DEV_FAKE_UPSTREAM: fakeOrigin,
     GMAIL_CLIENT_ID: 'synthetic-client.apps.googleusercontent.com',
     GMAIL_CLIENT_SECRET: 'synthetic-secret',

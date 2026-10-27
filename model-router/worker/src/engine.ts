@@ -35,21 +35,15 @@ interface ApiContext {
   owner: boolean;
 }
 const knownApps = new Set(['console', 'mailsort', 'todofy', 'brief', 'newsletter']);
-function billing(app: string, requested: string, owner: boolean): string {
-  if (!requested) return app;
-  if (!owner || !knownApps.has(requested))
-    throw new RpcError(Code.PERMISSION_DENIED, 'BILLING_PROFILE_FORBIDDEN', 'This billing profile is not available.');
-  return requested;
-}
 const modelApi = new HttpTranscoder(
   ModelService,
   {
-    listModels: async (req, ctx: ApiContext) =>
+    listModels: async (_req, ctx: ApiContext) =>
       create(ListModelsResponseSchema, {
-        models: await modelCatalog(ctx.engine.environment, billing(ctx.app, req.app, ctx.owner)),
+        models: await modelCatalog(ctx.engine.environment),
       }),
-    generate: (req, ctx) => ctx.engine.generate(req, ctx.app, ctx.owner),
-    embed: (req, ctx) => ctx.engine.embed(req, ctx.app, ctx.owner),
+    generate: (req, ctx) => ctx.engine.generate(req, ctx.app),
+    embed: (req, ctx) => ctx.engine.embed(req, ctx.app),
     createConversation: (req, ctx) => ctx.engine.createConversation(req, ctx.app),
     getConversation: (req, ctx) => ctx.engine.getConversation(req.name, ctx.app),
     closeConversation: (req, ctx) => ctx.engine.closeConversation(req.name, req.requestId, ctx.app),
@@ -95,7 +89,7 @@ export class RouterEngine extends DurableObject<Env> {
     const raw = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(value)));
     return Array.from(new Uint8Array(raw), (byte) => byte.toString(16).padStart(2, '0')).join('');
   }
-  async generate(req: GenerateRequest, app: string, owner = false): Promise<Generation> {
+  async generate(req: GenerateRequest, app: string): Promise<Generation> {
     const id = requestId(req.requestId);
     if (!!req.config === !!req.conversation)
       invalid('INVALID_MODEL_REQUEST', 'Supply one configuration or conversation.');
@@ -106,7 +100,6 @@ export class RouterEngine extends DurableObject<Env> {
       Object.entries(req.metadata).some(([key, value]) => key.length > 64 || value.length > 128)
     )
       invalid('INVALID_METADATA', 'Use at most 16 short correlation tags.');
-    const profile = billing(app, req.metadata['billing_app'] ?? '', owner);
     const hash = await this.hash({ app, req });
     const live = this.inflight.get(id);
     if (live) {
@@ -114,7 +107,7 @@ export class RouterEngine extends DurableObject<Env> {
         throw new RpcError(Code.ALREADY_EXISTS, 'REQUEST_ID_CONFLICT', 'This request ID has already been used.');
       return live.done;
     }
-    const done = this.accept(req, app, profile, hash);
+    const done = this.accept(req, app, hash);
     this.inflight.set(id, { hash, done });
     try {
       return await done;
@@ -122,7 +115,7 @@ export class RouterEngine extends DurableObject<Env> {
       this.inflight.delete(id);
     }
   }
-  private async accept(req: GenerateRequest, app: string, profile: string, hash: string): Promise<Generation> {
+  private async accept(req: GenerateRequest, app: string, hash: string): Promise<Generation> {
     const id = req.requestId;
     const row = await this.store.request(id);
     if (row) {
@@ -144,7 +137,7 @@ export class RouterEngine extends DurableObject<Env> {
     if (req.conversation && this.turns.has(req.conversation))
       precondition('CONVERSATION_BUSY', 'This conversation already has a running turn.');
     const controller = new AbortController();
-    const operation = this.run(req, app, profile, hash, controller);
+    const operation = this.run(req, app, hash, controller);
     if (req.conversation) this.turns.set(req.conversation, { controller, done: operation });
     try {
       return await operation;
@@ -155,7 +148,6 @@ export class RouterEngine extends DurableObject<Env> {
   private async run(
     req: GenerateRequest,
     app: string,
-    profile: string,
     hash: string,
     controller: AbortController,
   ): Promise<Generation> {
@@ -168,7 +160,6 @@ export class RouterEngine extends DurableObject<Env> {
       const body = await this.env.REQUEST_BODIES.get(context.config_key);
       if (!body) precondition('CONVERSATION_LOST', 'Conversation configuration is no longer available.');
       config = fromWire(GenerationConfigSchema, await body.json()).message;
-      profile = context.billing_app;
     }
     if (!config) invalid('INVALID_MODEL_REQUEST', 'A generation configuration is required.');
     config = { ...config, model: routeFor(config.model).name };
@@ -222,7 +213,7 @@ export class RouterEngine extends DurableObject<Env> {
         const provider = route.provider === 'anthropic' ? generateClaude : generateGemini;
         result = await provider(config, req.input, {
           env: this.env,
-          caller: profile,
+          caller: app,
           requestId: req.requestId,
           route,
           signal: controller.signal,
@@ -344,7 +335,6 @@ export class RouterEngine extends DurableObject<Env> {
     const row: ConversationRow = {
       id,
       app,
-      billing_app: app,
       model: route.name,
       provider: route.provider,
       state: 'creating',
@@ -354,7 +344,7 @@ export class RouterEngine extends DurableObject<Env> {
       created_ms: now,
     };
     await this.env.DB.prepare(
-      'INSERT INTO conversations (id,app,model,provider,billing_app,state,config_key,history_key,expire_ms,created_ms) VALUES (?,?,?,?,?,?,?,?,?,?)',
+      'INSERT INTO conversations (id,app,model,provider,state,config_key,history_key,expire_ms,created_ms) VALUES (?,?,?,?,?,?,?,?,?)',
     )
       .bind(
         ...[
@@ -362,7 +352,6 @@ export class RouterEngine extends DurableObject<Env> {
           row.app,
           row.model,
           row.provider,
-          row.billing_app,
           row.state,
           row.config_key,
           row.history_key,
@@ -411,9 +400,9 @@ export class RouterEngine extends DurableObject<Env> {
     if (!row) {
       const now = Date.now();
       await this.env.DB.prepare(
-        "INSERT INTO conversations (id,app,model,provider,billing_app,state,config_key,history_key,expire_ms,created_ms) VALUES (?,?,'','',?,'closed','','',?,?)",
+        "INSERT INTO conversations (id,app,model,provider,state,config_key,history_key,expire_ms,created_ms) VALUES (?,?,'','','closed','','',?,?)",
       )
-        .bind(id, app, app, now, now)
+        .bind(id, app, now, now)
         .run();
       row = (await this.store.conversation(id))!;
     }
@@ -430,7 +419,7 @@ export class RouterEngine extends DurableObject<Env> {
     await this.env.DB.prepare("UPDATE conversations SET state = 'closed' WHERE id = ?").bind(id).run();
     return this.view({ ...row, state: 'closed' });
   }
-  async embed(req: EmbedRequest, app: string, owner: boolean) {
+  async embed(req: EmbedRequest, app: string) {
     requestId(req.requestId);
     const route = routeFor(req.model);
     if (
@@ -440,7 +429,6 @@ export class RouterEngine extends DurableObject<Env> {
       req.inputs.some((text) => !text || new TextEncoder().encode(text).length > 32768)
     )
       invalid('INVALID_EMBEDDING_REQUEST', 'Supply between 1 and 50 texts, each at most 32 KiB.');
-    const profile = billing(app, req.metadata['billing_app'] ?? '', owner);
     const hash = await this.hash({ app, embed: req });
     const live = this.inflight.get(req.requestId);
     if (live && live.hash !== hash)
@@ -470,7 +458,7 @@ export class RouterEngine extends DurableObject<Env> {
       await this.store.start(trace, hash, config, input);
       const result = await embedWorkersAI(req.inputs, {
         env: this.env,
-        caller: profile,
+        caller: app,
         requestId: req.requestId,
         route,
         signal: AbortSignal.timeout(60000),

@@ -6,7 +6,6 @@ import worker from '../src/index.ts';
 export const OWNER_HOST = 'todofy.localhost';
 export const HOOKS_HOST = 'todofy-hooks.localhost';
 export const OWNER = 'owner@example.com';
-export const CSRF_KEY = 'ab'.repeat(32);
 
 const CORE_METHODS = [
   'mail',
@@ -101,7 +100,6 @@ export function fakes(vars: Vars = {}, reply: CoreReply = () => NO_CONTENT): Fak
     BUILD_SHA: 'test',
     ACCESS_OWNER: OWNER,
     DEV_AUTH_BYPASS: 'true',
-    CSRF_SIGNING_KEY: CSRF_KEY,
     ...vars,
     COORDINATOR: coreStub(core, reply),
     ASSETS: {

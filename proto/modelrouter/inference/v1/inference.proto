@@ -138,7 +138,7 @@ message Model {
   string provider = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Provider model identifier; never a credential.
   string upstream_model = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Whether the current caller has the required connection configured.
+  // Whether the Router's shared provider connection is configured.
   bool configured = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Whether the model produces text or JSON.
   bool generation = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
@@ -349,12 +349,7 @@ message Conversation {
 //     aip.dev/not-precedent: The complete deployment catalog is a fixed, bounded collection returned atomically; it has no further pages. --)
 // (-- api-linter: core::0158::request-page-token-field=disabled
 //     aip.dev/not-precedent: The complete deployment catalog is a fixed, bounded collection returned atomically; it has no further pages. --)
-// (-- api-linter: core::0132::request-unknown-fields=disabled
-//     aip.dev/not-precedent: Only the owner may select a billing profile; machine callers are fixed by authentication. --)
-message ListModelsRequest {
-  // Owner console billing profile; machine callers always use their authenticated application.
-  string app = 1 [(google.api.field_behavior) = OPTIONAL];
-}
+message ListModelsRequest {}
 // Finite configured model catalog.
 // (-- api-linter: core::0158::response-next-page-token-field=disabled
 //     aip.dev/not-precedent: The complete deployment catalog is a fixed, bounded collection returned atomically; it has no further pages. --)

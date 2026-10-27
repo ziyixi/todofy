@@ -229,7 +229,7 @@ lost `version`.
 | Route | Served by | Budget |
 | --- | --- | --- |
 | `GET /api/v1/registry` (GetRegistry) | Worker, serialized once per isolate; `ETag: "<build>"` → 304 | 0 DO; ≤ 16 KiB |
-| `GET /api/csrf` | Worker (signed token + `home_csrf` cookie, design.md §6) | — |
+| `GET /api/csrf` | Worker (static compatibility token `1`, no cookie; design.md §6) | — |
 | `GET /api/v1/homeView` (GetHomeView) | DO `view('home')` | 1 DO call; ordinary fixture ≤ 40 rows read; ≤ 10 KiB |
 | `GET /api/v1/flowsView` (GetFlowsView) | DO | ordinary fixture ≤ 40 rows read; ≤ 20 KiB |
 | `GET /api/v1/cloudflareView` (GetCloudflareView) | DO | ordinary fixture ≤ 40 rows read; ≤ 24 KiB |

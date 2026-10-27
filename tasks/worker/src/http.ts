@@ -1,8 +1,8 @@
-import { issueCsrf, STRICT_CSP, withPrivateHeaders } from '@ziyixi/edge-auth';
+import { STRICT_CSP, withPrivateHeaders } from '@ziyixi/edge-auth';
 import { HttpTranscoder } from '@ziyixi/proto/http-transcoder';
 import { TasksUiService } from '@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb';
 import { Code, RpcError } from '@ziyixi/proto/rpc-status';
-import { authenticate, checkCsrf, CSRF_COOKIE, csrfKey } from './auth.ts';
+import { authenticate, checkCsrf } from './auth.ts';
 import { handlers, type ApiContext } from './api.ts';
 import { mailRequest } from './mail-proxy.ts';
 import type { Env } from './env.ts';
@@ -12,7 +12,7 @@ export const api = new HttpTranscoder(TasksUiService, handlers, {
   domain: 'tasks.ziyixi.science',
   maxBodyBytes: 65536,
   async authorize(request, route, context) {
-    if (!route.safe && !context.internal) await checkCsrf(request, context.env, context.owner, context.bypassed);
+    if (!route.safe && !context.internal) await checkCsrf(request, context.env, context.bypassed);
   },
 });
 /** `build` is the Worker's BUILD_SHA once the owner is authenticated, else empty: nothing anonymous shows it. */
@@ -46,17 +46,11 @@ export async function ownerRequest(request: Request, env: Env): Promise<Response
     };
     const path = new URL(request.url).pathname;
     if (path === '/api/tasks/csrf' && request.method === 'GET') {
-      // The token lasts as long as the 168-hour Access session, so a PWA left open overnight can still write.
-      const issued = await issueCsrf(request, auth.owner, {
-        cookieName: CSRF_COOKIE,
-        key: await csrfKey(env),
-        ttlSeconds: 604800,
-      });
-      return secure(Response.json({ token: issued.token }, { headers: { 'set-cookie': issued.setCookie } }), build);
+      return secure(Response.json({ token: '1' }), build);
     }
     if (path.startsWith('/api/mail/')) {
       if (request.method !== 'GET' && request.method !== 'HEAD')
-        await checkCsrf(request, env, auth.owner, auth.bypassed);
+        await checkCsrf(request, env, auth.bypassed);
       return secure(await mailRequest(request, env, requestId), build);
     }
     if (path.startsWith('/api/')) {

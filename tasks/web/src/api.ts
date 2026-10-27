@@ -51,45 +51,11 @@ export const EMPTY_CATALOG: Catalog = {
   filters: [],
   timeZone: "",
 };
-let csrf: Promise<string> | undefined;
-async function csrfToken(): Promise<string> {
-  csrf ??= fetch("/api/tasks/csrf", {
-    credentials: "same-origin",
-    cache: "no-store",
-  })
-    .then(async (response) => {
-      if (!response.ok)
-        throw new Error(
-          "Could not verify your session. Refresh and sign in again.",
-        );
-      const result: unknown = await response.json();
-      if (
-        !result ||
-        typeof result !== "object" ||
-        !("token" in result) ||
-        typeof result.token !== "string"
-      )
-        throw new Error("Invalid session response. Refresh and try again.");
-      return result.token;
-    })
-    .catch((error: unknown) => {
-      csrf = undefined;
-      throw error;
-    });
-  return csrf;
-}
-/**
- * Fetches the session's CSRF token at startup, beside the first reads, so the first write does not
- * wait for it. A failure leaves it to that write, which fetches it again.
- */
-export function prepareWrites(): void {
-  csrfToken().catch(() => undefined);
-}
 export async function send(call: HttpCall): Promise<Response> {
   const mutation = !["GET", "HEAD"].includes(call.httpMethod);
   const headers = new Headers({ Accept: "application/json" });
-  if (call.body !== undefined) headers.set("Content-Type", "application/json");
-  if (mutation) headers.set("X-CSRF-Token", await csrfToken());
+  if (mutation || call.body !== undefined) headers.set("Content-Type", "application/json");
+  if (mutation) headers.set("X-CSRF-Token", "1");
   const response = await fetch(call.url, {
     method: call.httpMethod,
     body: call.body,
@@ -98,7 +64,6 @@ export async function send(call: HttpCall): Promise<Response> {
     cache: "no-store",
     redirect: "error",
   });
-  if (response.status === 401 || response.status === 403) csrf = undefined;
   await checkBuild(response);
   return response;
 }

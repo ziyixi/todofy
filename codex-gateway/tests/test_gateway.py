@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 import codex_cli_bin
 import httpx
+from auth_fixtures import AUDIENCE, ISSUER, access_headers, local_jwks, verifier
 from openai_codex.generated.v2_all import ThreadItem
 from ziyixi_proto.codex.inference.v1.inference_pb import (
     CheckInferenceResponse,
@@ -124,11 +125,14 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             os.environ,
             {
                 "CODEX_HOME": str(self.home),
-                "CODEX_GATEWAY_TOKEN": "synthetic-inference-token",
+                "ACCESS_ISSUER": ISSUER,
+                "ACCESS_AUDIENCE": AUDIENCE,
             },
             clear=True,
         )
         self.environment.start()
+        self.jwks_mock = local_jwks()
+        self.jwks_mock.start()
         self.calls = []
 
         async def runner(request, home):
@@ -142,7 +146,11 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                 usage_available=True,
             )
 
-        self.app = create_app(monitor_db=self.home / "monitor.sqlite3", runner=runner)
+        self.app = create_app(
+            access_verifier=verifier(),
+            monitor_db=self.home / "monitor.sqlite3",
+            runner=runner,
+        )
         self.client = httpx.AsyncClient(
             transport=httpx.ASGITransport(app=self.app), base_url="http://test"
         )
@@ -150,6 +158,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         await self.client.aclose()
         self.environment.stop()
+        self.jwks_mock.stop()
         self.temp.cleanup()
 
     async def test_authentication_precedes_body_read(self):
@@ -167,7 +176,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.post(
             PATH,
             json=BODY,
-            headers={"authorization": "Bearer synthetic-inference-token"},
+            headers=access_headers(),
         )
         self.assertEqual(response.status_code, 200)
         typed = from_wire(RunInferenceResponse, response.json(), strict=True).message
@@ -202,7 +211,11 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                 ],
             )
 
-        app = create_app(monitor_db=self.home / "monitor.sqlite3", checker=checker)
+        app = create_app(
+            access_verifier=verifier(),
+            monitor_db=self.home / "monitor.sqlite3",
+            checker=checker,
+        )
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
         ) as client:
@@ -210,7 +223,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             denied = await client.post(path, json={})
             self.assertEqual(denied.status_code, 401)
             self.assertEqual(calls, [])
-            headers = {"authorization": "Bearer synthetic-inference-token"}
+            headers = access_headers()
             response = await client.post(path, json={}, headers=headers)
             self.assertEqual(response.status_code, 200)
             typed = from_wire(
@@ -241,7 +254,9 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                 },
             ),
         ):
-            app = create_app(monitor_db=self.home / "monitor.sqlite3")
+            app = create_app(
+                access_verifier=verifier(), monitor_db=self.home / "monitor.sqlite3"
+            )
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app), base_url="http://test"
             ) as client:
@@ -261,14 +276,18 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                 ),
             )
 
-        app = create_app(monitor_db=self.home / "monitor.sqlite3", runner=runner)
+        app = create_app(
+            access_verifier=verifier(),
+            monitor_db=self.home / "monitor.sqlite3",
+            runner=runner,
+        )
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
         ) as client:
             response = await client.post(
                 PATH,
                 json=BODY,
-                headers={"authorization": "Bearer synthetic-inference-token"},
+                headers=access_headers(),
             )
         self.assertEqual(response.status_code, 200)
         typed = from_wire(RunInferenceResponse, response.json(), strict=True).message
@@ -287,7 +306,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                     PATH,
                     content=raw,
                     headers={
-                        "authorization": "Bearer synthetic-inference-token",
+                        **access_headers(),
                         "content-type": "application/json",
                     },
                 )
@@ -472,7 +491,8 @@ class EnvironmentTests(unittest.TestCase):
                     "PATH": "/usr/bin",
                     "CODEX_HOME": "/login",
                     "OPENAI_API_KEY": "synthetic-api-key",
-                    "CODEX_GATEWAY_TOKEN": "synthetic-inference-token",
+                    "ACCESS_ISSUER": ISSUER,
+                    "ACCESS_AUDIENCE": AUDIENCE,
                     "GITHUB_TOKEN": "synthetic-github-token",
                 }
             ),

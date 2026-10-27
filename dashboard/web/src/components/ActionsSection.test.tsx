@@ -47,7 +47,7 @@ describe('actions', () => {
     expect(post).toMatchObject({ path: PATHS.canary })
     // One AIP-155 request_id for the owner's action.
     expect(post?.body).toMatch(/^\{"request_id":"[0-9a-f-]{36}"\}$/)
-    expect(post?.headers['x-csrf-token']).toBe('token-1')
+    expect(post?.headers['x-csrf-token']).toBe('1')
     expect(post?.headers['content-type']).toBe('application/json')
     expect(post?.init).toMatchObject({ credentials: 'same-origin', redirect: 'error' })
     expect(within(actions).getByRole('status')).toHaveTextContent(
@@ -56,23 +56,7 @@ describe('actions', () => {
     expect(button).toHaveFocus()
   })
 
-  it('retries once with a fresh token after 403 csrf_failed', async () => {
-    let attempts = 0
-    const { calls, actions, user } = await open(healthy(), () => {
-      attempts += 1
-      return attempts === 1 ? apiError(403, 'csrf_failed') : json({ run: STARTED })
-    })
-    await user.click(within(actions).getByRole('button', { name: '立即运行金丝雀' }))
-    await user.click(screen.getByRole('button', { name: '确认运行' }))
-
-    await waitFor(() => expect(within(actions).getByRole('status')).toHaveTextContent('已启动金丝雀'))
-    expect(posts(calls).map((call) => call.headers['x-csrf-token'])).toEqual(['token-1', 'token-2'])
-    // The repeat is the same request (the same request_id).
-    expect(posts(calls)[1]?.body).toBe(posts(calls)[0]?.body)
-    expect(calls.filter((call) => call.path === PATHS.csrf)).toHaveLength(2)
-  })
-
-  it('does not retry a second csrf_failed and shows the error', async () => {
+  it('shows csrf_failed without retrying and shows the error', async () => {
     const { calls, actions, user } = await open(healthy(), () => apiError(403, 'csrf_failed', '页面安全校验失败', 'bbbbbbbbbbbbbbbb'))
     await user.click(within(actions).getByRole('button', { name: '立即运行金丝雀' }))
     await user.click(screen.getByRole('button', { name: '确认运行' }))
@@ -80,7 +64,7 @@ describe('actions', () => {
     expect(await within(actions).findByRole('alert')).toHaveTextContent(
       '未能启动金丝雀：页面安全校验失败（请求 bbbbbbbbbbbbbbbb）',
     )
-    expect(posts(calls)).toHaveLength(2)
+    expect(posts(calls)).toHaveLength(1)
   })
 
   it('reports canary_active without retrying', async () => {

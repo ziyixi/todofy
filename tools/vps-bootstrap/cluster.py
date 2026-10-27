@@ -90,8 +90,6 @@ def secrets(profile, private):
             },
         ),
     )
-    if "codex_gateway_env" in private:
-        environments += (("codex-gateway-settings", private["codex_gateway_env"]),)
     for name, variables in environments:
         items.append(
             {

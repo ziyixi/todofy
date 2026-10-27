@@ -18,18 +18,17 @@ function environment() {
     GITHUB_SHA: 'c'.repeat(40),
     WATCH_ACCESS_OWNER: 'owner@example.org',
     WATCH_ACCESS_OWNER_ALIASES: 'alias@example.org, second@example.net',
-    WATCH_CSRF_SIGNING_KEY: 'd'.repeat(64),
   }
 }
 
 test('the marker lists every input of each mode', () => {
   const marked = {}
   for (const [, mode, names] of readFileSync(WRAPPER, 'utf8').matchAll(/^\/\/ deploy-vars-inputs (\w+): (.+)$/gm)) {
-    marked[mode] = [...(marked[mode] ?? []), ...names.split(' ')]
+    marked[mode] = [...(marked[mode] ?? []), ...names.trim().split(/\s+/)]
   }
   assert.deepEqual(marked, {
     exec: INJECTED.map(({ from }) => from),
-    secrets: ['WATCH_ACCESS_OWNER', 'WATCH_ACCESS_OWNER_ALIASES', 'WATCH_CSRF_SIGNING_KEY'],
+    secrets: ['WATCH_ACCESS_OWNER', 'WATCH_ACCESS_OWNER_ALIASES'],
   })
 })
 
@@ -43,17 +42,15 @@ test('the build becomes a --var flag and must be the 40-hex commit', () => {
   }
 })
 
-test('the secrets file holds the owner, aliases and CSRF key; invalid values are refused by name', () => {
+test('the secrets file holds the owner and aliases; invalid values are refused by name', () => {
   assert.deepEqual(generateSecrets(environment()), {
     ACCESS_OWNER: 'owner@example.org',
     ACCESS_OWNER_ALIASES: 'alias@example.org,second@example.net',
-    CSRF_SIGNING_KEY: 'd'.repeat(64),
   })
   assert.equal(generateSecrets({ ...environment(), WATCH_ACCESS_OWNER_ALIASES: '' }).ACCESS_OWNER_ALIASES, ' ')
   for (const [name, value] of [
     ['WATCH_ACCESS_OWNER', undefined], ['WATCH_ACCESS_OWNER', 'not-an-email'], ['WATCH_ACCESS_OWNER', 'ówner@example.org'],
     ['WATCH_ACCESS_OWNER_ALIASES', 'a@example.org,a@example.org'],
-    ['WATCH_CSRF_SIGNING_KEY', 'd'.repeat(63)], ['WATCH_CSRF_SIGNING_KEY', undefined],
   ]) {
     const env = { ...environment(), [name]: value }
     if (value === undefined) delete env[name]
@@ -119,8 +116,8 @@ test('exec runs the deploy (or dry-run) unchanged plus the --var flag; secrets w
     const again = spawnSync(process.execPath, [WRAPPER, 'secrets', secrets], { env, encoding: 'utf8' })
     assert.equal(again.status, 1)
     const bad = join(dir, 'bad.json')
-    const invalid = spawnSync(process.execPath, [WRAPPER, 'secrets', bad], { env: { ...env, WATCH_CSRF_SIGNING_KEY: 'secret-looking-value' }, encoding: 'utf8' })
-    assert.equal(invalid.stderr.trim(), 'Invalid or missing deploy setting: WATCH_CSRF_SIGNING_KEY')
+    const invalid = spawnSync(process.execPath, [WRAPPER, 'secrets', bad], { env: { ...env, WATCH_ACCESS_OWNER: 'secret-looking-value' }, encoding: 'utf8' })
+    assert.equal(invalid.stderr.trim(), 'Invalid or missing deploy setting: WATCH_ACCESS_OWNER')
     assert.ok(!existsSync(bad))
 
     const printed = [result, refused, written, again, invalid].map(({ stdout, stderr }) => stdout + stderr).join('\n')

@@ -6,7 +6,7 @@
 #
 # Deployed only by CI ("Mailsort deploy" in .github/workflows/ci.yml) through deploy/deploy-vars.mjs, which appends
 # --var BUILD_SHA (the commit) and --var MODE (the GitHub variable MAILSORT_MODE: the highest mode the deployment allows)
-# and passes ACCESS_OWNER, ACCESS_OWNER_ALIASES and CSRF_SIGNING_KEY as Worker secrets with --secrets-file. A plain
+# and passes ACCESS_OWNER and ACCESS_OWNER_ALIASES as Worker secrets with --secrets-file. A plain
 # `wrangler deploy` of this file DELETES BUILD_SHA and MODE (then the Worker reads MODE as off: nothing is read or
 # written).
 #

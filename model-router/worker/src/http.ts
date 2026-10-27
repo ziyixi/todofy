@@ -1,8 +1,6 @@
 /** Owner Access and machine Bearer checks run before model request bodies are read. */
 import {
   createAccessVerifier,
-  importHmacKeyHex,
-  issueCsrf,
   verifyCsrf,
   withPrivateHeaders,
   constantTimeEqual,
@@ -12,7 +10,6 @@ import { Code, RpcError } from './errors.ts';
 import type { Env } from './types.ts';
 
 const verifier = createAccessVerifier();
-const cookieName = 'model_router_csrf';
 const machinePath =
   /^\/api\/model\/v1\/(models|generations:generate|embeddings:embed|conversations(?:\/[0-9a-f-]+(?::close)?)?)$/;
 export function errorResponse(error: RpcError): Response {
@@ -59,18 +56,13 @@ async function handle(request: Request, env: Env): Promise<Response> {
       'Sign in to open Model Router.',
     );
   if (url.pathname === '/api/session' && request.method === 'GET') {
-    const key = await importHmacKeyHex(env.CSRF_SIGNING_KEY ?? '');
-    if (!key)
-      throw new RpcError(Code.FAILED_PRECONDITION, 'CSRF_NOT_CONFIGURED', 'The console signing key is not configured.');
-    const csrf = await issueCsrf(request, auth.owner, { cookieName, key });
-    return Response.json({ csrf_token: csrf.token }, { headers: { 'set-cookie': csrf.setCookie } });
+    return Response.json({ csrf_token: '1' });
   }
   if (url.pathname.startsWith('/api/model/v1/')) {
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
-      const key = await importHmacKeyHex(env.CSRF_SIGNING_KEY ?? '');
       const origins = [`https://${env.PUBLIC_HOST}`];
       if (auth.bypassed) origins.push(url.origin);
-      if (!key || !(await verifyCsrf(request, auth.owner, { cookieName, key, allowedOrigins: origins })).ok)
+      if (!(await verifyCsrf(request, { allowedOrigins: origins })).ok)
         throw new RpcError(Code.PERMISSION_DENIED, 'CSRF_FAILED', 'Refresh the page and retry.');
     }
     return forward(request, env, 'console', true);

@@ -1,14 +1,9 @@
-/**
- * The owner API client (proto/todofy/ui/v1, todofy.ui.v1): TodofyUiService through the shared typed client
- * (proto/ts/http-client.ts), built from the same descriptors the gateway's transcoder routes with. Same-origin
- * only: every request goes to /api/v1/* with the Access cookie; nothing else leaves the page. This file adds only
- * the transport: mutations carry the signed double-submit CSRF token (header X-CSRF-Token, cookie todofy_csrf, from
- * GET /api/csrf), a refused token is renewed once, and every failure becomes an ApiError with the copy the owner
- * reads. Callers pass a request_id per distinct request (useAction.ts), so a repeated request is applied once.
+/** Same-origin owner API transport: Access cookies, JSON mutations and X-CSRF-Token: 1.
+ * Each action keeps its request_id; authorization failures are returned without automatic replay.
  */
 import type { CommonReason } from '@ziyixi/proto/common/errors/v1/errors_pb'
 import { createHttpClient, HttpEncodeError, HttpResponseError, RpcStatusError, type HttpCall } from '@ziyixi/proto/http-client'
-import { parseStatus, readDetail } from '@ziyixi/proto/rpc-status'
+import { readDetail } from '@ziyixi/proto/rpc-status'
 import type { ErrorReason } from '@ziyixi/proto/todofy/ui/v1/errors_pb'
 import { MailEventSchema, type MailEvent } from '@ziyixi/proto/todofy/ui/v1/mail_event_pb'
 import { TodofyUiService } from '@ziyixi/proto/todofy/ui/v1/todofy_ui_service_pb'
@@ -64,8 +59,6 @@ export function toApiError(error: unknown): ApiError {
   return unreadable(0)
 }
 
-let csrfToken: string | null = null
-
 async function fetchSameOrigin(url: string, init: RequestInit): Promise<Response> {
   try {
     // redirect: 'error' so an expired Access session surfaces as an error, not as the login page's HTML.
@@ -75,41 +68,13 @@ async function fetchSameOrigin(url: string, init: RequestInit): Promise<Response
   }
 }
 
-async function csrf(): Promise<string> {
-  if (csrfToken) return csrfToken
-  const response = await fetchSameOrigin('/api/csrf', { headers: { Accept: 'application/json' } })
-  let token: unknown
-  try {
-    token = ((await response.json()) as { token?: unknown }).token
-  } catch {
-    // Not JSON: an error page from a proxy or Access.
-  }
-  if (!response.ok || typeof token !== 'string' || token === '') throw new ApiError(response.status, 'BAD_RESPONSE', '无法取得页面安全令牌')
-  csrfToken = token
-  return csrfToken
-}
-
-/**
- * The transport of every call. A mutation carries the CSRF token; a 403 CSRF_FAILED (an expired token, a lost
- * cookie) drops the token and sends once more with a fresh one (the same body, so the same request_id).
- */
+/** Send JSON mutation headers directly; the Worker checks Origin before parsing the body. */
 export async function send(call: HttpCall): Promise<Response> {
-  for (let attempt = 0; ; attempt += 1) {
-    const headers: Record<string, string> = { Accept: 'application/json' }
-    if (call.body !== undefined) headers['Content-Type'] = 'application/json'
-    if (call.httpMethod !== 'GET') headers[CSRF_HEADER] = await csrf()
-    const response = await fetchSameOrigin(call.url, { method: call.httpMethod, headers, ...(call.body === undefined ? {} : { body: call.body }) })
-    if (response.status !== 403 || call.httpMethod === 'GET') return response
-    csrfToken = null
-    if (attempt > 0) return response
-    let reason: string | undefined
-    try {
-      reason = parseStatus(403, await response.clone().json())?.reason
-    } catch {
-      // Not a Status: answer it as it is.
-    }
-    if (reason !== 'CSRF_FAILED') return response
-  }
+  const mutation = !['GET', 'HEAD', 'OPTIONS'].includes(call.httpMethod)
+  const headers: Record<string, string> = { Accept: 'application/json' }
+  if (mutation || call.body !== undefined) headers['Content-Type'] = 'application/json'
+  if (mutation) headers['X-CSRF-Token'] = '1'
+  return fetchSameOrigin(call.url, { method: call.httpMethod, headers, ...(call.body === undefined ? {} : { body: call.body }) })
 }
 
 /** Every rpc of `client`, its failures turned into ApiErrors. */
@@ -133,6 +98,3 @@ export function newRequestId(): string {
 }
 
 /** Test hook: forget the cached CSRF token. */
-export function resetCsrfForTests(): void {
-  csrfToken = null
-}

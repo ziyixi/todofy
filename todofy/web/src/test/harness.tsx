@@ -2,7 +2,6 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { render } from '@testing-library/react'
 import { createMemoryRouter, RouterProvider } from 'react-router'
 import { vi } from 'vitest'
-import { resetCsrfForTests } from '../api/client'
 import { createQueryClient } from '../queryClient'
 import { routes } from '../routes'
 import { dailyMetrics, overview } from './fixtures'
@@ -79,7 +78,7 @@ export function mockApi(handlers: Record<string, Handler>) {
     return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
   })
   vi.stubGlobal('fetch', fetchMock)
-  resetCsrfForTests()
+
   return { calls, fetchMock }
 }
 

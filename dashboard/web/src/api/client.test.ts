@@ -38,14 +38,14 @@ describe('api client', () => {
     }
   })
 
-  it('fetches the CSRF token once and sends it on every mutation, with the request_id', async () => {
+  it('sends same-origin JSON mutations directly with the request_id', async () => {
     const calls = installFetch((call) => (call.path === PATHS.csrf ? json({ token: 'tok' }) : json({ guard: scenario.ops.guard })))
     expect(await api.setGuard('shed', 'mail-hero', REQUEST_ID)).toEqual({ guard: scenario.ops.guard })
     await api.setGuard('normal', 'mail-hero', REQUEST_ID)
-    expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual([`GET ${PATHS.csrf}`, `POST ${PATHS.guard}`, `POST ${PATHS.guard}`])
-    expect(calls.slice(1).map((call) => [call.headers['x-csrf-token'], call.headers['content-type'], call.body])).toEqual([
-      ['tok', 'application/json', `{"level":"shed","request_id":"${REQUEST_ID}","app":"mail-hero"}`],
-      ['tok', 'application/json', `{"level":"normal","request_id":"${REQUEST_ID}","app":"mail-hero"}`],
+    expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual([`POST ${PATHS.guard}`, `POST ${PATHS.guard}`])
+    expect(calls.map((call) => [call.headers['x-csrf-token'], call.headers['content-type'], call.body])).toEqual([
+      ['1', 'application/json', `{"level":"shed","request_id":"${REQUEST_ID}","app":"mail-hero"}`],
+      ['1', 'application/json', `{"level":"normal","request_id":"${REQUEST_ID}","app":"mail-hero"}`],
     ])
   })
 
@@ -58,32 +58,20 @@ describe('api client', () => {
     expect(ids[1]).not.toBe(ids[0])
   })
 
-  it('retries exactly once after CSRF_FAILED, with a new token and the same request', async () => {
-    let token = 0
-    let posts = 0
-    const run = scenario.ops.canary.recent[0]
-    const calls = installFetch((call) => {
-      if (call.path === PATHS.csrf) return json({ token: `t${++token}` })
-      posts += 1
-      return posts === 1 ? apiError(403, 'csrf_failed') : json({ run })
-    })
-    await expect(api.startCanary('mail-todofy', REQUEST_ID)).resolves.toEqual({ run })
-    expect(calls.map((call) => call.headers['x-csrf-token'] ?? '-')).toEqual(['-', 't1', '-', 't2'])
-    const posted = calls.filter((call) => call.method === 'POST')
-    expect(posted.map((call) => call.path)).toEqual([PATHS.canary, PATHS.canary])
-    expect(posted[0]?.body).toBe(posted[1]?.body)
+  it('reports CSRF refusals without fetching a token or repeating the mutation', async () => {
+    const calls = installFetch(() => apiError(403, 'csrf_failed'))
+    await expect(api.startCanary('mail-todofy', REQUEST_ID)).rejects.toMatchObject({ status: 403, code: 'csrf_failed' })
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({ method: 'POST', path: PATHS.canary })
+    expect(calls[0]?.headers['x-csrf-token']).toBe('1')
   })
 
-  it('does not retry other 403s, but forgets the token for the next mutation', async () => {
-    let token = 0
-    const calls = installFetch((call) => {
-      if (call.path === PATHS.csrf) return json({ token: `t${++token}` })
-      return apiError(403, 'unauthorized', '登录已过期')
-    })
+  it('does not retry unauthorized requests', async () => {
+    const calls = installFetch(() => apiError(403, 'unauthorized', '登录已过期'))
     await expect(api.startCanary('mail-todofy')).rejects.toMatchObject({ status: 403, code: 'unauthorized', message: '登录已过期' })
-    expect(calls.filter((call) => call.method === 'POST')).toHaveLength(1)
     await expect(api.startCanary('mail-todofy')).rejects.toBeInstanceOf(ApiError)
-    expect(calls.filter((call) => call.path === PATHS.csrf)).toHaveLength(2)
+    expect(calls).toHaveLength(2)
+    expect(calls.every(call => call.method === 'POST')).toBe(true)
   })
 
   it('reads the google.rpc.Status: its reason, localized message and request ID', async () => {
@@ -134,7 +122,6 @@ describe('api client', () => {
     expect(calls.map((call) => [call.method, call.path, call.headers['if-none-match'] ?? null])).toEqual([
       ['GET', PATHS.home, null],
       ['GET', PATHS.home, '"4"'],
-      ['GET', PATHS.csrf, null],
       ['POST', PATHS.refreshHome, null],
     ])
   })
@@ -143,7 +130,7 @@ describe('api client', () => {
     const run = scenario.ops.canary.recent[0]
     const calls = installFetch((call) => (call.path === PATHS.csrf ? json({ token: 'tok' }) : json({ run })))
     await api.startCanary('mail-todofy', REQUEST_ID)
-    expect(calls[1]).toMatchObject({ method: 'POST', path: PATHS.canary, body: `{"request_id":"${REQUEST_ID}"}` })
-    expect(calls[1]?.headers['x-csrf-token']).toBe('tok')
+    expect(calls[0]).toMatchObject({ method: 'POST', path: PATHS.canary, body: `{"request_id":"${REQUEST_ID}"}` })
+    expect(calls[0]?.headers['x-csrf-token']).toBe('1')
   })
 })

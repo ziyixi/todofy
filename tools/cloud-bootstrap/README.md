@@ -47,7 +47,9 @@ bootstrap 不启用 R2 计费或改收信子域 DNS；这些是主手册中的�
 | `vps` | 示例启动一个明确的空 mock Newsletter | 可以完整复制已有 VPS 私有 JSON；原环境、共享 key 和路径保留 |
 | `adopt_ids` | 不需要 | 固定 HCL address → 已有公开 ID；允许地址见 `bootstrap_inventory.py` |
 
-`prepare` 自动生成应用加密/CSRF/HMAC/共享认证 key，并把同一值用于相关消费者。Mail Hero webhook token、Newsletter 向 Todofy 报告的账号密码保存在私有 `integration_credentials`，对应 SHA256 写入 Todofy 配置。需要在各应用的首次接入设置中使用这些值时，只从本机私有文件读取。
+浏览器写 API 使用 Access 登录、精确同源 Origin、固定 `X-CSRF-Token: 1` 和 JSON，不再生成 CSRF 签名密钥。旧私有输入或 GitHub JSON map 中的已退役 CSRF 字段会在校验前丢弃，其余未知字段仍拒绝。
+
+`prepare` 自动生成应用加密/HMAC/共享认证 key，并把同一值用于相关消费者。Mail Hero webhook token、Newsletter 向 Todofy 报告的账号密码保存在私有 `integration_credentials`，对应 SHA256 写入 Todofy 配置。需要在各应用的首次接入设置中使用这些值时，只从本机私有文件读取。
 
 网站内容读取凭据 `WEBSITE_NOTION_TOKEN` / `WEBSITE_NOTION_DATA_SOURCE_ID` 放在私有输入的 `github_secrets`，只交给 Actions。Relay 仅持有该仓库的 GitHub token，需 Actions Read/Write 和 Deployments Read；bootstrap 不代替正规授权。
 

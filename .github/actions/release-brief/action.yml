@@ -1,10 +1,6 @@
 name: release-brief
 description: "release-brief; called by the repository workflow."
 inputs:
-  brief-csrf-signing-key:
-    description: "brief csrf signing key"
-    required: false
-    default: ''
   brief-feedback-signing-key:
     description: "brief feedback signing key"
     required: false
@@ -98,7 +94,6 @@ runs:
         BRIEF_WORKER_SECRETS: ${{ inputs.brief-worker-secrets }}
         BRIEF_ACCESS_OWNER: ${{ inputs.dashboard-access-owner }}
         BRIEF_ACCESS_OWNER_ALIASES: ${{ inputs.dashboard-access-owner-aliases }}
-        BRIEF_CSRF_SIGNING_KEY: ${{ inputs.brief-csrf-signing-key }}
         BRIEF_FEEDBACK_SIGNING_KEY: ${{ inputs.brief-feedback-signing-key }}
         BRIEF_MAIL_FROM: ${{ inputs.brief-mail-from }}
         BRIEF_MAIL_TO: ${{ inputs.brief-mail-to }}

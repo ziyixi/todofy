@@ -7,7 +7,7 @@
 //   ../docs/design.md §15) and BUILD_SHA (the commit);
 // - with `--secrets-file` (Worker secrets, hidden in wrangler's output): the owner's addresses, the CSRF key, the
 //   feedback links' signing key and the two mail addresses (inputs BRIEF_ACCESS_OWNER, BRIEF_ACCESS_OWNER_ALIASES,
-//   BRIEF_CSRF_SIGNING_KEY, BRIEF_FEEDBACK_SIGNING_KEY, BRIEF_MAIL_FROM, BRIEF_MAIL_TO, masked in the public Actions
+//   BRIEF_FEEDBACK_SIGNING_KEY, BRIEF_MAIL_FROM, BRIEF_MAIL_TO, masked in the public Actions
 //   log). The deploy job fills the first two from the dashboard's DASHBOARD_ACCESS_OWNER(_ALIASES) (the same owner,
 //   like mailsort) and the rest from the brief's own secrets.
 //
@@ -31,7 +31,7 @@
 // .github/scripts/test_wrangler_configs.py reads the next lines: every CI step that runs `exec` or `secrets` must set
 // each input of that mode (Actions sets GITHUB_* itself).
 // deploy-vars-inputs exec: BRIEF_MODE GITHUB_SHA
-// deploy-vars-inputs secrets: BRIEF_ACCESS_OWNER BRIEF_ACCESS_OWNER_ALIASES BRIEF_CSRF_SIGNING_KEY BRIEF_FEEDBACK_SIGNING_KEY BRIEF_MAIL_FROM BRIEF_MAIL_TO
+// deploy-vars-inputs secrets: BRIEF_ACCESS_OWNER BRIEF_ACCESS_OWNER_ALIASES BRIEF_FEEDBACK_SIGNING_KEY BRIEF_MAIL_FROM BRIEF_MAIL_TO
 import { mergeWorkerSecrets } from '../../tools/cloud-config/worker-secrets.mjs'
 import { spawnSync } from 'node:child_process'
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs'
@@ -107,7 +107,6 @@ export function generateSecrets(env) {
     // --secrets-file only adds or replaces secrets: an emptied list is uploaded as one space (read as no
     // aliases) rather than left out, which would keep the previous aliases working.
     ACCESS_OWNER_ALIASES: list.join(',') || ' ',
-    CSRF_SIGNING_KEY: checked(env, 'BRIEF_CSRF_SIGNING_KEY', HEX_KEY),
     FEEDBACK_SIGNING_KEY: checked(env, 'BRIEF_FEEDBACK_SIGNING_KEY', HEX_KEY),
     MAIL_FROM: checked(env, 'BRIEF_MAIL_FROM', NAMED_ADDRESS),
     MAIL_TO: checked(env, 'BRIEF_MAIL_TO', MAIL_ADDRESS),
@@ -168,7 +167,7 @@ export function run(argv, env = process.env) {
   }
   if (command === 'secrets' && rest.length === 1) {
     writeSecrets(rest[0], env)
-    console.log('Wrote the secrets file: ACCESS_OWNER, ACCESS_OWNER_ALIASES, CSRF_SIGNING_KEY, FEEDBACK_SIGNING_KEY, MAIL_FROM, MAIL_TO (values not printed).')
+    console.log('Wrote the secrets file: ACCESS_OWNER, ACCESS_OWNER_ALIASES, FEEDBACK_SIGNING_KEY, MAIL_FROM, MAIL_TO (values not printed).')
     return 0
   }
   if (command === 'exec' && rest[0] === '--') {

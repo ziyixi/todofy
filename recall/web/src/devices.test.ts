@@ -52,7 +52,7 @@ it('removes an empty test connection without deleting another installation’s r
   await settle()
   const call = fake.calls.find((item) => item.method === 'DELETE')
   expect(call?.path).toMatch(new RegExp(`/api/v1/devices/${EMPTY}\\?request_id=[0-9a-f-]{36}$`))
-  expect(call?.headers['x-csrf-token']).toBe('csrf-token')
+  expect(call?.headers['x-csrf-token']).toBe('1')
   expect(fake.status.devices?.map((item) => item.deviceId)).toEqual([OLD, NEW])
   expect(fake.visits).toHaveLength(1)
   expect(root.querySelector('.device-history')?.textContent).toContain('版本 1')

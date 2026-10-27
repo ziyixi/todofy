@@ -30,12 +30,12 @@ describe('Router with real D1, private R2 and SQLite Durable Objects', () => {
     harness.geminiOutputs.length = 0
   })
 
-  it('requires the signed owner CSRF cookie, token and Origin before generating with a billing profile', async () => {
+  it('requires owner authentication, exact Origin, custom header and JSON before body parsing', async () => {
     const body = JSON.stringify({
       request_id: crypto.randomUUID(),
       config: { model: gemini },
-      input: 'Synthetic owner billing input',
-      metadata: { billing_app: 'todofy' },
+      input: 'Synthetic owner input',
+      metadata: { source: 'synthetic-owner' },
     })
     const blocked = await harness.mf.dispatchFetch(origin + generatePath, {
       method: 'POST',
@@ -49,18 +49,18 @@ describe('Router with real D1, private R2 and SQLite Durable Objects', () => {
     const session = await harness.mf.dispatchFetch(`${origin}/api/session`)
     expect(session.status).toBe(200)
     const token = ((await session.json()) as { csrf_token: string }).csrf_token
-    const setCookie = session.headers.get('set-cookie') ?? ''
-    expect(token.length).toBeGreaterThan(0)
-    expect(setCookie).toContain('model_router_csrf=')
-    expect(setCookie).toContain('HttpOnly')
-    const cookie = setCookie.split(';')[0] ?? ''
-    const headers = { cookie, 'x-csrf-token': token, 'content-type': 'application/json' }
+    expect(token).toBe('1')
+    expect(session.headers.get('set-cookie')).toBeNull()
+    const headers = { 'x-csrf-token': token, 'content-type': 'application/json' }
     const foreign = await harness.mf.dispatchFetch(origin + generatePath, {
       method: 'POST',
       headers: { ...headers, origin: 'https://untrusted.example.test' },
       body,
     })
     expect(foreign.status).toBe(403)
+    expect(harness.calls).toHaveLength(0)
+    const form = await harness.mf.dispatchFetch(origin + generatePath, { method: 'POST', headers: { origin, 'x-csrf-token': '1', 'content-type': 'text/plain' }, body })
+    expect(form.status).toBe(403)
     expect(harness.calls).toHaveLength(0)
     const response = await harness.mf.dispatchFetch(origin + generatePath, {
       method: 'POST',
@@ -71,7 +71,7 @@ describe('Router with real D1, private R2 and SQLite Durable Objects', () => {
     expect(await response.json()).toMatchObject({
       state: 'succeeded',
       app: 'console',
-      metadata: { billing_app: 'todofy' },
+      metadata: { source: 'synthetic-owner' },
     })
     expect(harness.calls).toHaveLength(1)
     const stored = await harness.owner.listRequests({ app: 'console' })
@@ -116,7 +116,7 @@ describe('Router with real D1, private R2 and SQLite Durable Objects', () => {
     expect(persisted.output).toBe(first.output)
     expect(persisted.observations?.openedUrls).toEqual(['https://example.test/synthetic-research-evidence'])
     expect(harness.calls).toHaveLength(1)
-    expect(harness.calls[0]).toMatchObject({ caller: 'console', bearer: 'Bearer synthetic-executor-token' })
+    expect(harness.calls[0]).toMatchObject({ caller: 'console', bearer: null })
     const row = await harness.db
       .prepare('SELECT generation_json,body_key FROM requests WHERE id = ?')
       .bind(request.requestId)
@@ -137,7 +137,7 @@ describe('Router with real D1, private R2 and SQLite Durable Objects', () => {
     expect(harness.calls).toHaveLength(1)
   })
 
-  it('uses authenticated binding props and rejects machine billing-profile overrides before execution', async () => {
+  it('uses authenticated binding props and does not trust correlation tags as identity', async () => {
     const body = {
       request_id: crypto.randomUUID(),
       config: { model: gemini, output_schema_json: schema },
@@ -153,10 +153,11 @@ describe('Router with real D1, private R2 and SQLite Durable Objects', () => {
     const forbidden = await harness.caller('todofy', generatePath, {
       ...body,
       request_id: crypto.randomUUID(),
-      metadata: { billing_app: 'brief' },
+      metadata: { app: 'brief' },
     })
-    expect(forbidden.status).toBe(403)
-    expect(harness.calls).toHaveLength(1)
+    expect(forbidden.status).toBe(200)
+    expect(await forbidden.json()).toMatchObject({ app: 'todofy' })
+    expect(harness.calls).toHaveLength(2)
     const unknown = await harness.caller('unknown', generatePath, body)
     expect(unknown.status).toBe(403)
     const ownerOnly = await harness.caller('todofy', '/api/model/v1/requests')
@@ -445,6 +446,34 @@ it('authenticates before parsing private bodies and never grants Newsletter owne
     })
     expect(catalog.status).toBe(200)
     expect(harness.calls).toHaveLength(0)
+    const jwt = await harness.ownerToken()
+    const ownerHeaders = { 'cf-access-jwt-assertion': jwt }
+    const session = await harness.mf.dispatchFetch(`${origin}/api/session`, { headers: ownerHeaders })
+    expect(session.status).toBe(200)
+    expect(session.headers.get('set-cookie')).toBeNull()
+    expect(await session.json()).toEqual({ csrf_token: '1' })
+    const publicOrigin = 'https://models.example.test'
+    for (const headers of [
+      { 'content-type': 'application/json', 'x-csrf-token': '1' },
+      { origin: 'null', 'content-type': 'application/json', 'x-csrf-token': '1' },
+      { origin: publicOrigin, 'content-type': 'application/json' },
+      { origin: publicOrigin, 'content-type': 'text/plain', 'x-csrf-token': '1' },
+    ]) {
+      const refused = await harness.mf.dispatchFetch(origin + generatePath, {
+        method: 'POST', headers: { ...ownerHeaders, ...headers }, body: '{malformed synthetic JSON',
+      })
+      expect(refused.status).toBe(403)
+      expect(await refused.json()).toMatchObject({ error: { status: 'PERMISSION_DENIED' } })
+    }
+    expect(harness.calls).toHaveLength(0)
+    const accepted = await harness.mf.dispatchFetch(origin + generatePath, {
+      method: 'POST',
+      headers: { ...ownerHeaders, origin: publicOrigin, 'content-type': 'application/json', 'x-csrf-token': 'cached.opaque.header' },
+      body: JSON.stringify({ request_id: crypto.randomUUID(), config: { model: gemini }, input: 'Synthetic authenticated owner input' }),
+    })
+    expect(accepted.status).toBe(200)
+    expect(await accepted.json()).toMatchObject({ app: 'console', state: 'succeeded' })
+    expect(harness.calls).toHaveLength(1)
   } finally {
     await harness.dispose()
   }

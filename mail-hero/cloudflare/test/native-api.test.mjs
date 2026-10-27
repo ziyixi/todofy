@@ -506,61 +506,49 @@ test('Access aliases cannot replace a missing canonical owner or exceed the pers
   await assert.rejects(authenticate(request, { ...env, ACCESS_OWNER_ALIASES: aliases }, keys.verifier), error => error instanceof HttpError && error.status === 503)
 })
 
-// Minted by the pre-package security.ts (CREDENTIAL_KEY "12"×32, fixed nonce, exp 2100-01-01):
-// a CSRF cookie already in a browser must keep working across the deploy.
-const GOLDEN_CSRF = 'eyJraW5kIjoiY3NyZiIsIm93bmVyIjoib3duZXJAZXhhbXBsZS5vcmciLCJub25jZSI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMCIsImV4cCI6NDEwMjQ0NDgwMH0.PsGfEZ9TSpWDV8E-z6nAAyrq-o4zpAHqNtPXxFlC1ac'
+// An opaque value a cached page may still hold from the previous signing protocol.
+const LEGACY_CSRF = 'cached.synthetic.opaque-header'
 
-test('an existing mail_hero_csrf token and a real Access login pass handleAPI through the default verifier', async t => {
+test('a cached opaque header and a real Access login pass handleAPI through the default verifier', async t => {
   const env = environment(); delete env.DEV_AUTH_BYPASS
-  env.ACCESS_ISSUER = 'https://golden.cloudflareaccess.com'  // own issuer: the module verifier caches per issuer
+  env.ACCESS_ISSUER = 'https://golden.cloudflareaccess.com'
   const keys = await accessKeys(), certs = []
   t.mock.method(globalThis, 'fetch', async (url, init) => { certs.push({ url, init }); return Response.json({ keys: [keys.jwk] }) })
   const jwt = await accessToken(env, keys.privateKey)
-  const write = (csrf, origin = 'https://mail.example.org') => handleAPI(new Request('https://mail.example.org/api/v2/settings?update_mask=send_paused', {
+  const write = (header, origin = 'https://mail.example.org') => handleAPI(new Request('https://mail.example.org/api/v2/settings?update_mask=send_paused', {
     method: 'PATCH', body: JSON.stringify({ etag: '1', send_paused: true }),
-    headers: { 'Cf-Access-Jwt-Assertion': jwt, Origin: origin, Cookie: `mail_hero_csrf=${csrf}`, 'X-CSRF-Token': csrf, 'Content-Type': 'application/json' } }), env)
-  const accepted = await write(GOLDEN_CSRF)
+    headers: { 'Cf-Access-Jwt-Assertion': jwt, Origin: origin, 'X-CSRF-Token': header, 'Content-Type': 'application/json' } }), env)
+  const accepted = await write(LEGACY_CSRF)
   assert.equal(accepted.status, 200, await accepted.clone().text())
   assert.deepEqual(certs.map(call => [call.url, call.init.redirect]), [['https://golden.cloudflareaccess.com/cdn-cgi/access/certs', 'manual']])
-  // A browser serialises Origin in lowercase; the shared check compares case-insensitively (SPEC §4 #27).
-  assert.equal((await write(GOLDEN_CSRF, 'https://attacker.example')).status, 403)
-  const tampered = GOLDEN_CSRF.slice(0, -1) + (GOLDEN_CSRF.endsWith('c') ? 'd' : 'c')
-  const rejected = await write(tampered)
+  for (const origin of ['null', 'https://attacker.example', 'https://MAIL.example.org']) {
+    assert.equal((await write('1', origin)).status, 403)
+  }
+  const rejected = await write('')
   assert.equal(rejected.status, 403)
   const status = (await rejected.json()).error
   assert.deepEqual([status.code, status.status, reasonOf({ error: status })], [403, 'PERMISSION_DENIED', 'CSRF_FAILED'])
   assert.equal(status.details.find(detail => detail['@type'].endsWith('LocalizedMessage')).message, '请刷新页面后再试')
-  // A token minted for the local-development principal is not the Access owner's.
-  const local = await csrfResponse(new Request('http://127.0.0.1:8787/api/csrf'), env, 'local-development')
-  assert.equal((await write((await local.json()).token)).status, 403)
 })
 
-test('CSRF issue keeps the cookie, token claims and key failures of the former code', async () => {
-  const env = environment()
-  const issued = await csrfResponse(new Request('https://mail.example.org/api/csrf'), env, 'owner@example.org')
-  const { token } = await issued.json()
-  assert.equal(issued.headers.get('Set-Cookie'), `mail_hero_csrf=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200; Secure`)
+test('CSRF compatibility is static and cookie-free; JSON checks do not depend on CREDENTIAL_KEY', async () => {
+  const issued = csrfResponse()
+  assert.equal(issued.headers.get('Set-Cookie'), null)
   assert.equal(issued.headers.get('Cache-Control'), 'no-store')
   assert.equal(issued.headers.get('X-Content-Type-Options'), 'nosniff')
-  const claims = JSON.parse(Buffer.from(token.split('.')[0], 'base64url').toString())
-  assert.deepEqual(Object.keys(claims), ['kind', 'owner', 'nonce', 'exp'])
-  assert.equal(claims.kind, 'csrf'); assert.equal(claims.owner, 'owner@example.org')
-  assert.match(claims.nonce, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
-  assert.ok(Math.abs(claims.exp - (Math.floor(Date.now() / 1000) + 43200)) <= 1)
-  const plain = await csrfResponse(new Request('http://127.0.0.1:8787/api/csrf'), env, 'owner@example.org')
-  assert.equal(plain.headers.get('Set-Cookie').endsWith('Max-Age=43200'), true)
-  const request = value => new Request('https://mail.example.org/api/v2/settings', { method: 'PATCH',
-    headers: { Origin: 'https://mail.example.org', Cookie: `mail_hero_csrf=${value}; mail_hero_csrf=other`, 'X-CSRF-Token': value } })
-  await requireCSRF(request(token), env, 'owner@example.org')
-  await requireCSRF(request(GOLDEN_CSRF), env, 'owner@example.org')
-  // A missing CREDENTIAL_KEY: issuing fails as an internal error (503 service_unavailable), verifying as csrf_failed.
-  const noKey = { ...env, CREDENTIAL_KEY: '' }
-  await assert.rejects(csrfResponse(new Request('https://mail.example.org/api/csrf'), noKey, 'owner@example.org'), error => !(error instanceof HttpError))
+  assert.deepEqual(await issued.json(), { token: '1' })
+  const request = (value, mediaType = 'application/json') => new Request('https://mail.example.org/api/v2/settings', { method: 'PATCH',
+    headers: { Origin: 'https://mail.example.org', 'X-CSRF-Token': value, 'Content-Type': mediaType } })
+  await requireCSRF(request('1'))
+  await requireCSRF(request(LEGACY_CSRF))
   const csrfFailed = error => error instanceof HttpError && error.status === 403 && error.code === 'csrf_failed'
-  await assert.rejects(requireCSRF(request(GOLDEN_CSRF), noKey, 'owner@example.org'), csrfFailed)
-  const unavailable = await handleAPI(new Request('http://127.0.0.1:8787/api/csrf'), noKey)
-  assert.equal(unavailable.status, 503)
-  assert.equal(reasonOf(await unavailable.json()), 'NOT_CONFIGURED')
+  await assert.rejects(requireCSRF(request('')), csrfFailed)
+  await assert.rejects(requireCSRF(request('1', 'text/plain')), csrfFailed)
+  const noKey = { ...environment(), CREDENTIAL_KEY: '' }
+  const compatibility = await handleAPI(new Request('http://127.0.0.1:8787/api/csrf'), noKey)
+  assert.equal(compatibility.status, 200)
+  assert.deepEqual(await compatibility.json(), { token: '1' })
+  assert.equal(compatibility.headers.get('set-cookie'), null)
 })
 
 test('private responses carry the exact Mail Hero headers, including the sandboxed-HTML frame-src', async () => {
@@ -573,12 +561,13 @@ test('private responses carry the exact Mail Hero headers, including the sandbox
   })
 })
 
-test('mutations require matching signed owner CSRF cookie and same-origin request', async () => {
+test('mutations require exact Origin, a custom header and JSON before settings writes', async () => {
   const env = environment(), api = await session(env)
   const write = headers => api('PATCH', '/settings?update_mask=send_paused', { etag: '1', send_paused: true }, headers)
   assert.equal((await write({ Origin: 'https://attacker.example' })).status, 403)
-  assert.equal((await write({ 'X-CSRF-Token': 'forged' })).status, 403)
-  // The CSRF check runs before the body is read: a refused request never reaches the settings.
+  assert.equal((await write({ 'X-CSRF-Token': '' })).status, 403)
+  assert.equal((await write({ 'Content-Type': 'text/plain' })).status, 403)
+  // A refused request never reaches settings.
   assert.equal((await api('GET', '/settings')).data.etag, '1')
   assert.equal((await write()).status, 200)
 })

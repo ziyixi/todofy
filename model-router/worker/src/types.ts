@@ -14,9 +14,9 @@ export interface Env {
   ACCESS_OWNER?: string;
   ACCESS_OWNER_ALIASES?: string;
   DEV_AUTH_BYPASS?: string;
-  CSRF_SIGNING_KEY?: string;
   CODEX_EXECUTOR_ORIGIN?: string;
-  CODEX_EXECUTOR_TOKEN?: string;
+  ANTHROPIC_API_KEY?: string;
+  GEMINI_API_KEY?: string;
   CODEX_ACCESS_CLIENT_ID?: string;
   CODEX_ACCESS_CLIENT_SECRET?: string;
   MODEL_ROUTER_NEWSLETTER_TOKEN?: string;

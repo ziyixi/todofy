@@ -27,7 +27,6 @@ export interface Env {
   readonly ACCESS_OWNER?: string;
   readonly ACCESS_OWNER_ALIASES?: string;
   /** 64 hex characters: HMAC key of the recall_csrf tokens. */
-  readonly CSRF_SIGNING_KEY?: string;
 
   // optional secrets a machine token's SHA-256 (hex) may also come from, put by hand with `wrangler secret put` (the
   // tokens live in RecallState since 设置 → 插件口令, tokens.ts): the current one and the one before a rotation. Never in

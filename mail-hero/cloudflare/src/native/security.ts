@@ -1,5 +1,5 @@
-import { createAccessVerifier, deriveHmacKeyHkdf, issueCsrf, verifyCsrf, withPrivateHeaders,
-  type AccessPolicy, type AccessVerifier, type CsrfPolicy } from '@ziyixi/edge-auth';
+import { createAccessVerifier, deriveHmacKeyHkdf, verifyCsrf, withPrivateHeaders,
+  type AccessPolicy, type AccessVerifier } from '@ziyixi/edge-auth';
 import type { Env } from './types.ts';
 
 const encoder = new TextEncoder();
@@ -43,8 +43,8 @@ export async function decryptCredential(env: Env, revisionID: string, url: strin
 }
 let currentSigningKey: { master: string; key: Promise<CryptoKey> } | undefined;
 async function signingKey(env: Env): Promise<CryptoKey> {
-  // Domain separation: confirmation/CSRF tokens use a derived HMAC key. The
-  // salt and info are fixed: CSRF cookies and preview tokens already issued stay valid.
+  // Domain separation: confirmation tokens use a derived HMAC key. The
+  // salt and info are fixed so existing preview tokens and action signatures stay valid.
   // Keep only the current key. Validate before a cache hit, replace on rotation,
   // and let a failed derivation retry without evicting a newer key's promise.
   const value = env.CREDENTIAL_KEY ?? '';
@@ -125,19 +125,9 @@ export async function authenticate(request: Request, env: Env, verifier: AccessV
     default: throw new HttpError(401, 'unauthorized', 'Access 登录无效或无权限'); // invalid_token, keys_unavailable
   }
 }
-function csrfPolicy(request: Request, env: Env): CsrfPolicy {
-  // The key is lazy: a missing CREDENTIAL_KEY fails issue (503) and verify (403) as before.
-  return { cookieName: 'mail_hero_csrf', key: () => signingKey(env), nonce: () => crypto.randomUUID(),
-    ttlSeconds: 43200, allowedOrigins: [new URL(request.url).origin] };
-}
-export async function csrfResponse(request: Request, env: Env, owner: string): Promise<Response> {
-  const { token, setCookie } = await issueCsrf(request, owner, csrfPolicy(request, env));
-  const response = json({ token });
-  response.headers.set('Set-Cookie', setCookie);
-  return response;
-}
-export async function requireCSRF(request: Request, env: Env, owner: string): Promise<void> {
-  if (!(await verifyCsrf(request, owner, csrfPolicy(request, env))).ok) throw new HttpError(403, 'csrf_failed', '请刷新页面后再试');
+export function csrfResponse(): Response { return json({ token: '1' }); }
+export async function requireCSRF(request: Request): Promise<void> {
+  if (!(await verifyCsrf(request, { allowedOrigins: [new URL(request.url).origin] })).ok) throw new HttpError(403, 'csrf_failed', '请刷新页面后再试');
 }
 
 const MAIL_HERO_CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'self' about:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";

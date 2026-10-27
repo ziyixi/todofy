@@ -22,6 +22,11 @@ const ANSWERS: Readonly<Record<string, Record<string, unknown>>> = {
   GetLatestReports: fixtures.latestReports(),
   RecomputeReport: { recommendation: reports.recommendations.at(-1) },
   GetLegacyText: fixtures.legacyText(),
+  GetModelSettings: {
+    settings: { name: 'modelSettings', email_model: 'models/gemini-email', report_model: 'models/gemini-report', etag: '0' },
+    models: [{ name: 'models/sol-6-1', configured: true, generation: true }],
+  },
+  UpdateModelSettings: { name: 'modelSettings', email_model: 'models/sol-6-1', report_model: 'models/gemini-report', etag: '1' },
 };
 
 /**

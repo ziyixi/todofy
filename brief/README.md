@@ -3,7 +3,7 @@
 A daily research-and-world briefing in Chinese for the owner, to replace the newsletter: a short weekday email
 (研究前沿 and the day's 2-3 most important 世界与经济 stories) and a Saturday deep read. The Worker fetches its sources
 itself, the configured Haiku route screens them, the configured Opus route picks the day's items side by side and writes them, and code
-checks every quote, name and number. One Worker and one SQLite Durable Object on Workers Free. Inference and embeddings use the private shared Model Router; the dedicated Brief Claude connection keeps its existing billing boundary. Design: [`docs/design.md`](docs/design.md). Rules: [`AGENTS.md`](AGENTS.md).
+checks every quote, name and number. One Worker and one SQLite Durable Object on Workers Free. Inference and embeddings use the private shared Model Router; all Claude callers share Router's single key in the existing US$80/month workspace. Design: [`docs/design.md`](docs/design.md). Rules: [`AGENTS.md`](AGENTS.md).
 
 **Status: deployed in archive mode** (2026-10-11). The first deployment, `7bea3ec`, passed
 [CI](https://github.com/ziyixi/todofy/actions/runs/38128504001). Production `MODE` and the GitHub variable `BRIEF_MODE`
@@ -12,8 +12,7 @@ resource registration and Home monitoring are implemented; their release and pro
 [`HANDOFF.md`](../HANDOFF.md). Newsletter continues unchanged, and its retirement remains a separate decision.
 
 The owner has saved a monthly budget of **$80** in 设置, confirmed on the production settings page on 2026-10-11.
-Deployments must preserve this stored setting. The code's initial default remains $40; the separate Claude Console
-spend limit has not been verified. Both provider secret
+Deployments must preserve this stored setting. The code's initial default remains $40; the Claude Console workspace limit was separately set and verified at $80/month on 2026-10-27 for the shared Router connection. Both provider secret
 names are configured in production; that confirms configuration, not successful model calls or email delivery.
 
 | Path | What it is |
@@ -76,8 +75,8 @@ its deployment must follow Brief's deployment of the same commit. See [`HANDOFF.
 
 The wrapper sets `MODE` (the GitHub variable `BRIEF_MODE`: `off`, `archive`, `shadow` or `live`) and `BUILD_SHA`, and
 writes the Worker secrets `ACCESS_OWNER` and `ACCESS_OWNER_ALIASES` (from the dashboard's secrets: one owner),
-`CSRF_SIGNING_KEY`, `FEEDBACK_SIGNING_KEY`, `MAIL_FROM` and `MAIL_TO` (from `BRIEF_*` secrets). It never writes, needs or deletes `RESEND_API_KEY`; the owner manages that secret locally. Model credentials
-belong to Model Router, with a dedicated Brief Claude connection. The `MODEL_ROUTER` service binding carries the
+`FEEDBACK_SIGNING_KEY`, `MAIL_FROM` and `MAIL_TO` (from `BRIEF_*` secrets). It never writes, needs or deletes `RESEND_API_KEY`; the owner manages that secret locally. Model credentials
+belong to Model Router, with one shared Claude connection. The `MODEL_ROUTER` service binding carries the
 Brief caller identity. Provider credentials and native request payloads do not enter this Worker. Never paste a key
 into chat, an issue or GitHub.
 

@@ -136,7 +136,6 @@ async function main(): Promise<void> {
     BUILD_SHA: 'dev',
     DEV_AUTH_BYPASS: 'true',
     ACCESS_OWNER: 'owner@example.com',
-    CSRF_SIGNING_KEY: 'ab'.repeat(32),
     DEV_DROPBOX_ORIGIN: fake.origin,
   };
   const args = ['--no-install', 'wrangler', 'dev', '--config', '../wrangler.test.toml', '--ip', '127.0.0.1', '--port', String(port), '--local-upstream', `127.0.0.1:${String(port)}`, '--persist-to', persist, '--inspector-port', '0', '--show-interactive-dev-session=false'];

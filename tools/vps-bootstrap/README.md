@@ -60,7 +60,6 @@ it or send tokens through chat. Exact shape:
     "NEWSLETTER_TIME_ZONE": "America/Los_Angeles"
   },
   "platform_env": {"PLATFORM_DEPLOY_TOKEN": "<dedicated release API token>"},
-  "codex_gateway_env": {"CODEX_GATEWAY_TOKEN": "<independent inference-only bearer>"},
   "fleet_key": "<64 hexadecimal characters, independent receipt HMAC>",
   "connector_token": "<dedicated runtime Tunnel connector token>",
   "old_paths": {
@@ -77,8 +76,10 @@ token. Preserve existing editor/send values; editor requires 24–512 characters
 send/monitor/platform require 32–512, and tokens cannot contain whitespace.
 Editor and send must differ, monitor must differ from editor/send/platform, and
 platform must differ from send. These checks run before server changes.
-Gateway bundles require `codex_gateway_env` containing only its independent bearer, distinct from
-Newsletter and deployment tokens. Older two-image bundles and private inputs remain supported.
+The gateway needs no application Bearer secret. Its image bakes the public Access issuer/audience
+and verifies signed machine JWTs on inference routes. Older recovery inputs may retain the retired
+`codex_gateway_env` field; bootstrap ignores it and creates no gateway secret. The privileged platform
+deployment token remains independent and unchanged. Older two-image bundles remain supported.
 The gateway runs as UID 10001, mounts the existing `newsletter-auth` claim, and receives no Kubernetes
 service token. Its loopback port is 18766. The existing remotely managed platform Tunnel routes only
 `/api/codex/v1/.*` to that port before the normal platform rule. Each route retains the origin JWT
