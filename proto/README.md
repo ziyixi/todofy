@@ -194,9 +194,9 @@ See [`todofy/docs/mail-api.md`](../todofy/docs/mail-api.md). It replaced `PlusSe
    gain one: `PROFILE_RULE_SAME_MATCH`), and a closed enum may not gain a value or change its `closed` (rule 5). Formats
    compare by pattern, length and JSON Schema `format`, so renaming a format is compatible. Like buf, it skips the
    directories `buf.yaml` lists under `breaking.ignore` (the runtimes' fixtures). `scripts/rules-selftest.sh`
-   proves the rules bite (72 cases, on `tasks/inbox/v1`, `watch/ui/v1`, `ops/v1`, `dashboard/ui/v1`, `todofy/report/v1`,
-   `mailhero/webhook/v1` and `prototest`, the retirement of a package, a file, an enum value, an allowed value and an rpc
-   with its request among them), and `test/python/test_profile_breaking.py` checks the directions on synthetic images.
+   proves the rules bite (74 cases, on `tasks/inbox/v1`, `watch/ui/v1`, `ops/v1`, `dashboard/ui/v1`, `todofy/report/v1`,
+   `mailhero/webhook/v1` and `prototest`, the retirement of a package, a file, an enum value, a field, an allowed value
+   and an rpc with its request among them), and `test/python/test_profile_breaking.py` checks the directions on synthetic images.
 
    Reviewed output-rule corrections are recorded in `reviewed-rules.json` with their exact old/new values and
    rollout reason. The CLI permits only that one registered field rule when all other rules and field identity
@@ -209,8 +209,8 @@ See [`todofy/docs/mail-api.md`](../todofy/docs/mail-api.md). It replaced `PlusSe
    whose consumers branch on every value of an enum, with no default to fall back to, marks it
    `option (common.wire.v1.closed) = true` (every enum ops-v1 writes): every read refuses an unknown name, a
    lenient one too, and a new value is a new major version (`PROFILE_ENUM_CLOSED`).
-6. **Retiring an element.** Deleting a published package, file, enum value, allowed value, rpc or message is breaking
-   by every rule above, and that stays so. When no producer or consumer of it remains (the app that used it is removed in
+6. **Retiring an element.** Deleting a published package, file, enum value, field, allowed value, rpc or message is
+   breaking by every rule above, and that stays so. When no producer or consumer of it remains (the app that used it is removed in
    the same change), [`retired.json`](retired.json) lists it by full name with the date and the reason, and
    `tools/retired.py` (run by `scripts/breaking.sh` and the self-test before `buf breaking` and the profile rules)
    first checks that the head keeps the promise: no file under a retired package path or of its package name, no
@@ -218,6 +218,7 @@ See [`todofy/docs/mail-api.md`](../todofy/docs/mail-api.md). It replaced `PlusSe
    message and enum it defines, and no kept file of the base may import it, `RETIRED_FILE_IMPORTED`), no retired
    allowed value, and a retired enum value absent with **both its number and its name reserved**
    (`reserved 1; reserved "NAME";`, so neither is ever reused: a stored row may still hold the old name). A retired
+   field (`fields`, by message, name and number) is absent with both its number and its name reserved too. A retired
    rpc (`methods`, by service and name) is absent from its service. A retired top-level message (`messages`) is absent
    from the head, and no kept field or rpc of the base uses it (`RETIRED_MESSAGE_REFERENCED`): a message is retired
    together with everything that uses it. It then removes exactly the listed elements from the base, so their deletion

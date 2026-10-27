@@ -1,6 +1,7 @@
-"""tools/retired.py's `files` kind on synthetic buf images (JSON form), next to the module's own self-test
-(scripts/rules-selftest.sh, which deletes real .proto files): a retired file stays out of the head, leaves the base
-with everything it defines, and may not be imported by a file the base keeps.
+"""tools/retired.py's `files` and `fields` kinds on synthetic buf images (JSON form), next to the module's own self-test
+(scripts/rules-selftest.sh, which edits real .proto files): a retired file stays out of the head, leaves the base
+with everything it defines, and may not be imported by a file the base keeps; a retired field stays out of the head
+with its number and name reserved, and leaves the base.
 """
 
 import sys
@@ -57,6 +58,51 @@ class FilesTest(unittest.TestCase):
     def test_a_base_without_the_file_is_left_alone(self) -> None:
         out, removed, problems = tool.without_retired(RETIRED, image(old=False))
         self.assertEqual((out, removed, problems), (image(old=False), [], []))
+
+
+FIELD = {"fields": [{"message": "t.v1.Page.Part", "name": "tree", "number": 6}]}
+
+
+def page(*, tree: bool, reserved: bool = False) -> dict[str, Any]:
+    """A message with a nested message whose field 6 is `tree` (`reserved` keeps 6 and the name instead)."""
+    part: dict[str, Any] = {"name": "Part", "field": [{"name": "text", "number": 5}]}
+    if tree:
+        part["field"].append({"name": "tree", "number": 6})
+    if reserved:
+        part["reservedRange"] = [{"start": 6, "end": 7}]
+        part["reservedName"] = ["tree"]
+    return {
+        "file": [
+            {"name": "t/v1/page.proto", "package": "t.v1", "messageType": [{"name": "Page", "nestedType": [part]}]}
+        ]
+    }
+
+
+class FieldsTest(unittest.TestCase):
+    def test_the_head_must_keep_a_retired_field_deleted_and_reserved(self) -> None:
+        self.assertEqual(tool.head_problems(FIELD, page(tree=False, reserved=True)), [])
+        self.assertEqual(
+            tool.head_problems(FIELD, page(tree=False)),
+            ["RETIRED_FIELD_NOT_RESERVED t.v1.Page.Part.tree (6): reserve both its number and its name"],
+        )
+        self.assertIn(
+            "RETIRED_FIELD_BACK t.v1.Page.Part.tree (6): the head has tree = 6",
+            tool.head_problems(FIELD, page(tree=True)),
+        )
+
+    def test_the_base_loses_exactly_the_listed_field(self) -> None:
+        out, removed, problems = tool.without_retired(FIELD, page(tree=True))
+        self.assertEqual(out, page(tree=False))
+        self.assertEqual((removed, problems), (["field t.v1.Page.Part.tree"], []))
+
+    def test_another_field_with_the_number_is_a_mismatch(self) -> None:
+        base = page(tree=False)
+        base["file"][0]["messageType"][0]["nestedType"][0]["field"].append({"name": "other", "number": 6})
+        _, removed, problems = tool.without_retired(FIELD, base)
+        self.assertEqual(removed, [])
+        self.assertEqual(
+            problems, ["RETIRED_FIELD_MISMATCH t.v1.Page.Part.tree: the base has another name or number (other = 6)"]
+        )
 
 
 if __name__ == "__main__":

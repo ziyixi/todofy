@@ -1,5 +1,6 @@
 """Retired IDL elements (proto/README.md, "Retiring an element"): the one reviewed way to delete a published
-package, file, enum value, allowed value, method or message without weakening the breaking gate for anything else.
+package, file, enum value, field, allowed value, method or message without weakening the breaking gate for anything
+else.
 
 Usage (scripts/breaking.sh and scripts/rules-selftest.sh run it)::
 
@@ -13,13 +14,15 @@ full name, with the date and the reason:
   messages and enums), while the rest of its package stays.
 - ``enum_values``: ``{"enum": "a.v1.Kind", "name": "KIND_X", "number": 1}``: the value is gone and both its number
   and its name are reserved in the enum, so neither can be reused.
+- ``fields``: ``{"message": "a.v1.Message", "name": "field", "number": 6}``: the field is gone and both its number and
+  its name are reserved in the message, so neither can be reused.
 - ``allowed_values``: ``{"field": "a.v1.Message.field", "value": "x"}``: the value left the field's
   ``(common.wire.v1.field).allowed`` list.
 - ``methods``: ``{"service": "a.v1.Service", "name": "DoThing"}``: the rpc left the service.
 - ``messages``: ``{"message": "a.v1.DoThingRequest"}``: the top-level message is gone.
 
 First the head must keep every promise: no file under a retired path or of a retired package, no retired file, no
-retired enum value, its number and name reserved, no retired allowed value, method or message. Then OUT_IMAGE is the
+retired enum value or field, each reserved, no retired allowed value, method or message. Then OUT_IMAGE is the
 base without the listed elements, which ``buf breaking`` and tools/profile_breaking.py compare the head with: a
 listed deletion is the base's state, every other change is checked exactly as before. An element the base no longer
 has (the base is after the retirement) is left alone, so an entry does nothing once every base CI compares with is
@@ -58,19 +61,25 @@ def enums(image: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
             yield from walk(package, message)
 
 
-def fields(image: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
-    """(full name, descriptor) of every message field in the image, nested messages included."""
+def all_messages(image: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
+    """(full name, descriptor) of every message in the image, nested ones included."""
 
     def walk(prefix: str, message: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
         name = f"{prefix}.{message['name']}"
-        for field in message.get("field", []):
-            yield f"{name}.{field['name']}", field
+        yield name, message
         for nested in message.get("nestedType", []):
             yield from walk(name, nested)
 
     for file in image.get("file", []):
         for message in file.get("messageType", []):
             yield from walk(file.get("package", ""), message)
+
+
+def fields(image: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
+    """(full name, descriptor) of every message field in the image, nested messages included."""
+    for name, message in all_messages(image):
+        for field in message.get("field", []):
+            yield f"{name}.{field['name']}", field
 
 
 def services(image: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
@@ -100,6 +109,13 @@ def reserves(enum: dict[str, Any], name: str, number: int) -> bool:
     return by_number and name in enum.get("reservedName", [])
 
 
+def reserves_field(message: dict[str, Any], name: str, number: int) -> bool:
+    """Whether the message reserves both the number (a message's range ends are exclusive) and the name."""
+    ranges = message.get("reservedRange", [])
+    by_number = any(r.get("start", 0) <= number < r.get("end", 0) for r in ranges)
+    return by_number and name in message.get("reservedName", [])
+
+
 def allowed(field: dict[str, Any]) -> list[str]:
     return field.get("options", {}).get(WIRE_FIELD, {}).get("allowed", [])
 
@@ -126,6 +142,17 @@ def head_problems(retired: dict[str, Any], head: dict[str, Any]) -> list[str]:
                 problems.append(f"RETIRED_ENUM_VALUE_BACK {where}: the head has {found}")
         if not reserves(enum, entry["name"], entry["number"]):
             problems.append(f"RETIRED_ENUM_VALUE_NOT_RESERVED {where}: reserve both its number and its name")
+    head_messages = dict(all_messages(head))
+    for entry in retired.get("fields", []):
+        where = f"{entry['message']}.{entry['name']} ({entry['number']})"
+        message = head_messages.get(entry["message"])
+        if message is None:
+            continue  # the message itself is gone: buf's MESSAGE_NO_DELETE decides
+        for field in message.get("field", []):
+            if field["name"] == entry["name"] or field.get("number", 0) == entry["number"]:
+                problems.append(f"RETIRED_FIELD_BACK {where}: the head has {field['name']} = {field.get('number', 0)}")
+        if not reserves_field(message, entry["name"], entry["number"]):
+            problems.append(f"RETIRED_FIELD_NOT_RESERVED {where}: reserve both its number and its name")
     head_fields = dict(fields(head))
     for entry in retired.get("allowed_values", []):
         field = head_fields.get(entry["field"])
@@ -181,6 +208,20 @@ def without_retired(retired: dict[str, Any], base: dict[str, Any]) -> tuple[dict
         elif match and enum is not None:
             enum["value"] = [v for v in values if v not in match]
             removed.append(f"enum value {entry['enum']}.{entry['name']}")
+    base_messages = dict(all_messages(image))
+    for entry in retired.get("fields", []):
+        message = base_messages.get(entry["message"])
+        listed = [] if message is None else message.get("field", [])
+        match = [f for f in listed if f["name"] == entry["name"] and f.get("number", 0) == entry["number"]]
+        clash = [f for f in listed if (f["name"] == entry["name"]) != (f.get("number", 0) == entry["number"])]
+        if clash:
+            problems.append(
+                f"RETIRED_FIELD_MISMATCH {entry['message']}.{entry['name']}: the base has another "
+                f"name or number ({clash[0]['name']} = {clash[0].get('number', 0)})"
+            )
+        elif match and message is not None:
+            message["field"] = [f for f in listed if f not in match]
+            removed.append(f"field {entry['message']}.{entry['name']}")
     base_fields = dict(fields(image))
     for entry in retired.get("allowed_values", []):
         field = base_fields.get(entry["field"])
