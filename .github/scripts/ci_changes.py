@@ -420,11 +420,11 @@ def outputs(
     extension: bool = False,
 ) -> dict[str, bool]:
     checked, deployed = set(checked), set(deployed)
-    # Paired releases publish all three images for a complete bootstrap bundle. A gateway-only release
-    # remains independent; metadata-only inputs check without publishing.
+    # A paired release publishes both runtime images. The gateway releases on its own changes (and the shared
+    # release tools'); the bootstrap bundle carries its image only when this run built it.
     if deployed & {"newsletter", "platform"}:
-        checked.update({"newsletter", "platform", "codex-gateway"})
-        deployed.update({"newsletter", "platform", "codex-gateway"})
+        checked.update({"newsletter", "platform"})
+        deployed.update({"newsletter", "platform"})
     result = {
         "contracts": contracts,
         "packages": packages,

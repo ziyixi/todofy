@@ -141,13 +141,13 @@ MAILSORT = {"mailsort_check": True, "mailsort_deploy": True}
 RECALL = {"recall_check": True, "recall_deploy": True}
 BRIEF = {"brief_check": True, "brief_deploy": True}
 CODEX_GATEWAY = {"codex_gateway_check": True, "codex_gateway_deploy": True}
-PLATFORM = {"platform_check": True, "platform_publish": True, "platform_deploy": True, **CODEX_GATEWAY}
+PLATFORM = {"platform_check": True, "platform_publish": True, "platform_deploy": True}
 VPS = {**PLATFORM, "newsletter_check": True, "newsletter_deploy": True}
 ALL = {**DASH}
 # Every app that compiles in packages/edge-auth besides Todofy and Mail Hero: the dashboard, the links app, the watch
 # app, Fleet, mailsort, recall, the brief and Tasks, each checked and deployed.
 EDGE_AUTH = {"model_router_check": True, "model_router_deploy": True,"personal_mcp_check": True, "personal_mcp_deploy": True, "tasks_check": True, "tasks_deploy": True, **ALL, **LINKS, **WATCH, **FLEET, **MAILSORT, **RECALL, **BRIEF}
-EVERY = {"model_router_check": True, "model_router_deploy": True,"personal_mcp_check": True, "personal_mcp_deploy": True, "tasks_check": True, "tasks_deploy": True, **ALL, "website_check": True, "website_deploy": True, **LINKS, **WATCH, **FLEET, **MAILSORT, **RECALL, **BRIEF, **PLATFORM, "newsletter_check": True, "newsletter_deploy": True}
+EVERY = {"model_router_check": True, "model_router_deploy": True,"personal_mcp_check": True, "personal_mcp_deploy": True, "tasks_check": True, "tasks_deploy": True, **ALL, "website_check": True, "website_deploy": True, **LINKS, **WATCH, **FLEET, **MAILSORT, **RECALL, **BRIEF, **PLATFORM, **CODEX_GATEWAY, "newsletter_check": True, "newsletter_deploy": True}
 
 
 def push(paths, ref=MAIN, last_success=BASE, ancestor=True, merge_base=BASE):
@@ -740,7 +740,7 @@ class Classify(unittest.TestCase):
                 newsletter_check=T,
                 newsletter_deploy=paired,
                 codex_gateway_check=T,
-                codex_gateway_deploy=paired or "codex-gateway" in deployed,
+                codex_gateway_deploy="codex-gateway" in deployed,
                 mailsort_check=T,
                 mailsort_deploy="mailsort" in deployed,
                 recall_check=T,
@@ -761,7 +761,7 @@ class Classify(unittest.TestCase):
         # Paths add up: a Python runtime change with a UI API change deploys both.
         self.assertEqual(
             push(["proto/python/src/ziyixi_proto/wire_json.py", "proto/links/ui/v1/link.proto"]),
-            checked_and({"todofy", "links", "platform"}),
+            checked_and(python | {"links"}),
         )
         self.assertEqual(ci_changes.proto_deploys("proto/ts/http-transcoder.ts"), ts)
         self.assertEqual(ci_changes.proto_deploys("proto/links/ui/v1/link.proto"), {"links"})
@@ -1444,7 +1444,9 @@ class DeployConditions(unittest.TestCase):
 
     # (job, need) pairs where the need may be skipped only when this run did not select it: a selected gateway or
     # Router release that fails leaves the next job skipped, which must stop the jobs after it rather than let them ship.
+    # The bootstrap bundle carries the gateway image only when this run built it.
     SELECTED_ONLY = {
+        ("vps-bootstrap-bundle", "codex-gateway-image"): "needs.changes.outputs.codex_gateway_deploy != 'true'",
         ("model-router-deploy", "codex-gateway-deploy"): "needs.changes.outputs.codex_gateway_deploy != 'true' || vars.VPS_DEPLOY_ENABLED != 'true'",
         **{(job, "model-router-deploy"): "needs.changes.outputs.model_router_deploy != 'true'"
            for job in ("vps-deploy", "dashboard-deploy", "mailsort-deploy", "todofy-deploy", "brief-deploy")},

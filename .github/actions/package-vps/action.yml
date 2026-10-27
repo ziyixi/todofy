@@ -37,7 +37,8 @@ runs:
       run: |
         node proto/tools/ensure.mjs
         uv sync --package todofy-personal-cloud --locked
-    - name: Package this commit and three verified image digests
+    # The gateway image is empty unless this run built it; prepare.py then leaves it out of the bundle.
+    - name: Package this commit and its verified image digests
       env:
         NEWSLETTER_IMAGE: ${{ inputs.newsletter-image }}
         PLATFORM_IMAGE: ${{ inputs.platform-image }}

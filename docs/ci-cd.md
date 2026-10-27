@@ -132,8 +132,10 @@ required check, missing artifact, different SHA or manual run runs checks again.
 A package change checks and deploys its actual `PACKAGE_USERS`; a Markdown-only package change checks
 those consumers without deploying. Contract runtime values deploy only `BUNDLED_BY` consumers; schemas
 and fixtures still trigger checks. Generic CI/check tooling checks applications without deploying them.
-Explicit image build/publication/VPS release tooling changes publish the runtime pair and gateway for
-a complete bootstrap bundle. Gateway-only source changes leave Newsletter and Platform untouched.
+Explicit image build/publication/VPS release tooling changes publish the runtime pair and the gateway.
+Newsletter or Platform changes release only that pair, and gateway-only source changes leave them untouched.
+The bootstrap bundle includes the gateway image only when the same run built it; a fresh host bootstrapped
+from a pair-only bundle gets the gateway with the next gateway release or an `app=codex-gateway` dispatch.
 A Dashboard-only change does not redeploy its Ops providers. Root documentation alone runs
 `Changes` and the gate. These rules are tested against dependencies/imports, including proto import closure.
 

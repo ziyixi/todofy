@@ -166,8 +166,8 @@ catalog.access                 # public paths plus Wrangler-derived destinations
 CI uses `apps` to distinguish Cloudflare checks from VPS image checks. Newsletter, Platform and Codex gateway must not enter
 Worker hostname guards or Wrangler deploy steps. Platform's separately declared machine infrastructure is
 owned by infra, rather than inferred from its image manifest. CI prefixes include `newsletter`, `platform`
-and `codex_gateway`. A paired runtime release publishes all three independently tested images for its
-complete bootstrap bundle. Gateway-only changes release only the gateway. Changing a catalog row alone
+and `codex_gateway`. A paired runtime release publishes the Newsletter and Platform images; its bootstrap
+bundle includes the gateway image only when the same run built it. Gateway-only changes release only the gateway. Changing a catalog row alone
 does not start a release.
 
 ## Adding or changing a service

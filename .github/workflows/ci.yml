@@ -816,7 +816,7 @@ jobs:
       && needs.changes.result == 'success'
       && github.ref == 'refs/heads/main'
       && needs.newsletter-deploy.result == 'success' && needs.platform-image.result == 'success'
-      && needs.codex-gateway-image.result == 'success' }}
+      && (needs.codex-gateway-image.result == 'success' || needs.changes.outputs.codex_gateway_deploy != 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
