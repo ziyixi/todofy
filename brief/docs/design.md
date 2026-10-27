@@ -62,7 +62,7 @@ One Worker `brief`, one SQLite Durable Object `BriefState` ("brief-v1"), the sha
 | `worker/src/registry.ts` | `content-config/sources.yaml`, validated at build and bundled (§3) |
 | `worker/src/fetch/` | Polling, feed parsers, robots.txt, full text through HTMLRewriter (MathML to its alt text), the URL policy (§3, §6) |
 | `worker/src/cluster.ts` | Canonical keys, mentions, bge-m3 embeddings, world clusters (§4) |
-| `worker/src/claude.ts` | **The only code that calls the Claude API**: the gate, the pick, the writing and the entailment log; timeouts, refusals, usage and cost (§5, §7, §8, §13) |
+| `worker/src/claude.ts` | Claude call ledger and budget gates over Model Router: the gate, the pick, the writing and the entailment log; timeouts, refusals, usage and cost (§5, §7, §8, §13) |
 | `worker/src/ground.ts` | The grounding check, pure functions: normalization, quote alignment, the number classifier (§8) |
 | `worker/src/render.ts` | The email (HTML and text) and the archive's items (§11) |
 | `worker/src/send.ts` | **The only code that calls Resend**, through the ledger (§12) |
@@ -70,13 +70,16 @@ One Worker `brief`, one SQLite Durable Object `BriefState` ("brief-v1"), the sha
 | `web/` | The archive: Chinese, mobile-first, no framework, over `brief.ui.v1` (§11) |
 | `brief.ui.v1` | The owner API (AIP resources and custom methods) in `proto/brief/ui/v1/`, landed with the first implementation in `0e48a59` |
 
-No D1, R2, KV, Queues, Workflows or cron trigger. Bindings: `BRIEF` (the object), `ASSETS`, `AI` (Workers AI, for
-bge-m3 only). Vars: `PUBLIC_HOST`, `ACCESS_ISSUER`, `ACCESS_AUDIENCE`, and from the deploy wrapper `BUILD_SHA` and
+No D1, R2, KV, Queues, Workflows or cron trigger. Bindings: `BRIEF` (the object), `ASSETS`, and `MODEL_ROUTER`
+(`Inference`, `props.app=brief`) for generation and bge-m3 embeddings. Vars: `PUBLIC_HOST`, `ACCESS_ISSUER`, `ACCESS_AUDIENCE`, and from the deploy wrapper `BUILD_SHA` and
 `MODE` (the GitHub variable `BRIEF_MODE`: `off`, `archive`, `shadow` or `live`; anything else refused). Secrets from
 GitHub: `ACCESS_OWNER`, `ACCESS_OWNER_ALIASES`, `FEEDBACK_SIGNING_KEY` (64 hex),
-`MAIL_FROM`, `MAIL_TO` (personal values). Owner-machine secrets, put with `wrangler secret put` and never in GitHub
-(mailsort's `owner_machine_secrets` pattern): `ANTHROPIC_API_KEY`, `RESEND_API_KEY`. The SDK gets the key explicitly
-(`new Anthropic({ apiKey })`): its default credential chain does not exist in Workers.
+`MAIL_FROM`, `MAIL_TO` (personal values). Brief's only owner-machine secret is `RESEND_API_KEY`, kept outside
+GitHub and preserved by deployment. Model Router alone holds the shared `ANTHROPIC_API_KEY` and `GEMINI_API_KEY`.
+Claude uses the original Brief workspace, with an aggregate $80/month provider cap across all callers; Brief keeps
+its own persisted business budget. Provider credentials and API adapters stay in Router; the official Codex SDK
+and subscription login remain on the VPS. Current setup is in
+[Model Router deployment](../../model-router/docs/deployment.md).
 
 The whole host is behind the Access application `brief`; only the exact path `/feedback` has an Access Bypass
 application (the Fleet receipt's pattern), and the Worker verifies its token itself (§10). No Notion, no Todofy.
@@ -840,7 +843,8 @@ Workers AI. CI never holds a Claude key.
 
 ## 18. Owner steps
 
-Completed through the first deployment on 2026-10-11:
+Historical record of the first deployment on 2026-10-11. Current credential ownership is in §1; the original
+Brief-local provider key below is retired:
 
 - The owner approved the spend and successor on 2026-10-10. The implementation and owner API landed in `0e48a59`.
 - "Infra apply" created `brief` and the exact-path `brief-feedback` Access applications; their identities are recorded

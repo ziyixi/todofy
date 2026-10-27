@@ -23,7 +23,7 @@
 
 ## 服务隔离与共享代码
 
-- Cloudflare 应用各自拥有代码、资源、密钥和发布；Newsletter 入仓仍是独立 VPS 容器服务，不改成 Worker。
+- Cloudflare 应用各自拥有代码、资源和发布；模型供应商凭据统一由 Model Router 持有。Newsletter 仍是独立 VPS 容器服务，不改成 Worker。
   它的继任者 Brief 是另建的 Worker，替换与 Newsletter 的退役由 owner 另行决定。
 - 应用从不互相导入代码、配置或测试工具。允许共享的只有 `contracts/`、`proto/`、`packages/`；
   `tools/` 只供测试、构建和部署脚本使用，生产源码与包不得导入应用或这些工具。
@@ -54,7 +54,7 @@
   所有 fixture 的 event_id/message.id（含 legacy）唯一；重试复用冻结事件身份、目标与字节。
 - Ops 仅经同账户 service binding，不新增公共 HTTP 路由、不改默认 fetch/email/scheduled 行为。
   输出有界且无业务内容；shed 自动过期，不停止收件、解析、投递、重试或真实处理。
-  canary 不创建任务、摘要、提醒等业务副作用，不进入真实指标；Todofy 仅正常调用 Gemini 并记录结果。
+  canary 不创建任务、摘要、提醒等业务副作用，不进入真实指标；Todofy 经 Router 调用当前邮件模型并记录合成结果。
 - 旧 UI 的兼容回复必须让旧客户端明确提示刷新。保留日期见 [历史兼容表](docs/history.md#owner-api-compatibility)
   和 HANDOFF；不能提前删 410 路由或旧 core RPC。
 
@@ -90,8 +90,11 @@
 - Recall：[AGENTS](recall/AGENTS.md)、[设计](recall/docs/design.md)。只用合成页面，URL、标题与正文不进日志；三条机器路由各凭
   自己的令牌摘要，令牌由 owner 在设置里生成、只显示一次；归档由 recall 只增不删地写进 owner 的 Dropbox，
   布局与变更 feed 是 recall 拥有的公开合同 `recall-archive-v1`；Cloudflare 只留保留窗口内的正文和截图，且只在归档确认后移出。
-- Brief：[AGENTS](brief/AGENTS.md)、[设计](brief/docs/design.md)。只经 `claude.ts` 调 Claude、只经 `send.ts` 经账本发信，
-  每天至多一封、unknown 不重发；Claude 与 Resend 密钥只由 owner 写入 Worker、不经 GitHub；测试只用合成网页与假客户端，标题和正文不进日志。
+- Model Router：[AGENTS](model-router/AGENTS.md)、[设计](model-router/docs/design.md)、[发布](model-router/docs/deployment.md)。
+  Claude、Gemini 各共用一枚 API key，只留在 Router secrets；不进入 GitHub、客户端或 VPS。Codex 保留既有 VPS 订阅登录，Workers AI 使用 binding。
+  应用只用根 proto，供应商协议留在 Router 与执行层。
+- Brief：[AGENTS](brief/AGENTS.md)、[设计](brief/docs/design.md)。`claude.ts` 经 Router 调用模型，`send.ts` 经账本发信，
+  每天至多一封、unknown 不重发；Resend 密钥只由 owner 写入 Brief、不经 GitHub；测试只用合成网页与假客户端，标题和正文不进日志。
 - Website：[架构约束](docs/architecture.md#website)、[架构](website/docs/architecture.md)、[发布](website/docs/release.md)。
   只用静态访客路径，内容不提交；不绕过发布身份、门禁、验收与回退。
 - Newsletter：[README](newsletter/README.md)。正由 Brief 替换（退役另行决定）；保持独立镜像、VPS 状态目录与业务排空边界，

@@ -14,38 +14,40 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ### Unified Model Router (`codex/model-router`)
 
-Cloudflare Router owns the root `modelrouter.inference.v1` API, D1 metadata (90 days), private R2 bodies
-(7 days) and private console. Existing VPS `codex-gateway` runs the official pinned SDK; short conversations
-preserve Newsletter's follow-up and web observations. Apps retain their prompts, budgets, history and modes.
-Todofy switches future mail/reports to Sol6.1 after synthetic acceptance. The shared owner/Claude checkout is untouched.
+Cloudflare Router owns `modelrouter.inference.v1`, D1 metadata (90 days), private R2 bodies (7 days) and the
+private console. Existing VPS `codex-gateway` runs the pinned official SDK. Apps retain prompts, budgets,
+history and modes. The owner/Claude checkout is untouched. Architecture and active setup are in
+[deployment](model-router/docs/deployment.md); real synthetic evidence is in
+[verification](docs/model-router-verification.md).
 
-One `ANTHROPIC_API_KEY` and one `GEMINI_API_KEY` belong only to Router, outside GitHub, clients, VPS and
-persistent local files. Owner approved an equivalent shared Claude key in the existing Brief workspace;
-the provider's $80/month workspace cap is saved and verified. Owner explicitly approved no expiry. Its creation
-form is prepared, but create only after Router can receive it directly through browser memory. Original production
-keys remain until verified cutover. Gemini's original agent tab failed; the owner-opened key list works and owner
-explicitly authorized its direct browser-to-Router transfer. No provider key has been copied to a local file.
+Exactly one shared Claude API key uses the original Brief workspace's verified $80/month cap. Owner approved
+and created its no-expiry replacement. It and one existing Gemini key were moved directly through browser memory
+into Router secrets, then the temporary browser values were cleared. Neither current provider key entered a local
+file, GitHub or VPS. Original caller keys remain until final cutover. Same-account bindings have no tokens;
+owner JSON writes use exact Origin, a custom header and JSON content type. VPS inference validates Access JWTs;
+privileged deployment identity and the subscription login stay separate. Newsletter keeps one inference token.
 
-Same-account callers use bindings without tokens. Owner JSON writes use exact Origin, a custom header and
-JSON content type without signing keys. VPS inference verifies real Access JWTs, using public baked issuer/AUD;
-privileged deployment identity and Codex subscription login remain separate. Newsletter keeps one inference-only
-Router token. Its two-field runtime Secret patch and the necessary k3s restart were confirmed by owner;
-all four running Pods now match current host addresses and are ready. Modes remain unchanged.
+Source `3c4fda1ddf6bf42905a817c5a9494bf00f24af22` passed complete branch CI40447964148 and main's complete
+same-SHA gate40449071654 (a WebKit package-download timeout passed on rerun). Router, Mailsort, Brief and paired
+VPS published. Todofy stopped before upload on its three old Gemini variables; the staged exact retirement
+fix passes50 release tests and10 workflow guards. The real Router calls passed for Sol6.1, Claude Opus5.5 and
+Gemini Flash-Lite, plus two-turn Newsletter context, actual public-page observation, explicit close and BGE-M3.
+The Sol SDK did not report a model identity; keep that unavailable. No real work was recomputed for acceptance.
 
-Complete [branch CI40445648510](https://github.com/ziyixi/todofy/actions/runs/40445648510) passed for source
-`feba85f088327b49dc4ad5c863f5c85fa01d49ff`, including actual Linux gateway/image checks and full browser suites.
-[Main40446623395](https://github.com/ziyixi/todofy/actions/runs/40446623395) promoted that exact SHA; Gateway
-and the independent keyless consumers deployed. Router stopped before upload because its name was missing
-from the release identity allowlist. The one-line correction and first-release regression pass48 release tests.
-A real content-free Gateway catalog request verifies the existing Access identity. Default urllib UA triggers
-Cloudflare1010; a descriptive application UA returns200. Router now sends that explicit UA too.
+RouterEngine's actual namespace `ca44d90abc6e4191996a0eefc39df3ce` is captured in the staged resource inventory;
+FIRST_DEPLOY_PENDING is empty. Infra apply40448340660 recorded the public AUD output with zero resource actions
+and a clean post-plan. The owner completed the Newsletter URL/token patch and k3s restart; four running Pods
+then matched current host addresses and were ready. Provider/model credentials and business switches were not
+changed by that repair.
 
-Next: gate/publish the release correction, install Router's five owner-machine connection secrets, then rerun the
-same SHA to unlock paired VPS/Newsletter and migrated Mailsort/Todofy/Brief/Home. Capture the actual RouterEngine
-namespace in resources and remove FIRST_DEPLOY_PENDING. Verify synthetic calls, then switch future Todofy choices;
-retire old app/provider/CSRF credentials only after successful cutover. Matching main reconcile, resolved drift and
-Home/Fleet readback remain required. Additive bootstrap created six resources with42 no-ops; registered D1/R2/Access
-identities are already current. No real mail, reports, Tasks or Newsletter work was recomputed for acceptance.
+Next: gate and publish this final resource/docs/retirement batch at one SHA. Verify the NEW-SHA Gateway release
+uses the current Platform renderer and drops the old bearer env reference (a ready historical release is not
+reapplied, and ordinary reconcile projection can miss extra env entries). Then switch future Todofy mail/reports
+to Sol6.1 and run synthetic canaries. Remove old app/provider/CSRF bindings only after those checks; their deletion
+changes Worker versions, so use existing reconcile repair/check to record fresh publication proof. Final matching
+main reconcile, registered resources and Home/Fleet readback remain required. After its Deployment reference is
+removed, the old Kubernetes Secret can wait for ordinary privileged maintenance; no extra sudo or Secret-deletion
+API is needed for this rollout.
 
 ### Tasks Sunday planning week (`codex/tasks-next-step-estimate`)
 

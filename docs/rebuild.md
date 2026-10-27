@@ -1,6 +1,6 @@
 # 重建个人云
 
-日常更新：提交代码，等待 main 的 **CI and deploy**。它发布 Workers、构建两个独立镜像，再通过 daemon 更新 VPS。
+日常更新：提交代码，等待 main 的 **CI and deploy**。它发布 Workers、构建三个独立镜像，再通过 daemon 更新 VPS。
 检查或修复运行偏差：在 Actions 打开 **Personal cloud reconcile**，选择 `check` 或 `repair`。
 
 首次部署需要修改 [cloud.toml](../config/cloud.toml)，填写仓库外的一个私有 JSON，运行 bootstrap，再执行一次 VPS sudo。
@@ -17,11 +17,18 @@
 权限见 [bootstrap 凭据清单](../tools/cloud-bootstrap/README.md)。VPS 不接收此管理 token。
 准备 Node 26、uv，以及 [infra 固定版本](../infra/versions.tf)的 OpenTofu。
 
-Mailsort 的模型使用 Anthropic API：建立独立 `mailsort` 工作区并设置每月 $20 支出限额，
-生成只限该工作区的 API key。赠送额度也计入限额。保留组织与其他应用的原有配置。
-Worker 首次部署后，在 owner 本机运行 `cd mailsort/worker`，再运行
-`npx --no-install wrangler secret put ANTHROPIC_API_KEY --config ../wrangler.toml`。
-这个 key 与 Gmail 授权都不放进 bootstrap JSON 或 GitHub；后续发布会保留。未配置时 Home 显示具体缺失项。
+模型凭据只配置在 `model-router`。Claude 使用原 Brief 工作区，所有 Claude 调用合计受其每月 US$80 支出上限约束；
+在供应商控制台确认该限额。Gemini 使用一个共享 key。Router 首次上传后，在 owner 本机运行：
+
+```sh
+cd model-router/worker
+npx --no-install wrangler secret put ANTHROPIC_API_KEY --config ../wrangler.toml
+npx --no-install wrangler secret put GEMINI_API_KEY --config ../wrangler.toml
+```
+
+两把 key 都不进入 bootstrap JSON、GitHub 或 VPS。Gmail 授权和 Resend 凭据仍分别归 Mailsort、Brief。
+首次上传后，连接检查会在凭据不全时失败并阻止下游发布；owner 配好后重跑同一 SHA。执行器 Access 连接和 Newsletter 独立口令见
+[Model Router 部署说明](../model-router/docs/deployment.md)。
 
 成功结果：账户已启用、`gh auth status` 正常、目标域名可用。登录或账户启用失败，先完成对应网页步骤。
 
@@ -106,18 +113,18 @@ gh run list --workflow ci.yml -R "$cloud_repo"
 gh run watch <本次 run ID> --exit-status -R "$cloud_repo"
 ```
 
-成功结果：Workers 已发布，两个 VPS 镜像已按 digest 发布，run artifact 中有 `vps-bootstrap-<完整 SHA>`。
+成功结果：Workers 已发布，Newsletter、Platform 和 Codex gateway 三个镜像已按 digest 发布，run artifact 中有 `vps-bootstrap-<完整 SHA>`。
 `VPS_DEPLOY_ENABLED=false` 时服务器部署等待一次性安装。
 静态网站是异步发布，另确认 **Website release** 成功；CI 的 dispatch 成功只代表已启动它。
 
 网站或外部凭据错误在对应 job 处理，无需重建数据库。
 
-全新仓库首次创建的两个 GHCR 镜像默认私有。在 GitHub 的 **Packages** 分别打开
-`<仓库名>-newsletter` 和 `<仓库名>-platform`，进入 **Package settings → Change visibility → Public**。
+全新仓库首次创建的三个 GHCR 镜像默认私有。在 GitHub 的 **Packages** 分别打开
+`<仓库名>-newsletter`、`<仓库名>-platform` 和 `<仓库名>-codex-gateway`，进入 **Package settings → Change visibility → Public**。
 这一步每个包只做一次；已有公开包跳过。安装器和 k3s 使用匿名拉取，不配置 registry 密钥。
 公开前确认镜像只包含代码与依赖；私有文件由第 3 步单独传给 VPS。
 [GitHub 的默认可见性说明](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry#pushing-container-images)。
-如安装时镜像拉取报 `unauthorized`，先检查这两个包的可见性。
+如安装时镜像拉取报 `unauthorized`，先检查这三个包的可见性。
 
 ## 5. 一次性安装 VPS
 
@@ -138,7 +145,7 @@ sudo /usr/bin/python3 -E -s <bundle>/installer/install.py \
 
 成功结果：`complete_held`。K3s、专用 Tunnel、daemon 和 observer 已安装，Newsletter 暂不接新工作。
 示例 Newsletter 使用 mock 模式且禁真实发送，可先验收空服务。首次安装时要启用真实处理，先按
-[Newsletter 配置](../newsletter/README.md)准备专用 Codex 登录目录及外部 provider 凭据，将私有输入的
+[Newsletter 配置](../newsletter/README.md)准备专用 Codex 登录目录、Router URL/独立口令及发信凭据，将私有输入的
 `vps.newsletter_env` 改为对应的 live/codex 设置，用 `vps.old_paths.auth` 指定登录目录；安装器会导入该目录。
 已安装后更改 Secret 或登录状态属于 owner 的一次维护操作，daemon 不会替你修改它们。
 mock 服务健康不代表真实摘要通过。

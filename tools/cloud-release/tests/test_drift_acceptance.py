@@ -452,7 +452,11 @@ class DriftAcceptance(unittest.TestCase):
 
     def test_a_retired_binding_is_one_the_app_no_longer_declares(self):
         # Only these exact owner-approved retirements may pass a normal release.
-        self.assertEqual(control.RETIRED_BINDINGS, {"todofy": {"TASKS"}, "mailsort": {"AI", "CODEX_ENDPOINT_URL"}, "brief": {"AI"}})
+        self.assertEqual(control.RETIRED_BINDINGS, {
+            "todofy": {"TASKS", "GEMINI_API_BASE", "GEMINI_EMAIL_MODELS", "GEMINI_MODELS"},
+            "mailsort": {"AI", "CODEX_ENDPOINT_URL"},
+            "brief": {"AI"},
+        })
         for app, names in control.RETIRED_BINDINGS.items():
             for path in control.WORKERS[app]:
                 config = control.read_toml(ROOT / path)
@@ -461,6 +465,50 @@ class DriftAcceptance(unittest.TestCase):
                     declared.add(config["ai"]["binding"])
                 with self.subTest(app=app, path=path):
                     self.assertFalse(names & declared)
+
+    def test_normal_todofy_release_retires_legacy_gemini_configuration(self):
+        fixture = self.fixture("todofy")
+        bindings = fixture.bindings("todofy-core")
+        bindings[:] = [item for item in bindings if item["name"] != "MODEL_ROUTER"]
+        retired = {
+            "GEMINI_API_BASE": "https://synthetic-model-api.example",
+            "GEMINI_EMAIL_MODELS": "synthetic-email",
+            "GEMINI_MODELS": "synthetic-report,synthetic-fallback",
+        }
+        bindings.extend({"name": name, "type": "plain_text", "text": value}
+                        for name, value in retired.items())
+        for script in ("todofy-core", "todofy"):
+            next(item for item in fixture.bindings(script) if item["name"] == "BUILD_SHA")["text"] = "b" * 40
+        output = io.StringIO()
+        with redirect_stdout(output):
+            required = preflight(ROOT, "todofy", SHA, False, fixture.cloud, fixture.github)
+        self.assertTrue(required)
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["state"], "repairable")
+        self.assertEqual({(item["script"], item["field"]): item["reason"] for item in result["changes"]}, {
+            ("todofy-core", "MODEL_ROUTER"): "BINDING_MISSING",
+            **{("todofy-core", name): "RETIRED_BINDING" for name in retired},
+            ("todofy-core", "BUILD_SHA"): "BUILD_IDENTITY_CHANGED",
+            ("todofy", "BUILD_SHA"): "BUILD_IDENTITY_CHANGED",
+        })
+        for value in retired.values():
+            self.assertNotIn(value, output.getvalue())
+        self.assert_readonly(fixture)
+
+    def test_gemini_configuration_retirement_still_blocks_repairs_and_other_names(self):
+        for app, repair, name in (
+            ("todofy", True, "GEMINI_MODELS"),
+            ("todofy", False, "GEMINI_MODELS_EXTRA"),
+            ("todofy", False, "gemini_models"),
+            ("watch", False, "GEMINI_MODELS"),
+        ):
+            with self.subTest(app=app, repair=repair, name=name):
+                fixture = self.fixture(app)
+                script = "todofy-core" if app == "todofy" else fixture.configs[0]["name"]
+                fixture.bindings(script).append({"name": name, "type": "plain_text", "text": "synthetic"})
+                with redirect_stdout(io.StringIO()), self.assertRaisesRegex(ReleaseError, "REPAIR_MANUAL_REQUIRED"):
+                    preflight(ROOT, app, SHA, repair, fixture.cloud, fixture.github)
+                self.assert_readonly(fixture)
 
     @patch.dict("control.RETIRED_BINDINGS", {"dashboard": {"OLD_APP"}})
     def test_normal_home_release_removes_a_retired_binding(self):

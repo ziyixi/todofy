@@ -110,13 +110,11 @@ Read and unread mail are both eligible. Valid prior decisions remain frozen. Eac
 messages in its thread. The explicit unread action retains its separate unread requirement and includes older/archived mail, retaining its existing scan and
 progress table. Older recheck options remain explicit owner operations and never start on deployment.
 
-`claude.ts` sends a standard Messages API request to `claude-opus-5-5` with adaptive thinking, medium effort and
-structured JSON output. `codex.ts` sends the same prompt and masked mail snapshot to
-`https://platform-runtime.ziyixi.science/api/codex/v1/inference:run`, with a dedicated Access machine identity and
-an inference-only Bearer. The gateway contract separates instructions, JSON input and JSON output schema. Both
-providers must cover all input IDs exactly once, with P1-P4 and a short reason. Responses and timeouts are bounded
-(120 seconds at the caller, 110 seconds for the Codex operation). There is no provider/model fallback, second vote,
-embeddings or automatic learning.
+Model calls use the shared `MODEL_ROUTER` binding (`Inference`, `props.app=mailsort`). Mailsort sends the prompt,
+masked mail snapshot, selected model/effort and output schema through the common typed API. Router owns the native
+provider payloads and the Access-authenticated VPS executor connection. Results must cover every input ID exactly
+once, with P1-P4 and a short reason. Existing caller deadlines remain bounded. There is no automatic provider/model
+fallback, second vote, embeddings or automatic learning.
 
 Provider/network failures use the existing pending backoff. Invalid results are not partially applied. Exhausted
 retries become visible failures without new Gmail labels. Historical probabilities, examples and ledger entries
@@ -124,26 +122,20 @@ keep their original meanings; none are rewritten as judgments from the selected 
 
 ## 5. Cost and credentials
 
-Only Claude uses the dedicated Anthropic Mailsort workspace's provider-native $20/calendar-month spend limit; Brief and the
-organization limit are separate. Credits count toward that spend limit and the cap resets on the first UTC day
-of each month. API keys are scoped to this workspace.
+Mailsort keeps its existing $20/calendar-month local Claude budget. All Claude callers use Router's shared key in
+the original Brief workspace, whose aggregate provider cap is $80/month. Provider billing and the application's
+local ledger remain separate; the provider console is the authority for workspace spend.
 
-The app stores returned Claude usage in the existing SQLite store, by UTC day, and sums at most one month's rows. The
-recorded price is $4/million uncached input, $5/million five-minute cache writes, $0.20/million cache reads and
-$20/million output tokens; thinking is part of output tokens, not an extra charge. Input totals include uncached,
-cache-created and cache-read tokens. If the provider reports one-hour cache creation, it is priced at $8/million;
-this application only requests five minutes. Optional missing thinking breakdown remains unknown. Even a billed invalid result counts when the API
-returned its usage. No estimates, reservations or extra accounting service are introduced.
+The app stores Router-returned Claude usage and cost estimates in the existing SQLite store, by UTC day, and sums
+at most one month's rows. Pricing and native token normalization belong to Router. Historical costs stay frozen;
+unavailable usage or cost stays unknown. Even an invalid result counts when returned usage reports consumption.
 
-For Claude, the API's stable system blocks are base first, then nonempty personal rules; message-specific email/time data
-follows them. Each system block gets an explicit five-minute cache breakpoint only when the prepared batch has
-more due pending work behind it or a returned cache read/write began within five minutes. The latter is one
-timestamp in existing metadata, recorded from request start only when usage actually reports caching. No top-level
-automatic cache or email breakpoint is sent. Prefix edits invalidate the affected cache naturally; a rules edit
-can still reuse the base. No padding, prewarming or keepalive calls are used. Below the provider's minimum prefix
-length, caching may be ignored. Actual returned token fields determine cost and whether a hit occurred.
-See [Anthropic prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) and
-[Opus 5.5 pricing](https://platform.claude.com/docs/en/about-claude/pricing).
+Stable instruction blocks remain base first, then nonempty personal rules; message-specific email/time data follows
+them. Mailsort sends generic cache hints when more prepared work follows, or when actual cache activity began within
+its existing five-minute reuse window. That timestamp remains in existing metadata. Router owns native cache
+breakpoints, provider minimums and pricing. Prefix edits invalidate the affected cache naturally; a rules edit can
+still reuse the base. No padding, prewarming or keepalive calls are used. Reported cache counts distinguish an
+actual hit from a hint. See [Router design](../../model-router/docs/design.md).
 
 At recorded Claude cost >= $20, new Claude calls wait until the next UTC month. A provider spend refusal does the same even if
 local accounting is lower. Network responses lost before usage is read and out-of-app calls may be absent locally;
@@ -162,13 +154,11 @@ its reported tokens; network/HTTP failures without usage increment failures with
 Older all-zero responses remain unknown. Historical calls before this accounting release are not reconstructed from mail
 decisions or retry counts. These are this app's observations, without subscription-price conversion or account balance.
 
-Gmail OAuth, `ANTHROPIC_API_KEY`, `CODEX_ENDPOINT_TOKEN`, `CODEX_ACCESS_CLIENT_ID` and `CODEX_ACCESS_CLIENT_SECRET`
-are owner-written Worker secrets. `app.toml`, generated secret inventories and the deploy wrapper keep them out
-of GitHub release secrets and preserve them during deploy. `CODEX_ENDPOINT_URL` is a generated, non-secret deployment
-var for the fixed route above; the UI accepts no arbitrary endpoint. IaC owns the dedicated Access identity and
-keeps sensitive outputs in encrypted state. The subscription login stays on the VPS auth PVC, outside Worker/GitHub
-credentials. The initial account setup is in the
-[root rebuild guide](../../docs/rebuild.md); the concrete key command is in [README](../README.md).
+Mailsort's owner-machine secrets are its Gmail OAuth credentials: `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET` and `GMAIL_REFRESH_TOKEN`,
+put from the owner's machine and excluded from GitHub maps. Model Router alone holds shared provider keys and the
+VPS executor's Access identity; Mailsort needs no endpoint variable, executor Bearer or Access client credentials.
+The subscription login stays on the VPS auth PVC. Current connection setup is in the
+[root rebuild guide](../../docs/rebuild.md) and [Model Router deployment](../../model-router/docs/deployment.md).
 
 ## 6. Existing writes and history
 

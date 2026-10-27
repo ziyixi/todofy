@@ -4,15 +4,15 @@ What the owner sets up once before the first deploy. Everything after that goes 
 ([ci-cd.md](ci-cd.md)). This file names settings and how to derive them; it never holds values. The
 repository and its Actions logs are public, so no secret, owner email or database content belongs in it.
 
-Plan: Workers Free. Nothing here needs a paid product. Both Workers, D1 and Durable Object requests share
-the account's free daily allowances with Mail Hero.
+Cloudflare compute uses Workers Free. Both Workers, D1 and Durable Object requests share the account's free daily
+allowances with Mail Hero. Model usage is billed separately through the provider connections in Model Router.
 
 Todofy is two Workers ([gateway-contract.md](gateway-contract.md)):
 
 - `todofy`, the TypeScript gateway: the custom domains, Access and CSRF checks, webhook and newsletter
   credential checks, the UI assets and the cron. It holds the credential digests and the owner emails.
 - `todofy-core`, the Python Worker that hosts the Durable Object. It has no public route; it holds D1 and the
-  Gemini API key, binds no other app, and does all the work inside the object (30 s CPU per call instead of
+  `MODEL_ROUTER` binding (`Inference`, `props.app=todofy`), and does the work inside the object (30 s CPU per call instead of
   a plain Worker's 10 ms on Workers Free).
 
 ## 1. D1 database
@@ -108,14 +108,14 @@ is public, so nothing personal or secret goes there), and changing one is a comm
 | UI host, hooks hosts (at most 4; `daily.ziyixi.science` since cutover) | `gateway/wrangler.toml` `routes` (the UI host first, then each hooks host) and `[vars]` `TODOFY_PUBLIC_HOST`, `TODOFY_HOOKS_HOSTS`; the core's `TODOFY_PUBLIC_HOST` (Home's tile links to the UI) must be the same |
 | Access issuer and AUD (step 2) | `gateway/wrangler.toml` `ACCESS_ISSUER`, `ACCESS_AUDIENCE` |
 | mail source ID | `wrangler.toml` `MAIL_SOURCE_ID` (`mail-hero-personal`; must equal the source ID of the imported ledger) |
-| Gemini models, daily token budget | `wrangler.toml` `GEMINI_EMAIL_MODELS` (single email and Canary), `GEMINI_MODELS` (daily summaries and recommendations), `GEMINI_DAILY_TOKEN_BUDGET`; first model is preferred |
+| Models and daily token budget | Choose mail/report models through the owner API; selections live in D1 `model_settings`. `wrangler.toml` keeps the existing `GEMINI_DAILY_TOKEN_BUDGET` limit (a legacy physical name). |
 | report top and precompute time | `wrangler.toml` `REPORT_DEFAULT_TOP` (must equal the newsletter's `?top=`, 10, so its report is precomputed), `REPORT_PRECOMPUTE_UTC` |
 | legacy text retention | `wrangler.toml` `LEGACY_TEXT_RETENTION_DAYS` (`0` keeps imported mail text forever) |
 | carryover | `wrangler.toml` `REPORT_CARRYOVER_DAYS` (`14`, at most 14; `0` turns the carryover off) |
 
-The Gemini base URL is fixed in `wrangler.toml` and pinned by tests. `BUILD_SHA` (the commit)
-is added at deploy on both Workers. Each Worker gets only the vars it reads: hosts and `ACCESS_*` go to the
-gateway; the mail source, Gemini, report, retention and switch settings go to the core;
+Provider endpoints and credentials belong to Model Router. `BUILD_SHA` (the commit) is added at deploy on both
+Workers. Each Worker gets only the vars it reads: hosts and `ACCESS_*` go to the gateway; the mail source,
+model budget, report, retention and switch settings go to the core;
 `BUILD_SHA`, `MAINTENANCE_MODE` and `TODOFY_PUBLIC_HOST` go to both. `deploy/test_wrangler_configs.py`
 checks the committed values (formats, bounds, host order, the core/gateway pairing).
 
@@ -127,7 +127,6 @@ committed config (a Worker secret survives every deploy):
 
 ```sh
 npx wrangler secret put <NAME> --config gateway/wrangler.toml     # the gateway todofy
-npx wrangler secret put <NAME> --config wrangler.toml             # todofy-core
 ```
 
 Gateway `todofy`:
@@ -138,32 +137,32 @@ Gateway `todofy`:
 | `MAIL_WEBHOOK_TOKEN_SHA256_PREVIOUS` | optional, the previous digest while rotating the token |
 | `REPORT_BASIC_AUTH_SHA256` | SHA-256 of `user:password` the newsletter sends (`printf '%s' "$USER:$PASSWORD" \| shasum -a 256`); list two digests, comma-separated, while rotating. The password must be random, at least 128 bits (`openssl rand -hex 32`): the failure lockout never blocks a correct credential, so it does not slow guessing. |
 
-Core `todofy-core`:
+Core `todofy-core` needs no provider or Todoist key. Model Router alone holds one shared `GEMINI_API_KEY` and one
+shared `ANTHROPIC_API_KEY`; configure them on the Router after its first upload and before releasing migrated
+callers ([Model Router deployment](../../model-router/docs/deployment.md)). The core uses its private service binding.
 
-| Secret | How to derive it |
-|---|---|
-| `GEMINI_API_KEY` | a Gemini API key for Todofy |
+Until a gateway digest is configured, the webhook or newsletter endpoint that needs it answers 503
+`not_configured`. `ACCESS_OWNER` and `ACCESS_OWNER_ALIASES` are supplied by deployment from protected GitHub maps;
+do not put them separately. Owner mutations require authenticated Access, exact Origin, a nonempty custom header
+and JSON; they need no CSRF signing secret. Configure gateway digests after the Worker exists and before enabling
+its callers. No placeholder `todofy-core` Worker or core provider secret is needed.
 
-Until a gateway secret is set, the endpoint that needs it answers 503 `not_configured` (the webhook, the
-newsletter endpoints, or owner writes). A missing core key shows as not configured on the UI's setup
-page. `ACCESS_OWNER` and `ACCESS_OWNER_ALIASES` are also gateway secrets, but every deploy sets them from
-the GitHub environment secrets; do not `secret put` them.
+### Historical split migration notes (retired)
 
-On a fresh account, put the core key before the first deploy: `todofy-core` does not exist yet, so
-wrangler asks whether to create it; answer yes. It creates an empty placeholder Worker holding only the
-secret, and the first deploy replaces its code and keeps the secret (wrangler 4.142.0 behaviour,
-read from its source). The gateway secrets can be put after the first deploy.
+The following migration-tag notes and single-Worker procedures describe the former Python-to-gateway split.
+They are retained as history, not current installation or rollback instructions. Current model keys stay only
+in Router; current task behavior belongs to Tasks. Restoring an old release needs a separate review of its schema,
+storage and credential requirements.
 
-Also on a fresh account (or after the `todofy` script was deleted): a script without a migration tag
-gets every step in `gateway/wrangler.toml`. Today that is only `v1` creating `TodofyCoordinator`, which
-the gateway still exports as an empty retired class, so it is harmless. Once the gateway-only
-class-delete release has added `v2` ([gateway-contract.md](gateway-contract.md) §6.6), remove the
-`[[migrations]]` blocks before such a first deploy. `--dry-run` cannot catch this; it never computes
+At the original split, a fresh `todofy` script received every migration in `gateway/wrangler.toml`: only `v1`
+creating `TodofyCoordinator`, which the gateway exported as an empty retired class. The original guidance called
+for removing those blocks on fresh installs after the gateway-only class-delete release added `v2`
+([gateway-contract.md](gateway-contract.md) §6.6). The recorded `--dry-run` limitation was that it did not compute
 migrations against the account.
 
-### Moving from the single Python Worker (once)
+#### Original move from the single Python Worker
 
-Before the split, one Python Worker `todofy` held every secret. The first deploy of the split:
+Before the split, one Python Worker `todofy` held every secret. The historical first-deploy procedure was:
 
 1. Before merging it to `main`: put `GEMINI_API_KEY` and `TODOIST_API_KEY` on `todofy-core` as above
    (the same values as on `todofy`). Otherwise the new object would run the report precompute and any
@@ -183,7 +182,7 @@ Before the split, one Python Worker `todofy` held every secret. The first deploy
    get 401 or 429 from the object (the gateway → object → D1 path; [ci-cd.md](ci-cd.md)). Open the
    owner UI overview once to prove the Access → owner API path.
 
-### Rolling back to the single Python Worker
+#### Original rollback to the single Python Worker
 
 The object in `todofy-core` keeps waking itself after a rollback, and two coordinators must never share
 the D1 database: each would treat the other's in-flight rows as abandoned. The full steps and the reasons

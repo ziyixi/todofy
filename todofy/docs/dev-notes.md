@@ -375,7 +375,8 @@ The core calls `MODEL_ROUTER` (`service=model-router`, `entrypoint=Inference`, `
 provider credentials stay in the Router. Mail/report choices are stored in D1 `model_settings` and
 updated through the owner API with an etag and request ID. The gateway's vars and secrets
 (`ACCESS_*`, `TODOFY_HOOKS_HOSTS`, `MAIL_WEBHOOK_TOKEN_SHA256(_PREVIOUS)`,
-`REPORT_BASIC_AUTH_SHA256`, `CSRF_SIGNING_KEY`) are listed in gateway-contract.md §1.
+`REPORT_BASIC_AUTH_SHA256`) are listed in gateway-contract.md §1. Owner writes use the keyless JSON checks below;
+no CSRF signing secret is configured.
 Test configs shorten `*_MS` values; production keeps their code defaults.
 
 ### coordinator.py (P) — the only writer of the ledger
@@ -531,10 +532,12 @@ reasons to Todofy's codes; the package itself is never edited for one app. `acce
 RS256 via WebCrypto, keys cached per isolate for an hour, an unknown kid refetches at most once a
 minute; `alg`/`kid`/no `crit`, `iss`, `aud`, `exp`, `iat`, optional `nbf`, non-empty `sub` and `email`
 matched case-insensitively over ASCII only, non-ASCII addresses refused; `ACCESS_OWNER_ALIASES` ≤ 8 emails mapped to `ACCESS_OWNER`),
-`csrf.ts` (`Origin` must equal `https://<TODOFY_PUBLIC_HOST>`, `http://` only under the `.localhost`
-dev rule; `X-CSRF-Token` must equal the first `todofy_csrf` cookie; an HMAC-signed
-`{kind, owner, nonce, exp}` (12 h) keyed by `CSRF_SIGNING_KEY`, 64 hex; missing or malformed → 503
-`NOT_CONFIGURED` on `GET /api/csrf` and every write, reads keep working), `http.ts` (error
+`csrf.ts` (after Access authentication and before body parsing: exact allowed `Origin`, a nonempty
+`X-CSRF-Token` of at most 1024 characters, and `application/json`; local HTTP origins follow the existing
+`.localhost` dev rule). Clients send header `1` directly, including for bodyless mutations. `GET /api/csrf`
+returns static `{"token":"1"}` for cached clients without a cookie or signing key; old nonempty headers remain
+accepted under the same Origin and JSON checks. A failed check is 403 `CSRF_FAILED`.
+The other modules are `http.ts` (error
 envelopes; the package's private headers plus the `/assets/` cache exception), `crypto.ts` (the hooks
 hosts' Bearer and Basic digest checks only), `owner.ts` (the gate: Access → the old paths' 410 →
 `/api/csrf` → the owner API, private headers on every response), `mail.ts` (the `Mail` entrypoint:

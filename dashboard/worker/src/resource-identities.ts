@@ -10,6 +10,7 @@ export const RESOURCE_IDENTITIES: Readonly<Record<string, string | null>> = {
   "mail-hero-db": "6c13e4c3-e239-42fb-a7a4-96810fa8d7dc",
   "mailsort-state": "7dd130a08de1451cab2931db6a7d178d",
   "model-router-db": "79388b2a-1d62-49ad-9536-fb4cacd6c777",
+  "model-router-engine": "ca44d90abc6e4191996a0eefc39df3ce",
   "personal-mcp-subscriptions": "aa1c7803e2a846c191102824560a9fac",
   "recall-state": "7186ddeb99e748d19325e1e217470199",
   "tasks-db": "79a1f345-1183-46c3-bc6a-651be106f90c",

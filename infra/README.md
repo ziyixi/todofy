@@ -102,6 +102,9 @@ imports their actual IDs before switching to the managed references.
 | `cloudflare_zero_trust_access_application.recall_machine` | recall machine routes | Only the exact `/api/machine/v1/batches` and `/api/machine/v1/changes` and the blobs under `/api/machine/v1/blobs/*`; the Worker checks each route's own bearer token (recall/docs/design.md §2.1) |
 | `cloudflare_zero_trust_access_policy.recall_machine` | recall machine routes only | Bypass policy attached only to the machine-routes application; no owner API bypass |
 | `cloudflare_zero_trust_access_application.owner["brief"]` | Access app "brief" | `brief.ziyixi.science` (the whole host), session 24h, the two shared policies. **Created** here before the brief's first deploy, not imported; its AUD and id are then committed ([Adding an app](#adding-an-app)) |
+| `cloudflare_zero_trust_access_application.owner["model-router"]` | Model Router owner console | Whole configured Models host; the shared owner policies protect request history, bodies and Playground |
+| `cloudflare_zero_trust_access_application.model_router_inference` | Model Router machine routes | Only ModelService's catalog, generation, embedding and conversation paths; the Worker checks owner JWT or the Newsletter token |
+| `cloudflare_zero_trust_access_policy.model_router_inference` | Model Router machine-routes policy | Bypass for those exact paths; console and request-history paths retain owner Access |
 | `cloudflare_zero_trust_access_application.brief_feedback` | brief-feedback | Only the exact `/feedback` path (the email's vote links); the Worker verifies each link's signed token (brief/docs/design.md §10) |
 | `cloudflare_zero_trust_access_policy.brief_feedback` | brief feedback only | Bypass policy attached only to the feedback application; no owner API bypass |
 | `cloudflare_zero_trust_access_application.fleet_receipt` | Fleet machine receipt | Only the exact `/api/internal/fleet/v1/receipt` path; Worker independently validates signed POST receipts |
@@ -118,6 +121,7 @@ imports their actual IDs before switching to the managed references.
 | `cloudflare_zero_trust_access_application.mail_hero_backup` | Access app "Mail Hero backup API" | `mail-hero.ziyixi.science/api/internal/backup/*`. Used by the backup collector's machine identity (mail-hero/AGENTS.md §7). **Frozen**: an apply refuses any write to it ([Apply](#apply-p4)) |
 | `cloudflare_d1_database.app["mail-hero" \| "todofy" \| "links" \| "tasks" \| "model-router"]` | D1 databases | Existence only |
 | `cloudflare_r2_bucket.app["mail-hero-store" \| "mail-hero-backups" \| "todofy-backups" \| "recall-store" \| "tasks-backups" \| "watch-evidence" \| "model-router-request-bodies"]` | R2 buckets | Existence only. `recall-store` was **created** here before recall's first deploy, and `tasks-backups` was created here before Tasks bound it for its own weekly backup. `watch-evidence` stores Watch's private page evidence and screenshots |
+| `cloudflare_r2_bucket_lifecycle.model_router_request_bodies` | Model Router body expiry | Seven-day lifecycle for the private request-body bucket, including orphaned objects |
 
 **Never edit these objects in the Cloudflare dashboard** (the links app's application included). A
 hand edit is drift: the next "Infra apply" reverts it, and before the first apply it would even turn an import into
