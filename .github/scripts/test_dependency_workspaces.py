@@ -125,11 +125,13 @@ class DependencyWorkspaces(unittest.TestCase):
         self.assertLess(steps.index(python), steps.index(install))
 
     def test_all_check_installers_use_the_workspace_and_root_uv_lock(self):
+        for path in (ROOT / ".github/actions").glob("*/action.yml"):
+            with self.subTest(action=path.parent.name):
+                self.assertNotIn("npm ci", path.read_text())
         for path in (ROOT / ".github/actions").glob("check-*/action.yml"):
             action = workflow_data(path)
             steps = action["runs"]["steps"]
             with self.subTest(action=path.parent.name):
-                self.assertNotIn("npm ci", path.read_text())
                 if any("npm " in step.get("run", "") or "npx " in step.get("run", "") or "pnpm " in step.get("run", "") for step in steps):
                     install = next(step for step in steps if step.get("uses") == "./.github/actions/setup-workspace")
                     self.assertEqual(install["with"]["root"], ".")
@@ -137,25 +139,6 @@ class DependencyWorkspaces(unittest.TestCase):
                     if step.get("uses", "").startswith("astral-sh/setup-uv@"):
                         self.assertEqual(step["with"]["working-directory"], ".")
                         self.assertIn("uv.lock", step["with"]["cache-dependency-glob"].splitlines())
-
-    def test_old_release_installs_only_run_for_sources_without_a_root_lock(self):
-        required = "inputs.required == 'true'"
-        modern = required + " && hashFiles('.release-source/pnpm-lock.yaml') != ''"
-        legacy = required + " && hashFiles('.release-source/pnpm-lock.yaml') == ''"
-        for path in (ROOT / ".github/actions").glob("release-*/action.yml"):
-            with self.subTest(action=path.parent.name):
-                steps = workflow_data(path)["runs"]["steps"]
-                workspace = next(step for step in steps if step.get("uses") == "./.github/actions/setup-workspace")
-                self.assertEqual(workspace["if"], modern)
-                self.assertEqual(workspace["with"]["root"], ".release-source")
-                for step in steps:
-                    if step.get("uses", "").startswith("actions/setup-node@"):
-                        self.assertEqual(step["if"], legacy)
-                    script = step.get("run", "")
-                    if "npm ci" in script or "pnpm install" in script:
-                        if step["if"] != legacy:
-                            self.assertEqual(step["if"], required)
-                            self.assertIn('if [ ! -f "$GITHUB_WORKSPACE/.release-source/pnpm-lock.yaml" ]; then', script)
 
     def test_root_node_inputs_reach_all_members_and_generated_python_consumers(self):
         for path in ci_changes.NODE_WORKSPACE_INPUTS:

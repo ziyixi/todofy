@@ -21,22 +21,11 @@ runs:
   using: composite
   steps:
     - name: Install the selected Node workspaces
-      if: inputs.required == 'true' && hashFiles('.release-source/pnpm-lock.yaml') != ''
+      if: inputs.required == 'true'
       uses: ./.github/actions/setup-workspace
       with:
         root: .release-source
         filters: 'tasks-worker... @ziyixi/tasks-web...'
-    - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-      if: inputs.required == 'true' && hashFiles('.release-source/pnpm-lock.yaml') == ''
-      with:
-        node-version: '26'
-        cache: npm
-        cache-dependency-path: |
-          .release-source/tasks/worker/package-lock.json
-          .release-source/tasks/web/package-lock.json
-          .release-source/proto/package-lock.json
-          .release-source/packages/planning-ui/package-lock.json
-          .release-source/packages/task-dates/package-lock.json
     - name: Read the host and the Access issuer from the committed config
       if: inputs.required == 'true'
       id: config
@@ -56,12 +45,6 @@ runs:
       working-directory: .release-source/tasks
       shell: bash -e {0}
       run: |
-        if [ ! -f "$GITHUB_WORKSPACE/.release-source/pnpm-lock.yaml" ]; then
-          npm ci --prefix ../packages/planning-ui --no-audit --no-fund
-          npm ci --prefix ../packages/task-dates --no-audit --no-fund
-          npm ci --prefix worker --no-audit --no-fund
-          npm ci --prefix web --no-audit --no-fund
-        fi
         npm run build --prefix web
     - name: Write the Worker secrets file
       if: inputs.required == 'true'

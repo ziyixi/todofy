@@ -122,11 +122,7 @@ class WorkerReleaseWorkflow(unittest.TestCase):
                         self.assertEqual(app, "model-router")
                         self.assertEqual(field(step, "if"), "inputs.app == 'model-router'")
                         continue
-                    self.assertIn(field(step, "if"), {
-                        REQUIRED,
-                        REQUIRED + " && hashFiles('.release-source/pnpm-lock.yaml') == ''",
-                        REQUIRED + " && hashFiles('.release-source/pnpm-lock.yaml') != ''",
-                    }, step.splitlines()[0])
+                    self.assertEqual(field(step, "if"), REQUIRED, step.splitlines()[0])
 
     def test_success_record_requires_successful_probes_and_uses_the_selected_sha(self):
         for app in APPS:

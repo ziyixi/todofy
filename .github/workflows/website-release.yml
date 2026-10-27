@@ -106,24 +106,10 @@ jobs:
           print("SITE_URL=" + result["website_url"])
           PYTHON
       - name: Install the selected Node workspaces
-        if: hashFiles('pnpm-lock.yaml') != ''
         uses: ./.github/actions/setup-workspace
         with:
           root: .
           filters: 'ziyixi-personal-website...'
-      - name: Use the selected legacy website Node version
-        if: hashFiles('pnpm-lock.yaml') == ''
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: website/.nvmrc
-      - name: Install the shared proto toolchain
-        if: hashFiles('pnpm-lock.yaml') == ''
-        run: npm ci --prefix ../proto --no-audit --no-fund
-      - name: Install the pinned pnpm and locked dependencies
-        if: hashFiles('pnpm-lock.yaml') == ''
-        run: |
-          corepack enable
-          pnpm install --frozen-lockfile
       - name: Assert the trusted release context and the pinned commit
         env:
           GITHUB_TOKEN: ${{ github.token }}
