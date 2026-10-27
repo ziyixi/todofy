@@ -50,7 +50,9 @@ denominator. Existing imported history, task IDs and old GTD day rows remain int
 Root proto defines one owner-authenticated, read-only `GetGtdReport`, for 1–31 account-local days and optional
 Work/Personal filtering. Five indexed D1 statements return daily counts, totals, membership and at most 100
 related task rows. Summary totals include the full matching period; the UI states when details are limited.
-The report does not read Mail. The existing `GtdDay` and weekly-review APIs remain compatible.
+The report does not read Mail. The day counts (`gtd_days`) are still written daily for the Sunday review and
+Ops; `ListGtdDays` and `ListWeeklyReviews` had no caller left and were retired (`proto/retired.json`), with no
+410 route: a stale tab gets the reload prompt from `x-tasks-build`. `GetWeeklyReview` remains.
 
 `gtd_week_commitments` retains membership in the same transaction as task create/update. The small
 `gtd_reporting` singleton holds capture start. Existing day-queue rows provide Step membership; there is no new

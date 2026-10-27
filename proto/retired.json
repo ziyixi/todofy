@@ -44,7 +44,9 @@
     {"service": "todofy.ui.v1.PlusService", "name": "CompleteTask", "since": "2026-10-20", "reason": "Tasks completes a task and settles its Focus day itself; the FlowDay settlement Todofy added is gone"},
     {"service": "todofy.ui.v1.TodofyUiService", "name": "ListDailyReminders", "since": "2026-10-21", "reason": "Home sends the daily reminder; Todofy no longer creates it, and its owner page is gone"},
     {"service": "todofy.ui.v1.TodofyUiService", "name": "ListGtdDays", "since": "2026-10-21", "reason": "Tasks keeps GTD (tasks.ui.v1 ListGtdDays); Todofy no longer takes the snapshot, and its owner page is gone"},
-    {"service": "todofy.ui.v1.TodofyUiService", "name": "ListGtdReviews", "since": "2026-10-21", "reason": "Tasks keeps GTD; Todofy no longer creates the weekly review, and its owner page is gone"}
+    {"service": "todofy.ui.v1.TodofyUiService", "name": "ListGtdReviews", "since": "2026-10-21", "reason": "Tasks keeps GTD; Todofy no longer creates the weekly review, and its owner page is gone"},
+    {"service": "tasks.ui.v1.TasksUiService", "name": "ListGtdDays", "since": "2026-10-27", "reason": "GetGtdReport replaced the GTD page's day list; nothing calls it, and the daily counts stay in D1 for the Sunday review and ops"},
+    {"service": "tasks.ui.v1.TasksUiService", "name": "ListWeeklyReviews", "since": "2026-10-27", "reason": "nothing calls it: Plan's review reads one week with GetWeeklyReview"}
   ],
   "messages": [
     {"message": "todofy.ui.v1.IssueExtensionConnectionRequest", "since": "2026-10-18", "reason": "used only by a retired PlusService method"},
@@ -104,6 +106,12 @@
     {"message": "todofy.ui.v1.ListGtdReviewsResponse", "since": "2026-10-21", "reason": "used only by a retired TodofyUiService method"},
     {"message": "todofy.ui.v1.GtdDay", "since": "2026-10-21", "reason": "used only by a retired TodofyUiService method"},
     {"message": "todofy.ui.v1.GtdScope", "since": "2026-10-21", "reason": "used only by a retired TodofyUiService method"},
-    {"message": "todofy.ui.v1.GtdReview", "since": "2026-10-21", "reason": "used only by a retired TodofyUiService method"}
+    {"message": "todofy.ui.v1.GtdReview", "since": "2026-10-21", "reason": "used only by a retired TodofyUiService method"},
+    {"message": "tasks.ui.v1.ListGtdDaysRequest", "since": "2026-10-27", "reason": "used only by a retired TasksUiService method"},
+    {"message": "tasks.ui.v1.ListGtdDaysResponse", "since": "2026-10-27", "reason": "used only by a retired TasksUiService method"},
+    {"message": "tasks.ui.v1.ListWeeklyReviewsRequest", "since": "2026-10-27", "reason": "used only by a retired TasksUiService method"},
+    {"message": "tasks.ui.v1.ListWeeklyReviewsResponse", "since": "2026-10-27", "reason": "used only by a retired TasksUiService method"},
+    {"message": "tasks.ui.v1.GtdDay", "since": "2026-10-27", "reason": "used only by a retired TasksUiService method's response"},
+    {"message": "tasks.ui.v1.GtdScope", "since": "2026-10-27", "reason": "used only by the retired GtdDay"}
   ]
 }
