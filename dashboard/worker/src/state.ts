@@ -601,7 +601,7 @@ export class HomeState extends DurableObject<Env> {
     }
     let plan = driftPlan(now, pending, doc, configured, recheck);
     if (plan.kind === 'abandon') {
-      // A run of an earlier day did not finish: that day failed.
+      // A run of an earlier day did not finish: that day failed, unless it already completed or gave up (failedDoc).
       doc = failedDoc(doc, plan.run, { code: 'incomplete', step: plan.run.account === null ? 'account' : 'script' }, now, true);
       this.putDoc('drift', doc, now);
       this.deleteDoc('drift_run');

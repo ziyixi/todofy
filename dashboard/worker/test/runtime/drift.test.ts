@@ -280,7 +280,9 @@ describe('the daily drift check', () => {
       expect(calls.some(call => call.url.endsWith('/workers/scripts'))).toBe(true);
       const audit = calls.find(call => call.url.includes('/logs/audit?'));
       expect(audit).toBeDefined();
-      expect(new URL(audit?.url ?? '').searchParams.get('since')).toBe(new Date(previousAuditUntil ?? 0).toISOString());
+      // The recheck keeps the audit cursor but still reads at least the last day.
+      expect(previousAuditUntil).toBe(start);
+      expect(new URL(audit?.url ?? '').searchParams.get('since')).toBe(new Date(NOW + MIN - DAY_MS).toISOString());
       expect((await h.refresh<CloudflareView>('cloudflare')).body?.refresh.refreshed).toBe(false);
       expect(h.cloudflare.requests).toEqual([]);
       await h.dispose();
@@ -325,6 +327,19 @@ describe('the daily drift check', () => {
     const after = await view<OpsView>(h, 'ops');
     expect(after.digest.items.filter((item) => item.code === 'drift_unavailable' || item.code === 'config_drift')).toEqual([]);
     expect((await view<CloudflareView>(h, 'cloudflare')).drift).toMatchObject({ status: 'ok', consecutive_failed_days: 0 });
+  });
+
+  it('drops a recheck still open at midnight without counting a failed day', async () => {
+    h = await startFlows();
+    const start = driftHour(0);
+    for (let k = 0; k < 5; k++) await h.tick(start + k * 30 * MIN);
+    const completed = (await view<CloudflareView>(h, 'cloudflare')).drift.checked_at;
+    expect((await h.refresh<CloudflareView>('cloudflare')).body?.drift).toMatchObject({ in_progress: true, checked_at: completed });
+    // The next day's first tick, before DRIFT_UTC_HOUR, abandons the recheck and starts nothing yet.
+    driftRequests(h);
+    await h.tick(start + DAY_MS - 60 * MIN);
+    expect(driftRequests(h)).toBe(0);
+    expect((await view<CloudflareView>(h, 'cloudflare')).drift).toMatchObject({ status: 'ok', checked_at: completed, in_progress: false, consecutive_failed_days: 0 });
   });
 
   it('makes no call without the token and says not_configured', async () => {

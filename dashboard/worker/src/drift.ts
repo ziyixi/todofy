@@ -29,7 +29,7 @@ export const DRIFT_CRONS_MAX = 10;
 export const SCRIPT_STEP_CALLS = 3;
 /** Audit log entries one check reads (one page; a full page marks the check truncated). */
 export const AUDIT_EVENTS_MAX = 100;
-/** The audit window starts at the previous check, at most this far back. */
+/** The audit window starts at the previous check or a day back, whichever is earlier, at most this far back. */
 export const AUDIT_LOOKBACK_MAX_MS = 7 * DAY_MS;
 
 // ---- the desired state ----------------------------------------------------------------------------
@@ -120,7 +120,7 @@ export interface DriftDoc {
   readonly findings: readonly DriftFinding[];
   readonly zones_unchecked: number;
   readonly truncated: boolean;
-  /** Where the last completed check's audit window ended (the next one starts there); null before the first. */
+  /** Where the last completed check's audit window ended (the next one starts there or earlier); null before the first. */
   readonly audit_until: number | null;
   readonly audit_unchecked: boolean;
   /** The UTC day whose check completed or gave up (no new check that day). */
@@ -448,9 +448,12 @@ export function driftPlan(now: number, run: DriftRunDoc | null, doc: DriftDoc, c
   return { kind: 'start' };
 }
 
-/** Today's run; its audit window starts where the previous completed check's ended (at most a week back). */
+/**
+ * Today's run; its audit window starts where the previous completed check's ended, but always covers at least the
+ * last day (so a refresh or recheck never replaces the day's account writes with a shorter window) and at most a week.
+ */
 export function newDriftRun(now: number, previous: DriftDoc, desiredHash: string | null = null): DriftRunDoc {
-  const since = Math.max(previous.audit_until ?? now - DAY_MS, now - AUDIT_LOOKBACK_MAX_MS);
+  const since = Math.max(Math.min(previous.audit_until ?? now - DAY_MS, now - DAY_MS), now - AUDIT_LOOKBACK_MAX_MS);
   return { desired_hash: desiredHash, day: utcDay(now), started_at: now, audit_since: since, account: null, pending: null, scripts: {}, attempts: 0 };
 }
 
@@ -629,8 +632,12 @@ export function completedDoc(previous: DriftDoc, run: DriftRunDoc, now: number, 
   };
 }
 
-/** The `drift` document after a failed attempt; `gaveUp` ends the day (no further attempt today). */
+/**
+ * The `drift` document after a failed attempt; `gaveUp` ends the day (no further attempt today). A day counts as
+ * failed at most once: giving up a recheck of a day that already completed or gave up adds no failed day.
+ */
 export function failedDoc(previous: DriftDoc, run: DriftRunDoc, error: { code: DriftErrorCode; step: DriftStep }, now: number, gaveUp: boolean): DriftDoc {
+  const newFailedDay = gaveUp && previous.last_run_day !== run.day;
   return {
     ...previous,
     last_error: error.code,
@@ -638,7 +645,7 @@ export function failedDoc(previous: DriftDoc, run: DriftRunDoc, error: { code: D
     last_error_at: now,
     running_day: gaveUp ? null : run.day,
     last_run_day: gaveUp ? run.day : previous.last_run_day,
-    consecutive_failed_days: gaveUp ? previous.consecutive_failed_days + 1 : previous.consecutive_failed_days,
+    consecutive_failed_days: newFailedDay ? previous.consecutive_failed_days + 1 : previous.consecutive_failed_days,
   };
 }
 

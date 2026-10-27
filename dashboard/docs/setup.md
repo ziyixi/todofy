@@ -81,11 +81,11 @@ two read-only purposes (both URLs are constants, not configuration):
 - the usage query: `POST .../graphql` (`worker/src/usage.ts`), at most once per tick and once per
   minute on an owner refresh;
 - the daily configuration drift check (`worker/src/drift.ts`, [`design-v2.md`](design-v2.md) §10):
-  `GET` on the account's Worker scripts, Custom Domains and audit log (writes since the previous check
-  not made with an API token), the zone's Worker routes, and each Worker's schedules, settings and
-  subdomain flags, at most 12 calls per tick on about four ticks a day. Only binding names and types are
-  kept from the settings, and only the way in, resource and action from the audit log; values, addresses
-  and ids are dropped while parsing. Audit writes appear under 最近账户操作 as history and do not count
+  `GET` on the account's Worker scripts, Custom Domains and audit log (writes not made with an API token
+  since the previous check, at least over the last day), the zone's Worker routes, and each Worker's
+  schedules, settings and subdomain flags, at most 12 calls per tick on about four ticks a day. Only
+  binding names and types are kept from the settings, and only the way in, resource and action from the
+  audit log; values, addresses and ids are dropped while parsing. Audit writes appear under 最近账户操作 as history and do not count
   as configuration differences. Read-only query resources are excluded even if the audit action says `create`.
 
 It is never logged, stored, echoed to the page or sent anywhere else, and unit tests check that it

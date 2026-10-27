@@ -413,7 +413,9 @@ tick, four Workers on each next one, so a check of the 11 Workers takes four tic
 makes at most 27 outbound calls in all, §5). A failed step is retried by the next tick; after `DRIFT_MAX_ATTEMPTS` (3)
 failed attempts the day is given up (`consecutive_failed_days` + 1), and a run left unfinished at the end
 of its UTC day counts as a failed day too, as does a `drift_run` document that would pass
-`DRIFT_RUN_MAX_BYTES` (60,000 bytes, under the 64 KiB row limit; this account's is about 6 KB). Every answer is reduced at once to names, types and flags:
+`DRIFT_RUN_MAX_BYTES` (60,000 bytes, under the 64 KiB row limit; this account's is about 6 KB). A day counts at
+most once: a recheck of a day that already completed or was given up adds no failed day when it fails or is left
+unfinished. Every answer is reduced at once to names, types and flags:
 a binding keeps only `name` and `type`, so a `plain_text` value (and every id) never leaves the parser;
 remote text never leaves `drift.ts` (failures become `http_<n>`, `timeout`, `network_error`,
 `invalid_response`, `api_error`). Logs carry the outcome code and counts only.
@@ -437,9 +439,11 @@ configuration total and status.
 
 **Changes outside CI.** CI deploys and applies only with API tokens, so a write through any other way in is
 a change outside CI: a dashboard edit (token edits included), a laptop's `wrangler login` deploy, a Global
-API Key. The audit window runs from where the previous completed check's ended (`audit_until`; the day
-before on the first check, at most `AUDIT_LOOKBACK_MAX_MS`, a week, back) to the run's start, so each change
-is reported once, the day after it happened, and its finding clears with the next check. The query asks for
+API Key. The audit window runs from where the previous completed check's ended (`audit_until`) or from a day
+before the run's start, whichever is earlier (at most `AUDIT_LOOKBACK_MAX_MS`, a week, back), to the run's start.
+So every check, the daily one, a refresh or a recheck, shows at least the last day's changes, and a recheck soon
+after a check never replaces them with a shorter window; a change can therefore appear in more than one check
+within a day, and its finding clears with the first check whose window no longer covers it. The query asks for
 `create` / `update` / `delete` by those contexts (`AUDIT_EVENTS_MAX`, 100, entries; a full page marks the
 check `truncated`); `drift.ts` filters again, drops what the dashboard records as a write while the owner only
 looks (`analytics`, `observability.*` and other `*.query` resources, including

@@ -309,6 +309,28 @@ describe('a run across ticks', () => {
     expect(driftPlan(AT(`${hour}:30`), running, NO_DRIFT, true, true)).toEqual({ kind: 'continue', run: running });
     expect(driftPlan(AT(`${hour}:00`) + 86_400_000, running, NO_DRIFT, true)).toEqual({ kind: 'abandon', run: running });
   });
+
+  it('counts a day as failed at most once: a recheck given up or left unfinished adds no failed day', () => {
+    const incomplete = { code: 'incomplete' as const, step: 'account' as const };
+    const completed: DriftDoc = { ...NO_DRIFT, checked_at: AT('02:30'), audit_until: AT('02:00'), last_run_day: DAY };
+    // A refresh rechecks the completed day late; the run is still open at midnight and the next day abandons it.
+    const recheck = newDriftRun(AT('23:50'), completed);
+    const nextDay = AT('00:30') + 86_400_000;
+    expect(driftPlan(nextDay, recheck, completed, true)).toEqual({ kind: 'abandon', run: recheck });
+    expect(failedDoc(completed, recheck, incomplete, nextDay, true)).toMatchObject({
+      checked_at: AT('02:30'),
+      last_run_day: DAY,
+      running_day: null,
+      consecutive_failed_days: 0,
+    });
+    // A day that already gave up is not counted again when its recheck gives up too.
+    const gaveUp = failedDoc(NO_DRIFT, newDriftRun(AT('02:00'), NO_DRIFT), { code: 'http_500', step: 'script' }, AT('03:00'), true);
+    expect(gaveUp.consecutive_failed_days).toBe(1);
+    expect(failedDoc(gaveUp, newDriftRun(AT('12:00'), gaveUp), { code: 'http_500', step: 'script' }, AT('12:30'), true).consecutive_failed_days).toBe(1);
+    // The first check of a new day that never finishes still counts.
+    const firstNextDay = newDriftRun(AT('02:00') + 86_400_000, completed);
+    expect(failedDoc(completed, firstNextDay, incomplete, AT('00:30') + 2 * 86_400_000, true).consecutive_failed_days).toBe(1);
+  });
 });
 
 describe('changes made outside CI (the audit log)', () => {
@@ -369,6 +391,14 @@ describe('changes made outside CI (the audit log)', () => {
     expect(driftView(doc, true, AT('03:00')).status).toBe('ok');
     expect(JSON.stringify(doc)).not.toContain(SENTINEL_VALUE);
     expect(newDriftRun(AT('02:00') + 86_400_000, doc).audit_since).toBe(AT('02:00'));
+  });
+
+  it('reads at least the last day, so a refresh or recheck soon after a check keeps showing the writes of that day', () => {
+    const checked: DriftDoc = { ...NO_DRIFT, checked_at: AT('02:30'), audit_until: AT('02:00'), last_run_day: DAY };
+    expect(newDriftRun(AT('12:00'), checked).audit_since).toBe(AT('12:00') - 86_400_000);
+    expect(newDriftRun(AT('02:00'), NO_DRIFT).audit_since).toBe(AT('02:00') - 86_400_000);
+    // A window that ended more than a day ago still starts where it ended.
+    expect(newDriftRun(AT('02:00') + 2 * 86_400_000, checked).audit_since).toBe(AT('02:00'));
   });
 
   it('reads at most a week back, however long ago the last check was', () => {
