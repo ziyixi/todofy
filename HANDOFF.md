@@ -61,6 +61,13 @@ Gateway's legacy calls keep their existing monitor shape; only common-API calls 
 Platform observer reads that downstream output leniently and retains valid counters across future additive fields.
 
 
+Full branch CI40444321295 passed Router, Linux gateway, Platform, Newsletter and the Tasks runtime/CPU cases.
+Its remaining failures exposed stale keyless-auth browser/runtime fixtures, the fifteen-Worker drift fixture,
+three proto fixture lists and one test formatting error. Focused reruns pass; the next complete gate is pending.
+The pre-release live baseline found all four VPS Deployments ready but stale Pod host addresses and unavailable
+in-cluster API observation. Owner was given one sudo restart plus the existing Newsletter two-field Secret patch;
+the command is not yet confirmed. No production application or model setting has been changed for this rollout.
+
 ### Tasks Sunday planning week (`codex/tasks-next-step-estimate`)
 
 Owner chose Sunday as the first calendar day and Saturday-to-Sunday 00:00 account-local rollover.

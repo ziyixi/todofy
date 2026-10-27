@@ -345,11 +345,14 @@ export async function createTask(
   request: APIRequestContext,
   task: Json,
 ): Promise<{ id: string; name: string; etag: string; title: string }> {
-  const { token } = await (await request.get("/api/tasks/csrf")).json();
   const response = await request.post(
     `/api/tasks/v1/tasks?request_id=${crypto.randomUUID()}`,
     {
-      headers: { "x-csrf-token": token, origin: "http://127.0.0.1:8798" },
+      headers: {
+        "x-csrf-token": "1",
+        origin: "http://127.0.0.1:8798",
+        "content-type": "application/json",
+      },
       data: task,
     },
   );
@@ -357,7 +360,7 @@ export async function createTask(
   return response.json();
 }
 
-/** The dev server's own Tasks API as the owner, in a request context of its own, so the page's CSRF cookie stays. */
+/** The dev server's own Tasks API with the same keyless JSON mutation headers as the page. */
 interface TasksApi {
   read(path: string): Promise<Json | undefined>;
   write(path: string, data: Json): Promise<Json>;
@@ -367,7 +370,6 @@ interface TasksApi {
 async function withTasks<T>(use: (api: TasksApi) => Promise<T>): Promise<T> {
   const context = await apiRequest.newContext({ baseURL: ORIGIN });
   try {
-    const { token } = await (await context.get("/api/tasks/csrf")).json();
     return await use({
       async read(path) {
         const response = await context.get(path);
@@ -377,7 +379,11 @@ async function withTasks<T>(use: (api: TasksApi) => Promise<T>): Promise<T> {
       },
       async write(path, data) {
         const response = await context.post(path, {
-          headers: { "x-csrf-token": token, origin: ORIGIN },
+          headers: {
+            "x-csrf-token": "1",
+            origin: ORIGIN,
+            "content-type": "application/json",
+          },
           data,
         });
         expect(response.status(), `POST ${path}`).toBe(200);
@@ -385,7 +391,11 @@ async function withTasks<T>(use: (api: TasksApi) => Promise<T>): Promise<T> {
       },
       async patch(path, data) {
         const response = await context.patch(path, {
-          headers: { "x-csrf-token": token, origin: ORIGIN },
+          headers: {
+            "x-csrf-token": "1",
+            origin: ORIGIN,
+            "content-type": "application/json",
+          },
           data,
         });
         expect(
@@ -396,7 +406,11 @@ async function withTasks<T>(use: (api: TasksApi) => Promise<T>): Promise<T> {
       },
       async remove(path) {
         const response = await context.delete(path, {
-          headers: { "x-csrf-token": token, origin: ORIGIN },
+          headers: {
+            "x-csrf-token": "1",
+            origin: ORIGIN,
+            "content-type": "application/json",
+          },
         });
         expect(response.status(), `DELETE ${path}`).toBe(200);
       },

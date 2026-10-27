@@ -127,11 +127,14 @@ def test_old_core_gemini_map_field_is_dropped_before_validation(retired: object,
     assert secrets_file_problem("core", path) is None
 
 
-@pytest.mark.parametrize("worker,field,name", [
-    ("core", "TODOFY_CORE_WORKER_SECRETS", "ANTHROPIC_API_KEY"),
-    ("core", "TODOFY_CORE_WORKER_SECRETS", "GEMINI_API_KEY_EXTRA"),
-    ("gateway", "TODOFY_WORKER_SECRETS", "GEMINI_API_KEY"),
-])
+@pytest.mark.parametrize(
+    "worker,field,name",
+    [
+        ("core", "TODOFY_CORE_WORKER_SECRETS", "ANTHROPIC_API_KEY"),
+        ("core", "TODOFY_CORE_WORKER_SECRETS", "GEMINI_API_KEY_EXTRA"),
+        ("gateway", "TODOFY_WORKER_SECRETS", "GEMINI_API_KEY"),
+    ],
+)
 def test_provider_keys_cannot_enter_another_todofy_github_map(worker: str, field: str, name: str) -> None:
     with pytest.raises(SettingError, match=field):
         generate_secrets(worker, VALID | {field: json.dumps({name: "synthetic-private-provider-key"})})

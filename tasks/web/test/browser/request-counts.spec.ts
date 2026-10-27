@@ -119,7 +119,7 @@ test("opening a task reads it once, its children only when it has some, and noth
   expect(todofy).toEqual([]);
 });
 
-test("a dialog save on a list page writes once and reads the list and the catalog once, with the token read at load", async ({
+test("a dialog save writes once and reads the list and catalog once without a token roundtrip", async ({
   page,
   request,
 }) => {
@@ -143,8 +143,8 @@ test("a dialog save on a list page writes once and reads the list and the catalo
   });
   await expect(stage).toBeVisible();
   await settled(page);
-  // The session's token is read while the page loads, not on a write's path.
-  expect(sent.filter((line) => line === "GET /api/tasks/csrf")).toHaveLength(1);
+  // Mutations send the fixed custom header directly, with no token request at load or save.
+  expect(sent.filter((line) => line === "GET /api/tasks/csrf")).toHaveLength(0);
   sent.length = 0;
   await stage.selectOption("weekly");
   await dialog
