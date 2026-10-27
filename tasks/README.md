@@ -77,7 +77,7 @@ A Step cannot contain children. Task details can add, complete, reopen or delete
 of child. A dependency names its prerequisite; Blocked is derived from unfinished prerequisites. A task waits
 for at most 5 tasks, the account holds at most 300 dependencies, and none may close a cycle.
 
-[Goals](docs/goals.md) describes the annual view, the optional associations and the one-time private Notion import.
+[Goals](docs/goals.md) describes the annual view, the optional associations and the annual private Notion import.
 Routine and exploration goals keep their own notes; exploration has no required metrics or completion score.
 
 Completing a task completes its open children, recurring ones included. Completing a recurring task records

@@ -61,9 +61,9 @@ first authenticated catalog request with the unchanged 10 ms budget; each sample
 catalog encoding, with no warm-up request or retry. Warm endpoint bounds and worst-case fixtures are unchanged.
 These calibrated local profiles detect regressions; they do not guarantee production latency or CPU use.
 
-## One-time Notion import
+## Annual Notion import
 
-The owner-authorized Notion page is read once and converted into private JSON outside the repository. The Worker
+Each year the owner-authorized Notion page is read once and converted into private JSON outside the repository. The Worker
 does not receive a Notion token or fetch Notion. Preserve the original descriptions, Floor/Ceiling text and rules,
 with a source URL. An unscored exploration remains unscored. Do not invent progress, milestones, current focus,
 task associations or completions from the source's plans.
