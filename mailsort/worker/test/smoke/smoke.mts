@@ -216,7 +216,7 @@ async function run(origin: string, up: FakeUpstream, setClock: (now: number) => 
   try { await api.startReplayEvaluation({ name: 'replayEvaluation', requestId: id() }); } catch { refused = true; }
   check(refused && up.ai.calls.length === 0, 'retired model replay is refused and no Workers AI calls execute');
   const budget = (await api.getServiceStatus({ name: 'serviceStatus' })).claudeBudget;
-  check(budget?.model === 'models/claude-opus-5-5' && budget.effort === 'medium' && budget.limitUsd === 20 && budget.spentUsd > 0 && budget.inputTokens > 0, 'owner status exposes recorded Claude usage and the monthly cap');
+  check(budget?.model === 'claude-opus-5-5' && budget.effort === 'medium' && budget.limitUsd === 20 && budget.spentUsd > 0 && budget.inputTokens > 0, 'owner status exposes recorded Claude usage and the monthly cap');
   const flow = await api.getMailFlow({ name: 'mailFlows/today' });
   check(flow.counts.some(item => item.stage === MailFlow_Stage.CLAUDE && item.outcome === MailFlow_Outcome.ARCHIVED), 'flow attributes new decisions to Claude');
   force('p2');

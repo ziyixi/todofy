@@ -60,7 +60,9 @@ providers52; TS/Python clients6/5; Mailsort190 unit/123 runtime; Brief109 unit/4
 Newsletter2265; Gateway42 plus Linux-only skip and offline image probe; Todofy UI85, full runtime361
 then39 affected corrected fixture tests. All affected types/lint/format checks passed. API lint77 files,
 scoped breaking checks, catalog/config generation and Infra tests48+102 passed. These are local checks;
-the new API has not yet been published. Full branch CI remains required.
+the new API has not yet been published. First branch CI40476771338 caught two stale native-model
+assertions and the missing Home backup-resource registration. Those are corrected; the 16-app registry now
+uses a 20KiB soft response budget (64KiB hard stress budget unchanged). Corrected full branch CI remains required.
 
 Backup copies completed D1 request rows and retained bodies in bounded steps. Seven-day lifecycle uses
 one new private bucket, with initial backup armed through Ops and daily04:47UTC trigger. Synthetic tests

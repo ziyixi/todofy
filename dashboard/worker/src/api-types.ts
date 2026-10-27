@@ -21,7 +21,7 @@
  *
  * | Method                | HTTP                                  | Served by      | Budget per call                |
  * | --------------------- | ------------------------------------- | -------------- | ------------------------------ |
- * | GetRegistry           | GET  /api/v1/registry                 | Worker (no DO) | ≤ 16 KiB; ETag "<build>" → 304 |
+ * | GetRegistry           | GET  /api/v1/registry                 | Worker (no DO) | ≤ 20 KiB; ETag "<build>" → 304 |
  * | GetHomeView           | GET  /api/v1/homeView                 | DO, 1 call     | ≤ 10 KiB; ≤ 40 rows read       |
  * | GetFlowsView          | GET  /api/v1/flowsView                | DO, 1 call     | ≤ 20 KiB; ≤ 40 rows read       |
  * | GetCloudflareView     | GET  /api/v1/cloudflareView           | DO, 1 call     | ≤ 24 KiB; ≤ 40 rows read       |
@@ -309,7 +309,8 @@ export const BREAKDOWN_UNCLASSIFIED = 'unknown';
  */
 export const VIEW_BODY_MAX = 64 * 1024;
 export const VIEW_BODY_BUDGET = {
-  registry: 16 * 1024,
+  // Sixteen apps and their registered resources occupy about 16.1 KiB.
+  registry: 20 * 1024,
   home: 10 * 1024,
   // Six flows: 16.1 KB on the mockup day (2026-09-30), 17.4 KB in the workerd suite's full canary history with 20
   // Workers.

@@ -23,10 +23,10 @@ const ANSWERS: Readonly<Record<string, Record<string, unknown>>> = {
   RecomputeReport: { recommendation: reports.recommendations.at(-1) },
   GetLegacyText: fixtures.legacyText(),
   GetModelSettings: {
-    settings: { name: 'modelSettings', email_model: 'models/gemini-email', report_model: 'models/gemini-report', etag: '0' },
-    models: [{ name: 'models/sol-6-1', configured: true, generation: true }],
+    settings: { name: 'modelSettings', email_model: 'gemini-3.5-flash-lite', report_model: 'gemini-3.8-flash', etag: '0' },
+    models: [{ id: 'gpt-6.1-sol', provider: 'openai', kind: 'text', configured: true }],
   },
-  UpdateModelSettings: { name: 'modelSettings', email_model: 'models/sol-6-1', report_model: 'models/gemini-report', etag: '1' },
+  UpdateModelSettings: { name: 'modelSettings', email_model: 'gpt-6.1-sol', report_model: 'gemini-3.8-flash', etag: '1' },
 };
 
 /**

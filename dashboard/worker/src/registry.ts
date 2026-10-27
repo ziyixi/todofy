@@ -292,7 +292,7 @@ const ENTRIES: readonly EntryDef[] = [
     access: true,
     status: { type: 'ops_v1', binding: 'MODEL_ROUTER', guard: false },
     tile_metric: null,
-    app_only_signals: ['model_execution_unknown'],
+    app_only_signals: ['model_execution_unknown', 'backup_stale'],
     order: 31,
   },
   // END service-catalog entries
@@ -339,6 +339,7 @@ const RESOURCES: readonly ResourceDef[] = [
   { id: 'model-router-db', kind: 'd1', name: 'Model Router 请求元数据', entry: 'model-router', match: RESOURCE_IDENTITIES['model-router-db'] ?? null },
   { id: 'model-router-engine', kind: 'do', name: 'RouterEngine', entry: 'model-router', script: 'model-router', match: RESOURCE_IDENTITIES['model-router-engine'] ?? null, todo: '首次发布后记录 DO namespace 到 config/resources.toml' },
   { id: 'model-router-request-bodies', kind: 'r2', name: 'Model Router 七天请求内容', entry: 'model-router', match: 'model-router-request-bodies' },
+  { id: 'model-router-backups', kind: 'r2', name: 'Model Router 每日备份', entry: 'model-router', match: 'model-router-backups' },
   { id: 'infra-state', kind: 'r2', name: '基础设施状态存储', entry: 'home', match: 'infra-state' },
   { id: 'fleet-state', kind: 'do', name: 'FleetState', entry: 'fleet', script: 'fleet', match: RESOURCE_IDENTITIES['fleet-state'] ?? null, todo: '首次 Fleet 发布后，记录 DO namespace 到 config/resources.toml' },
   { id: 'mailsort-state', kind: 'do', name: 'MailsortState', entry: 'mailsort', script: 'mailsort', match: RESOURCE_IDENTITIES['mailsort-state'] ?? null, todo: '首次 mailsort 发布后，记录 DO namespace 到 config/resources.toml' },
