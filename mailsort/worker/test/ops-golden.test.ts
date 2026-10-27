@@ -76,7 +76,7 @@ function cases(): Record<string, unknown> {
 
   const degraded = store();
   // A breaker stored by an older release is neither a signal nor a mode any more.
-  degraded.setMeta('settings', JSON.stringify({ ...DEFAULTS, mode: 'live', breaker: 'daily_limit', etag: 'legacy' }));
+  degraded.setMeta('settings', JSON.stringify({ ...DEFAULTS, mode: 'live', classificationProvider: 'claude', breaker: 'daily_limit', etag: 'legacy' }));
   usage(degraded, 160, 150, 3, 8100);
   degraded.run(`UPDATE usage SET quota_exhausted = 1`);
   degraded.setMeta('auth_state', 'failed');
@@ -174,12 +174,20 @@ test('the auth failure is critical (it reaches Home attention and the digest); t
   expect(degraded.modes).toMatchObject({ live: true, breaker: false });
 });
 
-test('Claude errors become safe owner-action or availability signals', () => {
+test('model errors become safe configuration, capacity or availability signals for the selected provider', () => {
   const target = store();
   target.setMeta('auth_state', 'ok');
   target.setMeta('last_sync_at', String(NOW));
-  for (const [code, expected] of [['claude_not_configured', 'claude_not_configured'], ['claude_auth', 'claude_auth'], ['claude_http_429', 'claude_unavailable'], ['claude_bad_items', 'claude_unavailable']]) {
+  writeSettings(target, { ...DEFAULTS, classificationProvider: 'claude' }, NOW);
+  for (const [code, expected] of [['claude_not_configured', 'claude_not_configured'], ['claude_auth', 'claude_auth'], ['claude_not_allowed', 'claude_auth'], ['claude_quota', 'claude_unavailable'],
+    ['claude_http_429', 'claude_unavailable'], ['claude_bad_items', 'claude_unavailable']]) {
     target.setMeta('claude_error', code ?? '');
+    expect(sortStatus(target, env, NOW).signals).toMatchObject([{ code: expected, severity: 'warning' }]);
+  }
+  writeSettings(target, { ...DEFAULTS, classificationProvider: 'codex' }, NOW);
+  for (const [code, expected] of [['codex_not_configured', 'codex_not_configured'], ['codex_not_allowed', 'codex_auth'], ['codex_quota', 'codex_quota'], ['codex_rate_limit', 'codex_quota'],
+    ['codex_unavailable', 'codex_unavailable'], ['codex_timeout', 'codex_unavailable']]) {
+    target.setMeta('codex_error', code ?? '');
     expect(sortStatus(target, env, NOW).signals).toMatchObject([{ code: expected, severity: 'warning' }]);
   }
   expect(sortStatus(target, { ...env, MODE: 'off' }, NOW).signals).toEqual([]);

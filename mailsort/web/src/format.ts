@@ -31,11 +31,13 @@ export const UNSURE_REASONS: Readonly<Record<string, string>> = {
 const CLAUDE_ERRORS: Readonly<Record<string, string>> = {
   claude_not_configured: 'Claude API 尚未配置',
   claude_auth: 'Claude API 授权失败，需检查专用工作区密钥',
+  claude_not_allowed: 'Model Router 不允许本应用使用 Claude 模型，需检查 Router 授权',
   claude_401: 'Claude API 授权失败，需检查专用工作区密钥',
   claude_403: 'Claude API 权限不足，需检查专用工作区权限',
   claude_budget_exhausted: '本月模型预算已用完，待下个月继续',
   claude_spend_limit: 'Anthropic 工作区已达到消费上限，等待额度恢复',
   claude_rate_limit: 'Claude API 请求受限，等待重试',
+  claude_quota: 'Claude API 额度暂不可用，等待重试',
   claude_unavailable: 'Claude API 暂不可用，等待重试',
   claude_bad_answer: 'Claude 返回格式无效，本次没有生成分级',
   claude_timeout: 'Claude API 请求超时，等待重试',
@@ -69,6 +71,7 @@ export function classificationProviderName(value: ClassificationProvider): strin
 const CODEX_ERRORS: Readonly<Record<string, string>> = {
   codex_not_configured: 'VPS Codex 尚未配置',
   codex_auth: 'VPS Codex 授权失败，需检查服务凭据或订阅登录',
+  codex_not_allowed: 'Model Router 不允许本应用使用 Codex 模型，需检查 Router 授权',
   codex_rate_limit: 'Codex 请求受限，等待重试',
   codex_quota: 'Codex 订阅额度暂不可用，等待额度恢复',
   codex_unavailable: 'VPS Codex 暂不可用，等待重试',

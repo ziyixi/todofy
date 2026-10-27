@@ -84,6 +84,8 @@ export interface HarnessOptions {
   readonly inspectorPort?: number;
   /** Runs MailsortState in a Worker of its own, as Cloudflare runs a Durable Object apart from its caller. */
   readonly splitObject?: boolean;
+  /** `none` leaves the settings row unwritten (the Codex default); otherwise the owner chose Claude. */
+  readonly provider?: 'claude' | 'none';
 }
 
 export type StepResult = { next: number; mode?: string; synced?: number; decided?: number; applied?: number; deferred?: number; code: string };
@@ -225,6 +227,8 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     },
   };
   await harness.clock(T0);
+  // Most suites exercise the owner's explicit Claude choice; Codex suites select it through the API.
+  if (options.provider !== 'none') await harness.sql(`INSERT INTO meta (key, value) VALUES ('settings', ?)`, JSON.stringify({ classificationProvider: 'claude', classificationIntervalMinutes: 15 }));
   return harness;
 }
 

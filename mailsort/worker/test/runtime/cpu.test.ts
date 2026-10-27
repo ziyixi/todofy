@@ -232,7 +232,7 @@ async function session({ h, meter: worker, object }: SortIsolate, index: number)
   let clock = T0;
   await h.step(clock);
   await h.sql(`UPDATE meta SET value = '0' WHERE key = 'next_model_at'`);
-  await h.sql(`INSERT INTO meta (key, value) VALUES ('settings', '{"mode":"live"}') ON CONFLICT (key) DO UPDATE SET value = excluded.value`);
+  await h.sql(`INSERT INTO meta (key, value) VALUES ('settings', '{"mode":"live","classificationProvider":"claude"}') ON CONFLICT (key) DO UPDATE SET value = excluded.value`);
   for (let i = 0; i < DRAIN_MAX; i++) h.up.gmail.deliver(message({ ...MAILS.newsletterZh, text: '合成阅读材料，等待周末阅读。'.repeat(1500), id: `cc00000000000${String(i).padStart(3, '0')}`, receivedAt: T0 }));
   for (let i = 0; i < 300 - DRAIN_MAX; i++) h.up.gmail.ownerModify(`cc00000000000${String(i % DRAIN_MAX).padStart(3, '0')}`, i % 2 === 0 ? ['STARRED'] : [], i % 2 === 0 ? [] : ['STARRED']);
   clock += 5 * MINUTE;

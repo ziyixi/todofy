@@ -57,6 +57,18 @@ describe('write gates and retries', () => {
     expect(gmailLabels(h, id)).toContain('INBOX');
   });
 
+  it('holds an intended retry at the daily cap without reading the mail first', async () => {
+    await setup();
+    const id = 'abc0000000000109';
+    await intended(id);
+    const settings = await h.api.getSettings({ name: 'settings' });
+    await h.sql(`INSERT INTO usage (day, applied) VALUES ('2026-10-01', ?) ON CONFLICT (day) DO UPDATE SET applied = excluded.applied`, settings.dailyWriteLimit);
+    const before = h.up.gmail.calls.length;
+    await step();
+    expect(h.up.gmail.calls.slice(before).filter((call) => call.url.includes(`/messages/${id}`))).toEqual([]);
+    expect(await ledger(id)).toEqual([{ state: 'intended', last_code: 'message_modify_503' }]);
+  });
+
   it('checks label enablement again before retry', async () => {
     await setup();
     const id = 'abc0000000000103';

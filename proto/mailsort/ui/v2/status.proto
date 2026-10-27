@@ -41,7 +41,7 @@ message Settings {
   // AIP-154: changes with every change. UpdateSettings that carries an etag is refused with ETAG_MISMATCH when
   // the settings changed since.
   string etag = 9 [(google.api.field_behavior) = OPTIONAL];
-  // The fixed classification provider. Legacy settings use Claude; changing this affects the next model batch.
+  // The fixed classification provider. Settings without a choice use Codex; changing this affects the next model batch.
   ClassificationProvider classification_provider = 10 [(google.api.field_behavior) = OPTIONAL];
   // Normal automatic classification interval in minutes: 5, 15, 30 or 60. Defaults to 15.
   // Gmail maintenance and pending-work retries keep their separate schedules.

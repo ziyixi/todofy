@@ -80,7 +80,7 @@ deployment ceiling can lower the owner mode. Setup or deployment does not raise 
 breaker is removed: a stored breaker is ignored, and `Settings.breaker_tripped` and Ops `modes.breaker` stay false.
 
 `Settings.classification_provider` persists one of two choices: Claude API (`claude-opus-5-5`, medium) or VPS Codex
-(`gpt-6.1-sol`, medium). A missing legacy field means Claude until the owner chooses otherwise. Both use the same
+(`gpt-6.1-sol`, medium). A missing field means Codex, the provider in use (a fresh install or rebuilt state). Both use the same
 saved prompt snapshot. The existing mask, etag and request-ID handling protects a switch; it preserves mode,
 write limits, prompt and Claude accounting history. The existing Alarm can resume pending work with the
 chosen provider. A switch does not start an unread batch, rewrite classified history or enable automatic fallback.
@@ -113,8 +113,20 @@ provider payloads and the Access-authenticated VPS executor connection. Results 
 once, with P1-P4 and a short reason. Existing caller deadlines remain bounded. There is no automatic provider/model
 fallback, second vote, embeddings or automatic learning.
 
-Provider/network failures use the existing pending backoff. Invalid results are not partially applied. Exhausted
-retries become visible failures without new Gmail labels. Historical probabilities, examples and ledger entries
+Failures follow the shared Model Router error contract (`classification-model.ts`, `limits.ts`), by reason and,
+for a reason this build does not know, by google.rpc.Code:
+
+| Kind | Reasons (code) | Handling |
+| --- | --- | --- |
+| Configuration | `MODEL_AUTH` (16), `MODEL_NOT_CONFIGURED` (9), `MODEL_NOT_ALLOWED` (7), `MODEL_SPEND_LIMIT` | No attempts; the next model pass waits an hour (a spend limit: the next UTC month). Any settings save retries at once. |
+| Content | `MODEL_INVALID_REQUEST` (3), `MODEL_INVALID_ANSWER`, `MODEL_REFUSED`, `MODEL_OUTPUT_LIMIT`, `MODEL_UNSUPPORTED_TOOL` | Per-mail attempts, at most three, with the per-mail backoff. |
+| Timeout | `MODEL_TIMEOUT` (4) | Per-mail attempts, at most seven (about five hours). |
+| Infrastructure | `MODEL_QUOTA`, `MODEL_RATE_LIMIT`, `MODEL_UNAVAILABLE`, `MODEL_BUSY`, `MODEL_MAINTENANCE`, `MODEL_STORAGE_UNAVAILABLE`, `MODEL_INTERNAL`, any other code, a transport failure | No attempts; the whole pass is deferred 5 minutes, doubling per consecutive deferred pass up to an hour, or longer for the Router's Retry-After; a quota at least an hour. Success resets the backoff. |
+
+A Router refusal over HTTP (its own auth or maintenance) is read by the same table; an unreadable answer or a network
+failure is infrastructure. A mail with attempts is retried alone, so one mail the model cannot answer never fails
+the mail beside it. Invalid results are not partially applied. Exhausted retries become visible failures without new
+Gmail labels. Ops keeps the selected provider's configuration, Codex capacity and availability signals apart. Historical probabilities, examples and ledger entries
 keep their original meanings; none are rewritten as judgments from the selected provider.
 
 ## 5. Cost and credentials
@@ -210,7 +222,8 @@ the old installation-time receipt boundary for automatic intake. Pending rows ke
 attempts and not_before, so accepted work remains eligible through quota/retry waits.
 
 At a normal batch's due time, reuse the bounded Gmail messages.list operation with INBOX, newer_than:2d,
-P1-P4 exclusions and maxResults 100. This returns IDs only and never follows an all-mailbox/backfill path.
+P1-P4 and sent-mail (`-in:sent`) exclusions and maxResults 100, so an Inbox copy of the owner's own message is skipped
+once instead of re-listed on every pass. This returns IDs only and never follows an all-mailbox/backfill path.
 The ordinary message preparation independently checks the same receipt boundary because history arrivals
 do not come through that list query. An active manual unread batch keeps its fixed scope; automatic
 reconciliation waits until their pending work finishes.

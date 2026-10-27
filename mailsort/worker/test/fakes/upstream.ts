@@ -22,7 +22,10 @@ export class FakeUpstream {
     configured: true,
     errorReason: '',
     errorCode: 0,
+    retryAfterSeconds: 0,
     badItems: false,
+    /** A message ID whose presence makes the whole batch answer invalid (one mail the model cannot answer). */
+    poison: '',
     spendLimit: false,
     cacheWriteTokens: 0,
     cacheReadTokens: 0,
@@ -63,6 +66,8 @@ export class FakeUpstream {
     this.claude.configured = true;
     this.claude.errorReason = '';
     this.claude.errorCode = 0;
+    this.claude.retryAfterSeconds = 0;
+    this.claude.poison = '';
     this.claude.spendLimit = false;
     this.claude.badItems = false;
     this.codex.calls.length = 0;
@@ -96,14 +101,15 @@ export class FakeUpstream {
       else this.codex.requests.push(input);
       const reason = !engine.configured ? 'MODEL_NOT_CONFIGURED' : isClaude && this.claude.spendLimit ? 'MODEL_SPEND_LIMIT' : engine.errorReason;
       const code = !engine.configured ? 9 : isClaude && this.claude.spendLimit ? 8 : engine.errorCode;
-      const items = engine.badItems ? [] : emails.map(email => ({ id: email.id, bucket: engine.bucket, reason: 'Synthetic reading priority.' }));
+      const poisoned = isClaude && this.claude.poison !== '' && emails.some(email => email.id === this.claude.poison);
+      const items = engine.badItems || poisoned ? [] : emails.map(email => ({ id: email.id, bucket: engine.bucket, reason: 'Synthetic reading priority.' }));
       const cacheWrite = isClaude ? this.claude.cacheWriteTokens : 0;
       const cacheRead = isClaude ? this.claude.cacheReadTokens : 0;
       const inputTokens = engine.inputTokens + cacheWrite + cacheRead;
       const cost = Math.ceil(engine.inputTokens * 4 + cacheWrite * 5 + cacheRead * 0.2 + engine.outputTokens * 20);
       return Response.json(toWire(GenerationSchema, create(GenerationSchema, {
         name: `requests/${crypto.randomUUID()}`, model: isClaude ? 'claude-opus-5-5' : 'gpt-6.1-sol', output: reason ? '' : JSON.stringify({ items }),
-        ...(reason ? { error: { code, reason, message: 'Synthetic model failure.' } } : {}),
+        ...(reason ? { error: { code, reason, message: 'Synthetic model failure.', retryAfterSeconds: isClaude ? this.claude.retryAfterSeconds : 0 } } : {}),
         usage: { available: !reason, billingKind: isClaude ? 'api' : 'subscription', inputTokens: reason ? 0 : inputTokens, outputTokens: reason ? 0 : engine.outputTokens,
           cacheWriteTokens: cacheWrite, cachedInputTokens: cacheRead,
           ...(isClaude ? { estimatedCostMicrousd: cost } : {}) },

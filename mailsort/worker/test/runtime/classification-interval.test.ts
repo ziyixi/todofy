@@ -11,7 +11,7 @@ describe('automatic classification interval', () => {
   afterEach(async () => { await h.dispose(); });
 
   it('adopts the former idle hour once, persists the choice and reports the adjusted next batch', async () => {
-    await h.sql(`INSERT INTO meta(key,value) VALUES('settings', ?),('next_model_at', ?)`,
+    await h.sql(`INSERT OR REPLACE INTO meta(key,value) VALUES('settings', ?),('next_model_at', ?)`,
       JSON.stringify({ mode: 'off', classificationProvider: 'codex', dailyWriteLimit: 19, etag: 'old' }), String(T0 + HOUR));
     expect((await h.api.getSettings({ name: 'settings' })).classificationIntervalMinutes).toBe(15);
     expect(await h.sql(`SELECT value FROM meta WHERE key='next_model_at'`)).toEqual([{ value: String(T0 + HOUR) }]);
@@ -63,7 +63,7 @@ describe('automatic classification interval', () => {
   });
 
   it('keeps a pending retry deadline during default adoption and a later shorter interval save', async () => {
-    await h.sql(`INSERT INTO meta(key,value) VALUES('settings','{"mode":"off"}'),('next_model_at',?)`, String(T0 + 10 * MINUTE));
+    await h.sql(`INSERT OR REPLACE INTO meta(key,value) VALUES('settings','{"mode":"off"}'),('next_model_at',?)`, String(T0 + 10 * MINUTE));
     await h.sql(`INSERT INTO pending(message_id,added_at,attempts,not_before) VALUES('synthetic-retry',?,1,?)`, T0, T0 + 10 * MINUTE);
     await h.step(T0);
     const current = await h.api.getSettings({ name: 'settings' });

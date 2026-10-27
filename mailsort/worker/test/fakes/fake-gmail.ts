@@ -199,6 +199,7 @@ export class FakeGmail {
       const label = url.searchParams.get('labelIds') ?? 'INBOX';
       const excluded = new Set(url.searchParams.get('q')?.includes('-label:P1')
         ? [...this.labels.values()].filter((value) => /^P[1-4]$/.test(value.name)).map((value) => value.id) : []);
+      if (url.searchParams.get('q')?.includes('-in:sent') === true) excluded.add('SENT');
       const ids = [...this.messages.values()].filter((m) => m.labelIds.has(label) && (label === 'UNREAD' || m.internalDate >= since) && ![...m.labelIds].some((id) => excluded.has(id)) && !m.labelIds.has('SPAM') && !m.labelIds.has('TRASH')).map((m) => ({ id: m.id, threadId: m.threadId }));
       const offset = Number(url.searchParams.get('pageToken') ?? '0');
       const max = Number(url.searchParams.get('maxResults') ?? '100');

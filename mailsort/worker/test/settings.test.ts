@@ -12,11 +12,11 @@ function store(): Store {
 }
 
 describe('classification provider settings', () => {
-  it('defaults new and legacy settings to Claude', () => {
+  it('defaults new and legacy settings to Codex, the provider in use', () => {
     const value = store();
-    expect(readSettings(value).classificationProvider).toBe('claude');
+    expect(readSettings(value).classificationProvider).toBe('codex');
     value.setMeta('settings', JSON.stringify({ mode: 'live', breaker: 'daily_limit', etag: 'legacy' }));
-    expect(readSettings(value)).toEqual({ ...DEFAULTS, classificationProvider: 'claude', mode: 'live', etag: 'legacy' });
+    expect(readSettings(value)).toEqual({ ...DEFAULTS, classificationProvider: 'codex', mode: 'live', etag: 'legacy' });
     // A breaker an older release stored no longer lowers the mode.
     expect(effectiveMode(readSettings(value), 'live')).toBe('live');
   });

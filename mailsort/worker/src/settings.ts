@@ -21,10 +21,10 @@ export interface SettingsValue {
   readonly etag: string;
 }
 
-/** A fresh install starts in shadow: nothing is written to Gmail until the owner chooses live. */
+/** A fresh install starts in shadow: nothing is written to Gmail until the owner chooses live. Codex is in use. */
 export const DEFAULTS: Omit<SettingsValue, 'etag'> = {
   mode: 'shadow',
-  classificationProvider: 'claude',
+  classificationProvider: 'codex',
   classificationIntervalMinutes: 15,
   runWriteLimit: DEFAULT_RUN_WRITE_LIMIT,
   dailyWriteLimit: DEFAULT_DAILY_WRITE_LIMIT,
@@ -48,7 +48,7 @@ export function readSettings(store: Store): SettingsValue {
   const number = (value: unknown, fallback: number) => (typeof value === 'number' && Number.isFinite(value) ? value : fallback);
   return {
     mode,
-    classificationProvider: stored.classificationProvider === 'codex' ? 'codex' : 'claude',
+    classificationProvider: stored.classificationProvider === 'claude' ? 'claude' : 'codex',
     classificationIntervalMinutes: CLASSIFICATION_INTERVAL_MINUTES.includes(stored.classificationIntervalMinutes ?? 0)
       ? stored.classificationIntervalMinutes ?? DEFAULTS.classificationIntervalMinutes : DEFAULTS.classificationIntervalMinutes,
     runWriteLimit: number(stored.runWriteLimit, DEFAULTS.runWriteLimit),

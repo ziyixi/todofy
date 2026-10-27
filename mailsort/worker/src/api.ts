@@ -34,6 +34,7 @@ import { ClassificationPromptSchema } from '@ziyixi/proto/mailsort/ui/v2/prompt_
 import { classificationPromptMessage, readClassificationPrompt, saveClassificationPrompt, validClassificationPrompt } from './classification-prompt.ts';
 import { CLASSIFICATION_EFFORT, CODEX_MODEL, CLAUDE_MODEL, CLASSIFIER_MODELS } from './classifier-config.ts';
 import { createModelClient, type ModelBinding } from '@ziyixi/model-router-client';
+import { configurationCode } from './classification-model.ts';
 import { deleteExample, deleteExamplesOfLabel } from './examples.ts';
 import { setVerdict } from './feedback.ts';
 import { FLOW_RANGES, readFlow } from './flow.ts';
@@ -1018,8 +1019,13 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
       if (next.classificationProvider !== current.classificationProvider) {
         ctx.store.setMeta('next_model_at', String(ctx.now));
         ctx.store.run('UPDATE pending SET not_before = ? WHERE deferred > 0', ctx.now);
+        // The other provider's outages say nothing about this one's: its deferral backoff starts over.
+        ctx.store.deleteMeta('model_deferrals');
       }
-      return settingsMessage(ctx, writeSettings(ctx.store, next, ctx.now));
+      const saved = writeSettings(ctx.store, next, ctx.now);
+      // A configuration failure waits an hour; any save may be its fix, so the next pass tries again at once.
+      if (configurationCode(ctx.store.getMeta(`${saved.classificationProvider}_error`) ?? '')) ctx.store.setMeta('next_model_at', String(ctx.now));
+      return settingsMessage(ctx, saved);
     });
     await ctx.wake();
     return answer;

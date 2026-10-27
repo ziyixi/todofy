@@ -76,7 +76,7 @@ export function allowedOperation(method: string, rawUrl: string, body: string, c
       const token = url.searchParams.get('pageToken');
       return only('labelIds', 'maxResults', 'pageToken') && url.searchParams.getAll('labelIds').length === 1 && url.searchParams.getAll('maxResults').length === 1 && url.searchParams.getAll('pageToken').length <= 1 && url.searchParams.get('maxResults') === '100' && (token === null || /^[0-9A-Za-z_-]{1,256}$/.test(token)) && body === '' ? 'unread_list' : null;
     }
-    return only('labelIds', 'q', 'maxResults', 'pageToken') && url.searchParams.get('labelIds') === 'INBOX' && ['newer_than:2d', 'newer_than:2d -label:P1 -label:P2 -label:P3 -label:P4'].includes(url.searchParams.get('q') ?? '') ? 'messages_list' : null;
+    return only('labelIds', 'q', 'maxResults', 'pageToken') && url.searchParams.get('labelIds') === 'INBOX' && ['newer_than:2d', 'newer_than:2d -label:P1 -label:P2 -label:P3 -label:P4 -in:sent'].includes(url.searchParams.get('q') ?? '') ? 'messages_list' : null;
   }
   if (method === 'GET' && path[0] === 'messages' && path.length === 2) {
     return MESSAGE_ID.test(path[1] ?? '') && only('format', 'metadataHeaders', 'fields') && ['full', 'metadata'].includes(url.searchParams.get('format') ?? '') ? 'message_get' : null;

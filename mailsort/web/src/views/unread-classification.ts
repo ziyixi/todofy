@@ -6,7 +6,7 @@ import { button, el, fill } from '../dom.ts'
 import { classificationProvider, classificationProviderName, classifierErrorMessage, ms, relative, when } from '../format.ts'
 
 const PROGRESS_REFRESH_MS = 30_000
-const MODEL_CONFIG_ERRORS = new Set(['claude_not_configured', 'claude_auth', 'claude_401', 'claude_403', 'codex_not_configured', 'codex_auth', 'codex_http_401', 'codex_http_403'])
+const MODEL_CONFIG_ERRORS = new Set(['claude_not_configured', 'claude_auth', 'claude_not_allowed', 'claude_401', 'claude_403', 'codex_not_configured', 'codex_auth', 'codex_not_allowed', 'codex_http_401', 'codex_http_403'])
 
 export function unreadClassificationCard(ctx: ViewContext, initialStatus: ServiceStatus | null, onStatusRefresh?: () => Promise<void>): HTMLElement {
   let status = initialStatus

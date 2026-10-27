@@ -232,12 +232,15 @@ describe('priority batch classification', () => {
     expect(card.textContent).not.toContain('下批判断最早在')
   })
 
-  it('keeps model configuration failures ahead of the daily Gmail-cap explanation', async () => {
+  it.each([
+    ['claude_401', 'Claude API 授权失败'],
+    ['claude_not_allowed', 'Model Router 不允许本应用使用 Claude 模型'],
+  ])('keeps model configuration failure %s ahead of the daily Gmail-cap explanation', async (code, message) => {
     const server = liveServer()
-    server.status = { writeScope: true, gmailWriteResumeTime: timestampFromMs(NOW + 16 * 3_600_000), claudeBudget: create(ClaudeBudgetSchema, { limitUsd: 20, lastErrorCode: 'claude_401' }) }
+    server.status = { writeScope: true, gmailWriteResumeTime: timestampFromMs(NOW + 16 * 3_600_000), claudeBudget: create(ClaudeBudgetSchema, { limitUsd: 20, lastErrorCode: code }) }
     server.unreadClassification = batch()
     const card = await open(server)
-    expect(card.textContent).toContain('Claude API 授权失败')
+    expect(card.textContent).toContain(message)
     expect(card.textContent).not.toContain('已达本应用今日 Gmail 写入上限')
   })
 

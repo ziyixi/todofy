@@ -45,9 +45,12 @@ export const HISTORY_PAGE_SIZE = 100;
 /** After a lost history cursor (404): the inbox's mails of the last two days, at most this many. */
 export const RESYNC_MAX = 100;
 export const RESYNC_QUERY = 'newer_than:2d';
-/** Automatic catch-up stays in the same two-day Inbox window and excludes existing priorities. */
+/**
+ * Automatic catch-up stays in the same two-day Inbox window and excludes existing priorities and the owner's own sent
+ * mail (an Inbox copy of a self-sent message is skipped once, never listed again on every pass).
+ */
 export const RECENT_CLASSIFICATION_AGE_MS = 2 * DAY;
-export const RECENT_CLASSIFICATION_QUERY = `${RESYNC_QUERY} -label:P1 -label:P2 -label:P3 -label:P4`;
+export const RECENT_CLASSIFICATION_QUERY = `${RESYNC_QUERY} -label:P1 -label:P2 -label:P3 -label:P4 -in:sent`;
 
 // ---- Gmail reads -----------------------------------------------------------------------------------------------------
 
@@ -83,19 +86,30 @@ export const REPLAY_KEPT_MS = 7 * DAY;
 /** GetReplayEvaluation answers at most this many cases (each evaluated mail's numbers). */
 export const REPLAY_CASES_MAX = 200;
 
-// ---- model failures ------------------------------------------------------------------------------------------------
+// ---- read and model failures (the shared Model Router error contract, ../../docs/design.md §4) -----------------------
 
 /**
- * A mail whose read or model call failed (Gmail or Workers AI unavailable, not the quota) waits RETRY_BASE_MS, doubling
- * per failure up to RETRY_MAX_MS, and is given up after MAIL_ATTEMPTS_MAX tries: 5+10+20+40+80+160 minutes, about
- * five hours, so a short outage never turns waiting mail into unsure decisions. The backoff is per mail, so one mail
- * Gmail cannot answer for never holds up the mail behind it.
+ * A mail whose Gmail read failed (403, unavailable), or whose model call timed out, waits RETRY_BASE_MS, doubling per
+ * failure up to RETRY_MAX_MS, and is given up after MAIL_ATTEMPTS_MAX tries: 5+10+20+40+80+160 minutes, about five
+ * hours. The backoff is per mail, and a mail that already failed is retried alone (pipeline.ts runPass), so one mail
+ * never holds up or fails the mail behind it.
  */
 export const RETRY_BASE_MS = 5 * MINUTE;
 export const RETRY_MAX_MS = 6 * HOUR;
 export const MAIL_ATTEMPTS_MAX = 7;
-/** A Clef answer this code refused (clef_bad_*): a few tries only, it is the answer, not an outage. */
+/** A content-dependent refusal (an invalid request or answer, a refusal, the output limit): a few tries only. */
 export const BAD_ANSWER_ATTEMPTS_MAX = 3;
+/**
+ * An outage or capacity limit (unavailable, busy, maintenance, rate limit, quota, a transport failure) is nobody's
+ * mail: the whole model pass waits, without attempts, MODEL_DEFER_BASE_MS doubling per consecutive deferred pass up to
+ * MODEL_DEFER_MAX_MS, or the Router's Retry-After when longer; a quota at least QUOTA_WAIT_MS. Success resets it, and a
+ * long outage only delays mail.
+ */
+export const MODEL_DEFER_BASE_MS = 5 * MINUTE;
+export const MODEL_DEFER_MAX_MS = HOUR;
+export const QUOTA_WAIT_MS = HOUR;
+/** A configuration failure (auth, not configured, not allowed) is retried this often until a settings save. */
+export const CONFIGURATION_RETRY_MS = HOUR;
 
 // ---- writes ----------------------------------------------------------------------------------------------------------------
 

@@ -42,9 +42,9 @@ import type { Budget } from './session.ts';
 
 /**
  * Asked right before an `intended` row is written: null to write, `wait` to keep queued, or a failure code. It reads the mode,
- * the label and the limits as they are now, and may count the write (the alarm's caps).
+ * the label and the limits as they are now, and may count the write (the alarm's caps); a `peek` counts nothing.
  */
-export type WriteGate = (row: LedgerRow, label: LabelRow) => string | null;
+export type WriteGate = (row: LedgerRow, label: LabelRow, peek?: boolean) => string | null;
 
 export interface WriteContext {
   readonly store: Store;
@@ -278,6 +278,8 @@ export async function executeWrites(ctx: WriteContext, ids: readonly string[] | 
           failed++;
           continue;
         }
+        // A write the caps hold anyway needs no read of the mail first.
+        if ((recheck || adopted) && ctx.transact(() => ctx.gate(row, label, true)) === 'wait') continue;
         const labelsNow = recheck || adopted ? await ctx.gmail.labelIdsOf(row.message_id) : null;
         // Before the gate, so a mail that is not written does not use up a write of the run's cap.
         if (recheck && labelsNow !== null && mailChanged(row, labelsNow)) {

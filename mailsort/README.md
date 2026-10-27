@@ -27,18 +27,18 @@ Choose either provider in **设置 → 分类引擎**:
 | VPS Codex | `models/sol-6-1`, medium | Model Router, existing VPS subscription executor |
 
 The Codex model and effort were checked against the production VPS catalog; inference requires separate verification.
-The choice is saved in the existing settings row and survives reload and deployment. Legacy settings use Claude
-until the owner switches. Both providers use the same saved prompt; switching preserves mode, write limits and Claude
+The choice is saved in the existing settings row and survives reload and deployment. A settings row without a choice
+(a fresh install or rebuilt state) uses Codex, the provider in use. Both providers use the same saved prompt; switching preserves mode, write limits and Claude
 usage history. It affects the next batch without starting an unread batch or reclassifying labelled mail.
 There is no automatic provider or model fallback.
 
 The interval is persisted for both providers. Saving adjusts a future ordinary wait; retries, quota waits and
 accepted backlog keep their own schedules. Older settings adopt 15 minutes once without reclassifying old mail.
 Backlog continues over subsequent Alarm calls within existing request and write caps. History sync includes
-mail opened before a batch; each normal due batch also lists at most 100 recent, unclassified Inbox IDs to
-recover missed items. Classification checks the receipt window against the first enqueue time, so already
-accepted work survives quota/retry holds. Unknown receipt dates are skipped. Old installation cutoffs no longer
-exclude otherwise eligible mail inside the 48-hour window. The explicit unread action still has its own scope
+mail opened before a batch; each normal due batch also lists at most 100 recent, unclassified Inbox IDs (never the
+owner's own sent mail) to recover missed items. Classification checks the receipt window against the first enqueue
+time, so already accepted work survives quota/retry holds. Unknown receipt dates are skipped. Old installation cutoffs
+no longer exclude otherwise eligible mail inside the 48-hour window. The explicit unread action still has its own scope
 and can cover older and archived unread mail; it is never automatically started by a deployment.
 
 Classification uses a [base prompt](prompts/priority-classification.txt) and [personal rules](prompts/personal-rules.txt).
@@ -51,8 +51,11 @@ they illustrate the default preferences, while current personal rules take prece
 Inputs include masked sender,
 subject, up to 12,000 body characters, receipt time and evaluation time. Each result is one P1-P4 choice and a short
 reason. Brand preferences live in editable prompt text; there are no sender-specific code branches,
-probability thresholds, second model vote or learned examples. An invalid
-result or unavailable provider leaves mail pending through existing backoff; it never fabricates P1.
+probability thresholds, second model vote or learned examples. A failed model call never fabricates P1. Failures
+follow the shared Model Router error contract: an outage, rate limit or quota defers the whole batch without counting
+against any mail (5 minutes doubling to an hour, or the Router's Retry-After), so a long outage only delays mail; a
+configuration or auth failure retries hourly, or at once after a settings save; an invalid request or answer gives
+a mail three tries and a timeout seven. A mail that already failed is retried alone.
 
 Claude API uses its own workspace with a **$20/calendar-month provider spend limit**, separate from Brief.
 Gift-credit usage counts toward provider limits. The app records returned input/output/thinking and cache tokens and

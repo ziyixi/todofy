@@ -20,6 +20,7 @@ describe('recent unclassified Inbox discovery', () => {
       ['b000003', ['INBOX'], now - 3 * 86_400_000],
       ['b000004', ['STARRED'], now - 1000],
       ['b000005', ['INBOX', 'SPAM'], now - 1000],
+      ['b000006', ['INBOX', 'SENT'], now - 1000],
     ] as const) gmail.deliver(message({ ...MAILS.bankEn, id, labels, receivedAt }));
     const before = [...gmail.messages].map(([id, mail]) => [id, [...mail.labelIds]]);
     const requests: string[] = [];
@@ -40,7 +41,7 @@ describe('recent unclassified Inbox discovery', () => {
     expect(await client.recentUnclassifiedInbox(100)).toEqual([read, unread]);
     const listing = new URL(requests.find((url) => new URL(url).pathname.endsWith('/messages')) ?? '');
     expect(listing.searchParams.get('labelIds')).toBe('INBOX');
-    expect(listing.searchParams.get('q')).toBe('newer_than:2d -label:P1 -label:P2 -label:P3 -label:P4');
+    expect(listing.searchParams.get('q')).toBe('newer_than:2d -label:P1 -label:P2 -label:P3 -label:P4 -in:sent');
     expect(listing.searchParams.get('maxResults')).toBe('100');
     expect(requests.filter((url) => /\/messages\/[^/]+$/.test(new URL(url).pathname))).toEqual([]);
     expect([...gmail.messages].map(([id, mail]) => [id, [...mail.labelIds]])).toEqual(before);

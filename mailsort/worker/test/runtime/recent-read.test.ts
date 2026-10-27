@@ -159,3 +159,20 @@ it('classifies existing recent read Inbox mail when initializing its history cur
   expect(modifies(h)).toHaveLength(1);
   expect(await decision(h, mail(41).id)).toMatchObject({ outcome: 'applied', label_id: 'p2' });
 });
+
+it('skips an Inbox copy of the owner\'s own sent mail once and never lists it again', async () => {
+  await ready();
+  const sent = mail(31, ['INBOX', 'SENT']);
+  const incoming = mail(32, ['INBOX']);
+  deliver(h, sent, T0 + MINUTE);
+  deliver(h, incoming, T0 + MINUTE);
+  await h.sql(`UPDATE meta SET value = ? WHERE key = 'history_cursor'`, String(h.up.gmail.historyId));
+  await h.step(T0 + 2 * MINUTE);
+  expect(inputs()).toEqual([incoming.id]);
+  expect(await decision(h, sent.id)).toBeUndefined();
+  await h.step(T0 + 20 * MINUTE);
+  expect(inputs()).toEqual([incoming.id]);
+  expect(await h.sql(`SELECT count(*) AS n FROM pending`)).toEqual([{ n: 0 }]);
+  expect(await decision(h, sent.id)).toBeUndefined();
+  expect(gmailLabels(h, sent.id)).toEqual(['INBOX', 'SENT']);
+});

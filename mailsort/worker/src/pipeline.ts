@@ -17,14 +17,17 @@ import {
   ALARM_IDLE_MS,
   ALARM_SUBREQUESTS,
   BAD_ANSWER_ATTEMPTS_MAX,
+  CONFIGURATION_RETRY_MS,
   DAY,
   DRAIN_MAX,
-  HOUR,
   HISTORY_PAGE_SIZE,
   HISTORY_PAGES_MAX,
   MINUTE,
   MAIL_ATTEMPTS_MAX,
   MAIL_SUBREQUESTS,
+  MODEL_DEFER_BASE_MS,
+  MODEL_DEFER_MAX_MS,
+  QUOTA_WAIT_MS,
   RECENT_CLASSIFICATION_AGE_MS,
   RESYNC_MAX,
   RETRY_BASE_MS,
@@ -220,7 +223,7 @@ export function writesLive(store: Store, ceiling: ModeName): boolean {
  * reaching the daily or run cap keeps its intent waiting for a later eligible pass. An owner's row (a review choice whose first try failed) is not capped.
  */
 export function alarmGate(store: Store, ceiling: ModeName, counter: { runWrites: number }, now: () => number): WriteGate {
-  return (row, label) => {
+  return (row, label, peek = false) => {
     const unread = store.one(`SELECT 1 AS x FROM unread_batch WHERE ledger_id = ?`, row.id) !== undefined;
     if (unread) {
       const settings = readSettings(store);
@@ -233,7 +236,7 @@ export function alarmGate(store: Store, ceiling: ModeName, counter: { runWrites:
     const settings = readSettings(store);
     const at = now();
     if (store.usage(utcDay(at)).applied >= settings.dailyWriteLimit || counter.runWrites >= settings.runWriteLimit) return 'wait';
-    counter.runWrites++;
+    if (!peek) counter.runWrites++;
     return null;
   };
 }
@@ -486,6 +489,7 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
 
     const ctx: MailContext = { store, gmail, budget, now: deps.now, transact, ceiling, gate, counter };
     const nextModelAt = Number(store.getMeta('next_model_at') ?? '0');
+    let hold: number | null = null;
     const month = utcDay(deps.now()).slice(0, 7);
     const providerLimited = store.getMeta('claude_limited_month') === month;
     if (provider === 'claude' && (providerLimited || store.claudeUsage(month).cost_micros >= CLAUDE_MONTHLY_LIMIT_MICROS)) {
@@ -499,7 +503,10 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
         transact(() => { enqueueRecent(store, recent, deps.now()); });
       }
       const prepared: PreparedMail[] = [];
-      for (const item of store.due(deps.now(), DRAIN_MAX)) {
+      const due = store.due(deps.now(), DRAIN_MAX);
+      // A mail that already failed goes alone, so one mail the model cannot answer never fails the mail beside it.
+      const retry = due.find(item => item.attempts > 0);
+      for (const item of retry === undefined ? due : [retry]) {
         if (!budget.has(MAIL_SUBREQUESTS + 1)) break;
         const result = await prepareMail(ctx, item.message_id, item.attempts, item.added_at);
         if (typeof result !== 'string') prepared.push(result);
@@ -518,32 +525,29 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
           }));
           const recorded = await classifyEmails(modelRouterBinding(deps.env), provider, emails, { basePrompt: prompt.baseText, personalRules: prompt.personalRules });
           answer = recorded;
-          if (provider === 'codex') {
-            transact(() => {
-              store.setMeta('codex_last_success_at', String(at));
-              store.deleteMeta('codex_error');
-            });
-          } else {
-            transact(() => {
+          transact(() => {
+            if (provider === 'claude') {
               store.addClaudeUsage(utcDay(at), recorded);
               store.setMeta('claude_last_request_at', String(at));
-              store.setMeta('claude_last_success_at', String(at));
-              store.deleteMeta('claude_error');
-            });
-          }
+            }
+            store.setMeta(`${provider}_last_success_at`, String(at));
+            store.deleteMeta(`${provider}_error`, 'model_deferrals');
+          });
         } catch (error) {
-          const errorCode = error instanceof ClassificationError ? error.code : `${provider}_unexpected`;
+          const failure = error instanceof ClassificationError ? error : null;
+          const errorCode = failure?.code ?? `${provider}_unexpected`;
           transact(() => {
-            if (provider === 'claude' && error instanceof ClassificationError && error.usage !== undefined) {
-              store.addClaudeUsage(utcDay(at), error.usage);
+            if (provider === 'claude' && failure?.usage !== undefined) {
+              store.addClaudeUsage(utcDay(at), failure.usage);
               store.setMeta('claude_last_request_at', String(at));
             }
             store.pushError(errorCode);
             store.setMeta(`${provider}_error`, errorCode);
-            if (provider === 'claude' && error instanceof ClassificationError && error.spendLimited) store.setMeta('claude_limited_month', month);
-            if (!(error instanceof ClassificationError && (error.spendLimited || error.configuration)) && errorCode !== 'codex_quota') {
+            if (provider === 'claude' && failure?.spendLimited === true) store.setMeta('claude_limited_month', month);
+            // Content and timeouts are charged to each mail; an unexpected local error too, with the ordinary cap.
+            if (failure === null || failure.kind === 'content' || failure.kind === 'timeout') {
               for (const item of prepared) {
-                if (item.attempts + 1 >= (/^(claude|codex)_bad_/.test(errorCode) || errorCode === 'claude_incomplete' || errorCode === 'codex_response_too_large' ? BAD_ANSWER_ATTEMPTS_MAX : MAIL_ATTEMPTS_MAX)) {
+                if (item.attempts + 1 >= (failure?.kind === 'content' ? BAD_ANSWER_ATTEMPTS_MAX : MAIL_ATTEMPTS_MAX)) {
                   recordDecision(store, item.read, item.gathered, at, { outcome: 'unsure', label: null, decider: 'none', model: '', reason: 'model_unavailable' });
                   store.addUsage(utcDay(at), 'decided', 1);
                   store.addUsage(utcDay(at), 'unsure', 1);
@@ -554,8 +558,16 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
               }
             }
           });
-          if (provider === 'claude' && error instanceof ClassificationError && error.spendLimited) deferred = deferModel(store, nextUtcMonth(at), at, transact);
-          else if (errorCode === 'codex_quota') deferred = deferModel(store, at + HOUR, at, transact);
+          if (failure?.spendLimited === true) deferred = deferModel(store, nextUtcMonth(at), at, transact);
+          // A configuration fix comes from the owner: try hourly, or at once after a settings save (api.ts).
+          else if (failure?.kind === 'configuration') hold = at + CONFIGURATION_RETRY_MS;
+          else if (failure?.kind === 'infrastructure') {
+            // An outage or capacity limit is nobody's mail: the whole pass waits, 5 minutes doubling to an hour.
+            const deferrals = Number(store.getMeta('model_deferrals') ?? 0) + 1;
+            const backoff = Math.min(MODEL_DEFER_BASE_MS * 2 ** (deferrals - 1), MODEL_DEFER_MAX_MS);
+            transact(() => { store.setMeta('model_deferrals', String(deferrals)); });
+            deferred = deferModel(store, at + Math.max(failure.retryAfterMs, backoff, failure.quota ? QUOTA_WAIT_MS : 0), at, transact);
+          }
           code = errorCode;
         }
         let stopped = false;
@@ -571,9 +583,9 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
       const pending = store.count(`SELECT count(*) AS n FROM pending`);
       transact(() => {
         const at = deps.now();
-        const nextAt = pending > 0
+        const nextAt = hold ?? (pending > 0
           ? Math.max(at, store.one<{ at: number }>('SELECT min(not_before) AS at FROM pending')?.at ?? at)
-          : at + readSettings(store).classificationIntervalMinutes * MINUTE;
+          : at + readSettings(store).classificationIntervalMinutes * MINUTE);
         store.setMeta('next_model_at', String(nextAt));
       });
       if (pending > 0 && store.due(deps.now(), 1).length > 0 && code === 'ok') backlog = true;

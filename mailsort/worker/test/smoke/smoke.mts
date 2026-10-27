@@ -18,7 +18,7 @@ import { join } from 'node:path';
 import { createHttpClient, type HttpCall } from '@ziyixi/proto/http-client';
 import { MailsortUiService } from '@ziyixi/proto/mailsort/ui/v2/mailsort_ui_service_pb';
 import { MailFlow_Outcome, MailFlow_Stage } from '@ziyixi/proto/mailsort/ui/v2/flow_pb';
-import { Mode, SettingsSchema } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
+import { ClassificationProvider, Mode, SettingsSchema } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
 import { create } from '@ziyixi/proto/protobuf';
 import { MAILS, message, type SyntheticMail } from '../fakes/fixtures.ts';
 import type { RecordedLedger } from '../fakes/fake-gmail.ts';
@@ -196,6 +196,9 @@ async function run(origin: string, up: FakeUpstream, setClock: (now: number) => 
   check((await step(0)).code === 'ok', 'the initialized pipeline starts from its setup cursor');
   const initialSettings = await api.getSettings({ name: 'settings' });
   check(initialSettings.mode === Mode.SHADOW && initialSettings.runWriteLimit === 10, 'setup preserves the shadow mode and existing write cap');
+  check(initialSettings.classificationProvider === ClassificationProvider.CODEX, 'a fresh store defaults to Codex, the provider in use');
+  // The rest exercises the owner's explicit Claude choice, with its usage and monthly cap.
+  await api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', classificationProvider: ClassificationProvider.CLAUDE }), updateMask: { paths: ['classification_provider'] }, requestId: id() });
   force('p2');
   deliver(MAILS.newsletterEn);
   await step();
