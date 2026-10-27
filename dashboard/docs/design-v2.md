@@ -476,8 +476,8 @@ The digest adds `config_drift` (warning; metrics `total` and the non-zero config
 category counts) while the last completed check has configuration differences, and `drift_unavailable` (warning) after
 `DRIFT_UNAVAILABLE_AFTER_DAYS` (2) failed days in a row; both point at the Cloudflare view.
 
-**Token.** The same `CF_ANALYTICS_TOKEN` as the GraphQL query ([`setup.md`](setup.md) §4). A read-only
-replacement needs Account Analytics Read, Workers Scripts Read, Account Settings Read (the audit log) and,
+**Token.** The same `CF_ANALYTICS_TOKEN` as the GraphQL query ([`setup.md`](setup.md) §4). The read-only
+token needs Account Analytics Read, Workers Scripts Read, Account Settings Read (the audit log) and,
 on the zone, Workers Routes Read. Without the Workers permissions the check reports `http_403` and, after
 two days, `drift_unavailable`; without Account Settings Read (401/403 on the audit log only) the rest of the
 check completes, the history section says the audit log was not read (`audit_unchecked`), and the window stays

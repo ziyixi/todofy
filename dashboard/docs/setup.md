@@ -64,7 +64,7 @@ setting without printing its value (a deploy without a var deletes it, so a miss
 | `DASHBOARD_ACCESS_OWNER` | secret | printable-ASCII e-mail | Worker secret `ACCESS_OWNER`; `Links deploy` and `Watch deploy` read it too (same owner, `links/README.md` "Deploy", `watch/README.md` "Deploy") |
 | `DASHBOARD_ACCESS_OWNER_ALIASES` | secret, may be empty | ≤ 8 unique printable-ASCII e-mails, ≤ 2048 chars | Worker secret `ACCESS_OWNER_ALIASES` (a single space when empty, so an emptied list replaces the old one); `Links deploy` and `Watch deploy` read it too |
 | `DASHBOARD_CF_ANALYTICS_TOKEN` | secret | `[A-Za-z0-9_-]{20,200}` | Worker secret `CF_ANALYTICS_TOKEN` (§4) |
-| `CF_API_TOKEN` | secret (existing, Todofy's deploy token) | – | `CLOUDFLARE_API_TOKEN` for the read-only hostname guard (`tools/cf-guard`) and `wrangler deploy` only; the secrets step also receives it, only to warn when `DASHBOARD_CF_ANALYTICS_TOKEN` equals it (never written anywhere) |
+| `CF_API_TOKEN` | secret (existing deploy token) | – | `CLOUDFLARE_API_TOKEN` for the read-only hostname guard (`tools/cf-guard`) and `wrangler deploy` only; the secrets step also receives it, only to warn when `DASHBOARD_CF_ANALYTICS_TOKEN` equals it (never written anywhere) |
 
 The secrets go to `$RUNNER_TEMP` (mode 0600) for `wrangler deploy --secrets-file` and are removed at the
 end. `GITHUB_SHA` becomes `--var BUILD_SHA` (shown by `/health`). Changing a variable or secret takes

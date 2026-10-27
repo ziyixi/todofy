@@ -667,6 +667,6 @@ Action SHAs and job names must be read from the current workflow.
 
 ## 11. Open items
 
-- Production checks (verification.md): real Access login and alias; GraphQL with the replacement
-  "Account Analytics: Read" token; the first real canary; whether `Ops` calls count in the apps'
+- Production checks (verification.md): real Access login and alias; GraphQL with a read-only token
+  (setup.md §4); the first real canary; whether `Ops` calls count in the apps'
   Worker request totals; the deploy probe.

@@ -433,7 +433,7 @@ export async function fetchScript(token: string, accountId: string, script: stri
 
 export type DriftPlan =
   | { readonly kind: 'idle' }
-  /** A run of an earlier day never finished: record it as a failed day (then maybe start today's). */
+  /** A run of an earlier day never finished: that day failed, unless it already completed or gave up (then maybe start today's). */
   | { readonly kind: 'abandon'; readonly run: DriftRunDoc }
   | { readonly kind: 'start' }
   | { readonly kind: 'continue'; readonly run: DriftRunDoc };
