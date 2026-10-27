@@ -76,12 +76,13 @@ one snapshot. Saving affects the next call, preserves in-flight/historical decis
 There is no prompt history, reset service or automatic reclassification.
 
 Off stops Gmail/model work; shadow records model decisions without Gmail changes; live applies them. The existing
-deployment ceiling and breaker can lower the owner mode. Setup or deployment does not raise it or replay old mail.
+deployment ceiling can lower the owner mode. Setup or deployment does not raise it or replay old mail. The former
+breaker is removed: a stored breaker is ignored, and `Settings.breaker_tripped` and Ops `modes.breaker` stay false.
 
 `Settings.classification_provider` persists one of two choices: Claude API (`claude-opus-5-5`, medium) or VPS Codex
 (`gpt-6.1-sol`, medium). A missing legacy field means Claude until the owner chooses otherwise. Both use the same
 saved prompt snapshot. The existing mask, etag and request-ID handling protects a switch; it preserves mode,
-breaker, write limits, prompt and Claude accounting history. The existing Alarm can resume pending work with the
+write limits, prompt and Claude accounting history. The existing Alarm can resume pending work with the
 chosen provider. A switch does not start an unread/recheck batch, rewrite classified history or enable automatic fallback.
 
 ## 4. Automatic batch interval
@@ -97,7 +98,7 @@ settings save adopts a missing legacy interval once, converting an ordinary 60-m
 persisting the field. Later reads and Alarms do not repeatedly move it. No new scheduler or table is introduced.
 The pass stays within 40 external requests and existing run/day Gmail write caps. Message eligibility and existing
 P1-P4 labels are checked before a reached write cap can defer it, so skip-only work can finish without a model or
-Gmail write. Eligible mail waits through the normal queue; a routine cap is not a breaker fault.
+Gmail write. Eligible mail waits through the normal queue; a reached cap only waits.
 
 History registers messages independently by Gmail message ID. Normal processing retains its Inbox and receipt
 scope: Inbox mail received within 48 hours of first enqueue, with a known receipt date and no P1-P4 label.
@@ -196,7 +197,7 @@ Use synthetic Gmail/Claude/Codex endpoints, the independent Gmail operation tabl
 owner API and the existing local Wrangler smoke. Cover batch ID validation, all four Gmail outcomes, preserved
 read/star/other labels, already-classified skips, default and configured cadence, retry/quota schedule preservation, actual usage, monthly reset/wait, auth/provider
 failure and ordinary write-cap waits. Cover provider persistence, legacy defaults, selected-provider errors, no fallback
-and preserved mode/breaker/prompt/budget history. CPU tests must reach the active batched model path. Gateway checks
+and preserved mode/prompt/budget history. CPU tests must reach the active batched model path. Gateway checks
 use the shared Python wire codec, a fake SDK and offline pinned-feature inspection. Frozen contract fixtures
 remain unchanged and readable.
 

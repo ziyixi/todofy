@@ -43,7 +43,7 @@ describe('Claude priority pipeline', () => {
     expect(await h.step(T0 + 3 * MINUTE)).toMatchObject({ decided: 10, applied: 10 });
     expect(await h.step(T0 + 4 * MINUTE)).toMatchObject({ decided: 1, applied: 1 });
     expect(h.up.claude.calls.map(call => call.length)).toEqual([10, 10, 1]);
-    expect((await h.api.getSettings({ name: 'settings' })).breakerTripped).toBe(false);
+    expect((await h.api.getSettings({ name: 'settings' })).effectiveMode).toBe(Mode.LIVE);
     deliver(h, mail(22), T0 + 5 * MINUTE);
     await h.step(T0 + 9 * MINUTE);
     expect(h.up.claude.calls).toHaveLength(3);

@@ -97,17 +97,12 @@ export const MAIL_ATTEMPTS_MAX = 7;
 /** A Clef answer this code refused (clef_bad_*): a few tries only, it is the answer, not an outage. */
 export const BAD_ANSWER_ATTEMPTS_MAX = 3;
 
-// ---- writes and the breaker -----------------------------------------------------------------------------------------------
+// ---- writes ----------------------------------------------------------------------------------------------------------------
 
 export const DEFAULT_RUN_WRITE_LIMIT = 10;
 export const RUN_WRITE_LIMIT_MAX = 10;
 export const DEFAULT_DAILY_WRITE_LIMIT = 150;
 export const DAILY_WRITE_LIMIT_MAX = 500;
-/** The breaker's label-share rule: at least this many writes today, and one label's share above both bounds. */
-export const SHARE_MIN_WRITES = 15;
-export const SHARE_MAX = 0.6;
-/** ... and more than this many times its share of the last 7 days. */
-export const SHARE_JUMP = 2;
 /** A Gmail write is retried by this many alarms before its ledger entry fails. */
 export const WRITE_ATTEMPTS_MAX = 5;
 /** UndoLedgerEntries undoes at most this many entries per call. */

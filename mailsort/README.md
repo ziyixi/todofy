@@ -28,8 +28,8 @@ Choose either provider in **设置 → 分类引擎**:
 
 The Codex model and effort were checked against the production VPS catalog; inference requires separate verification.
 The choice is saved in the existing settings row and survives reload and deployment. Legacy settings use Claude
-until the owner switches. Both providers use the same saved prompt; switching preserves mode, breaker, write limits
-and Claude usage history. It affects the next batch without starting an unread batch or reclassifying labelled mail.
+until the owner switches. Both providers use the same saved prompt; switching preserves mode, write limits and Claude
+usage history. It affects the next batch without starting an unread batch or reclassifying labelled mail.
 There is no automatic provider or model fallback.
 
 The interval is persisted for both providers. Saving adjusts a future ordinary wait; retries, quota waits and
@@ -127,8 +127,8 @@ the wrapper. Provider keys and Codex executor credentials belong to Model Router
 `MODEL_ROUTER` binding with the Mailsort caller identity; it has no arbitrary endpoint setting or provider credential.
 Use Router's single Claude key in the shared $80/month workspace. Mailsort's existing local business budget and history stay intact; no separate provider key is configured here.
 
-The migration does not change the saved classifier choice, mode, prompt, pending work, write limits, breaker or
-usage history. Credential transfer, deployment and a real synthetic inference require separate release evidence.
+The migration does not change the saved classifier choice, mode, prompt, pending work, write limits or usage
+history. Credential transfer, deployment and a real synthetic inference require separate release evidence.
 Do not paste keys into chat, issues or GitHub.
 
 Gmail credentials still use `deploy/mint-token.mjs`. Full rebuild steps are in the root

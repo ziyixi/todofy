@@ -100,13 +100,14 @@ describe('the owner API', () => {
     expect(reasonOf(stale)).toBe('ETAG_MISMATCH');
   });
 
-  it('settings need an explicit mask; choosing a mode resets the breaker', async () => {
+  it('settings need an explicit mask; a breaker an older release stored is ignored', async () => {
     expect(reasonOf(await rejection(h.api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', mode: Mode.LIVE }), requestId: op() })))).toBe('BAD_REQUEST');
     expect(reasonOf(await rejection(h.api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', runWriteLimit: 50 }), updateMask: { paths: ['run_write_limit'] }, requestId: op() })))).toBe('INVALID_SETTINGS');
     await h.sql(`INSERT INTO meta (key, value) VALUES ('settings', '{"mode":"live","breaker":"daily_limit"}') ON CONFLICT (key) DO UPDATE SET value = excluded.value`);
-    expect(await h.api.getSettings({ name: 'settings' })).toMatchObject({ breakerTripped: true, effectiveMode: Mode.SHADOW });
-    const reset = await h.api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', mode: Mode.LIVE }), updateMask: { paths: ['mode'] }, requestId: op() });
-    expect(reset).toMatchObject({ breakerTripped: false, effectiveMode: Mode.LIVE, mode: Mode.LIVE });
+    expect(await h.api.getSettings({ name: 'settings' })).toMatchObject({ breakerTripped: false, breakerReason: '', effectiveMode: Mode.LIVE });
+    const saved = await h.api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', mode: Mode.LIVE }), updateMask: { paths: ['mode'] }, requestId: op() });
+    expect(saved).toMatchObject({ breakerTripped: false, effectiveMode: Mode.LIVE, mode: Mode.LIVE });
+    expect(JSON.parse((await h.sql<{ value: string }>(`SELECT value FROM meta WHERE key = 'settings'`))[0]?.value ?? '{}')).not.toHaveProperty('breaker');
   });
 
   it('SyncLabels adopts the Gmail label of a label\'s exact path (never one with labels nested under it), follows renames by ID, and never imports another label', async () => {

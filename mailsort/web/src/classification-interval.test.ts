@@ -43,7 +43,7 @@ describe('automatic classification interval', () => {
 
   it.each([ClassificationProvider.CLAUDE, ClassificationProvider.CODEX])('persists a %s interval and refreshes the next batch without changing mode/provider/prompt', async provider => {
     const server = new FakeServer()
-    Object.assign(server.settings, { classificationProvider: provider, mode: Mode.LIVE, effectiveMode: Mode.SHADOW, breakerTripped: true, breakerReason: 'label_share' })
+    Object.assign(server.settings, { classificationProvider: provider, mode: Mode.LIVE, effectiveMode: Mode.SHADOW })
     const classifier = create(ClassifierStatusSchema, { provider, configured: true, classificationIntervalMinutes: 15, nextBatchTime: timestampFromMs(NOW + 15 * 60_000) })
     server.status = { classifier }
     const prompt = server.classificationPrompt
@@ -59,7 +59,7 @@ describe('automatic classification interval', () => {
     expect(url.searchParams.get('update_mask')).toBe('classification_interval_minutes,etag')
     expect(url.searchParams.get('request_id')).toMatch(/^[0-9a-f-]{36}$/)
     expect(patch?.body).toMatchObject({ classification_interval_minutes: 30, etag: 's1' })
-    expect(server.settings).toMatchObject({ classificationIntervalMinutes: 30, classificationProvider: provider, mode: Mode.LIVE, breakerTripped: true, breakerReason: 'label_share' })
+    expect(server.settings).toMatchObject({ classificationIntervalMinutes: 30, classificationProvider: provider, mode: Mode.LIVE })
     expect(server.classificationPrompt).toBe(prompt)
     expect(server.calls.filter(call => call.method !== 'GET')).toHaveLength(1)
     expect(server.calls.filter(call => call.path === '/api/v2/serviceStatus')).toHaveLength(2)

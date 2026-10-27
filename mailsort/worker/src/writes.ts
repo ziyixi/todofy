@@ -5,9 +5,9 @@
  * label that is already there, or removing one that is gone, changes nothing in Gmail.
  *
  * An `intended` row is written only if the caller's gate allows it at that moment: the row may be from an earlier
- * pass, and since then the owner may have chosen shadow, the breaker may have tripped or the label may have been
- * disabled. A refused row fails (`mode_changed`, ...) and its decision stays only recorded (`suggested`); the mail is
- * left as it is. Undo rows are never gated: they restore the original priority labels and Inbox position.
+ * pass, and since then the owner may have chosen shadow or the label may have been disabled. A refused row fails
+ * (`mode_changed`, ...) and its decision stays only recorded (`suggested`); the mail is left as it is. Undo rows are
+ * never gated: they restore the original priority labels and Inbox position.
  *
  * An automatic row left by an earlier pass (a 503, a pass cut short) is also checked against the mail as it is now,
  * one metadata read before the write: if the owner has meanwhile changed its Inbox position or added another user

@@ -18,13 +18,6 @@ export const MODE_HINTS: Readonly<Record<number, string>> = {
   [Mode.LIVE]: '按 P1、P2、P3、P4 分级；P1 留在收件箱，P2、P3、P4 归档，未读状态不变',
 }
 
-/** Why the breaker tripped (Settings.breaker_reason). */
-export const BREAKER_REASONS: Readonly<Record<string, string>> = {
-  daily_limit: '超过每天写入上限',
-  run_limit: '超过每次运行写入上限',
-  label_share: '某个标签占比突增',
-}
-
 /** Why the model was uncertain (ReviewItem.reason). */
 export const UNSURE_REASONS: Readonly<Record<string, string>> = {
   low_confidence: '把握不够',

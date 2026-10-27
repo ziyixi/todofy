@@ -3,7 +3,7 @@
  * built only from MailsortState's own SQLite, with counts and codes only: never a subject, sender, address or label
  * name.
  *
- * Signals cover Gmail auth/freshness, retained breaker state and native Claude configuration/spend failures.
+ * Signals cover Gmail auth/freshness and the selected provider's configuration, availability and spend failures.
  * Claude has no Cloudflare guard capability; old shed requests are refused and legacy normal requests clear state.
  */
 import { create } from '@ziyixi/proto/protobuf';
@@ -96,7 +96,6 @@ export function sortStatus(store: Store, env: StatusEnv, now: number): wire.OpsS
         signals.push(signal('sync_stale', Severity.WARNING, synced === null ? {} : { minutes: Math.floor((now - synced) / MINUTE) }, synced ?? undefined));
       }
     }
-    if (settings.breaker !== '' && settings.mode === 'live') signals.push(signal('breaker_tripped', Severity.WARNING, { applied_today: usage.applied }));
     if (mode !== 'off' && settings.classificationProvider === 'claude') {
       const modelError = store.getMeta('claude_error') ?? (env.MODEL_ROUTER === undefined ? 'claude_not_configured' : '');
       if (store.getMeta('claude_limited_month') === month || claude.cost_micros >= CLAUDE_MONTHLY_LIMIT_MICROS) signals.push(signal('claude_spend_limit', Severity.WARNING, {}));
@@ -128,7 +127,7 @@ export function sortStatus(store: Store, env: StatusEnv, now: number): wire.OpsS
       create(OpsStatusSchema, {
         ...base,
         health: signals.some((s) => s.severity !== Severity.INFO) ? Health.DEGRADED : Health.OK,
-        modes: { maintenance: false, live: mode === 'live', sorting_off: mode === 'off', mode_limited: ceiling !== 'live', breaker: settings.breaker !== '' },
+        modes: { maintenance: false, live: mode === 'live', sorting_off: mode === 'off', mode_limited: ceiling !== 'live', breaker: false },
         guard,
         signals: signals.slice(0, MAX_SIGNALS),
         counters,

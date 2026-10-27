@@ -140,7 +140,7 @@ it('keeps an ordinary unread exclusion separate from rechecks even when an exist
   expect(modifies(h)).toEqual([]);
 });
 
-it('uses the remaining daily write allowance and resumes next day without changing caps or tripping the breaker', async () => {
+it('uses the remaining daily write allowance and resumes next day without changing caps or mode', async () => {
   await ready();
   for (let i = 401; i <= 403; i++) deliver(h, mail(i), T0 - DAY);
   const before = await h.api.getSettings({ name: 'settings' });
@@ -148,7 +148,7 @@ it('uses the remaining daily write allowance and resumes next day without changi
   await start();
   await h.step(T0 + MINUTE);
   expect(await progress()).toMatchObject({ state: State.RUNNING, totalCount: 3, appliedCount: 1, pendingCount: 2, deferredCount: 0 });
-  expect((await h.api.getSettings({ name: 'settings' })).breakerTripped).toBe(false);
+  expect((await h.api.getSettings({ name: 'settings' })).effectiveMode).toBe(Mode.LIVE);
   await h.step(T0 + DAY + MINUTE);
   expect(await progress()).toMatchObject({ state: State.COMPLETED, appliedCount: 3 });
   expect(await h.api.getSettings({ name: 'settings' })).toEqual(before);
@@ -192,7 +192,7 @@ it('keeps a persisted Gmail retry pending and counts a terminal failure separate
   await h.sql(`UPDATE usage SET applied = ? WHERE day = '2026-10-01'`, settings.dailyWriteLimit);
   await h.step(T0 + 3 * MINUTE);
   expect(await progress()).toMatchObject({ state: State.RUNNING, pendingCount: 1, failedCount: 0 });
-  expect((await h.api.getSettings({ name: 'settings' })).breakerTripped).toBe(false);
+  expect((await h.api.getSettings({ name: 'settings' })).effectiveMode).toBe(Mode.LIVE);
   await h.step(T0 + DAY + MINUTE);
   expect(await progress()).toMatchObject({ state: State.COMPLETED, appliedCount: 1 });
   deliver(h, mail(602), T0 - DAY);

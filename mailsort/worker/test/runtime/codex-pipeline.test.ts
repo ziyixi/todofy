@@ -229,16 +229,16 @@ describe('Codex priority pipeline', () => {
     expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).codexUsage).toMatchObject({ requestCount: 2, successCount: 2, usageReportedCount: 1, inputTokens: 0, outputTokens: 0 });
   });
 
-  it('switches only the model and its deferred work while retaining breaker, write limits and Gmail retry times', async () => {
+  it('switches only the model and its deferred work while retaining write limits and Gmail retry times', async () => {
     await initialize();
-    await h.sql(`UPDATE meta SET value = json_set(value, '$.breaker', 'label_share', '$.runWriteLimit', 2, '$.dailyWriteLimit', 7) WHERE key = 'settings'`);
+    await h.sql(`UPDATE meta SET value = json_set(value, '$.runWriteLimit', 2, '$.dailyWriteLimit', 7) WHERE key = 'settings'`);
     await h.sql(`INSERT INTO pending (message_id, added_at, not_before, attempts, deferred) VALUES ('model-held', ?, ?, 0, ?), ('gmail-retry', ?, ?, 2, 0)`, T0, T0 + HOUR, T0, T0, T0 + HOUR);
     await h.sql(`INSERT INTO meta (key, value) VALUES ('next_model_at', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, String(T0 + HOUR));
     const before = await h.api.getSettings({ name: 'settings' });
     const googleCalls = h.up.gmail.calls.length;
     await h.clock(T0 + 3 * MINUTE);
     const saved = await select(ClassificationProvider.CODEX);
-    expect(saved).toMatchObject({ classificationProvider: ClassificationProvider.CODEX, mode: before.mode, effectiveMode: before.effectiveMode, breakerTripped: true, breakerReason: 'label_share', runWriteLimit: 2, dailyWriteLimit: 7 });
+    expect(saved).toMatchObject({ classificationProvider: ClassificationProvider.CODEX, mode: before.mode, effectiveMode: before.effectiveMode, runWriteLimit: 2, dailyWriteLimit: 7 });
     expect(await h.sql(`SELECT value FROM meta WHERE key = 'next_model_at'`)).toEqual([{ value: String(T0 + 3 * MINUTE) }]);
     expect(await h.sql(`SELECT message_id, not_before, attempts, deferred FROM pending ORDER BY message_id`)).toEqual([
       { message_id: 'gmail-retry', not_before: T0 + HOUR, attempts: 2, deferred: 0 },

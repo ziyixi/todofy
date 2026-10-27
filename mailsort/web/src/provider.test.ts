@@ -44,7 +44,7 @@ describe('classification provider', () => {
 
   it('saves Codex in one click with an etag and request ID, retains mode and saved prompts, and survives reload', async () => {
     const server = new FakeServer()
-    Object.assign(server.settings, { mode: Mode.LIVE, effectiveMode: Mode.LIVE, breakerTripped: true, breakerReason: 'label_share' })
+    Object.assign(server.settings, { mode: Mode.LIVE, effectiveMode: Mode.LIVE })
     const confirm = vi.fn(() => true)
     const root = await open(server, '/settings', confirm)
     const prompt = server.classificationPrompt
@@ -57,7 +57,7 @@ describe('classification provider', () => {
     expect(url.searchParams.get('update_mask')).toBe('classification_provider,etag')
     expect(url.searchParams.get('request_id')).toMatch(/^[0-9a-f-]{36}$/)
     expect(patch?.body).toMatchObject({ classification_provider: 'codex', etag: 's1' })
-    expect(server.settings).toMatchObject({ classificationProvider: ClassificationProvider.CODEX, mode: Mode.LIVE, breakerTripped: true, breakerReason: 'label_share' })
+    expect(server.settings).toMatchObject({ classificationProvider: ClassificationProvider.CODEX, mode: Mode.LIVE })
     expect(server.classificationPrompt).toBe(prompt)
     expect(confirm).not.toHaveBeenCalled()
     expect(choice(root, 'VPS Codex').getAttribute('aria-pressed')).toBe('true')

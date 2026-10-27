@@ -199,7 +199,7 @@ describe('priority batch classification', () => {
     expect(server.calls.filter((call) => call.method !== 'GET')).toHaveLength(0)
   })
 
-  it.each([Mode.OFF, Mode.SHADOW])('keeps an active batch waiting in mode %s, including a breaker hold', async (mode) => {
+  it.each([Mode.OFF, Mode.SHADOW])('keeps an active batch waiting in mode %s', async (mode) => {
     const server = liveServer()
     server.status = { effectiveMode: mode, writeScope: true }
     server.unreadClassification = batch()

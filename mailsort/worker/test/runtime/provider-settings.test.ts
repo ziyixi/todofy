@@ -9,9 +9,9 @@ describe('classification provider settings and status', () => {
   beforeEach(async () => { h = await startHarness(); });
   afterEach(async () => { await h.dispose(); });
 
-  it('defaults legacy settings to Claude and preserves mode, limits, breaker and existing work when switching', async () => {
+  it('defaults legacy settings to Claude and preserves mode, limits and existing work when switching', async () => {
     await h.sql(`INSERT INTO meta (key, value) VALUES ('settings', ?), ('next_model_at', ?), ('claude_limited_month', '2026-10'), ('claude_error', 'claude_spend_limit')`,
-      JSON.stringify({ mode: 'live', runWriteLimit: 3, dailyWriteLimit: 19, dailyNeuronBudget: 7000, breaker: 'daily_limit', etag: 'legacy' }), String(T0 + HOUR));
+      JSON.stringify({ mode: 'live', runWriteLimit: 3, dailyWriteLimit: 19, etag: 'legacy' }), String(T0 + HOUR));
     const before = await h.api.getSettings({ name: 'settings' });
     expect(before.classificationProvider).toBe(ClassificationProvider.CLAUDE);
     const requestId = op();
@@ -26,7 +26,7 @@ describe('classification provider settings and status', () => {
     expect(await h.api.updateSettings(request)).toEqual(saved);
     expect(reasonOf(await rejection(h.api.updateSettings({ ...request, requestId: op() })))).toBe('ETAG_MISMATCH');
     const stored = await h.sql<{ value: string }>(`SELECT value FROM meta WHERE key = 'settings'`);
-    expect(JSON.parse(stored[0]?.value ?? '{}')).toMatchObject({ classificationProvider: 'codex', mode: 'live', breaker: 'daily_limit' });
+    expect(JSON.parse(stored[0]?.value ?? '{}')).toMatchObject({ classificationProvider: 'codex', mode: 'live', runWriteLimit: 3, dailyWriteLimit: 19 });
     expect(await h.sql(`SELECT value FROM meta WHERE key = 'next_model_at'`)).toEqual([{ value: String(T0) }]);
     expect(await h.sql(`SELECT key FROM meta WHERE key IN ('claude_limited_month', 'claude_error') ORDER BY key`)).toEqual([{ key: 'claude_error' }, { key: 'claude_limited_month' }]);
     expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).unreadClassification).toBeUndefined();

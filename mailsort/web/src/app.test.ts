@@ -194,20 +194,6 @@ describe('设置', () => {
     expect(root.textContent).toContain('受部署上限限制，按影子运行')
   })
 
-  it('names a tripped breaker in the owner’s words, and 解除熔断 clears it', async () => {
-    const server = new FakeServer()
-    Object.assign(server.settings, { mode: Mode.LIVE, effectiveMode: Mode.SHADOW, breakerTripped: true, breakerReason: 'label_share' })
-    const root = await open(server, '/settings')
-    expect(root.textContent).toContain('已熔断（某个标签占比突增），暂按影子运行')
-    expect(root.textContent).not.toContain('label_share')
-    buttonNamed(root, '解除熔断').click()
-    await settle()
-    const reset = server.calls.find((call) => call.method === 'PATCH')
-    expect(decodeURIComponent(reset?.path ?? '')).toContain('update_mask=mode,etag')
-    expect(server.settings).toMatchObject({ breakerTripped: false, effectiveMode: Mode.LIVE })
-    expect(root.querySelector('#view')?.textContent).not.toContain('熔断')
-  })
-
   it('previews a range undo, then undoes it in rounds of 20 until none is left', async () => {
     const server = new FakeServer()
     const old = timestampFromMs(NOW - 3 * 86_400_000)

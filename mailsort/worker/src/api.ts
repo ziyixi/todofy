@@ -418,8 +418,6 @@ function settingsMessage(ctx: ApiContext, value: SettingsValue): Settings {
     effectiveMode: MODES[effectiveMode(value, ctx.ceiling)],
     runWriteLimit: value.runWriteLimit,
     dailyWriteLimit: value.dailyWriteLimit,
-    breakerTripped: value.breaker !== '',
-    breakerReason: value.breaker,
     etag: value.etag,
   });
 }
@@ -1100,8 +1098,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
         if (path === 'mode') {
           const mode = modeName(input.mode);
           if (mode === null) throw sortError('INVALID_SETTINGS');
-          // Choosing a mode is the owner's reset of the breaker.
-          next = { ...next, mode, breaker: '' };
+          next = { ...next, mode };
         } else if (path === 'classification_provider') {
           const provider = input.classificationProvider === ClassificationProvider.CLAUDE ? 'claude'
             : input.classificationProvider === ClassificationProvider.CODEX ? 'codex' : null;

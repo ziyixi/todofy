@@ -12,12 +12,12 @@ describe('automatic classification interval', () => {
 
   it('adopts the former idle hour once, persists the choice and reports the adjusted next batch', async () => {
     await h.sql(`INSERT INTO meta(key,value) VALUES('settings', ?),('next_model_at', ?)`,
-      JSON.stringify({ mode: 'off', classificationProvider: 'codex', dailyWriteLimit: 19, breaker: 'daily_limit', etag: 'old' }), String(T0 + HOUR));
+      JSON.stringify({ mode: 'off', classificationProvider: 'codex', dailyWriteLimit: 19, etag: 'old' }), String(T0 + HOUR));
     expect((await h.api.getSettings({ name: 'settings' })).classificationIntervalMinutes).toBe(15);
     expect(await h.sql(`SELECT value FROM meta WHERE key='next_model_at'`)).toEqual([{ value: String(T0 + HOUR) }]);
     expect(await h.step(T0 + MINUTE)).toMatchObject({ next: T0 + 6 * MINUTE, code: 'off' });
     const initial = await h.api.getSettings({ name: 'settings' });
-    expect(initial).toMatchObject({ mode: Mode.OFF, classificationProvider: ClassificationProvider.CODEX, classificationIntervalMinutes: 15, dailyWriteLimit: 19, breakerTripped: true });
+    expect(initial).toMatchObject({ mode: Mode.OFF, classificationProvider: ClassificationProvider.CODEX, classificationIntervalMinutes: 15, dailyWriteLimit: 19 });
     await h.step(T0 + 2 * MINUTE);
     expect(await h.api.getSettings({ name: 'settings' })).toEqual(initial);
     expect(await h.sql(`SELECT value FROM meta WHERE key='next_model_at'`)).toEqual([{ value: String(T0 + 15 * MINUTE) }]);
@@ -33,7 +33,7 @@ describe('automatic classification interval', () => {
       provider: ClassificationProvider.CODEX, classificationIntervalMinutes: 30, nextBatchTime: timestampFromMs(T0 + 30 * MINUTE),
     });
     const row = await h.sql<{ value: string }>(`SELECT value FROM meta WHERE key='settings'`);
-    expect(JSON.parse(row[0]?.value ?? '{}')).toMatchObject({ classificationIntervalMinutes: 30, mode: 'off', classificationProvider: 'codex', breaker: 'daily_limit' });
+    expect(JSON.parse(row[0]?.value ?? '{}')).toMatchObject({ classificationIntervalMinutes: 30, mode: 'off', classificationProvider: 'codex' });
     expect(h.up.gmail.calls).toEqual([]);
     expect(h.up.claude.calls).toEqual([]);
     expect(h.up.codex.calls).toEqual([]);

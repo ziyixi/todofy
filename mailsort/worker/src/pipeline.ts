@@ -209,7 +209,7 @@ function postpone(store: Store, messageId: string, attempts: number, now: number
   store.run(`UPDATE pending SET attempts = ?, not_before = ? WHERE message_id = ?`, attempts + 1, now + retryDelay(attempts + 1), messageId);
 }
 
-/** Auto writes may go out now: live in force (the owner's mode under the ceiling and the breaker) and a write grant. */
+/** Auto writes may go out now: live in force (the owner's mode under the ceiling) and a write grant. */
 export function writesLive(store: Store, ceiling: ModeName): boolean {
   return effectiveMode(readSettings(store), ceiling) === 'live' && writeScope(store);
 }
@@ -480,7 +480,7 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
     if (migrationActive(store)) {
       await labelMergeStep({ store, gmail, budget, now: deps.now, transact, canWrite: () => {
         const current = readSettings(store);
-        return effectiveMode(current, modeCeiling(deps.env)) !== 'off' && current.breaker === '' && store.getMeta('write_scope') === '1';
+        return effectiveMode(current, modeCeiling(deps.env)) !== 'off' && store.getMeta('write_scope') === '1';
       } });
       return { next: deps.now() + ALARM_BACKLOG_MS, mode, synced, decided: 0, applied: 0, deferred: 0, code: 'label_consolidation' };
     }
