@@ -10,7 +10,7 @@
 - **Gmail 封闭表**：只有 `worker/src/gmail.ts` 访问 Google，每次经过 `checkRequest`。消息写入只动本应用 P 标签与 INBOX，先记意图。保留原 request ID、撤销和既有 run/day 写入上限；正常到限额等待。绝不开放邮件删除、trash、send、filters、settings、forwarding、batchModify 或系统标签删除。
 - **一次性旧操作**：已完成的 P1-P4 初始化、标签合并、旧概率和账本保留历史含义。标签合并与两个旧重判入口已下线（代码与 Gmail 操作已删除，旧页面调用时提示刷新）；从合并运行中恢复的未完成任务会拒绝除设置外的所有修改。显式未读整理沿用既有 owner 授权与边界，不能自动启动。新回复按 message ID 独立判断，不按 thread 去重。
 - **个人使用边界**：不为模型运行期间少见的手动改标签增加额外核对或并发状态机。保留处理前的普通标签检查及原有写入重试。
-- **历史学习**：旧例子、回放和决策保持可读；Workers AI embedding、弱学习、双视图和回放代码已删除，新判定不再生成例子并删除该邮件的旧例子。旧 UI 启动回放时明确拒绝，不静默执行旧模型。不要重写原预测或冻结 fixture。
+- **历史学习**：旧例子、回放和决策保持可读；Workers AI embedding、弱学习、双视图和回放代码已删除，新判定不再生成例子；旧例子保留到 owner 删除或撤回对应判定。旧 UI 启动回放时明确拒绝，不静默执行旧模型。不要重写原预测或冻结 fixture。
 - **模型入口**：所有模型调用只经 `@ziyixi/model-router-client` 与私有 `MODEL_ROUTER` service binding。保留 Claude/Codex 的既有设置、模式、历史和各自计费口径；请求使用公共 model route、通用参数与标准 JSON Schema。Mailsort 不持有 provider key、VPS endpoint、SDK 或厂商请求格式。Router 按已认证 Mailsort caller 选择独立凭据，不能共用 Brief 的 Claude workspace。Gmail grant 仍只由 owner 本机写入；发布不覆盖。配置、实际模型推理与 Gmail 写入分别验收。
 
 - **隐私**：主题最多200字符，正文最多12,000字符。邮箱与长数字掩码、链接只保留域名。依 owner 选择，掩码输入发送给 Anthropic，或经 owner VPS 发送给 OpenAI；不进请求内容日志或 fixture。Gateway 不持有 Gmail 授权，不保存推理 job 或邮件内容日志；Ops 只有计数、时间和安全错误码。保留期修改同提交更新网站 `/privacy/mailsort`。

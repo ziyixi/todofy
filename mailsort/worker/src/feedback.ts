@@ -9,8 +9,8 @@
  * decided label) or a correction (another). Mailsort's own writes change `current_labels` when they are made, so
  * their history records change nothing.
  *
- * Verdicts no longer make learning examples: nothing reads them. A new or withdrawn verdict deletes the mail's
- * historical example, so its summary does not outlive the verdict it was made from.
+ * Verdicts no longer make learning examples: nothing reads them. A historical example stays until the owner deletes it;
+ * a withdrawn verdict, or the choice that no label fits, still deletes the mail's own.
  */
 import { canonicalDecision, effectiveLedgerRow, isMergeFeedback } from './label-identity.ts';
 import { deleteExampleOf } from './examples.ts';
@@ -34,8 +34,8 @@ export function setCurrentLabels(store: Store, messageId: string, labels: readon
 }
 
 /**
- * Records the owner's choice for a decided mail: `chosen` is a label ID or null ("none of them"). Resolves a pending
- * review item of the mail and deletes its historical example.
+ * Records the owner's choice for a decided mail: `chosen` is a label ID or null ("none of them", which also deletes the
+ * mail's historical example). Resolves a pending review item of the mail.
  */
 export function setVerdict(store: Store, row: DecisionRow, chosen: string | null, source: VerdictSource, now: number): void {
   if (priorityStartedAt(store) === 0 || row.decided_at < priorityStartedAt(store) || (row.label_id !== null && !PRIORITY_IDS.has(row.label_id)) || (chosen !== null && !PRIORITY_IDS.has(chosen))) return;
@@ -44,7 +44,7 @@ export function setVerdict(store: Store, row: DecisionRow, chosen: string | null
   // The flow's corrections count decisions whose label the owner changed, once each, on the day it was decided.
   countCorrection(store, row, (verdict === 'corrected' ? 1 : 0) - (row.verdict === 'corrected' ? 1 : 0));
   store.run(`UPDATE decisions SET verdict = ?, verdict_label = ?, verdict_source = ?, verdict_at = ? WHERE message_id = ?`, verdict, chosen, source, now, row.message_id);
-  deleteExampleOf(store, row.message_id);
+  if (chosen === null) deleteExampleOf(store, row.message_id);
   const review = store.pendingReviewOf(row.message_id);
   if (review !== undefined) {
     // `confirmed` when the owner chose the model's most likely label, else `corrected`: both are resolved.
