@@ -88,16 +88,8 @@ async def authorized_home(request: Request) -> pathlib.Path:
         raise RpcError(
             "UNAVAILABLE", "ACCESS_KEYS_UNAVAILABLE", "Access signing keys unavailable"
         ) from None
-    home = os.getenv("CODEX_HOME", "")
-    if (
-        not home
-        or not pathlib.Path(home).is_absolute()
-        or not pathlib.Path(home).is_dir()
-    ):
-        raise RpcError(
-            "UNAVAILABLE", "GATEWAY_NOT_CONFIGURED", "Inference is not configured"
-        )
-    return pathlib.Path(home)
+    # __main__ checked the login and set this private CLI home before serving.
+    return pathlib.Path(os.environ["CODEX_HOME"])
 
 
 async def request_bytes(

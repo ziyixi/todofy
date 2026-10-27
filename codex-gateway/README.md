@@ -46,9 +46,9 @@ cache and thinking consumption; cache counters are subsets. Missing or invalid s
 ## Authentication and runtime
 
 Every inference/control route requires one `Cf-Access-Jwt-Assertion`. PyJWT verifies RS256 signatures against
-the fixed issuer's cached JWKS, exact issuer/audience, expiry and issuance time, then the documented service-token
-claims (`type=app`, nonempty `common_name`, empty `sub`). Header presence or an old Bearer cannot authorize a
-localhost request. See [JWT validation](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/)
+the fixed issuer's cached JWKS, exact issuer/audience, expiry and issuance time (60 seconds of clock-skew leeway),
+then the documented service-token claims (`type=app`, nonempty `common_name`, empty `sub`). Header presence or an
+old Bearer cannot authorize a localhost request. See [JWT validation](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/)
 and [service-token claims](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/application-token/).
 
 The image bakes public issuer/audience from `config/cloud.toml` and `config/resources.toml` alongside its source
@@ -58,7 +58,8 @@ existing inference observations. It does not verify login or model access.
 
 `CODEX_HOME` is the existing login-only mount. Startup makes a private temporary CLI home and links only
 `auth.json` into it; token refresh writes through that link. Caches, skills and SQLite files stay out of the
-shared login directory. The SDK account must be the subscription account type. SDK/CLI versions must match.
+shared login directory. The SDK account must be the subscription account type. The lock pins matching SDK/CLI
+versions, which CI checks.
 The final launch environment removes unrelated credentials. A dedicated process group covers hosted-tool
 children, and Linux parent-death notification handles abrupt server termination. Container restart discards
 its temporary files. Run one server process per state directory. Normal shutdown closes active contexts.

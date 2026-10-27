@@ -181,23 +181,6 @@ def execution_error(error: BaseException) -> ModelError:
     )
 
 
-def _login_home(home: pathlib.Path) -> None:
-    # The image has no host config mounts. The shared mount supplies login only.
-    if not home.is_absolute() or not home.is_dir():
-        raise RuntimeError("codex_unavailable")
-    if any(
-        (home / name).exists()
-        for name in (
-            "config.toml",
-            "hooks.json",
-            "AGENTS.md",
-            "AGENTS.override.md",
-            "plugins",
-        )
-    ):
-        raise RuntimeError("codex_unavailable")
-
-
 async def _assert_no_skills(client: Any, workspace: pathlib.Path) -> None:
     from openai_codex.generated.v2_all import SkillsListResponse
 
