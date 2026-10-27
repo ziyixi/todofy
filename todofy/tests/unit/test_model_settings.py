@@ -2,8 +2,10 @@
 
 import asyncio
 import dataclasses
+import sqlite3
 import types
 import uuid
+from pathlib import Path
 
 import model_router_client as models
 import pytest
@@ -16,6 +18,8 @@ from todofy.core.owner_ui import UiError
 EMAIL = "gemini-3.5-flash-lite"
 REPORT = "gemini-3.8-flash"
 SOL = "gpt-6.1-sol"
+MIGRATIONS = sorted((Path(__file__).parents[2] / "migrations").glob("*.sql"))
+REWRITE = MIGRATIONS[0].parent / "0017_native_model_ids.sql"
 
 
 @pytest.fixture
@@ -48,14 +52,26 @@ def test_initial_route_choices_and_configured_catalog(settings_api):
     assert [model.id for model in result.models] == [EMAIL, REPORT, SOL]
 
 
-def test_old_saved_route_aliases_normalize_without_rewriting_storage(settings_api):
-    module, env = settings_api
-    env.DB.db.execute("INSERT INTO model_settings VALUES (1, 'models/sol-6-1', 'models/gemini-report', 7)")
-    selected = asyncio.run(module.get(env))
-    assert (selected.email_model, selected.report_model, selected.etag) == (SOL, REPORT, "7")
-    saved = env.DB.db.execute("SELECT email_model,report_model FROM model_settings").fetchone()
-    assert tuple(saved) == ("models/sol-6-1", "models/gemini-report")
-    assert module.native_model("gemini-3.7-flash") == REPORT
+@pytest.mark.parametrize(
+    ("saved", "native"),
+    [
+        (("models/sol-6-1", "models/gemini-report"), (SOL, REPORT)),
+        (("models/gemini-email", "gemini-3.7-flash"), (EMAIL, REPORT)),
+    ],
+)
+def test_migration_rewrites_old_saved_route_names_once(saved, native):
+    db = sqlite3.connect(":memory:")
+    for migration in MIGRATIONS[: MIGRATIONS.index(REWRITE)]:
+        db.executescript(migration.read_text())
+    db.execute("INSERT INTO model_settings VALUES (1, ?, ?, 7)", saved)
+    db.executescript(REWRITE.read_text())
+    assert db.execute("SELECT email_model,report_model,version FROM model_settings").fetchone() == (*native, 7)
+    db.executescript(REWRITE.read_text())
+    assert db.execute("SELECT email_model,report_model FROM model_settings").fetchone() == native
+
+
+def test_only_the_two_gemini_choices_fall_back_to_each_other(settings_api):
+    module, _ = settings_api
     assert module.fallback_models(EMAIL) == (REPORT,)
     assert module.fallback_models(REPORT, report=True) == (EMAIL,)
     assert module.fallback_models(SOL) == ()
