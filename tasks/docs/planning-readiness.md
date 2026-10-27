@@ -55,8 +55,8 @@ confirmation and returns focus to its trigger. These keys are scoped to the conf
 submit the underlying task form or close its editor. Pointer deletion keeps the same confirmation.
 
 This behavior is deployed from `f3a689fa519977f824b3045b4649fff6d9c5cc94`. The complete branch gate,
-same-source production release and matching configuration reconcile passed. Dated evidence is in
-[refinement verification](refinement-verification.md#2026-10-26-planning-and-task-details).
+same-source production release and matching configuration reconcile passed; see
+[verification](verification.md#planning-readiness-and-task-details-october-26).
 
 Tasks was subsequently republished with the same behavior in monorepo source `42897d14`. The
 [main release](https://github.com/ziyixi/todofy/actions/runs/40259875945) and

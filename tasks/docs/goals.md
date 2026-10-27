@@ -54,7 +54,7 @@ write. Drafts and popup geometry stay in place while asynchronous or cached data
 The existing unlinked list budgets remain 102 rows for the seeded first 50-row page, 103 for the later page and
 four for the exact lookup. The seeded GetPlan remains three statements/nine rows. The synthetic worst-case catalog,
 KR, progress page and linked-task CPU checks remain under Workers Free's request budget. Actual measurements and
-release proof belong in [verification](../../docs/tasks-goals-verification.md).
+release conclusions are in [verification](verification.md#goals-october-24).
 
 The Goal CPU test uses the existing profiler with five independent cold workerd isolates. It compares the median
 first authenticated catalog request with the unchanged 10 ms budget; each sample includes Access key import and
@@ -98,4 +98,4 @@ before progress. Pre-Goals backups restore them empty and use default empty Task
 Tests use synthetic definitions/mail/tasks and local D1. They cover result CRUD, masks/replay, Step inheritance,
 link preservation, Bet updates, completion separation, archived links, copied-task parent validation, import
 idempotence, backup/restore, query/CPU budgets, real browser saves, refresh and dialog geometry. No real OKR is a
-fixture. The approved source and rendered comparison are in [design QA](../design-qa.md#goals).
+fixture. The approved design is listed in [design QA](../design-qa.md).

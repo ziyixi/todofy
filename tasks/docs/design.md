@@ -269,8 +269,8 @@ Pause/Resume, Stop and Complete call the timer bar's own functions through App's
 write waits; there is no second timer state and nothing is stored in the browser. The window asks for 320 × 120
 (Chrome then reuses the size and place the owner leaves it at). At 64px high, the Step title stays visible above
 the clock and the controls. Taller windows also show the parent outcome and cumulative time against the estimate.
-Pause/Resume, Stop and Complete stay visible without hover; each has a text tooltip. The clock uses tabular digits
-at medium weight; the main Focus bar uses the same weight. See the [rendered review](ui-refinement.md). It gets one
+Pause/Resume, Stop and Complete stay visible without hover; each is at least 24px with a text tooltip and a visible
+focus outline. The clock uses tabular digits at medium weight; the main Focus bar uses the same weight. It gets one
 `<style>` (`mini-timer.css`, imported as text) and the opener's computed `--plus-*` tokens and font, so Tasks'
 overrides carry over without copying the app's stylesheets: Plan and Focus's calmer accent, `#50743b`, which
 `.app-shell .planning-ui` sets over planning-ui's own tokens (they load later, so the plain class would lose). It ticks on its own window's timers, to the session's
@@ -400,5 +400,5 @@ These images contain only local synthetic data. The shared planning interface is
 ![Mail in a narrow window](images/tasks-mail-narrow-synthetic.png)
 ![Upcoming with synthetic tasks](images/tasks-upcoming-synthetic.png)
 
-Import commands and the remaining real-data boundaries are in [import.md](import.md). Actual verification,
-including what has not been deployed or migrated, is in [verification.md](verification.md).
+Import commands and the remaining real-data boundaries are in [import.md](import.md). What each release
+established, and its limits, is in [verification.md](verification.md).

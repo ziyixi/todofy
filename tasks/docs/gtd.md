@@ -19,7 +19,7 @@ queue, mini timer and away-pause. **View statistics** opens GTD Time.
 
 Approved synthetic designs: [Overview](images/gtd/overview-approved.png),
 [Completion](images/gtd/completion-approved.png), [Time](images/gtd/time-approved.png).
-Actual browser evidence belongs in `tasks/design-qa.md`.
+New captures stay out of Git ([design QA](../design-qa.md)).
 
 ## What the numbers mean
 
