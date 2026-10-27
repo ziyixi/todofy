@@ -175,6 +175,10 @@ class MonitoringTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(snapshot.recent_requests[0].usage_available)
         self.assertTrue(snapshot.recent_requests[1].usage_available)
+        self.assertTrue(
+            all(sample.requested_effort is None for sample in snapshot.recent_requests)
+        )
+        self.assertNotIn("requested_effort", json.dumps(to_wire(snapshot)))
         self.assertNotIn("private", json.dumps(to_wire(snapshot)).lower())
         day = snapshot.daily_usage[0]
         self.assertEqual(day.day, "2026-10-25")
@@ -308,6 +312,50 @@ class MonitoringTests(unittest.IsolatedAsyncioTestCase):
                 database.execute("SELECT COUNT(*) FROM recent_requests").fetchone()[0],
                 8,
             )
+
+    async def test_requested_max_is_separate_from_legacy_effort_and_survives_restart(
+        self,
+    ):
+        async def runner(_request, _home):
+            return RunInferenceResponse(model=MODEL, effort="max")
+
+        monitor = InferenceMonitor(
+            self.monitor_db, clock=self.clock.now, monotonic=self.clock.monotonic
+        )
+        await monitor.run(RunInferenceRequest(), self.home, runner, effort="max")
+        sample = monitor.snapshot().recent_requests[0]
+        self.assertEqual(sample.effort, "medium")
+        self.assertEqual(sample.requested_effort, "max")
+        from_wire(InferenceStatus, to_wire(monitor.snapshot()), strict=True)
+        restarted = InferenceMonitor(
+            self.monitor_db, clock=self.clock.now, monotonic=self.clock.monotonic
+        ).snapshot()
+        self.assertEqual(restarted.recent_requests[0], sample)
+
+    async def test_historical_medium_sample_keeps_its_value_without_requested_effort(
+        self,
+    ):
+        with closing(sqlite3.connect(self.monitor_db)) as database, database:
+            database.execute("""
+                CREATE TABLE recent_requests (
+                    id INTEGER PRIMARY KEY, sequence INTEGER NOT NULL,
+                    completed_at TEXT NOT NULL, model TEXT NOT NULL,
+                    effort TEXT NOT NULL, duration_ms REAL NOT NULL,
+                    error_code TEXT NOT NULL, input_tokens INTEGER NOT NULL,
+                    output_tokens INTEGER NOT NULL, usage_available INTEGER NOT NULL
+                )
+            """)
+            database.execute(
+                "INSERT INTO recent_requests VALUES (1,1,?,?, 'medium',0,'',0,0,1)",
+                ("2026-10-25T12:00:00Z", MODEL),
+            )
+        monitor = InferenceMonitor(
+            self.monitor_db, clock=self.clock.now, monotonic=self.clock.monotonic
+        )
+        sample = monitor.snapshot().recent_requests[0]
+        self.assertEqual(sample.effort, "medium")
+        self.assertIsNone(sample.requested_effort)
+        from_wire(InferenceStatus, to_wire(monitor.snapshot()), strict=True)
 
     async def test_thirty_days_and_eight_full_width_samples_fit_health_response_budget(
         self,

@@ -14,6 +14,14 @@ function show(inference: OpsStatus['codex_inference']) {
 const metric = (label: string) => within(screen.getByText(label, { selector: '.counter dt' }).closest('.counter') as HTMLElement)
 
 describe('Codex inference observations', () => {
+  it('shows the requested common-API effort instead of the legacy configured default', () => {
+    const sample = codexInference().recent_requests[0]!
+    show(codexInference({ recent_requests: [{ ...sample, effort: 'medium', requested_effort: 'max' }] }))
+    const row = within(screen.getByRole('table', { name: '最近完成的推理请求，最多 8 条' })).getAllByRole('row')[1]!
+    expect(within(row).getByText('max')).toBeInTheDocument()
+    expect(within(row).queryByText('medium')).not.toBeInTheDocument()
+  })
+
   it('shows persistent history after a process restart and keeps repeated request sequences', () => {
     const reactErrors = vi.spyOn(console, 'error')
     show(codexInference({ started_at: '2026-09-29T16:59:00.000Z', request_count: 1,

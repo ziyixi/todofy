@@ -14,7 +14,7 @@
 //   the service (they stream bytes; mail_hero_ui_service.proto says why), behind the same authentication. The Worker
 //   streams the raw message itself; an attachment's R2 key is in the parsed record (the same 4 MiB of JSON), so the
 //   Worker checks the path and forwards it like a DELEGATED read, and the coordinator streams the attachment back;
-// - GET /api/csrf: the CSRF token and its cookie (transport, not part of the service);
+// - GET /api/csrf: static compatibility token `1`, without a cookie (transport, not part of the service);
 // - /api/v1/*, the hand-written owner API before mailhero.ui.v2: 410 `reload_required` in its old error envelope, so a
 //   tab still running the old UI tells the owner to reload (until 2026-11-01, then NOT_FOUND like any other path).
 //

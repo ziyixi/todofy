@@ -65,6 +65,11 @@ Cloudflare callers bind the named `Inference` entrypoint with immutable `props.a
 `X-CSRF-Token: 1` and `application/json` before body parsing. `/api/session` temporarily returns static `1` for
 cached clients, without a cookie or signing key.
 
+Migrated callers no longer declare provider or executor credentials. New bootstrap input rejects those retired
+caller keys. Older Todofy Core GitHub maps may retain `GEMINI_API_KEY`; deploy parsers drop that exact field before
+validation and never upload it. Release preflight separately tolerates the old live bindings until the owner
+removes them after verified cutover. Gmail grants and Brief's Resend key remain with their applications.
+
 Provider credentials are owner-machine secrets, excluded from GitHub maps and preserved by deployment:
 
 - `ANTHROPIC_API_KEY` is the existing Brief workspace key, shared by every Claude caller and the

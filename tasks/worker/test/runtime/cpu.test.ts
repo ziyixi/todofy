@@ -63,7 +63,9 @@ test(
   async () => {
     const owner = await syntheticOwner();
     const result = await measureInIsolates(
-      COLD_ISOLATES,
+      // Five independent cold starts reduce profile variance on this near-budget path.
+      // The first request still includes Access key import and catalog encoding; no pre-warm or retry.
+      5,
       async () => {
         const harness = await startHarness({
           inspectorPort: 0,

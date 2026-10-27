@@ -7,12 +7,8 @@ config = "brief/wrangler.toml"
 personal_secrets = ["ACCESS_OWNER", "ACCESS_OWNER_ALIASES", "FEEDBACK_SIGNING_KEY", "MAIL_FROM", "MAIL_TO"]
 manual_secrets = []
 optional_secrets = ["ACCESS_OWNER_ALIASES"]
-# The Claude API key (its own Console workspace with a spend limit) and the Resend key (sending access only), put from
-# the owner's machine with `wrangler secret put` and kept by every deploy (docs/design.md §1, §18). Owner-machine secrets
-# are not part of the GitHub map BRIEF_WORKER_SECRETS (tools/cloud-config/worker-secrets.json leaves them out,
-# deploy/deploy-vars.mjs refuses them); the drift check expects them, optional: without the Claude key no issue is
-# made (ops-v1 `anthropic_not_configured`), without the Resend key nothing is sent (`mail_not_configured`).
-owner_machine_secrets = ["ANTHROPIC_API_KEY", "RESEND_API_KEY"]
+# The Resend sending key stays owner-machine only; model credentials belong to Model Router.
+owner_machine_secrets = ["RESEND_API_KEY"]
 hosts = ["brief"]
 entry = "brief"
 role = "每日简报、深读与归档"

@@ -113,8 +113,28 @@ def test_a_missing_or_invalid_var_names_only_the_setting(name: str, value: str |
 def test_the_core_secrets_are_only_its_map() -> None:
     """No personal value: the file holds what the TODOFY_CORE_WORKER_SECRETS map holds, or nothing."""
     assert generate_secrets("core", VALID) == {}
-    mapped = VALID | {"TODOFY_CORE_WORKER_SECRETS": json.dumps({"GEMINI_API_KEY": "synthetic-key"})}
-    assert generate_secrets("core", mapped) == {"GEMINI_API_KEY": "synthetic-key"}
+    mapped = VALID | {"TODOFY_CORE_WORKER_SECRETS": json.dumps({"TODOIST_API_KEY": "synthetic-key"})}
+    assert generate_secrets("core", mapped) == {"TODOIST_API_KEY": "synthetic-key"}
+
+
+@pytest.mark.parametrize("retired", ["synthetic-private-provider-key", "", 7])
+def test_old_core_gemini_map_field_is_dropped_before_validation(retired: object, tmp_path: Path) -> None:
+    env = VALID | {"TODOFY_CORE_WORKER_SECRETS": json.dumps({"GEMINI_API_KEY": retired})}
+    assert generate_secrets("core", env) == {}
+    path = tmp_path / "retired.json"
+    assert main(["secrets", "core", str(path)], env) == 0
+    assert json.loads(path.read_text()) == {}
+    assert secrets_file_problem("core", path) is None
+
+
+@pytest.mark.parametrize("worker,field,name", [
+    ("core", "TODOFY_CORE_WORKER_SECRETS", "ANTHROPIC_API_KEY"),
+    ("core", "TODOFY_CORE_WORKER_SECRETS", "GEMINI_API_KEY_EXTRA"),
+    ("gateway", "TODOFY_WORKER_SECRETS", "GEMINI_API_KEY"),
+])
+def test_provider_keys_cannot_enter_another_todofy_github_map(worker: str, field: str, name: str) -> None:
+    with pytest.raises(SettingError, match=field):
+        generate_secrets(worker, VALID | {field: json.dumps({name: "synthetic-private-provider-key"})})
 
 
 def test_the_gateway_secrets_are_the_owner_and_the_aliases() -> None:
@@ -223,7 +243,7 @@ def test_exec_runs_the_command_unchanged_plus_the_vars(
     script = f"import json,sys; open({str(out)!r}, 'w').write(json.dumps(sys.argv[1:])); sys.exit(3)"
     stub = [sys.executable, "-c", script]
     command = [*stub, "deploy", "--config", "wrangler.toml", "--secrets-file", str(files["core"])]
-    env = VALID | {"TODOFY_CORE_WORKER_SECRETS": json.dumps({"GEMINI_API_KEY": "synthetic-key"})}
+    env = VALID | {"TODOFY_CORE_WORKER_SECRETS": json.dumps({"TODOIST_API_KEY": "synthetic-key"})}
     assert main(["exec", "core", "--", *command], env) == 3
     sent = json.loads(out.read_text())
     assert sent == [*command[3:], *wrangler_args("core", env)]

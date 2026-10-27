@@ -113,8 +113,11 @@ volume. The health response exposes the latest 30 recorded days, newest first. S
 `history_since` records when this database began observing requests. Earlier usage is unknown; upgrading does
 not reconstruct lost process counters. Startup and writes require working storage and do not fall back to memory.
 
-Both generated model calls and legacy calls update these counters. Samples use `default` when effort was
-left to the SDK; the legacy top-level configured effort remains medium.
+Both generated model calls and legacy calls update these counters. Common model calls record actual request
+choice in `requested_effort`, using `default` when effort was left to the SDK. Legacy calls omit this field
+and keep their fixed medium effort. The frozen legacy `effort` field remains medium; historical rows keep
+their original value with no new field added to their records.
+The SQLite table gains a nullable column; images from before this extension cannot read that upgraded table.
 Only validated, authenticated inference requests count; health and metadata checks do not. HTTP 200 with a
 nonempty `error_code` is a failed inference. Completed failures, including cancellation, count even when usage
 is unavailable. An abrupt process termination before completion is not reconstructed. `usage_available` and the

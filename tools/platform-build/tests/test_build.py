@@ -48,6 +48,10 @@ def test_image_context_identity_and_reviewed_manifest_asset(tmp_path):
     assert (tmp_path / "artifact/pyproject.toml").is_file()
     assert not (tmp_path / "artifact/platform/uv.lock").exists()
     assert (tmp_path / "artifact/proto/python/pyproject.toml").is_file()
+    client_manifest = Path("packages/model-router-client/python/pyproject.toml")
+    assert (context / client_manifest).read_bytes() == (
+        ROOT / client_manifest
+    ).read_bytes()
 
 
 def test_invalid_identity_does_not_create_a_partial_artifact(tmp_path):

@@ -359,15 +359,8 @@
                     "pattern": "^(?:[a-z0-9][a-z0-9._-]{0,63})$(?!\\n)"
                   },
                   "effort": {
-                    "description": "Configured effort.",
-                    "enum": [
-                      "default",
-                      "low",
-                      "medium",
-                      "high",
-                      "xhigh",
-                      "max"
-                    ]
+                    "description": "Legacy fixed API default; new requests report their actual choice in requested_effort.",
+                    "const": "medium"
                   },
                   "duration_ms": {
                     "description": "Full request wall duration, measured with a monotonic clock.",
@@ -393,6 +386,17 @@
                   "usage_available": {
                     "description": "Whether this completion supplied actual token usage, including a real zero.",
                     "type": "boolean"
+                  },
+                  "requested_effort": {
+                    "description": "Requested effort for the common model API; absent on historical fixed-effort requests.",
+                    "enum": [
+                      "default",
+                      "low",
+                      "medium",
+                      "high",
+                      "xhigh",
+                      "max"
+                    ]
                   }
                 },
                 "additionalProperties": false

@@ -109,7 +109,6 @@ def test_gateway_monitoring_passes_through_the_existing_runtime_contract():
 def test_invalid_or_legacy_monitoring_does_not_invent_counters_or_hide_process_health():
     for invalid in (
         None,
-        {**INFERENCE, "input_json": "Private synthetic input"},
         {**INFERENCE, "request_count": True},
         {**INFERENCE, "recent_requests": INFERENCE["recent_requests"] * 9},
     ):
@@ -122,6 +121,18 @@ def test_invalid_or_legacy_monitoring_does_not_invent_counters_or_hide_process_h
     legacy = codex_gateway({"service": "codex-gateway", "status": "ok"})
     assert legacy.inference_status is None
     assert legacy.active_count is None
+
+
+def test_new_monitoring_fields_are_ignored_without_losing_known_observations():
+    newer = deepcopy(INFERENCE)
+    newer["input_json"] = "Private synthetic input"
+    newer["recent_requests"][0]["future_effort"] = "max"
+    business = codex_gateway(
+        {"service": "codex-gateway", "status": "ok", "inference_status": newer}
+    )
+    assert business.health == "healthy"
+    assert business.active_count == 1
+    assert to_wire(business.inference_status) == INFERENCE
 
 
 def test_nested_samples_reject_unsafe_metadata():

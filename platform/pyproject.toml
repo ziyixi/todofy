@@ -20,7 +20,7 @@ dependencies = [
 personal-cloud = "personal_cloud.__main__:main"
 
 [dependency-groups]
-dev = ["pytest", "ruff", "pyyaml"]
+dev = ["pytest", "ruff", "pyyaml", "ziyixi-model-router-client"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

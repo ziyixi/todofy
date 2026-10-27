@@ -36,12 +36,6 @@
           "optional": true
         },
         {
-          "name": "ANTHROPIC_API_KEY",
-          "type": "secret_text",
-          "source": "manual",
-          "optional": true
-        },
-        {
           "name": "ASSETS",
           "type": "assets",
           "source": "config"
@@ -542,12 +536,6 @@
           "optional": true
         },
         {
-          "name": "ANTHROPIC_API_KEY",
-          "type": "secret_text",
-          "source": "manual",
-          "optional": true
-        },
-        {
           "name": "ASSETS",
           "type": "assets",
           "source": "config"
@@ -556,24 +544,6 @@
           "name": "BUILD_SHA",
           "type": "plain_text",
           "source": "deploy"
-        },
-        {
-          "name": "CODEX_ACCESS_CLIENT_ID",
-          "type": "secret_text",
-          "source": "manual",
-          "optional": true
-        },
-        {
-          "name": "CODEX_ACCESS_CLIENT_SECRET",
-          "type": "secret_text",
-          "source": "manual",
-          "optional": true
-        },
-        {
-          "name": "CODEX_ENDPOINT_TOKEN",
-          "type": "secret_text",
-          "source": "manual",
-          "optional": true
         },
         {
           "name": "GMAIL_CLIENT_ID",
@@ -1074,12 +1044,6 @@
           "name": "DB",
           "type": "d1",
           "source": "config"
-        },
-        {
-          "name": "GEMINI_API_KEY",
-          "type": "secret_text",
-          "source": "manual",
-          "optional": true
         },
         {
           "name": "GEMINI_DAILY_TOKEN_BUDGET",

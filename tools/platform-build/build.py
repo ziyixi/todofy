@@ -69,6 +69,7 @@ def build(sha: str, output: Path) -> None:
         "platform/pyproject.toml",
         "todofy/pyproject.toml",
         "proto/python/pyproject.toml",
+        "packages/model-router-client/python/pyproject.toml",
     ):
         target = output / relative
         target.parent.mkdir(parents=True, exist_ok=True)

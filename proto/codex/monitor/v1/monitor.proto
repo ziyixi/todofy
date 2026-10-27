@@ -190,15 +190,10 @@ message InferenceRequestSample {
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).format = "ModelId"
   ];
-  // Configured effort.
+  // Legacy fixed API default; new requests report their actual choice in requested_effort.
   string effort = 4 [
     (google.api.field_behavior) = REQUIRED,
-    (common.wire.v1.field).allowed = "default",
-    (common.wire.v1.field).allowed = "low",
-    (common.wire.v1.field).allowed = "medium",
-    (common.wire.v1.field).allowed = "high",
-    (common.wire.v1.field).allowed = "xhigh",
-    (common.wire.v1.field).allowed = "max"
+    (common.wire.v1.field).allowed = "medium"
   ];
   // Full request wall duration, measured with a monotonic clock.
   // (-- api-linter: core::0142::time-field-type=disabled
@@ -224,4 +219,14 @@ message InferenceRequestSample {
   ];
   // Whether this completion supplied actual token usage, including a real zero.
   bool usage_available = 9 [(google.api.field_behavior) = REQUIRED];
+  // Requested effort for the common model API; absent on historical fixed-effort requests.
+  optional string requested_effort = 10 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field).allowed = "default",
+    (common.wire.v1.field).allowed = "low",
+    (common.wire.v1.field).allowed = "medium",
+    (common.wire.v1.field).allowed = "high",
+    (common.wire.v1.field).allowed = "xhigh",
+    (common.wire.v1.field).allowed = "max"
+  ];
 }

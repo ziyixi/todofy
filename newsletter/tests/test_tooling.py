@@ -197,6 +197,26 @@ def test_docker_context_only_allows_build_inputs():
     assert "**/__pycache__/" in rules and "**/*.pyc" in rules
 
 
+def test_image_job_generates_shared_proto_before_python_only_builder():
+    steps = workflows.load("ci.yml")["jobs"]["newsletter-image"]["steps"]
+    setup = next(
+        index
+        for index, step in enumerate(steps)
+        if step.get("uses") == "./.github/actions/setup-workspace"
+    )
+    generate = next(
+        index
+        for index, step in enumerate(steps)
+        if "node proto/tools/ensure.mjs" in step.get("run", "")
+    )
+    build = next(
+        index
+        for index, step in enumerate(steps)
+        if "docker build" in step.get("run", "")
+    )
+    assert setup < generate < build
+
+
 def test_docker_installs_locked_production_environment_and_starts_directly():
     dockerfile = (ROOT / "Dockerfile").read_text().replace("\\\n", " ")
     install_lines = [

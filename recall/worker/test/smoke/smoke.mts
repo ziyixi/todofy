@@ -172,16 +172,10 @@ async function main(): Promise<void> {
 
 /** The whole path; answers the tokens it made, which the dev server's log must not hold. */
 async function run(origin: string, dropbox: FakeDropbox): Promise<string[]> {
-  let csrf: { token: string; cookie: string } | undefined;
   const send = async (call: HttpCall): Promise<Response> => {
     const headers: Record<string, string> = { accept: 'application/json' };
-    if (call.body !== undefined) headers['content-type'] = 'application/json';
     if (call.httpMethod !== 'GET') {
-      if (csrf === undefined) {
-        const response = await fetch(`${origin}/api/csrf`);
-        csrf = { token: (await response.json<{ token: string }>()).token, cookie: (response.headers.get('set-cookie') ?? '').split(';')[0] ?? '' };
-      }
-      Object.assign(headers, { origin, 'x-csrf-token': csrf.token, cookie: csrf.cookie });
+      Object.assign(headers, { origin, 'x-csrf-token': '1', 'content-type': 'application/json' });
     }
     return fetch(`${origin}${call.url}`, { method: call.httpMethod, headers, ...(call.body === undefined ? {} : { body: call.body }) });
   };

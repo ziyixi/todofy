@@ -133,7 +133,7 @@ function RecentRequests({ inference, now }: { inference: InferenceStatus; now: D
               {inference.recent_requests.map((request) => (
                 <tr key={`${request.completed_at}:${request.sequence}`}>
                   <th scope="row"><Time iso={request.completed_at} now={now} relative={false} /></th>
-                  <td><code>{request.model}</code><span className="small muted codex-effort">{request.effort}</span></td>
+                  <td><code>{request.model}</code><span className="small muted codex-effort">{request.requested_effort || request.effort}</span></td>
                   <td className="num">{duration(request.duration_ms)}</td>
                   <td>
                     <Pill tone={request.error_code ? 'danger' : 'ok'}>{request.error_code ? '失败' : '成功'}</Pill>

@@ -25,4 +25,3 @@ def user_turn(content: str, preface: str = "") -> str:
 def summary_content(event: MailEvent) -> str:
     """What the summary step fences: the body, or the subject for a body-less mail."""
     return event.text if event.text.strip() else event.subject
-

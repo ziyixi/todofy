@@ -9,7 +9,7 @@
  * - /api/v1/*: the API before 2026-10-10 (mailsort.ui.v1), which only a page loaded before the update calls: 410
  *   RELOAD_REQUIRED in the same google.rpc.Status, whose LocalizedMessage that page shows (刷新页面), for one release
  *   (until 2026-11-10, ../../../docs/history.md);
- * - GET /api/csrf: the CSRF token and its cookie (transport, not part of the service);
+ * - GET /api/csrf: static compatibility token `1`, without a cookie (transport, not part of the service);
  * - GET /health: the build, without data;
  * - everything else (GET and HEAD): the UI's static files, through the single-page fallback.
  *

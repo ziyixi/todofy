@@ -42,6 +42,7 @@ INT32_MAX = 2**31 - 1
 class Reason(StrEnum):
     """The ErrorInfo reasons TodofyCore answers: common.errors.v1.CommonReason and todofy.ui.v1.ErrorReason names."""
 
+    NOT_CONFIGURED = "NOT_CONFIGURED"
     BAD_REQUEST = "BAD_REQUEST"
     NOT_FOUND = "NOT_FOUND"
     UNAVAILABLE = "UNAVAILABLE"

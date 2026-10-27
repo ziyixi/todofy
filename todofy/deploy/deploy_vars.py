@@ -184,8 +184,12 @@ def _merge_worker_secrets(worker: str, env: Mapping[str, str], personal: dict[st
         parsed = json.loads(raw)
     except (ValueError, TypeError) as error:
         raise SettingError(field) from error
-    if worker == "gateway" and isinstance(parsed, dict):
-        parsed.pop("CSRF_SIGNING_KEY", None)
+    if isinstance(parsed, dict):
+        if worker == "gateway":
+            parsed.pop("CSRF_SIGNING_KEY", None)
+        elif worker == "core":
+            # Older encrypted GitHub maps may retain this retired provider key; never upload it.
+            parsed.pop("GEMINI_API_KEY", None)
     if not _valid_worker_secrets(worker, parsed, complete=False):
         raise SettingError(field)
     merged = {**parsed, **personal}

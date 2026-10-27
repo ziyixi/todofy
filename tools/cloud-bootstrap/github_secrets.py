@@ -17,7 +17,15 @@ def worker_secret_values(private: dict, scalar: dict, specs: dict, *, complete: 
     configured = private.get("worker_secrets", {})
     if not isinstance(configured, dict) or set(configured) - set(specs):
         raise BootstrapError("WORKER_SECRETS_INVALID")
-    for worker, names in (owner_machine or {}).items():
+    protected = {worker: set(names) for worker, names in (owner_machine or {}).items()}
+    # These caller connections retired to Router; new private input must not upload them again.
+    for worker, names in {
+        "todofy-core": ("GEMINI_API_KEY",),
+        "brief": ("ANTHROPIC_API_KEY",),
+        "mailsort": ("ANTHROPIC_API_KEY", "CODEX_ENDPOINT_TOKEN", "CODEX_ACCESS_CLIENT_ID", "CODEX_ACCESS_CLIENT_SECRET"),
+    }.items():
+        protected.setdefault(worker, set()).update(names)
+    for worker, names in protected.items():
         bindings = configured.get(worker, {})
         prefix = specs[worker]["github_secret"].removesuffix("_WORKER_SECRETS") if worker in specs else ""
         if any((isinstance(bindings, dict) and name in bindings) or (prefix and prefix + "_" + name in scalar)

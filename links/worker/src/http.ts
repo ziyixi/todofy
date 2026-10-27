@@ -49,7 +49,7 @@ export function newRequestId(): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(8)), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-/** The transcoder's authorize hook: a mutation needs the same-origin Origin and this owner's CSRF token. */
+/** The transcoder's authorize hook: a mutation needs an exact Origin, a custom header and JSON media type. */
 async function authorize(request: Request, route: RouteInfo, ctx: Context): Promise<void> {
   if (route.safe) return;
   const result = await checkCsrf(request, ctx.env, ctx.bypassed);

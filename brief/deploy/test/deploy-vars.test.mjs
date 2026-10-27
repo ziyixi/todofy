@@ -164,6 +164,13 @@ test('the Resend and provider keys never enter a secrets file: a BRIEF_WORKER_SE
   assert.equal(generateSecrets(map).ACCESS_OWNER, environment().BRIEF_ACCESS_OWNER)
 })
 
+test('retired model connections cannot enter the caller secret map', () => {
+  for (const name of ['ANTHROPIC_API_KEY']) {
+    const env = { ...environment(), BRIEF_WORKER_SECRETS: JSON.stringify({ ACCESS_OWNER: 'owner@example.org', [name]: 'synthetic-retired-key' }) }
+    assert.throws(() => generateSecrets(env), error => error instanceof SettingError && error.setting === 'BRIEF_WORKER_SECRETS', name)
+  }
+})
+
 test('the public GitHub secrets spec excludes the owner-machine Resend key', () => {
   const specs = JSON.parse(readFileSync(new URL('../../../tools/cloud-config/worker-secrets.json', import.meta.url), 'utf8'))
   const spec = specs.brief

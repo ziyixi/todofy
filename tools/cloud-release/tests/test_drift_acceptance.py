@@ -235,6 +235,28 @@ class DriftAcceptance(unittest.TestCase):
             preflight(ROOT, fixture.app, SHA, False, fixture.cloud, fixture.github)
         self.assert_readonly(fixture)
 
+    def test_retired_model_connections_are_optional_live_bindings_only(self):
+        for app, worker, names in (
+            ("todofy", "todofy-core", ["GEMINI_API_KEY"]),
+            ("brief", "brief", ["ANTHROPIC_API_KEY"]),
+            ("mailsort", "mailsort", ["ANTHROPIC_API_KEY", "CODEX_ENDPOINT_TOKEN", "CODEX_ACCESS_CLIENT_ID", "CODEX_ACCESS_CLIENT_SECRET"]),
+        ):
+            _, _, _, desired = release_inputs(ROOT, app)
+            for name in names:
+                with self.subTest(worker=worker, name=name):
+                    binding = next(item for item in desired[worker]["bindings"] if item["name"] == name)
+                    self.assertEqual(binding, {"name": name, "type": "secret_text", "optional": True})
+        fixture = self.fixture("todofy")
+        fixture.bindings("todofy-core").append({"name": "GEMINI_API_KEY", "type": "secret_text"})
+        output = io.StringIO()
+        with redirect_stdout(output):
+            preflight(ROOT, fixture.app, SHA, False, fixture.cloud, fixture.github)
+        self.assertEqual(json.loads(output.getvalue()), {"state": "clean", "changes": []})
+        fixture.bindings("todofy-core").append({"name": "GEMINI_API_KEY_EXTRA", "type": "secret_text"})
+        with redirect_stdout(io.StringIO()), self.assertRaisesRegex(ReleaseError, "REPAIR_MANUAL_REQUIRED"):
+            preflight(ROOT, fixture.app, SHA, False, fixture.cloud, fixture.github)
+        self.assert_readonly(fixture)
+
     def test_cron_service_and_domain_drift_are_detected_before_publishing(self):
         fixture = self.fixture()
         original = deepcopy(fixture.values)

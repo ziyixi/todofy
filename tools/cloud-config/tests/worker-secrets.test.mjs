@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { mergeWorkerSecrets, workerSecretSpec } from '../worker-secrets.mjs'
+import { mergeWorkerSecrets, workerSecretSpec, validWorkerSecrets } from '../worker-secrets.mjs'
 
 const applications = { dashboard: 'home', fleet: 'fleet', links: 'links', watch: 'watch', 'mail-hero': 'mail-hero', 'website/relay': 'ziyixi-notion-publish' }
 const privateValue = 'synthetic-private-value'
@@ -49,14 +49,30 @@ for (const [app, worker] of Object.entries(applications)) {
   })
 }
 
-test('Mail Hero retains its required keys while Todofy accepts its optional retired provider key', () => {
+test('Mail Hero retains required keys while old Todofy maps lose only the retired provider field', () => {
   const mail = workerSecretSpec('mail-hero')
   assert.throws(() => mergeWorkerSecrets('mail-hero', { [mail.github_secret]: '{}' }, {}, SettingError),
     (error) => error.setting === mail.github_secret)
   const core = workerSecretSpec('todofy-core')
   assert.deepEqual(mergeWorkerSecrets('todofy-core', { [core.github_secret]: '{}' }, {}, SettingError), {})
-  const legacy = { GEMINI_API_KEY: privateValue }
-  assert.deepEqual(mergeWorkerSecrets('todofy-core', { [core.github_secret]: JSON.stringify(legacy) }, {}, SettingError), legacy)
+  assert.equal(validWorkerSecrets('todofy-core', { GEMINI_API_KEY: privateValue }, false), false)
+  for (const value of [privateValue, 7, '']) {
+    const legacy = { GEMINI_API_KEY: value }
+    assert.deepEqual(mergeWorkerSecrets('todofy-core', { [core.github_secret]: JSON.stringify(legacy) }, {}, SettingError), {})
+  }
+  for (const name of ['ANTHROPIC_API_KEY', 'GEMINI_API_KEY_EXTRA', 'gemini_api_key']) {
+    assert.throws(() => mergeWorkerSecrets('todofy-core', { [core.github_secret]: JSON.stringify({ GEMINI_API_KEY: privateValue, [name]: privateValue }) }, {}, SettingError),
+      error => error.setting === core.github_secret && !error.message.includes(privateValue), name)
+  }
+})
+
+test('Router provider credentials cannot enter its GitHub deployment map', () => {
+  const spec = workerSecretSpec('model-router')
+  for (const name of ['ANTHROPIC_API_KEY', 'GEMINI_API_KEY']) {
+    assert.ok(![...spec.required, ...spec.optional].includes(name))
+    assert.throws(() => mergeWorkerSecrets('model-router', { [spec.github_secret]: JSON.stringify({ ACCESS_OWNER: 'owner@example.test', [name]: privateValue }) }, {}, SettingError),
+      error => error.setting === spec.github_secret && !error.message.includes(privateValue), name)
+  }
 })
 
 test('keyless owner maps drop only the exact retired CSRF binding and preserve strict validation', () => {

@@ -150,6 +150,13 @@ test("the owner's Gmail grant never enters a secrets file: a MAILSORT_WORKER_SEC
   assert.equal(generateSecrets(map).ACCESS_OWNER, environment().MAILSORT_ACCESS_OWNER)
 })
 
+test('retired model connections cannot enter the caller secret map', () => {
+  for (const name of ['ANTHROPIC_API_KEY', 'CODEX_ENDPOINT_TOKEN', 'CODEX_ACCESS_CLIENT_ID', 'CODEX_ACCESS_CLIENT_SECRET']) {
+    const env = { ...environment(), MAILSORT_WORKER_SECRETS: JSON.stringify({ ACCESS_OWNER: 'owner@example.org', [name]: 'synthetic-retired-key' }) }
+    assert.throws(() => generateSecrets(env), error => error instanceof SettingError && error.setting === 'MAILSORT_WORKER_SECRETS', name)
+  }
+})
+
 test('the public GitHub secrets spec leaves the Gmail grant out; app.toml declares it owner-machine only', () => {
   const specs = JSON.parse(readFileSync(new URL('../../../tools/cloud-config/worker-secrets.json', import.meta.url), 'utf8'))
   const spec = specs.mailsort

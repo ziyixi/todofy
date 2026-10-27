@@ -4,7 +4,7 @@
  * - /api/v1/*: the owner API, DashboardUiService (proto/dashboard/ui/v1), served by the shared transcoder with the
  *   handlers of api.ts; every method but GET also needs the same-origin Origin and the custom CSRF header and JSON media type
  *   token (the transcoder's `authorize` hook runs before the body is read);
- * - GET /api/csrf: the CSRF token and its cookie (transport, not part of the service);
+ * - GET /api/csrf: static compatibility token `1`, without a cookie (transport, not part of the service);
  * - the routes of the UI before dashboard.ui.v1 (/api/v2/home, ...): 410 with RELOAD_MESSAGE in their old error
  *   envelope, under the code `not_found` (LEGACY_RELOAD_CODE: the old UI shows a message only for the codes it knows,
  *   LEGACY_CODES), so a tab still running the old UI tells the owner to reload (until 2026-11-02, then NOT_FOUND like
@@ -142,7 +142,7 @@ function allowedOrigins(ctx: OwnerContext): string[] {
   return origins;
 }
 
-/** The transcoder's authorize hook: a mutation needs Origin and the CSRF token of this owner (the key first). */
+/** The transcoder's authorize hook: a mutation needs Origin and a custom header and JSON media type before body parsing. */
 async function authorize(request: Request, route: RouteInfo, ctx: OwnerContext): Promise<void> {
   if (route.safe) return;
   const result = await verifyCsrf(request, { allowedOrigins: allowedOrigins(ctx) });

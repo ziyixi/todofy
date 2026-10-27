@@ -56,6 +56,11 @@ four for the exact lookup. The seeded GetPlan remains three statements/nine rows
 KR, progress page and linked-task CPU checks remain under Workers Free's request budget. Actual measurements and
 release proof belong in [verification](../../docs/tasks-goals-verification.md).
 
+The Goal CPU test uses the existing profiler with five independent cold workerd isolates. It compares the median
+first authenticated catalog request with the unchanged 10 ms budget; each sample includes Access key import and
+catalog encoding, with no warm-up request or retry. Warm endpoint bounds and worst-case fixtures are unchanged.
+These calibrated local profiles detect regressions; they do not guarantee production latency or CPU use.
+
 ## One-time Notion import
 
 The owner-authorized Notion page is read once and converted into private JSON outside the repository. The Worker

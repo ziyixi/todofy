@@ -6,7 +6,7 @@
  *   and the custom CSRF header and JSON media type, checked here before the body is read; the request then goes to WatchState
  *   (state.ts), whose transcoder answers it. This handler stays thin (Workers Free: 10 ms of CPU): the JWT, the CSRF
  *   token and one call to the object;
- * - GET /api/csrf: the CSRF token and its cookie (transport, not part of the service);
+ * - GET /api/csrf: static compatibility token `1`, without a cookie (transport, not part of the service);
  * - GET /health: the build, without data;
  * - everything else (GET and HEAD): the UI's static files, `/new` (the add-from-phone page, `/new#u=<url>`: the
  *   fragment never reaches the server) included through the single-page fallback.

@@ -48,6 +48,17 @@ verification and production remain pending. Provider keys have no local temporar
 Claude workspace limit is configured, and the replacement key will be generated only after Router is ready.
 The prior Newsletter URL/token patch remains the single initial VPS Secret step; inference policy public
 issuer/audience are baked into the image, so no additional sudo is required for JWT configuration.
+Full branch CI40440454131 exposed seven integration failures. The next commit fixes clean-checkout proto/image
+preparation, the Platform test dependency/context, owner smoke transports and one missing configuration-error enum.
+The monitor retains its frozen effort field and adds persisted requested_effort; proto breaking/API checks pass.
+Focused reruns pass: gateway59, Platform257, Newsletter tooling10, owner-gate/coverage53 and Recall smoke.
+The Goals cold CPU test now takes five independent samples with the original limits; its measured median is8.356ms.
+The combined branch gate and all production acceptance remain pending. Gemini's existing project requires owner
+access in AI Studio; do not create a replacement project or retrieve credentials through another channel.
+The final credential audit removed retired model/executor ownership from Todofy, Brief and Mailsort manifests;
+new bootstrap input rejects those caller credentials. Existing encrypted maps drop only exact retired fields.
+Gateway's legacy calls keep their existing monitor shape; only common-API calls add requested_effort. The new
+Platform observer reads that downstream output leniently and retains valid counters across future additive fields.
 
 
 ### Tasks Sunday planning week (`codex/tasks-next-step-estimate`)

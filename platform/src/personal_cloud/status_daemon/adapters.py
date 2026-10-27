@@ -111,7 +111,7 @@ def codex_gateway(value: dict) -> Business:
     if "inference_status" in value:
         try:
             inference_status = from_wire(
-                InferenceStatus, value["inference_status"], strict=True
+                InferenceStatus, value["inference_status"], strict=False
             ).message
         except WireJsonError:
             pass

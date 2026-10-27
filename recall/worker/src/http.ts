@@ -8,7 +8,7 @@
  *   - /api/v1/*: RecallUiService (proto/recall/ui/v1). Every method but GET, HEAD and OPTIONS needs the same-origin
  *     Origin and the custom CSRF header and JSON media type, checked here before the body is read; the request then goes to
  *     RecallState, whose transcoder answers it;
- *   - GET /api/csrf: the CSRF token and its cookie (transport, not part of the service);
+ *   - GET /api/csrf: static compatibility token `1`, without a cookie (transport, not part of the service);
  *   - GET /api/dropbox/callback: where Dropbox sends the owner's browser back after its authorization page (transport:
  *     the browser follows Dropbox's redirect with the owner's Access cookie, so it needs no Bypass); RecallState checks
  *     the state once and keeps the token, and the browser goes on to /settings?dropbox=<outcome> (303);

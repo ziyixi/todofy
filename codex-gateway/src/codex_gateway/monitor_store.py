@@ -49,9 +49,18 @@ class MonitorStore:
                     error_code TEXT NOT NULL,
                     input_tokens INTEGER NOT NULL,
                     output_tokens INTEGER NOT NULL,
-                    usage_available INTEGER NOT NULL
+                    usage_available INTEGER NOT NULL,
+                    requested_effort TEXT
                 )
             """)
+            columns = {
+                row["name"]
+                for row in database.execute("PRAGMA table_info(recent_requests)")
+            }
+            if "requested_effort" not in columns:
+                database.execute(
+                    "ALTER TABLE recent_requests ADD COLUMN requested_effort TEXT"
+                )
 
     def connect(self) -> sqlite3.Connection:
         database = sqlite3.connect(self.path, timeout=5)
@@ -87,8 +96,9 @@ class MonitorStore:
                 """
                 INSERT INTO recent_requests (
                     sequence, completed_at, model, effort, duration_ms,
-                    error_code, input_tokens, output_tokens, usage_available
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    error_code, input_tokens, output_tokens, usage_available,
+                    requested_effort
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     sample.sequence,
@@ -100,6 +110,7 @@ class MonitorStore:
                     sample.input_tokens,
                     sample.output_tokens,
                     sample.usage_available,
+                    sample.requested_effort,
                 ),
             )
             database.execute("""

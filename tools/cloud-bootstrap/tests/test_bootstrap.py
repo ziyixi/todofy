@@ -163,6 +163,27 @@ class GitHub(unittest.TestCase):
                 github_secrets.worker_secret_values({}, {"MAILSORT_" + name: "synthetic"}, specs, complete=False,
                                                     owner_machine=owner_machine)
 
+    def test_migrated_and_router_provider_connections_never_enter_github(self):
+        import cloud_profile
+
+        specs = cloud_profile.worker_secret_specs(ROOT)
+        owner_machine = cloud_profile.owner_machine_secrets(ROOT)
+        retired = {
+            "todofy-core": ["GEMINI_API_KEY"],
+            "brief": ["ANTHROPIC_API_KEY"],
+            "mailsort": ["ANTHROPIC_API_KEY", "CODEX_ENDPOINT_TOKEN", "CODEX_ACCESS_CLIENT_ID", "CODEX_ACCESS_CLIENT_SECRET"],
+            "model-router": ["ANTHROPIC_API_KEY", "GEMINI_API_KEY"],
+        }
+        for worker, names in retired.items():
+            prefix = specs[worker]["github_secret"].removesuffix("_WORKER_SECRETS")
+            for name in names:
+                for private, scalar in (({"worker_secrets": {worker: {name: "synthetic-private-provider"}}}, {}),
+                                        ({}, {prefix + "_" + name: "synthetic-private-provider"})):
+                    with self.subTest(worker=worker, name=name), self.assertRaises(BootstrapError) as caught:
+                        github_secrets.worker_secret_values(private, scalar, specs, complete=False, owner_machine=owner_machine)
+                    self.assertEqual(str(caught.exception), "WORKER_SECRET_OWNER_MACHINE_ONLY")
+                    self.assertNotIn("synthetic-private-provider", str(caught.exception))
+
     def test_new_environments_require_owner_review_and_pause_defaults(self):
         calls = []
 

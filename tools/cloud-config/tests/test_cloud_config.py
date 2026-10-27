@@ -306,15 +306,17 @@ SAFETY_BUDGET = "10"
     def test_owner_machine_secrets_never_reach_the_github_maps_in_the_repository(self):
         """Provider credentials, Gmail grants and machine-token digests stay owner-machine only."""
         source = TOOL.parents[1]
-        # Legacy app declarations remain optional upload guards, not required live connections.
-        grant = ['ANTHROPIC_API_KEY', 'CODEX_ACCESS_CLIENT_ID', 'CODEX_ACCESS_CLIENT_SECRET', 'CODEX_ENDPOINT_TOKEN',
-                 'GMAIL_CLIENT_ID', 'GMAIL_CLIENT_SECRET', 'GMAIL_REFRESH_TOKEN']
+        # Migrated callers retain only their external credentials; model connections belong to Router.
+        grant = ['GMAIL_CLIENT_ID', 'GMAIL_CLIENT_SECRET', 'GMAIL_REFRESH_TOKEN']
         digests = ['EXPORT_TOKEN_SHA256', 'EXPORT_TOKEN_SHA256_PREVIOUS', 'INGEST_TOKEN_SHA256', 'INGEST_TOKEN_SHA256_PREVIOUS']
-        keys = ['ANTHROPIC_API_KEY', 'RESEND_API_KEY']
+        keys = ['RESEND_API_KEY']
         router = sorted(['ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'CODEX_ACCESS_CLIENT_ID', 'CODEX_ACCESS_CLIENT_SECRET',
                          'MODEL_ROUTER_NEWSLETTER_TOKEN'])
         expected = {'brief': keys, 'mailsort': grant, 'recall': digests, 'model-router': router}
         self.assertEqual(cloud_profile.owner_machine_secrets(source), expected)
+        for worker in ('todofy-core', 'mailsort', 'brief'):
+            spec = cloud_profile.worker_secret_specs(source)[worker]
+            self.assertFalse({'ANTHROPIC_API_KEY', 'GEMINI_API_KEY'} & set(spec['required'] + spec['optional']), worker)
         for worker, names in expected.items():
             spec = cloud_profile.worker_secret_specs(source)[worker]
             self.assertFalse(set(names) & set(spec['required'] + spec['optional']), worker)

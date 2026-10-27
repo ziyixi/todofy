@@ -71,7 +71,7 @@ class InferenceMonitor:
         home: pathlib.Path,
         runner: Runner,
         *,
-        effort: str = EFFORT,
+        effort: str | None = None,
     ) -> RunInferenceResponse:
         self.request_count += 1
         sequence = self.request_count
@@ -108,9 +108,10 @@ class InferenceMonitor:
                 sequence=sequence,
                 completed_at=timestamp(self.clock()),
                 model=model,
-                effort=effort
+                effort=EFFORT,
+                requested_effort=effort
                 if effort in {"default", "low", "medium", "high", "xhigh", "max"}
-                else "unknown",
+                else None,
                 duration_ms=duration_ms,
                 error_code=error_code,
                 input_tokens=input_tokens,

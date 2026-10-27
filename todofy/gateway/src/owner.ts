@@ -6,7 +6,7 @@
  * - /api/v1/*: the owner API, TodofyUiService (proto/todofy/ui/v1, ui.ts), served by the shared transcoder; for
  *   every method but GET its `authorize` hook checks the same-origin Origin and the custom CSRF header and JSON media type,
  *   then MAINTENANCE_MODE, before the body is read;
- * - GET /api/csrf: the CSRF token and its cookie (transport, not part of the service);
+ * - GET /api/csrf: static compatibility token `1`, without a cookie (transport, not part of the service);
  * - GET /task/<id>: a 302 to that task in Tasks (TASKS_PUBLIC_URL), the link the UI shows for a task;
  * - the routes of the owner API before todofy.ui.v1 (api/owner-api-v1.openapi.yaml until 2026-10-02:
  *   /api/v1/overview, /api/v1/events/..., ...): 410 `reload_required` in their old error envelope, so a tab still

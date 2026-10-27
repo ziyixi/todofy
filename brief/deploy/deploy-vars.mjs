@@ -5,17 +5,15 @@
 // - with `wrangler deploy --var NAME:value` (a plain_text var, exactly like a [vars] entry): MODE (the GitHub variable
 //   BRIEF_MODE: `off`, `archive`, `shadow` or `live`, the highest mode the deployment allows: the emergency switch,
 //   ../docs/design.md §15) and BUILD_SHA (the commit);
-// - with `--secrets-file` (Worker secrets, hidden in wrangler's output): the owner's addresses, the CSRF key, the
+// - with `--secrets-file` (Worker secrets, hidden in wrangler's output): the owner's addresses, the
 //   feedback links' signing key and the two mail addresses (inputs BRIEF_ACCESS_OWNER, BRIEF_ACCESS_OWNER_ALIASES,
 //   BRIEF_FEEDBACK_SIGNING_KEY, BRIEF_MAIL_FROM, BRIEF_MAIL_TO, masked in the public Actions
 //   log). The deploy job fills the first two from the dashboard's DASHBOARD_ACCESS_OWNER(_ALIASES) (the same owner,
 //   like mailsort) and the rest from the brief's own secrets.
 //
-// The Claude API key and the Resend key (ANTHROPIC_API_KEY, RESEND_API_KEY) are never part of a deploy: the owner puts
-// them from their own machine (`wrangler secret put`, ../docs/design.md §18). The secrets file never names them, and
-// this wrapper refuses a BRIEF_WORKER_SECRETS map that does, so they can neither come from GitHub nor be overwritten by
-// a deploy; and `wrangler deploy --secrets-file` keeps every secret the file does not name (test/secrets-kept.test.mjs
-// checks the pinned wrangler), so a deploy never deletes them either.
+// The Resend key stays owner-machine only; model credentials belong to Model Router.
+// The strict GitHub map allowlist rejects both current owner-machine keys and retired model keys.
+// Wrangler preserves secrets absent from the deployment file until the owner removes them.
 //
 // A real deploy is refused while ../wrangler.toml has no ACCESS_AUDIENCE (before "Infra apply" creates the Access
 // application); a `wrangler deploy --dry-run` (CI's bundle check) is always allowed.
@@ -63,8 +61,8 @@ export const INJECTED = [
   { name: 'BUILD_SHA', from: 'GITHUB_SHA', kind: 'build', pattern: /^[0-9a-f]{40}$/ },
 ]
 
-/** The Claude API key and the Resend key: put from the owner's machine, never by a deploy. */
-export const OWNER_ONLY_SECRETS = ['ANTHROPIC_API_KEY', 'RESEND_API_KEY']
+/** Sending credentials put from the owner's machine, never by a deploy. */
+export const OWNER_ONLY_SECRETS = ['RESEND_API_KEY']
 
 function checked(env, name, pattern) {
   const value = env[name]

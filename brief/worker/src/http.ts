@@ -10,7 +10,7 @@
  * - everything else needs the owner's Access JWT, verified here (the whole host is behind Access as well):
  *   - /api/v1/*: BriefUiService (proto/brief/ui/v1). Every method but GET, HEAD and OPTIONS needs the same-origin Origin
  *     and the custom CSRF header and JSON media type, checked here before the body is read; BriefState's transcoder answers;
- *   - GET /api/csrf: the CSRF token and its cookie (transport, not part of the service);
+ *   - GET /api/csrf: static compatibility token `1`, without a cookie (transport, not part of the service);
  *   - everything else (GET and HEAD): the archive UI's static files, through the single-page fallback.
  *
  * Every response carries the private headers (no-store, nosniff, no referrer, never framed, the strict CSP). A refusal

@@ -97,6 +97,13 @@ def release_inputs(source, app):
         # Only this retired secret may remain until owner deletion after the keyless rollout.
         if config["name"] in {"home", "links", "watch", "mailsort", "recall", "brief", "tasks", "todofy", "model-router"}:
             bindings.setdefault("CSRF_SIGNING_KEY", {"name": "CSRF_SIGNING_KEY", "type": "secret_text", "optional": True})
+        # Retained old model connections are tolerated only as live bindings through cutover.
+        for name in {
+            "todofy-core": ("GEMINI_API_KEY",),
+            "brief": ("ANTHROPIC_API_KEY",),
+            "mailsort": ("ANTHROPIC_API_KEY", "CODEX_ENDPOINT_TOKEN", "CODEX_ACCESS_CLIENT_ID", "CODEX_ACCESS_CLIENT_SECRET"),
+        }.get(config["name"], ()):
+            bindings.setdefault(name, {"name": name, "type": "secret_text", "optional": True})
         wanted["bindings"] = list(bindings.values())
     return profile, resources, configs, desired
 
