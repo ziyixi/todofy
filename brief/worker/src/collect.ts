@@ -514,7 +514,7 @@ function gateCandidate(store: Store, registry: Registry, item: ItemRow): GateCan
 type GateStop = 'blocked' | 'transient' | null;
 
 async function gateGroup(env: CollectEnv, claude: CallContext, items: readonly ItemRow[], split: boolean): Promise<{ stop: GateStop; calls: number }> {
-  if (!env.budget.take(2)) return { stop: 'transient', calls: 0 };
+  if (!env.budget.take()) return { stop: 'transient', calls: 0 };
   const candidates = items.map((item) => gateCandidate(env.store, env.registry, item));
   const { params, estimatedInputTokens } = gateRequest(candidates, env.topics);
   const outcome = await callModel(claude, { step: 'gate', issue: env.day, model: GATE_MODEL, params, estimatedInputTokens, deadlineMs: Math.min(3 * MINUTE, env.budget.timeLeft()) });

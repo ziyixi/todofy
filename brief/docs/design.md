@@ -663,8 +663,9 @@ the picks have none (one call a day each). Output and thinking dominate, so effo
 **Three walls**, metered in code:
 
 1. **The call's reservation.** Before every model call its maximum is reserved: the estimated input and `max_tokens`
-   at the dearest model that may serve it (an Opus call at its fallbacks' $5/$25: about $1.85 for a 64K write). The call
-   starts only if every reservation in flight still fits under what is left of the month's budget. When the final
+   at the rates of `worker/src/limits.ts`, the dearest model that may serve it (an Opus call at its fallbacks' $25
+   output, input at the dearest cache write: about $2 for a 64K write). The call starts only if every reservation in
+   flight still fits under what is left of the month's budget. When the final
    message arrives, its real cost replaces the reservation. A call that dies keeps its reservation: the stream reports
    output tokens only in its last event (`message_delta`) and the thinking text is omitted, so what a dead call
    generated cannot be counted from what streamed (only its input, from `message_start`); the conservative charge is
@@ -746,7 +747,7 @@ an issue.
 | Failure | What happens | Signal |
 | --- | --- | --- |
 | The Claude API refuses a request before its stream (400, 401, 402, 403, 404, 413) | every model call stops, no attempt used, until the key changes, a build deploys or 设置 → 恢复调用 | `anthropic_rejected` (critical; status and error type) |
-| No Claude key, or no Resend key or addresses | issues are not made, or made and archived | `anthropic_not_configured`, `mail_not_configured` |
+| No `MODEL_ROUTER` binding, or no Resend key or addresses | issues are not made, or made and archived | `anthropic_not_configured`, `mail_not_configured` |
 | 408, 409, 429, 529 or 5xx before a stream | retried with backoff until the cutoff, then the note, archived | `issue_late` past 07:30, `issue_missed` |
 | A write runs out of tokens or time (`max_tokens`, the deadline, a stall) | the shortlist halved through the bisection | `issue_failed` when nothing answers |
 | A write dies otherwise (an invalid answer, a mid-stream error) | its attempt counts; at most 3 | `issue_failed` when they run out |

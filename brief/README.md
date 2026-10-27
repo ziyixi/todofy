@@ -37,7 +37,7 @@ public) → write (Opus, structured output) → check (every quote aligned to th
 → repair → render → entail (a Haiku log) → send (06:30 on weekdays, 07:30 on Saturday; one Resend request a day with
 an idempotency key, never replayed after an unknown outcome). Saturday's deep read takes a thread of the week instead.
 Every step is resumable after a deploy or a crash, and a step that cannot go on sends a two-line note instead of
-silence. Each model call reserves the Router catalog's worst-case rates against the monthly budget (设置), then settles the Router's actual API cost. Unknown or interrupted consumption keeps the reservation. Connection revisions replace local key hashes for resuming rejected connections; historical ledger rows remain readable.
+silence. Each model call reserves Brief's own worst-case rates (`worker/src/limits.ts`) against the monthly budget (设置), then settles the Router's actual API cost. Unknown or interrupted consumption keeps the reservation. A rejected call stops every call until a new build deploys or the owner presses 恢复调用.
 
 ## Develop
 

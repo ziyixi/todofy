@@ -33,7 +33,7 @@ export interface StatusNumbers {
   readonly run: RunRow | null;
 }
 
-/** The numbers both statuses read. The rejected state is shown as stored (a new key or build lifts it at the next call). */
+/** The numbers both statuses read. The rejected state is shown as stored (a new build lifts it at the next call). */
 export function statusNumbers(store: Store, registry: Registry, env: Env, now: number): StatusNumbers {
   const day = localDate(now);
   const { spent, reserved } = monthSpend(store, monthOf(day));
@@ -44,7 +44,7 @@ export function statusNumbers(store: Store, registry: Registry, env: Env, now: n
   return {
     mode: mode(env),
     paused: settings.paused,
-    keyState: modelRouter(env) === null || store.getMeta('model_configured') === '0' ? 'not_configured' : rejected === null ? 'ok' : 'rejected',
+    keyState: modelRouter(env) === null ? 'not_configured' : rejected === null ? 'ok' : 'rejected',
     rejectedStatus: rejected?.status ?? 0,
     rejectedType: rejected?.type ?? '',
     mailConfigured: mailSettings(env) !== null,

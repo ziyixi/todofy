@@ -1,7 +1,7 @@
 /** Brief's call ledger and budget gates over the shared Model Router contract. */
-import { createModelClient, modelRequest, type Model, type ModelBinding } from '@ziyixi/model-router-client';
+import { createModelClient, modelRequest, type ModelBinding } from '@ziyixi/model-router-client';
 import { buildSha, type Env, type ModeName } from './env.ts';
-import { MODEL_DEADLINE_MARGIN_MS, MODEL_DEADLINE_MS } from './limits.ts';
+import { MODEL_DEADLINE_MARGIN_MS, MODEL_DEADLINE_MS, RESERVATION_RATES } from './limits.ts';
 import type { Params } from './prompts.ts';
 import { localDate, monthOf } from './schedule.ts';
 import { isPaused } from './settings.ts';
@@ -87,27 +87,20 @@ export function unreadAnswer(store: Store, issue: string, step: CallStep, after:
   return store.one<CallRow>(`SELECT * FROM calls WHERE issue = ? AND step = ? AND state = 'done' AND stop = 'end_turn' AND answer != '' AND id > ? ORDER BY id DESC LIMIT 1`, issue, step, after) ?? null;
 }
 
-/** A catalog lookup precedes reservation; it never invokes a model or resets business settings. */
+/** Reserves at the rates of limits.ts, calls the Router, and settles its outcome. */
 export async function callModel(ctx: CallContext, request: ModelRequest): Promise<ModelOutcome> {
   if (ctx.mode === 'off') return { kind: 'blocked', reason: 'mode_off' };
   if (isPaused(ctx.store)) return { kind: 'blocked', reason: 'paused' };
   const binding: ModelBinding | undefined = ctx.env.MODEL_ROUTER;
-  if (!binding) return { kind: 'blocked', reason: 'not_configured' };
-  const client = createModelClient(binding);
-  let connection: Model | undefined;
-  try { connection = (await client.listModels({})).models.find(model => model.id === request.model); }
-  catch { return { kind: 'transient', code: 'model_unavailable', retryAfterMs: null }; }
-  ctx.store.setMeta('model_configured', connection?.configured ? '1' : '0');
-  if (!connection?.configured) return { kind: 'blocked', reason: 'not_configured' };
+  const rates = RESERVATION_RATES[request.model];
+  if (!binding || rates === undefined) return { kind: 'blocked', reason: 'not_configured' };
   if (callsStopped(ctx.store, ctx.env)) return { kind: 'blocked', reason: 'rejected' };
-  const inputRate = connection.reservationInputMicrousdPerToken;
-  const outputRate = connection.reservationOutputMicrousdPerToken;
-  if (!Number.isFinite(inputRate) || !Number.isFinite(outputRate) || inputRate <= 0 || outputRate <= 0) return { kind: 'blocked', reason: 'not_configured' };
+  const client = createModelClient(binding);
   const build = buildSha(ctx.env);
   const startedAt = ctx.now();
   const day = localDate(startedAt);
   const month = monthOf(day);
-  const reserved = (request.estimatedInputTokens * inputRate + request.params.parameters.maxOutputTokens * outputRate) / 1_000_000;
+  const reserved = (request.estimatedInputTokens * rates.input + request.params.parameters.maxOutputTokens * rates.output) / 1_000_000;
   const callId = ctx.transact(() => {
     const { spent, reserved: inFlight } = monthSpend(ctx.store, month);
     if (spent + inFlight + reserved > ctx.budgetUsd) return null;

@@ -89,11 +89,7 @@ message Model {
   bool configured = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Supported thinking effort values.
   repeated string efforts = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Conservative input reservation rate used by Brief, in micro-USD per token.
-  double reservation_input_microusd_per_token = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Conservative output reservation rate used by Brief, in micro-USD per token.
-  double reservation_output_microusd_per_token = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Workers AI quota reservation rate used by Brief.
+  // Estimated Workers AI quota units per input token.
   double reservation_quota_units_per_token = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 

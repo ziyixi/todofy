@@ -355,7 +355,7 @@ export class BriefState extends DurableObject<Env> {
     const date = localDate(now);
     const kind = issueKind(date);
     if (kind === null || now < cutoffOf(date)) return false;
-    if (mode(this.env) === 'off' || modelRouter(this.env) === null || this.store.getMeta('model_configured') === '0' || readSettings(this.store).paused) return false;
+    if (mode(this.env) === 'off' || modelRouter(this.env) === null || readSettings(this.store).paused) return false;
     if (this.store.one(`SELECT 1 AS x FROM runs WHERE issue = ?`, date) !== undefined) return false;
     const cutoffKey = `${date}T03:30`;
     if ((this.store.getMeta('round_done') ?? '') < cutoffKey && now < cutoffOf(date) + CUTOFF_ROUND_WAIT_MS) return false;

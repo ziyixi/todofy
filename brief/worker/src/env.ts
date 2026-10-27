@@ -70,7 +70,7 @@ export function buildSha(env: Pick<Env, 'BUILD_SHA'>): string {
   return /^[0-9a-f]{7,40}$|^dev$|^test(-[a-z0-9]{1,16})?$/.test(sha) ? sha : 'dev';
 }
 
-/** A binding configures the application transport; ListModels checks the actual model connection. */
+/** The Model Router binding, or null; a missing provider connection answers the first call (claude.ts). */
 export function modelRouter(env: Pick<Env, 'MODEL_ROUTER'>): ModelBinding | null { return env.MODEL_ROUTER ?? null; }
 
 const ADDRESS = /^(?=[\x21-\x7e ]+$)[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;

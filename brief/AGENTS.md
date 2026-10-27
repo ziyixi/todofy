@@ -5,7 +5,7 @@
 - **仓库公开，只用合成数据**：测试只用合成站点（`synthetic-*.org` 等）、为测试写的中英文文本、合成密钥与假地址，从不用
   真实文章全文、owner 的邮箱或真实密钥。日志、错误与 ops-v1 只记 ID、计数、状态码与原因码，从不记标题、正文、引文、
   URL、密钥或地址；`observability` 的 invocation logs 与 traces 保持关闭。
-- **唯一的模型出口**：生成与 embedding 只经 `@ziyixi/model-router-client` 与私有 `MODEL_ROUTER` binding。应用保留 prompts、mode、调度、业务验收与 calls 账本；Router 负责 SDK、厂商参数、缓存协议、fallback、usage 与凭据。调用前按通用 catalog 的最坏单价预留，成功按返回的实际费用结算，未知消耗保留预留。拒绝、输出上限、partial usage、贡献模型和 opaque connection revision 均走统一合同。
+- **唯一的模型出口**：生成与 embedding 只经 `@ziyixi/model-router-client` 与私有 `MODEL_ROUTER` binding。应用保留 prompts、mode、调度、业务验收与 calls 账本；Router 负责 SDK、厂商参数、缓存协议、fallback、usage 与凭据。调用前按 `worker/src/limits.ts` 的最坏单价预留，成功按返回的实际费用结算，未知消耗保留预留。拒绝、输出上限、partial usage 和贡献模型均走统一合同。
 - **密钥**：应用只持有自身 Resend 等业务密钥，模型凭据属于 Router，Brief 与 Mailsort 的 Claude connection 保持独立。`RESEND_API_KEY` 只由 owner 本机写入，部署不覆盖。不要向用户索取密钥。Resend 仍只经 `worker/src/send.ts` 的账本与幂等键，每天至多一封，unknown 不重发。
 - **抓取礼貌**（`docs/design.md` §3.3）：诚实的 User-Agent、按 host 的间隔与 Crawl-delay、429/503 退避、arXiv API 每 3 秒
   至多一次；只有点名 `ziyixi-brief` 的 robots.txt 组适用（owner 2026-10-10 的决定，AI 代理规则不适用）；从不绕过

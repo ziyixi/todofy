@@ -429,8 +429,8 @@ describe('the walls and the switches', () => {
     expect(shadow.sent[0]?.body.subject).toBe('[影子版] 简报 · 10月12日（周一）');
   });
 
-  it('makes no issue and no model call without the configured model connection', async () => {
-    const harness = await startHarness({ modelConfigured: false });
+  it('makes no issue and no model call without the Model Router binding', async () => {
+    const harness = await startHarness({ modelRouter: false });
     h = harness;
     await harness.runUntil(la('2026-10-11', '12:30'), la('2026-10-12', '08:00'));
     expect(harness.claude.requests).toHaveLength(0);
