@@ -296,10 +296,6 @@ it('authenticates before parsing private bodies and never grants Newsletter owne
     expect(harness.calls).toHaveLength(0)
     const jwt = await harness.ownerToken()
     const ownerHeaders = { 'cf-access-jwt-assertion': jwt }
-    const session = await harness.mf.dispatchFetch(`${origin}/api/session`, { headers: ownerHeaders })
-    expect(session.status).toBe(200)
-    expect(session.headers.get('set-cookie')).toBeNull()
-    expect(await session.json()).toEqual({ csrf_token: '1' })
     const publicOrigin = 'https://models.example.test'
     for (const headers of [
       { 'content-type': 'application/json', 'x-csrf-token': '1' },

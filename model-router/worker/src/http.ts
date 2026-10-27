@@ -60,9 +60,6 @@ async function handle(request: Request, env: Env): Promise<Response> {
       'OWNER_AUTH_REQUIRED',
       'Sign in to open Model Router.',
     );
-  if (url.pathname === '/api/session' && request.method === 'GET') {
-    return Response.json({ csrf_token: '1' });
-  }
   if (url.pathname.startsWith('/api/model/v1/')) {
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
       const origins = [`https://${env.PUBLIC_HOST}`];
