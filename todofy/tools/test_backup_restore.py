@@ -214,6 +214,19 @@ def test_a_backup_from_before_the_briefs_restores_them_as_never_derived(tmp_path
     assert target.execute("SELECT event_id, summary, brief FROM summaries").fetchall() == [("e01", "摘要", None)]
 
 
+def test_a_backup_from_before_the_native_model_ids_restores_them(source, tmp_path):
+    """0017 rewrote the saved route names in place; an older backup's restore replays it after the rows."""
+    source.execute("INSERT INTO model_settings VALUES (1, 'models/sol-6-1', 'models/gemini-report', 7)")
+    backup_of(source, tmp_path, schema_version="0016_model_settings.sql")
+    lines = write_sql(tmp_path, tmp_path / "restore.sql", legacy_text=True)
+    assert lines[-1] == "PASS replay 0017_native_model_ids.sql"
+    target = database()
+    for _ in range(2):
+        target.executescript((tmp_path / "restore.sql").read_text())
+    assert target.execute("SELECT * FROM model_settings").fetchall() == [(1, "gpt-6.1-sol", "gemini-3.8-flash", 7)]
+    assert verify(SqliteWrangler(target), "DB", tmp_path, legacy_text=True)[0]
+
+
 # The planning store migration 0013 drops; backed_up() reads how the releases before it backed each table up.
 PLANNING = ("plus_settings", "plus_weeks", "plan_marks", "plan_edges", "plan_notes", "plan_task_state", "plan_tasks")
 # The copies Tasks took, which migration 0015 drops, as the releases before it backed them up.
