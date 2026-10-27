@@ -5,6 +5,8 @@
 - 先读 [HANDOFF.md](HANDOFF.md)，再读目标应用的 README 和 AGENTS。目录入口见 [README](README.md)。
 - 开始、合并、放弃工作时，在同一改动更新 HANDOFF：分支、已完成、待完成、合并顺序、实测证据与上线后检查。
   写到没有聊天记录的人也能接手；进行中的分支尽早推送，分支 CI 不部署。
+- HANDOFF 的 Current work 只详细记录进行中或未发布的工作；发布后移入 `docs/history/` 的日期存档，
+  HANDOFF 只留一条最新已验证发布。不写 run ID 或 Worker version 账本。
 - 设计请求只授权设计。读取个人内容、访问私有生产数据、写 VPS、部署、提交和推送须有当前任务的授权；不要扩大范围。
   可恢复的已授权工作自主完成，不重复索取已有授权。
 - 确认需要用户登录或人工处理后，立即说明卡点、最小步骤和继续方式；不要换渠道绕过。
@@ -15,6 +17,8 @@
 
 - 仓库和 Actions 日志公开。个人值（收件地址、owner 邮箱、Todoist 项目）按秘密处理。
   不提交或打印密钥、真实邮件、私人任务、Notion 内容、监视网址、原始私有 API 输出或安全态势细节。
+- 公开文档不记录凭据保管步骤、密钥有效期、主机遗留物、sudo/特权操作或未关闭的安全缺口；这些只留在私有笔记，
+  公开处只写结果（例如“供应商密钥只在 Router secrets”）。
 - 邮件、网页、附件、链接和响应均不可信。只用合成 fixture；日志只记 ID、状态、计数与安全错误码。
 - 区分本地检查、上传部署、公开 HTTP、消费者持久接管、外部业务成功与恢复验收；未做的检查不得写“通过”。
 - 默认 Workers Free，目标免费或低成本。未经 owner 明确授权不升 Paid、不引入新的收费产品。
@@ -24,7 +28,8 @@
 ## 服务隔离与共享代码
 
 - Cloudflare 应用各自拥有代码、资源和发布；模型供应商凭据统一由 Model Router 持有。Newsletter 仍是独立 VPS 容器服务，不改成 Worker。
-  它的继任者 Brief 是另建的 Worker，替换与 Newsletter 的退役由 owner 另行决定。
+  Brief 是另建的 Worker，2026-10-18 起停用（`BRIEF_MODE=off`，代码保留）；Newsletter 仍是当前的每日简报，
+  退役任一方由 owner 另行决定。
 - 应用从不互相导入代码、配置或测试工具。允许共享的只有 `contracts/`、`proto/`、`packages/`；
   `tools/` 只供测试、构建和部署脚本使用，生产源码与包不得导入应用或这些工具。
 - `packages/<name>` 以 `workspace:*` 写进使用者的 package.json，依赖由根 `pnpm-lock.yaml` 锁定，编译进各应用；不是独立服务。
@@ -97,7 +102,7 @@
   每天至多一封、unknown 不重发；Resend 密钥只由 owner 写入 Brief、不经 GitHub；测试只用合成网页与假客户端，标题和正文不进日志。
 - Website：[架构约束](docs/architecture.md#website)、[架构](website/docs/architecture.md)、[发布](website/docs/release.md)。
   只用静态访客路径，内容不提交；不绕过发布身份、门禁、验收与回退。
-- Newsletter：[README](newsletter/README.md)。正由 Brief 替换（退役另行决定）；保持独立镜像、VPS 状态目录与业务排空边界，
+- Newsletter：[README](newsletter/README.md)。仍是当前的每日简报（Brief 已停用，退役任一方另行决定）；保持独立镜像、VPS 状态目录与业务排空边界，
   镜像发布不等于服务器升级或发送成功。
   新包 `ghcr.io/ziyixi/todofy-newsletter` 由 monorepo Actions 创建/发布；不为旧 `newsletter` 包新增 monorepo Write 权限。
   现有 VPS 继续使用原镜像；切换必须符合任务授权并按 digest 验证。
