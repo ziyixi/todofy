@@ -27,8 +27,9 @@ newest 50 candidates is green, the job fails. `context` checks the pinned commit
 Each stage is one `pnpm release <command>`, run from `website/`:
 
 1. `context` validates main, workflow dispatch, confirmation, request UUID and green commit.
-2. `code-sha` identifies the newest commit that touched `website/`; unrelated service changes do not
-   change the website's code identity.
+2. `code-sha` identifies the newest commit that touched `website/` or its shared build inputs (the root
+   workspace files and `proto/` without other apps' packages); unrelated service changes do not change the
+   website's code identity.
 3. `gate` reads the existing `website-release` records. Ordinary release needs a successful baseline;
    a failed/interrupted release needs recovery. No baseline requires bootstrap and produces a blocked
    content-sync receipt.

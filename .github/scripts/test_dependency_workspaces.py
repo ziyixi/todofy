@@ -256,6 +256,12 @@ class DependencyWorkspaces(unittest.TestCase):
         command = source.split('async "code-sha"() {', 1)[1].split("async gate()", 1)[0]
         arguments = re.search(r'execFileAsync\(\s*"git",\s*(\[[^\]]*\])', command).group(1)
         args = json.loads(re.sub(r",(\s*])", r"\1", arguments))
+        # Only other apps' proto packages are left out, never one the website's bundles import.
+        excluded = tuple(arg.removeprefix(":(exclude)../") + "/" for arg in args if arg.startswith(":(exclude)"))
+        self.assertTrue(excluded)
+        for prefix, importers in ci_changes.PROTO_PACKAGES.items():
+            if prefix.startswith(excluded):
+                self.assertNotIn("website", importers, prefix)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "website").mkdir()
@@ -264,18 +270,22 @@ class DependencyWorkspaces(unittest.TestCase):
             git("init", "--quiet")
             git("config", "user.name", "Workspace test")
             git("config", "user.email", "fixture@example.invalid")
-            for path in ("website/source.ts", "proto/source.proto", "package.json", "pnpm-workspace.yaml", "pnpm-lock.yaml", ".python-version"):
+            for path in ("website/source.ts", "proto/source.proto", "proto/ops/v1/ops.proto", "proto/shared/v1/new.proto",
+                         "package.json", "pnpm-workspace.yaml", "pnpm-lock.yaml", ".python-version"):
                 target = root / path
-                target.parent.mkdir(exist_ok=True)
+                target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(path)
                 git("add", path)
                 git("commit", "--quiet", "-m", "Change " + path)
                 selected = subprocess.check_output(["git", *args], cwd=root / "website", text=True).strip()
                 self.assertEqual(selected, git("rev-parse", "HEAD"), path)
-            (root / "unrelated.txt").write_text("Other app input")
-            git("add", "unrelated.txt")
-            git("commit", "--quiet", "-m", "Other app")
-            self.assertEqual(subprocess.check_output(["git", *args], cwd=root / "website", text=True).strip(), selected)
+            for path in ("unrelated.txt", "proto/tasks/ui/v1/tasks.proto", "proto/modelrouter/inference/v1/inference.proto"):
+                target = root / path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text("Other app input")
+                git("add", path)
+                git("commit", "--quiet", "-m", "Other app")
+                self.assertEqual(subprocess.check_output(["git", *args], cwd=root / "website", text=True).strip(), selected, path)
 
 
 if __name__ == "__main__":
