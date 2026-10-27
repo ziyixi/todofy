@@ -73,8 +73,7 @@ describe('priority batch classification', () => {
     expect(calls[0]?.body?.['recheck_fallback']).toBeUndefined()
     expect(calls[0]?.body?.['recheck_initial100']).toBeUndefined()
     expect(start.disabled).toBe(true)
-    expect(button(card, '重判保底 P1').disabled).toBe(true)
-    expect(button(card, '重判最初100封').disabled).toBe(true)
+    expect([...card.querySelectorAll('button')].map((node) => node.textContent)).toEqual(['整理当前未读', '刷新进度'])
     expect(button(card, '刷新进度').disabled).toBe(false)
     expect(card.textContent).toContain('总数尚未确定')
     expect(server.settings).toEqual(settings)
@@ -97,84 +96,21 @@ describe('priority batch classification', () => {
     expect(server.calls.some((call) => call.path.startsWith('/api/v2/settings'))).toBe(false)
   })
 
-  it('requests only unread fallback P1 for rechecking and explains the cohort', async () => {
-    const server = liveServer()
-    const card = await open(server)
-    expect(card.textContent).toContain('重判保底 P1 只处理当前未读邮件；已读和已手动调整的邮件不动。')
-    const recheck = button(card, '重判保底 P1')
-    recheck.click()
-    recheck.click()
-    button(card, '整理当前未读').click()
-    await settle()
-    const calls = server.calls.filter((call) => call.path.endsWith('/unreadClassification:start'))
-    expect(calls).toHaveLength(1)
-    expect(calls[0]?.body?.['recheck_fallback']).toBe(true)
-    expect(calls[0]?.body?.['recheck_initial100']).toBeUndefined()
-    expect(String(calls[0]?.body?.['request_id'])).toMatch(/^[0-9a-f-]{36}$/)
-    expect(calls[0]?.headers['x-csrf-token']).toBe('1')
-    expect(recheck.disabled).toBe(true)
-    expect(button(card, '整理当前未读').disabled).toBe(true)
-    expect(button(card, '重判最初100封').disabled).toBe(true)
-    expect(button(card, '刷新进度').disabled).toBe(false)
-  })
-
-  it('requests the original 100 regardless of read or archive state and locks all actions while starting', async () => {
-    const server = liveServer()
-    const settings = { ...server.settings }
-    const card = await open(server)
-    expect(card.textContent).toContain('当前分级启用后最早成功自动分级的100封')
-    expect(card.textContent).toContain('固定按原始分级顺序选择')
-    expect(card.textContent).toContain('包括已读和已归档邮件')
-    expect(card.textContent).toContain('跳过已手动调整的邮件，保留已读状态')
-    expect(card.textContent).toContain('重判未变表示已完成分析，只更新判断证据，不再写入 Gmail')
-    const recheck = button(card, '重判最初100封')
-    recheck.click()
-    expect(recheck.disabled).toBe(true)
-    expect(button(card, '整理当前未读').disabled).toBe(true)
-    expect(button(card, '重判保底 P1').disabled).toBe(true)
-    expect(button(card, '刷新进度').disabled).toBe(true)
-    recheck.click()
-    button(card, '整理当前未读').click()
-    button(card, '重判保底 P1').click()
-    await settle()
-    const calls = server.calls.filter((call) => call.path.endsWith('/unreadClassification:start'))
-    expect(calls).toHaveLength(1)
-    expect(calls[0]?.method).toBe('POST')
-    expect(calls[0]?.body?.['recheck_initial100']).toBe(true)
-    expect(calls[0]?.body?.['recheck_fallback']).toBeUndefined()
-    expect(String(calls[0]?.body?.['request_id'])).toMatch(/^[0-9a-f-]{36}$/)
-    expect(calls[0]?.headers['x-csrf-token']).toBe('1')
-    expect(recheck.disabled).toBe(true)
-    expect(button(card, '刷新进度').disabled).toBe(false)
-    expect(card.textContent).toContain('正在收集本轮邮件')
-    expect(server.settings).toEqual(settings)
-  })
-
   it('disables every start action during refresh or an active batch', async () => {
     const server = liveServer()
     server.unreadClassification = batch(UnreadClassification_State.COMPLETED)
     const card = await open(server)
     const start = button(card, '整理当前未读')
-    const recheck = button(card, '重判保底 P1')
-    const recheckInitial = button(card, '重判最初100封')
-    expect(recheckInitial.disabled).toBe(false)
     expect(start.disabled).toBe(false)
-    expect(recheck.disabled).toBe(false)
     button(card, '刷新进度').click()
     expect(start.disabled).toBe(true)
-    expect(recheck.disabled).toBe(true)
-    expect(recheckInitial.disabled).toBe(true)
     await settle()
     expect(start.disabled).toBe(false)
-    expect(recheck.disabled).toBe(false)
-    expect(recheckInitial.disabled).toBe(false)
     for (const state of [UnreadClassification_State.SCANNING, UnreadClassification_State.RUNNING]) {
       server.unreadClassification = batch(state)
       button(card, '刷新进度').click()
       await settle()
       expect(start.disabled).toBe(true)
-      expect(recheck.disabled).toBe(true)
-      expect(recheckInitial.disabled).toBe(true)
       expect(button(card, '刷新进度').disabled).toBe(false)
     }
     expect(server.calls.filter((call) => call.method !== 'GET')).toHaveLength(0)
@@ -193,7 +129,7 @@ describe('priority batch classification', () => {
     button(card, '刷新进度').click()
     await settle()
     expect(card.textContent).toContain('后台分批整理中')
-    expect(card.textContent).toContain('总数 100 · 待处理 60 · 已改标 30 · 重判未变 0 · 未重判跳过 8 · 失败 2 · 暂缓 5')
+    expect(card.textContent).toContain('总数 100 · 待处理 60 · 已改标 30 · 跳过 8 · 失败 2 · 暂缓 5')
     expect(card.textContent).not.toContain('总数尚未确定')
     expect(server.calls.filter((call) => call.path === '/api/v2/serviceStatus')).toHaveLength(2)
     expect(server.calls.filter((call) => call.method !== 'GET')).toHaveLength(0)
@@ -310,7 +246,7 @@ describe('priority batch classification', () => {
     server.unreadClassification = create(UnreadClassificationSchema, { ...batch(UnreadClassification_State.COMPLETED), totalCount: 40, pendingCount: 0, deferredCount: 0 })
     const card = await open(server)
     expect(card.textContent).toContain('本轮整理已结束')
-    expect(card.textContent).toContain('总数 40 · 待处理 0 · 已改标 30 · 重判未变 0 · 未重判跳过 8 · 失败 2 · 暂缓 0')
+    expect(card.textContent).toContain('总数 40 · 待处理 0 · 已改标 30 · 跳过 8 · 失败 2 · 暂缓 0')
     expect(card.textContent).not.toContain('已改标 40')
     expect(button(card, '整理当前未读').disabled).toBe(false)
     button(card, '整理当前未读').click()
@@ -319,20 +255,15 @@ describe('priority batch classification', () => {
     expect(button(card, '整理当前未读').disabled).toBe(true)
   })
 
-  it('distinguishes 100 completed same-grade judgments from untouched skips', async () => {
+  it('keeps an older recheck batch\'s same-grade judgments apart from skips', async () => {
     const server = liveServer()
     server.unreadClassification = create(UnreadClassificationSchema, { name: 'unreadClassification', state: UnreadClassification_State.COMPLETED, totalCount: 100, unchangedCount: 100 })
     const card = await open(server)
-    expect(card.textContent).toContain('总数 100 · 待处理 0 · 已改标 0 · 重判未变 100 · 未重判跳过 0 · 失败 0 · 暂缓 0')
-    expect(card.textContent).toContain('重判未变表示已完成分析')
-    expect(card.textContent).not.toContain('未重判跳过 100')
+    expect(card.textContent).toContain('总数 100 · 待处理 0 · 已改标 0 · 重判未变 100 · 跳过 0 · 失败 0 · 暂缓 0')
+    expect(card.textContent).not.toContain('跳过 100')
   })
 
-  it.each([
-    { label: '整理当前未读', recheckFallback: undefined, recheckInitial100: undefined },
-    { label: '重判保底 P1', recheckFallback: true, recheckInitial100: undefined },
-    { label: '重判最初100封', recheckFallback: undefined, recheckInitial100: true },
-  ])('retries $label after a lost response with the same action identity and scope', async ({ label, recheckFallback, recheckInitial100 }) => {
+  it('retries a start after a lost response with the same request ID', async () => {
     const server = liveServer()
     const card = await open(server)
     const fetcher = globalThis.fetch
@@ -342,15 +273,11 @@ describe('priority batch classification', () => {
       if (!lost && url.endsWith('/unreadClassification:start')) { lost = true; throw new TypeError('lost response') }
       return response
     })
-    button(card, label).click()
+    button(card, '整理当前未读').click()
     await vi.waitFor(() => expect(card.textContent).toContain('总数尚未确定'), { timeout: 1500 })
     const calls = server.calls.filter((call) => call.path.endsWith('/unreadClassification:start'))
     expect(calls).toHaveLength(2)
     expect(calls[0]?.body?.['request_id']).toBe(calls[1]?.body?.['request_id'])
-    for (const call of calls) {
-      expect(call.body?.['recheck_fallback']).toBe(recheckFallback)
-      expect(call.body?.['recheck_initial100']).toBe(recheckInitial100)
-    }
   })
 
   it('shows start failures without claiming success, then allows retry', async () => {

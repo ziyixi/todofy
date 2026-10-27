@@ -184,7 +184,7 @@ export class MailsortState extends DurableObject<Env> {
       alarmAt: () => this.ctx.storage.getAlarm(),
       budget,
       // This Start request is itself one mutation. Reads and emergency settings stay responsive.
-      consolidationBusy: () => this.passRunning || this.mutationsInFlight > 1,
+      busy: () => this.passRunning || this.mutationsInFlight > 1,
       gmail: async () => {
         const session = await openSession({ store: this.store, env: this.env, fetch: upstreamFetch(this.env), now: () => this.now(), budget, token: this.token });
         if ('reason' in session) return session.reason;

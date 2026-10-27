@@ -193,3 +193,30 @@ describe('the owner API', () => {
     expect(await h.opsSetGuard({ level: 'normal', reason: 'quota_recovered', until: null })).toMatchObject({ level: 'normal' });
   });
 });
+
+describe('the retired label consolidation', () => {
+  let h: Harness;
+  beforeAll(async () => {
+    h = await startHarness();
+  });
+  afterAll(async () => {
+    await h.dispose();
+  });
+
+  it('asks an older page to reload, and a restored unfinished job holds every mutation but settings', async () => {
+    for (const call of [
+      () => h.api.getLabelConsolidation({ name: 'labelConsolidation' }),
+      () => h.api.startLabelConsolidation({ name: 'labelConsolidation', groups: [], requestId: op() }),
+      () => h.api.resumeLabelConsolidation({ name: 'labelConsolidation', etag: 'synthetic', requestId: op() }),
+    ]) expect(reasonOf(await rejection(call()))).toBe('RELOAD_REQUIRED');
+    await h.step(T0);
+    await h.sql(`INSERT INTO label_merge_jobs (id, state, phase, plan, create_time, update_time, etag) VALUES ('restored', 'running', 'move', '[]', ?, ?, 'e')`, T0, T0);
+    expect(reasonOf(await rejection(h.api.initializePriorities({ requestId: op() })))).toBe('CONSOLIDATION_ACTIVE');
+    expect(await h.api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', mode: Mode.OFF }), updateMask: { paths: ['mode'] }, requestId: op() })).toMatchObject({ mode: Mode.OFF });
+    await h.api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', mode: Mode.LIVE }), updateMask: { paths: ['mode'] }, requestId: op() });
+    expect(await h.step(T0 + HOUR)).toMatchObject({ code: 'priority_setup_required', decided: 0, applied: 0 });
+    expect(h.up.gmail.calls.filter((call) => call.method !== 'GET' && !call.url.includes('oauth2'))).toEqual([]);
+    await h.sql(`UPDATE label_merge_jobs SET state = 'succeeded'`);
+    expect(await h.api.initializePriorities({ requestId: op() })).toMatchObject({ completed: true });
+  });
+});

@@ -4,7 +4,7 @@ import { create } from '@ziyixi/proto/protobuf';
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt';
 import { MailFlow_Stage } from '@ziyixi/proto/mailsort/ui/v2/flow_pb';
 import { ClassificationPromptSchema } from '@ziyixi/proto/mailsort/ui/v2/prompt_pb';
-import { ClassificationProvider, Mode, SettingsSchema, UnreadClassification_State } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
+import { ClassificationProvider, Mode, SettingsSchema } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
 import { PRIORITY_LABELS } from '../../src/priority.ts';
 import { MAILS, type SyntheticMail } from '../fakes/fixtures.ts';
 import { MODEL_ENDPOINT } from '../fakes/upstream.ts';
@@ -80,7 +80,7 @@ describe('Codex priority pipeline', () => {
     expect(h.up.codex.calls.flat().map(email => email.id)).toEqual([mail(91).id, mail(92).id]);
   });
 
-  it('applies all four priorities, records Codex flow and counts unchanged explicit rechecks correctly', async () => {
+  it('applies all four priorities and records Codex flow', async () => {
     await initialize();
     await select(ClassificationProvider.CODEX);
     const owner = h.up.gmail.createUserLabel('Synthetic owner tag');
@@ -103,12 +103,6 @@ describe('Codex priority pipeline', () => {
     const status = await h.api.getServiceStatus({ name: 'serviceStatus' });
     expect(status.classifier).toMatchObject({ provider: ClassificationProvider.CODEX, model: 'gpt-6.1-sol', effort: 'medium', configured: true, lastErrorCode: '', lastSuccessTime: timestampFromMs(T0 + 3 * HOUR + 2 * MINUTE) });
     expect(status.codexUsage).toMatchObject({ month: '2026-10', requestCount: 4, successCount: 4, failureCount: 0, usageReportedCount: 4, inputTokens: 4800, outputTokens: 480, lastRequestTime: timestampFromMs(T0 + 3 * HOUR + 2 * MINUTE) });
-    await h.clock(T0 + 3 * HOUR + 3 * MINUTE);
-    await h.api.startUnreadClassification({ name: 'unreadClassification', recheckInitial100: true, requestId: op() });
-    await h.step(T0 + 3 * HOUR + 4 * MINUTE);
-    expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).unreadClassification).toMatchObject({
-      state: UnreadClassification_State.COMPLETED, totalCount: 4, appliedCount: 3, unchangedCount: 1, skippedCount: 0, failedCount: 0,
-    });
     expect(h.up.claude.calls).toEqual([]);
   });
 

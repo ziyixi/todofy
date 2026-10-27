@@ -3,15 +3,15 @@ import { UnreadClassification_State, UnreadClassificationSchema, type UnreadClas
 import { create } from '@ziyixi/proto/protobuf';
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt';
 import type { GmailClient } from './gmail.ts';
-import { P1_ID, PRIORITY_IDS, priorityStartedAt } from './priority.ts';
-import type { DecisionRow, Store } from './store.ts';
+import type { Store } from './store.ts';
 
 interface UnreadScan {
   readonly startedAt: number;
   readonly listed: boolean;
   readonly pageToken?: string;
-  readonly recheckFallback: boolean;
-  readonly recheckInitial100: boolean;
+  /** Set only by the retired one-time recheck batches, whose progress still reports unchanged rechecks. */
+  readonly recheckFallback?: boolean;
+  readonly recheckInitial100?: boolean;
 }
 
 function scanOf(store: Store): UnreadScan | null {
@@ -35,7 +35,7 @@ export function unreadProgress(store: Store, now: number): UnreadClassification 
        LEFT JOIN decisions d ON d.message_id = b.message_id`, now, scan.startedAt,
   );
   const pending = counts?.pending ?? 0;
-  const unchanged = scan.recheckFallback || scan.recheckInitial100 ? counts?.unchanged ?? 0 : 0;
+  const unchanged = scan.recheckFallback === true || scan.recheckInitial100 === true ? counts?.unchanged ?? 0 : 0;
   let state: UnreadClassification_State = UnreadClassification_State.SCANNING;
   if (scan.listed) state = pending > 0 ? UnreadClassification_State.RUNNING : UnreadClassification_State.COMPLETED;
   return create(UnreadClassificationSchema, {
@@ -54,41 +54,11 @@ export function unreadProgress(store: Store, now: number): UnreadClassification 
 }
 
 /** An active batch keeps its IDs and progress, including when another request_id is used. Transactional. */
-export function startUnread(store: Store, now: number, recheckFallback = false, recheckInitial100 = false): void {
+export function startUnread(store: Store, now: number): void {
   const previous = unreadProgress(store, now);
   if (previous !== undefined && previous.state !== UnreadClassification_State.COMPLETED) return;
   store.run(`DELETE FROM unread_batch`);
-  store.setMeta('unread_scan', JSON.stringify({ startedAt: now, listed: recheckInitial100, recheckFallback, recheckInitial100 } satisfies UnreadScan));
-  if (recheckInitial100) {
-    // Original successful writes are immutable, including after a later recheck or undo.
-    store.run(`INSERT INTO unread_batch (message_id)
-      SELECT message_id FROM ledger WHERE origin = 'auto' AND label_id IN ('p1', 'p2', 'p3', 'p4') AND apply_time IS NOT NULL AND create_time >= ?
-      GROUP BY message_id ORDER BY min(create_time), message_id LIMIT 100`, priorityStartedAt(store));
-    store.run(`INSERT OR IGNORE INTO pending (message_id, added_at) SELECT message_id, ? FROM unread_batch`, now);
-  }
-}
-
-/** The current assigned priority, excluding decisions explicitly confirmed or corrected by the owner. */
-export function decisionForRecheck(store: Store, messageId: string): DecisionRow | undefined {
-  const row = store.decision(messageId);
-  if (row === undefined || row.label_id === null || !PRIORITY_IDS.has(row.label_id) || row.decided_at < priorityStartedAt(store) ||
-    ((row.verdict === 'confirmed' || row.verdict === 'corrected') && (row.verdict_source === 'gmail' || row.verdict_source === 'review'))) return undefined;
-  return row;
-}
-
-/** A current-era P1 chosen by the uncertainty policy, without an owner's confirmed or corrected verdict. */
-export function fallbackP1(store: Store, messageId: string): boolean {
-  const row = decisionForRecheck(store, messageId);
-  return row?.label_id === P1_ID && ['low_confidence', 'views_disagree', 'no_match'].includes(row.unsure_reason);
-}
-
-/** The batch's explicit narrow retry option; older saved batches retain normal unread behavior. */
-export function unreadRechecksFallback(store: Store): boolean {
-  return scanOf(store)?.recheckFallback === true;
-}
-
-export function unreadRechecksInitial100(store: Store): boolean {
-  return scanOf(store)?.recheckInitial100 === true;
+  store.setMeta('unread_scan', JSON.stringify({ startedAt: now, listed: false } satisfies UnreadScan));
 }
 
 /** One read-only page per alarm. No batch writes start until the complete ID set has been collected. */
@@ -97,9 +67,7 @@ export async function scanUnread(store: Store, gmail: GmailClient, now: number, 
   if (scan === null || scan.listed) return false;
   const page = await gmail.unreadPage(scan.pageToken);
   transact(() => {
-    for (const id of page.ids) {
-      if (!scan.recheckFallback || fallbackP1(store, id)) store.run(`INSERT OR IGNORE INTO unread_batch (message_id) VALUES (?)`, id);
-    }
+    for (const id of page.ids) store.run(`INSERT OR IGNORE INTO unread_batch (message_id) VALUES (?)`, id);
     store.setMeta('unread_scan', JSON.stringify({ ...scan, listed: page.nextPageToken === undefined, pageToken: page.nextPageToken }));
     if (page.nextPageToken === undefined) {
       // Explicit backfill includes older decisions; ordinary new-mail enqueue retains its original deduplication.

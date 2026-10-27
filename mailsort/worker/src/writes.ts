@@ -29,7 +29,6 @@
  * keeps its mail by the time it goes out (keepIfLabelKeeps).
  */
 import { effectiveLedgerRow } from './label-identity.ts';
-import { migrationActive } from './label-merge.ts';
 import { priorityGmailIds, PRIORITY_IDS } from './priority.ts';
 import { setCurrentLabels } from './feedback.ts';
 import { countFlow, stageOf } from './flow.ts';
@@ -38,7 +37,6 @@ import { WRITE_ATTEMPTS_MAX } from './limits.ts';
 import { ownerPath } from './paths.ts';
 import { noteGoogleError } from './session.ts';
 import { timeId } from './ids.ts';
-import { unreadRechecksFallback, unreadRechecksInitial100 } from './unread.ts';
 import { utcDay, type LabelRow, type LedgerRow, type Store } from './store.ts';
 import type { Budget } from './session.ts';
 
@@ -253,7 +251,6 @@ function keepIfLabelKeeps(store: Store, row: LedgerRow): LedgerRow {
  */
 export async function executeWrites(ctx: WriteContext, ids: readonly string[] | null, limit: number): Promise<WriteOutcome> {
   const { store } = ctx;
-  if (migrationActive(store)) return { applied: 0, undone: 0, failed: 0, stopped: true };
   const rows =
     ids === null
       ? store.all<LedgerRow>(`SELECT * FROM ledger WHERE state IN ('intended', 'undo_intended') ORDER BY id LIMIT ?`, limit)
@@ -318,10 +315,6 @@ export async function executeWrites(ctx: WriteContext, ids: readonly string[] | 
         const now = ctx.now();
         ctx.transact(() => {
           store.run(`UPDATE ledger SET state = 'applied', apply_time = ?, last_code = NULL WHERE id = ?`, now, row.id);
-          if ((unreadRechecksInitial100(store) || unreadRechecksFallback(store)) && store.one(`SELECT 1 AS x FROM unread_batch WHERE message_id = ? AND ledger_id = ?`, row.message_id, row.id) !== undefined) {
-            // Only the successful replacement owns undo; the earlier priority's history remains read-only.
-            store.run(`UPDATE ledger SET superseded = 1 WHERE message_id = ? AND origin = 'auto' AND label_id IN ('p1', 'p2', 'p3', 'p4') AND state = 'applied' AND id != ?`, row.message_id, row.id);
-          }
           const decision = store.decision(row.message_id);
           if (decision !== undefined) setCurrentLabels(store, row.message_id, [
             ...(JSON.parse(decision.current_labels) as string[]).filter(id => !PRIORITY_IDS.has(id)), row.label_id,

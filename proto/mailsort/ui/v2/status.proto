@@ -172,7 +172,7 @@ message ServiceStatus {
   UnreadClassification unread_classification = 23 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Native Claude API usage for the current UTC calendar month. List-price cost from reported tokens.
   ClaudeBudget claude_budget = 24 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The next UTC midnight while today's automatic and consolidation writes have reached the daily Gmail cap.
+  // The next UTC midnight while today's automatic writes have reached the daily Gmail cap.
   // Absent while the current day's write allowance remains available.
   google.protobuf.Timestamp gmail_write_resume_time = 25 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The selected classification provider's readiness, errors and batch schedule.

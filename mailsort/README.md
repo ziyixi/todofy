@@ -88,7 +88,8 @@ preserve both providers' history on a switch and do not estimate subscription co
 
 Off, shadow and live modes retain their existing meanings. Shadow records decisions without changing Gmail;
 live applies them. The deployment ceiling can lower the owner's mode. Existing labelled mail is not automatically
-reclassified after a deployment. Older recheck actions remain explicit owner operations.
+reclassified after a deployment. The one-time recheck actions and the label consolidation are retired: an older page
+that still calls them is asked to reload.
 
 The initial P1-P4 setup and historical label replacement are in [priority rollout](docs/priority-rollout.md).
 Provider selection does not repeat that setup or delete labels.
@@ -112,9 +113,8 @@ node --test ../deploy/test/*.test.mjs
 ```
 
 Runtime and smoke tests use workerd/SQLite and fake Gmail/Claude/Codex endpoints with synthetic data.
-Batch results separate confirmed Gmail changes, successful rechecks that kept the same grade, and messages
-excluded before judgment. Priority badges refresh with batch progress. “重判最初100封” means the original earliest
-successfully graded cohort, including read/archive mail, rather than the newest 100 unread messages.
+Batch results separate confirmed Gmail changes and messages excluded before judgment; a recheck batch an older
+release completed still shows its same-grade judgments apart. Priority badges refresh with batch progress.
 
 UI checks in `web/`: `npm run lint && npm run typecheck && npm test && npm run build`.
 See [design](docs/design.md) and [collaboration rules](AGENTS.md).

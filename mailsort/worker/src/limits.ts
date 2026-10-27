@@ -112,10 +112,6 @@ export const UNDO_RANGE_MAX_MS = 31 * DAY;
 // ---- stores and retention -----------------------------------------------------------------------------------------------------
 
 export const LABELS_MAX = 24;
-/** Trusted domains per label at most (historical; the oldest goes first past it). */
-export const TRUSTED_DOMAINS_PER_LABEL_MAX = 50;
-export const EXAMPLES_MAX = 2000;
-export const EXAMPLES_PER_LABEL_MAX = 200;
 /** Subjects, senders and summaries of decided mails (and the review queue) are kept this long. */
 export const CONTENT_KEPT_MS = 14 * DAY;
 /** Decisions and the ledger (IDs, labels, probabilities) are kept this long. */
@@ -125,12 +121,12 @@ export const ERRORS_KEPT = 8;
 
 // ---- the owner API -----------------------------------------------------------------------------------------------------
 
-/** Maximum owner request body, including a bounded private consolidation plan. */
+/** Maximum owner request body (a saved prompt of up to 12 KiB of UTF-8 included). */
 export const MAX_BODY_BYTES = 32 * 1024;
 export const PAGE = 50;
 export const LABEL_ID_PATTERN = /^[a-z][a-z0-9-]{0,39}$/;
 export const ID_PATTERN = /^[a-z0-9-]{1,40}$/;
-/** New labels use a single English name. Older paths remain readable during label consolidation. */
+/** New labels use a single English name. Older paths remain readable. */
 export const LABEL_NAME_MAX = 40;
 /** Legacy path limits; never used to accept a new owner-supplied label name. */
 export const LABEL_DEPTH_MAX = 3;

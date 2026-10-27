@@ -39,7 +39,7 @@ export const REASONS: Readonly<Record<Reason, { readonly code: Code; readonly me
   GMAIL_WRITE_NOT_ALLOWED: { code: Code.FAILED_PRECONDITION, message: 'the mode or the grant does not allow Gmail writes', zh: '当前模式或授权不允许修改 Gmail' },
   DEPENDENCY_UNAVAILABLE: { code: Code.UNAVAILABLE, message: 'Gmail or Claude did not answer; repeat the request', zh: 'Gmail 或模型暂时不可用，请稍后再试' },
   RELOAD_REQUIRED: { code: Code.FAILED_PRECONDITION, message: 'mailsort was updated: reload the page', zh: '邮件分拣已更新，请刷新页面' },
-  CONSOLIDATION_ACTIVE: { code: Code.FAILED_PRECONDITION, message: 'a label consolidation owns these writes', zh: '标签整理尚未完成，请先查看整理进度；完成后可继续修改' },
+  CONSOLIDATION_ACTIVE: { code: Code.FAILED_PRECONDITION, message: 'a restored, unfinished label consolidation holds these writes', zh: '恢复的数据中有未完成的旧标签整理，除设置外的修改已暂停' },
   CONSOLIDATION_NOT_BLOCKED: { code: Code.FAILED_PRECONDITION, message: 'only a blocked consolidation can resume', zh: '这次标签整理没有暂停，无需恢复' },
   REPLAY_ACTIVE: { code: Code.FAILED_PRECONDITION, message: 'a replay evaluation is already running', zh: '回放评估正在运行，请等待它完成' },
   CONSOLIDATION_PENDING_WRITES: { code: Code.FAILED_PRECONDITION, message: 'existing mail processing and Gmail writes must finish before consolidation', zh: '当前邮件处理或 Gmail 写入还未结束，请稍后重新开始整理' },

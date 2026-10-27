@@ -83,7 +83,7 @@ breaker is removed: a stored breaker is ignored, and `Settings.breaker_tripped` 
 (`gpt-6.1-sol`, medium). A missing legacy field means Claude until the owner chooses otherwise. Both use the same
 saved prompt snapshot. The existing mask, etag and request-ID handling protects a switch; it preserves mode,
 write limits, prompt and Claude accounting history. The existing Alarm can resume pending work with the
-chosen provider. A switch does not start an unread/recheck batch, rewrite classified history or enable automatic fallback.
+chosen provider. A switch does not start an unread batch, rewrite classified history or enable automatic fallback.
 
 ## 4. Automatic batch interval
 
@@ -104,7 +104,8 @@ History registers messages independently by Gmail message ID. Normal processing 
 scope: Inbox mail received within 48 hours of first enqueue, with a known receipt date and no P1-P4 label.
 Read and unread mail are both eligible. Valid prior decisions remain frozen. Each recent new reply can be judged independently of other
 messages in its thread. The explicit unread action retains its separate unread requirement and includes older/archived mail, retaining its existing scan and
-progress table. Older recheck options remain explicit owner operations and never start on deployment.
+progress table. The one-time recheck options (fallback P1, the first 100) finished and are retired: the deprecated
+request fields answer RELOAD_REQUIRED, and a stored recheck batch keeps reporting its unchanged results.
 
 Model calls use the shared `MODEL_ROUTER` binding (`Inference`, `props.app=mailsort`). Mailsort sends the prompt,
 masked mail snapshot, selected model/effort and output schema through the common typed API. Router owns the native
@@ -165,8 +166,10 @@ initial checks and established retry behavior.
 
 Gmail corrections update verdicts, the label report and flow counts. They create no example and delete the mail's
 historical example; the Workers AI embedding, weak-learning and replay code is removed. Old replay start calls return a
-clear retired-feature error; GET history remains readable. The prior
-initializer and consolidation state keep their original identity and resume behavior, with no new migration system.
+clear retired-feature error; GET history remains readable. The prior initializer keeps its original identity and
+resume behavior. The label consolidation finished on 2026-10-11 and its code and Gmail operations are removed; its
+three RPCs answer RELOAD_REQUIRED and its tables stay as history. A state restored from its run (an unfinished job)
+refuses every owner mutation but settings with CONSOLIDATION_ACTIVE, so no priority setup or write starts over it.
 
 ## 7. UI and Ops
 
@@ -186,8 +189,9 @@ warnings apply only while Claude is selected. It no longer declares the account 
 shedding unrelated free-model usage cannot switch or stop Mailsort's model. The manual batch card consumes the fresh status after Start and reads status every 30 seconds only while
 its batch is active and visible. It cancels on hide/leave/completion and refreshes once on visible return.
 `ServiceStatus.gmail_write_resume_time` reports the next UTC midnight only when the effective daily write cap is
-full. The UI uses that timestamp for a specific local-time explanation. No new owner API endpoint or scheduler is added. Recheck progress derives `unchanged_count` from existing batch/decision
-metadata and excludes it from `skipped_count`; a successful same-grade judgment is not an unprocessed exclusion.
+full. The UI uses that timestamp for a specific local-time explanation. No new owner API endpoint or scheduler is added. A retired
+recheck batch's progress derives `unchanged_count` from existing batch/decision metadata and excludes it from
+`skipped_count`; a successful same-grade judgment is not an unprocessed exclusion.
 Labels refreshes its existing report after status updates and patches count spans in place, preserving focus and
 expanded details. Home owns its existing warning dismissal behavior.
 
@@ -217,7 +221,7 @@ attempts and not_before, so accepted work remains eligible through quota/retry w
 At a normal batch's due time, reuse the bounded Gmail messages.list operation with INBOX, newer_than:2d,
 P1-P4 exclusions and maxResults 100. This returns IDs only and never follows an all-mailbox/backfill path.
 The ordinary message preparation independently checks the same receipt boundary because history arrivals
-do not come through that list query. Active manual unread/recheck batches keep their fixed scope; automatic
+do not come through that list query. An active manual unread batch keeps its fixed scope; automatic
 reconciliation waits until their pending work finishes.
 
 Only old non-model skip records for not_inbox or before_install can be recovered in this bounded scope.

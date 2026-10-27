@@ -16,14 +16,10 @@
  *   labels_patch   PATCH /gmail/v1/users/me/labels/{owned id}               the name only, to the path the store
  *                                                                            plans for that label
  *   labels_delete  DELETE /gmail/v1/users/me/labels/{frozen retired id}     one-time priority setup; mail is kept
- *   merge_list     GET   /gmail/v1/users/me/messages                       approved source, first 10 IDs, all time
- *   merge_metadata GET   /gmail/v1/users/me/messages/{registered id}       labels and history identity only
- *   labels_hide    PATCH /gmail/v1/users/me/labels/{verified empty id}     hide visibility, never delete
- *   message_modify POST  /gmail/v1/users/me/messages/{id}/modify            ledger shapes or an approved consolidation swap:
+ *   message_modify POST  /gmail/v1/users/me/messages/{id}/modify            ledger shapes only:
  *     classify: add one owned label, remove the ledger's original priorities, and change INBOX only when its
  *               original position differs from the intended Inbox/archive position;
- *     undo:     remove that owned label, restore the original priorities and the original INBOX position;
- *     merge:    add one owned target and remove one owned source, for the persisted private migration intent.
+ *     undo:     remove that owned label, restore the original priorities and the original INBOX position.
  *
  * So there is no path to trash, untrash, message deletion, batchDelete, batchModify, send, drafts, filters, settings or
  * forwarding, and no way to touch UNREAD, STARRED, IMPORTANT, SPAM, TRASH, CATEGORY_* or a label mailsort does not own.
@@ -77,7 +73,7 @@ export function hasControl(text: string): boolean {
   return false;
 }
 
-export type GmailOp = 'token' | 'profile' | 'history' | 'messages_list' | 'unread_list' | 'message_get' | 'labels_list' | 'labels_create' | 'labels_patch' | 'labels_delete' | 'message_modify' | 'merge_list' | 'merge_metadata' | 'merge_modify' | 'labels_hide';
+export type GmailOp = 'token' | 'profile' | 'history' | 'messages_list' | 'unread_list' | 'message_get' | 'labels_list' | 'labels_create' | 'labels_patch' | 'labels_delete' | 'message_modify';
 
 /** A ledger row as the guard needs it (store.ts LedgerState). */
 export interface LedgerView {
@@ -99,13 +95,6 @@ export interface Ownership {
   plannedPath(labelId: string): string | null;
   /** The ledger row that adds `labelId` to `messageId`, or null. */
   ledger(messageId: string, labelId: string): LedgerView | null;
-  /** Exact private consolidation plan/intent; absent outside this operation. */
-  mergeListLabel?(labelId: string): boolean;
-  mergeMessage?(messageId: string): boolean;
-  mergeSwap?(messageId: string, sourceId: string, targetId: string): boolean;
-  mergeHide?(labelId: string): boolean;
-  mergeRename?(labelId: string): string | null;
-  mergeCreate?(name: string): boolean;
   /** Frozen owned retirement IDs of the authorized, one-time priority setup. */
   priorityDelete?(labelId: string): boolean;
 }
@@ -197,14 +186,6 @@ function checkModify(messageId: string, body: string | undefined, ownership: Own
   const add = labelList(value['addLabelIds']);
   const remove = labelList(value['removeLabelIds']);
   const inboxOnly = (list: string[]) => list.length === 0 || (list.length === 1 && list[0] === 'INBOX');
-  if (add.length === 1 && remove.length === 1 && isUserLabelId(add[0] ?? '') && isUserLabelId(remove[0] ?? '')) {
-    const target = add[0] ?? '';
-    const source = remove[0] ?? '';
-    owned(source, ownership);
-    owned(target, ownership);
-    if (source !== target && ownership.mergeSwap?.(messageId, source, target) === true) return;
-  }
-
   const undoLabels = remove.filter(id => id !== 'INBOX');
   if (undoLabels.length === 1) {
     const label = undoLabels[0] ?? '';
@@ -294,13 +275,6 @@ export function checkRequest(request: GoogleRequest, ownership: Ownership): Gmai
       if (token !== undefined && !PAGE_TOKEN.test(token)) refuse('page_token');
       return 'unread_list';
     }
-    if (url.searchParams.get('fields') === 'messages/id,nextPageToken,resultSizeEstimate') {
-      const params = query(url, ['labelIds', 'maxResults', 'fields', 'includeSpamTrash']);
-      const label = single(params, 'labelIds') ?? '';
-      const max = Number(single(params, 'maxResults'));
-      if (!isUserLabelId(label) || ownership.mergeListLabel?.(label) !== true || !Number.isInteger(max) || max < 1 || max > 10 || single(params, 'includeSpamTrash') !== 'true' || request.body !== undefined) refuse('merge_list');
-      return 'merge_list';
-    }
     const params = query(url, ['labelIds', 'q', 'maxResults', 'pageToken']);
     const q = single(params, 'q');
     if (single(params, 'labelIds') !== 'INBOX' || (q !== RESYNC_QUERY && q !== RECENT_CLASSIFICATION_QUERY)) refuse('list_query');
@@ -315,11 +289,6 @@ export function checkRequest(request: GoogleRequest, ownership: Ownership): Gmai
     if (!MESSAGE_ID.test(rest[1] ?? '')) refuse('message_id');
     const params = query(url, ['format', 'metadataHeaders', 'fields']);
     const format = single(params, 'format');
-    if (format === 'minimal' && single(params, 'fields') === 'id,labelIds,historyId') {
-      if (params.has('metadataHeaders') || ownership.mergeMessage?.(rest[1] ?? '') !== true || request.body !== undefined) refuse('merge_metadata');
-      return 'merge_metadata';
-    }
-
     const headers = params.get('metadataHeaders') ?? [];
     if (format === 'full') {
       if (headers.length > 0) refuse('metadata_headers');
@@ -341,7 +310,7 @@ export function checkRequest(request: GoogleRequest, ownership: Ownership): Gmai
       if (url.search !== '') refuse('query_param');
       const value = jsonBody(request.body, ['name', 'labelListVisibility', 'messageListVisibility']);
       const name = value['name'];
-      if (!flatName(name) || (!ownership.plannedPaths().has(name) && ownership.mergeCreate?.(name) !== true) || value['labelListVisibility'] !== 'labelShow' || value['messageListVisibility'] !== 'show') refuse('labels_create');
+      if (!flatName(name) || !ownership.plannedPaths().has(name) || value['labelListVisibility'] !== 'labelShow' || value['messageListVisibility'] !== 'show') refuse('labels_create');
       return 'labels_create';
     }
   }
@@ -353,15 +322,10 @@ export function checkRequest(request: GoogleRequest, ownership: Ownership): Gmai
   if (method === 'PATCH' && rest.length === 2 && rest[0] === 'labels') {
     if (url.search !== '') refuse('query_param');
     const id = rest[1] ?? '';
-
-    if (request.body === JSON.stringify({ labelListVisibility: 'labelHide', messageListVisibility: 'hide' })) {
-      if (!isUserLabelId(id) || ownership.mergeHide?.(id) !== true) refuse('hide_not_verified');
-      return 'labels_hide';
-    }
     owned(id, ownership);
     const value = jsonBody(request.body, ['name']);
     const name = value['name'];
-    if (!flatName(name) || name !== (ownership.mergeRename?.(id) ?? ownership.plannedPath(id))) refuse('labels_patch');
+    if (!flatName(name) || name !== ownership.plannedPath(id)) refuse('labels_patch');
     return 'labels_patch';
   }
   if (method === 'POST' && rest.length === 3 && rest[0] === 'messages' && rest[2] === 'modify') {
@@ -690,35 +654,6 @@ export class GmailClient {
     if (tooLarge) throw new GoogleError('too_large', 'labels_delete_too_large');
     // An interrupted setup may have removed the label before saving its progress.
     if (status !== 404 && (status < 200 || status >= 300)) throw this.failure('labels_delete', status, json);
-  }
-
-  /** First bounded page only: removing its source label safely makes progress without a mutable offset. */
-  async mergeMessages(labelId: string, max = 10): Promise<string[]> {
-    const params = new URLSearchParams({ labelIds: labelId, maxResults: String(max), includeSpamTrash: 'true', fields: 'messages/id,nextPageToken,resultSizeEstimate' });
-    const value = assertObject(await this.getJson('merge_list', `${GMAIL_BASE}/messages?${params.toString()}`));
-    const messages = value['messages'] ?? [];
-    if (!Array.isArray(messages) || messages.length > max) throw new GoogleError('bad_answer', 'merge_list_bad_answer');
-    const ids = messages.map((item: unknown) => assertObject(item)['id']);
-    if (!ids.every(isMessageId) || new Set(ids).size !== ids.length || (ids.length === 0 && value['nextPageToken'] !== undefined)) throw new GoogleError('bad_answer', 'merge_list_bad_answer');
-    return ids;
-  }
-
-  /** No snippet, headers or body: only the current labels and their history identity. */
-  async mergeMetadata(messageId: string): Promise<{ labels: string[]; historyId: string }> {
-    const params = new URLSearchParams({ format: 'minimal', fields: 'id,labelIds,historyId' });
-    const value = assertObject(await this.getJson('merge_metadata', `${GMAIL_BASE}/messages/${messageId}?${params.toString()}`));
-    const labels = value['labelIds'];
-    const historyId = value['historyId'];
-    if (value['id'] !== messageId || !Array.isArray(labels) || !labels.every((id): id is string => typeof id === 'string') || typeof historyId !== 'string' || !DIGITS.test(historyId)) throw new GoogleError('bad_answer', 'merge_metadata_bad_answer');
-    return { labels, historyId };
-  }
-
-  async swapMergeLabel(messageId: string, sourceId: string, targetId: string): Promise<void> {
-    await this.write('merge_modify', 'POST', `${GMAIL_BASE}/messages/${messageId}/modify`, { addLabelIds: [targetId], removeLabelIds: [sourceId] });
-  }
-
-  async hideMergeLabel(labelId: string): Promise<void> {
-    await this.write('labels_hide', 'PATCH', `${GMAIL_BASE}/labels/${labelId}`, { labelListVisibility: 'labelHide', messageListVisibility: 'hide' });
   }
 
   /** Applies the intended priority and Inbox position; the ledger row must be `intended` or `applied`. */
