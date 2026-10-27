@@ -10,11 +10,11 @@ a Haiku entailment check logs overstatements. One send per day through Resend, n
 outcome; a private archive behind Access shows every issue, its sources, its quotes and what it cost. The owner's
 👍 / 👎 / 多来点 adjust source and topic weights weekly.
 
-**Status: deployed in archive mode** (2026-10-11). The implementation landed in `0e48a59`; the first deployment,
-`7bea3ec`, passed [CI](https://github.com/ziyixi/todofy/actions/runs/38128504001). The Access applications and
-`BriefState` namespace exist, and production has both provider secret names configured. Production `MODE` and the
-GitHub variable `BRIEF_MODE` are `archive`: the pipeline can call the paid Claude API and archive issues, but sends
-no email. Real model quality and delivery remain separate acceptance steps (§16).
+**Status: stopped** (2026-10-18, `BRIEF_MODE=off`): no Claude call, issue or email; the code is kept, and Newsletter
+is the active daily briefing. Before that it ran in archive mode from 2026-10-11: the implementation landed in
+`0e48a59`; the first deployment, `7bea3ec`, passed [CI](https://github.com/ziyixi/todofy/actions/runs/38128504001).
+The Access applications and `BriefState` namespace exist. Real model quality and delivery remain separate acceptance
+steps (§16).
 
 The resource registration and Home Ops integration were implemented on `codex/brief-home-monitoring`.
 [`HANDOFF.md`](../../HANDOFF.md) records their release status, production checks and the initial synthetic

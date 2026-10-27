@@ -1,15 +1,15 @@
 # brief
 
-A daily research-and-world briefing in Chinese for the owner, to replace the newsletter: a short weekday email
+A daily research-and-world briefing in Chinese for the owner, written as the newsletter's successor: a short weekday email
 (研究前沿 and the day's 2-3 most important 世界与经济 stories) and a Saturday deep read. The Worker fetches its sources
 itself, the configured Haiku route screens them, the configured Opus route picks the day's items side by side and writes them, and code
 checks every quote, name and number. One Worker and one SQLite Durable Object on Workers Free. Inference and embeddings use the private shared Model Router; all Claude callers share Router's single key in the existing US$80/month workspace. Design: [`docs/design.md`](docs/design.md). Rules: [`AGENTS.md`](AGENTS.md).
 
-**Status: deployed in archive mode** (2026-10-11). The first deployment, `7bea3ec`, passed
-[CI](https://github.com/ziyixi/todofy/actions/runs/38128504001). Production `MODE` and the GitHub variable `BRIEF_MODE`
-are both `archive`: sources are fetched and paid Claude API calls can run, but no email is sent. The follow-up
-resource registration and Home monitoring are implemented; their release and production checks are tracked in
-[`HANDOFF.md`](../HANDOFF.md). Newsletter continues unchanged, and its retirement remains a separate decision.
+**Status: stopped** (2026-10-18). Production `MODE` and the GitHub variable `BRIEF_MODE` are `off`: sources are still
+fetched, but no Claude call starts, no issue is made and no email is sent. The code is kept for possible later use;
+resuming is setting `BRIEF_MODE` and redeploying (Deploy below). Newsletter is the active daily briefing. Brief ran in
+archive mode from its first deployment, `7bea3ec` on 2026-10-11
+([CI](https://github.com/ziyixi/todofy/actions/runs/38128504001)), until the stop.
 
 The owner has saved a monthly budget of **$80** in 设置, confirmed on the production settings page on 2026-10-11.
 Deployments must preserve this stored setting. The code's initial default remains $40; the Claude Console workspace limit was separately set and verified at $80/month on 2026-10-27 for the shared Router connection. Both provider secret
