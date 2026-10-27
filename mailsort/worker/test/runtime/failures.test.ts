@@ -192,7 +192,6 @@ describe('read and model recovery', () => {
     h.up.claude.spendLimit = false;
     await step();
     expect(h.up.claude.calls).toHaveLength(1);
-    expect(h.up.ai.calls).toEqual([]);
     expect(modifies(h)).toEqual([]);
     await h.step(november);
     expect(await decision(h, 'abc0000000000115')).toMatchObject({ outcome: 'applied', label_id: 'p2' });

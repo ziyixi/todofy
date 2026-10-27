@@ -96,7 +96,6 @@ describe('Codex priority pipeline', () => {
     expect(h.up.codex.calls).toHaveLength(4);
     expect(h.up.codex.requests.every(request => request.model === 'gpt-6.1-sol')).toBe(true);
     expect(h.up.claude.calls).toEqual([]);
-    expect(h.up.ai.calls).toEqual([]);
     expect(await h.sql(`SELECT requests FROM claude_usage`)).toEqual([]);
     const flow = await h.api.getMailFlow({ name: 'mailFlows/today' });
     expect(flow.counts.filter(row => row.stage === MailFlow_Stage.CODEX).reduce((sum, row) => sum + row.mailCount, 0)).toBe(4);

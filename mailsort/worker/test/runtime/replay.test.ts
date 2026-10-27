@@ -22,7 +22,6 @@ describe('historical priority replay', () => {
     expect(reasonOf(error)).toBe('MODEL_FEATURE_RETIRED');
     expect((error as Error).message).toContain('historical results remain readable');
     expect(await h.sql(`SELECT * FROM replay`)).toEqual([]);
-    expect(h.up.ai.calls).toEqual([]);
     expect(h.up.claude.calls).toEqual([]);
     expect(modifies(h)).toEqual([]);
     expect(reasonOf(await rejection(h.api.getReplayEvaluation({ name: 'replayEvaluation' })))).toBe('NOT_FOUND');
@@ -47,7 +46,6 @@ describe('historical priority replay', () => {
     await h.step(NOW + MINUTE);
     expect(await h.sql(`SELECT * FROM replay ORDER BY message_id`)).toEqual(rows);
     expect(await h.api.getReplayEvaluation({ name: 'replayEvaluation' })).toEqual(summary);
-    expect(h.up.ai.calls).toEqual([]);
     expect(h.up.claude.calls).toEqual([]);
     expect(modifies(h)).toEqual([]);
   });
@@ -60,7 +58,6 @@ describe('historical priority replay', () => {
     const before = h.up.gmail.calls.length;
     await h.step(NOW + MINUTE);
     expect(h.up.gmail.calls.slice(before).some(call => call.url.includes('/messages/abc0000000000013'))).toBe(false);
-    expect(h.up.ai.calls).toEqual([]);
     expect(h.up.claude.calls).toEqual([]);
     expect(await h.sql(`SELECT * FROM replay ORDER BY message_id`)).toEqual(rows);
     expect(await h.api.getReplayEvaluation({ name: 'replayEvaluation' })).toMatchObject({ state: ReplayEvaluation_State.RUNNING, totalCount: 1, evaluatedCount: 0 });

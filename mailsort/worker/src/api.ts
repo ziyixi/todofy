@@ -52,8 +52,6 @@ import {
   ID_PATTERN,
   LABEL_ID_PATTERN,
   LABELS_MAX,
-  NEURON_BUDGET_MAX,
-  NEURON_BUDGET_MIN,
   NONE,
   PAGE,
   RUN_WRITE_LIMIT_MAX,
@@ -420,7 +418,6 @@ function settingsMessage(ctx: ApiContext, value: SettingsValue): Settings {
     effectiveMode: MODES[effectiveMode(value, ctx.ceiling)],
     runWriteLimit: value.runWriteLimit,
     dailyWriteLimit: value.dailyWriteLimit,
-    dailyNeuronBudget: value.dailyNeuronBudget,
     breakerTripped: value.breaker !== '',
     breakerReason: value.breaker,
     etag: value.etag,
@@ -635,8 +632,8 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
           (has('sensitive') ? label.sensitive : before.sensitive === 1) ? 1 : 0,
           id,
         );
-        // A label turned sensitive keeps no example (examples.ts putExample): the ones it has go now, embeddings and
-        // all, so their summaries neither outlive the 14 days of content nor reach the model as neighbours.
+        // A label turned sensitive keeps no historical example: the ones it has go now, embeddings and all, so their
+        // summaries do not outlive the 14 days of content.
         if (has('sensitive') && label.sensitive && before.sensitive === 0) deleteExamplesOfLabel(store, id);
         return labelOut(ctx, existingLabel(ctx, id));
       });
@@ -1021,9 +1018,6 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
       ...(gmailWriteCapFull ? { gmailWriteResumeTime: timestampFromMs(Math.floor(ctx.now / DAY) * DAY + DAY) } : {}),
       unsureTodayCount: usage.unsure,
       gmailCallTodayCount: usage.gmail_calls,
-      aiCallTodayCount: usage.ai_calls,
-      neuronsToday: Math.round(usage.neurons * 10) / 10,
-      dailyNeuronBudget: settings.dailyNeuronBudget,
       decisionModel: model,
       classifier: {
         provider: CLASSIFICATION_PROVIDERS[provider], model, effort: CLASSIFICATION_EFFORT, configured,
@@ -1050,8 +1044,6 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
         usageReportedCount: codex.usage_reported,
         ...(Number.isFinite(codexLastRequest) && codexLastRequest > 0 ? { lastRequestTime: timestampFromMs(codexLastRequest) } : {}),
       },
-      aiQuotaExhausted: usage.quota_exhausted === 1,
-      unembeddedExampleCount: store.count(`SELECT count(*) AS n FROM examples WHERE embedding IS NULL`),
       recentErrorCodes: store.errors(),
       build: ctx.build,
     });
@@ -1120,8 +1112,8 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
           if (!CLASSIFICATION_INTERVAL_MINUTES.includes(input.classificationIntervalMinutes)) throw sortError('INVALID_SETTINGS');
           next = { ...next, classificationIntervalMinutes: input.classificationIntervalMinutes };
         } else if (path === 'daily_write_limit') next = { ...next, dailyWriteLimit: integer(input.dailyWriteLimit, 1, DAILY_WRITE_LIMIT_MAX) };
-        else if (path === 'daily_neuron_budget') next = { ...next, dailyNeuronBudget: integer(input.dailyNeuronBudget, NEURON_BUDGET_MIN, NEURON_BUDGET_MAX) };
-        else if (!['name', 'etag', 'effective_mode', 'breaker_tripped', 'breaker_reason'].includes(path)) bad('update_mask names an unknown field');
+        // A retired field an older UI may still name is accepted and ignored.
+        else if (!['name', 'etag', 'effective_mode', 'breaker_tripped', 'breaker_reason', 'daily_neuron_budget'].includes(path)) bad('update_mask names an unknown field');
       }
       if (next.classificationProvider !== current.classificationProvider) {
         ctx.store.setMeta('next_model_at', String(ctx.now));

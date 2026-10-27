@@ -1,26 +1,44 @@
 /**
  * MailsortState's SQLite storage (../../docs/design.md §6): labels and their trusted domains, the pending queue,
- * decisions, the review queue, examples with their embeddings, the ledger of Gmail writes, the daily usage, the feedback
- * queue, the replay evaluation and the AIP-155 request log, in the Durable Object's own database. No D1, no R2, no KV.
+ * decisions, the review queue, historical examples, the ledger of Gmail writes, the daily usage, the feedback queue,
+ * the replay results and the AIP-155 request log, in the Durable Object's own database. No D1, no R2, no KV.
  * Synchronous (the Durable Object's SQL API), so the writes of one `transactionSync` are atomic: the history cursor
  * advances in the same transaction that queues the mails it covers.
  *
- * Every table is bounded (limits.ts): LABELS_MAX labels, TRUSTED_DOMAINS_PER_LABEL_MAX domains each, EXAMPLES_MAX
- * examples; decisions and the ledger for DECISIONS_KEPT_MS, their content (subject, sender, summary, the sender's
- * domain) and the review queue for CONTENT_KEPT_MS; the replay for REPLAY_KEPT_MS; the daily usage and flow counters
- * for FLOW_KEPT_DAYS; request IDs for a day. `prune` runs once per UTC day in every mode, off included (pipeline.ts
- * retain). Examples (masked summaries) and trusted domains are what the app learned: they are kept until deleted,
- * never pruned. The sender of a decision is kept only as a salted hash (mask.ts senderHash), never as its address.
+ * Every table is bounded (limits.ts): LABELS_MAX labels, historical examples and trusted domains that only shrink;
+ * decisions and the ledger for DECISIONS_KEPT_MS, their content (subject, sender, summary, the sender's domain) and the
+ * review queue for CONTENT_KEPT_MS; the replay for REPLAY_KEPT_MS; the daily usage and flow counters for
+ * FLOW_KEPT_DAYS; request IDs for a day. `prune` runs once per UTC day in every mode, off included (pipeline.ts
+ * retain). Examples (masked summaries) and trusted domains are what the retired learning path kept: they stay until
+ * deleted, never pruned. The sender of a decision is kept only as a salted hash (mask.ts senderHash).
  *
  * Nothing here logs. Rows hold the owner's personal data (subjects, senders, domains); they leave the object only
- * through the owner API behind Access, and the masked text only to Workers AI.
+ * through the owner API behind Access, and the masked text only to the selected model through Model Router.
  */
-import { sharedMailbox } from './decide.ts';
 import { effectiveLedgerRow } from './label-identity.ts';
 import { newEtag } from './ids.ts';
-import { CONTENT_KEPT_MS, DAY, DECISIONS_KEPT_MS, ERRORS_KEPT, FLOW_KEPT_DAYS, REPLAY_KEPT_MS, REQUEST_ID_TTL_MS, TRUSTED_DOMAINS_PER_LABEL_MAX } from './limits.ts';
+import { CONTENT_KEPT_MS, DAY, DECISIONS_KEPT_MS, ERRORS_KEPT, FLOW_KEPT_DAYS, REPLAY_KEPT_MS, REQUEST_ID_TTL_MS } from './limits.ts';
 import { senderHash } from './mask.ts';
 import { PRIORITY_LABELS } from './priority.ts';
+
+/**
+ * Public mailbox providers: anyone can send DMARC-aligned mail from them, so none is ever a trusted domain (not seeded,
+ * not learned), nor a subdomain of one (`vip.qq.com`). A small fixed list of the common ones, not a complete one.
+ */
+export const SHARED_MAILBOX_DOMAINS: ReadonlySet<string> = new Set([
+  'gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'live.com', 'msn.com', 'yahoo.com', 'ymail.com', 'icloud.com',
+  'me.com', 'mac.com', 'aol.com', 'proton.me', 'protonmail.com', 'pm.me', 'gmx.com', 'gmx.de', 'gmx.net', 'mail.com',
+  'yandex.com', 'yandex.ru', 'zoho.com', 'fastmail.com', 'hey.com', 'qq.com', 'foxmail.com', '163.com', '126.com', 'yeah.net',
+  'sina.com', 'sina.cn', 'sohu.com', 'aliyun.com', '139.com', '189.cn', 'naver.com', 'daum.net', 'hanmail.net',
+  'hotmail.co.uk', 'yahoo.co.uk', 'yahoo.co.jp', 'outlook.jp', 'hotmail.fr', 'yahoo.fr', 'web.de', 'mail.ru',
+]);
+
+/** Whether `domain` is a public mailbox provider's (SHARED_MAILBOX_DOMAINS) or a subdomain of one. */
+export function sharedMailbox(domain: string): boolean {
+  const parts = domain.toLowerCase().split('.').filter((part) => part !== '');
+  for (let i = 0; i + 2 <= parts.length; i++) if (SHARED_MAILBOX_DOMAINS.has(parts.slice(i).join('.'))) return true;
+  return false;
+}
 
 export const SCHEMA_VERSION = 12;
 /** The provider workspace cap is the hard boundary; this is the app's additional actual-usage stop. */
@@ -297,7 +315,7 @@ export const SCHEMA_V4: readonly string[] = [
  * 1. trusted domains, seeded from the active rules of trust labels and the active rules with `require_dmarc`: the
  *    domain of a sender address rule, matched exactly, or a sender domain rule's own, which also covers its subdomains
  *    (`subdomains`, as the rule did); list and delivered-to rules name no sender. A shared mailbox provider's domain
- *    (decide.ts sharedMailbox) is never seeded: Store.migrate deletes any right after;
+ *    (sharedMailbox) is never seeded: Store.migrate deletes any right after;
  * 2. the rules (proposals included) dropped, and what only they used: a decision's exact sender address, List-Id,
  *    delivered-to address and its rule's keep-in-inbox, with their indexes;
  * 3. decisions rebuilt (SQLite cannot change a CHECK): the outcome `none` (confident that no label fits), the sender
@@ -531,7 +549,7 @@ export interface DecisionRow extends Record<string, SqlStorageValue> {
   bulk: number | null;
   /** p(needs_action), the higher of the two views', for decisions before 2026-10-11; NULL since (no longer asked). */
   needs_action: number | null;
-  /** The top option's combined probability (decide.ts). */
+  /** The top option's combined probability (historical Clef decisions). */
   confidence: number | null;
   /** 1: the mail was shown in the review queue. */
   shown: number;
@@ -616,7 +634,8 @@ export interface UsageRow extends Record<string, SqlStorageValue> {
   quota_exhausted: number;
 }
 
-export type UsageField = 'gmail_calls' | 'ai_calls' | 'neurons' | 'decided' | 'applied' | 'unsure' | 'quota_exhausted';
+/** The counters still written; ai_calls, neurons and quota_exhausted hold retired Workers AI history. */
+export type UsageField = 'gmail_calls' | 'decided' | 'applied' | 'unsure';
 
 /** The UTC day of `ms`, `YYYY-MM-DD`. */
 export function utcDay(ms: number): string {
@@ -778,10 +797,6 @@ export class Store {
     this.run(`INSERT INTO usage (day, ${field}) VALUES (?, ?) ON CONFLICT (day) DO UPDATE SET ${field} = ${field} + excluded.${field}`, day, amount);
   }
 
-  setQuotaExhausted(day: string): void {
-    this.run(`INSERT INTO usage (day, quota_exhausted) VALUES (?, 1) ON CONFLICT (day) DO UPDATE SET quota_exhausted = 1`, day);
-  }
-
   /** Reported API tokens and list-price cost, summed for one UTC calendar month. */
   claudeUsage(month: string): ClaudeUsageRow {
     return this.one<ClaudeUsageRow>(`SELECT coalesce(sum(input_tokens), 0) AS input_tokens, coalesce(sum(output_tokens), 0) AS output_tokens,
@@ -868,40 +883,6 @@ export class Store {
       out.set(row.label_id, [...(out.get(row.label_id) ?? []), row.domain]);
     }
     return out;
-  }
-
-  /**
-   * Whether `domain` is trusted for the label: one of its trusted domains exactly, or a subdomain of one that covers
-   * its subdomains (`a.bank.example.com` of a seeded sender domain `bank.example.com`), among those it had before
-   * `asOf` (the replay evaluation asks as of a mail's original decision). A seeded domain counts at any `asOf`: it
-   * stands for one of the owner's former rules, which decided the mail before the migration recorded it (2026-10-10);
-   * only a learned one (origin `owner`) dates from the owner's answer.
-   */
-  isTrusted(labelId: string, domain: string, asOf = Number.MAX_SAFE_INTEGER): boolean {
-    const suffixes = domainSuffixes(domain.toLowerCase());
-    if (suffixes.length === 0) return false;
-    return (
-      this.one(
-        `SELECT 1 AS x FROM trusted_domains WHERE label_id = ? AND (origin = 'seed' OR create_time < ?) AND (domain = ? OR (subdomains = 1 AND domain IN (${suffixes.map(() => '?').join(', ')})))`,
-        labelId,
-        asOf,
-        domain.toLowerCase(),
-        ...suffixes,
-      ) !== undefined
-    );
-  }
-
-  /**
-   * Adds a trusted domain the owner's choice taught (origin `owner`; that exact domain only, never a shared mailbox
-   * provider's); the label's oldest goes first past TRUSTED_DOMAINS_PER_LABEL_MAX. Answers whether it was new. Run
-   * inside a transaction.
-   */
-  addTrustedDomain(labelId: string, domain: string, now: number): boolean {
-    if (sharedMailbox(domain) || this.isTrusted(labelId, domain)) return false;
-    const added = this.run(`INSERT OR IGNORE INTO trusted_domains (label_id, domain, origin, create_time) VALUES (?, ?, 'owner', ?)`, labelId, domain.toLowerCase(), now) > 0;
-    const over = this.count(`SELECT count(*) AS n FROM trusted_domains WHERE label_id = ?`, labelId) - TRUSTED_DOMAINS_PER_LABEL_MAX;
-    if (over > 0) this.run(`DELETE FROM trusted_domains WHERE label_id = ? AND domain IN (SELECT domain FROM trusted_domains WHERE label_id = ? ORDER BY create_time, domain LIMIT ?)`, labelId, labelId, over);
-    return added;
   }
 
   // ---- pending ----------------------------------------------------------------------------------------------------------
@@ -1000,13 +981,5 @@ export async function senderHashesToBackfill(store: Store): Promise<Map<string, 
   if (version < 1 || version >= 5) return out;
   const rows = store.all<{ message_id: string; sender_address: string }>(`SELECT message_id, sender_address FROM decisions WHERE sender_address IS NOT NULL AND sender_address != ''`);
   for (const row of rows) out.set(row.message_id, await senderHash(row.sender_address));
-  return out;
-}
-
-/** `a.b.example.com` -> [a.b.example.com, b.example.com, example.com] (a trusted domain covers its subdomains). */
-export function domainSuffixes(domain: string): string[] {
-  const parts = domain.split('.').filter((part) => part !== '');
-  const out: string[] = [];
-  for (let i = 0; i + 2 <= parts.length && out.length < 6; i++) out.push(parts.slice(i).join('.'));
   return out;
 }

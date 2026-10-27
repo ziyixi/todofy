@@ -3,8 +3,8 @@
  * "mailsort" with a real SQLite MailsortState, next to
  *   - "probe": calls MailsortState.step(now), setClock(now), alarmAt() and sqlForTests() over the object binding, and the
  *     named entrypoint Ops of "mailsort" over a service binding (ops-v1, as the dashboard does);
- *   - the outbound service: every request the Worker makes goes to FakeUpstream (../fakes/upstream.ts), the fake Gmail,
- *     Google token endpoint and Workers AI, in this Node process; nothing leaves it.
+ *   - the outbound service: every request the Worker makes goes to FakeUpstream (../fakes/upstream.ts), the fake Gmail
+ *     and Google token endpoint, in this Node process; nothing leaves it. MODEL_ROUTER is bound to the same fake.
  * DEV_MANUAL_ALARMS=true: no alarm is ever armed and the tests drive the passes with explicit clocks; the owner is
  * signed in over loopback http by the dev bypass. All data is synthetic.
  */
@@ -84,8 +84,6 @@ export interface HarnessOptions {
   readonly inspectorPort?: number;
   /** Runs MailsortState in a Worker of its own, as Cloudflare runs a Durable Object apart from its caller. */
   readonly splitObject?: boolean;
-  /** Binds AI to the fake Workers AI entrypoint (../fakes/ai-entrypoint.ts), as production binds Workers AI. */
-  readonly aiBinding?: boolean;
 }
 
 export type StepResult = { next: number; mode?: string; synced?: number; decided?: number; applied?: number; deferred?: number; code: string };
@@ -109,7 +107,6 @@ export interface Harness {
 export async function startHarness(options: HarnessOptions = {}): Promise<Harness> {
   const temp = await mkdtemp(join(tmpdir(), 'mailsort-runtime-'));
   const script = await workerBundle();
-  const aiScript = options.aiBinding === true ? await workerBundle('test/fakes/ai-entrypoint.ts') : '';
   const up = new FakeUpstream();
   up.gmail.grants.set(REFRESH_TOKEN, SCOPE_MODIFY);
   up.gmail.clock = () => T0;
@@ -125,7 +122,6 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     serviceBindings: {
       ASSETS: () => new Response(TEST_PAGE, { headers: { 'content-type': 'text/html; charset=utf-8' } }),
       MODEL_ROUTER: (request: Request) => up.handle(request),
-      ...(options.aiBinding === true ? { AI: { name: 'fake-ai', entrypoint: 'FakeAiBinding' } } : {}),
     },
     bindings,
     outboundService: outbound,
@@ -143,7 +139,6 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
       workers: [
         mailsort('mailsort', options.splitObject === true),
         ...(options.splitObject === true ? [{ ...mailsort(OBJECT_WORKER, false) }] : []),
-        ...(options.aiBinding === true ? [{ name: 'fake-ai', modules: true, script: aiScript, compatibilityDate: '2026-09-08' }] : []),
         {
           name: 'probe',
           modules: true,

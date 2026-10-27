@@ -1,7 +1,7 @@
 /**
  * MailsortState (../../docs/design.md §3): the single SQLite-backed Durable Object "mailsort-v1". It holds every label,
  * decision, example and ledger entry, schedules itself with setAlarm (no cron trigger), makes every request to
- * Gmail (gmail.ts) and Workers AI, and serves the owner API (api.ts) through the shared transcoder: the Worker (http.ts)
+ * Gmail (gmail.ts) and Model Router, and serves the owner API (api.ts) through the shared transcoder: the Worker (http.ts)
  * authenticates the owner and checks CSRF, then forwards /api/v2/* here, so the Worker's own request stays far below
  * Workers Free's 10 ms of CPU, and the Gmail and model calls get the object's 30 s.
  *

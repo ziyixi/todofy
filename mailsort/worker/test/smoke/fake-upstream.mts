@@ -1,5 +1,5 @@
 /**
- * The fake Gmail and fake Workers AI (../fakes/upstream.ts) on a loopback HTTP port, for the smoke run (./smoke.mts)
+ * The fake Gmail and fake Model Router (../fakes/upstream.ts) on a loopback HTTP port, for the smoke run (./smoke.mts)
  * and for trying the UI by hand with `wrangler dev` (../../../.dev.vars.example sets DEV_FAKE_UPSTREAM to it). It
  * accepts the synthetic grant of .dev.vars.example (gmail.modify) and, for manual tries, delivers a synthetic mail of
  * ../fakes/fixtures.ts on `POST /__fake/deliver?mail=<name>`. Nothing here reaches Google or Cloudflare.
@@ -58,5 +58,5 @@ if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.a
   const up = new FakeUpstream();
   up.gmail.grants.set(DEV_REFRESH_TOKEN, 'https://www.googleapis.com/auth/gmail.modify');
   const { origin } = await serveFakeUpstream(up, Number(process.argv[2] ?? '8796'));
-  console.log(`fake Gmail and Workers AI on ${origin} (DEV_FAKE_UPSTREAM); POST ${origin}/__fake/deliver?mail=newsletterZh delivers a synthetic mail`);
+  console.log(`fake Gmail and Model Router on ${origin} (DEV_FAKE_UPSTREAM); POST ${origin}/__fake/deliver?mail=newsletterZh delivers a synthetic mail`);
 }

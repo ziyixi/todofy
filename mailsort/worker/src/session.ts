@@ -14,7 +14,7 @@ import { AUTH_FAILURES_STOP } from './limits.ts';
 import { priorityDeleteIds, priorityGmailIds } from './priority.ts';
 import { utcDay, type Store } from './store.ts';
 
-/** Subrequests left in this invocation (Google and Workers AI together). */
+/** Subrequests left in this invocation (Google and Model Router together). */
 export class Budget {
   left: number;
 

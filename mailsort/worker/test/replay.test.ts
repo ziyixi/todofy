@@ -1,32 +1,19 @@
 /**
- * The replay evaluation's calibration numbers over the store on Node's SQLite (./fakes/sql.ts); the workerd suite
- * (runtime/replay.test.ts) runs the whole replay. Each evaluated mail's numbers from the two views (numbersOf), the
- * summary's cases (at most REPLAY_CASES_MAX, without the mails evaluated before the numbers were recorded) and reason
- * counts, and the API message as wire JSON: exactly those fields, no mail content. Labels and IDs are synthetic.
+ * The retired replay evaluation's stored results over the store on Node's SQLite (./fakes/sql.ts); the workerd suite
+ * (runtime/replay.test.ts) reads them over the API. The summary's cases (at most REPLAY_CASES_MAX, without the mails
+ * evaluated before the numbers were recorded) and reason counts, and the API message as wire JSON: exactly those
+ * fields, no mail content. Labels and IDs are synthetic.
  */
 import { describe, expect, it } from 'vitest';
 import { ReplayEvaluationSchema } from '@ziyixi/proto/mailsort/ui/v2/replay_pb';
 import { toWire } from '@ziyixi/proto/wire-json';
-import { decideViews, type LabelFacts, type View } from '../src/decide.ts';
-import { modelUnavailable } from '../src/judge.ts';
 import { NONE, REPLAY_CASES_MAX } from '../src/limits.ts';
 import { replayMessage } from '../src/model.ts';
-import { numbersOf, replaySummary } from '../src/replay.ts';
+import { replaySummary } from '../src/replay.ts';
 import { Store } from '../src/store.ts';
 import { memorySql } from './fakes/sql.ts';
 
 const T0 = Date.parse('2026-10-08T08:00:00Z');
-
-const labels = new Map<string, LabelFacts>([
-  ['newsletter', { id: 'newsletter', enabled: true, trust: false }],
-  ['receipt', { id: 'receipt', enabled: true, trust: false }],
-  ['bank', { id: 'bank', enabled: true, trust: true }],
-]);
-
-function view(probabilities: Record<string, number>): View {
-  const top = Object.entries(probabilities).sort((a, b) => b[1] - a[1])[0]?.[0] ?? NONE;
-  return { probabilities, top };
-}
 
 /**
  * The fields a case may have: the decision's numbers, the owner's answer and the outcome. Never
@@ -36,36 +23,6 @@ const CASE_FIELDS = [
   'owner_label', 'outcome', 'top_label', 'top_probability', 'runner_up_probability', 'second_view_probability', 'combined_probability',
   'suspicious_probability', 'authenticated', 'trust_implying', 'reason',
 ];
-
-describe('the decision numbers', () => {
-  it('reads both views: the top option, the runner-up, view 2 as it answered, the combined value and the higher p(suspicious)', () => {
-    const v1 = view({ newsletter: 0.8, receipt: 0.15, none: 0.05 });
-    const v2 = view({ newsletter: 0.9, receipt: 0.06, none: 0.04 });
-    const decision = decideViews(v1, v2, labels);
-    expect(decision).toMatchObject({ kind: 'label', label: 'newsletter' });
-    expect(numbersOf(decision, v1, v2, true)).toEqual({
-      topOption: 'newsletter', topP: 0.8, runnerUpP: 0.15, view2P: 0.9, combined: decision.confidence, suspicious: null, authenticated: true, trust: false,
-    });
-    // The combined value is the mean on view 1's scale (here 1: view 2 was asked about every option view 1 had).
-    expect(decision.confidence).toBeCloseTo((0.8 + 0.9) / 2, 10);
-  });
-
-  it('a none top has no view 2 and no trust; a trust label says so; without view 1 only the sender is known', () => {
-    const none = view({ none: 0.5, bank: 0.3, receipt: 0.2 });
-    const unsure = decideViews(none, null, labels);
-    expect(numbersOf(unsure, none, null, false)).toEqual({
-      topOption: NONE, topP: 0.5, runnerUpP: 0.3, view2P: null, combined: 0.5, suspicious: null, authenticated: false, trust: false,
-    });
-    const bank = view({ bank: 0.9, none: 0.1 });
-    const untrusted = decideViews(bank, bank, labels);
-    expect(untrusted).toMatchObject({ kind: 'label', label: 'bank' });
-    expect(numbersOf(untrusted, bank, bank, true)).toMatchObject({ topOption: 'bank', view2P: 0.9, trust: false });
-    const { decision } = modelUnavailable();
-    expect(numbersOf(decision, null, null, true)).toEqual({
-      topOption: null, topP: null, runnerUpP: null, view2P: null, combined: null, suspicious: null, authenticated: true, trust: false,
-    });
-  });
-});
 
 describe('the summary\'s cases', () => {
   function store(): Store {

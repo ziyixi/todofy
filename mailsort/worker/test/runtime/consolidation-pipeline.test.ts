@@ -42,7 +42,6 @@ describe('consolidation in the real pipeline', () => {
     h.up.gmail.deliver(message({ ...MAILS.newsletterEn, receivedAt: T0 + 1 }));
     expect(await step()).toMatchObject({ code: 'label_consolidation', decided: 0, synced: 1 });
     expect(await h.sql(`SELECT message_id FROM pending`)).toEqual([{ message_id: MAILS.newsletterEn.id }]);
-    expect(h.up.ai.calls).toHaveLength(0);
     await h.api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', mode: Mode.OFF }), updateMask: { paths: ['mode'] }, requestId: op() });
     const before = h.up.gmail.calls.length;
     expect(await step()).toMatchObject({ code: 'off' });
@@ -62,7 +61,6 @@ describe('consolidation in the real pipeline', () => {
       expect(h.up.gmail.calls.length - from).toBeLessThanOrEqual(40);
     }
     expect(await h.api.getLabelConsolidation({ name: NAME })).toMatchObject({ state: LabelConsolidation_State.SUCCEEDED, processedCount: 17 });
-    expect(h.up.ai.calls).toHaveLength(0);
     expect(await h.sql(`SELECT message_id FROM pending`)).toEqual([{ message_id: MAILS.newsletterEn.id }]);
     for (const id of ids) expect([...h.up.gmail.messages.get(id)?.labelIds ?? []].sort()).toEqual([target, 'UNREAD'].sort());
     for (const call of h.up.gmail.calls) expect(allowedOperation(call.method, call.url, call.body, {

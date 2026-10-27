@@ -9,11 +9,6 @@ export const MAILSORT_OBJECT = 'mailsort-v1';
 /** The header the Worker passes its request ID to MailsortState in. */
 export const REQUEST_ID_HEADER = 'x-mailsort-request-id';
 
-/** What the Worker needs of the Workers AI binding: one method (the tests and local development replace it). */
-export interface AiRunner {
-  run(model: string, input: Record<string, unknown>): Promise<unknown>;
-}
-
 export interface Env {
   /** The single SQLite-backed object "mailsort-v1": every label, decision and example, and the scheduler. */
   readonly MAILSORT: DurableObjectNamespace<MailsortState>;
@@ -50,8 +45,8 @@ export interface Env {
   /** `true`: MailsortState never arms its alarm and reads a clock the tests set; the tests call `step(now)`. */
   readonly DEV_MANUAL_ALARMS?: string;
   /**
-   * `http://127.0.0.1:<port>`: every Google request and every Workers AI call goes to this local fake (the smoke test's
-   * fake Gmail and fake Workers AI) instead. Honoured only together with DEV_AUTH_BYPASS and only for a loopback origin.
+   * `http://127.0.0.1:<port>`: every Google request and every Model Router call goes to this local fake (the smoke
+   * test's fake Gmail and fake Router) instead. Honoured only together with DEV_AUTH_BYPASS and only for a loopback origin.
    */
   readonly DEV_FAKE_UPSTREAM?: string;
 }

@@ -41,7 +41,7 @@ no request or response content. The Router and gateway receive no Gmail authoriz
 | Non-content decisions and write ledger; sender as salted hash | 180 days |
 | Historical replay metadata | 7 days |
 | Daily aggregate counters, Codex request outcomes/reported tokens and returned Claude usage | 400 days |
-| Historical masked examples and embeddings | Owner deletion, maximum 2,000 |
+| Historical masked examples and embeddings | Owner deletion; a new or withdrawn verdict deletes its mail's example |
 | Fixed labels and Gmail identities | Until explicit app-data removal |
 | Saved base prompt and personal rules | Until replaced or app-data removal |
 | Owner request receipts | 1 day |
@@ -162,8 +162,9 @@ Retries of existing intents precede new decisions. Undo uses the existing eligib
 The model does not perform a new post-call manual-edit concurrency check; this personal app retains its ordinary
 initial checks and established retry behavior.
 
-Gmail corrections can still update historical answer records. No active embedding/weak-learning/replay process
-uses them. Old replay start calls return a clear retired-feature error; GET history remains readable. The prior
+Gmail corrections update verdicts, the label report and flow counts. They create no example and delete the mail's
+historical example; the Workers AI embedding, weak-learning and replay code is removed. Old replay start calls return a
+clear retired-feature error; GET history remains readable. The prior
 initializer and consolidation state keep their original identity and resume behavior, with no new migration system.
 
 ## 7. UI and Ops

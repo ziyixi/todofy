@@ -3,10 +3,9 @@
  * records and their stable model keys until the owner finishes consolidating labels; they do not validate new input.
  *
  * The same path gives a label its stable, meaningful identifiers: the ID CreateLabel and the import derive when none
- * is given, and the option key the decision model sees (ai.ts). Clef reads each option as `key` with the criterion
- * `path: description`; a random key (`lxy260f75g`, what an import from Gmail used to get) tells it nothing, a key
- * like `finance-invest` repeats the meaning in the alphabet the model's instructions are in. Chinese words become
- * English through a small fixed glossary; a word outside it becomes a short hash of itself, still stable.
+ * is given, and the option key the retired Clef model saw; a random key (`lxy260f75g`, what an import from Gmail used
+ * to get) tells a reader nothing, a key like `finance-invest` repeats the meaning. Chinese words become English through
+ * a small fixed glossary; a word outside it becomes a short hash of itself, still stable.
  */
 import { DISPLAY_NAME_MAX, LABEL_DEPTH_MAX, LABEL_ID_PATTERN, LABEL_NAME_MAX, LABEL_SEGMENT_MAX, LEGACY_LABEL_ROOT, NONE } from './limits.ts';
 
