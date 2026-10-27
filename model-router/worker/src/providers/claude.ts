@@ -148,7 +148,7 @@ export async function generateClaude(request: GenerateRequest, context: Provider
   if (!Array.isArray(message.content)) return fail(13, 'claude_invalid_response');
   base.contributingModels = contributingModels(message);
   if (message.stop_reason === 'refusal') return { ...base, error: providerStatus(9, 'claude_refused', 'MODEL_REFUSED') };
-  if (message.stop_reason === 'max_tokens') return { ...base, error: providerStatus(8, 'claude_output_limit', 'MODEL_OUTPUT_LIMIT') };
+  if (message.stop_reason === 'max_tokens') return { ...base, error: providerStatus(13, 'claude_output_limit', 'MODEL_OUTPUT_LIMIT') };
   if (message.stop_reason !== 'end_turn') return fail(13, 'claude_incomplete');
   const output = textOf(message);
   if (output === null || output.trim() === '') return fail(13, 'claude_invalid_response');

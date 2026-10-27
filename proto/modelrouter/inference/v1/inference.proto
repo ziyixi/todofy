@@ -286,8 +286,7 @@ message ModelError {
   // Content-dependent; count per-item attempts with a small cap:
   // MODEL_INVALID_REQUEST (3: provider 400, 413 or 422, or an option the
   // model rejects), MODEL_INVALID_ANSWER (13), MODEL_REFUSED (9),
-  // MODEL_OUTPUT_LIMIT (8 from Claude and Gemini, 13 from Codex),
-  // MODEL_UNSUPPORTED_TOOL (13).
+  // MODEL_OUTPUT_LIMIT (13), MODEL_UNSUPPORTED_TOOL (13).
   //
   // MODEL_TIMEOUT (4): the request exceeded its deadline, including the
   // Router's own. MODEL_CANCELLED (1): only a real caller cancellation, such

@@ -120,7 +120,7 @@ describe('Claude adapter', () => {
   it.each([['refusal', 'claude_refused'], ['max_tokens', 'claude_output_limit']])('keeps billable usage for %s', async (stop, message) => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json(claudeMessage(stop)));
     const result = await generateClaude(config(), 'synthetic', context('anthropic', fetcher));
-    expect(result.error?.message).toBe(message);
+    expect(result.error).toMatchObject({ message, code: stop === 'refusal' ? 9 : 13 });
     expect(result.output).toBe('');
     expect(result.usage.available).toBe(true);
   });
@@ -250,7 +250,7 @@ describe('Gemini adapter', () => {
   it('does not return truncated output as a success', async () => {
     const result = await generateGemini(config(), 'synthetic', context('gemini', vi.fn<typeof fetch>().mockResolvedValue(Response.json(geminiMessage('MAX_TOKENS')))));
     expect(result.output).toBe('');
-    expect(result.error?.message).toBe('gemini_output_limit');
+    expect(result.error).toMatchObject({ code: 13, reason: 'MODEL_OUTPUT_LIMIT', message: 'gemini_output_limit' });
     expect(result.usage.available).toBe(true);
   });
 

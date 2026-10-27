@@ -19,7 +19,7 @@ export function modelError(reason: string, code: number): FakeMessage {
 }
 export function modelResponse(request: GenerateRequest, message: FakeMessage): Response {
   const finish = message.finishReason ?? 'complete';
-  const error = message.error ?? (finish === 'refused' ? { code: 9, reason: 'MODEL_REFUSED' } : finish === 'output_limit' ? { code: 8, reason: 'MODEL_OUTPUT_LIMIT' } : undefined);
+  const error = message.error ?? (finish === 'refused' ? { code: 9, reason: 'MODEL_REFUSED' } : finish === 'output_limit' ? { code: 13, reason: 'MODEL_OUTPUT_LIMIT' } : undefined);
   const model = message.model ?? request.model;
   return Response.json(toWire(GenerationSchema, create(GenerationSchema, {
     name: `requests/${crypto.randomUUID()}`, model, output: error ? '' : message.output ?? '{}',

@@ -65,7 +65,7 @@ export async function generateGemini(request: GenerateRequest, context: Provider
     if (candidate.blocked || ['SAFETY', 'BLOCKLIST', 'PROHIBITED_CONTENT', 'SPII', 'RECITATION'].includes(candidate.finish))
       return { ...base, error: providerStatus(9, 'gemini_refused', 'MODEL_REFUSED') };
     if (candidate.finish === 'MAX_TOKENS')
-      return { ...base, error: providerStatus(8, 'gemini_output_limit', 'MODEL_OUTPUT_LIMIT') };
+      return { ...base, error: providerStatus(13, 'gemini_output_limit', 'MODEL_OUTPUT_LIMIT') };
     if (candidate.finish !== 'STOP' || candidate.text.trim() === '') return fail(13, 'gemini_incomplete');
     return { ...base, output: candidate.text, contributingModels: base.reportedModel ? [base.reportedModel] : [] };
   } catch (error) {

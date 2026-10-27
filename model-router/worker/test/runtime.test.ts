@@ -81,9 +81,9 @@ describe('Router with native D1, private R2 and SQLite Durable Objects', () => {
 
   it('limits the external Newsletter token to Codex models before registering a request', async () => {
     for (const refused of [
-      harness.newsletter.generate({ model: gemini, input: 'Synthetic API-billed attempt' }),
-      harness.newsletter.embed({ model: '@cf/baai/bge-m3', inputs: ['Synthetic embedding attempt'] }),
-    ]) await expect(refused).rejects.toMatchObject({ status: { status: 'PERMISSION_DENIED', reason: 'MODEL_NOT_ALLOWED' } })
+      () => harness.newsletter.generate({ model: gemini, input: 'Synthetic API-billed attempt' }),
+      () => harness.newsletter.embed({ model: '@cf/baai/bge-m3', inputs: ['Synthetic embedding attempt'] }),
+    ]) await expect(refused()).rejects.toMatchObject({ status: { status: 'PERMISSION_DENIED', reason: 'MODEL_NOT_ALLOWED' } })
     expect(harness.calls).toHaveLength(0)
     expect(await harness.db.prepare('SELECT count(*) AS n FROM requests').first('n')).toBe(0)
     const answer = await harness.newsletter.generate({ model: sol, input: 'Synthetic Codex input' })
