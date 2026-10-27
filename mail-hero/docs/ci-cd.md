@@ -56,8 +56,7 @@ Migration 在旧 Worker 仍运行时执行，因此自动发布中的 migration 
 本地在 `mail-hero/` 目录运行同样的检查：
 
 ```sh
-npm ci --prefix cloudflare
-npm ci --prefix web
+pnpm --dir .. install --frozen-lockfile   # 根目录统一锁文件，见 docs/dependencies.md
 node --test deploy/test/*.test.mjs
 npm run typecheck --prefix cloudflare
 npm test --prefix cloudflare

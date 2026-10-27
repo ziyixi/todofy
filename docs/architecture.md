@@ -57,7 +57,7 @@ No application imports another application's code, configuration or test tools. 
 | --- | --- | --- |
 | `proto/` | IDL, generated types, wire JSON codecs, HTTP transcoder/client | Compiled into each actual user; generated directories are not committed |
 | `contracts/` | Consumer semantics, schemas, golden fixtures and dependency-free value rules | Only explicitly mapped runtime files are bundled |
-| `packages/edge-auth/` | Access JWT, signed double-submit CSRF, private headers | Compiled via `workspace:*` dependency; Web Crypto, no runtime dependencies |
+| `packages/edge-auth/` | Access JWT, keyless Origin and custom-header CSRF checks, private headers | Compiled via `workspace:*` dependency; Web Crypto, no runtime dependencies |
 | `packages/planning-ui/` | Existing Plan, Focus and Mail components | Compiled into Tasks; typed transports and navigation callbacks |
 | `packages/task-dates/` | Date previews and recurrence advancement | Compiled into Tasks; reused by its explicit import tool |
 | `tools/` | Tests, builds and deployment checks | Never imported by production application source |
@@ -155,14 +155,17 @@ and [verification](../tasks/docs/verification.md).
 ## Home
 
 Home is the owner launcher and operations console, not a second administrator of each application's storage.
-It calls only generated Ops methods through `MAIL_HERO`, `TODOFY`, `TASKS`, `WATCH`, `MAILSORT`, `RECALL`, `BRIEF`, `FLEET`,
-`NEWSLETTER` and `WEBSITE_SYNC` bindings. `FLEET` targets Fleet's `Ops`; `NEWSLETTER` targets its `NewsletterOps` projection of the latest
-bounded host report. Home does not call the VPS directly or read an application's D1, R2, private
-configuration or source. The four views are Home, Flows, Cloudflare and Ops.
+Besides its own `HOME` object and `ASSETS`, its bindings in `dashboard/wrangler.toml` are thirteen Ops services and
+one task inbox. It calls only generated Ops methods through `MAIL_HERO`, `TODOFY`, `TASKS`, `WATCH`, `MAILSORT`,
+`RECALL`, `BRIEF`, `MODEL_ROUTER`, `PERSONAL_MCP`, `WEBSITE_SYNC`, `FLEET`, `NEWSLETTER` and `CODEX_GATEWAY`.
+The last three all target Fleet: its `Ops`, and the `NewsletterOps` and `CodexGatewayOps` projections of the latest
+bounded host report. `TASK_INBOX` is Tasks' create-only `TaskInbox` for the daily digest task. Home does not call
+the VPS directly or read an application's D1, R2, private configuration or source. The four views are Home, Flows,
+Cloudflare and Ops.
 
 `BRIEF` targets Brief's `Ops`: bounded counts, costs, budget and signal codes, with no issue text or source URLs.
-Its guard defers embedding, learning and source probes. Brief and Home deploy at the same source SHA, with Home
-waiting for Brief; the integration's rollout evidence is in [HANDOFF](../HANDOFF.md).
+Its guard defers embedding, learning and source probes. Home's release waits for Brief's, as for its other Ops
+services.
 
 Fetch/cron handlers authenticate, route and make one RPC; the SQLite `HomeState` owns the work. It serializes
 each view once and the Worker forwards `PreEncoded` bytes with ETag/304, avoiding another decode/encode under
@@ -226,14 +229,14 @@ accepted report nor a ready deployment receipt proves successful Newsletter deli
   Its private console shows requests and usage. The VPS executor runs the official Codex SDK and returns actual
   research observations; applications own their workflows and budgets. See [design](../model-router/docs/design.md).
 - **Mailsort:** one SQLite DO/Alarm, no D1/R2 or cron. Configurable 5/15/30/60-minute batches process unclassified
-  Inbox mail from the last 48 hours, including read mail, through Model Router and one maintained prompt. All Claude callers share Router's single key and provider-side $80/month workspace limit; the application's own local budget ledger remains. It
+  Inbox mail from the last 48 hours, including read mail, through Model Router and one maintained prompt. Provider keys are Router secrets and spending is capped at the provider; the application's own local budget ledger remains. It
   reads the owner's Gmail with the owner's own OAuth grant and only ever adds or removes its own labels (created by it
   or adopted, owned by ID) and INBOX, through the closed operation table of `gmail.ts`; it never marks mail read, deletes, sends or changes
   settings. Every write is a ledger row first and can be undone. Shadow mode (the default) only records; the
-  deployment variable `MODE` and the breaker can only lower the mode. Gmail credentials stay in Mailsort; model credentials are owner-written Router secrets. Neither passes through GitHub. Account Workers AI shedding does not affect its model.
+  deployment variable `MODE` can only lower the mode. Gmail credentials stay in Mailsort; model credentials are owner-written Router secrets. Neither passes through GitHub. Account Workers AI shedding does not affect its model.
   See [AGENTS](../mailsort/AGENTS.md) and [design](../mailsort/docs/design.md).
 - **recall:** one SQLite DO (records, the bigram FTS5 index, the compacted change feed) and one private R2 bucket (the
-  texts of a rolling retention window, a year by default; a text leaves only after the Dropbox archive confirmed it), no
+  texts of a rolling retention window, seven days by default; a text leaves only after the Dropbox archive confirmed it), no
   D1 and no cron. A Chrome extension (never in incognito) records visits with their focus time and a page's
   text after ten seconds; both it and the Worker scrub secrets and apply the denylist with the same `recall/shared/`
   code, and sensitive sites are kept by their site alone. Logs never hold a URL, title or text. The machine tokens are
@@ -245,9 +248,9 @@ accepted report nor a ready deployment receipt proves successful Newsletter deli
   generation and bge-m3 embeddings. It fetches the registry's public feeds and pages itself (an honest user agent, per-host pacing, never a
   paywall or a login), screens with Claude Haiku, picks and writes with Claude Opus through the common ModelService (the local call ledger is `claude.ts`), checks every quote and number in code, and sends at most one email a day through a ledger
   (`send.ts`; an unknown outcome is never sent again). The Claude key belongs to Router and the Resend key to Brief; both are owner-written and never pass
-  through GitHub; `BRIEF_MODE` and 暂停 can only lower what it does. Its first deployment (`7bea3ec`) runs in archive
-  mode: public-source fetching and paid Claude calls can run, with no email sent. Home monitors its Ops entrypoint;
-  resource registration and Home rollout acceptance are tracked in [HANDOFF](../HANDOFF.md). See
+  through GitHub; `BRIEF_MODE` and 暂停 can only lower what it does. It has been stopped since
+  2026-10-18 (`BRIEF_MODE=off`, code kept); Newsletter remains the active daily briefing. Home monitors its Ops
+  entrypoint. See
   [AGENTS](../brief/AGENTS.md) and [design](../brief/docs/design.md).
 - **Newsletter:** runs its persistent editorial workflows in an independent k3s image and invokes models
   through the same Router API. It installs no model SDK or CLI. It reads Todofy's machine
