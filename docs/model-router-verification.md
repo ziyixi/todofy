@@ -8,6 +8,47 @@ Provider API keys were transferred through browser memory directly to Router sec
 provider key was written to a local file, GitHub or the VPS. Claude uses the original Brief workspace's
 verified $80/month limit; its replacement key has the owner-approved no-expiry setting.
 
+## Cost visibility and array-schema correction, 2026-10-27 UTC
+
+Source `129d5fe959a1ef4e855e4df8cd768884a74c1920` passed
+[branch40541274534](https://github.com/ziyixi/todofy/actions/runs/40541274534),
+[main40544317131](https://github.com/ziyixi/todofy/actions/runs/40544317131), and
+[matching reconcile40545319611](https://github.com/ziyixi/todofy/actions/runs/40545319611), including
+Worker/VPS comparison, complete resource registration and the resolved-infrastructure gate.
+The first branch run exposed a test helper reading/proc after the child had exited; a read-once correction
+changed only the test. A subsequent Recall system-package download timed out before browser tests; its
+same-SHA failed-job retry passed. No processing pause or provider-key/budget change was needed.
+
+Metadata-only diagnosis found two cost defects: one missing amount hid the entire SQL/UI aggregate, and
+SDK totals above272K were left unpriced. Owner buckets now return known subtotals and priced-request counts;
+the UI separately lists unpriced requests and preserves known numeric zero. Sol subscription references
+use the documented Standard text rates, not a guessed per-request context tier. SDK totals can contain
+multiple model calls. Missing known-token estimates were derived from existing metadata only; failed
+requests without consumption reports remain unpriced. No model result was regenerated for this backfill.
+The official [Sol model pricing](https://developers.openai.com/api/docs/models/gpt-6.1-sol) remains the rate source;
+reference values exclude unknown context/tool/service-tier extras and are not subscription bills.
+
+Real Chrome showed API known estimate US$0.003339 and subscription Standard reference US$3.406225,
+with67 priced subscription requests and5 unpriced. These are that observation's values, not frozen totals.
+All successful known-token Sol rows, including the large Newsletter totals, had estimates after migration.
+
+Four preexisting Todofy unavailability records and one Newsletter invalid-answer record were retained.
+The public Todofy recommendation schema has an array root. A matched synthetic control reproduced the
+short unavailability failure with no token report (`f6e6aef4-bc71-4828-98de-e65c7b2646f7`,4.270s), while
+an object root succeeded (`e962162f-2f7a-4fb3-9261-97861c270285`,6.124s). Router now privately envelopes
+array schemas and unwraps/validates the original response; callers retain their provider-neutral contract.
+After publication, the same synthetic root-array request succeeded in5.753s with reported usage and a valid
+array (`8a1b9083-fd80-4a24-a68f-de7330f1cfe7`). The deliberate failing diagnostic remains in history and
+is not a real Newsletter workflow failure. No real report, mail or task content was used or recomputed.
+
+Gateway now retains known typed SDK categories and separates bad requests, unsupported tools and invalid
+JSON/schema output. Router preserves safe upstream RPC reasons. The older generic failure records were
+not relabeled busy or successful. Limited application metadata showed no active mail backlog and a successful
+daily summary; the absent recommendation precompute was not forced to rerun during acceptance.
+Local validation passed81 Worker cases and25 UI cases plus types/lint/build, native D1 metadata backfill,
+array-envelope and error-reason regressions, pinned-SDK category/process tests and proto checks.
+There is no new queue, retry manager, credential, billing tier or inference-request field.
+
 ## Slim API and dashboard rollout, 2026-10-27 UTC
 
 Source `8adaf08921f14dc3ff684f241f8e9757f9533861` passed the full

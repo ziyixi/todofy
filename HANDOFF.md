@@ -12,29 +12,22 @@ MCP, Boundary B, done steps in Plan, the Tasks PWA features, the FlowDay retirem
 
 ## Current work
 
-### Router cost visibility and recommendation schema (`codex/router-cost-visibility`)
+### Router cost visibility and recommendation schema (released)
 
-Owner reported missing estimates and failed requests after the Router rollout. Read-only metadata showed
-known prices were hidden by all-or-nothing SQL/UI aggregation; six Newsletter SDK totals above272K were
-unpriced although usage was known. One owner-only coverage counter now supports known subtotals and explicit
-unpriced-request counts. Sol uses a stated Standard token reference, without inferring per-request context
-tiers from SDK aggregates. Migration0003 derives only missing price metadata; it changes no prompts,
-answers, token counts or business results.
+Source `129d5fe959a1ef4e855e4df8cd768884a74c1920` passed branch40541274534,
+main40544317131 and matching reconcile40545319611 with resolved drift/resource/VPS gates.
+[Verification](docs/model-router-verification.md) records the metadata-only diagnosis, synthetic paired control,
+exact before/after traces and CI test/environment retry. The owner/Claude checkout remains untouched.
 
-Five production failures were retained: four Todofy generic unavailability records and one Newsletter
-invalid-answer record. A public-code synthetic matched control reproduced recommendation root-array schema
-failure (4.27s, no usage) while the object-root control succeeded (6.124s). Router now envelopes array schemas
-internally and returns/validates the original array. Callers and the minimal inference API stay unchanged.
-Gateway preserves typed SDK categories and distinguishes invalid requests, invalid answers and unsupported
-tools. Generic historical failures are not relabeled busy or successful. No new queue/retry/diagnostic DB.
-
-Limited Todofy state read found no active mail backlog and today's summary wasok; recommendation precompute
-had no row. No real content was read and no real report was recomputed. Local Worker81 and console25 tests,
-types/lint, targeted native schema/backfill tests and Gateway50 tests passed (one Linux-only skip).
-The first branch CI40540505450 caught an existing process-test race: the child exited between/proc existence
-and read. The helper now reads once and treats a disappeared status file as the observed exit; production
-process behavior is unchanged. Corrected branch CI, same-SHA publication and matching reconcile remain required; production is still the prior
-8ada application. Model keys, budgets, modes and backup retention are unchanged.
+Known cost subtotals now remain visible with explicit unpriced-request counts. Large cumulative SDK usage
+uses a Standard text reference; migration0003 derives only missing price metadata. Real Chrome showed
+API$0.003339 and subscription reference$3.406225 (67priced/5unpriced), not a subscription bill.
+Router internally envelopes the actual recommendation array schema and returns the original array.
+The prior synthetic array failure now succeeds; no real recommendation/mail/task was recomputed.
+Known SDK failures retain precise safe reasons; generic historical failures remain unchanged. One deliberate
+negative diagnostic remains logged and is clearly identified in verification. No queues, retries, model keys,
+application budgets/modes or backup retention were added/changed. Local Worker81/UI25 and relevant
+native D1/schema/category/process/proto checks passed; the full same-source branch/main gates passed.
 
 
 ### Unified Model Router (released, `codex/model-router`)
