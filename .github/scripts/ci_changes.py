@@ -105,6 +105,11 @@ tools/ (CI, test and build tooling: the deploy hostname guard, and the bundle bu
 apps' build scripts and tests import, which no bundle carries: test_app_isolation.py) counts as
 .github/: every app is re-checked, none deployed. The exception is tools/infra-plan-summary/, which belongs to
 infra/: it runs only Infra checks, as infra/ does (and .github/ does too); the other tools/ do not run them.
+The root workspace files (package.json, pnpm-workspace.yaml, pnpm-lock.yaml; pyproject.toml, uv.lock; .python-version)
+check every member of their workspace. A pnpm catalog version bump deploys the members whose package.json lists that
+name, a root uv constraint the members that declare it, and a lock what the manifest changes beside it reach
+(workspace_reach, reading both ends of the diff); anything else in them deploys the whole workspace (fail safe). Only
+the proto toolchain's own catalog entries reach the Python proto package, and so the VPS images.
 workflow_dispatch: the "app" input checks and deploys that app ("both" = Todofy and Mail Hero, as
 before; "all" = every app; or one app; "website" = the site and its relay), and the contracts and
 shared packages are checked too. The website uses no contract and no package, so a website-only
@@ -116,6 +121,7 @@ import os
 import re
 import subprocess
 import sys
+import tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -208,11 +214,17 @@ INFRA = ("infra/", "tools/infra-plan-summary/")
 # These are source inputs to checked generators, not deployable Worker bundles. Generated app source changes are
 # classified through their own app directory; editing the central inputs alone cannot publish production.
 CLOUD_CONFIG = {"config/cloud.toml", "config/resources.toml", "config/account-resources.toml"}
-# Both package managers share one root lock. These inputs can change every member's resolved dependencies,
-# including the Node toolchain that generates the Python proto package before its image build.
+# Both package managers share one root lock. These inputs check every member of their workspace. They deploy only
+# the members a version bump reaches (workspace_reach) when that is all that changed; anything else can change every
+# member's resolved dependencies, including the Node toolchain that generates the Python proto package before its
+# image build, and deploys them all.
 NODE_WORKSPACE_INPUTS = {"package.json", "pnpm-workspace.yaml", "pnpm-lock.yaml"}
 PYTHON_WORKSPACE_INPUTS = {"pyproject.toml", "uv.lock", ".python-version"}
 PYTHON_WORKSPACE_APPS = {"newsletter", "codex-gateway", "platform", "todofy"}
+# The manifest groups that list a Node member's dependencies.
+NODE_DEPENDENCY_GROUPS = ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies")
+# A file's text before and after the diff; raises ValueError when either is unreadable (git_show).
+Reader = Callable[[str], tuple[str, str]]
 # Reviewed test directories outside production entrypoints and image inputs. Do not replace this with
 # a filename glob: fixtures and files named "test" inside production source can be shipped. Newsletter's
 # Docker COPY/.dockerignore and Platform's minimal context exclude their tests; Todofy's Python base_dir
@@ -483,14 +495,103 @@ def proto_users(paths: list[str]) -> tuple[set[str], set[str]]:
     return set(PROTO_USERS), {app for path in changed for app in proto_deploys(path)}
 
 
-def classify(paths: Iterable[str]) -> dict[str, bool]:
+def requirement_name(requirement: str) -> str:
+    """A Python requirement's normalized project name (PEP 503)."""
+    return re.sub(r"[-_.]+", "-", re.match(r"[A-Za-z0-9._-]*", requirement).group(0)).lower()
+
+
+def pnpm_workspace(text: str) -> tuple[dict[str, str], list[str], str]:
+    """pnpm-workspace.yaml as (its default catalog, its member directories, every other line). Comments and blank
+    lines are left out; a member entry stays among the other lines, so adding or removing one counts as a change."""
+    catalog, members, rest, key = {}, [], [], ""
+    for line in text.splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if not line[0].isspace():
+            key = line.rstrip()
+        if key == "catalog:" and (entry := re.fullmatch(r"""  (["']?)([^"'\s:]+)\1:\s*(\S.*)""", line)):
+            catalog[entry.group(2)] = entry.group(3)
+            continue
+        if key == "packages:" and (member := re.fullmatch(r"""  - (["']?)([^"'\s]+)\1\s*""", line)):
+            members.append(member.group(2))
+        rest.append(line)
+    return catalog, members, "\n".join(rest)
+
+
+def catalog_reach(changed: set[str], read: Reader) -> list[str] | None:
+    """The member package.json files a root Node change reaches, or None for every member."""
+    if "package.json" in changed:
+        return None
+    try:
+        (old, _, old_rest), (new, members, new_rest) = (pnpm_workspace(text) for text in read("pnpm-workspace.yaml"))
+        listed = {}
+        for member in members:
+            manifest = json.loads(read(f"{member}/package.json")[1])
+            listed[f"{member}/package.json"] = {name for group in NODE_DEPENDENCY_GROUPS for name in manifest.get(group, {})}
+    except (ValueError, AttributeError):
+        return None
+    bumped = {name for name in old.keys() | new.keys() if old.get(name) != new.get(name)}
+    if old_rest != new_rest or ("pnpm-lock.yaml" in changed and not bumped and not changed & listed.keys()):
+        return None
+    return [manifest for manifest, names in listed.items() if names & bumped]
+
+
+def constraint_reach(changed: set[str], read: Reader) -> list[str] | None:
+    """The member pyproject.toml files a root uv change reaches, or None for every member."""
+    try:
+        before, after = (tomllib.loads(text) for text in read("pyproject.toml"))
+        # Popped, so that what remains of each file is everything but the constraints.
+        old, new = ({requirement_name(pin): pin for pin in data.get("tool", {}).get("uv", {}).pop("constraint-dependencies", [])}
+                    for data in (before, after))
+        declared = {}
+        for member in after["tool"]["uv"]["workspace"]["members"]:
+            data = tomllib.loads(read(f"{member}/pyproject.toml")[1])
+            project = data.get("project", {})
+            requirements = [*project.get("dependencies", []), *(r for extra in project.get("optional-dependencies", {}).values() for r in extra),
+                            *(r for group in data.get("dependency-groups", {}).values() for r in group if isinstance(r, str))]
+            declared[f"{member}/pyproject.toml"] = {requirement_name(requirement) for requirement in requirements}
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return None
+    bumped = {name for name in old.keys() | new.keys() if old.get(name) != new.get(name)}
+    # A pin no member declares constrains some member's transitive dependency.
+    if before != after or bumped - set().union(*declared.values()):
+        return None
+    if "uv.lock" in changed and not bumped and not changed & declared.keys():
+        return None
+    return [manifest for manifest, names in declared.items() if names & bumped]
+
+
+def workspace_reach(paths: list[str], read: Reader | None) -> tuple[list[str], bool, bool]:
+    """(the member manifests a root workspace change reaches, whether it reaches every Node member, every Python member).
+
+    A version bump in pnpm-workspace.yaml's default catalog reaches the members whose package.json lists that name, a
+    root uv constraint the members that declare it, and a lock no more than the manifest changes beside it. Anything
+    else reaches the whole workspace (fail safe): the root package.json, another key, a lock changed alone, a pin no
+    member declares, an unreadable file or no reader. The interpreter (.python-version) reaches both: ensure.mjs uses it
+    to generate code for every Node consumer too.
+    """
+    changed = set(paths)
+    if ".python-version" in changed:
+        return [], True, True
+    node: list[str] | None = []
+    python: list[str] | None = []
+    if changed & NODE_WORKSPACE_INPUTS:
+        node = catalog_reach(changed, read) if read else None
+    if changed & PYTHON_WORKSPACE_INPUTS:
+        python = constraint_reach(changed, read) if read else None
+    return [*(node or []), *(python or [])], node is None, python is None
+
+
+def classify(paths: Iterable[str], read: Reader | None = None) -> dict[str, bool]:
     paths = [path for path in paths if path]
-    apps = {app for app in APPS if any(path.startswith(f"{app}/") for path in paths)}
-    # ensure.mjs uses the shared Python interpreter to generate code for every Node consumer too.
     node_workspace = bool(NODE_WORKSPACE_INPUTS.intersection(paths)) or ".python-version" in paths
     python_workspace = bool(PYTHON_WORKSPACE_INPUTS.intersection(paths))
-    workspace_apps = (set(PROTO_USERS) if node_workspace else set()) | (PYTHON_WORKSPACE_APPS if python_workspace else set())
-    apps.update(workspace_apps)
+    # A root workspace change checks every member; a member manifest a version bump reaches counts as changed itself.
+    members, node_all, python_all = workspace_reach(paths, read)
+    paths.extend(members)
+    apps = {app for app in APPS if any(path.startswith(f"{app}/") for path in paths)}
+    apps.update((set(PROTO_USERS) if node_workspace else set()) | (PYTHON_WORKSPACE_APPS if python_workspace else set()))
+    workspace_apps = (set(PROTO_USERS) if node_all else set()) | (PYTHON_WORKSPACE_APPS if python_all else set())
     # A Newsletter release also tests and publishes the independent monitor image from this source SHA.
     if "newsletter" in apps:
         apps.add("platform")
@@ -522,8 +623,8 @@ def classify(paths: Iterable[str]) -> dict[str, bool]:
     bundled = {app for path in paths for app in BUNDLED_BY.get(path, ())}
     # website/relay/ is its own Worker: it deploys itself, not the site (unless the site's own files, or a
     # package counted as used by it, changed too).
-    relay = node_workspace or any(path.startswith(RELAY) for path in paths)
-    site = node_workspace or any(path.startswith("website/") and not path.startswith(RELAY) for path in paths)
+    relay = node_all or any(path.startswith(RELAY) for path in paths)
+    site = node_all or any(path.startswith("website/") and not path.startswith(RELAY) for path in paths)
     site |= any("website" in PACKAGE_USERS.get(name, APPS) for name in compiled)
     proto_checked, proto_deployed = proto_users(paths)
     package_deploys = {app for name in compiled for app in PACKAGE_USERS.get(name, APPS)}
@@ -539,7 +640,7 @@ def classify(paths: Iterable[str]) -> dict[str, bool]:
         relay=relay,
         infra=any(path.startswith((".github/", *INFRA)) for path in paths),
         proto=ci or node_workspace or python_workspace or bool(proto_checked) or any(path.startswith(PROTO_READS) for path in paths),
-        extension=node_workspace or any(path.startswith(EXTENSION) for path in paths),
+        extension=node_all or any(path.startswith(EXTENSION) for path in paths),
     )
 
 
@@ -568,6 +669,7 @@ def decide(
     *,
     resume: bool = False,
     resume_source_sha: str = "",
+    show: Callable[[str, str], str] | None = None,
 ) -> tuple[dict[str, bool], str, str]:
     """(outputs, reason, diff base); the base is empty when there is no diff (everything runs)."""
     if resume:
@@ -601,7 +703,8 @@ def decide(
             return everything(), "no merge base with origin/main: running everything", ""
         why = "the merge base with origin/main"
     paths = diff(base, after)
-    return classify(paths), f"{len(paths)} file(s) changed since {base[:12]} ({why})", base
+    read = (lambda path: (show(base, path), show(after, path))) if show else None
+    return classify(paths, read), f"{len(paths)} file(s) changed since {base[:12]} ({why})", base
 
 
 def required_jobs(result: dict[str, bool]) -> list[str]:
@@ -773,6 +876,15 @@ def git_diff(base: str, after: str) -> list[str]:
     return result.stdout.splitlines()
 
 
+def git_show(revision: str, path: str) -> str:
+    """A file's text at a revision. A file missing there, or any other failure, raises ValueError (the classifier then
+    counts the whole workspace as changed)."""
+    result = subprocess.run(["git", "show", f"{revision}:{path}"], capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        raise ValueError(f"{path} is unreadable at {revision[:12]}")
+    return result.stdout
+
+
 def git_is_ancestor(base: str, after: str) -> bool:
     return (
         subprocess.run(["git", "merge-base", "--is-ancestor", base, after], capture_output=True, check=False).returncode
@@ -813,6 +925,7 @@ def main(get: Callable[[str], dict] | None = None) -> int:
         git_merge_base,
         resume=resume == "true",
         resume_source_sha=os.environ.get("RESUME_SOURCE_SHA", ""),
+        show=git_show,
     )
     result, extra, reuse_reason = try_reuse(event, ref, after, result, dict(os.environ), get)
     if reuse_reason:

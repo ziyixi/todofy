@@ -130,7 +130,11 @@ same-SHA, non-expired artifacts, and the extension release its build artifact. A
 required check, missing artifact, different SHA or manual run runs checks again. Reuse changes neither deploy selection nor the cumulative main base.
 
 A package change checks and deploys its actual `PACKAGE_USERS`; a Markdown-only package change checks
-those consumers without deploying. Contract runtime values deploy only `BUNDLED_BY` consumers; schemas
+those consumers without deploying. A root workspace change checks every member of that workspace. A pnpm catalog
+version bump deploys only the members whose `package.json` lists the name (the VPS images only for the proto
+toolchain's own entries), and a root uv constraint only the Python members that declare it; a lock follows the
+manifest changes beside it. The root `package.json`, any other workspace key, a lock changed alone or a pin no
+member declares still deploys the whole workspace. Contract runtime values deploy only `BUNDLED_BY` consumers; schemas
 and fixtures still trigger checks. Generic CI/check tooling checks applications without deploying them.
 Explicit image build/publication/VPS release tooling changes publish the runtime pair and the gateway.
 Newsletter or Platform changes release only that pair, and gateway-only source changes leave them untouched.
