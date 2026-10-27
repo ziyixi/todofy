@@ -109,7 +109,7 @@ The root workspace files (package.json, pnpm-workspace.yaml, pnpm-lock.yaml; pyp
 check every member of their workspace. A pnpm catalog version bump deploys the members whose package.json lists that
 name, a root uv constraint the members that declare it, and a lock what the manifest changes beside it reach
 (workspace_reach, reading both ends of the diff); anything else in them deploys the whole workspace (fail safe). Only
-the proto toolchain's own catalog entries reach the Python proto package, and so the VPS images.
+the proto toolchain's dependencies (not its devDependencies) reach the Python proto package, and so the VPS images.
 workflow_dispatch: the "app" input checks and deploys that app ("both" = Todofy and Mail Hero, as
 before; "all" = every app; or one app; "website" = the site and its relay), and the contracts and
 shared packages are checked too. The website uses no contract and no package, so a website-only
@@ -527,7 +527,9 @@ def catalog_reach(changed: set[str], read: Reader) -> list[str] | None:
         listed = {}
         for member in members:
             manifest = json.loads(read(f"{member}/package.json")[1])
-            listed[f"{member}/package.json"] = {name for group in NODE_DEPENDENCY_GROUPS for name in manifest.get(group, {})}
+            # The proto toolchain's devDependencies only run its own checks; its dependencies generate every app's code.
+            groups = ("dependencies",) if member == "proto" else NODE_DEPENDENCY_GROUPS
+            listed[f"{member}/package.json"] = {name for group in groups for name in manifest.get(group, {})}
     except (ValueError, AttributeError):
         return None
     bumped = {name for name in old.keys() | new.keys() if old.get(name) != new.get(name)}
@@ -627,7 +629,12 @@ def classify(paths: Iterable[str], read: Reader | None = None) -> dict[str, bool
     site = node_all or any(path.startswith("website/") and not path.startswith(RELAY) for path in paths)
     site |= any("website" in PACKAGE_USERS.get(name, APPS) for name in compiled)
     proto_checked, proto_deployed = proto_users(paths)
-    package_deploys = {app for name in compiled for app in PACKAGE_USERS.get(name, APPS)}
+    # The VPS images install no Node package: a package whose only change is the package.json a catalog bump reached
+    # deploys just its Worker users.
+    node_reached = {path for path in members if path.endswith("/package.json")}
+    node_only = compiled - {path.split("/")[1] for path in package_paths if path not in node_reached}
+    package_deploys = {app for name in compiled for app in PACKAGE_USERS.get(name, APPS)
+                       if not (name in node_only and app in {"newsletter", "platform", "codex-gateway"})}
     deployed = direct_deploys | package_deploys | bundled | proto_deployed
     relay |= "website" in proto_deployed
     if not site:

@@ -168,7 +168,7 @@ class DependencyWorkspaces(unittest.TestCase):
 
     def test_a_catalog_bump_deploys_only_the_members_that_list_it(self):
         workspace = yaml.safe_load((ROOT / "pnpm-workspace.yaml").read_text())
-        generator = {name for group in ci_changes.NODE_DEPENDENCY_GROUPS for name in json.loads((ROOT / "proto/package.json").read_text()).get(group, {})}
+        generator = set(json.loads((ROOT / "proto/package.json").read_text())["dependencies"])
         vps = {"newsletter", "platform", "codex-gateway"}
         for name in workspace["catalog"]:
             with self.subTest(name=name):
@@ -176,10 +176,12 @@ class DependencyWorkspaces(unittest.TestCase):
                 self.assertEqual(checked(result), set(ci_changes.PROTO_USERS))
                 self.assertTrue(result["packages"] and result["proto"])
                 self.assertFalse(result["infra"])
-                # Only the proto generator's own entries reach the Python proto package and so the VPS images.
+                # Only the proto generator's dependencies reach the Python proto package and so the VPS images; the
+                # Router client's package.json reaches its Worker users, not Newsletter's Python half.
                 self.assertEqual(deployed(result) & vps, vps if name in generator else set())
         bump = lambda name: ci_changes.classify(["pnpm-workspace.yaml", "pnpm-lock.yaml"], reader({"pnpm-workspace.yaml": older(name)}))
         self.assertEqual(deployed(bump("postal-mime")), {"mail-hero"})
+        self.assertEqual(deployed(bump("vitest")), set(ci_changes.PROTO_USERS) - {"newsletter", "platform", "codex-gateway"})
         self.assertEqual(deployed(bump("react-router")), {"mail-hero", "todofy"})
         self.assertEqual(deployed(bump("chrono-node")), set(ci_changes.PACKAGE_USERS["task-dates"]))
         site = bump("next")
