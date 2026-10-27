@@ -257,7 +257,7 @@ it('authenticates before parsing private bodies and never grants Newsletter owne
 it('maintenance returns standard UNAVAILABLE before parsing while history, health and Ops remain readable', async () => {
   const harness = await startHarness({ maintenance: true })
   try {
-    for (const [method, path] of [['GET', '/models'], ['POST', '/generations:generate'], ['POST', '/embeddings:embed'], ['POST', '/conversations'], ['POST', `/conversations/${crypto.randomUUID()}:close`]] as const) {
+    for (const [method, path] of [['POST', '/generations:generate'], ['POST', '/embeddings:embed'], ['POST', '/conversations'], ['POST', `/conversations/${crypto.randomUUID()}:close`]] as const) {
       for (const caller of ['owner', 'newsletter', 'binding']) {
         const headers = { 'content-type': 'application/json', origin, 'x-csrf-token': '1', ...(caller === 'newsletter' ? { authorization: `Bearer ${machineToken}` } : {}) }
         const worker = caller === 'binding' ? await harness.mf.getWorker('caller-todofy') : null
@@ -268,6 +268,8 @@ it('maintenance returns standard UNAVAILABLE before parsing while history, healt
       }
     }
     expect((await harness.owner.listRequests({})).requests).toEqual([])
+    // Newsletter's startup preflight reads this catalog before it can become ready.
+    expect((await harness.models.listModels({})).models).toHaveLength(6)
     expect((await harness.owner.getUsage({ days: 1 })).buckets).toEqual([])
     expect((await harness.mf.dispatchFetch(`${origin}/health`)).status).toBe(200)
     const ops = await harness.mf.getWorker('router-ops-probe')

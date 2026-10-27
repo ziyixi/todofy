@@ -4,8 +4,8 @@ account_id = "f57937bd1d93bf59e737b6d8445fb7a3"
 zone_id = "39163aaaa9eba38eca58f3ea969710bf"
 
 [access_audiences]
-"codex-gateway" = "f5d90ab5641ca41014e14af8e2b8a9c2479f78a56e103d78b7c1fe7d158f56cb"
 "brief" = "d9dd5577cada54bc585a0add6f508663c8f27288cdf085cfbae70a24b54b7bfb"
+"codex-gateway" = "f5d90ab5641ca41014e14af8e2b8a9c2479f78a56e103d78b7c1fe7d158f56cb"
 "fleet" = "43aba3693dea8e88a343446ce5c416f9c950e37a2b066c7dcfc1189d8ea0cb73"
 "home" = "7e0d033509e69a7f59c947ed4219b3898b79dffd24bfd4c1ea78e4d69269d5cc"
 "links" = "cc7072526c75d5250e9e0ba274d795c632dee4554a707c41ce8fae26ebf5b0d1"

@@ -83,8 +83,9 @@ keys or private request bodies. Lifecycle ages use seconds with the pinned provi
 variable `MODEL_ROUTER_MAINTENANCE_MODE` to `true` or `false`; publication rejects a missing value. Use the normal
 Actions path so the deployed maintenance value is preserved.
 
-For a coordinated invocation-schema change, stop callers and allow active contexts to settle before enabling
-maintenance. While enabled, inference/context routes return `MODEL_MAINTENANCE`; owner history and backup work
+For a coordinated invocation-schema change, allow current calls and contexts to settle before enabling
+maintenance. While enabled, inference/context writes return `MODEL_MAINTENANCE`; the read-only model catalog
+remains available for Newsletter startup preflight. Owner history and backup work
 remain available. Keep maintenance enabled while the executor, Router and callers move to the same checked
 contract. This does not change application pause/archive modes or release their queued business work.
 

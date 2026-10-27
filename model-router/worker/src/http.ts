@@ -16,7 +16,7 @@ export function errorResponse(error: RpcError): Response {
   return Response.json(statusBody(error, { domain: 'modelrouter.inference.v1' }), { status: error.httpStatus });
 }
 export async function forward(request: Request, env: Env, app: string, owner = false): Promise<Response> {
-  if (env.MAINTENANCE_MODE === 'true' && machinePath.test(new URL(request.url).pathname))
+  if (env.MAINTENANCE_MODE === 'true' && request.method !== 'GET' && machinePath.test(new URL(request.url).pathname))
     return withPrivateHeaders(
       errorResponse(new RpcError(Code.UNAVAILABLE, 'MODEL_MAINTENANCE', 'Model Router is temporarily under maintenance.')),
     );
