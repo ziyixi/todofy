@@ -27,27 +27,23 @@ file, GitHub or VPS. Original caller keys remain until final cutover. Same-accou
 owner JSON writes use exact Origin, a custom header and JSON content type. VPS inference validates Access JWTs;
 privileged deployment identity and the subscription login stay separate. Newsletter keeps one inference token.
 
-Source `3c4fda1ddf6bf42905a817c5a9494bf00f24af22` passed complete branch CI40447964148 and main's complete
-same-SHA gate40449071654 (a WebKit package-download timeout passed on rerun). Router, Mailsort, Brief and paired
-VPS published. Todofy stopped before upload on its three old Gemini variables; the staged exact retirement
-fix passes50 release tests and10 workflow guards. The real Router calls passed for Sol6.1, Claude Opus5.5 and
-Gemini Flash-Lite, plus two-turn Newsletter context, actual public-page observation, explicit close and BGE-M3.
-The Sol SDK did not report a model identity; keep that unavailable. No real work was recomputed for acceptance.
+All migration/resource code is published at `dfc814d7e1bdc0e7f51343f83c163cf5d2a367c3`: full branch CI40456441169
+and same-SHA main40457569495 passed. Earlier real canaries at3c4 passed Sol6.1, Claude Opus5.5, Gemini Flash-Lite,
+Newsletter two-turn context with actual public-page observation/close, and BGE-M3. See the verification record.
+The SDK does not report Sol's model identity; leave it unavailable. No real work was recomputed for acceptance.
 
-RouterEngine's actual namespace `ca44d90abc6e4191996a0eefc39df3ce` is captured in the staged resource inventory;
-FIRST_DEPLOY_PENDING is empty. Infra apply40448340660 recorded the public AUD output with zero resource actions
-and a clean post-plan. The owner completed the Newsletter URL/token patch and k3s restart; four running Pods
-then matched current host addresses and were ready. Provider/model credentials and business switches were not
-changed by that repair.
+RouterEngine's real namespace is registered and FIRST_DEPLOY_PENDING is empty. Infra apply40448340660 recorded
+one public output with zero resource actions and a clean post-plan. Owner completed the Newsletter URL/token
+patch and k3s restart; four Pods then matched current host addresses and were ready. The NEW-SHA Gateway release
+used the updated Platform renderer and removed its redundant bearer environment reference without sudo.
 
-Next: gate and publish this final resource/docs/retirement batch at one SHA. Verify the NEW-SHA Gateway release
-uses the current Platform renderer and drops the old bearer env reference (a ready historical release is not
-reapplied, and ordinary reconcile projection can miss extra env entries). Then switch future Todofy mail/reports
-to Sol6.1 and run synthetic canaries. Remove old app/provider/CSRF bindings only after those checks; their deletion
-changes Worker versions, so use existing reconcile repair/check to record fresh publication proof. Final matching
-main reconcile, registered resources and Home/Fleet readback remain required. After its Deployment reference is
-removed, the old Kubernetes Secret can wait for ordinary privileged maintenance; no extra sudo or Secret-deletion
-API is needed for this rollout.
+Todofy now persists Sol6.1 for both future email summaries and reports/recommendations; full reload and budget
+readback verified it. Home canary `canary-manual-20261027T061058Z` is awaiting the normal controller observation.
+The final small UI batch replaces misleading Gemini wording on the shared model budget and canary confirmation;
+identifiers and behavior stay unchanged. Next: publish that checked copy, confirm the canary, retire old app/provider
+and CSRF credentials, then run existing reconcile repair/check. Secret deletions change Worker versions and need
+fresh publication proof. Final matching-main resolved drift and Home/Fleet readback remain required. The unused
+Kubernetes Secret itself can wait for ordinary privileged maintenance; no new sudo or Secret-deletion API is needed.
 
 ### Tasks Sunday planning week (`codex/tasks-next-step-estimate`)
 

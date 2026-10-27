@@ -42,10 +42,17 @@ Cloudflare UI. It is recorded in `config/resources.toml`; the initial pending ex
 [Infra apply40448340660](https://github.com/ziyixi/todofy/actions/runs/40448340660) recorded one public output change
 with zero resource actions, then passed its clean-plan check.
 
-[Main40449071654](https://github.com/ziyixi/todofy/actions/runs/40449071654) has verified Router, Mailsort, Brief and
-the paired VPS publication. Its remaining Todofy preflight stop identified three retired Gemini variables;
-the next checked revision adds those exact normal-release retirements. Todofy model selection, old-credential
-retirement and the final matching-main reconciliation are still pending at this checkpoint.
+[Main40449071654](https://github.com/ziyixi/todofy/actions/runs/40449071654) verified Router, Mailsort, Brief and
+the paired VPS publication, then identified three retired Gemini variables in Todofy's preflight.
+Their exact retirement and namespace registration passed
+[complete branch CI40456441169](https://github.com/ziyixi/todofy/actions/runs/40456441169) and
+[same-SHA main40457569495](https://github.com/ziyixi/todofy/actions/runs/40457569495), source
+`dfc814d7e1bdc0e7f51343f83c163cf5d2a367c3`.
+
+The live Todofy settings now select Sol6.1 for both new email summaries and reports/recommendations. A full page
+reload retained both selections; the budget page reports both saved routes. Completed content remains frozen.
+Synthetic Mail Hero/Todofy canary `canary-manual-20261027T061058Z` was started through Home; its controller's
+next scheduled observation and old-credential retirement are pending at this checkpoint.
 
 The earlier VPS monitoring failure preceded this rollout. The owner restarted k3s and applied the two-field
 Newsletter connection patch. A read-only check confirmed four ready running Pods with current host addresses.
@@ -57,6 +64,8 @@ Cloudflare error1010; the Router sends that same identifier.
 Local and CI suites cover provider failures, retries, cancellation, replay, unknown usage and private-body expiry.
 Production acceptance above does not inject provider failures or expire real records. A later natural business
 run is separate evidence; none was manually recomputed for these checks. The unused Kubernetes
-`codex-gateway-settings` object may remain until ordinary privileged maintenance. At this mixed-version checkpoint,
-the old Deployment template still references it, although the new binary rejects that Bearer as authentication.
-The final Gateway manifest reconciliation must remove that reference before the object is considered unused.
+`codex-gateway-settings` object may remain until ordinary privileged maintenance. The first independent Gateway
+release retained its old environment reference while Platform was still old. The new-SHA Gateway release used the
+current renderer and removed it; a namespace-reader check confirmed no reference in the ready Deployment template.
+The JWT-only binary cannot authenticate with the retired Bearer. No additional sudo step or Secret-deletion API
+was added for this cleanup.

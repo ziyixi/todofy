@@ -13,7 +13,7 @@ describe('StatusBanner', () => {
   it.each([
     ['maintenance', overview({ switches: { ...overview().switches, maintenance_mode: true } }), '维护模式'],
     ['processing_paused', overview({ switches: { ...overview().switches, processing_paused: true } }), '处理已暂停'],
-    ['gemini_budget', overview({ gemini: { ...overview().gemini, used_tokens: 2_999_000, reserved_tokens: 1000 } }), '今日 Gemini 预算已用完'],
+    ['gemini_budget', overview({ gemini: { ...overview().gemini, used_tokens: 2_999_000, reserved_tokens: 1000 } }), '今日模型预算已用完'],
   ] as const)('explains %s', (kind, wire, title) => {
     const data = message(ServiceStatusSchema, wire)
     expect(bannerNotices(data).map((notice) => notice.kind)).toEqual([kind])

@@ -32,8 +32,8 @@ describe('attention page', () => {
     expect(cards).toHaveLength(2)
     expect(cards[0]).toHaveAttribute('href', `/events/${EVENT_ID}`)
     expect(cards[0]).toHaveTextContent('摘要失败')
-    expect(cards[0]).toHaveTextContent('Gemini 暂时不可用')
-    expect(cards[1]).toHaveTextContent('Gemini 拒绝请求')
+    expect(cards[0]).toHaveTextContent('模型暂时不可用')
+    expect(cards[1]).toHaveTextContent('模型拒绝请求')
     expect(calls.find((call) => call.path === '/api/v1/mailEvents')?.search).toBe('?page_size=50&filter=attention%20%3D%20true')
   })
 

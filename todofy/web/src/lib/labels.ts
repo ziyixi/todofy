@@ -41,20 +41,20 @@ export const EVENT_STATE_ORDER = Object.keys(EVENT_STATES) as EventState[]
 export const EVENT_ERRORS: Record<EventErrorName, CodeLabel> = {
   mail_needs_review: {
     title: '邮件需人工检查',
-    detail: 'Mail Hero 标记该邮件需要人工检查（或 HTML 被省略且没有正文）；不会调用 Gemini',
+    detail: 'Mail Hero 标记该邮件需要人工检查（或 HTML 被省略且没有正文）；不会调用模型',
   },
   summary_failed: {
-    title: 'Gemini 暂时不可用',
-    detail: 'Gemini 暂时不可用（5xx、超时、网络错误或空输出），会按退避自动重试最多 7 天',
+    title: '模型暂时不可用',
+    detail: '模型暂时不可用（5xx、超时、网络错误或空输出），会按退避自动重试最多 7 天',
   },
-  llm_quota: { title: 'Gemini 限流', detail: 'Gemini 返回限流（429），会按 Retry-After 与退避自动重试' },
+  llm_quota: { title: '模型限流', detail: '模型返回限流（429），会按 Retry-After 与退避自动重试' },
   llm_budget_exhausted: {
-    title: '今日 Gemini 预算用完',
-    detail: '当日 Gemini token 预算已用完，推迟到预算恢复后继续，不会丢弃',
+    title: '今日模型预算用完',
+    detail: '当日模型 token 预算已用完，推迟到预算恢复后继续，不会丢弃',
   },
   llm_request_rejected: {
-    title: 'Gemini 拒绝请求',
-    detail: 'Gemini 拒绝了请求（400/401/403/404 等），多半是密钥或模型配置问题；重试 12 次后停止',
+    title: '模型拒绝请求',
+    detail: '模型拒绝了请求（400/401/403/404 等），多半是密钥或模型配置问题；重试 12 次后停止',
   },
   processing_interrupted_limit: {
     title: '摘要多次中断',
@@ -145,7 +145,7 @@ export const RECONCILE_ACTIONS: Record<ReconcileActionName, ActionCopy> = {
     title: '重新生成摘要',
     trigger: '重试摘要',
     confirm: '重新生成摘要',
-    consequence: '会重新调用 Gemini 生成摘要并计入当日 token 预算；成功后按正常流程出现在 Tasks 的 Mail 页。',
+    consequence: '会重新调用模型生成摘要并计入当日 token 预算；成功后按正常流程出现在 Tasks 的 Mail 页。',
     destructive: false,
   },
   dismiss: {

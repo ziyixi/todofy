@@ -144,9 +144,9 @@ describe('业务流程', () => {
     expect(nodes[4]).toHaveAttribute('aria-pressed', 'true')
 
     const detail = within(mail).getByRole('region', { name: /^Todofy 摘要/ })
-    expect(within(detail).getByText('Gemini 预算超过 80%')).toBeInTheDocument()
+    expect(within(detail).getByText('模型预算超过 80%')).toBeInTheDocument()
     expect(within(detail).getByText('gemini_budget_80')).toBeInTheDocument()
-    expect(within(detail).getByText(/24 小时 41 封 · Gemini 调用 43 · 处理中事件 0/)).toBeInTheDocument()
+    expect(within(detail).getByText(/24 小时 41 封 · 模型调用 43 · 处理中事件 0/)).toBeInTheDocument()
     expect(within(detail).getByRole('link', { name: '在 Cloudflare 中查看 todofy、todofy-core →' })).toHaveAttribute(
       'href',
       '#/cloudflare/worker/todofy',

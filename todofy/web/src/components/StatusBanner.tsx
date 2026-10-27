@@ -31,7 +31,7 @@ export function bannerNotices(overview: ServiceStatus): Notice[] {
   if (gemini && gemini.tokenBudget > 0 && gemini.usedTokens + gemini.reservedTokens >= gemini.tokenBudget) {
     notices.push({
       kind: 'gemini_budget',
-      title: '今日 Gemini 预算已用完',
+      title: '今日模型预算已用完',
       consequence: '新的摘要推迟到 UTC 次日预算恢复后继续，事件不会丢弃。',
     })
   }

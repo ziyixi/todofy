@@ -174,7 +174,7 @@ describe('首页', () => {
     await showHome(oneWarning())
     const strip = screen.getByRole('region', { name: '1 项需关注' })
     const item = within(strip).getByRole('listitem')
-    expect(item).toHaveTextContent('邮件 → 任务 › Todofy 摘要：Gemini 预算超过 80%（82%） · 开始于 昨天 11:20')
+    expect(item).toHaveTextContent('邮件 → 任务 › Todofy 摘要：模型预算超过 80%（82%） · 开始于 昨天 11:20')
     expect(within(item).getByRole('link')).toHaveAttribute('href', '#/flows/mail-to-task/consume')
 
     const todofy = within(launcher()).getByRole('button', { name: 'Todofy 状态：需关注，查看详情' })
@@ -183,7 +183,7 @@ describe('首页', () => {
 
     const flows = screen.getByRole('region', { name: '业务流程' })
     expect(
-      within(flows).getByRole('link', { name: '邮件 → 任务：需关注，Todofy 摘要：Gemini 预算超过 80%，端到端成功 今天 00:06' }),
+      within(flows).getByRole('link', { name: '邮件 → 任务：需关注，Todofy 摘要：模型预算超过 80%，端到端成功 今天 00:06' }),
     ).toBeInTheDocument()
   })
 
@@ -193,7 +193,7 @@ describe('首页', () => {
     const button = within(launcher()).getByRole('button', { name: 'Todofy 状态：需关注，查看详情' })
     await user.click(button)
     const sheet = screen.getByRole('dialog', { name: 'Todofy 状态' })
-    expect(within(sheet).getByText('原因').nextElementSibling).toHaveTextContent('Gemini 预算超过 80%')
+    expect(within(sheet).getByText('原因').nextElementSibling).toHaveTextContent('模型预算超过 80%')
     const signals = within(sheet).getByRole('list', { name: '主要信号' })
     expect(within(signals).getByText('gemini_budget_80')).toBeInTheDocument()
     const links = within(within(sheet).getByRole('list', { name: '相关位置' })).getAllByRole('link')

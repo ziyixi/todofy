@@ -18,7 +18,7 @@ describe('event detail', () => {
     renderApp(`/events/${EVENT_ID}`)
     expect(await screen.findByRole('heading', { name: 'Quarterly tax reminder' })).toBeInTheDocument()
     const status = screen.getByRole('region', { name: '状态' })
-    expect(status).toHaveTextContent('Gemini 暂时不可用')
+    expect(status).toHaveTextContent('模型暂时不可用')
     expect(status).toHaveTextContent('会按退避自动重试最多 7 天')
     expect(screen.getByText('<b>not html</b>')).toBeInTheDocument()
     const timeline = screen.getByRole('region', { name: '时间线' })

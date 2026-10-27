@@ -137,7 +137,7 @@ function RecomputeDialog({ kind, onClose }: { kind: Kind; onClose: () => void })
     >
       <div className="stack">
         <p className="consequence">
-          用最近 24 小时的邮件摘要重新计算，会调用 Gemini（窗口为空时除外）并计入每小时的报告计算上限。
+          用最近 24 小时的邮件摘要重新计算，会调用模型（窗口为空时除外）并计入每小时的报告计算上限。
           {newsletterEffect(kind, top)}可能需要几十秒。
         </p>
         {kind === 'recommendation' ? (
