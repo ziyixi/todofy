@@ -15,6 +15,25 @@ features, the FlowDay retirement), [October 20](docs/history/handoff-2026-10-20.
 
 ## Current work
 
+### Newsletter researcher (`claude/newsletter-researcher`, local, not pushed)
+
+Owner decision 2026-10-28: Brief's collection moves into Newsletter as a deterministic "researcher"; Newsletter's
+model stays the editor. PR 1 of 2 (Newsletter only); PR 2 retires Brief right after it.
+
+- `newsletter/content-config/researcher.yaml` registers 35 public sources ported from Brief at `b55b29b1` (dropped
+  entries recoverable there). The existing `feeds` (api_feed) node runs it once per run inside the worker activity:
+  metadata-only leads, at most 20 per direction, routed only to that discovery direction with an untrusted excerpt in
+  the prompt. No new service, node type, table, proto field, Router permission or model call.
+- Notion is unchanged: leads reach 材料库 only through the `deduplicate` pool (≤30 a run), with a code-written
+  来源选择依据 and the feed name as 刊会／发布方. The `feeds` timeout is 180 s; a failed source marks the node
+  `partial_failure` and keeps the others ([content config](newsletter/docs/content-config.md#研究员订阅源)).
+
+Release: push, full `CI gate`, promote to `main`; the image publishes, the deploy drains, then the content-config
+workflow publishes the bundle (an older engine keeps its last bundle until the image is live). Verify after the next
+07:00 run (read-only): the `feeds` node succeeded (or `partial_failure` with per-source codes in its artifact), the
+log line shows source/ok/failed/seed counts, discovery prompts carry only their own direction's seeds, and new
+材料库 rows with 研究员订阅源 attribution appear only for pool candidates. Fix unreachable feed URLs in the registry.
+
 ### Fleet node telemetry (`claude/fleet-telemetry`, released with this merge)
 
 Owner request 2026-10-28: per-node CPU, memory, load, disk, network and per-workload usage with history in Fleet,
