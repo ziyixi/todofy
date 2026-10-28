@@ -110,6 +110,23 @@ class OutputRulesTest(unittest.TestCase):
             ["PROFILE_RULE_SAME t.v1.Out.code", "PROFILE_RULE_SAME t.v1.Lone.code"],
         )
 
+    def test_an_open_list_may_give_way_to_a_format_every_listed_value_matches(self) -> None:
+        base = image({"allowed": ["ab", "cd"], "open": True})
+        self.assertEqual(rules_of(base, image({"format": "Code"}, formats=[CODE])), [])
+        coded = image({"format": "Code", "allowed": ["ab", "cd"], "open": True}, formats=[CODE])
+        self.assertEqual(rules_of(coded, image({"format": "Code"}, formats=[CODE])), [])
+        for name, head in [
+            ("a format a listed value fails", image({"format": "Code"}, formats=[{**CODE, "pattern": "[a-c]{1,8}"}])),
+            ("a closed list dropped for a format", None),
+            ("the list and its openness dropped", image({})),
+        ]:
+            with self.subTest(name):
+                was = image({"allowed": ["ab", "cd"]}) if head is None else base
+                now = image({"format": "Code"}, formats=[CODE]) if head is None else head
+                self.assertEqual(
+                    rules_of(was, now), ["PROFILE_RULE_SAME t.v1.Out.code", "PROFILE_RULE_SAME t.v1.Lone.code"]
+                )
+
     def test_a_format_compares_by_pattern_not_name(self) -> None:
         base = image({"format": "Code"}, formats=[CODE])
         renamed = image({"format": "Name"}, formats=[{**CODE, "name": "Name"}])

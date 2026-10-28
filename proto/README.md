@@ -187,16 +187,18 @@ See [`todofy/docs/mail-api.md`](../todofy/docs/mail-api.md). It replaced `PlusSe
    existing method that gains or loses `positional` (callers and receivers would disagree on the arguments).
    The value rules are wire too, since both codecs check them on every read, a consumer's lenient read included:
    a rule of an existing field of an output may not change either way (older and newer readers check older and
-   newer writers; only an `open` list may change, and a list may become `open`), a rule of a field only inputs
+   newer writers; only an `open` list may change, a list may become `open`, and an open list may give way to the
+   field's format, kept or new, when every listed value matches it), a rule of a field only inputs
    reach may loosen but never tighten (the apps deploy before the dashboard that calls them), a union's
    discriminator may not change, the relations between fields are rules too (a field's `present_when` like its other
    rules; a message's `any_match` groups may not change on an output, and an input-only message may drop one but not
    gain one: `PROFILE_RULE_SAME_MATCH`), and a closed enum may not gain a value or change its `closed` (rule 5). Formats
    compare by pattern, length and JSON Schema `format`, so renaming a format is compatible. Like buf, it skips the
    directories `buf.yaml` lists under `breaking.ignore` (the runtimes' fixtures). `scripts/rules-selftest.sh`
-   proves the rules bite (72 cases, on `tasks/inbox/v1`, `watch/ui/v1`, `ops/v1`, `dashboard/ui/v1`, `todofy/report/v1`,
-   `mailhero/webhook/v1` and `prototest`, the retirement of a package, a file, an enum value, an allowed value and an rpc
-   with its request among them), and `test/python/test_profile_breaking.py` checks the directions on synthetic images.
+   proves the rules bite (76 cases, on `tasks/inbox/v1`, `watch/ui/v1`, `ops/v1`, `dashboard/ui/v1`, `todofy/report/v1`,
+   `mailhero/webhook/v1` and `prototest`, the retirement of a package, a file, an enum value, an allowed value, an rpc
+   with its request and a field among them), and `test/python/test_profile_breaking.py` checks the directions on
+   synthetic images.
 
    Reviewed output-rule corrections are recorded in `reviewed-rules.json` with their exact old/new values and
    rollout reason. The CLI permits only that one registered field rule when all other rules and field identity
@@ -209,22 +211,24 @@ See [`todofy/docs/mail-api.md`](../todofy/docs/mail-api.md). It replaced `PlusSe
    whose consumers branch on every value of an enum, with no default to fall back to, marks it
    `option (common.wire.v1.closed) = true` (every enum ops-v1 writes): every read refuses an unknown name, a
    lenient one too, and a new value is a new major version (`PROFILE_ENUM_CLOSED`).
-6. **Retiring an element.** Deleting a published package, file, enum value, allowed value, rpc or message is breaking
-   by every rule above, and that stays so. When no producer or consumer of it remains (the app that used it is removed in
+6. **Retiring an element.** Deleting a published package, file, enum value, allowed value, rpc, message or field is
+   breaking by every rule above, and that stays so. When no producer or consumer of it remains (the app that used it is removed in
    the same change), [`retired.json`](retired.json) lists it by full name with the date and the reason, and
    `tools/retired.py` (run by `scripts/breaking.sh` and the self-test before `buf breaking` and the profile rules)
    first checks that the head keeps the promise: no file under a retired package path or of its package name, no
    retired file (`files`, by its path: buf compares at FILE level, so a file is retired whole, with every service,
    message and enum it defines, and no kept file of the base may import it, `RETIRED_FILE_IMPORTED`), no retired
    allowed value, and a retired enum value absent with **both its number and its name reserved**
-   (`reserved 1; reserved "NAME";`, so neither is ever reused: a stored row may still hold the old name). A retired
-   rpc (`methods`, by service and name) is absent from its service. A retired top-level message (`messages`) is absent
-   from the head, and no kept field or rpc of the base uses it (`RETIRED_MESSAGE_REFERENCED`): a message is retired
-   together with everything that uses it. It then removes exactly the listed elements from the base, so their deletion
-   is the base's state and every other difference is checked as before; an element the base no longer has is left
-   alone. Once every base CI compares with is newer than the deletion (the first green run on `main` after it), an
-   entry does nothing and may be removed; the `reserved` lines stay. `ci_changes.py` deploys nothing for the deleted
-   files of a listed package (every importer stopped importing them in the same change).
+   (`reserved 1; reserved "NAME";`, so neither is ever reused: a stored row may still hold the old name), and so is
+   a retired field (`fields`, by message, name and number). A retired rpc (`methods`, by service and name) is absent
+   from its service, and a service whose every rpc is retired goes with them. A retired top-level message (`messages`) is absent from the head, and no kept field or rpc of the
+   base uses it (`RETIRED_MESSAGE_REFERENCED`): a message is retired together with everything that uses it. A kept
+   file may import a retired package or file only for retired fields; the base drops that import with them. It then
+   removes exactly the listed elements from the base, so their deletion is the base's state and every other difference
+   is checked as before; an element the base no longer has is left alone. Once every base CI compares with is newer
+   than the deletion (the first green run on `main` after it), an entry does nothing and may be removed; the `reserved`
+   lines stay. `ci_changes.py` deploys nothing for the deleted files of a listed package (every importer stopped
+   importing them in the same change).
 
 ## Layout
 
@@ -238,7 +242,7 @@ See [`todofy/docs/mail-api.md`](../todofy/docs/mail-api.md). It replaced `PlusSe
 | `ts/` | The TypeScript package `@ziyixi/proto`. Committed: `package.json` (its exports), `wire-json.ts`, `wire-rules.ts` and `field-mask.ts` (the codec and its value rules), `http-path.ts`, `http-rule.ts`, `http-transcoder.ts`, `http-client.ts` and `rpc-status.ts` (the HTTP runtime, [HTTP APIs](#http-apis)), `page-token.ts` and `filter.ts` (AIP-158 page tokens and the AIP-160 subset for list methods), `protobuf.ts` / `protobuf-wkt.ts` (the runtime re-exports). Generated: every directory (`ts/todofy/...`, `ts/watch/...`, `ts/ops/...`, `ts/common/...`, `ts/google/...`): protobuf-es's `*_pb.ts`, and for the packages of `WIRE_PACKAGES` the wire JSON types `*_wire.ts` |
 | `python/` | The Python package `ziyixi-proto`. Committed: `pyproject.toml` (static metadata, uv cache keys), `build_backend.py`, `src/ziyixi_proto/__init__.py` and `wire_json.py` (the codec and its value rules). Generated: every directory under `src/ziyixi_proto/`, for the packages `tools/gen_py.py` lists in `PYTHON_PACKAGES` only; the wheel leaves the test-only ones out (`TEST_ONLY_PACKAGES`) |
 | `tools/ensure.mjs` | Installs the pinned toolchain when `node_modules/` does not match the lockfile, and generates both languages when its stamp (`.generated.json`, ignored) does not match |
-| `tools/gen_py.py` | The stdlib-only Python generator (frozen dataclasses, `IntEnum`s, field tables; a field named like a Python keyword is the attribute `<name>_`, `from_`), for `PYTHON_PACKAGES` only: `todofy.report.v1`, `ops.v1`, `website.sync.v1`, `mailhero.webhook.v1`, `todofy.ui.v1` and `todofy.mail.v1` (todofy-core's); `platform.runtime.v1`, `fleet.telemetry.v1` and `common.errors.v1` (the VPS package); and `prototest.v1` (this folder's Python tests). A package only TypeScript apps use (another app's UI API) is not generated, so it may use what the Python profile lacks |
+| `tools/gen_py.py` | The stdlib-only Python generator (frozen dataclasses, `IntEnum`s, field tables; a field named like a Python keyword is the attribute `<name>_`, `from_`), for `PYTHON_PACKAGES` only: `todofy.report.v1`, `ops.v1`, `mailhero.webhook.v1`, `todofy.ui.v1` and `todofy.mail.v1` (todofy-core's); `platform.runtime.v1`, `fleet.telemetry.v1` and `common.errors.v1` (the VPS package); and `prototest.v1` (this folder's Python tests). A package only TypeScript apps use (another app's UI API) is not generated, so it may use what the Python profile lacks |
 | `tools/gen_wire_ts.py` | The TypeScript wire JSON types (`ts/<package>/<file>_wire.ts`, types only) of the packages in `WIRE_PACKAGES` (`ops.v1`, `todofy.report.v1` and `todofy.ui.v1` for Todofy's UI and the fixtures of its tests, `dashboard.ui.v1`, whose views the dashboard's Worker builds and its UI renders as wire JSON, `tasks.inbox.v1`, the `TaskInbox` binding Home and Watch call, and `recall.ingest.v1`, the uploads recall's browser extension builds as plain objects without a runtime dependency): each message's JSON as a producer writes it, a union narrowed by its discriminator, a type of another file of these packages as a type-only import of that file's module, each service as a binding's methods (none for a service with `google.api.http` bindings: an HTTP API is called through the client), and the `WireTypes` entries that type `toWire`'s answer |
 | `tools/gen_schema.py`, `tools/schema.mjs` | A contract's JSON Schema from its IDL (`SCHEMAS`: `ops.v1` writes the `$defs` document `contracts/ops-v1/ops-v1.schema.json`, with `ALIASES` keeping the `$defs` names it had before; `todofy.report.v1` writes `todofy/api/summary-v1.schema.json` and `recommendation-v1.schema.json`, each the self-contained schema of one message, `Target.root`, described by the IDL's comments; a target marked
 `Target.open` is a consumer's schema (mail.received.v1's, and recall.archive.v1's `$defs` document `contracts/recall-archive-v1/recall-archive-v1.schema.json`), every object open to unknown properties as a lenient read is, a union whose discriminator is an open enum given one more branch for a value it does not know (the fields' own rules, no case), and the relations

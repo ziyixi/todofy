@@ -47,9 +47,7 @@ class AccessRouteTests(unittest.IsolatedAsyncioTestCase):
 
         executor = StubExecutor()
         self.calls = executor.calls
-        self.app = create_app(
-            monitor_db=self.root / "monitor.sqlite3", model_executor=executor
-        )
+        self.app = create_app(model_executor=executor)
         self.client = httpx.AsyncClient(
             transport=httpx.ASGITransport(app=self.app), base_url="http://127.0.0.1"
         )
@@ -120,7 +118,7 @@ class AccessRouteTests(unittest.IsolatedAsyncioTestCase):
         claims = [
             {"aud": ["wrong-audience"]},
             {"iss": "https://other.cloudflareaccess.com"},
-            {"exp": now - 60},
+            {"exp": now - 120},
             {"iat": now + 3600},
             {"nbf": now + 3600},
             {"type": "org"},
@@ -138,6 +136,14 @@ class AccessRouteTests(unittest.IsolatedAsyncioTestCase):
                 "INFERENCE_NOT_AUTHORIZED",
             )
         self.assertEqual(self.calls, [])
+
+    async def test_small_clock_skew_within_one_minute_is_accepted(self):
+        now = int(time.time())
+        for claims in ({"iat": now + 30}, {"nbf": now + 30}):
+            response = await self.client.post(
+                RUN, json=BODY, headers=access_headers(**claims)
+            )
+            self.assertEqual(response.status_code, 200, response.text)
 
     async def test_unsigned_wrong_algorithm_and_duplicate_assertions_are_denied(self):
         wrong_alg = jwt.encode(

@@ -5,7 +5,8 @@ The workflow reads the complete Notion content snapshot and publishes only when 
 changes. Code pushes keep their normal publication path. There are no GitHub schedules or Notion
 buttons, and this Worker holds no Notion credentials.
 
-Home calls the same Worker through its private `Ops` service binding. The public HTTP entry returns
+Home calls the same Worker through two private service bindings: `Ops` answers ops-v1 `status()` (the
+sync signals only) and `WebsiteSync` the sync contract below. The public HTTP entry returns
 404; `workers.dev` and preview URLs are disabled. Home authenticates the owner and checks Origin and
 CSRF before accepting an immediate sync. Different requests enter the release queue, including while
 another build runs. Home stores each request UUID before dispatch; a repeated or uncertain request

@@ -4,7 +4,6 @@ import asyncio
 import io
 import json
 import os
-import pathlib
 import tempfile
 import time
 from importlib.resources import files
@@ -107,10 +106,7 @@ async def main():
                 "jwt.jwks_client.urllib.request.OpenerDirector.open", side_effect=jwks
             ),
         ):
-            app = create_app(
-                monitor_db=pathlib.Path(temporary) / "monitor.sqlite3",
-                model_executor=Executor(),
-            )
+            app = create_app(model_executor=Executor())
             assert await request(app, None) == (401, False)
             assert await request(app, token) == (200, True)
             assert calls == [True]

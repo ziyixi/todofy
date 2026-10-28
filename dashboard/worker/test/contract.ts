@@ -19,7 +19,6 @@ const MESSAGES = {
   StartCanaryResult: ops.StartCanaryResultSchema,
   CanaryDelivery: ops.CanaryDeliverySchema,
   CanaryResult: ops.CanaryResultSchema,
-  OpsReport: ops.OpsReportSchema,
   OpsReportItem: ops.OpsReportItemSchema,
   OpsReportReceipt: ops.OpsReportReceiptSchema,
 } satisfies Record<string, DescMessage>;

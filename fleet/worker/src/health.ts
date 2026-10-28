@@ -106,8 +106,6 @@ export function statusSnapshot(
   signals.sort((a, b) => rank(a.severity) - rank(b.severity) || a.code.localeCompare(b.code));
   const modes: { maintenance: boolean } & Record<string, boolean> = { maintenance: false };
   if (app === 'newsletter') modes.deployment_paused = age === 'fresh' && report !== null && ['draining', 'frozen'].includes(report.newsletter.drain_state);
-  const codexInference = app === 'codex-gateway' && age === 'fresh' && report
-    ? workload(report, app)?.inference_status : undefined;
   return {
     version: 'ops-v1',
     app,
@@ -121,6 +119,5 @@ export function statusSnapshot(
     last_backup_at: null,
     ui_url: `https://${publicHost}/`,
     capabilities: [],
-    ...(codexInference ? { codex_inference: codexInference } : {}),
   };
 }

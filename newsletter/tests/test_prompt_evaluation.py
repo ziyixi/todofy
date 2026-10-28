@@ -463,7 +463,6 @@ def test_cli_uses_only_explicit_configuration_not_environment_or_dotenv(
     suite = tmp_path / "suite.json"
     suite.write_text(contracts.canonical_json({"cases": [selection_case()]}))
     monkeypatch.setenv("NEWSLETTER_MODEL", "must-not-select-from-environment")
-    monkeypatch.setenv("NEWSLETTER_CODEX_HOME", "/must-not-use-this-auth")
     monkeypatch.setenv("RESEND_API_KEY", "synthetic-secret-not-a-real-key")
     original_read = pathlib.Path.read_text
 

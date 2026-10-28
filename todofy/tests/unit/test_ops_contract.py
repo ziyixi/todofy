@@ -27,24 +27,11 @@ from tests import mail_contract
 ROOT = mail_contract.TODOFY.parent / "contracts" / "ops-v1"
 SCHEMA = json.loads((ROOT / "ops-v1.schema.json").read_text())
 LEGACY = json.loads((ROOT / "legacy" / "ops-v1.schema.json").read_text())
-# The apps that joined ops-v1 after the hand-written schema was frozen (OpsStatus.app is an open list): Watch,
-# Fleet, Newsletter, Codex gateway, Notion publish, mailsort, recall, Brief and Tasks. No dashboard using the legacy
-# schema binds one, so compare as if its App list had grown the same way. New optional evidence is checked below.
-JOINED_APPS = [
-    "watch",
-    "fleet",
-    "newsletter",
-    "codex-gateway",
-    "notion-publish",
-    "mailsort",
-    "recall",
-    "brief",
-    "tasks",
-]
-LEGACY_GROWN = {
-    **LEGACY,
-    "$defs": {**LEGACY["$defs"], "App": {"enum": [*LEGACY["$defs"]["App"]["enum"], *JOINED_APPS]}},
-}
+# The apps the hand-written schema knew. OpsStatus.app is no list any more: any app's name (the format AppName)
+# answers ops-v1, and no dashboard using the legacy schema binds an app that joined later, so compare as if its
+# App list had grown to every such name.
+LEGACY_APPS = LEGACY["$defs"]["App"]["enum"]
+LEGACY_GROWN = {**LEGACY, "$defs": {**LEGACY["$defs"], "App": SCHEMA["$defs"]["AppName"]}}
 # validate.mjs: KEYWORDS plus the annotations it skips.
 SUPPORTED = {
     *("$ref", "type", "enum", "const", "required", "properties", "additionalProperties", "propertyNames"),
@@ -99,7 +86,6 @@ def test_fixtures_exist_for_every_method_input_and_output():
         "CanaryDelivery",
         "CanaryResult",
         "GuardState",
-        "OpsReport",
         "OpsReportReceipt",
         "OpsStatus",
         "SetGuardInput",
@@ -113,12 +99,10 @@ def test_fixtures_exist_for_every_method_input_and_output():
 def test_valid_fixture(name, path):
     assert _errors(name, path) == []
     value = json.loads(path.read_text())
-    joined = isinstance(value, dict) and value.get("app") in JOINED_APPS
-    # The new relay's optional website_sync evidence is for the new Home only. The frozen reader rejects it,
-    # as well as the joined app; compare the pre-existing fields without extending that reader's closed shape.
+    joined = name == "OpsStatus" and value["app"] not in LEGACY_APPS
+    # The frozen reader refuses exactly the apps that joined after it.
     assert _validator(LEGACY, name).is_valid(value) != joined
-    legacy_value = {key: item for key, item in value.items() if key != "website_sync"} if name == "OpsStatus" else value
-    assert _validator(LEGACY_GROWN, name).is_valid(legacy_value)
+    assert _validator(LEGACY_GROWN, name).is_valid(value)
 
 
 @pytest.mark.parametrize(("name", "path"), INVALID, ids=[f"{n}/{p.stem}" for n, p in INVALID])
@@ -128,8 +112,7 @@ def test_invalid_fixture(name, path):
     legacy = list(_validator(LEGACY, name).iter_errors(value))
     assert legacy != []
     # The frozen reader must reject the fixture's own mutation, not only an app it never knew (a joined one).
-    if path.stem != "unknown-app":
-        assert all(list(error.absolute_path) != ["app"] for error in legacy)
+    assert all(list(error.absolute_path) != ["app"] for error in legacy)
 
 
 def _validator(schema: dict[str, Any], name: str) -> jsonschema.Draft202012Validator:
@@ -193,21 +176,5 @@ def test_the_generated_schema_keeps_every_guarantee_of_the_hand_written_one(name
     """About 22,000 mutants of the valid fixtures (the invalid ones get the same verdict from both above)."""
     generated, legacy = _validator(SCHEMA, name), _validator(LEGACY_GROWN, name)
     value = json.loads(path.read_text())
-    if name == "OpsStatus":
-        value.pop("website_sync", None)  # The frozen profile has no rules for this new optional field.
     differ = [m for m in _mutants(value) if generated.is_valid(m) != legacy.is_valid(m)]
     assert differ == []
-
-
-def test_the_new_website_sync_field_is_checked_by_the_schema_and_python_codec():
-    value = json.loads((ROOT / "fixtures" / "OpsStatus" / "notion-publish-ok.json").read_text())
-    assert not _validator(LEGACY_GROWN, "OpsStatus").is_valid(value)
-    generated = _validator(SCHEMA, "OpsStatus")
-    for sync in _mutants(value["website_sync"]):
-        mutant = {**value, "website_sync": sync}
-        try:
-            from_wire(pb.OpsStatus, mutant, strict=True)
-            read = True
-        except WireJsonError:
-            read = False
-        assert read == generated.is_valid(mutant), mutant

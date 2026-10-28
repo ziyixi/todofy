@@ -151,19 +151,13 @@ test('status: maintenance is down; an unreadable source is down with only status
   assert.equal('capacity_used_bytes' in noCapacity.counters, false, 'a counter that was not read is left out')
 })
 
-/** The modes each app writes even on a `status_unavailable` status (its deployment variables, contracts/ops-v1
- * README "modes"); a key read from storage is left out then, never guessed. */
-const DEPLOYMENT_MODES = { 'mail-hero': ['maintenance', 'force_send_paused'], todofy: ['maintenance', 'processing_paused'], watch: ['maintenance', 'notifications'], 'notion-publish': ['maintenance'], fleet: ['maintenance'], newsletter: ['maintenance'], 'codex-gateway': ['maintenance'], mailsort: ['maintenance', 'mode_limited'], recall: ['maintenance'], brief: ['maintenance', 'mode_limited'], tasks: ['maintenance'] }
+/** Mail Hero's deployment variables: in `modes` even on a `status_unavailable` status (contracts/ops-v1
+ * deployment-modes.json); a key read from storage is left out then, never guessed. */
+const DEPLOYMENT_MODES = ['maintenance', 'force_send_paused']
 
 test('status: every deployment-variable mode is a boolean, also on status_unavailable', () => {
   for (const value of [status(), status({ env: { ...env, MAINTENANCE_MODE: 'true' } }), status({ coordinator: null }), status({ snapshot: null })]) {
-    for (const key of DEPLOYMENT_MODES['mail-hero']) assert.equal(typeof value.modes[key], 'boolean', `${key} in ${JSON.stringify(value.modes)}`)
-  }
-  for (const file of readdirSync(new URL('../../../contracts/ops-v1/fixtures/OpsStatus/', import.meta.url))) {
-    const fixture = JSON.parse(readFileSync(new URL(`../../../contracts/ops-v1/fixtures/OpsStatus/${file}`, import.meta.url), 'utf8'))
-    assert.ok(Object.hasOwn(DEPLOYMENT_MODES, fixture.app), `${file}: an explicit deployment-mode profile is required`)
-    for (const key of DEPLOYMENT_MODES[fixture.app]) assert.equal(typeof fixture.modes[key], 'boolean', `${file}: ${key}`)
-    if (file === 'notion-publish-ok.json') assert.deepEqual(fixture.modes, { maintenance: false }, `${file}: the relay has no other deployment modes`)
+    for (const key of DEPLOYMENT_MODES) assert.equal(typeof value.modes[key], 'boolean', `${key} in ${JSON.stringify(value.modes)}`)
   }
 })
 

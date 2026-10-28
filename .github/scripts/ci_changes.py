@@ -294,7 +294,6 @@ PROTO_RUNTIMES: dict[str, tuple[str, ...]] = {
 # reaches every user (fail safe; test_proto.py fails until it is listed).
 PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     "proto/modelrouter/inference/": ("model-router", "mailsort", "todofy", "brief", "newsletter", "codex-gateway"),
-    "proto/codex/monitor/": ("codex-gateway", "mailsort", "mail-hero", "todofy", "dashboard", "watch", "website", "recall", "brief", "tasks", "personal-mcp", "fleet", "platform", "model-router"),
     # recommendation-v1 and summary-v1 (todofy/api/*.schema.json are generated from it): todofy-core builds them.
     "proto/todofy/report/": ("todofy",),
     # Todofy's owner API (todofy.ui.v1): todofy-core writes every answer with it, the gateway serves it through the
@@ -323,7 +322,9 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     "proto/common/errors/": ("platform",),
     # ops-v1 (contracts/ops-v1): every app's Ops entrypoint and the dashboard that calls them.
     "proto/ops/": ("mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp", "model-router"),
-    "proto/website/sync/": ("mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp", "model-router"),
+    # website.sync.v1: the relay serves its WebsiteSync entrypoint, Home calls it and shows the evidence (dashboard.ui.v1,
+    # which the Personal MCP reads).
+    "proto/website/sync/": ("website", "dashboard", "personal-mcp"),
     # mail.received.v1 (contracts/mail-received-v1's schema is generated from it): Mail Hero builds every event,
     # todofy-core reads every webhook body.
     "proto/mailhero/webhook/": ("mail-hero", "todofy"),

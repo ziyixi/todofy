@@ -1,9 +1,9 @@
 # `ops-v1`: personal-cloud operations contracts
 
 A small, typed RPC surface on each app so that one dashboard Worker (`home`, in
-[`dashboard/`](../../dashboard/)) can show health, run a daily end-to-end canary, apply quota guardrails and hand a
-single ops digest to Todofy's daily reminder. It is a contract between each app and that dashboard;
-the two apps still never call or import each other.
+[`dashboard/`](../../dashboard/)) can show health, run a daily end-to-end canary and apply quota guardrails. It is a
+contract between each app and that dashboard, and names no app: any app answers it under its own name. The apps
+still never call or import each other.
 
 The source of truth is the IDL [`proto/ops/v1/ops.proto`](../../proto/ops/v1/ops.proto): its services
 are the methods, its messages and enums the values, and its `common.wire.v1` options every value rule
@@ -22,6 +22,7 @@ contract this replaced (each app's golden test, below).
 | `legacy/ops-v1.schema.json` | The hand-written schema the dashboards deployed before the move validate answers with, frozen: the golden tests prove every answer still passes it (rollout) |
 | `validate.mjs` | Dependency-free validator for the JSON Schema keywords the contracts use; the golden tests check answers against the legacy schema with it |
 | `fixtures/<Def>/*.json` | Valid examples of each input/output; `fixtures/invalid/<Def>/*.json` must fail |
+| `deployment-modes.json` | The modes each app writes even on a `status_unavailable` status (its deployment variables, "modes" below); `proto/test/ops.test.ts` checks every `OpsStatus` fixture against it, and each app's own tests check only its own |
 | `IMPLEMENTATION.md` | Per app: files, migrations, guard keep/defer table, canary state machine, digest, query budgets, tests |
 
 Checks (the `Contracts` CI job, `Proto checks`, and each app's own tests):
@@ -86,9 +87,9 @@ entrypoint = "Ops"
 
 The method signatures are the generated services' wire types (`@ziyixi/proto/ops/v1/ops_wire`, types
 only): `OpsService` on every app, `CanaryProducerService` on Mail Hero and `CanaryConsumerService` on Todofy.
-`OpsDigestService` (`reportOps`, below) has no implementer since 2026-10-21: Home creates the digest's daily task in
-Tasks itself (`dashboard/docs/design.md` §5.5), and the service leaves the IDL with the next `ops.proto` change. An
-app's `Ops` class `implements` its services; the dashboard types its bindings with them:
+`OpsDigestService` (`reportOps`) left the IDL on 2026-10-27 (`proto/retired.json`): Home creates the digest's daily task
+in Tasks itself since 2026-10-21 (`dashboard/docs/design.md` §5.5). An app's `Ops` class `implements` its services;
+the dashboard types its bindings with them:
 
 ```ts
 import type * as ops from '@ziyixi/proto/ops/v1/ops_wire';
@@ -107,12 +108,13 @@ deploy there can already read the D1 databases). The default `fetch`, `email` an
 keep their exact behaviour. RPC arguments and results are structured-clone values; this contract uses
 only JSON values.
 
-Website synchronization (`notion-publish`) embeds optional `website_sync` evidence from
-`proto/website/sync/v1/sync.proto`: complete content checks, active Actions runs and verified publications
-have separate timestamps. Other apps omit this field. Its read-only Ops entrypoint also implements
-`WebsiteSyncService`; Home sends owner actions by UUID and persists their receipts before dispatch.
-`accepted` identifies an Actions run; it does not assert deployment success. Website request receipts do
-not expire. A repeated uncertain UUID looks up that exact run and never dispatches again.
+Website synchronization (`notion-publish`) answers `status()` with its signals only. Its evidence and owner requests
+are the relay's own contract, `proto/website/sync/v1/sync.proto`, on a second entrypoint `WebsiteSync` (Home's
+`WEBSITE_SYNC` binding; `OpsStatus.website_sync` until 2026-10-27): complete content checks, active Actions runs and
+verified publications have separate timestamps. Home reads `getSyncStatus()` with each `status()` poll, sends owner
+actions by UUID and persists their receipts before dispatch. `accepted` identifies an Actions run; it does not
+assert deployment success. Website request receipts do not expire. A repeated uncertain UUID looks up that exact
+run and never dispatches again.
 
 The website signals are `website_sync_stale`, `website_sync_failed`, `website_sync_blocked`,
 `website_sync_unconfirmed` and `website_sync_provider_unavailable`. Provider read failure leaves the
@@ -129,7 +131,6 @@ refreshes do not reopen a dismissed incident and a different failed run can aler
 | `startCanary(input)` | Mail Hero | `StartCanaryInput` | `StartCanaryResult` | one synthetic message and delivery (D1, R2) when queued |
 | `canaryDelivery(eventId)` | Mail Hero | `EventId` | `CanaryDelivery` | none |
 | `canaryResult(eventId)` | Todofy | `EventId` | `CanaryResult` | none |
-| `reportOps(report)` | none since 2026-10-21 (Todofy until then) | `OpsReport` | `OpsReportReceipt` | – |
 
 **Errors.** A method rejects only with `new Error(code)` where `code` is an `ErrorCode` (`ops.v1.ErrorCode`; the
 schema's `OpsErrorCode` is the same list under its earlier name)
@@ -166,9 +167,8 @@ lost alarm; `IMPLEMENTATION.md` §3c). Poll it no more often than every 10 minut
   `maintenance` (always false: it has no maintenance switch). The brief: `maintenance` (always false), `paused` (the
   owner's switch, read from storage), `mode_limited` (the deployment variable BRIEF_MODE is below live; a
   `status_unavailable` status has only `maintenance` and `mode_limited`). A
-  `status_unavailable` status has only the deployment variables (Mail Hero `maintenance`,
-  `force_send_paused`; Todofy `maintenance`, `processing_paused`, `force_pause_todoist`,
-  `reminder_enabled`); the keys read from storage (Mail Hero `send_paused`, `forwarding`,
+  `status_unavailable` status has only the deployment variables (`deployment-modes.json` lists them per app); the
+  keys read from storage (Mail Hero `send_paused`, `forwarding`,
   `backup_active`; Todofy `backup_active`) are then simply absent from the map: `modes` is a
   `map<string, bool>` whose only required key is `maintenance` (`required_keys` in the IDL).
 - `guard`: the effective `GuardState` (below).
@@ -262,27 +262,6 @@ failure), `ok` (the summary call answered and the result passed Todofy's validat
 `failed` (`completed_at`, `error_code` from Todofy's vocabulary, e.g. `llm_quota`,
 `llm_budget_exhausted`). A canary never reaches Tasks, reports, the attention list or the reminder.
 
-### `reportOps(report)` → `OpsReportReceipt` (no implementer since 2026-10-21)
-
-Retired with Todofy's task writes: Home now creates the one digest task a UTC day in Tasks through Tasks' create-only
-`TaskInbox` (`dashboard/docs/design.md` §5.5), and no app implements this method. Until then it worked as follows.
-
-Stores the dashboard's latest report: `generated_at`, up to 20 items `{source, code, severity, since,
-metrics}` and an optional `dashboard_url`, at most 8 KiB as compact JSON. It replaces the stored report
-unless the stored one has a later `generated_at` (then `stored: false` and the receipt describes the
-stored one), so a retried older report cannot win. `generated_at` more than 5 minutes ahead of Todofy's
-clock is `invalid_input`. An empty `items` list clears the ops section.
-
-**Digest.** Todofy's daily attention reminder (at most one task in Tasks per UTC day, frozen title and
-body, existing retry rules) gains an ops section built from the stored report when its `generated_at`
-is at most 36 hours old: the `warning` and `critical` items, critical first. Each report is listed by at
-most one day's reminder. A day with ops items but no attention items still creates that day's one task,
-from a report generated before that UTC day began (a report from the current day waits for the next
-day's reminder unless mail needs attention first); there is never a second task on a day. The text holds
-only sources, codes, severities, timestamps, numeric metrics and links (Todofy's owner UI, the
-`dashboard_url`). Days without ops items keep today's exact title and body. Report at about 23:40 UTC so
-the next UTC day's reminder carries it.
-
 ## Daily canary, end to end (for the dashboard)
 
 1. `TODOFY.status()`; skip the run (report `canary_skipped`) unless `capabilities` has `canary_consumer`.
@@ -298,9 +277,9 @@ the next UTC day's reminder carries it.
 
 - Additive changes stay `ops-v1`: new optional output fields, new signal/counter/capability codes, new
   codes of the open lists `reason`/`waiting_code`, new `error_code`s documented here, and a new app. `OpsStatus.app`
-  is an open list (since 2026-10-01, ahead of the watch app): a dashboard reads a status naming an app it was built
-  without, and keeps only the answer of the app whose binding it called, so the list grows with the new app's
-  `Ops` entrypoint and the dashboard's binding to it. They land in `ops.proto`
+  names no app (the format `AppName`, since 2026-10-27; an open list from 2026-10-01): a dashboard reads a status
+  naming an app it was built without, and keeps only the answer of the app whose binding it called, so a new app
+  needs its `Ops` entrypoint and the dashboard's binding to it, and no change here. They land in `ops.proto`
   together with the regenerated schema (`npm run schema` in `proto/`) and fixtures in one change;
   `buf breaking` and the wire profile check (`proto/tools/profile_breaking.py`) refuse a change that
   would alter the bytes of an existing field. Consumers ignore unknown fields and show unknown codes
@@ -318,8 +297,6 @@ the next UTC day's reminder carries it.
 | Bound | Value |
 | --- | --- |
 | Guard `until` ahead of now | ≤ 36 h |
-| Digest window of a stored report | 36 h |
-| Report items / report size | ≤ 20 / ≤ 8 KiB compact JSON |
 | Signals / metrics per signal or item / modes / counters / capabilities | ≤ 16 / 12 / 12 / 32 / 16 |
 | `status()` polling | ≥ 10 min apart |
-| D1 statements per call | `status()` Mail Hero ≤ 6, Todofy ≤ 5; `canaryDelivery`/`canaryResult` 1; `setGuard`/`reportOps` 0; `startCanary` ≤ 2 reads, plus the synthetic delivery's writes when queued |
+| D1 statements per call | `status()` Mail Hero ≤ 6, Todofy ≤ 5; `canaryDelivery`/`canaryResult` 1; `setGuard` 0; `startCanary` ≤ 2 reads, plus the synthetic delivery's writes when queued |

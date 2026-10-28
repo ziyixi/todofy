@@ -33,7 +33,8 @@ a rule is as much wire as a field's type). Older and newer builds of each side r
   producers write; a wider one lets newer producers write what older consumers refuse. Formats compare by pattern
   and length (a renamed format with the same pattern is the same rule). One exception: an ``open`` allowed list
   (a lenient read accepts any value of its format) may change while the list stays open on the side that reads it,
-  and a list may become ``open``.
+  a list may become ``open``, and an open list may give way to the field's format, kept or new, when every listed
+  value matches it (older producers wrote only listed values, and older consumers never checked the list).
 - ``PROFILE_RULE_NOT_TIGHTER``: a rule of an existing field of an input (reachable only from methods' inputs, read
   strictly by the method's implementation) accepts less than it did: a changed format pattern, a lower
   ``max_length``, ``max_items``, ``maximum`` or a higher ``minimum``, a value removed from ``allowed`` (or a list
@@ -336,6 +337,16 @@ def _accepts_format(reader: Any, writer: Any) -> bool:
     return _accepts_size(reader[1], writer[1])
 
 
+def _list_became_format(was: Rules, now: Rules) -> bool:
+    """Whether an open allowed list gave way to the field's format (kept, or new) and every listed value matches it."""
+    if not was.open or was.allowed is None or now.allowed is not None or now.format is None:
+        return False
+    if was.format is not None and was.format != now.format:
+        return False
+    pattern, max_length, _ = now.format
+    return all(re.fullmatch(pattern, value) and len(value) <= (max_length or len(value)) for value in was.allowed)
+
+
 def accepts(reader: Rules, writer: Rules, lenient: bool) -> list[str]:
     """What a reader with ``reader``'s rules refuses of what a writer with ``writer``'s rules writes (rule names)."""
     refused = []
@@ -406,7 +417,9 @@ def rule_violations(base: dict[str, Any], head: dict[str, Any], ignore: tuple[st
                     )
                 continue
             refused = sorted(set(accepts(was, now, lenient=True)) | set(accepts(now, was, lenient=True)))
-            if was.open and not now.open:
+            if _list_became_format(was, now):
+                refused = [rule for rule in refused if rule != "format"]
+            elif was.open and not now.open:
                 refused.append("open")
             if refused:
                 found.append(f"PROFILE_RULE_SAME {path}: changed ({', '.join(refused)})")

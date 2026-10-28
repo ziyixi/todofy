@@ -56,7 +56,7 @@ export const TOP_SIGNALS_MAX = maxItems(EntryStateSchema.field.topSignals);
 export const QUOTA_BREAKDOWN_MAX = maxItems(QuotaRowSchema.field.breakdown);
 /** Stages of a registry flow, at most (Flow.stages; the registry check also wants at least 2). */
 export const FLOW_STAGES_MAX = maxItems(FlowSchema.field.stages);
-/** Items of the ops view's digest (Digest.items); the digest itself keeps ops.v1's REPORT_MAX_ITEMS (equal, tested). */
+/** Items of the digest (Digest.items): what the digest keeps and what its task lists. */
 export const DIGEST_ITEMS_MAX = maxItems(DigestSchema.field.items);
 /** The mini quota bars of 首页 (CloudflareSummary.quota): HOME_QUOTA_IDS has exactly this many (tested). */
 export const HOME_QUOTA_MAX = maxItems(CloudflareSummarySchema.field.quota);

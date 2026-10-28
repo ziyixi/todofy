@@ -10,7 +10,6 @@ from codex_gateway.app import create_app
 
 
 def main() -> None:
-    data_dir = pathlib.Path(os.getenv("DATA_DIR", ".data"))
     shared_home = os.environ["CODEX_HOME"]
     shared_auth = pathlib.Path(shared_home) / "auth.json"
     if not shared_auth.is_absolute():
@@ -21,7 +20,7 @@ def main() -> None:
         os.environ["CODEX_HOME"] = str(home)
         try:
             uvicorn.run(
-                create_app(monitor_db=data_dir / "inference-monitor.sqlite3"),
+                create_app(),
                 host="0.0.0.0",
                 port=8080,
                 access_log=False,

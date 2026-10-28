@@ -84,9 +84,7 @@ export function homeResponse(
     return row === undefined ? [] : [{ ...row, breakdown: [] }];
   });
   const receipt = input.digest.last_receipt;
-  const website = input.statuses['notion-publish'];
-  const evidence = website?.status?.website_sync;
-  const websiteSync = evidence === undefined || website?.ok !== false ? evidence : { ...evidence, error_code: website.error ?? 'unavailable' };
+  const websiteSync = input.statuses['notion-publish']?.website_sync;
   return {
     name: VIEW_NAMES.home,
     ...base,

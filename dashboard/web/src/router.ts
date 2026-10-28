@@ -9,7 +9,7 @@ export type Route =
   | { readonly view: 'home' }
   | { readonly view: 'flows'; readonly flow?: string; readonly stage?: string }
   | { readonly view: 'cloudflare'; readonly script?: string }
-  | { readonly view: 'ops'; readonly app?: string }
+  | { readonly view: 'ops' }
 
 const FLOW_ID = /^[a-z][a-z0-9-]{0,31}$/
 const SCRIPT = /^[a-z0-9][a-z0-9_-]{0,62}$/
@@ -41,10 +41,7 @@ export function parseHash(hash: string): Route {
     const script = rest.length === 2 && rest[0] === 'worker' && SCRIPT.test(rest[1] as string) ? rest[1] : undefined
     return script === undefined ? { view: 'cloudflare' } : { view: 'cloudflare', script }
   }
-  if (view === 'ops') {
-    const app = rest.length === 1 && FLOW_ID.test(rest[0] as string) ? rest[0] : undefined
-    return app === undefined ? { view: 'ops' } : { view: 'ops', app }
-  }
+  if (view === 'ops') return { view: 'ops' }
   return { view: 'home' }
 }
 
@@ -59,7 +56,7 @@ export function routeHash(route: Route): string {
     case 'cloudflare':
       return route.script === undefined ? '#/cloudflare' : `#/cloudflare/worker/${route.script}`
     case 'ops':
-      return route.app === undefined ? '#/ops' : `#/ops/${route.app}`
+      return '#/ops'
   }
 }
 

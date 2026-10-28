@@ -426,8 +426,8 @@ class Files(unittest.TestCase):
         [binding] = gateway["durable_objects"]["bindings"]
         self.assertIn(binding["script_name"], PRODUCTION)
         self.assertEqual(binding["script_name"], "todofy-core")
-        # Home reaches every app through its Ops entrypoint, and Tasks also through the create-only TaskInbox (the
-        # digest's daily task), bound to its own source.
+        # Home reaches every app through its Ops entrypoint, Tasks also through the create-only TaskInbox (the
+        # digest's daily task), bound to its own source, and the website relay also through its WebsiteSync.
         for service in load(PRODUCTION["home"])["services"]:
             with self.subTest(worker="home", service=service["binding"]):
                 self.assertIn(service["service"], PRODUCTION)
@@ -436,10 +436,12 @@ class Files(unittest.TestCase):
                         "binding": "TASK_INBOX", "service": "tasks", "entrypoint": "TaskInbox", "props": {"source": "home"},
                     })
                     continue
-                expected = {"NEWSLETTER": "NewsletterOps", "CODEX_GATEWAY": "CodexGatewayOps"}.get(service["binding"], "Ops")
+                expected = {"NEWSLETTER": "NewsletterOps", "CODEX_GATEWAY": "CodexGatewayOps", "WEBSITE_SYNC": "WebsiteSync"}.get(service["binding"], "Ops")
                 self.assertEqual(service["entrypoint"], expected)
                 if expected in {"NewsletterOps", "CodexGatewayOps"}:
                     self.assertEqual(service["service"], "fleet")
+                if expected == "WebsiteSync":
+                    self.assertEqual(service["service"], "ziyixi-notion-publish")
         # The watch app parses untrusted pages: it reaches Tasks only through the create-only TaskInbox, bound to its
         # own source, never through TasksApi or Ops (until 2026-10-21 it bound Todofy's Intents, now deleted).
         self.assertEqual(

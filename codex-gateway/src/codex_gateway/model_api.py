@@ -20,7 +20,6 @@ from ziyixi_proto.rpc_status import RpcError, status_body
 from ziyixi_proto.wire_json import WireJsonError, to_wire
 
 from codex_gateway.modelrouter import ModelExecutor
-from codex_gateway.monitoring import InferenceMonitor
 
 HEARTBEAT_SECONDS = 15
 
@@ -55,9 +54,7 @@ async def result_events(operation: Awaitable[Any]):
                 await task
 
 
-def install_model_routes(
-    app: FastAPI, executor: ModelExecutor, monitor: InferenceMonitor
-) -> None:
+def install_model_routes(app: FastAPI, executor: ModelExecutor) -> None:
     from codex_gateway.app import PRIVATE_HEADERS, _json, authorized_home, request_bytes
 
     async def invoke(request: Request):
@@ -80,10 +77,7 @@ def install_model_routes(
             return JSONResponse(to_wire(executor.catalog()), headers=PRIVATE_HEADERS)
         if isinstance(message, GenerateRequest):
             executor.validate_generate(message)
-            operation = monitor.run(
-                lambda: executor.generate(message, home),
-                effort=executor.effort_for(message),
-            )
+            operation = executor.generate(message, home)
         elif isinstance(message, CreateConversationRequest):
             executor.validate_create(message)
             operation = executor.create(message, home)

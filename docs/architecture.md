@@ -156,7 +156,8 @@ and [verification](../tasks/docs/verification.md).
 
 Home is the owner launcher and operations console, not a second administrator of each application's storage.
 It calls only generated Ops methods through `MAIL_HERO`, `TODOFY`, `TASKS`, `WATCH`, `MAILSORT`, `RECALL`, `BRIEF`, `FLEET`,
-`NEWSLETTER` and `WEBSITE_SYNC` bindings. `FLEET` targets Fleet's `Ops`; `NEWSLETTER` targets its `NewsletterOps` projection of the latest
+`NEWSLETTER` and `NOTION_PUBLISH` bindings, and the website relay's own sync contract through `WEBSITE_SYNC` (its
+`WebsiteSync` entrypoint). `FLEET` targets Fleet's `Ops`; `NEWSLETTER` targets its `NewsletterOps` projection of the latest
 bounded host report. Home does not call the VPS directly or read an application's D1, R2, private
 configuration or source. The four views are Home, Flows, Cloudflare and Ops.
 

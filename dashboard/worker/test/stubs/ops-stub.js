@@ -22,12 +22,16 @@ function answer(method, args) {
 }
 
 class Base extends WorkerEntrypoint {}
-const prototype = {}
-for (const method of METHODS) {
-  prototype[method] = { async value(...args) { return answer(method, args) }, writable: true, configurable: true }
+// The website relay's own sync contract (proto/website/sync/v1) is its WebsiteSync entrypoint, not its Ops.
+const SYNC = ['getSyncStatus', 'requestSync', 'getSyncRequest']
+function methods(names) {
+  return Object.fromEntries(names.map((method) => [method, { async value(...args) { return answer(method, args) }, writable: true, configurable: true }]))
 }
 export class Ops extends Base {}
-Object.defineProperties(Ops.prototype, prototype)
+Object.defineProperties(Ops.prototype, methods(METHODS.filter((method) => !SYNC.includes(method))))
+// Only the "notion-publish" stub is bound as WebsiteSync (Home's WEBSITE_SYNC).
+export class WebsiteSync extends Base {}
+Object.defineProperties(WebsiteSync.prototype, methods(METHODS.filter((method) => SYNC.includes(method))))
 
 // Tasks' create-only TaskInbox (proto/tasks/inbox/v1), which only the "tasks" stub is bound as: Home's digest task.
 // Like Tasks it refuses a binding whose props.source is not "home" or "watch".

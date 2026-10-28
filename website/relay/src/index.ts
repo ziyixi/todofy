@@ -6,10 +6,13 @@ import { getSyncRequest, requestSync } from "./request";
 import { getSyncStatus, opsStatus } from "./status";
 
 /** Same-account RPC only. The public HTTP path cannot request or inspect a sync. */
-export class Ops extends WorkerEntrypoint<RelayEnv> implements sync.WebsiteSyncService {
+export class Ops extends WorkerEntrypoint<RelayEnv> {
   status() {
     return opsStatus(this.env);
   }
+}
+/** The relay-only sync surface (website.sync.v1): its evidence and the owner's requests. */
+export class WebsiteSync extends WorkerEntrypoint<RelayEnv> implements sync.WebsiteSyncService {
   getSyncStatus() {
     return getSyncStatus(this.env);
   }

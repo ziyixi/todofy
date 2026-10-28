@@ -372,7 +372,6 @@ export async function opsStatus(env: RelayEnv, now = new Date()): Promise<OpsSta
     last_backup_at: null,
     ui_url: null,
     capabilities: [],
-    website_sync: sync,
   };
   return toWire(OpsStatusSchema, fromWire(OpsStatusSchema, value, { strict: true }).message);
 }

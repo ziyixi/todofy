@@ -12,7 +12,7 @@ import type { HomeState } from './state.ts';
 export interface MailHeroOpsEntrypoint extends Rpc.WorkerEntrypointBranded, ops.OpsService, ops.CanaryProducerService {}
 export interface TodofyOpsEntrypoint extends Rpc.WorkerEntrypointBranded, ops.OpsService, ops.CanaryConsumerService {}
 export interface WatchOpsEntrypoint extends Rpc.WorkerEntrypointBranded, ops.OpsService {}
-export interface WebsiteSyncEntrypoint extends Rpc.WorkerEntrypointBranded, ops.OpsService, WebsiteSyncService {}
+export interface WebsiteSyncEntrypoint extends Rpc.WorkerEntrypointBranded, WebsiteSyncService {}
 export interface TaskInboxEntrypoint extends Rpc.WorkerEntrypointBranded, TaskInboxService {}
 
 export interface Env {
@@ -22,6 +22,9 @@ export interface Env {
   readonly FLEET: Service<WatchOpsEntrypoint>;
   readonly NEWSLETTER: Service<WatchOpsEntrypoint>;
   readonly CODEX_GATEWAY: Service<WatchOpsEntrypoint>;
+  /** The website relay's Ops entrypoint: status() (the sync signals). */
+  readonly NOTION_PUBLISH: Service<WatchOpsEntrypoint>;
+  /** The relay's WebsiteSync entrypoint: the sync evidence each status poll reads, and the owner's sync requests. */
   readonly WEBSITE_SYNC: Service<WebsiteSyncEntrypoint>;
   /** mailsort's Ops entrypoint: status() and setGuard() (counts and codes of the Gmail sorting). */
   readonly MAILSORT: Service<WatchOpsEntrypoint>;

@@ -505,15 +505,3 @@ class ModelRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(workspace.exists())
         self.assertIsNone(await executor.close(name))
         self.assertFalse(workspace.exists())
-
-    async def test_sdk_and_cli_version_mismatch_never_starts_a_model(self):
-        executor = self.executor(None)
-        with patch(
-            "codex_gateway.modelrouter.metadata.version",
-            side_effect=["0.163.0", "0.164.0"],
-        ):
-            answer = await executor.generate(
-                GenerateRequest(model=MODEL, input="x"), self.home
-            )
-        self.assertEqual(answer.error.reason, "MODEL_UNAVAILABLE")
-        self.assertFalse(answer.usage.available)

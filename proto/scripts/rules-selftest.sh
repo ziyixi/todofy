@@ -89,14 +89,15 @@ case_ "widen Code to 64 characters (older dashboards refuse a newer app's longer
 case_ "narrow Code to 30 characters (a newer dashboard refuses an older app's code)" breaking fail 's/\[a-z\]\[a-z0-9_\]\{0,47\}/[a-z][a-z0-9_]{0,29}/' "$OPS"
 case_ "lower OpsStatus.counters max_items 32 -> 16" breaking fail 's/max_items: 32/max_items: 16/' "$OPS"
 case_ "change OpsStatus.version's closed allowed value (every older reader refuses it)" breaking fail 's/\(common.wire.v1.field\).allowed = "ops-v1"/(common.wire.v1.field).allowed = "ops-v2"/' "$OPS"
-case_ "add an app to OpsStatus.app's open list (next)" breaking pass 's/(        "model-router"\n)(      \]\n      open: true)/        "model-router",\n        "next"\n$2/' "$OPS"
-case_ "close OpsStatus.app (drop open)" breaking fail 's/(        "model-router"\n      \]\n)      open: true\n/$1/' "$OPS"
+case_ "add a code to CanaryResult.waiting_code's open list (next)" breaking pass 's/(      "retry_wait"\n)(    \]\n    open: true)/      "retry_wait",\n      "next"\n$2/' "$OPS"
+case_ "close CanaryResult.waiting_code (drop open)" breaking fail 's/(      "retry_wait"\n    \]\n)    open: true\n/$1/' "$OPS"
+case_ "drop CanaryResult.waiting_code's open list (every code it listed is a Code)" breaking pass 's/(    format: "Code"\n)    allowed: \[\n[^\]]*\]\n    open: true\n(    cases: \{\n      when: "processing")/$1$2/' "$OPS"
 case_ "close StartCanaryResult.reason (drop open)" breaking fail 's/(    format: "Code"\n)    open: true\n(    cases: \{\n      when: "paused")/$1$2/' "$OPS"
 case_ "drop non_null from CanaryDelivery.state (a newer producer may write null)" breaking fail 's/(  State state = 1 \[\n    \(google.api.field_behavior\) = REQUIRED),\n    \(common.wire.v1.field\).non_null = true\n/$1\n/' "$OPS"
 case_ "add a code to an open list (StartCanaryResult paused: consumer_paused)" breaking pass 's/          "endpoint_blocked"\n/          "endpoint_blocked",\n          "consumer_paused"\n/' "$OPS"
 # An input's rule may loosen (the apps deploy before the dashboard), never tighten:
-case_ "raise OpsReport.items max_items 20 -> 30 (an input accepts more)" breaking pass 's/\(common.wire.v1.field\).max_items = 20/(common.wire.v1.field).max_items = 30/' "$OPS"
-case_ "lower OpsReport.items max_items 20 -> 10 (an input refuses older reports)" breaking fail 's/\(common.wire.v1.field\).max_items = 20/(common.wire.v1.field).max_items = 10/' "$OPS"
+case_ "raise CreateInboxTaskRequest.subtasks max_items 30 -> 40 (an input accepts more)" breaking pass 's/\(common.wire.v1.field\).max_items = 30/(common.wire.v1.field).max_items = 40/'
+case_ "lower CreateInboxTaskRequest.subtasks max_items 30 -> 10 (an input refuses older requests)" breaking fail 's/\(common.wire.v1.field\).max_items = 30/(common.wire.v1.field).max_items = 10/'
 case_ "drop StartCanaryInput.run_id's format (an input accepts more)" breaking pass 's/(string run_id = 1 \[\n    \(google.api.field_behavior\) = REQUIRED),\n    \(common.wire.v1.field\).format = "RunId"\n/$1\n/' "$OPS"
 case_ "give StartCanaryInput.run_id an allowed list (an input refuses older run IDs)" breaking fail 's/\(common.wire.v1.field\).format = "RunId"/(common.wire.v1.field) = {\n      format: "RunId"\n      allowed: "canary-1"\n    }/' "$OPS"
 # A closed enum's values are fixed for the major version; buf (FILE) allows the new value.
@@ -143,6 +144,12 @@ case_ "delete a whole file (watch_ui_service.proto)" breaking fail DELETE "$WATC
 case_ "delete a whole file that retired.json lists" breaking pass DELETE "$WATCH" "$RETIRE_WATCH_SERVICE"
 case_ "list a file as retired but keep it" breaking fail 's/(\/\/ Input of GetWatch\.)/$1 Kept./' "$WATCH" "$RETIRE_WATCH_SERVICE"
 case_ "list a file that a kept file imports (change.proto)" breaking fail 's/(\/\/ A change of a watch)/$1, kept/' watch/ui/v1/change.proto '{"files": [{"path": "watch/ui/v1/change.proto"}]}'
+# A field (fields): it leaves its message with its number and name reserved, like an enum value.
+RETIRE_SUBTASK_DESCRIPTION='{"fields": [{"field": "tasks.inbox.v1.InboxSubtask.description", "number": 2}]}'
+DROP_DESCRIPTION='s/  \/\/ At most 16,000 UTF-16 code units.\n  string description = 2 \[\(google.api.field_behavior\) = OPTIONAL\];\n/'
+case_ "remove a listed field (InboxSubtask.description) and reserve its number and name" breaking pass "${DROP_DESCRIPTION}  reserved 2;\n  reserved \"description\";\n/" "$INBOX" "$RETIRE_SUBTASK_DESCRIPTION"
+case_ "remove a listed field without reserving it" breaking fail "${DROP_DESCRIPTION}/" "$INBOX" "$RETIRE_SUBTASK_DESCRIPTION"
+case_ "list a field as retired but keep it" breaking fail 's/(At most 16,000 UTF-16 code units)/$1, kept/' "$INBOX" "$RETIRE_SUBTASK_DESCRIPTION"
 case_ "zero value without _UNSPECIFIED (ERROR_CODE_UNSPECIFIED -> ERROR_CODE_NONE)" lint fail 's/ERROR_CODE_UNSPECIFIED = 0/ERROR_CODE_NONE = 0/'
 case_ "enum value without its prefix (ERROR_CODE_DAILY_LIMIT -> DAILY_LIMIT)" lint fail 's/ERROR_CODE_DAILY_LIMIT = 2/DAILY_LIMIT = 2/'
 case_ "lowerCamelCase field (request_id -> requestId)" lint fail 's/string request_id = 1 \[/string requestId = 1 [/'

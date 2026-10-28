@@ -7,6 +7,7 @@ exactly what ops-v1's consumer rules allow; and producers read the contract's bo
 
 import dataclasses
 import json
+import re
 import unittest
 
 from proto_test_support import REPO
@@ -18,7 +19,6 @@ MESSAGES = {
     "CanaryDelivery": pb.CanaryDelivery,
     "CanaryResult": pb.CanaryResult,
     "GuardState": pb.GuardState,
-    "OpsReport": pb.OpsReport,
     "OpsReportReceipt": pb.OpsReportReceipt,
     "OpsStatus": pb.OpsStatus,
     "SetGuardInput": pb.SetGuardInput,
@@ -28,9 +28,7 @@ MESSAGES = {
 # The invalid fixtures a lenient read accepts, with what it skipped (test/ops.test.ts LENIENT says why).
 LENIENT = {
     "CanaryResult/ok-with-summary.json": ["summary"],
-    "OpsReport/item-with-text.json": ["items[0].text"],
     "OpsStatus/extra-field-subject.json": ["subject"],
-    "OpsStatus/unknown-app.json": [],
     "StartCanaryInput/extra-field.json": ["to"],
     "StartCanaryResult/unknown-reason.json": [],
 }
@@ -72,7 +70,7 @@ class FixturesTest(unittest.TestCase):
                     else:
                         with self.assertRaises(WireJsonError):
                             from_wire(cls, value)
-        self.assertGreaterEqual(count, 28)
+        self.assertGreaterEqual(count, 22)
 
 
 class BoundsTest(unittest.TestCase):
@@ -80,23 +78,17 @@ class BoundsTest(unittest.TestCase):
         self.assertEqual(field_rules(pb.OpsStatus, "signals").max_items, 16)
         self.assertEqual(field_rules(pb.OpsStatus, "counters").max_items, 32)
         self.assertEqual(field_rules(pb.Signal, "metrics").max_items, 12)
-        self.assertEqual(field_rules(pb.OpsReport, "items").max_items, 20)
-        self.assertEqual(field_rules(pb.OpsStatus, "app").allowed, frozenset({"mail-hero", "todofy", "watch", "fleet", "newsletter", "codex-gateway", "notion-publish", "mailsort", "recall", "brief", "tasks", "personal-mcp", "model-router"}))
-        self.assertTrue(field_rules(pb.OpsStatus, "app").open)  # an app may join within ops-v1
+        # No list names the apps: any app answers ops-v1 under its name.
+        self.assertIsNone(field_rules(pb.OpsStatus, "app").allowed)
         self.assertEqual([wire_name(code) for code in list(pb.ErrorCode)[1:]], ["invalid_input", "busy", "unavailable"])
-
-    def test_a_receipt_counts_at_most_the_items_a_report_holds(self) -> None:
-        self.assertEqual(
-            field_rules(pb.OpsReportReceipt, "item_count").maximum, field_rules(pb.OpsReport, "items").max_items
-        )
 
 
 class SchemaTest(unittest.TestCase):
     def test_every_defs_name_of_the_hand_written_schema_still_resolves(self) -> None:
         """Readers outside the monorepo may resolve "#/$defs/<name>" by the names the schema had before it was
-        generated: each one is still there and says the same (descriptions aside), except App, which lists the apps
-        that answer now: the frozen ones still running in their order, then those that joined since (the watch app,
-        2026-10-01, ...). OpsStatus.app is an open list, so a name may also leave with its app."""
+        generated: each one is still there and says the same (descriptions aside), except App, which no longer lists
+        the apps: any app's name, of the format AppName, answers (every name the frozen list held matches it), and
+        OpsReport, whose method was retired with no implementer left."""
         root = REPO / "contracts" / "ops-v1"
         legacy = json.loads((root / "legacy" / "ops-v1.schema.json").read_text(encoding="utf-8"))["$defs"]
         generated = json.loads((root / "ops-v1.schema.json").read_text(encoding="utf-8"))["$defs"]
@@ -106,17 +98,14 @@ class SchemaTest(unittest.TestCase):
                 entry = generated[entry["$ref"].removeprefix("#/$defs/")]
             return {key: value for key, value in entry.items() if key != "description"}
 
-        self.assertLessEqual(set(legacy), set(generated))
+        self.assertEqual(set(legacy) - set(generated), {"OpsReport"})
         for name in ("App", "Counters", "Metrics", "Modes", "OpsErrorCode"):
             with self.subTest(name):
                 now = resolved(generated[name])
                 was = {k: v for k, v in legacy[name].items() if k != "description"}
                 if name == "App":
-                    kept = [app for app in was["enum"] if app in now["enum"]]
-                    self.assertLessEqual({"mail-hero", "todofy"}, set(kept))
-                    self.assertEqual(now["enum"][: len(kept)], kept)
-                    self.assertEqual(now["enum"][len(kept) :], ["watch", "fleet", "newsletter", "codex-gateway", "notion-publish", "mailsort", "recall", "brief", "tasks", "personal-mcp", "model-router"])
-                    now, was = {**now, "enum": None}, {**was, "enum": None}
+                    self.assertTrue(all(re.fullmatch(now["pattern"], app) for app in was["enum"]))
+                    continue
                 self.assertEqual(now, was)
 
 

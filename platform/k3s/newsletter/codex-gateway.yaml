@@ -33,8 +33,6 @@ spec:
           env:
             - name: CODEX_HOME
               value: /var/lib/newsletter-auth
-            - name: DATA_DIR
-              value: /var/lib/codex-gateway
             - name: CODEX_GATEWAY_RELEASE_REQUEST_ID
               value: pending
           securityContext:
@@ -62,16 +60,10 @@ spec:
           volumeMounts:
             - name: auth
               mountPath: /var/lib/newsletter-auth
-            - name: state
-              mountPath: /var/lib/codex-gateway
-              subPath: codex-gateway
       volumes:
         - name: auth
           persistentVolumeClaim:
             claimName: newsletter-auth
-        - name: state
-          persistentVolumeClaim:
-            claimName: platform-state
 ---
 apiVersion: v1
 kind: Service

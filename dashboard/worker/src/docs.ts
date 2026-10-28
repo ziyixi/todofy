@@ -5,7 +5,7 @@
  */
 import type { OpsReportItem, OpsReportReceipt, OpsStatus } from '@ziyixi/proto/ops/v1/ops_wire';
 import type { CreateInboxTaskRequest } from '@ziyixi/proto/tasks/inbox/v1/task_inbox_wire';
-import type { AppErrorCode, QuotaRow } from './api-types.ts';
+import type { AppErrorCode, QuotaRow, WebsiteSyncStatus } from './api-types.ts';
 import type { ResourceUsage, UsageErrorCode } from './usage.ts';
 
 /** `status:<entry>`: the last status() attempt of an ops_v1 entry (the entry id is its OpsApp). */
@@ -16,6 +16,11 @@ export interface StatusDoc {
   readonly consecutive_failures: number;
   readonly status: OpsStatus | null;
   readonly status_at: number | null;
+  /**
+   * notion-publish only: the relay's sync evidence (WebsiteSync.getSyncStatus), read with each status poll; when a
+   * read fails, the last evidence with that error as its error_code. Absent before the first read.
+   */
+  readonly website_sync?: WebsiteSyncStatus;
 }
 
 /** `usage`: the last GraphQL answer (quota rows and, since v2, the per-resource rows). */

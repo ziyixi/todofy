@@ -12,12 +12,6 @@
 export const OPS_LIMITS = {
   /** setGuard: `until` at most this far ahead of the app's clock. */
   guardMaxAheadSeconds: 36 * 3600,
-  /** The digest uses the stored report while its generated_at is at most this old. */
-  digestWindowSeconds: 36 * 3600,
-  /** reportOps: generated_at may be at most this far ahead of Todofy's clock (clock skew). */
-  reportFutureSkewSeconds: 300,
-  /** Compact JSON (JSON.stringify without spaces) of one OpsReport. */
-  reportMaxBytes: 8192,
   /** Callers poll status() no more often than this (each call runs a few bounded D1 queries). */
   statusMinIntervalSeconds: 600,
 } as const;

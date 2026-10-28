@@ -306,12 +306,11 @@ the strip's observed items, §4), the canary rows or the reminder ledger. The me
 older estimates; reads grow with retained decisions while views continue to poll every five minutes.
 A partial index (`canary_runs_active`) keeps the "run in progress" lookup at one row for ticks and views.
 
-Per tick: 13 `status()` (Mail Hero, Todofy, the watch app, the website relay, Fleet, Newsletter, mailsort, recall, the
-brief, Tasks, Personal MCP, Codex gateway and Model Router) + 2 probes (website, links) + 1 GraphQL + ≤ 4 `setGuard` + ≤ 2 canary calls + ≤ 1 `createInboxTask` + ≤ 12
-read-only drift calls (§10) = 35 outbound calls, including the read-only Codex gateway status.
-Mailsort's Claude budget is independent of account Workers AI shedding.
-(`outboundPerTick`, tested ≤ `MAX_OUTBOUND_PER_TICK` = 35 and asserted per tick in workerd; Free allows 50). The probes run in parallel with the
-status polls. GraphQL stays one query per tick (48/day) plus refreshes ≤ 1/min. DO rows written grow by ~3 per tick
+Per tick: at most `outboundPerTick()` outbound calls, computed from the registry: one `status()` per ops_v1 entry (and
+the website relay's `getSyncStatus` with notion-publish's), one GET per enabled probe, 1 GraphQL, ≤ 1 `setGuard` per
+guarded entry, ≤ 2 canary calls, ≤ 1 `createInboxTask` and ≤ `DRIFT_CALLS_PER_TICK` read-only drift calls (§10). It is tested ≤ `MAX_OUTBOUND_PER_TICK`, a fixed margin under
+Free's 50, and asserted per tick in workerd, so a new app changes neither constant. Mailsort's Claude budget is
+independent of account Workers AI shedding. The probes run in parallel with the status polls. GraphQL stays one query per tick (48/day) plus refreshes ≤ 1/min. DO rows written grow by ~3 per tick
 (`cf_scripts` and one `probe:<entry>` per probe). The links probe is one request of its Worker per tick (≤ 144 a day with refreshes, no D1 query); the website's is a static asset. Everything else as in
 [`limits.md`](limits.md).
 
@@ -346,24 +345,12 @@ gradients, no side-stripe cards, no emoji; inline lucide-style stroke SVGs (lock
 separate button ("<name> 状态：<level>，查看详情") opening a detail sheet; skeletons of the same size
 while loading; one failing source greys only its own tile. Times in the browser time zone.
 
-### Codex inference detail
+### Codex gateway
 
-`#/ops/<app>` focuses one registered app within the existing Ops tab and offers a return to `#/ops`.
-The Home Codex service row links directly to `#/ops/codex-gateway`. Its dedicated body replaces the
-generic mode, guard, counter and backup sections; process health and alert controls remain visible.
-The optional `OpsStatus.codex_inference` snapshot comes through Fleet and includes its actual observation
-time. Daily counts, reported tokens and total durations persist in the gateway's existing storage and
-are grouped by UTC completion day. Today is the default, with seven-day and thirty-day selections and
-a daily table, all computed from the same bounded snapshot. Counts include completed successful and failed
-requests; concurrency is separately labelled 采样时进行中. The page shows the history start and does not
-backfill earlier usage. Older snapshots without a history start explicitly remain process-only data.
-A snapshot over one hour old is explicitly historical,
-matching the existing app-status threshold and allowing the ordinary thirty-minute Home cache interval.
-Missing snapshots and usage remain unknown, and an unused period shows zero requests without warning.
-The persistent recent-request table shows at most eight completions, models, effort, durations, outcomes,
-safe error labels and reported tokens. It contains no prompts, output or account data. On a phone it
-scrolls inside the card. The existing five-minute view cache and refresh flow are unchanged; opening
-the detail starts no inference or independent polling.
+The Codex gateway's ops-v1 status comes through Fleet and carries process and release evidence only, like
+Newsletter's; its app details are the generic ones. Its Home service row opens the Model Router console in a
+new tab, since the Router's request records are the one Codex usage ledger. The old `#/ops/codex-gateway`
+path opens `#/ops`.
 
 ## 8. Decisions taken (owner-approved defaults)
 
@@ -410,7 +397,7 @@ also redeploys the dashboard with the new desired state.
 
 At most `DRIFT_CALLS_PER_TICK` (12) calls per tick: the account step (four calls) and two Workers on the first
 tick, four Workers on each next one, so a check of the 11 Workers takes four ticks, 2 + 4 + 4 + 1 (a tick then
-makes at most 27 outbound calls in all, §5). A failed step is retried by the next tick; after `DRIFT_MAX_ATTEMPTS` (3)
+stays within `outboundPerTick()`, §5). A failed step is retried by the next tick; after `DRIFT_MAX_ATTEMPTS` (3)
 failed attempts the day is given up (`consecutive_failed_days` + 1), and a run left unfinished at the end
 of its UTC day counts as a failed day too, as does a `drift_run` document that would pass
 `DRIFT_RUN_MAX_BYTES` (60,000 bytes, under the 64 KiB row limit; this account's is about 6 KB). Every answer is reduced at once to names, types and flags:

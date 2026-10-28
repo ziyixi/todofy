@@ -2,7 +2,6 @@
 syntax = "proto3";
 package platform.runtime.v1;
 
-import "codex/monitor/v1/monitor.proto";
 import "common/wire/v1/wire.proto";
 import "google/api/field_behavior.proto";
 import "google/api/field_info.proto";
@@ -219,10 +218,9 @@ message WorkloadStatus {
   // (-- api-linter: core::0142::time-field-names=disabled
   //     aip.dev/not-precedent: Preserve the shared adapter field spelling next_due_at. --)
   google.protobuf.Timestamp next_due_at = 10 [(google.api.field_behavior) = OPTIONAL];
-  // Content-free gateway observation, present only when the configured adapter supplies it.
-  // (-- api-linter: core::0215::foreign-type-reference=disabled
-  //     aip.dev/not-precedent: Share the inference observation with Fleet and Home without a second DTO. --)
-  optional codex.monitor.v1.InferenceStatus inference_status = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The retired Codex gateway telemetry (codex.monitor.v1); the Model Router's request records replace it.
+  reserved 11;
+  reserved "inference_status";
 }
 
 // One durable asynchronous deployment. Only targets are accepted during creation; the daemon rejects

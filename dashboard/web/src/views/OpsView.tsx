@@ -2,33 +2,18 @@ import type { OpsView as OpsViewData } from '../../../worker/src/api-types.ts'
 import { ActionsSection } from '../components/ActionsSection'
 import { AppDetails } from '../components/AppDetails'
 import { DigestSection } from '../components/DigestSection'
-import { Card, Fact, Facts, Notice } from '../components/ui'
+import { Card, Fact, Facts } from '../components/ui'
 import { browserTimeZone } from '../lib/format'
 import { STATUS_SOURCE } from '../lib/labels'
 import { entryOf, sortedByOrder, type Reg } from '../lib/registry'
-import { routeHash } from '../router'
 
 /**
  * 操作与记录 `#/ops`: the guard and canary actions (confirmation texts and the CSRF flow unchanged),
  * the digest, the full ops-v1 status of every app, and what this build knows (build, zone, registry).
  */
-export function OpsView({ registry, ops, app, now }: { registry: Reg; ops: OpsViewData; app?: string; now: Date }) {
+export function OpsView({ registry, ops, now }: { registry: Reg; ops: OpsViewData; now: Date }) {
   const groups = sortedByOrder(registry.entry_groups)
   const entries = groups.flatMap((group) => sortedByOrder(registry.entries.filter((entry) => entry.group === group.id)))
-  if (app !== undefined) {
-    const entry = entryOf(registry, app)
-    const card = entry && ops.apps.find((item) => item.entry === app)
-    return (
-      <div className="view view-ops view-app-detail">
-        <div className="view-head">
-          <a href={routeHash({ view: 'ops' })}>← 返回操作与记录</a>
-          <h1 className="visually-hidden">{entry?.name ?? '应用详情'}</h1>
-        </div>
-        {card ? <AppDetails card={card} entry={entry} guard={ops.guard.apps[card.entry]} now={now} level={2} />
-          : <Notice tone="neutral">没有找到该应用的监控详情。</Notice>}
-      </div>
-    )
-  }
   return (
     <div className="view view-ops">
       <div className="view-head">

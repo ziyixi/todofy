@@ -265,11 +265,13 @@ class Classify(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(push([path]), expect(F, F, T, F, F, codex_gateway_check=T))
 
-    def test_retired_codex_inference_proto_checks_without_publication(self):
-        result = push(["proto/codex/inference/v1/inference.proto"])
-        self.assertTrue(result["proto"])
-        self.assertEqual({app for app in ci_changes.APPS if result[f"{ci_changes.PREFIX[app]}_check"]}, set(ci_changes.PROTO_USERS))
-        self.assertEqual({key for key, value in result.items() if value and key.endswith(("_deploy", "_publish"))}, set())
+    def test_retired_codex_protos_check_without_publication(self):
+        for path in ("proto/codex/inference/v1/inference.proto", "proto/codex/monitor/v1/monitor.proto"):
+            with self.subTest(path=path):
+                result = push([path])
+                self.assertTrue(result["proto"])
+                self.assertEqual({app for app in ci_changes.APPS if result[f"{ci_changes.PREFIX[app]}_check"]}, set(ci_changes.PROTO_USERS))
+                self.assertEqual({key for key, value in result.items() if value and key.endswith(("_deploy", "_publish"))}, set())
         self.assertEqual(ci_changes.dispatched("codex-gateway"), expect(F, F, T, F, F, packages=T, proto=T, **CODEX_GATEWAY))
 
     def test_platform_release_changes_publish_its_independent_tested_image(self):
@@ -643,8 +645,8 @@ class Classify(unittest.TestCase):
             # ops-v1: the Ops entrypoints that bundle its generated code (Todofy's gateway takes its types only, its
             # core reads ops.v1 in Python).
             "proto/ops/v1/ops.proto": {"mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp", "model-router"},
-            # OpsStatus embeds WebsiteSyncStatus; every Ops descriptor brings this package too.
-            "proto/website/sync/v1/sync.proto": {"mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp", "model-router"},
+            # website.sync.v1: the relay serves it, Home calls it and shows its evidence (read by the Personal MCP).
+            "proto/website/sync/v1/sync.proto": {"website", "dashboard", "personal-mcp"},
             # mailsort's owner API: its Worker serves it, its UI calls it.
             "proto/mailsort/ui/v2/mailsort_ui_service.proto": {"mailsort"},
             # The unused inference package was retired after every caller moved to Model Router.

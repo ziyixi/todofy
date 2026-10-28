@@ -4,10 +4,8 @@
  * query and Worker discovery, guard, canary, digest, and the v2 views assembled from its tables. The
  * fetch and scheduled handlers only call these RPC methods.
  *
- * Bounds: every tick makes at most outboundPerTick() = 35 outbound calls (13 status, 2 probes, 1 GraphQL,
- * ≤ 4 setGuard, ≤ 2 canary calls, ≤ 1 createInboxTask, ≤ DRIFT_CALLS_PER_TICK = 12 read-only drift calls) and
- * writes a few dozen rows; a v2 view reads at most VIEW_ROWS_READ[view] rows (api-types.ts; tested in
- * workerd).
+ * Bounds: every tick makes at most outboundPerTick() outbound calls (registry.ts; within MAX_OUTBOUND_PER_TICK) and
+ * writes a few dozen rows; a v2 view reads at most VIEW_ROWS_READ[view] rows (api-types.ts; tested in workerd).
  */
 import { DurableObject } from 'cloudflare:workers';
 import type { GuardLevel, GuardState, OpsReportItem, OpsStatus, SetGuardInput } from '@ziyixi/proto/ops/v1/ops_wire';
@@ -78,7 +76,7 @@ import { fromWire, toWire } from '@ziyixi/proto/wire-json';
 import type { HomeView } from './api-types.ts';
 import type { Attention, AttentionItem, Badges } from './api-types.ts';
 import { OPS_APPS, createInboxTask, opsCanaryDelivery, opsCanaryResult, opsSetGuard, opsStartCanary, opsStatus } from './ops-client.ts';
-import { callWebsiteRequest, unconfirmedWebsiteRequest } from './website-sync.ts';
+import { callWebsiteRequest, callWebsiteSyncStatus, unconfirmedWebsiteRequest } from './website-sync.ts';
 import type { WebsiteSyncRequestResult } from './api-types.ts';
 import { nextProbeDoc, probeDue, probeUrl, type ProbeTarget } from './probe.ts';
 import { REGISTRY } from './registry.ts';
@@ -527,15 +525,25 @@ export class HomeState extends DurableObject<Env> {
 
   // ---- the tick's steps -------------------------------------------------------------------------
 
-  /** status() of the given apps in parallel; returns the statuses this call obtained (null on failure). */
+  /**
+   * status() of the given apps in parallel, and with notion-publish's the relay's sync evidence; returns the statuses
+   * this call obtained (null on failure).
+   */
   private async pollStatuses(now: number, apps: readonly OpsApp[]): Promise<Record<OpsApp, OpsStatus | null>> {
     const observed = perApp<OpsStatus | null>(() => null);
-    const results = await Promise.all(apps.map(async (app) => [app, await opsStatus(this.env, app)] as const));
+    const [results, sync] = await Promise.all([
+      Promise.all(apps.map(async (app) => [app, await opsStatus(this.env, app)] as const)),
+      apps.includes('notion-publish') ? callWebsiteSyncStatus(this.env) : null,
+    ]);
     for (const [app, result] of results) {
       const previous = this.statusDoc(app);
-      const doc: StatusDoc = result.ok
+      let doc: StatusDoc = result.ok
         ? { checked_at: now, ok: true, error: null, consecutive_failures: 0, status: result.value, status_at: now }
         : { ...previous, checked_at: now, ok: false, error: result.code, consecutive_failures: previous.consecutive_failures + 1 };
+      if (app === 'notion-publish' && sync !== null) {
+        const evidence = sync.ok ? sync.value : previous.website_sync && { ...previous.website_sync, error_code: sync.code };
+        doc = { ...doc, ...(evidence ? { website_sync: evidence } : {}) };
+      }
       this.putDoc(`status:${app}`, doc, now);
       if (result.ok) observed[app] = result.value;
     }

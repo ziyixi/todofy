@@ -39,7 +39,6 @@ MESSAGES = {
             "StartCanaryResult",
             "CanaryDelivery",
             "CanaryResult",
-            "OpsReport",
             "OpsReportReceipt",
         )
     },

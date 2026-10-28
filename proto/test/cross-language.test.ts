@@ -57,12 +57,11 @@ const SCHEMAS = {
   'ops.v1.StartCanaryResult': ops.StartCanaryResultSchema,
   'ops.v1.CanaryDelivery': ops.CanaryDeliverySchema,
   'ops.v1.CanaryResult': ops.CanaryResultSchema,
-  'ops.v1.OpsReport': ops.OpsReportSchema,
   'ops.v1.OpsReportReceipt': ops.OpsReportReceiptSchema,
   'mailhero.webhook.v1.MailReceivedEvent': MailReceivedEventSchema,
 } satisfies Record<string, DescMessage>;
 /** ops-v1's inputs, read strictly; its outputs are read leniently. */
-const OPS_INPUTS = new Set(['SetGuardInput', 'StartCanaryInput', 'OpsReport']);
+const OPS_INPUTS = new Set(['SetGuardInput', 'StartCanaryInput']);
 // npm run test:python uses the same interpreter (todofy-core's Python); PROTO_TEST_PYTHON overrides it.
 const PYTHON = (process.env['PROTO_TEST_PYTHON'] ?? 'uv run --no-project --python 3.14 python').split(' ');
 
@@ -136,7 +135,7 @@ function builtInTypeScript(): ReadRequest[] {
 /** Everything TypeScript writes: the fixtures and the shared cases after a TypeScript read, then its own messages. */
 function corpus(): ReadRequest[] {
   const out: ReadRequest[] = [];
-  for (const def of ['OpsStatus', 'GuardState', 'SetGuardInput', 'StartCanaryInput', 'StartCanaryResult', 'CanaryDelivery', 'CanaryResult', 'OpsReport', 'OpsReportReceipt'] as const) {
+  for (const def of ['OpsStatus', 'GuardState', 'SetGuardInput', 'StartCanaryInput', 'StartCanaryResult', 'CanaryDelivery', 'CanaryResult', 'OpsReportReceipt'] as const) {
     const message = `ops.v1.${def}` as const;
     const strict = OPS_INPUTS.has(def);
     for (const { text } of fixtures(def, false, OPS_CONTRACT)) {
@@ -179,7 +178,7 @@ beforeAll(() => {
 
 describe('TypeScript writes, Python reads and writes the same bytes', () => {
   test('every corpus entry', () => {
-    // 37 ops-v1 fixtures, the reading shared cases, 7 x 14 results, 2 intents, 1 ref, 1 status.
+    // The valid ops-v1 fixtures (at least 37), the reading shared cases, 7 x 14 results, 2 intents, 1 ref, 1 status.
     expect(requests.length).toBeGreaterThan(37 + 98 + 4);
     expect(python.read).toHaveLength(requests.length);
     requests.forEach((request, i) => {

@@ -73,9 +73,15 @@ service = "fleet"
 entrypoint = "CodexGatewayOps"
 
 [[services]]
-binding = "WEBSITE_SYNC"
+binding = "NOTION_PUBLISH"
 service = "ziyixi-notion-publish"
 entrypoint = "Ops"
+
+# The website relay's own sync contract (proto/website/sync/v1): its evidence and the owner's sync requests.
+[[services]]
+binding = "WEBSITE_SYNC"
+service = "ziyixi-notion-publish"
+entrypoint = "WebsiteSync"
 
 [[services]]
 binding = "MAILSORT"

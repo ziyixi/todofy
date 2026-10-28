@@ -379,11 +379,11 @@ class Reconciliation(Fixture, unittest.TestCase):
         env = {item["name"]: item.get("value") for item in container["env"]}
         expected = {
             "NEWSLETTER_DATA_DIR": "/var/lib/newsletter",
-            "CODEX_HOME": "/var/lib/newsletter-auth",
-            "NEWSLETTER_CODEX_HOME": "/var/lib/newsletter-auth",
             "NEWSLETTER_CONTENT_CONFIG_DIR": "/var/lib/newsletter-config",
         }
         self.assertEqual({key: env.get(key) for key in expected}, expected)
+        self.assertNotIn("CODEX_HOME", env)
+        self.assertNotIn("NEWSLETTER_CODEX_HOME", env)
         self.assertEqual(env["NEWSLETTER_BOOTSTRAP_DRAIN_KEY"], "release-" + SHA)
         self.assertEqual(env["NEWSLETTER_RELEASE_REQUEST_ID"], REQUEST)
         self.assertNotIn(("admission", "resume"), self.events)

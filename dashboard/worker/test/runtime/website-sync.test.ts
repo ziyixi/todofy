@@ -65,9 +65,9 @@ describe('website content sync owner requests', () => {
     await (await request(h)).arrayBuffer();
     await h.answer('notion-publish', 'getSyncRequest', { value: receipt(OTHER_UUID) });
     expect((await (await request(h)).json() as RequestWebsiteSyncResponse).request.state).toBe('unconfirmed');
-    await h.answer('notion-publish', 'status', { value: await status('notion-publish', {
-      website_sync: { ...DETAILS, active_run: { run_id: '12001', run_url: RUN_URL, run_attempt: 1, state: 'checking', started_at: new Date(NOW).toISOString() } },
-    }) });
+    await h.answer('notion-publish', 'getSyncStatus', { value: {
+      ...DETAILS, active_run: { run_id: '12001', run_url: RUN_URL, run_attempt: 1, state: 'checking', started_at: new Date(NOW).toISOString() },
+    } });
     await h.tick(NOW);
     await h.answer('notion-publish', 'requestSync', { value: receipt(OTHER_UUID) });
     expect(await (await request(h, OTHER_UUID)).json()).toEqual({ request: receipt(OTHER_UUID) });
@@ -82,7 +82,8 @@ describe('website content sync owner requests', () => {
         run_id: run, run_url: `https://github.com/example/cloud/actions/runs/${run}`, run_attempt: 1, state: 'failed', started_at: new Date(started).toISOString(),
       } };
       await harness.redeploy({ DEV_NOW: new Date(at).toISOString() });
-      await harness.answer('notion-publish', 'status', { value: await status('notion-publish', { health: 'degraded', website_sync: sync,
+      await harness.answer('notion-publish', 'getSyncStatus', { value: sync });
+      await harness.answer('notion-publish', 'status', { value: await status('notion-publish', { health: 'degraded',
         signals: [{ code: 'website_sync_failed', severity: 'warning', metrics: { run_id: Number(run) }, since: new Date(started).toISOString() }],
       }) });
       await harness.tick(at);
@@ -102,18 +103,19 @@ describe('website content sync owner requests', () => {
 
   it('keeps public HTTP availability separate and no-op checks preserve verified publication time', async () => {
     h = await start();
-    await h.answer('notion-publish', 'status', { value: await status('notion-publish', { website_sync: DETAILS }) });
+    await h.answer('notion-publish', 'getSyncStatus', { value: DETAILS });
     await h.tick(NOW);
     const home = (await h.view<HomeView>('home')).body;
     expect(home?.website_sync).toEqual(DETAILS);
     expect(home?.entries.find(entry => entry.id === 'website')?.level).toBe('ok');
+    // One status() on the relay's Ops and one evidence read on its WebsiteSync per poll.
     expect(await h.callsOf('notion-publish', 'status')).toHaveLength(1);
-    expect(await h.callsOf('notion-publish', 'getSyncStatus')).toEqual([]);
+    expect(await h.callsOf('notion-publish', 'getSyncStatus')).toEqual([[]]);
     const at = NOW + 31 * 60_000;
     await h.redeploy({ DEV_NOW: new Date(at).toISOString() });
+    await h.answer('notion-publish', 'getSyncStatus', { value: { ...DETAILS, observed_at: new Date(at).toISOString(), error_code: 'github_unavailable' } });
     await h.answer('notion-publish', 'status', { value: await status('notion-publish', {
-      health: 'degraded', website_sync: { ...DETAILS, observed_at: new Date(at).toISOString(), error_code: 'github_unavailable' },
-      signals: [{ code: 'website_sync_provider_unavailable', severity: 'warning', metrics: {} }],
+      health: 'down', signals: [{ code: 'website_sync_provider_unavailable', severity: 'warning', metrics: {} }],
     }) });
     await h.tick(at);
     const unknown = (await h.view<HomeView>('home')).body;
@@ -121,5 +123,18 @@ describe('website content sync owner requests', () => {
     expect(unknown?.entries.find(entry => entry.id === 'notion-publish')?.level).toBe('unknown');
     expect(unknown?.attention.items.some(item => item.source === 'notion-publish' && item.code === 'app_down')).toBe(false);
     expect(unknown?.website_sync?.last_publish).toEqual(DETAILS.last_publish);
+  });
+
+  it('keeps the last evidence, marked with the error, when the evidence read fails', async () => {
+    h = await start();
+    await h.answer('notion-publish', 'getSyncStatus', { value: DETAILS });
+    await h.tick(NOW);
+    const at = NOW + 31 * 60_000;
+    await h.redeploy({ DEV_NOW: new Date(at).toISOString() });
+    await h.answer('notion-publish', 'getSyncStatus', { throw: 'unavailable' });
+    await h.tick(at);
+    const home = (await h.view<HomeView>('home')).body;
+    expect(home?.website_sync).toEqual({ ...DETAILS, error_code: 'unavailable' });
+    expect(home?.entries.find(entry => entry.id === 'notion-publish')?.level).toBe('ok');
   });
 });

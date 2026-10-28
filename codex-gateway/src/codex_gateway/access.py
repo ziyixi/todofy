@@ -47,6 +47,8 @@ class AccessServiceVerifier:
                 algorithms=["RS256"],
                 issuer=self.issuer,
                 audience=self.audience,
+                # Tolerate small clock skew on exp/iat/nbf between Access and this host.
+                leeway=60,
                 options={
                     "require": [
                         "iss",

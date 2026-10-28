@@ -24,7 +24,7 @@ export interface Harness {
   send(data: unknown, signature?: string): Promise<MiniflareResponse>;
   view(at?: number): Promise<Record<string, unknown>>;
   accept(data: unknown, at: number): Promise<MiniflareResponse>;
-  status(app: 'fleet' | 'newsletter' | 'codex-gateway', at: number): Promise<Record<string, unknown>>;
+  status(app: 'fleet' | 'newsletter', at: number): Promise<Record<string, unknown>>;
 }
 export async function startHarness(options: { bindings?: Record<string, string>; outbound?: (request: Request) => Response } = {}): Promise<Harness> {
   const result = await build({

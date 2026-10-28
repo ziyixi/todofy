@@ -127,7 +127,7 @@ function ServiceRow({ reg, entry, state, loading, now }: { reg: Reg; entry: Regi
   const label = line ? `${entry.name}：${dismissed ? '本批提醒已关闭' : line.word}${line.detail ? `，${line.detail}` : ''}，${target.what}` : `${entry.name}，${target.what}`
   return (
     <li>
-      <a className="service-row" href={target.hash} aria-label={label}>
+      <a className="service-row" href={target.hash} aria-label={label} {...(target.external ? { target: '_blank', rel: 'noreferrer noopener' } : {})}>
         <EntryIcon icon={entry.icon} accent={entry.accent} small />
         <span className="service-text">
           <span className="service-name">{entry.name}</span>

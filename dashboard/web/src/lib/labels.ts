@@ -217,8 +217,6 @@ const SIGNALS: Readonly<Record<string, string>> = {
   canary_skipped: '金丝雀已跳过（未测试链路）',
   // Page only (info): CANARY_ENABLED=false.
   canary_disabled: '金丝雀已关闭',
-  // Not emitted by this dashboard (its digest has warning/critical only); kept for the contract's OpsReport fixture.
-  canary_ok: '金丝雀成功',
   tick_stale: '定时检查已停止',
   app_unreachable: '应用无法连接',
   app_down: '应用不可用',

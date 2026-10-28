@@ -10,7 +10,6 @@ import signal
 import tempfile
 import time
 import uuid
-from importlib import metadata
 from typing import Any
 
 import jsonschema
@@ -30,7 +29,6 @@ from codex_gateway.runtime import (
     MODEL,
     _assert_no_skills,
     _interrupt,
-    _login_home,
     execution_error,
     runtime_config,
 )
@@ -160,20 +158,10 @@ class ModelExecutor:
             )
         )
 
-    def effort_for(self, request: GenerateRequest) -> str:
-        context = self.contexts.get(request.conversation)
-        return context.options.effort if context else request.effort
-
     async def _open(self, context: ExecutionContext, home: pathlib.Path) -> None:
         sdk = self.sdk
         if sdk is None:
             import openai_codex as sdk
-
-            if metadata.version("openai-codex") != metadata.version(
-                "openai-codex-cli-bin"
-            ):
-                raise RuntimeError("configuration")
-        _login_home(home)
         context.directory = tempfile.TemporaryDirectory(prefix="model-router-")
         workspace = pathlib.Path(context.directory.name)
         context.client = sdk.AsyncCodex(

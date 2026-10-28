@@ -223,7 +223,7 @@ class GatewayRelease(Fixture, unittest.TestCase):
             {SHA, GATEWAY_SHA},
         )
 
-    def test_new_gateway_mount_reports_repairable_drift_through_node_status(self):
+    def test_missing_gateway_mount_reports_repairable_drift_through_node_status(self):
         self.create_gateway()
         self.complete_gateway()
         resources = self.controller.renderer.render((*TARGETS, TARGET), GATEWAY_ID)
@@ -235,15 +235,9 @@ class GatewayRelease(Fixture, unittest.TestCase):
         pod = self.resource_state[("Deployment", "codex-gateway")]["spec"]["template"][
             "spec"
         ]
-        # The new Platform image precedes Gateway's release and still observes its old mount.
-        pod["volumes"] = [item for item in pod["volumes"] if item["name"] != "state"]
-        container = pod["containers"][0]
-        container["volumeMounts"] = [
-            item for item in container["volumeMounts"] if item["name"] != "state"
-        ]
-        container["env"] = [
-            item for item in container["env"] if item["name"] != "DATA_DIR"
-        ]
+        # A live Pod without the declared login mount is drift that a release repairs.
+        pod["volumes"] = []
+        pod["containers"][0]["volumeMounts"] = []
 
         def get(kind, name, **_):
             return deepcopy(self.resource_state[(kind, name)])
@@ -274,9 +268,7 @@ class GatewayRelease(Fixture, unittest.TestCase):
             ],
         )
 
-    def test_gateway_pod_preserves_login_and_isolates_monitor_state_in_existing_volume(
-        self,
-    ):
+    def test_gateway_pod_mounts_only_the_existing_login_volume(self):
         resources = self.controller.renderer.render((TARGET,), GATEWAY_ID)
         self.assertEqual(len(resources), 3)
         deployment = next(item for item in resources if item["kind"] == "Deployment")
@@ -292,29 +284,18 @@ class GatewayRelease(Fixture, unittest.TestCase):
                     "name": "auth",
                     "persistentVolumeClaim": {"claimName": "newsletter-auth"},
                 },
-                {
-                    "name": "state",
-                    "persistentVolumeClaim": {"claimName": "platform-state"},
-                },
             ],
         )
         container = pod["containers"][0]
         self.assertEqual(
             container["volumeMounts"],
-            [
-                {"name": "auth", "mountPath": "/var/lib/newsletter-auth"},
-                {
-                    "name": "state",
-                    "mountPath": "/var/lib/codex-gateway",
-                    "subPath": "codex-gateway",
-                },
-            ],
+            [{"name": "auth", "mountPath": "/var/lib/newsletter-auth"}],
         )
         environment = {
             item["name"]: item["value"] for item in container["env"] if "value" in item
         }
         self.assertEqual(environment["CODEX_HOME"], "/var/lib/newsletter-auth")
-        self.assertEqual(environment["DATA_DIR"], "/var/lib/codex-gateway")
+        self.assertNotIn("DATA_DIR", environment)
         self.assertEqual(container["ports"][0]["hostIP"], "127.0.0.1")
         self.assertEqual(container["ports"][0]["hostPort"], 18766)
         secrets = [

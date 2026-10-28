@@ -58,9 +58,10 @@ export function withLinkOnly(registry: RegistryDef = REGISTRY): RegistryDef {
 
 export function status(app: OpsApp, patch: Partial<OpsStatus> = {}, at = NOW - 2 * MIN): StatusDoc {
   const base = { 'mail-hero': mailHeroOk, todofy: todofyOk, watch: watchOk, fleet: fleetOk, newsletter: newsletterOk, 'codex-gateway': codexGatewayOk, 'notion-publish': notionPublishOk, mailsort: mailsortOk, recall: recallOk, brief: briefOk, tasks: tasksOk, 'personal-mcp': personalMcpOk, 'model-router': modelRouterOk }[app] as OpsStatus;
-  const website = app === 'notion-publish' ? base.website_sync : undefined;
-  const evidence = website === undefined ? {} : { website_sync: { ...website, observed_at: new Date(at).toISOString(), next_check_at: new Date(at + DAY).toISOString(), ...(website.last_check === undefined ? {} : { last_check: { ...website.last_check, checked_at: new Date(at).toISOString() } }) } };
-  return { checked_at: at, ok: true, error: null, consecutive_failures: 0, status: { ...base, ...evidence, ...patch }, status_at: at };
+  // notion-publish's sync evidence: read from the relay's WebsiteSync with its status (website-sync.ts).
+  const checked = new Date(at).toISOString();
+  const evidence = app !== 'notion-publish' ? {} : { website_sync: { observed_at: checked, next_check_at: new Date(at + DAY).toISOString(), last_check: { checked_at: checked, decision: 'unchanged' as const, run_id: '12001', run_url: 'https://github.com/example/cloud/actions/runs/12001' } } };
+  return { checked_at: at, ok: true, error: null, consecutive_failures: 0, status: { ...base, ...patch }, status_at: at, ...evidence };
 }
 
 export function signal(code: string, severity: OpsSignal['severity'], metrics: Record<string, number> = {}, since?: string): OpsSignal {

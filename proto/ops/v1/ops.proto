@@ -16,15 +16,13 @@
 //
 // Timestamps are strings in the format `Timestamp`, not google.protobuf.Timestamp: ops-v1's producers write both
 // whole seconds (`...:00Z`) and milliseconds (`...:00.000Z`), and the profile's Timestamp would rewrite one of
-// them. The app names (`mail-hero`) are strings with an open allowed list (an app may join within ops-v1): an enum's
-// wire name cannot hold a hyphen.
+// them. The app names (`mail-hero`) are strings of the format `AppName`, not a list: any app may answer ops-v1 with
+// no change here (an enum's wire name cannot hold a hyphen).
 //
 // Content rule (README "Content rule"): outputs carry codes, numbers, booleans, timestamps, event and run IDs and
 // the apps' own UI URLs only. The rules below make that a check rather than a convention: every name is a `Code`
 // (never free text, an address or a subject), metrics, modes and counters are numbers or booleans, and the only
 // URLs are `HttpsUrl`s without a query.
-// The optional Codex observation uses bounded model/version identifiers from the monitor contract and carries no
-// instructions, model output or account identity.
 //
 // Google's api-linter runs on this file (scripts/api-lint.sh). The rules it cannot meet without changing ops-v1's
 // frozen wire are disabled where they apply, each with its reason. File-wide (api-linter reads them from this
@@ -36,7 +34,7 @@
 // (-- api-linter: core::0127::http-annotation=disabled
 //     aip.dev/not-precedent: a Workers service binding, never HTTP. --)
 // (-- api-linter: core::0136::request-message-name=disabled
-//     aip.dev/not-precedent: ops-v1's message names (SetGuardInput, OpsReport). --)
+//     aip.dev/not-precedent: ops-v1's message names (SetGuardInput, StartCanaryInput). --)
 // (-- api-linter: core::0136::response-message-name=disabled
 //     aip.dev/not-precedent: ops-v1's message names (OpsStatus, GuardState). --)
 // (-- api-linter: core::0142::time-field-type=disabled
@@ -53,10 +51,8 @@ syntax = "proto3";
 
 package ops.v1;
 
-import "codex/monitor/v1/monitor.proto";
 import "common/wire/v1/wire.proto";
 import "google/api/field_behavior.proto";
-import "website/sync/v1/sync.proto";
 
 option java_multiple_files = true;
 option java_outer_classname = "OpsProto";
@@ -70,6 +66,11 @@ option (common.wire.v1.formats) = {
   name: "Code"
   pattern: "[a-z][a-z0-9_]{0,47}"
   description: "A closed-vocabulary identifier: signal codes, counter and metric names, reasons. Never free text."
+};
+option (common.wire.v1.formats) = {
+  name: "AppName"
+  pattern: "[a-z][a-z0-9-]{0,31}"
+  description: "The name of an app that answers ops-v1, e.g. mail-hero or notion-publish."
 };
 option (common.wire.v1.formats) = {
   name: "EventId"
@@ -93,7 +94,7 @@ option (common.wire.v1.formats) = {
   description: "Where a report item comes from: an app (mail-hero, todofy, watch), dashboard, cloudflare."
 };
 
-// What every app's "Ops" entrypoint answers (Mail Hero, Todofy, the watch app, Fleet and the website relay).
+// What every app's "Ops" entrypoint answers.
 service OpsService {
   // `status()`: a snapshot built only from bounded, indexed reads; it writes no data. One write is allowed: an app
   // that schedules itself may re-arm its own missing scheduler alarm (the watch app does, so the dashboard's tick
@@ -142,15 +143,6 @@ service CanaryConsumerService {
   }
 }
 
-// The ops digest: Todofy (capability `ops_digest`) stores the dashboard's latest report for its daily reminder.
-service OpsDigestService {
-  // `reportOps(report)`: replaces the stored report unless the stored one is newer.
-  // buf:lint:ignore RPC_REQUEST_STANDARD_NAME
-  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
-  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
-  rpc ReportOps(OpsReport) returns (OpsReportReceipt);
-}
-
 // Input of Status: nothing (`status()`).
 message StatusRequest {}
 
@@ -161,29 +153,11 @@ message OpsStatus {
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).allowed = "ops-v1"
   ];
-  // The app that answers. The list is open: it may grow within ops-v1 when an app joins (the watch app joined on
-  // 2026-10-01, mailsort on 2026-10-06, recall and the brief on 2026-10-10), and a consumer reads a name it does not
-  // know yet; the dashboard keeps only the answer of the app it called.
+  // The app that answers. No list names the apps: any app may answer ops-v1, a consumer reads a name it does not
+  // know, and the dashboard keeps only the answer of the app it called.
   string app = 2 [
     (google.api.field_behavior) = REQUIRED,
-    (common.wire.v1.field) = {
-      allowed: [
-        "mail-hero",
-        "todofy",
-        "watch",
-        "fleet",
-        "newsletter",
-        "codex-gateway",
-        "notion-publish",
-        "mailsort",
-        "recall",
-        "brief",
-        "tasks",
-        "personal-mcp",
-        "model-router"
-      ]
-      open: true
-    }
+    (common.wire.v1.field).format = "AppName"
   ];
   // When the snapshot was taken.
   string generated_at = 3 [
@@ -237,8 +211,8 @@ message OpsStatus {
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).format = "HttpsUrl"
   ];
-  // What this release supports (canary_producer, canary_consumer, guard, ops_digest); the dashboard checks
-  // them before using a feature.
+  // What this release supports (canary_producer, canary_consumer, guard); the dashboard checks them before using
+  // a feature.
   repeated string capabilities = 11 [
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field) = {
@@ -247,14 +221,12 @@ message OpsStatus {
       unique: true
     }
   ];
-  // Website-only content-sync evidence; absent on other apps and older Ops releases.
-  // (-- api-linter: core::0215::foreign-type-reference=disabled
-  //     aip.dev/not-precedent: embed the shared internal sync contract without duplicating fields. --)
-  optional website.sync.v1.WebsiteSyncStatus website_sync = 12;
-  // Gateway process-lifetime telemetry; absent on other apps and older host observations.
-  // (-- api-linter: core::0215::foreign-type-reference=disabled
-  //     aip.dev/not-precedent: Forward the bounded shared inference observation without duplicating fields. --)
-  optional codex.monitor.v1.InferenceStatus codex_inference = 13;
+  // The retired website content-sync evidence (website.sync.v1): the relay's WebsiteSync entrypoint answers it.
+  reserved 12;
+  reserved "website_sync";
+  // The retired Codex gateway telemetry (codex.monitor.v1); the Model Router's request records replace it.
+  reserved 13;
+  reserved "codex_inference";
 }
 
 // An app's health.
@@ -626,24 +598,7 @@ message CanaryResult {
   }];
 }
 
-// Input of ReportOps: the dashboard's latest report, at most 8 KiB as compact JSON (OPS_LIMITS.reportMaxBytes, a
-// rule about the whole message, which Todofy checks).
-message OpsReport {
-  // When the dashboard built it; at most 5 minutes ahead of Todofy's clock.
-  string generated_at = 1 [
-    (google.api.field_behavior) = REQUIRED,
-    (common.wire.v1.field).format = "Timestamp"
-  ];
-  // The items; only warning and critical ones reach the digest.
-  repeated OpsReportItem items = 2 [
-    (google.api.field_behavior) = REQUIRED,
-    (common.wire.v1.field).max_items = 20
-  ];
-  // Linked from the digest when present.
-  optional string dashboard_url = 3 [(common.wire.v1.field).format = "HttpsUrl"];
-}
-
-// One item of a report.
+// One item of the dashboard's digest (dashboard.ui.v1's Digest embeds it; no app sends or reads one).
 message OpsReportItem {
   // Where it comes from.
   string source = 1 [
@@ -676,17 +631,16 @@ message OpsReportItem {
   ];
 }
 
-// Output of ReportOps. When a report with a later generated_at is already stored, `stored` is false and the
-// receipt describes that stored report.
+// The dashboard's record of its last digest (dashboard.ui.v1's Digest embeds it; no app sends or reads one).
 message OpsReportReceipt {
-  // Whether this report replaced the stored one.
+  // Whether the digest was stored.
   bool stored = 1 [(google.api.field_behavior) = REQUIRED];
-  // The stored report's generated_at.
+  // When the stored digest's items were frozen.
   string generated_at = 2 [
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).format = "Timestamp"
   ];
-  // The stored report's number of items.
+  // The stored digest's number of items.
   int32 item_count = 3 [
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field) = {

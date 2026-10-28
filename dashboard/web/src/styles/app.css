@@ -2838,41 +2838,6 @@ main {
   font-weight: 650;
 }
 
-.codex-counters .counter dd {
-  font-size: var(--text-l);
-  overflow-wrap: anywhere;
-}
-
-.codex-periods {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  margin: var(--space-3) 0 var(--space-2);
-}
-
-.codex-request-scroll {
-  max-width: 100%;
-}
-
-.codex-requests {
-  min-width: 640px;
-}
-
-.codex-requests th,
-.codex-requests td {
-  vertical-align: top;
-}
-
-.codex-requests .num {
-  white-space: nowrap;
-}
-
-.codex-effort,
-.codex-error {
-  display: block;
-  margin-top: 2px;
-}
-
 .signal-list {
   display: grid;
   gap: 0;

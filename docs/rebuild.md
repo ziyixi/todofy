@@ -145,8 +145,9 @@ sudo /usr/bin/python3 -E -s <bundle>/installer/install.py \
 
 成功结果：`complete_held`。K3s、专用 Tunnel、daemon 和 observer 已安装，Newsletter 暂不接新工作。
 示例 Newsletter 使用 mock 模式且禁真实发送，可先验收空服务。首次安装时要启用真实处理，先按
-[Newsletter 配置](../newsletter/README.md)准备专用 Codex 登录目录、Router URL/独立口令及发信凭据，将私有输入的
-`vps.newsletter_env` 改为对应的 live/codex 设置，用 `vps.old_paths.auth` 指定登录目录；安装器会导入该目录。
+[Newsletter 配置](../newsletter/README.md)准备 Router URL/独立口令及发信凭据，将私有输入的 `vps.newsletter_env`
+改为对应的 live/codex 设置。Codex 订阅登录属于 [Codex gateway](../codex-gateway/README.md)：用 `vps.old_paths.auth`
+指定登录目录，安装器把它导入 gateway 挂载的 `newsletter-auth` 卷（沿用原名），Newsletter 不挂载它。
 已安装后更改 Secret 或登录状态属于 owner 的一次维护操作，daemon 不会替你修改它们。
 mock 服务健康不代表真实摘要通过。
 启动首次发布：
@@ -258,7 +259,7 @@ sudo /usr/bin/python3 -E -s <新 bundle>/installer/recover.py \
 
 ## Data recovery
 
-空环境 bootstrap 创建空业务状态。恢复历史时先停旧写入，保留原事件、密钥、SQL/R2/DO、Newsletter 登录/状态和 daemon 账本，
+空环境 bootstrap 创建空业务状态。恢复历史时先停旧写入，保留原事件、密钥、SQL/R2/DO、Codex gateway 登录、Newsletter 状态和 daemon 账本，
 按各应用恢复说明核对后激活。Mail Hero 每日副本在私有 R2，见 [原生备份](../mail-hero/docs/native-backup.md)。
 Tasks 用自己的每周备份（私有 R2 `tasks-backups`，由其 `TaskJobs` 的 Alarm 写入）或 7 天内的 Time Travel 恢复自己的 D1，见 [Tasks 备份与恢复](../tasks/docs/backup.md)；核对任务 ID、完成次数以及 Todofy 邮件引用后，再恢复任务写入。从 Todoist 重新导入只能重建 10-17 切换时的状态，不是恢复路径。
 Watch/Home 等 DO 完整跨账户数据恢复、真实空账户与干净 VPS 演练留待后续。PVC Retain 和镜像 artifact 都不能替代业务备份。

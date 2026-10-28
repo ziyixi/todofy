@@ -1,0 +1,13 @@
+{
+  "mail-hero": ["maintenance", "force_send_paused"],
+  "todofy": ["maintenance", "processing_paused"],
+  "watch": ["maintenance", "notifications"],
+  "fleet": ["maintenance"],
+  "newsletter": ["maintenance"],
+  "codex-gateway": ["maintenance"],
+  "notion-publish": ["maintenance"],
+  "mailsort": ["maintenance", "mode_limited"],
+  "recall": ["maintenance"],
+  "brief": ["maintenance", "mode_limited"],
+  "tasks": ["maintenance"]
+}

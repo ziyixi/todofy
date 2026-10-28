@@ -101,7 +101,11 @@ describe("actual sync evidence", () => {
     expect(status.last_check?.checked_at).toBe("2026-10-04T10:18:00Z");
     expect(status.latest_attempt?.state).toBe("unchanged");
     expect(status.last_publish?.verified_at).toBe("2026-10-03T10:22:00Z");
-    expect((await opsStatus(env, now)).health).toBe("ok");
+    const ops = await opsStatus(env, now);
+    expect(ops.health).toBe("ok");
+    // ops-v1 carries the signals only; the evidence is WebsiteSync's, and the relay has no other mode.
+    expect(ops.modes).toEqual({ maintenance: false });
+    expect(ops).not.toHaveProperty("website_sync");
   });
   it("changed content in progress shows publishing without advancing last verified release", async () => {
     observe({
