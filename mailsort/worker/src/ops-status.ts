@@ -43,8 +43,11 @@ export function guardState(): wire.GuardState {
 
 export type GuardOutcome = { readonly ok: wire.GuardState } | { readonly error: 'invalid_input' };
 
-/** Claude has no shed action. Normal clears a guard stored by an older release. */
-export function setGuard(store: Store, input: unknown): GuardOutcome {
+/**
+ * Claude has no shed action. Normal clears a guard stored by an older release, except while a restore loads the store
+ * (`write` false, restore.ts): it refuses every other write, and the restored rows keep any such guard until then.
+ */
+export function setGuard(store: Store, input: unknown, write = true): GuardOutcome {
   let value;
   try {
     value = fromWireArguments(OpsService.method.setGuard, [input]);
@@ -53,7 +56,7 @@ export function setGuard(store: Store, input: unknown): GuardOutcome {
     throw error;
   }
   if (value.level === GuardLevel.SHED) return { error: 'invalid_input' };
-  store.deleteMeta('guard_reason', 'guard_until', 'guard_set_at');
+  if (write) store.deleteMeta('guard_reason', 'guard_until', 'guard_set_at');
   return { ok: guardState() };
 }
 

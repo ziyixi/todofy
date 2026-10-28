@@ -138,7 +138,8 @@ export class MailsortState extends DurableObject<Env> {
     return this.serial(now, async () => {
       if (restoreUnfinished(this.kv)) {
         const next = await runRestore({ store: this.store, kv: this.kv, bucket: this.env.BACKUPS, transact: this.transact }, now);
-        return { next, code: 'restore' };
+        // Once it succeeded, the new backup and the pipeline start at the next alarm; a failed one arms none.
+        return { next: restoreUnfinished(this.kv) ? next : now, code: 'restore' };
       }
       const bucket = this.env.BACKUPS;
       const backup = backupSchedule(bucket, this.kv);
@@ -231,7 +232,7 @@ export class MailsortState extends DurableObject<Env> {
   }
 
   opsSetGuard(input: unknown): GuardOutcome {
-    return this.transact(() => setGuard(this.store, input));
+    return this.transact(() => setGuard(this.store, input, !restoreUnfinished(this.kv)));
   }
 
   // ---- the owner API --------------------------------------------------------------------------------------------------

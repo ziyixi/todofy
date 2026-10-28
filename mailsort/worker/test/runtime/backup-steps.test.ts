@@ -20,6 +20,7 @@ import {
   DAY,
   HOUR,
 } from '../../src/limits.ts';
+import { runRestore, startRestore, type RestoreState } from '../../src/restore.ts';
 import { Store } from '../../src/store.ts';
 import { memorySql } from '../fakes/sql.ts';
 import { startHarness, T0, type Harness } from './harness.ts';
@@ -208,4 +209,37 @@ it('the next daily start, and Ops: the age of the last backup, a stale one and a
     { code: 'backup_stale', severity: Severity.CRITICAL, metrics: { has_backup: 0 } },
     { code: 'backup_failed', severity: Severity.WARNING, metrics: {} },
   ]);
+});
+
+it('a restore whose last step fails after the migration repeats it without counting the migrated store again', async () => {
+  const kv = new MemoryKv();
+  const at = Date.parse('2026-10-14T11:41:00Z');
+  const deps = { store: store(10), kv, bucket, object: 'mailsort-v1' };
+  let now = at;
+  do {
+    await runBackup(deps, now);
+    now += BACKUP_CONTINUE_MS;
+  } while (kv.state.job !== null);
+  const target = new Store(memorySql());
+  target.migrate();
+  const restoreKv = new MemoryKv();
+  // The first transaction after the count (the migration's) fails once.
+  let failFinal = true;
+  const transact = <T>(fn: () => T): T => {
+    if (failFinal && (restoreKv.values.get('restore') as RestoreState | undefined)?.step === 'migrate') {
+      failFinal = false;
+      throw new Error('Synthetic SQLite failure');
+    }
+    return fn();
+  };
+  const restoreDeps = { store: target, kv: restoreKv, bucket, transact };
+  await startRestore(restoreDeps, kv.state.last_key, now);
+  while ((restoreKv.values.get('restore') as RestoreState).step !== 'migrate') now = await runRestore(restoreDeps, now);
+  const verified = (restoreKv.values.get('restore') as RestoreState).tables;
+  expect(verified.every((table) => table.restored_rows === table.backup_rows)).toBe(true);
+  // What a later migration might do to the loaded rows: the repeat keeps the counts it verified.
+  target.run(`DELETE FROM flow WHERE day = (SELECT min(day) FROM flow)`);
+  now = await runRestore(restoreDeps, now);
+  expect(restoreKv.values.get('restore')).toMatchObject({ state: 'succeeded', step: 'migrate', errors: 0, tables: verified });
+  expect(now).toBe(Infinity);
 });

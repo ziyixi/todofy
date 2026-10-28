@@ -19,9 +19,10 @@ import { BackupRestore_State as State } from '@ziyixi/proto/mailsort/ui/v2/backu
 import { Mode, SettingsSchema } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
 import { BACKUP_FORMAT, LATEST, MANIFEST, type BackupManifest } from '../../src/backup.ts';
 import { BACKUP_PART_BYTES, BACKUP_STEP_BYTES, BACKUP_STEP_PARTS, DAY as DAY_MS, RESTORE_ROWS_PER_DAY } from '../../src/limits.ts';
+import { MAILSORT_OBJECT } from '../../src/env.ts';
 import { SCHEMA_VERSION } from '../../src/store.ts';
 import { MAILS, type SyntheticMail } from '../fakes/fixtures.ts';
-import { MINUTE, op, reasonOf, rejection, startHarness, T0, type Harness } from './harness.ts';
+import { MINUTE, op, reasonOf, rejection, startHarness, T0, type Harness, type StepResult } from './harness.ts';
 import { checkGoogleCalls, deliver, modifies, setMode } from './helpers.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -57,12 +58,13 @@ async function dump(h: Harness): Promise<Record<string, unknown[]>> {
   return out;
 }
 
-/** Alarm ticks a second apart from `now` until the work in progress (a backup job, a restore) ends. */
-async function settle(h: Harness, now: number, what: 'backup' | 'restore', limit = 400): Promise<number> {
+/** Alarm ticks a second apart from `now` until the work in progress (a backup job, a restore) ends; the ticks and the last one's result. */
+async function settle(h: Harness, now: number, what: 'backup' | 'restore', limit = 400): Promise<{ ticks: number; last: StepResult }> {
   for (let ticks = 1; ticks <= limit; ticks++) {
-    await h.tick(now + (ticks - 1) * SECOND);
+    const at = now + (ticks - 1) * SECOND;
+    const last = await h.tick(at);
     const state = (await h.kv(what)) as { job?: unknown; state?: string } | null;
-    if (what === 'backup' ? state !== null && state.job === null : state?.state !== 'running') return ticks;
+    if (what === 'backup' ? state !== null && state.job === null : state?.state !== 'running') return { ticks, last: { ...last, next: last.next - at } };
   }
   throw new Error(`the ${what} did not end`);
 }
@@ -117,6 +119,8 @@ async function populate(h: Harness): Promise<void> {
     `INSERT INTO label_merge_items (job_id, message_id, source_id, target_id, source_gmail_id, target_gmail_id, state) VALUES ('merge1', 'm-mi1', 'old-p2', 'p2', 'Label_1', 'Label_2', 'done')`,
     `INSERT INTO label_merge_hides (job_id, gmail_id, state) VALUES ('merge1', 'Label_1', 'done')`,
     `INSERT INTO unread_batch (message_id, state, ledger_id) VALUES ('m-u1', 'skipped', NULL)`,
+    // A guard an older release stored: Ops' normal request clears it, but never while a restore loads it.
+    `INSERT INTO meta (key, value) VALUES ('guard_reason', 'usage_80')`,
     `INSERT INTO codex_usage (day, requests, successes, failures, usage_reported, input_tokens, output_tokens) VALUES ('2026-09-30', 3, 2, 1, 1, 9007199254740991, -7)`,
     // More counters than one part holds: a WITHOUT ROWID table read over several parts in key order.
     `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 40000)
@@ -181,7 +185,7 @@ describe('a populated store backs itself up and restores into an empty one', () 
     prefix = ((await (await bucket.get(LATEST))?.json()) as { key: string }).key;
     expect(prefix).toBe('backups/2026-10-03T000000Z/');
     const manifest = await manifestOf(source);
-    expect(manifest).toMatchObject({ format: BACKUP_FORMAT, object: 'mailsort-v1', started_at: '2026-10-03T00:00:00Z', schema_version: SCHEMA_VERSION });
+    expect(manifest).toMatchObject({ format: BACKUP_FORMAT, object: MAILSORT_OBJECT, started_at: '2026-10-03T00:00:00Z', schema_version: SCHEMA_VERSION });
     expect(manifest.tables.map((table) => table.name).sort()).toEqual(all);
     for (const table of manifest.tables) {
       expect(table.rows, table.name).toBe(before[table.name]?.length);
@@ -218,10 +222,15 @@ describe('a populated store backs itself up and restores into an empty one', () 
     expect(reasonOf(await rejection(target.api.startBackupRestore({ name: 'backupRestore', backup: prefix, requestId: op() })))).toBe('RESTORE_ACTIVE');
     const settings = create(SettingsSchema, { name: 'settings', mode: Mode.OFF });
     expect(reasonOf(await rejection(target.api.updateSettings({ settings, updateMask: { paths: ['mode'] }, requestId: op() })))).toBe('RESTORE_ACTIVE');
-    // Neither a pass nor a backup runs meanwhile.
+    // Neither a pass nor a backup runs meanwhile, and Ops' normal guard request changes no restored row.
     expect(await target.step(AT)).toMatchObject({ code: 'restoring' });
-    const ticks = await settle(target, AT, 'restore');
+    for (let tick = 0; tick < 3; tick++) await target.tick(AT + tick * SECOND);
+    expect(await target.sql(`SELECT value FROM meta WHERE key = 'guard_reason'`)).toEqual([{ value: 'usage_80' }]);
+    expect(await target.opsSetGuard({ level: 'normal', reason: 'quota_recovered', until: null })).toMatchObject({ level: 'normal' });
+    const { ticks, last } = await settle(target, AT + 3 * SECOND, 'restore');
     expect(ticks).toBeGreaterThan(2);
+    // Its last step asks for the next alarm at once: the new backup and the pipeline start without waiting for a call.
+    expect(last).toEqual({ next: 0, code: 'restore' });
     const done = await target.api.getBackupRestore({ name: 'backupRestore' });
     expect(done).toMatchObject({ state: State.SUCCEEDED, errorCode: '', backup: prefix });
     expect(done.tables.map((table) => table.table).sort()).toEqual(await tables(source));
@@ -332,8 +341,8 @@ describe('a broken part, a restart and the daily share of writes', () => {
 it("after a switch to a new object (MAILSORT_OBJECT), the former object's alarm ends without a pass", async () => {
   const h = await startHarness();
   try {
-    expect(await h.tickOf('mailsort-v0', T0)).toEqual({ result: { next: null, code: 'retired_object' }, passed: false });
-    expect((await h.tickOf('mailsort-v1', T0)).passed).toBe(true);
+    expect(await h.tickOf(`${MAILSORT_OBJECT}-former`, T0)).toEqual({ result: { next: null, code: 'retired_object' }, passed: false });
+    expect((await h.tickOf(MAILSORT_OBJECT, T0)).passed).toBe(true);
   } finally {
     await h.dispose();
   }

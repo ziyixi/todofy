@@ -41,7 +41,8 @@ export interface RestoreState {
   schema_version: number;
   started_at: number;
   ended_at: number | null;
-  step: 'schema' | 'rows' | 'finish';
+  /** `migrate` once `finish` verified the counts. */
+  step: 'schema' | 'rows' | 'finish' | 'migrate';
   /** The manifest's table and part that load next. */
   table: number;
   part: number;
@@ -281,8 +282,14 @@ async function rowsStep(deps: RestoreDeps, bucket: R2Bucket, state: RestoreState
 /** Counts against the manifest, the migration, the safe pipeline state; then the restore has succeeded. */
 async function finishStep(deps: RestoreDeps, state: RestoreState, manifest: BackupManifest, now: number): Promise<void> {
   const { store } = deps;
-  state.tables = manifest.tables.map((table) => ({ name: table.name, backup_rows: table.rows, restored_rows: store.count(`SELECT count(*) AS n FROM ${sqlName(table.name)}`) }));
-  if (state.tables.some((table) => table.restored_rows !== table.backup_rows)) throw new RestoreFailure('count_mismatch');
+  // Counted once: a repeat after the migration below (the step failed, or the object restarted after it) keeps the
+  // verified counts, since a migration may add, drop or change rows and tables.
+  if (state.step === 'finish') {
+    state.tables = manifest.tables.map((table) => ({ name: table.name, backup_rows: table.rows, restored_rows: store.count(`SELECT count(*) AS n FROM ${sqlName(table.name)}`) }));
+    if (state.tables.some((table) => table.restored_rows !== table.backup_rows)) throw new RestoreFailure('count_mismatch');
+    state.step = 'migrate';
+    deps.kv.put(STATE_KEY, state);
+  }
   store.migrate(deps.transact, await senderHashesToBackfill(store));
   const done: RestoreState = { ...state, state: 'succeeded', ended_at: now };
   const abandoned = deps.transact(() => {
