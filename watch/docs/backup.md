@@ -102,9 +102,9 @@ Expected for the owner's store (tens of watches, a few changes a day), not measu
 - Evidence: one copy of each capture (at most 256 KiB of text, usually tens of KiB) and each screenshot (at most
   1 MiB) made in the last 30 days or still named: a few to a few hundred MiB, most of it screenshots of browser
   watches.
-- R2 operations a day: one PUT per part (about 15), per new evidence object, for the manifest and `latest.json` (Class
-  A, well under 100), one LIST of prefixes, about 30 manifest GETs (Class B); deletes are free. Free tier: 1 million
-  Class A and 10 million Class B a month, shared by the account.
+- R2 operations a day: one PUT per part (about 15), per new evidence object, for the manifest and `latest.json`, and
+  one LIST of prefixes (Class A, well under 100); a HEAD of `latest.json` and about 30 manifest GETs (Class B); deletes
+  are free. Free tier: 1 million Class A and 10 million Class B a month, shared by the account.
 - Owner writes wait for the seconds a daily job runs (`BACKUP_RUNNING`, worth repeating).
 - A restore writes every row once (a few thousand SQLite rows; about 15,000 and their indexes at every bound, against
   the account's 100,000 a day shared with Mail Hero) and one PUT per evidence object the evidence bucket lacks.

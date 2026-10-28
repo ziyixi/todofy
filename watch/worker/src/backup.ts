@@ -549,8 +549,10 @@ export async function applyRetention(store: Store, bucket: R2Bucket, current: st
   const candidates = new Set(store.all<{ key: string }>(`SELECT key FROM backup_evidence`).map((row) => row.key));
   for (const { manifest } of retired) for (const object of manifest?.evidence.objects ?? []) candidates.add(object.key);
   const doomed = [...candidates].filter((key) => !kept.has(key)).sort();
-  await deleteKeys(bucket, doomed.map((key) => `${EVIDENCE_ROOT}${key}`));
+  // The records first: a copy deleted while its record stayed would be named by a later manifest (a screenshot's key is
+  // its hash, so it may come back) without being in the bucket; a record gone with its copy left is only copied again.
   for (const key of doomed) store.run(`DELETE FROM backup_evidence WHERE key = ?`, key);
+  await deleteKeys(bucket, doomed.map((key) => `${EVIDENCE_ROOT}${key}`));
   for (const { prefix, manifest } of retired) {
     if (manifest !== null) {
       // The manifest first: from then on the prefix is incomplete, never a backup missing parts.
