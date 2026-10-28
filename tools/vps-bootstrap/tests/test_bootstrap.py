@@ -26,6 +26,7 @@ import cluster
 import firewall
 import host
 import install
+import node_address
 import observer_policy
 import prepare
 
@@ -592,10 +593,13 @@ with patch.object(socket, "socket", side_effect=AssertionError("Network use is f
             (host, "retire_legacy_runtime", None),
             (observer_policy, "install", None),
             (firewall, "install", None),
+            (node_address, "install", None),
             (cluster, "start", None),
+            (node_address, "wait_cluster", None),
             (cluster, "apply", None),
             (cluster, "secrets", None),
             (cluster, "held_runtime", None),
+            (node_address, "in_cluster_read", None),
             (cluster, "services", None),
             (host, "complete_bootstrap", None),
         ]
@@ -631,10 +635,13 @@ with patch.object(socket, "socket", side_effect=AssertionError("Network use is f
             (host, "retire_legacy_runtime"),
             (observer_policy, "install"),
             (firewall, "install"),
+            (node_address, "install"),
             (cluster, "start"),
+            (node_address, "wait_cluster"),
             (cluster, "apply"),
             (cluster, "secrets"),
             (cluster, "held_runtime"),
+            (node_address, "in_cluster_read"),
             (cluster, "services"),
             (host, "complete_bootstrap"),
         )
@@ -669,10 +676,13 @@ with patch.object(socket, "socket", side_effect=AssertionError("Network use is f
             (host, "retire_legacy_runtime", None),
             (observer_policy, "install", None),
             (firewall, "install", None),
+            (node_address, "install", None),
             (cluster, "start", None),
+            (node_address, "wait_cluster", None),
             (cluster, "apply", None),
             (cluster, "secrets", None),
             (cluster, "held_runtime", None),
+            (node_address, "in_cluster_read", None),
         )
         with (
             contextlib.ExitStack() as stack,
@@ -707,10 +717,13 @@ with patch.object(socket, "socket", side_effect=AssertionError("Network use is f
             (host, "retire_legacy_runtime", None),
             (observer_policy, "install", None),
             (firewall, "install", None),
+            (node_address, "install", None),
             (cluster, "start", None),
+            (node_address, "wait_cluster", None),
             (cluster, "apply", None),
             (cluster, "secrets", None),
             (cluster, "held_runtime", None),
+            (node_address, "in_cluster_read", None),
         )
 
         def path(value):

@@ -121,8 +121,8 @@ its source, creates root-reviewed host directories owned by UID 10001, installs
 the pinned K3s binary, and applies foundation/Secrets/held runtime. All apply uses
 server-side apply with `field-manager=personal-cloud`, matching normal releases,
 without force takeover. Its own `PCLOUD-K3S` INPUT chain allows Kubernetes ports
-6443/10250 and VXLAN 8472 only on loopback or local cni0 Pod CIDR traffic. It does
-not flush other chains or change SSH. Its rules reload before K3s starts.
+6443/10250 and VXLAN 8472 only on loopback, or from the cni0 Pod CIDR to the fixed node
+address below. It does not flush other chains or change SSH. Its rules reload before K3s starts.
 
 Bootstrap downloads the official Linux amd64 cloudflared **2026.8.2**, pinned by SHA256 in
 [`platform/versions.json`](../../platform/versions.json), into
@@ -149,6 +149,36 @@ Actions operation to activate the release, check actual SHA/digest/UUID, healthy
 worker and accepting admission, verify Fleet's fresh report. Compose services are already retired by this one-time
 bootstrap; they are not automatically restarted as a fallback. System-bus permissions also require the non-mutating
 polkit check described in [the observer boundary](../../platform/systemd/README.md).
+
+## Fixed node address
+
+K3s never uses the DHCP address. Without `node-ip` it would take the default route's address
+once at startup and keep advertising it after a lease change, breaking every in-cluster API
+client. The one-shot `personal-cloud-node-address.service` runs before `k3s.service` (which
+`Requires=` it): it creates or keeps the dummy interface `pcloud0`, sets exactly `10.254.0.42/32`
+and brings it up, leaving no process and having no stop action. The K3s configuration sets
+`node-ip` and `advertise-address` to that address and `flannel-iface` to `pcloud0`;
+`node-external-ip` stays unset. K3s adds both addresses to its serving certificate, and the host
+kubeconfig keeps using `127.0.0.1`. Where NetworkManager is installed, a drop-in marks only
+`pcloud0` unmanaged. Pod egress still masquerades through the current default route.
+
+The address is RFC 1918, outside the K3s Pod/Service CIDRs, Docker's default pools, CGNAT and
+Tailscale's 100.64/10 and the networks home routers usually assign. Install, migration and
+recovery stop before writing if any existing host network contains it, if `pcloud0` exists for
+another purpose, or if K3s uses embedded etcd. See [host address recovery](../../docs/rebuild.md#主机地址变化).
+
+A host installed before this change migrates once, from a bundle that contains it:
+
+```sh
+sudo /usr/bin/python3 -E -s <bundle>/installer/node_address.py --bundle <bundle>
+```
+
+It accepts only host K3s files equal to this bundle's or to their pre-address rendering, writes
+the unit and address, writes the new K3s configuration and firewall, restarts K3s once
+(`KillMode=process` keeps containers running), then waits until the Node InternalIP and the
+`default/kubernetes` EndpointSlice show only the fixed address and the daemon's own Pod reads the
+API through `kubernetes.default.svc`. The last line is `"status": "stable"`. A repeat run only
+verifies; `--rollback` restores the previous K3s files and restarts K3s once.
 
 ## Failures and retries
 
@@ -199,6 +229,8 @@ retry uses its separate repair checkpoint. The original bootstrap marker remains
 `complete_held` still requires a normal **CreateRelease** from Actions for the new
 source SHA. There is no old API release to resume. Keep VPS deployment disabled
 until the new daemon can read Kubernetes and the frozen admission is verified.
+Bundles that carry the fixed node address change host configuration, so this repair
+path refuses them; migrate such a host with `node_address.py` instead.
 
 ## Diagnosis without sudo
 

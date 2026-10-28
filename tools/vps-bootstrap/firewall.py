@@ -1,5 +1,6 @@
 """Own one standard INPUT chain; atomic restore never flushes existing host firewall chains."""
 
+from node_address import FIREWALL_DESTINATION
 from runner import command
 
 from config import require
@@ -18,7 +19,9 @@ def rules(ipv6=False, include_jump=False):
         suffix = " -m comment --comment " + COMMENT
         commands.append(prefix + " -i lo" + suffix + " -j ACCEPT")
         if not ipv6:
-            commands.append(prefix + " -i cni0 -s 10.42.0.0/16" + suffix + " -j ACCEPT")
+            # Pods reach the API and kubelet only at the fixed node address (Service NAT target).
+            pods = " -i cni0 -s 10.42.0.0/16" + FIREWALL_DESTINATION
+            commands.append(prefix + pods + suffix + " -j ACCEPT")
         commands.append(prefix + suffix + " -j DROP")
     if include_jump:
         commands.append("-I INPUT 1 -j " + CHAIN)

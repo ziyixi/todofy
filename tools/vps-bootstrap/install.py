@@ -11,6 +11,7 @@ import binaries
 import cluster
 import firewall
 import host
+import node_address
 import observer_policy
 
 from config import (
@@ -77,6 +78,7 @@ def preflight(bundle):
             == (Path(bundle) / "units/k3s-config.yaml").read_bytes(),
             "K3S_CONFIGURATION_CONFLICT",
         )
+    node_address.preflight(bundle)
     observer_policy.preflight(bundle)
     return cloudflared
 
@@ -102,11 +104,15 @@ def install(bundle, private_file):
     observer_policy.install(bundle)
     event("observer_policy", "enforcing")
     firewall.install()
+    node_address.install(bundle)
+    event("node_address", "ready")
     cluster.start(bundle)
+    node_address.wait_cluster(profile["observer_node_key"])
     event("cluster", "ready")
     cluster.apply(read_json(Path(bundle) / "foundation.json"))
     cluster.secrets(profile, private)
     cluster.held_runtime(bundle, profile["namespace"])
+    node_address.in_cluster_read(profile["namespace"])
     event("runtime", "held")
     cluster.services(bundle, private, cloudflared)
     host.complete_bootstrap(bundle_sha256)

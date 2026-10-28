@@ -223,24 +223,50 @@ gh workflow run ci.yml --ref main -R "$cloud_repo" \
 
 ### 主机地址变化
 
-如果业务 Pod 仍然 Ready，但 daemon 的运行观测变成 unknown，发布在 `suspend` 阶段报
-`UNAVAILABLE`，先核对主机网卡地址、Node InternalIP 和 `default/kubernetes` 的 EndpointSlice。
-Node 和 API 端点仍指向已不属于主机的地址时，正确的 Service/NAT 规则也会把请求送往旧地址。
-这类问题先恢复节点网络，再继续原发布；重复创建发布不会解除 `RELEASE_HELD`。
+集群不依赖主机的 DHCP 地址。K3s 不设置 `node-ip` 时，只在启动那一刻从默认路由取地址，之后不再更新；
+租约一变，Node InternalIP 和 `default/kubernetes` 的 EndpointSlice 就指向主机已经没有的地址。
+宿主上经 `127.0.0.1` 的 kubectl 仍然正常，但所有集群内客户端（发布 daemon、状态观测）经 Service NAT 都连不上 API，
+发布停在 `suspend / UNAVAILABLE`。这是架构问题，不靠重启或地址变化钩子补救。
 
-确认实际 k3s 配置没有固定旧的 `node-ip`、`node-external-ip` 或 `advertise-address` 后，在宿主运行：
+bootstrap 给 K3s 一个只属于本机、永不变化的节点地址：
+
+- oneshot 单元 `personal-cloud-node-address.service` 在 `k3s.service` 之前运行（K3s 以 `Requires=`/`After=` 依赖它），
+  创建或保留 dummy 网卡 `pcloud0`，设置唯一地址 `10.254.0.42/32` 并启用；它不留下进程，也没有停止动作。
+- K3s 配置的 `node-ip`、`advertise-address` 为该地址，`flannel-iface` 为 `pcloud0`；不设置 `node-external-ip`。
+  K3s 自动把 node-ip 和 advertise-address 加进 API 证书；宿主 kubeconfig 仍连 `127.0.0.1`。
+- `PCLOUD-K3S` 只允许本机回环，以及 Pod 网段经 `cni0` 访问该地址的 6443/10250；局域网与公网照旧丢弃。
+- 有 NetworkManager 时，另写一个只匹配 `pcloud0` 的 unmanaged 配置，下次 NetworkManager 启动时生效；迁移不重启或重载它。
+
+该地址属于 RFC 1918 的 10.254/16，不在 K3s 的 10.42/16、10.43/16，不在 Docker 默认地址池、CGNAT/Tailscale 的 100.64/10，
+也不在家用路由器常用的 192.168/16 和 10.0–10.10 网段。安装、迁移和恢复都会先检查主机现有网段，任何网段包含它就在写入前停止
+（`NODE_ADDRESS_CONFLICT`）。Pod 出网仍按当时的默认路由做地址转换，公网入口仍是 Tunnel 到 `127.0.0.1` 的 hostPort，
+所以局域网地址变化、Wi-Fi 重连、开机时暂时没有网络都不影响集群内访问 API。没有 DHCP 钩子、定时器或常驻进程。
+
+#### 已安装主机的一次性迁移
+
+在此之前安装的主机仍是旧配置。把包含 `installer/node_address.py` 的 bundle 放到主机后执行一次：
 
 ```sh
-sudo systemctl restart k3s
+sudo /usr/bin/python3 -E -s <bundle>/installer/node_address.py --bundle <bundle>
 ```
 
-控制面会短暂不可用。项目的 unit 使用 `KillMode=process`；[K3s 停止规则](https://docs.k3s.io/upgrades/killall)
-保留现有容器运行，不需要 `k3s-killall.sh`、重启整机或手改 EndpointSlice。
-重启后核对 API Service 可访问、daemon 能读到真实运行状态，以及原业务 Pod 的 UID、重启次数和健康状态。
-这些检查通过后，使用上节的 CI resume 命令继续原 SHA 的发布；正式发布仍按正常流程排空和替换其目标容器。
+它先核对 bundle 校验和与安装完成标记，并要求主机上的 `k3s.service`、`config.yaml`、`firewall.v4`、`firewall.v6`
+恰好是该 bundle 的版本或其加入固定地址之前的版本；其他改动、`pcloud0` 已被别的用途占用、地址冲突或使用内嵌 etcd 时，
+在任何写入前停止。然后写入单元、创建地址，写入新的 K3s 配置与防火墙，只重启一次 K3s，等待 API 就绪、
+Node InternalIP 和 `default/kubernetes` EndpointSlice 都只剩固定地址，最后在 daemon 自己的 Pod 里经
+`https://kubernetes.default.svc` 读取一次 `platform-release`。成功的最后一行为 `"status": "stable"`。
+已迁移的主机重复运行只做核对，不重启 K3s；中途失败时直接重跑同一命令。
 
-节点地址可能变化；不要将当前 DHCP 地址写进应用或依赖路由器固定租约。
-本次验证的是地址变化后的恢复；当前部署没有自动刷新节点地址的钩子，不能将上述步骤当作已经实现的自动修复。
+控制面中断通常不到一分钟：`KillMode=process` 让现有容器继续运行（[K3s 停止规则](https://docs.k3s.io/upgrades/killall)），
+业务 Pod 不重启，Tunnel 入口不中断。完成后用[检查与修复](#检查与修复)中的 CI resume 命令继续原 SHA 的发布；
+重复创建发布不会解除 `RELEASE_HELD`。
+
+核对：`ip -4 address show dev pcloud0` 只有固定地址；Node InternalIP 与 `default/kubernetes` EndpointSlice 为该地址；
+daemon 读到真实运行状态，Fleet/Home 恢复新鲜观测；原业务 Pod 的 UID 和重启次数不变。
+
+回退：同一命令加 `--rollback`，写回迁移前的 K3s 配置与防火墙并重启一次 K3s；单元和 `pcloud0` 保留但不再被 K3s 使用。
+回退后节点重新跟随 DHCP 地址，原问题随之回来。迁移后的恢复只使用包含 `node_address.py` 的 bundle；
+更早的 bundle 会写回旧配置，遇到时重新运行上面的迁移命令。
 
 ### 宿主入口或运行资源损坏
 
@@ -253,6 +279,7 @@ sudo /usr/bin/python3 -E -s <新 bundle>/installer/recover.py \
 
 成功结果：`runtime_restored`。入口恢复保留 Secrets、PVC 和账本，再从 Actions 继续原发布。
 它核对原安装身份和账本接受版本；缺失磁盘数据、错误 bundle 或未知归属会停止。
+它同时写入[固定节点地址](#主机地址变化)：原安装 bundle 早于固定地址时，只接受这一处已审核的 K3s 文件差异。
 宿主服务故障需要管理员操作，日常部署和运行资源修复通过 daemon HTTP API 完成。
 即使其他 job 失败，成功生成的同 SHA bundle 仍可用于该发布。Actions artifact 保留 30 天；下载后自行保留。
 过期时用原接受 SHA 和账本中的两个 digest，按 [固定 bundle 生成命令](../tools/vps-bootstrap/README.md#prepare-locally)重新生成。
