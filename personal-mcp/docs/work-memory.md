@@ -20,8 +20,8 @@ What the server guarantees:
 - `done` refuses unhandled reports, and both terminal states need a `result` and every owned Watch, schedule and Codex
   link confirmed stopped (or, for Codex, completed).
 - Captured Watch evidence changes and Watch health reach linked open Works as reports from Watch's private feed, read at
-  most once a minute while needed. An expired feed cursor becomes a new baseline plus one `blocked` gap report per open
-  Work with a Watch.
+  most once a minute while needed. An expired feed cursor (or, after a restore, one Watch refuses) becomes a new
+  baseline plus one `blocked` gap report per open Work with a Watch; see [backup and restore](backup.md).
 
 ## Verification boundary
 

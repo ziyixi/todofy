@@ -65,6 +65,12 @@ Home reads this Worker's standard private Ops binding.
 The protocol uses the official MCP SDK's native `createMcpHandler` and Standard Webhooks signatures. It requires
 MCP 2.0 (`2026-07-28`). There is no Agents framework, server-side model call, D1, Queue or Workflow.
 
+## Backup and restore
+
+The DO backs its whole store up daily (05:23 UTC) into the private bucket `personal-mcp-backups`, keeping the newest
+30. The owner's `POST /owner/restore` loads a backup into a new, empty store from inside the object and verifies it;
+`tools/backup-restore.ts` downloads, verifies and uploads copies. See [backup and restore](docs/backup.md).
+
 ## Development and release
 
 From the repository root, use Node 26:
