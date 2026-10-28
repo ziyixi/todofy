@@ -112,14 +112,18 @@ _TRACKING = frozenset(
         "ocid",
     }
 )
-_UNSAFE_XML = re.compile(rb"<!(?:DOCTYPE|ENTITY)", re.IGNORECASE)
-_SCRIPT = re.compile(r"<(script|style)\b.*?</\1\s*>", re.IGNORECASE | re.DOTALL)
-_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
-_TAG = re.compile(r"</?[A-Za-z][\w:.-]*(?:\s[^<>]*)?/?>")
-_JATS_TITLE = re.compile(
-    r"<jats:title>.*?</jats:title>", re.IGNORECASE | re.DOTALL
-)
+# Blocks dropped with their text: comments, scripts, styles and JATS
+# headings ("Abstract"). Found by a linear scan, never a lazy regex, so a
+# hostile body with many unclosed openers cannot stall the event loop.
+_BLOCK = re.compile(r"<!--|<(script|style|jats:title)(?=[\s/>])", re.IGNORECASE)
+# Tags and markup declarations such as <!DOCTYPE html> inside feed HTML.
+_TAG = re.compile(r"</?[A-Za-z][\w:.-]*(?:\s[^<>]*)?/?>|<![A-Za-z][^<>]*>")
 _RDF_ABOUT = "{http://www.w3.org/1999/02/22-rdf-syntax-ns#}about"
+# NAT64 well-known prefix: Python calls it global, but it embeds an IPv4
+# destination that must be global too.
+_NAT64 = ipaddress.ip_network("64:ff9b::/96")
+# A merged lead names at most this many feeds in its source basis.
+_BASIS_NAMES = 5
 _DATE_FIELDS = ("date", "pubDate", "published", "publicationDate", "updated")
 _BODY_FIELDS = ("encoded", "content", "description", "summary")
 
@@ -383,12 +387,35 @@ def _registry(text: str, directions: frozenset[str]) -> list[Source]:
 # Parsing. Feed text is untrusted: it becomes bounded leads, nothing else.
 
 
+def _drop_blocks(text: str) -> str:
+    """Drop comment, script, style and JATS title blocks in linear time.
+
+    An unclosed block drops the rest of the text.
+    """
+    lowered = text.lower()
+    parts = []
+    position = 0
+    while (match := _BLOCK.search(text, position)) is not None:
+        parts.append(text[position : match.start()])
+        if match[1] is None:
+            end = lowered.find("-->", match.end())
+            end = end + 3 if end >= 0 else -1
+        else:
+            end = lowered.find("</" + match[1].lower(), match.end())
+            end = lowered.find(">", end) + 1 if end >= 0 else -1
+        if end <= 0:
+            return " ".join(parts)
+        parts.append(" ")
+        position = end
+    parts.append(text[position:])
+    return "".join(parts)
+
+
 def clean_text(value: str, limit: int = 8000) -> str:
     """Return untrusted markup as one bounded line of plain text."""
     text = value[: limit * 20]
     for _ in range(2):
-        text = _COMMENT.sub(" ", _SCRIPT.sub(" ", text))
-        text = html.unescape(_TAG.sub(" ", text))
+        text = html.unescape(_TAG.sub(" ", _drop_blocks(text)))
     text = "".join(c if c.isprintable() else " " for c in text)
     return " ".join(text.split())[:limit]
 
@@ -495,17 +522,44 @@ def _feed_entry(element: ElementTree.Element) -> Entry | None:
     )
 
 
+def _check_prolog(raw: bytes) -> None:
+    """Refuse a DTD before the root element, or a prolog not in ASCII bytes.
+
+    A DOCTYPE (and so any ENTITY) is only legal before the root element;
+    later it is a parse error, and inside CDATA it is plain text. UTF-16/32
+    bodies are refused so the byte-level check cannot be bypassed.
+    """
+    if b"\x00" in raw[:4] or raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        raise ValueError("Unsafe feed")
+    position = 3 if raw.startswith(b"\xef\xbb\xbf") else 0
+    while True:
+        while position < len(raw) and raw[position] in b" \t\r\n":
+            position += 1
+        for opener, closer in ((b"<?", b"?>"), (b"<!--", b"-->")):
+            if raw.startswith(opener, position):
+                end = raw.find(closer, position + len(opener))
+                if end < 0:
+                    raise ValueError("Malformed feed")
+                position = end + len(closer)
+                break
+        else:
+            if raw.startswith(b"<!", position):
+                raise ValueError("Unsafe feed")
+            return
+
+
 def parse_feed(raw: bytes, *, complete: bool = True) -> list[Entry]:
     """Parse RSS 2.0, RSS 1.0 (RDF) or Atom, read from the content.
 
     A body cut at its byte cap (``complete=False``) keeps the items that
-    closed before the cut. DOCTYPE and ENTITY declarations are refused.
+    closed before the cut. DOCTYPE and ENTITY declarations are refused;
+    whitespace before the XML declaration (a common blog quirk) is skipped.
 
     Raises:
         ValueError: The body is not a safe RSS, RDF or Atom document.
     """
-    if _UNSAFE_XML.search(raw):
-        raise ValueError("Unsafe feed")
+    _check_prolog(raw)
+    raw = raw.removeprefix(b"\xef\xbb\xbf").lstrip(b" \t\r\n")
     parser: ElementTree.XMLPullParser[ElementTree.Element] = (
         ElementTree.XMLPullParser(events=("start", "end"))
     )
@@ -599,11 +653,7 @@ def parse_crossref(raw: bytes) -> list[Entry]:
                 doi=doi,
                 version="",
                 published=published,
-                text=clean_text(
-                    _JATS_TITLE.sub(" ", abstract)
-                    if isinstance(abstract, str)
-                    else ""
-                ),
+                text=clean_text(abstract if isinstance(abstract, str) else ""),
                 excerpt=False,
             )
         )
@@ -706,15 +756,41 @@ def _parse(source: Source, raw: bytes, truncated: bool) -> list[Entry]:
         return parse_crossref(raw)
     if source.kind == "hf_daily":
         return parse_hf_daily(raw)
-    return parse_feed(raw, complete=not truncated)
+    entries = parse_feed(raw, complete=not truncated)
+    if source.kind == "arxiv":
+        # The API reports query errors as a 200 feed with an "Error" entry
+        # linking to arxiv.org/api/errors; only paper abs links are leads.
+        return [
+            entry
+            for entry in entries
+            if entry.url.startswith("https://arxiv.org/abs/")
+        ]
+    return entries
 
 
 def _host_chains(registry: Sequence[Source]) -> list[list[Source]]:
+    """Group sources by host, longest chain first.
+
+    Long serial chains (arXiv, Crossref) take a slot before single feeds, so
+    they are not the ones the internal deadline cuts.
+    """
     chains: dict[str, list[Source]] = {}
     for source in registry:
         host = parse.urlsplit(source.url).hostname or ""
         chains.setdefault(host, []).append(source)
-    return list(chains.values())
+    return sorted(chains.values(), key=len, reverse=True)
+
+
+def _public(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    if not address.is_global or address.is_multicast:
+        return False
+    if isinstance(address, ipaddress.IPv6Address):
+        if int(address) >> 32 == 0:
+            # Deprecated IPv4-compatible ::a.b.c.d is never a real host.
+            return False
+        if address in _NAT64:
+            return ipaddress.IPv4Address(int(address) & 0xFFFFFFFF).is_global
+    return True
 
 
 def failed(result: sources.MetadataResult) -> bool:
@@ -838,7 +914,7 @@ class Researcher:
                 address = ipaddress.ip_address(value)
             except ValueError:
                 raise _FetchError("unsafe_address") from None
-            if not address.is_global or address.is_multicast:
+            if not _public(address):
                 raise _FetchError("unsafe_address")
             addresses.append(address)
         if not addresses:
@@ -851,12 +927,14 @@ class Researcher:
     ) -> tuple[bytes, bool]:
         parsed = parse.urlsplit(source.url)
         host = parsed.hostname or ""
-        address = await self._address(host)
-        target = parse.urlunsplit(
-            ("https", address, parsed.path or "/", parsed.query, "")
-        )
         raw = bytearray()
+        # The resolver counts against the request time: a stalled lookup is
+        # a timeout for this source, not a stalled host chain.
         async with asyncio.timeout(REQUEST_SECONDS):
+            address = await self._address(host)
+            target = parse.urlunsplit(
+                ("https", address, parsed.path or "/", parsed.query, "")
+            )
             async with client.stream(
                 "GET",
                 target,
@@ -880,7 +958,10 @@ class Researcher:
 
 
 def _basis(names: Sequence[str]) -> str:
-    return "研究员订阅源：" + "、".join(names) + "（仅元数据，未打开原文）"
+    # Bounded so a work many feeds share still passes seed validation.
+    shown = "、".join(names[:_BASIS_NAMES])
+    more = "等" if len(names) > _BASIS_NAMES else ""
+    return "研究员订阅源：" + shown + more + "（仅元数据，未打开原文）"
 
 
 def _accept(
@@ -1009,7 +1090,7 @@ def _note(lead: _Lead) -> types.Payload:
     if lead.percentile is not None:
         signals["hf_upvote_percentile"] = lead.percentile
     return {
-        "source": "、".join(lead.names),
+        "source": "、".join(lead.names[:_BASIS_NAMES]),
         "excerpt_untrusted": lead.excerpt,
         "signals": signals,
     }

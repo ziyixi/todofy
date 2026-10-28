@@ -7,6 +7,7 @@ resolver and sleep, so no DNS, socket or real feed is touched.
 import asyncio
 import json
 import pathlib
+import time
 
 import httpx
 import pytest
@@ -196,6 +197,9 @@ def test_feed_links_drop_tracking_and_upgrade_scheme():
     [
         b'<!DOCTYPE rss [<!ENTITY x SYSTEM "file:///private">]><rss>&x;</rss>',
         b'<!entity x "anything"><rss/>',
+        b'<?xml version="1.0"?>\n<!-- note -->\n<!DOCTYPE rss><rss/>',
+        '<!DOCTYPE rss [<!ENTITY x "y">]><rss>&x;</rss>'.encode("utf-16"),
+        b"<rss><channel><!DOCTYPE rss></channel></rss>",
         b"<html><body><item><title>x</title></item></body></html>",
         b"not xml at all",
         b"",
@@ -246,6 +250,33 @@ def test_hf_daily_becomes_arxiv_leads_with_upvotes():
 def test_clean_text_unescapes_and_strips_tags():
     raw = "<script>alert(1)</script>&lt;i&gt;Mass&lt;/i&gt; n &lt; m\nend"
     assert researcher.clean_text(raw) == "Mass n < m end"
+    assert researcher.clean_text("a<!-- x -->b<STYLE a=1>c</style >d") == (
+        "a b d"
+    )
+    # An unclosed block drops the rest instead of leaking script text.
+    assert researcher.clean_text("keep <script>drop() <b>x</b>") == "keep"
+
+
+def test_clean_text_stays_linear_on_unclosed_blocks():
+    # A lazy-regex strip took tens of seconds here and blocked the event
+    # loop, so neither the internal deadline nor the node timeout could fire.
+    started = time.monotonic()
+    for opener in ("<script ", "<style>", "<!--", "<jats:title>"):
+        assert researcher.clean_text("x" + opener * 20_000) == "x"
+    assert len(researcher.clean_text("<a " * 50_000)) == 8000
+    assert time.monotonic() - started < 2
+
+
+def test_feed_quirks_cdata_doctype_text_and_leading_whitespace():
+    item = fake.rss_item(
+        description="<![CDATA[<pre><!DOCTYPE html><html></html></pre>"
+        + fake.LONG
+        + "]]>"
+    )
+    (entry,) = researcher.parse_feed(b"\n\n  " + fake.rss(item))
+    assert entry.text == fake.LONG
+    (entry,) = researcher.parse_feed(b"\xef\xbb\xbf" + fake.rss(item))
+    assert entry.title == "Synthetic feed item"
 
 
 # Fetch policy.
@@ -389,6 +420,8 @@ async def test_redirects_and_errors_are_not_followed_or_retried(status):
         ["::1"],
         ["fd00::1"],
         ["::ffff:10.0.0.1"],
+        ["64:ff9b::a00:7"],
+        ["::7f00:1"],
         [fake.PUBLIC, "10.0.0.7"],
         ["not-an-address"],
     ],
@@ -402,6 +435,15 @@ async def test_non_global_addresses_are_blocked_before_any_request(addresses):
     assert network.requests == []
     assert result.diagnostics == ["synthetic-feed:unsafe_address"]
     assert not result.candidates
+
+
+async def test_nat64_to_a_public_address_is_allowed():
+    network = fake.Network(
+        {"feeds.example.org": fake.rss(fake.rss_item())},
+        {"feeds.example.org": ["64:ff9b::5db8:d70e"]},
+    )
+    result = await run(network, load(fake.source()))
+    assert result.diagnostics == ["synthetic-feed:ok"]
 
 
 async def test_ipv4_is_preferred_and_ipv6_is_bracketed():
@@ -506,6 +548,31 @@ async def test_request_timeout_is_a_finite_code(monkeypatch):
     assert result.diagnostics == ["synthetic-feed:timeout"]
 
 
+async def test_stalled_resolver_is_a_request_timeout(monkeypatch):
+    monkeypatch.setattr(researcher, "REQUEST_SECONDS", 0.01)
+
+    async def stalled(host):
+        await asyncio.Event().wait()
+
+    result = await researcher.Researcher(
+        transport=fake.Network({}).transport(), resolver=stalled
+    ).fetch(load(fake.source()), DAY, budget_seconds=5)
+    assert result.diagnostics == ["synthetic-feed:timeout"]
+
+
+def test_long_host_chains_take_a_slot_first():
+    registry = load(
+        fake.source(id="single", url="https://one.example.org/rss"),
+        fake.source(id="a1", url="https://serial.example.org/1"),
+        fake.source(id="a2", url="https://serial.example.org/2"),
+    )
+    chains = researcher._host_chains(registry)
+    assert [[s.id for s in chain] for chain in chains] == [
+        ["a1", "a2"],
+        ["single"],
+    ]
+
+
 async def test_deadline_keeps_finished_sources():
     never = asyncio.Event()
 
@@ -546,6 +613,41 @@ async def test_outer_cancellation_propagates():
 
 
 # Filtering, merging and routing.
+
+
+async def test_arxiv_error_entries_are_not_leads():
+    error = (
+        "<entry><id>http://arxiv.org/api/errors#bad_query</id>"
+        "<title>Error</title><summary>bad query</summary>"
+        "<updated>2026-10-28T00:00:00-04:00</updated>"
+        '<link href="http://arxiv.org/api/errors#bad_query" rel="alternate"/>'
+        "</entry>"
+    )
+    network = fake.Network(
+        {"export.arxiv.org": fake.atom(error, fake.arxiv_entry())}
+    )
+    result = await run(
+        network,
+        load(
+            fake.source(
+                kind="arxiv",
+                url="https://export.arxiv.org/api/query",
+                query="cat:cs.LG",
+            )
+        ),
+    )
+    assert [c["url"] for c in result.candidates] == [
+        "https://arxiv.org/abs/2610.01234"
+    ]
+
+
+def test_source_basis_names_at_most_five_feeds():
+    names = [f"Synthetic Journal Number {n:02d} " + "x" * 50 for n in range(9)]
+    basis = researcher._basis(names)
+    assert basis.startswith("研究员订阅源：" + names[0])
+    assert names[4] in basis and names[5] not in basis
+    assert basis.endswith("等（仅元数据，未打开原文）")
+    assert len(basis) <= 1200
 
 
 async def test_future_stale_and_undated_items_are_dropped():
