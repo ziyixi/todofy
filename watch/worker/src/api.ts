@@ -18,15 +18,20 @@ import { Code, RpcError } from '@ziyixi/proto/rpc-status';
 import { ChangeSchema } from '@ziyixi/proto/watch/ui/v1/change_pb';
 import { WatchSchema, type Watch } from '@ziyixi/proto/watch/ui/v1/watch_pb';
 import {
+  BackupRestore_State,
+  BackupRestoreSchema,
   ListChangesResponseSchema,
   PollWatchEventsResponseSchema,
   WatchEvent_Kind,
   ListWatchesResponseSchema,
   ServiceStatusSchema,
+  type BackupRestore,
   type PreviewWatchResponse,
+  type ServiceStatus,
   type WatchUiService,
 } from '@ziyixi/proto/watch/ui/v1/watch_ui_service_pb';
 import { fromWire, toWire } from '@ziyixi/proto/wire-json';
+import { backupFacts } from './backup.ts';
 import { browserAllowed } from './browser.ts';
 import { checkHash, readConfig, readHash, SETTINGS_FIELDS, settingsWire, type ConfigEnv, type WatchConfig } from './config.ts';
 import { earliestFetch, nextCheckAt, nextUtcMidnight, utcDay } from './etiquette.ts';
@@ -35,6 +40,7 @@ import { BROWSER_DAILY_MS, CHANGE_ID_PATTERN, CHANGE_PAGE, FILTER_LITERALS_MAX, 
 import { changeMessage, watchMessage, withBackoff } from './model.ts';
 import type { Comparison } from './preview.ts';
 import { REASONS, watchError } from './reasons.ts';
+import { RestoreRefusal, restoreState, type RestoreState } from './restore.ts';
 import type { ChangeStateName, Store, WatchRow } from './store.ts';
 
 /** What every handler gets from WatchState. */
@@ -46,7 +52,14 @@ export interface ApiContext {
   readonly now: number;
   readonly configEnv: ConfigEnv;
   readonly build: string;
+  /** An owner write's transaction: refused (RESTORE_RUNNING, BACKUP_RUNNING) while the store must not change. */
   readonly transact: <T>(fn: () => T) => T;
+  /** Throws as `transact` does, for a write outside one (a preview's etiquette rows). */
+  readonly writable: () => void;
+  /** The deployment has a backup bucket (BACKUPS). */
+  readonly backups: boolean;
+  /** Starts a restore of `backup` (empty: the newest) into this empty store (restore.ts). */
+  readonly restore: (backup: string) => Promise<void>;
   /** Brings the alarm forward (a new watch, a resume, a check). */
   readonly wake: () => Promise<void>;
   readonly alarmAt: () => Promise<number | null>;
@@ -420,6 +433,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof WatchUiService>, ApiContex
   },
 
   async previewWatch(request, ctx) {
+    ctx.writable();
     const watch = request.watch ?? bad();
     const config = configOf(watch, ctx);
     // Stages 4 and 5 compare with an existing watch's texts, when what is read is the same.
@@ -474,30 +488,77 @@ export const handlers: ServiceHandlers<ShapeOf<typeof WatchUiService>, ApiContex
     );
   },
 
-  async getServiceStatus(request, ctx) {
+  getServiceStatus(request, ctx) {
     if (request.name !== 'serviceStatus') notFound();
-    const rows = ctx.store.watches();
-    const counts = ctx.store.openCounts();
-    const ledger = ctx.store.ledger(utcDay(ctx.now));
-    const alarm = await ctx.alarmAt();
-    const lastAlarm = ctx.store.getMeta('last_alarm_at');
-    return create(ServiceStatusSchema, {
-      name: 'serviceStatus',
-      activeWatchCount: rows.filter((row) => row.state === 'active').length,
-      pausedWatchCount: rows.filter((row) => row.state === 'paused').length,
-      brokenWatchCount: rows.filter((row) => row.state === 'broken').length,
-      newChangeCount: counts.confirmed,
-      pendingChangeCount: counts.pending,
-      suppressedChangeCount: counts.suppressed,
-      browserEnabled: ctx.configEnv.browserEnabled,
-      browserUsedMs: ledger.browser_ms,
-      browserLimitMs: BROWSER_DAILY_MS,
-      browserQuotaExhausted: !browserAllowed(ledger),
-      browserQuotaResetTime: timestampFromMs(nextUtcMidnight(ctx.now)),
-      nextAlarmTime: alarm === null ? undefined : timestampFromMs(alarm),
-      lastAlarmTime: lastAlarm === null ? undefined : timestampFromMs(Number(lastAlarm)),
-      fetchCountToday: ledger.fetches,
-      build: ctx.build,
-    });
+    return serviceStatus(ctx);
+  },
+
+  /** The owner's restore of a backup into this empty store (restore.ts; the private binding is refused in state.ts). */
+  async restoreBackup(request, ctx) {
+    if (request.name !== 'serviceStatus') notFound();
+    try {
+      await ctx.restore(request.backup);
+    } catch (error) {
+      if (error instanceof RestoreRefusal) throw watchError(error.reason);
+      // Reading the backup bucket failed: a dependency, worth repeating.
+      throw watchError('UNAVAILABLE');
+    }
+    await ctx.wake();
+    return serviceStatus(ctx);
   },
 };
+
+const RESTORE_STATES: Readonly<Record<RestoreState['state'], BackupRestore_State>> = {
+  running: BackupRestore_State.RUNNING,
+  succeeded: BackupRestore_State.SUCCEEDED,
+  failed: BackupRestore_State.FAILED,
+};
+
+/** The last restore and its verification, counts and codes only. */
+function restoreMessage(state: RestoreState | null): BackupRestore | undefined {
+  if (state === null) return undefined;
+  return create(BackupRestoreSchema, {
+    backup: state.backup,
+    state: RESTORE_STATES[state.state],
+    startTime: timestampFromMs(state.started_at),
+    endTime: state.finished_at === null ? undefined : timestampFromMs(state.finished_at),
+    errorCode: state.error_code,
+    tables: state.tables.map((table) => ({ table: table.table, restoredRowCount: table.restored, expectedRowCount: table.expected })),
+    evidenceRestoredCount: state.evidence.restored,
+    evidencePresentCount: state.evidence.present,
+    evidenceMissingCount: state.evidence.missing,
+    evidenceMismatchedCount: state.evidence.mismatched,
+  });
+}
+
+/** The health view's facts (GetServiceStatus, and RestoreBackup's answer). */
+async function serviceStatus(ctx: ApiContext): Promise<ServiceStatus> {
+  const rows = ctx.store.watches();
+  const counts = ctx.store.openCounts();
+  const ledger = ctx.store.ledger(utcDay(ctx.now));
+  const alarm = await ctx.alarmAt();
+  const lastAlarm = ctx.store.getMeta('last_alarm_at');
+  const backup = ctx.backups ? backupFacts(ctx.store) : null;
+  return create(ServiceStatusSchema, {
+    name: 'serviceStatus',
+    activeWatchCount: rows.filter((row) => row.state === 'active').length,
+    pausedWatchCount: rows.filter((row) => row.state === 'paused').length,
+    brokenWatchCount: rows.filter((row) => row.state === 'broken').length,
+    newChangeCount: counts.confirmed,
+    pendingChangeCount: counts.pending,
+    suppressedChangeCount: counts.suppressed,
+    browserEnabled: ctx.configEnv.browserEnabled,
+    browserUsedMs: ledger.browser_ms,
+    browserLimitMs: BROWSER_DAILY_MS,
+    browserQuotaExhausted: !browserAllowed(ledger),
+    browserQuotaResetTime: timestampFromMs(nextUtcMidnight(ctx.now)),
+    nextAlarmTime: alarm === null ? undefined : timestampFromMs(alarm),
+    lastAlarmTime: lastAlarm === null ? undefined : timestampFromMs(Number(lastAlarm)),
+    fetchCountToday: ledger.fetches,
+    build: ctx.build,
+    lastBackupTime: backup?.last_backup_at == null ? undefined : timestampFromMs(backup.last_backup_at),
+    lastBackup: backup?.last_key ?? '',
+    backupFailed: backup?.status === 'failed',
+    restore: restoreMessage(restoreState(ctx.store)),
+  });
+}

@@ -39,10 +39,13 @@ test('every request reaches the Worker first (Access, private headers), and /new
   assert.deepEqual(config.assets, { directory: 'web/dist', binding: 'ASSETS', run_worker_first: true, not_found_handling: 'single-page-application' })
 })
 
-test('one SQLite Durable Object, private evidence R2 and Browser Run; no D1, KV, queue or AI', () => {
+test('one SQLite Durable Object, private evidence and backup R2, and Browser Run; no D1, KV, queue or AI', () => {
   assert.deepEqual(config.durable_objects, { bindings: [{ name: 'WATCH', class_name: 'WatchState' }] })
   assert.deepEqual(config.migrations, [{ tag: 'v1', new_sqlite_classes: ['WatchState'] }])
-  assert.deepEqual(config.r2_buckets, [{ binding: 'EVIDENCE_STORE', bucket_name: 'watch-evidence' }])
+  assert.deepEqual(config.r2_buckets, [
+    { binding: 'EVIDENCE_STORE', bucket_name: 'watch-evidence' },
+    { binding: 'BACKUPS', bucket_name: 'watch-backups' },
+  ])
   assert.deepEqual(config.browser, { binding: 'BROWSER' })
   assert.deepEqual(config.compatibility_flags, ['nodejs_compat'])
   for (const key of ['d1_databases', 'kv_namespaces', 'queues', 'ai']) assert.equal(config[key], undefined, key)

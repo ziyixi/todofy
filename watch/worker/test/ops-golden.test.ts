@@ -29,7 +29,8 @@ const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 const TASKS = {} as Service;
-const env = { PUBLIC_HOST: 'watch.example.com', TASKS };
+const BACKUPS = {} as R2Bucket;
+const env = { PUBLIC_HOST: 'watch.example.com', TASKS, BACKUPS };
 
 /** The SqlStorage surface Store uses (exec(...).toArray() and the cursor's row counts), on real SQLite. */
 function sqlStorage(): SqlStorage {
@@ -92,6 +93,11 @@ function intent(target: Store, id: string, state: 'open' | 'recorded' | 'refused
   );
 }
 
+/** The daily backup's state (backup.ts) as the object stores it. */
+function backup(target: Store, status: 'ok' | 'failed', lastBackupAt: number, since: number): void {
+  target.setMeta('backup', JSON.stringify({ since, next_run: NOW + DAY, failed_jobs: status === 'ok' ? 0 : 1, status, last_backup_at: lastBackupAt, last_key: 'backups/2026-09-27T112300Z/', error_code: status === 'ok' ? '' : 'storage_error', job: null }));
+}
+
 function cases(): Record<string, unknown> {
   const fresh = store();
   watch(fresh, 'kettle', 'active');
@@ -105,6 +111,7 @@ function cases(): Record<string, unknown> {
   intent(fresh, 'urgent-c0', 'recorded', NOW - 3 * HOUR);
   fresh.addLedger('2026-10-01', 37);
   fresh.setMeta('last_alarm_at', String(NOW - 5 * MINUTE));
+  backup(fresh, 'ok', Date.parse('2026-10-01T11:23:04Z'), NOW - 30 * DAY);
 
   const degraded = store();
   watch(degraded, 'old', 'broken', 3, NOW - 3 * DAY);
@@ -115,6 +122,8 @@ function cases(): Record<string, unknown> {
   intent(degraded, 'urgent-c9', 'expired', NOW - 8 * DAY, '2026-09-23');
   degraded.run(`UPDATE intents SET updated_at = ? WHERE intent_id = 'urgent-c9'`, NOW - DAY);
   degraded.setMeta('last_alarm_at', String(NOW - 13 * HOUR));
+  // The last complete backup is four days old, and the last job failed.
+  backup(degraded, 'failed', NOW - 4 * DAY, NOW - 30 * DAY);
   const shed = { level: 'shed', reason: 'do_rows_read_high', until: '2026-10-02T01:00:00Z' };
   const guarded = setGuard(degraded, shed, NOW - 30 * MINUTE);
 

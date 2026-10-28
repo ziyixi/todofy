@@ -20,6 +20,12 @@ export interface Env {
   /** Private saved text and screenshots; managed by the Watch snapshot index. */
   readonly EVIDENCE_STORE?: R2Bucket;
   /**
+   * Private daily backups (backup.ts, ../../docs/backup.md): the store's tables and a copy of every evidence object
+   * they name; RestoreBackup (restore.ts) reads them back into an empty store. Absent in local development and most
+   * workerd tests: then nothing is backed up.
+   */
+  readonly BACKUPS?: R2Bucket;
+  /**
    * Browser Run for rendered page evidence (browser.ts). Production uses the official Puppeteer transport;
    * local manual tests inject their synthetic renderer.
    */

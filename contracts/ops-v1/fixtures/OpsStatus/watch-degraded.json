@@ -19,6 +19,19 @@
   },
   "signals": [
     {
+      "code": "backup_stale",
+      "severity": "critical",
+      "metrics": {
+        "age_seconds": 345600,
+        "has_backup": 1
+      }
+    },
+    {
+      "code": "backup_failed",
+      "severity": "warning",
+      "metrics": {}
+    },
+    {
       "code": "notify_unsettled",
       "severity": "warning",
       "metrics": {
@@ -60,9 +73,10 @@
     "fetches_today": 0,
     "notifications_pending": 1,
     "intents_open": 1,
-    "intents_sent_today": 0
+    "intents_sent_today": 0,
+    "backup_age_seconds": 345600
   },
-  "last_backup_at": null,
+  "last_backup_at": "2026-09-27T14:00:00Z",
   "ui_url": "https://watch.example.com/",
   "capabilities": [
     "guard"
