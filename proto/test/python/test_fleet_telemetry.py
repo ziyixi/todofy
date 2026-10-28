@@ -30,8 +30,8 @@ class FleetTelemetry(unittest.TestCase):
                 from_wire(HostReport, report, strict=True)
 
         invalid(lambda metrics: metrics.update(boot_id="not-a-boot"))
-        invalid(lambda metrics: metrics.update(interface="enp1s0"))
-        invalid(lambda metrics: metrics["network"].update(name="enp1s0"))
+        invalid(lambda metrics: metrics.update(interface="eth1"))
+        invalid(lambda metrics: metrics["network"].update(name="eth1"))
         invalid(lambda metrics: metrics["cpu"].update(idle_milliseconds=-1))
         invalid(lambda metrics: metrics["cpu"].update(total_milliseconds=2**53))
         invalid(lambda metrics: metrics["cpu"].pop("cpu_count"))

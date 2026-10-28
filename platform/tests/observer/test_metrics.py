@@ -24,8 +24,8 @@ ctxt 456
 NET_DEV = """Inter-|   Receive                                                |  Transmit
  face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
     lo: 900 9 0 0 0 0 0 0 900 9 0 0 0 0 0 0
-enp1s0:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0
-  wlo1: 5000 50 0 0 0 0 0 0 7000 70 0 0 0 0 0 0
+eth1:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0
+  wlan0: 5000 50 0 0 0 0 0 0 7000 70 0 0 0 0 0 0
 docker0: 111 1 0 0 0 0 0 0 222 2 0 0 0 0 0 0
   cni0: 333 3 0 0 0 0 0 0 444 4 0 0 0 0 0 0
 veth1a2b3c4d: 555 5 0 0 0 0 0 0 666 6 0 0 0 0 0 0
@@ -105,7 +105,7 @@ class KernelFiles(unittest.TestCase):
         self.assertEqual(
             value, {"interface_count": 2, "receive_bytes": 5000, "transmit_bytes": 7000}
         )
-        self.assertNotIn("wlo1", json.dumps(value))
+        self.assertNotIn("wlan0", json.dumps(value))
         self.assertIsNone(metrics.network("garbage"))
         self.assertIsNone(metrics.network(NET_DEV + "eth0: 1 2 3\n"))
         many = NET_DEV.splitlines()[:2] + [f"veth{i}: " + "0 " * 16 for i in range(600)]
@@ -283,6 +283,14 @@ class NodeReport(unittest.TestCase):
             )
             self.assertEqual(report["metrics"], fixture)
             read.assert_called_with("another-cloud")
+
+            # A failed or out-of-contract reading leaves the report without metrics.
+            for failure in (
+                {"side_effect": RuntimeError("synthetic")},
+                {"return_value": {**fixture, "load": {"one_minute": -1}}},
+            ):
+                with patch.object(collector, "node_metrics", **failure):
+                    self.assertNotIn("metrics", json.loads(collector.observe({}, 1)))
 
             # A report over the 16 KiB bound drops workloads, then metrics, never the heartbeat.
             real = collector._encode

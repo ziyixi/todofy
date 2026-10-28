@@ -209,7 +209,8 @@ class BootstrapBoundaries(unittest.TestCase):
             {"path": "/proc/1/net/dev", "type": "File"},
         )
         self.assertEqual(
-            volumes["root-fs"]["hostPath"], {"path": "/usr", "type": "Directory"}
+            volumes["root-fs"]["hostPath"],
+            {"path": "/usr/lib/os-release", "type": "File"},
         )
         self.assertEqual(
             volumes["k3s-fs"]["hostPath"],

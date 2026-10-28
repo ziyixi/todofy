@@ -144,12 +144,13 @@ spec:
               hostPath:
                 path: /proc/1/net/dev
                 type: File
-            # statvfs targets only, never listed or read: public OS files and the K3s data directory
-            # (its agent and server state are root-only).
+            # statvfs targets only, never listed or read: one public distro file on the root filesystem
+            # (a file has no subtree or nested mounts) and the K3s data directory (its agent and server
+            # state are root-only).
             - name: root-fs
               hostPath:
-                path: /usr
-                type: Directory
+                path: /usr/lib/os-release
+                type: File
             - name: k3s-fs
               hostPath:
                 path: /var/lib/rancher/k3s
