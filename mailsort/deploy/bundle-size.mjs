@@ -14,9 +14,10 @@
 //   node ../deploy/bundle-size.mjs "$RUNNER_TEMP/mailsort-bundle"     (from worker/, after the dry run's --outdir)
 import { checkWorkerBundle, isMain } from '../../tools/bundle-size/bundle-size.mjs'
 
-// October 25: Codex usage accounting and the shared inference monitor descriptor measure 148.8 KiB in Linux CI.
 // October 26: bounded recent-read intake and its explicit flow outcome measure 150.1 KiB in Linux CI.
-// Keep modest build headroom; platform, CPU, model and spending limits are unchanged.
-export const BUDGET_GZIP_BYTES = 152 * 1024
+// October 27: the retired Workers AI path, rechecks, label consolidation and Codex usage ledger, and the shared
+// inference monitor descriptor leaving ops-v1, bring the bundle to 135.8 KiB. Lowered to 138 KiB with the same modest
+// build headroom; platform, CPU, model and spending limits are unchanged.
+export const BUDGET_GZIP_BYTES = 138 * 1024
 
 if (isMain(import.meta.url)) process.exitCode = checkWorkerBundle('The mailsort app', process.argv[2], BUDGET_GZIP_BYTES)
