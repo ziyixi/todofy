@@ -1,6 +1,7 @@
 import { HostReportSchema } from '@ziyixi/proto/fleet/telemetry/v1/host_report_pb';
 import { fromWire, toWire } from '@ziyixi/proto/wire-json';
 import type { HostReport } from '@ziyixi/proto/fleet/telemetry/v1/host_report_wire';
+import { validMetrics } from './metrics.ts';
 import { releaseReady, validRuntime } from './runtime.ts';
 
 export type Report = HostReport;
@@ -39,6 +40,7 @@ export function parseReport(text: string, host: string, epoch: string, now: numb
     const decoded = fromWire(HostReportSchema, input, { strict: true });
     report = toWire(HostReportSchema, decoded.message);
     if (!validNewsletter(report.newsletter)) throw new Error('invalid_newsletter_outcomes');
+    if (report.metrics && !validMetrics(report.metrics)) throw new Error('invalid_metrics');
     if (typeof input === 'object' && input !== null && 'configured_daemons' in input) {
       const daemons = report.configured_daemons;
       if (!daemons?.k3s || !daemons.ssh
@@ -88,7 +90,10 @@ export function reportCodes(report: Report): string[] {
   if ((report.newsletter.unknown_count ?? 0) > 0) {
     codes.push('newsletter_unknown');
   }
-  if ((report.disk_used_percent ?? 0) >= 90) {
+  // Any observed filesystem: the observer's own volume (legacy percent) and, from metrics, the root and K3s ones.
+  const filesystems = Object.values(report.metrics?.filesystems ?? {});
+  if ((report.disk_used_percent ?? 0) >= 90
+    || filesystems.some((fs) => fs.used_bytes >= 0.9 * (fs.used_bytes + fs.available_bytes))) {
     codes.push('disk_high');
   }
   if ((report.memory_used_percent ?? 0) >= 90) {

@@ -1,12 +1,14 @@
 /** Owner HTTP surface: authenticate first, then the shared, read-only IDL transcoder. */
 import { createAccessVerifier, withPrivateHeaders, STRICT_CSP } from '@ziyixi/edge-auth';
-import { FleetUiService } from '@ziyixi/proto/fleet/ui/v1/fleet_ui_service_pb';
+import { FleetUiService, SummarizeNodeMetricsRequest_Range as Range } from '@ziyixi/proto/fleet/ui/v1/fleet_ui_service_pb';
+import { timestampMs } from '@ziyixi/proto/protobuf/wkt';
 import { HttpTranscoder, PreEncoded } from '@ziyixi/proto/http-transcoder';
 import { RpcError, Code } from '@ziyixi/proto/rpc-status';
 import type { Env } from './env.ts';
+import { METRICS, type RangeName } from './metrics.ts';
 import { handleReceipt } from './receipt.ts';
 import { REPORT_PATH } from './report.ts';
-import { OBJECT_NAME } from './state.ts';
+import { OBJECT_NAME, type FleetState } from './state.ts';
 
 interface OwnerContext { readonly env: Env; readonly at: number; }
 const verifier = createAccessVerifier();
@@ -14,14 +16,50 @@ function error(code: Code, reason: string): RpcError {
   return new RpcError(code, reason, 'Fleet request failed.');
 }
 
+const RANGES: Readonly<Record<number, RangeName>> = {
+  [Range.UNSPECIFIED]: 'day', [Range.DAY]: 'day', [Range.WEEK]: 'week', [Range.MONTH]: 'month',
+  [Range.HALF_YEAR]: 'half_year', [Range.TWO_YEARS]: 'two_years',
+};
+/** The earliest range end a summary reads; older ones are refused rather than written as odd timestamps. */
+const EARLIEST_END = Date.UTC(2020, 0, 1);
+
+function nodeKey(name: string): string {
+  const match = /^nodes\/([a-z][a-z0-9_-]{0,31})$/.exec(name);
+  if (!match?.[1]) throw error(Code.INVALID_ARGUMENT, 'BAD_REQUEST');
+  return match[1];
+}
+
+/** Every Durable Object call is the one dependency: its failure is UNAVAILABLE, its null answer NOT_FOUND. */
+async function fromState(context: OwnerContext, call: (stub: DurableObjectStub<FleetState>) => Promise<string | null>): Promise<PreEncoded> {
+  let text: string | null;
+  try {
+    text = await call(context.env.FLEET.get(context.env.FLEET.idFromName(OBJECT_NAME)));
+  } catch {
+    throw error(Code.UNAVAILABLE, 'UNAVAILABLE');
+  }
+  if (text === null) throw error(Code.NOT_FOUND, 'NOT_FOUND');
+  return new PreEncoded(text);
+}
+
 const api = new HttpTranscoder<typeof FleetUiService.method, OwnerContext>(FleetUiService, {
-  getFleetStatus: async (_request, context) => {
-    try {
-      const stub = context.env.FLEET.get(context.env.FLEET.idFromName(OBJECT_NAME));
-      return new PreEncoded(await stub.view(context.at));
-    } catch {
-      throw error(Code.UNAVAILABLE, 'UNAVAILABLE');
+  getFleetStatus: (_request, context) => fromState(context, (stub) => stub.view(context.at)),
+  getNode: (request, context) => {
+    const node = nodeKey(request.name);
+    return fromState(context, (stub) => stub.node(node));
+  },
+  listNodes: (request, context) => {
+    if (request.pageSize < 0 || request.pageToken !== '') throw error(Code.INVALID_ARGUMENT, 'BAD_REQUEST');
+    return fromState(context, (stub) => stub.nodes());
+  },
+  summarizeNodeMetrics: (request, context) => {
+    const node = nodeKey(request.name);
+    const range = RANGES[request.range];
+    const end = Math.min(request.endTime ? timestampMs(request.endTime) : context.at, context.at);
+    if (!range || end < EARLIEST_END || request.metrics.length > 32
+      || request.metrics.some((metric) => !Object.hasOwn(METRICS, metric))) {
+      throw error(Code.INVALID_ARGUMENT, 'BAD_REQUEST');
     }
+    return fromState(context, (stub) => stub.summarize(node, range, end, request.metrics));
   },
 }, {
   domain: 'fleet.ziyixi.science',

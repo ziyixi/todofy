@@ -3,6 +3,7 @@ syntax = "proto3";
 package fleet.ui.v1;
 
 import "fleet/telemetry/v1/host_report.proto";
+import "fleet/ui/v1/node.proto";
 import "google/api/annotations.proto";
 import "google/api/client.proto";
 import "google/api/field_behavior.proto";
@@ -20,6 +21,20 @@ service FleetUiService {
   rpc GetFleetStatus(GetFleetStatusRequest) returns (FleetStatus) {
     option (google.api.http) = {get: "/api/v1/{name=fleetStatus}"};
     option (google.api.method_signature) = "name";
+  }
+  // One node and its latest sample (AIP-131).
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  rpc GetNode(GetNodeRequest) returns (Node) {
+    option (google.api.http) = {get: "/api/v1/{name=nodes/*}"};
+    option (google.api.method_signature) = "name";
+  }
+  // Every node with metrics and its latest sample, at most 16 (AIP-132; one page, no tokens).
+  rpc ListNodes(ListNodesRequest) returns (ListNodesResponse) {
+    option (google.api.http) = {get: "/api/v1/nodes"};
+  }
+  // A node's metrics over a range ending at `end_time`, at most 300 steps per series (AIP-136).
+  rpc SummarizeNodeMetrics(SummarizeNodeMetricsRequest) returns (SummarizeNodeMetricsResponse) {
+    option (google.api.http) = {get: "/api/v1/{name=nodes/*}:summarizeMetrics"};
   }
 }
 // Request the singleton snapshot.
@@ -61,4 +76,73 @@ message Change {
   google.protobuf.Timestamp observation_time = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Safe vocabulary code, never an exception, log or provider message.
   string code = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+// Input of GetNode.
+message GetNodeRequest {
+  // nodes/{node}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "fleet.ziyixi.science/Node"
+  ];
+}
+// Input of ListNodes.
+message ListNodesRequest {
+  // At most this many nodes: 0 means 16, a larger value is read as 16.
+  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
+  // Reserved for paging; always empty, as every node fits one page.
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+// Output of ListNodes.
+message ListNodesResponse {
+  // Nodes by name.
+  repeated Node nodes = 1;
+  // Always empty.
+  string next_page_token = 2;
+}
+// Input of SummarizeNodeMetrics.
+message SummarizeNodeMetricsRequest {
+  // How far back a summary reaches, and so its resolution.
+  enum Range {
+    // Read as DAY.
+    RANGE_UNSPECIFIED = 0;
+    // 24 hours of 5-minute steps (kept 14 days).
+    RANGE_DAY = 1;
+    // 7 days of hourly steps (kept 180 days).
+    RANGE_WEEK = 2;
+    // 30 days of 3-hour steps (from hourly rollups).
+    RANGE_MONTH = 3;
+    // 180 days of daily steps (kept 2 years).
+    RANGE_HALF_YEAR = 4;
+    // 2 years of 3-day steps (from daily rollups).
+    RANGE_TWO_YEARS = 5;
+  }
+
+  // nodes/{node}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "fleet.ziyixi.science/Node"
+  ];
+  // The range; unspecified is DAY.
+  Range range = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The range's end (exclusive); unset or later than now means now. Older ranges read what retention kept.
+  google.protobuf.Timestamp end_time = 3 [(google.api.field_behavior) = OPTIONAL];
+  // Metric names to return (`MetricSeries.metric`); empty returns every series. An unknown name is INVALID_ARGUMENT.
+  repeated string metrics = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+// Output of SummarizeNodeMetrics.
+message SummarizeNodeMetricsResponse {
+  // nodes/{node}.
+  string name = 1 [(google.api.resource_reference).type = "fleet.ziyixi.science/Node"];
+  // The range (never unspecified).
+  SummarizeNodeMetricsRequest.Range range = 2;
+  // The first step's start.
+  google.protobuf.Timestamp start_time = 3;
+  // The range's end (exclusive).
+  google.protobuf.Timestamp end_time = 4;
+  // Every step's length in seconds.
+  // (-- api-linter: core::0142::time-field-type=disabled
+  //     aip.dev/not-precedent: the wire profile has no Duration. --)
+  int32 step_seconds = 5;
+  // Series with at least one point, in metric order, then by label.
+  repeated MetricSeries series = 6;
 }
