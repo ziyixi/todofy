@@ -29,9 +29,10 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
   recall_extension_publish
                     recall/extension/ or recall/shared/ (the Chrome extension and the code it bundles) changed:
                     publish the build "Recall checks" made as the GitHub Release recall-extension-v<version>
-                    (main only; a version whose tag exists is skipped). Any file there counts, a README too: an
-                    extra release is harmless, a missed one is not. A dispatch for recall (or all) and a run of
-                    everything publish too. The extension is never deployed.
+                    (main only; a version whose tag exists is skipped). Any file there but documentation counts
+                    (shared/NOTICE is copied into the build): an extra release is harmless, a missed one is not.
+                    A dispatch for recall (or all) and a run of everything publish too. The extension is never
+                    deployed.
   The links app (links/, the short links on s.ziyixi.science) is checked and deployed since L2 (links/docs/design.md
   section 11). It answers ops-v1 (its Ops entrypoint, which reports its daily backup; Contracts runs that test; Home
   binds it, HOME_BOUND) and compiles in packages/edge-auth and the TypeScript proto runtime with proto/links/ui/ and
@@ -82,12 +83,16 @@ so a change whose run was cancelled or failed is checked (and deployed) again by
   every app but deploy none, except the contract files the TypeScript Workers bundle (BUNDLED_BY,
   e.g. OPS_LIMITS in contracts/ops-v1/ops-v1.ts), which also deploy every app listed for them. A
   shared package packages/<name>/ is compiled into the apps listed in PACKAGE_USERS, so any change
-  inside it runs the package checks and checks AND deploys each of those apps. Its Markdown documents
-  (packages/<name>/**/*.md: README, SPEC) are compiled into nothing: they run the package checks and
-  check those apps (tests cite the SPEC) but deploy none, so a documentation edit never redeploys
-  production. A package missing from PACKAGE_USERS counts as used by every app (fail safe; the tests
-  run by the Changes job also fail until PACKAGE_USERS matches the file: dependencies). A file
-  directly under packages/ (a README) is root documentation: gate only.
+  inside it runs the package checks and checks AND deploys each of those apps. Its README and SPEC are
+  documentation (below). A package missing from PACKAGE_USERS counts as used by every app (fail safe;
+  the tests run by the Changes job also fail until PACKAGE_USERS matches the file: dependencies).
+Documentation (is_documentation: Markdown anywhere, and any file in a docs/ folder, the repository's or an app's,
+  or the website's doc/) is read by people, not by a build or a check: a change to it alone selects no check, no
+  deploy and no VPS release; Changes (whose tests check the documents' links and references) and the gate still run.
+  The exceptions are the Markdown a build ships (RUNTIME_MARKDOWN: the app's input like its code), reviewed test
+  directories (fixtures), and the documents an app's tests read (TESTED_DOCUMENTS: that app is checked, nothing is
+  deployed). test_ci_changes.py scans Worker Text imports, ?raw imports, file reads, wheel package-data, image
+  COPY sources and public/ folders, and fails when any of them reaches a path classified as documentation.
 Newsletter remains an independent VPS image. newsletter_deploy publishes its tested image to GHCR; it does
 not upgrade the server. It still uses its locked external ziyixi-protos dependency, not the root proto runtime.
 platform/ checks and publishes its own independently tested daemon image; platform_deploy upgrades the VPS.
@@ -256,6 +261,30 @@ APP_TEST_DIRECTORIES = (
     "model-router/worker/test/",
     "model-router/tools/test/",
 )
+# Documentation (is_documentation) is Markdown anywhere and every file in these folders: docs/ at the root, and
+# <app>/docs/ or <app>/doc/ (the website's design notes and their images).
+DOC_FOLDERS = ("docs", "doc")
+# Markdown that a build ships, an input of its app like its code (checked and deployed). Keep this list in step with
+# the guard in test_ci_changes.py, which scans what the builds read.
+RUNTIME_MARKDOWN = (
+    # The brief's Worker imports policy.md and profile.md as Text modules (wrangler.toml [[rules]]).
+    "brief/content-config/",
+    # The mailsort Worker imports its prompts as Text modules (*.txt today; a Markdown prompt would ship the same way).
+    "mailsort/prompts/",
+    # The newsletter wheel's package-data (instructions/, policy/), installed into its image.
+    "newsletter/src/",
+)
+# Documents an app's tests read (?raw imports, file reads), or its image check validates: a change checks that app
+# and deploys nothing. newsletter/content-config/ is published by its own workflow (content-config.yml) and validated
+# against the candidate image in "Newsletter image checks".
+TESTED_DOCUMENTS: dict[str, tuple[str, ...]] = {
+    "contracts/ops-v1/README.md": ("dashboard",),
+    "dashboard/docs/design.md": ("dashboard",),
+    "dashboard/docs/design-v2.md": ("dashboard",),
+    "dashboard/docs/limits.md": ("dashboard",),
+    "mailsort/docs/backup.md": ("mailsort",),
+    "newsletter/content-config/": ("newsletter",),
+}
 # packages/<name>/ -> the apps whose Workers compile its workspace dependency in.
 PACKAGE_USERS = {"model-router-client": ("mailsort", "brief", "newsletter", "todofy"), "edge-auth": ("todofy", "mail-hero", "dashboard", "links", "watch", "fleet", "mailsort", "recall", "brief", "tasks", "personal-mcp", "model-router"), "planning-ui": ("tasks",), "task-dates": ("tasks",)}
 # The protobuf IDL (proto/README.md): app -> the languages ("ts", "python") whose generated code and runtime
@@ -459,9 +488,18 @@ def outputs(
     return {key: result[key] for key in KEYS}
 
 
-def is_package_document(path: str) -> bool:
-    """A Markdown file inside a package (packages/<name>/**/*.md): documentation, never compiled in."""
-    return path.startswith("packages/") and path.count("/") >= 2 and path.endswith(".md")
+def is_documentation(path: str) -> bool:
+    """Read by people only: Markdown, or a file in a docs folder, that no build ships and no reviewed test directory
+    holds (documents some tests read are documentation too: document_readers)."""
+    if path.startswith(RUNTIME_MARKDOWN + APP_TEST_DIRECTORIES):
+        return False
+    folders = path.split("/")[:-1]
+    return path.endswith(".md") or folders[:1] == ["docs"] or (len(folders) >= 2 and folders[1] in DOC_FOLDERS)
+
+
+def document_readers(path: str) -> set[str]:
+    """The apps whose tests read this document (TESTED_DOCUMENTS): they are checked, none deployed."""
+    return {app for prefix, apps in TESTED_DOCUMENTS.items() if path.startswith(prefix) for app in apps}
 
 
 def retired_packages(root: Path = Path(__file__).resolve().parents[2]) -> tuple[str, ...]:
@@ -590,12 +628,15 @@ def workspace_reach(paths: list[str], read: Reader | None) -> tuple[list[str], b
 
 def classify(paths: Iterable[str], read: Reader | None = None) -> dict[str, bool]:
     paths = [path for path in paths if path]
+    # Documentation selects nothing but the apps whose tests read it (checks only); everything below sees the rest.
+    readers = {app for path in paths if is_documentation(path) for app in document_readers(path)}
+    paths = [path for path in paths if not is_documentation(path)]
     node_workspace = bool(NODE_WORKSPACE_INPUTS.intersection(paths)) or ".python-version" in paths
     python_workspace = bool(PYTHON_WORKSPACE_INPUTS.intersection(paths))
     # A root workspace change checks every member; a member manifest a version bump reaches counts as changed itself.
     members, node_all, python_all = workspace_reach(paths, read)
     paths.extend(members)
-    apps = {app for app in APPS if any(path.startswith(f"{app}/") for path in paths)}
+    apps = readers | {app for app in APPS if any(path.startswith(f"{app}/") for path in paths)}
     apps.update((set(PROTO_USERS) if node_workspace else set()) | (PYTHON_WORKSPACE_APPS if python_workspace else set()))
     workspace_apps = (set(PROTO_USERS) if node_all else set()) | (PYTHON_WORKSPACE_APPS if python_all else set())
     # A Newsletter release also tests and publishes the independent monitor image from this source SHA.
@@ -603,24 +644,20 @@ def classify(paths: Iterable[str], read: Reader | None = None) -> dict[str, bool
         apps.add("platform")
     # Catalog metadata and reviewed test directories are checked, but are not production inputs.
     direct_deploys = {app for app in apps if any(path.startswith(f"{app}/") and path != f"{app}/app.toml"
-                       and not path.startswith(APP_TEST_DIRECTORIES)
-                       and not (app in {"newsletter", "platform", "codex-gateway"} and path.endswith(".md")) for path in paths)}
+                       and not path.startswith(APP_TEST_DIRECTORIES) for path in paths)}
     direct_deploys.update(workspace_apps)
     if "newsletter" in direct_deploys:
         direct_deploys.add("platform")
     # This shared promotion tool owns both tested-image publications. Its executable changes need fresh tested
-    # images and the gated VPS release; its Markdown remains ordinary tooling documentation (checks only).
-    if any(path.startswith(("tools/container-release/", "tools/platform-build/", "tools/vps-release/")) and not path.endswith(".md") for path in paths):
+    # images and the gated VPS release (its README is documentation).
+    if any(path.startswith(("tools/container-release/", "tools/platform-build/", "tools/vps-release/")) for path in paths):
         direct_deploys.update({"newsletter", "platform", "codex-gateway"})
     # packages/<name>/<file>: at least three components; packages/README.md is documentation.
     package_paths = [path for path in paths if path.startswith("packages/") and path.count("/") >= 2]
-    package_names = {path.split("/")[1] for path in package_paths}
-    # Users of a package whose code (anything but its documents) changed are checked and deployed;
-    # users of a package whose documents alone changed are only checked.
-    compiled = {path.split("/")[1] for path in package_paths if not is_package_document(path)}
-    documented: set[str] = set()
-    for name in package_names:
-        (apps if name in compiled else documented).update(PACKAGE_USERS.get(name, APPS))
+    # Users of a changed package (its documents are documentation) are checked and deployed.
+    compiled = {path.split("/")[1] for path in package_paths}
+    for name in compiled:
+        apps.update(PACKAGE_USERS.get(name, APPS))
     # tools/ is CI, test and build tooling (tools/cf-guard, tools/bundle-size, tools/workerd-cpu): like .github/, it
     # re-checks every app and deploys none.
     # tools/infra-plan-summary/ belongs to infra/ and runs only Infra checks.
@@ -644,10 +681,10 @@ def classify(paths: Iterable[str], read: Reader | None = None) -> dict[str, bool
     if not site:
         deployed -= {"website"}
     return outputs(
-        checked=APPS if shared else apps | documented | proto_checked,
+        checked=APPS if shared else apps | proto_checked,
         deployed=deployed,
-        contracts=bool((apps - NO_CONTRACTS) | documented | proto_checked) or shared,
-        packages=bool(package_names) or ci or node_workspace,
+        contracts=bool((apps - NO_CONTRACTS) | proto_checked) or shared,
+        packages=bool(compiled) or ci or node_workspace,
         relay=relay,
         infra=any(path.startswith((".github/", *INFRA)) for path in paths),
         proto=ci or node_workspace or python_workspace or bool(proto_checked) or any(path.startswith(PROTO_READS) for path in paths),

@@ -131,8 +131,7 @@ check job succeeded, including every matrix shard. Its checked image publication
 same-SHA, non-expired artifacts, and the extension release its build artifact. An API error, missing/skipped
 required check, missing artifact, different SHA or manual run runs checks again. Reuse changes neither deploy selection nor the cumulative main base.
 
-A package change checks and deploys its actual `PACKAGE_USERS`; a Markdown-only package change checks
-those consumers without deploying. A root workspace change checks every member of that workspace. A pnpm
+A package change checks and deploys its actual `PACKAGE_USERS`. A root workspace change checks every member of that workspace. A pnpm
 catalog version bump deploys only the members whose `package.json` lists the name (the VPS images only for
 the proto toolchain's `dependencies`), and a root uv constraint only the Python members that declare it; a lock
 follows the manifest changes beside it. The root `package.json`, any other workspace key, a lock changed alone
@@ -142,8 +141,17 @@ Explicit image build/publication/VPS release tooling changes publish the runtime
 Newsletter or Platform changes release only that pair, and gateway-only source changes leave them untouched.
 The bootstrap bundle includes the gateway image only when the same run built it; a fresh host bootstrapped
 from a pair-only bundle gets the gateway with the next gateway release or an `app=codex-gateway` dispatch.
-A Dashboard-only change does not redeploy its Ops providers. Root documentation alone runs
-`Changes` and the gate. These rules are tested against dependencies/imports, including proto import closure.
+A Dashboard-only change does not redeploy its Ops providers. These rules are tested against dependencies/imports,
+including proto import closure.
+
+Documentation selects no app check, deploy or VPS release: Markdown anywhere (an app's README or AGENTS, a package
+SPEC, a contract's notes) and any file in a `docs/` folder (the website's `doc/`) runs only `Changes`, whose tests
+check the documents' links and references, and the gate; beside code, the code's own selection applies. The
+exceptions in [ci_changes.py](../.github/scripts/ci_changes.py) are the Markdown a build ships (`RUNTIME_MARKDOWN`:
+the brief's Text-module `content-config/`, Mailsort's `prompts/`, the Newsletter wheel's package-data), which
+releases its app like code, and the documents an app's tests read (`TESTED_DOCUMENTS`), which check that app only.
+A guard scans Worker Text and `?raw` imports, file reads, wheel package-data, image `COPY` sources and `public/`
+folders, and fails when one of them reaches a path classified as documentation.
 
 Production job conditions retain `!cancelled()` and explicit successful dependency results. A reused check
 can be skipped only with `checks_reused=true`; Home's upstream deploys may succeed or be skipped. Relying

@@ -2,10 +2,12 @@
 
 from workflow_sources import effective_ci
 
+import fnmatch
 import io
 import json
 import tomllib
 import os
+import posixpath
 import re
 import shutil
 import subprocess
@@ -260,10 +262,13 @@ class Classify(unittest.TestCase):
                 self.assertEqual(push(["codex-gateway/tests/test_server.py", path]), expected)
         self.assertEqual(push(["codex-gateway-notes.md"]), expect(F, F, F, F, F))
 
-    def test_codex_gateway_docs_tests_and_catalog_metadata_check_without_publication(self):
-        for path in ("codex-gateway/README.md", "codex-gateway/docs/operations.md", "codex-gateway/tests/test_server.py", "codex-gateway/app.toml"):
+    def test_codex_gateway_tests_and_catalog_metadata_check_without_publication(self):
+        for path in ("codex-gateway/tests/test_server.py", "codex-gateway/app.toml"):
             with self.subTest(path=path):
                 self.assertEqual(push([path]), expect(F, F, T, F, F, codex_gateway_check=T))
+        for path in ("codex-gateway/README.md", "codex-gateway/docs/operations.md"):
+            with self.subTest(path=path):
+                self.assertEqual(push([path]), expect(F, F, F, F, F))
 
     def test_retired_codex_protos_check_without_publication(self):
         for path in ("proto/codex/inference/v1/inference.proto", "proto/codex/monitor/v1/monitor.proto"):
@@ -279,8 +284,8 @@ class Classify(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(push([path]), expect(F, F, T, F, F, **VPS))
                 self.assertEqual(push([path], ref=BRANCH), expect(F, F, T, F, F, **VPS))
-        self.assertEqual(push(["platform/README.md"]), expect(F, F, T, F, F, platform_check=T))
-        self.assertEqual(push(["newsletter/docs/monitoring.md"]), expect(F, F, T, F, F, newsletter_check=T, platform_check=T))
+        self.assertEqual(push(["platform/README.md"]), expect(F, F, F, F, F))
+        self.assertEqual(push(["newsletter/docs/monitoring.md"]), expect(F, F, F, F, F))
         self.assertEqual(push(["platform/app.toml"]), expect(F, F, T, F, F, platform_check=T))
         self.assertEqual(push(["platform-notes.md"]), expect(F, F, F, F, F))
 
@@ -295,14 +300,7 @@ class Classify(unittest.TestCase):
                 self.assertTrue(executable["platform_deploy"])
                 self.assertTrue(executable["codex_gateway_check"])
                 self.assertTrue(executable["codex_gateway_deploy"])
-                documentation = push([directory + "README.md"])
-                self.assertTrue(documentation["newsletter_check"])
-                self.assertTrue(documentation["platform_check"])
-                self.assertFalse(documentation["newsletter_deploy"])
-                self.assertFalse(documentation["platform_publish"])
-                self.assertFalse(documentation["platform_deploy"])
-                self.assertTrue(documentation["codex_gateway_check"])
-                self.assertFalse(documentation["codex_gateway_deploy"])
+                self.assertEqual(push([directory + "README.md"]), expect(F, F, F, F, F))
 
     def test_one_app_checks_and_deploys_only_itself_plus_contracts(self):
         self.assertEqual(push(["todofy/worker/todofy/core/render.py"]), expect(T, F, T, T, F))
@@ -310,15 +308,15 @@ class Classify(unittest.TestCase):
 
     def test_the_dashboard_checks_and_deploys_itself_plus_contracts(self):
         """Its ops-v1 caller tests run in Contracts; the registered Fleet binding can be deployed."""
-        for path in ("dashboard/worker/src/state.ts", "dashboard/web/src/App.tsx", "dashboard/docs/setup.md"):
+        for path in ("dashboard/worker/src/state.ts", "dashboard/web/src/App.tsx"):
             with self.subTest(path=path):
                 self.assertEqual(push([path]), expect(F, F, T, F, F, **DASH))
 
     def test_both_apps(self):
-        self.assertEqual(push(["todofy/README.md", "mail-hero/web/src/app/App.tsx"]), expect(T, T, T, T, T))
+        self.assertEqual(push(["todofy/worker/todofy/core/render.py", "mail-hero/web/src/app/App.tsx"]), expect(T, T, T, T, T))
 
     def test_all_three_apps(self):
-        paths = ["todofy/README.md", "mail-hero/web/src/app/App.tsx", "dashboard/README.md"]
+        paths = ["todofy/worker/todofy/core/render.py", "mail-hero/web/src/app/App.tsx", "dashboard/worker/src/state.ts"]
         self.assertEqual(push(paths), expect(T, T, T, T, T, **DASH))
 
     def test_every_app_has_stable_check_and_deploy_outputs_during_bootstrap(self):
@@ -377,12 +375,12 @@ class Classify(unittest.TestCase):
     def test_the_extension_publishes_when_its_folder_or_the_shared_code_changes(self):
         """recall/extension/ and recall/shared/ (which its bundle compiles in) publish the extension's build as a GitHub
         Release; any file there counts. The rest of recall, CI and a dispatch for another app publish none."""
-        for path in ("recall/extension/src/sw.ts", "recall/extension/package-lock.json", "recall/extension/README.md", "recall/shared/scrub.ts"):
+        for path in ("recall/extension/src/sw.ts", "recall/extension/package-lock.json", "recall/shared/NOTICE", "recall/shared/scrub.ts"):
             with self.subTest(path=path):
                 self.assertEqual(push([path]), expect(F, F, T, F, F, **RECALL, recall_extension_publish=T))
                 # The same output on a branch; the release job itself runs only on main.
                 self.assertTrue(push([path], ref=BRANCH)["recall_extension_publish"])
-        for paths in (["recall/worker/src/state.ts"], ["recall/web/src/main.ts"], ["recall/extension.md"], [".github/workflows/ci.yml"],
+        for paths in (["recall/worker/src/state.ts"], ["recall/web/src/main.ts"], ["recall/extension.md"], ["recall/extension/README.md"], [".github/workflows/ci.yml"],
                       ["packages/edge-auth/src/access.ts"], ["proto/recall/ingest/v1/ingest.proto"]):
             with self.subTest(paths=paths):
                 self.assertFalse(push(paths)["recall_extension_publish"])
@@ -460,8 +458,6 @@ class Classify(unittest.TestCase):
             "links/wrangler.toml",
             "links/deploy/deploy-vars.mjs",
             "links/web/package-lock.json",
-            "links/docs/design.md",
-            "links/README.md",
         ):
             with self.subTest(path=path):
                 self.assertEqual(push([path]), expect(F, F, T, F, F, **LINKS))
@@ -476,8 +472,6 @@ class Classify(unittest.TestCase):
             "watch/wrangler.toml",
             "watch/deploy/deploy-vars.mjs",
             "watch/web/package-lock.json",
-            "watch/docs/design.md",
-            "watch/README.md",
         ):
             with self.subTest(path=path):
                 self.assertEqual(push([path]), expect(F, F, T, F, F, **WATCH))
@@ -486,7 +480,7 @@ class Classify(unittest.TestCase):
     def test_contracts_recheck_every_app_but_deploy_none(self):
         paths = ["contracts/mail-received-v1/fixtures/plain_text.json"]
         self.assertEqual(push(paths), expect(T, T, T, F, F, **ALL_CHECKED, proto=T))
-        self.assertEqual(push(["contracts/README.md"]), expect(T, T, T, F, F, **ALL_CHECKED))
+        self.assertEqual(push(["contracts/README.md"]), expect(F, F, F, F, F))
 
     def test_ops_contract_fixtures_and_docs_recheck_every_app_but_deploy_none(self):
         paths = ["contracts/ops-v1/fixtures/OpsStatus/todofy-ok.json", "contracts/ops-v1/README.md"]
@@ -591,7 +585,7 @@ class Classify(unittest.TestCase):
 
     def test_infra_runs_only_its_own_checks(self):
         """infra/ (plan-only OpenTofu) and its plan-summary tool check nothing else and deploy nothing."""
-        for path in ("infra/access.tf", "infra/README.md", "infra/.terraform.lock.hcl", "tools/infra-plan-summary/summary.py"):
+        for path in ("infra/access.tf", "infra/.terraform.lock.hcl", "tools/infra-plan-summary/summary.py"):
             with self.subTest(path=path):
                 self.assertEqual(push([path]), expect(F, F, F, F, F, infra=T))
                 self.assertEqual(push([path], ref=BRANCH), expect(F, F, F, F, F, infra=T))
@@ -696,8 +690,7 @@ class Classify(unittest.TestCase):
             "proto/package-lock.json": every,
             "proto/tools/ensure.mjs": every,
             "proto/newapp/ui/v1/newapp_ui_service.proto": every,
-            # Checks, tests, test data, types-only output and documents: nothing.
-            "proto/README.md": none,
+            # Checks, tests, test data and types-only output: nothing.
             "proto/test/wire-enum.test.ts": none,
             "proto/test/python/test_gen_py.py": none,
             "proto/testdata/wire-profile-cases.json": none,
@@ -837,7 +830,7 @@ class Classify(unittest.TestCase):
         for path in ("tools/container-release/image.py", "tools/container-release/test_image.py"):
             with self.subTest(path=path):
                 self.assertEqual(push([path]), expect(T, T, T, F, F, packages=T, proto=T, **ALL_CHECKED, newsletter_deploy=T, platform_publish=T, platform_deploy=T, codex_gateway_deploy=T))
-        self.assertEqual(push(["tools/container-release/README.md"]), expect(T, T, T, F, F, packages=T, proto=T, **ALL_CHECKED))
+        self.assertEqual(push(["tools/container-release/README.md"]), expect(F, F, F, F, F))
 
     def test_a_shared_package_checks_and_deploys_every_app_that_compiles_it_in(self):
         for path in (
@@ -848,22 +841,21 @@ class Classify(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(push([path]), expect(T, T, T, T, T, packages=T, **EDGE_AUTH))
 
-    def test_a_package_document_checks_every_user_but_deploys_none(self):
-        """A README or SPEC is compiled into no Worker: an edit must not redeploy production."""
+    def test_a_package_document_selects_nothing(self):
+        """A README or SPEC is compiled into no Worker and read by no test: an edit checks and deploys nothing."""
         for paths in (
             ["packages/edge-auth/SPEC.md"],
             ["packages/edge-auth/README.md", "packages/edge-auth/SPEC.md"],
             ["packages/edge-auth/docs/notes.md"],
+            ["packages/new-kit/README.md"],
         ):
             with self.subTest(paths=paths):
-                self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, dashboard_check=T, links_check=T, watch_check=T, fleet_check=T, mailsort_check=T, recall_check=T, brief_check=T, tasks_check=T, personal_mcp_check=T, model_router_check=T))
-        # With the package's code, or with one app, the usual rules apply.
+                self.assertEqual(push(paths), expect(F, F, F, F, F))
+        # With the package's code, or with a document an app's tests read, the usual rules apply.
         paths = ["packages/edge-auth/SPEC.md", "packages/edge-auth/src/csrf.ts"]
         self.assertEqual(push(paths), expect(T, T, T, T, T, packages=T, **EDGE_AUTH))
         paths = ["packages/edge-auth/SPEC.md", "dashboard/docs/design.md"]
-        self.assertEqual(push(paths), expect(T, T, T, F, F, packages=T, **DASH, links_check=T, watch_check=T, fleet_check=T, mailsort_check=T, recall_check=T, brief_check=T, tasks_check=T, personal_mcp_check=T, model_router_check=T))
-        # An unregistered package's documents are checked by every app, deployed by none.
-        self.assertEqual(push(["packages/new-kit/README.md"]), expect(T, T, T, F, F, packages=T, **ALL_CHECKED))
+        self.assertEqual(push(paths), expect(F, F, T, F, F, dashboard_check=T))
 
     def test_this_branch_redeploys_only_the_dashboard(self):
         """The dashboard branch's non-dashboard files: CI, root and contract docs, the edge-auth docs."""
@@ -937,9 +929,13 @@ class Classify(unittest.TestCase):
 
     def test_the_website_checks_and_releases_only_itself(self):
         """The relay shares proto/ and runs Contracts; a website change still releases only its own app."""
-        for path in ("website/src/app/page.tsx", "website/wrangler.toml", "website/docs/release.md"):
+        for path in ("website/src/app/page.tsx", "website/wrangler.toml", "website/content/profile.json", "website/public/fonts/Source-Sans-3-OFL.txt"):
             with self.subTest(path=path):
                 self.assertEqual(push([path]), expect(F, F, T, F, F, website_check=T, website_deploy=T))
+        # Its design notes, release runbook and their images are documentation.
+        for path in ("website/docs/release.md", "website/doc/plan.md", "website/doc/assets/homepage-concept.prompt.txt", "website/design-qa.md", "website/relay/README.md"):
+            with self.subTest(path=path):
+                self.assertEqual(push([path]), expect(F, F, F, F, F))
 
     def test_the_relay_deploys_without_releasing_the_site(self):
         """website/relay/ is the Notion relay Worker: its change deploys the relay only."""
@@ -949,7 +945,7 @@ class Classify(unittest.TestCase):
         both = expect(F, F, T, F, F, website_check=T, website_deploy=T, website_relay_deploy=T)
         self.assertEqual(push(["website/relay/wrangler.toml", "website/package.json"]), both)
         # Not a prefix match on the folder name alone; a site change alone never redeploys the relay.
-        self.assertEqual(push(["website/relay.md"]), expect(F, F, T, F, F, website_check=T, website_deploy=T))
+        self.assertEqual(push(["website/relay.txt"]), expect(F, F, T, F, F, website_check=T, website_deploy=T))
         self.assertEqual(push(["website/src/app/page.tsx"])["website_relay_deploy"], False)
         self.assertEqual(
             push(["website/relay/src/index.ts"], ref=BRANCH),
@@ -977,6 +973,228 @@ class Classify(unittest.TestCase):
             push([".github/workflows/website-release.yml"]),
             expect(T, T, T, F, F, packages=T, infra=T, proto=T, **ALL_CHECKED),
         )
+
+
+NOTHING = expect(F, F, F, F, F)
+JS_SUFFIXES = (".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs")
+# A relative specifier or path in JavaScript: an import, a ?raw import, new URL(..., import.meta.url), import.meta.glob.
+JS_RELATIVE = re.compile(r"""['"`](\.{1,2}/[^'"`\s?]+)(?:\?raw)?['"`]""")
+# A Markdown path in Python (a package resource, a path joined to a root, a glob).
+PY_MARKDOWN = re.compile(r"""["']([^"'\s]+\.md)["']""")
+
+
+def tracked_files() -> list[str]:
+    listed = subprocess.run(["git", "-C", str(REPO), "ls-files", "-z"], check=True, capture_output=True).stdout
+    return [path for path in listed.decode().split("\0") if path]
+
+
+def is_test_file(path: str) -> bool:
+    folders, name = path.split("/")[:-1], path.rsplit("/", 1)[-1]
+    return (bool({"test", "tests", "__tests__"} & set(folders)) or path.startswith(ci_changes.APP_TEST_DIRECTORIES)
+            or re.search(r"\.(test|spec)\.[cm]?[jt]sx?$", name) is not None)
+
+
+def document_shaped(path: str) -> bool:
+    """What is_documentation would call documentation without its exceptions."""
+    folders = path.split("/")[:-1]
+    return path.endswith(".md") or folders[:1] == ["docs"] or (len(folders) >= 2 and folders[1] in ci_changes.DOC_FOLDERS)
+
+
+def code_lines(path: str) -> str:
+    text = (REPO / path).read_text(encoding="utf-8", errors="replace")
+    return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith(("#", "//", "*", "/*")))
+
+
+def check_key(path: str) -> str | None:
+    """The output that runs the checks of the code at ``path`` (None: Changes runs it on every push)."""
+    top = path.split("/", 1)[0]
+    if top in ci_changes.APPS:
+        return f"{ci_changes.PREFIX[top]}_check"
+    return {"proto": "proto", "packages": "packages", "contracts": "contracts"}.get(top)
+
+
+def deploy_key(path: str) -> str | None:
+    """The output that ships the code at ``path``."""
+    if path.startswith(ci_changes.RELAY):
+        return "website_relay_deploy"
+    if path.startswith(ci_changes.EXTENSION):
+        return "recall_extension_publish"
+    top = path.split("/", 1)[0]
+    return f"{ci_changes.PREFIX[top]}_deploy" if top in ci_changes.APPS else None
+
+
+class BuildInputs:
+    """What the repository's builds ship and its tests read, scanned from their sources: (reader, file) pairs."""
+
+    def __init__(self) -> None:
+        self.files = tracked_files()
+        self.tracked = set(self.files)
+        self.shipped: set[tuple[str, str]] = set()
+        self.read: set[tuple[str, str]] = set()
+        self.scan_javascript()
+        self.scan_python()
+        self.scan_package_data()
+        self.scan_images()
+        self.shipped |= {(path, path) for path in self.files if "/public/" in path and document_shaped(path)}
+
+    def resolve(self, reader: str, literal: str) -> set[str]:
+        folder = posixpath.dirname(reader)
+        target = posixpath.normpath(posixpath.join(folder, literal))
+        if "*" in literal:
+            return {path for path in self.files if fnmatch.fnmatch(path, target)}
+        return {target} & self.tracked
+
+    def text_modules(self) -> dict[str, list[str]]:
+        """Each Worker folder -> the file name globs its wrangler.toml [[rules]] import as Text modules."""
+        globs: dict[str, list[str]] = {}
+        for path in self.files:
+            if path.endswith("/wrangler.toml"):
+                rules = tomllib.loads((REPO / path).read_text()).get("rules", [])
+                found = [glob.rsplit("/", 1)[-1] for rule in rules if rule.get("type") == "Text" for glob in rule.get("globs", [])]
+                if found:
+                    globs[posixpath.dirname(path) + "/"] = found
+        return globs
+
+    def scan_javascript(self) -> None:
+        text_modules = self.text_modules()
+        for reader in self.files:
+            if not reader.endswith(JS_SUFFIXES) or reader.startswith((".github/", "tools/")):
+                continue
+            patterns = next((globs for folder, globs in text_modules.items() if reader.startswith(folder)), [])
+            for literal in JS_RELATIVE.findall(code_lines(reader)):
+                for path in self.resolve(reader, literal):
+                    text_module = any(fnmatch.fnmatch(path.rsplit("/", 1)[-1], glob) for glob in patterns)
+                    if is_test_file(reader):
+                        if document_shaped(path):
+                            self.read.add((reader, path))
+                    elif text_module or document_shaped(path):
+                        self.shipped.add((reader, path))
+
+    def scan_python(self) -> None:
+        for reader in self.files:
+            if not reader.endswith(".py") or reader.startswith((".github/", "tools/")):
+                continue
+            app = reader.split("/", 1)[0] + "/"
+            for literal in PY_MARKDOWN.findall(code_lines(reader)):
+                found = self.resolve(reader, literal)
+                # A path below a root (the repository's, the app's, a package's): a bare name is too vague to place.
+                if "/" in literal:
+                    found |= {literal} & self.tracked
+                    found |= {path for path in self.files if path.startswith(app) and fnmatch.fnmatch(path, "*/" + literal)}
+                self.read.update((reader, path) for path in found)
+
+    def scan_package_data(self) -> None:
+        for manifest in self.files:
+            if not manifest.endswith("pyproject.toml"):
+                continue
+            tool = tomllib.loads((REPO / manifest).read_text()).get("tool", {}).get("setuptools", {})
+            where = (tool.get("packages", {}).get("find", {}).get("where") or ["."])[0]
+            for package, globs in tool.get("package-data", {}).items():
+                base = posixpath.normpath(posixpath.join(posixpath.dirname(manifest), where, package.replace(".", "/")))
+                for glob in globs:
+                    self.shipped.update((manifest, path) for path in self.resolve(base + "/x", glob))
+
+    def scan_images(self) -> None:
+        """The files the final stage of each Dockerfile copies from the build context (the repository root)."""
+        for dockerfile in self.files:
+            if not dockerfile.rsplit("/", 1)[-1].startswith("Dockerfile") or dockerfile.endswith(".dockerignore"):
+                continue
+            lines = (REPO / dockerfile).read_text().splitlines()
+            final = max(index for index, line in enumerate(lines) if line.upper().startswith("FROM "))
+            for line in lines[final:]:
+                words = line.split()
+                if not words or words[0].upper() != "COPY" or any(word.startswith("--from") for word in words):
+                    continue
+                for source in (word for word in words[1:-1] if not word.startswith("--")):
+                    source = source.rstrip("/")
+                    found = {path for path in self.files if path == source or path.startswith(source + "/")}
+                    self.shipped.update((dockerfile, path) for path in found if document_shaped(path))
+
+
+class Documentation(unittest.TestCase):
+    """Documentation selects no check and no release (owner, 2026-10-28): only what a build ships or a test reads does."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.inputs = BuildInputs()
+
+    def test_an_app_agents_file_deploys_nothing(self):
+        for path in ("mailsort/AGENTS.md", "mailsort/README.md", "mailsort/docs/design.md", "HANDOFF.md", "docs/ci-cd.md"):
+            with self.subTest(path=path):
+                self.assertEqual(push([path]), NOTHING)
+                self.assertEqual(push([path], ref=BRANCH), NOTHING)
+
+    def test_every_tracked_document_no_test_reads_selects_nothing(self):
+        documents = [path for path in self.inputs.files if ci_changes.is_documentation(path) and not ci_changes.document_readers(path)]
+        self.assertGreater(len(documents), 100)
+        for path in documents:
+            with self.subTest(path=path):
+                self.assertEqual(push([path]), NOTHING)
+        self.assertEqual(push(documents), NOTHING)
+
+    def test_runtime_markdown_deploys_its_app(self):
+        for path in ("mailsort/prompts/priority-classification.txt", "mailsort/prompts/escalation.md"):
+            with self.subTest(path=path):
+                self.assertEqual(push([path]), expect(F, F, T, F, F, **MAILSORT))
+        for path in ("brief/content-config/policy.md", "brief/content-config/profile.md"):
+            with self.subTest(path=path):
+                self.assertEqual(push([path]), expect(F, F, T, F, F, **BRIEF))
+        # The newsletter wheel's package-data, a README among its instructions too: the paired VPS release.
+        for path in ("newsletter/src/newsletter/policy/reader-profile.md", "newsletter/src/newsletter/instructions/discovery/_sources/README.md"):
+            with self.subTest(path=path):
+                self.assertEqual(push([path]), expect(F, F, T, F, F, **VPS))
+
+    def test_documents_a_test_reads_check_that_app_without_deploying(self):
+        for path in ("dashboard/docs/limits.md", "dashboard/docs/design-v2.md", "contracts/ops-v1/README.md"):
+            with self.subTest(path=path):
+                self.assertEqual(push([path]), expect(F, F, T, F, F, dashboard_check=T))
+        self.assertEqual(push(["mailsort/docs/backup.md"]), expect(F, F, T, F, F, mailsort_check=T))
+        # Published by content-config.yml, validated against the candidate image by "Newsletter image checks".
+        self.assertEqual(push(["newsletter/content-config/prompts/selection.md"]), expect(F, F, T, F, F, newsletter_check=T, platform_check=T))
+        # Markdown fixtures in reviewed test directories stay test inputs.
+        self.assertEqual(push(["newsletter/tests/fixtures/editorial/selection.md"]), expect(F, F, T, F, F, newsletter_check=T, platform_check=T))
+
+    def test_documents_beside_code_leave_the_code_selection(self):
+        for code in ("mailsort/worker/src/gmail.ts", "links/worker/src/resolve.ts", "packages/edge-auth/src/csrf.ts", ".github/workflows/ci.yml",
+                     "newsletter/src/newsletter/service.py", "website/content/profile.json", "proto/links/ui/v1/link.proto"):
+            with self.subTest(code=code):
+                self.assertEqual(push(["mailsort/AGENTS.md", "README.md", "docs/ci-cd.md", "packages/edge-auth/SPEC.md", "tasks/docs/images/x.png", code]), push([code]))
+
+    def test_the_exception_lists_name_existing_paths(self):
+        for prefix in (*ci_changes.RUNTIME_MARKDOWN, *ci_changes.TESTED_DOCUMENTS):
+            with self.subTest(prefix=prefix):
+                self.assertTrue((REPO / prefix).exists())
+                self.assertFalse(ci_changes.is_documentation(prefix) and not ci_changes.document_readers(prefix))
+
+    def test_the_scan_finds_the_known_build_inputs(self):
+        """A guard that scans nothing passes vacuously: it must see today's runtime and test-read Markdown."""
+        shipped = {path for _, path in self.inputs.shipped}
+        for path in ("brief/content-config/policy.md", "mailsort/prompts/priority-classification.txt", "newsletter/src/newsletter/policy/reader-profile.md",
+                     "newsletter/src/newsletter/instructions/discovery/_sources/ai-ml.md"):
+            self.assertIn(path, shipped)
+        read = {path for _, path in self.inputs.read}
+        for path in ("dashboard/docs/limits.md", "contracts/ops-v1/README.md", "mailsort/docs/backup.md", "newsletter/content-config/policy/editorial.md"):
+            self.assertIn(path, read)
+        # Every listed test-read document is still read (a stale entry would keep checking for nothing).
+        for prefix in ci_changes.TESTED_DOCUMENTS:
+            with self.subTest(prefix=prefix):
+                self.assertTrue(any(path.startswith(prefix) for path in read))
+
+    def test_what_a_build_ships_is_never_documentation(self):
+        """Worker Text modules and ?raw imports, wheel package-data, image COPY sources and public/ folders: each file
+        is an input of its app (add it to RUNTIME_MARKDOWN), and changing it alone releases that app."""
+        for reader, path in sorted(self.inputs.shipped):
+            with self.subTest(reader=reader, path=path):
+                self.assertFalse(ci_changes.is_documentation(path))
+                if key := deploy_key(reader):
+                    self.assertTrue(push([path])[key])
+
+    def test_what_a_test_or_the_code_reads_is_checked_by_it(self):
+        """A document an app's code or tests read: changing it alone runs that app's checks (TESTED_DOCUMENTS)."""
+        for reader, path in sorted(self.inputs.read):
+            with self.subTest(reader=reader, path=path):
+                if key := check_key(reader):
+                    self.assertTrue(push([path])[key])
 
 
 class Unknown(unittest.TestCase):
@@ -1180,10 +1398,10 @@ class RealGit(unittest.TestCase):
 
     def test_a_cancelled_pending_run_on_main_is_not_lost(self):
         # Run 1 (green) at p0; push 2 touched todofy/ and was cancelled while pending; push 3 touched
-        # only Mail Hero docs. Run 3 must still check and deploy Todofy.
+        # only Mail Hero. Run 3 must still check and deploy Todofy.
         p0 = self.commit("README.md")
         self.commit("todofy/worker/a.py")
-        p3 = self.commit("mail-hero/docs/b.md")
+        p3 = self.commit("mail-hero/web/b.ts")
         outputs = self.main_run(p3, p0)
         expected = {**dict.fromkeys(ci_changes.KEYS, "true"), "packages": "false", "infra": "false", "proto": "false"}
         expected.update(dashboard_check="false", dashboard_deploy="false", tasks_check="false", tasks_deploy="false")
