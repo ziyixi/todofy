@@ -10,7 +10,7 @@ import { client } from './api.ts';
 import { RANGE_LABELS, type RangeName } from './chart.ts';
 import { bytes, time } from './format.ts';
 import {
-  filesystemPercent, labelsOf, lastValue, nodeKey, orderRoles, roleName, toGrid, type Grid,
+  FILESYSTEM_ROLES, filesystemPercent, labelsOf, lastValue, nodeKey, orderRoles, roleName, toGrid, type Grid,
 } from './metrics.ts';
 import { SERIES_COLORS, TableDetails, TimeChart, type ChartLine } from './TimeChart.tsx';
 
@@ -25,7 +25,7 @@ const [C1, C2, C3, C4] = SERIES_COLORS;
 const ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 /** Per-node history: one summary request per node and range, every series at once (at most 730 rows read). */
-export function ResourcesView({ nodes, loading }: { nodes: readonly Node[]; loading: boolean }) {
+export function ResourcesView({ nodes, loading, failed = false }: { nodes: readonly Node[]; loading: boolean; failed?: boolean }) {
   const [chosen, setChosen] = useState<string | null>(null);
   const [range, setRange] = useState<RangeName>('day');
   const node = nodes.find((item) => item.name === chosen) ?? nodes[0];
@@ -40,6 +40,9 @@ export function ResourcesView({ nodes, loading }: { nodes: readonly Node[]; load
     refetchInterval: 5 * 60_000,
   });
 
+  if (!node && failed) {
+    return <p role="alert">无法读取节点列表。登录过期时请刷新页面；这不代表节点没有指标。</p>;
+  }
   if (!node) {
     return (
       <section className="empty-state">
@@ -71,7 +74,7 @@ export function ResourcesView({ nodes, loading }: { nodes: readonly Node[]; load
         </fieldset>
       </div>
       <p className="scope-note">
-        {grid ? `步长 ${STEP_NAMES[grid.stepSeconds] ?? `${grid.stepSeconds} 秒`}，每点为步长内 5 分钟样本的均值${grid.stepSeconds > 300 ? '，悬停可见峰值' : ''}。` : ''}
+        {grid ? `步长 ${STEP_NAMES[grid.stepSeconds] ?? `${grid.stepSeconds} 秒`}，每点为步长内 5 分钟样本的均值${grid.stepSeconds > 300 ? '，悬停可见峰值' : ''}；图例旁的数值是最后一个有数据的步长。` : ''}
         时间为本地时区（{ZONE}）。空白处表示没有数据，不代表为零。最近样本：{time(node.sample_time)}
       </p>
       {query.error && <p role="alert">无法读取指标历史。登录过期时请刷新页面。</p>}
@@ -110,7 +113,7 @@ function NodeCharts({ grid, range, node }: { grid: Grid; range: RangeName; node:
           lines={[line('memory_used_bytes', '已用', C1), ...(swapTotal ? [line('swap_used_bytes', '交换已用', C2)] : [])]} />
         <TimeChart title="磁盘使用率" subtitle="已用 ÷（已用 + 可用），按数据集计算" unit="percent" grid={grid} range={range}
           floor={10} ceiling={100}
-          lines={roles.map((role, i) => ({ key: role, name: roleName(role), color: SERIES_COLORS[i] ?? C4, values: filesystemPercent(grid, role) }))} />
+          lines={roles.map((role) => ({ key: role, name: roleName(role), color: roleColor(role), values: filesystemPercent(grid, role) }))} />
         <TimeChart wide title="网络" subtitle="物理网卡合计速率" unit="bytes_per_second" grid={grid} range={range}
           lines={[line('network_receive_bytes_per_second', '接收', C1), line('network_transmit_bytes_per_second', '发送', C2)]} />
       </section>
@@ -119,13 +122,18 @@ function NodeCharts({ grid, range, node }: { grid: Grid; range: RangeName; node:
         <p className="scope-note">按 Pod 的 app 标签或 CronJob 汇总；同一指标共用纵轴，便于比较。</p>
         {workloads.length ? (
           <>
-            <Multiples title="CPU" metric="workload_cpu_cores" unit="cores" grid={grid} range={range} labels={workloads} />
+            <Multiples title="CPU（核）" metric="workload_cpu_cores" unit="cores" grid={grid} range={range} labels={workloads} />
             <Multiples title="内存" metric="workload_memory_bytes" unit="bytes" grid={grid} range={range} labels={workloads} />
           </>
         ) : <p className="muted">此范围内没有工作负载数据。</p>}
       </section>
     </>
   );
+}
+
+/** A role keeps its colour whichever other roles report (colour follows the entity, not its rank). */
+function roleColor(role: string): string {
+  return SERIES_COLORS[FILESYSTEM_ROLES.indexOf(role)] ?? C4;
 }
 
 function Multiples({ title, metric, unit, grid, range, labels }: {

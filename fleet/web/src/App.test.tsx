@@ -147,6 +147,38 @@ describe('Fleet owner page', () => {
     expect(tile('网络')).toHaveTextContent('未知');
     expect(within(node).getByText(/运行时间：/)).toHaveTextContent('运行时间：未知');
   });
+  it('keeps an older observer\'s percentages as current as the host report', async () => {
+    show({ ...BASE, freshness: 'fresh', report: fixture, receive_time: '2026-10-03T00:00:00Z' });
+    const node = await screen.findByRole('article', { name: '节点 vps' });
+    expect(node).not.toHaveClass('dated');
+    expect(screen.queryByText(/报告百分比/)).toBeNull();
+  });
+  it('waits for the node list before falling back to the report\'s percentages', async () => {
+    vi.spyOn(client, 'getFleetStatus').mockResolvedValue(
+      fromWire(FleetStatusSchema, { ...BASE, freshness: 'fresh', report: fixture, receive_time: '2026-10-03T00:00:00Z' }).message);
+    vi.spyOn(client, 'listNodes').mockReturnValue(new Promise(() => undefined));
+    const query = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={query}><App /></QueryClientProvider>);
+    expect(await screen.findByRole('heading', { name: '系统 daemon' })).toBeVisible();
+    expect(screen.queryByText('未上报指标')).toBeNull();
+  });
+  it('says node metrics are unreadable rather than unreported when the node list fails', async () => {
+    vi.spyOn(client, 'getFleetStatus').mockResolvedValue(
+      fromWire(FleetStatusSchema, { ...BASE, freshness: 'fresh', report: fixture, receive_time: '2026-10-03T00:00:00Z' }).message);
+    vi.spyOn(client, 'listNodes').mockRejectedValue(new Error('denied'));
+    const query = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={query}><App /></QueryClientProvider>);
+    const node = await screen.findByRole('article', { name: '节点 vps' });
+    expect(within(node).getByText('指标暂时无法读取')).toBeVisible();
+    expect(within(node).queryByText('未上报指标')).toBeNull();
+    expect(within(node).getByText('内存').parentElement).toHaveTextContent('30.0%');
+  });
+  it('states uptime only as far as a late sample proves it', async () => {
+    show({ ...BASE, freshness: 'stale', report: fixture, receive_time: '2026-10-03T00:05:02Z' },
+      [{ ...NODE, receive_time: '2026-10-02T00:05:02Z', sample_time: '2026-10-02T00:05:00Z' }]);
+    const node = await screen.findByRole('article', { name: '节点 vps' });
+    expect(within(node).getByText(/运行时间：/)).toHaveTextContent('截至最近样本已运行 1 天');
+  });
   it('opens resources in its own tab', async () => {
     const user = userEvent.setup();
     show({ ...BASE, freshness: 'fresh', report: fixture, receive_time: '2026-10-03T00:00:00Z' }, [NODE]);

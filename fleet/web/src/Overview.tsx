@@ -11,12 +11,14 @@ const NODE_STATES: Readonly<Record<string, string>> = {
 };
 
 export function Overview({ view, nodes, nodesError, now }: {
-  view: FleetStatus; nodes: readonly Node[]; nodesError: boolean; now: number;
+  /** Undefined until the node list first answers, so an older-observer card never flashes in first. */
+  view: FleetStatus; nodes: readonly Node[] | undefined; nodesError: boolean; now: number;
 }) {
   const freshness = view.freshness ?? 'never_seen';
   const level = tone(freshness);
   const report = view.report ?? undefined;
-  const legacy = report && !nodes.some((node) => node.name === `nodes/${report.host_key}`) ? report : undefined;
+  const settled = nodes !== undefined || nodesError;
+  const legacy = report && settled && !nodes?.some((node) => node.name === `nodes/${report.host_key}`) ? report : undefined;
   return (
     <>
       <section className="status" aria-label="最近报告">
@@ -31,8 +33,8 @@ export function Overview({ view, nodes, nodesError, now }: {
           <p role="status" className="notice">以下是历史观测，不能代表当前服务健康。</p>
         )}
         <p className="muted">报告中断可能是主机、网络、Tunnel 或监控身份异常，不能据此确定故障原因。</p>
-        {nodes.map((node) => <NodeSummary key={node.name} node={node} now={now} />)}
-        {legacy && <NodeSummary report={legacy} now={now} />}
+        {nodes?.map((node) => <NodeSummary key={node.name} node={node} now={now} />)}
+        {legacy && <NodeSummary report={legacy} reportFreshness={freshness} unread={nodesError} now={now} />}
         {nodesError && <p className="muted">节点指标暂时无法读取；以上主机状态不受影响。</p>}
       </section>
       {view.report && <HostReportView report={view.report} />}
@@ -53,13 +55,15 @@ export function Overview({ view, nodes, nodesError, now }: {
 }
 
 /**
- * One node's latest sample as tiles. A report without metrics (an older observer) keeps its two legacy
- * percentages and shows everything else as unknown.
+ * One node's latest sample as tiles. A report without metrics (an older observer, or node metrics that could
+ * not be read) keeps its two legacy percentages, as current as the report itself, and shows the rest as unknown.
  */
-export function NodeSummary({ node, report, now }: { node?: Node; report?: HostReport; now: number }) {
+export function NodeSummary({ node, report, reportFreshness, unread = false, now }: {
+  node?: Node; report?: HostReport; reportFreshness?: string; unread?: boolean; now: number;
+}) {
   const values = latestValues(node);
   const get = (key: string): number | undefined => values.get(key);
-  const freshness = nodeFreshness(node?.receive_time, now);
+  const freshness = node ? nodeFreshness(node.receive_time, now) : reportFreshness ?? 'never_seen';
   const cpuCount = node?.cpu_count ?? 0;
   const memoryUsed = get('memory_used_bytes');
   const memoryTotal = get('memory_total_bytes');
@@ -68,7 +72,6 @@ export function NodeSummary({ node, report, now }: { node?: Node; report?: HostR
   const receive = get('network_receive_bytes_per_second');
   const transmit = get('network_transmit_bytes_per_second');
   const load1 = get('load_1m');
-  const bootTime = node?.boot_time;
   const name = node ? nodeKey(node.name) : report?.host_key ?? '';
   return (
     <article className={freshness === 'fresh' ? 'node' : 'node dated'} aria-label={`节点 ${name}`}>
@@ -76,11 +79,10 @@ export function NodeSummary({ node, report, now }: { node?: Node; report?: HostR
         <h3>{name}</h3>
         {node ? (
           <p><Mark state={freshness} text={NODE_STATES[freshness]} /> · 样本 {time(node.sample_time)}（{ago(node.sample_time, now)}）</p>
-        ) : <p><Mark state="unknown" text="未上报指标" /> · 观察器尚未发送节点数值</p>}
-        <p className="uptime">
-          运行时间：{bootTime && freshness === 'fresh' ? duration((now - Date.parse(bootTime)) / 1000) : '未知'}
-          {bootTime ? `（开机于 ${time(bootTime)}）` : ''}
-        </p>
+        ) : unread
+          ? <p><Mark state="unknown" text="指标暂时无法读取" /> · 只显示主机报告中的百分比</p>
+          : <p><Mark state="unknown" text="未上报指标" /> · 观察器尚未发送节点数值</p>}
+        <p className="uptime">{uptime(node, now)}</p>
       </header>
       <dl className="tiles">
         <div>
@@ -130,6 +132,18 @@ export function NodeSummary({ node, report, now }: { node?: Node; report?: HostR
       </dl>
     </article>
   );
+}
+
+/** Up to now while fresh; otherwise only as far as the last sample proves. */
+function uptime(node: Node | undefined, now: number): string {
+  const boot = Date.parse(node?.boot_time ?? '');
+  if (!node?.boot_time || !Number.isFinite(boot)) return '运行时间：未知';
+  const since = `（开机于 ${time(node.boot_time)}）`;
+  if (nodeFreshness(node.receive_time, now) === 'fresh') return `运行时间：${duration((now - boot) / 1000)}${since}`;
+  const sample = Date.parse(node.sample_time ?? '');
+  return Number.isFinite(sample) && sample > boot
+    ? `运行时间：截至最近样本已运行 ${duration((sample - boot) / 1000)}${since}`
+    : `运行时间：未知${since}`;
 }
 
 /** Usage against capacity; the word and number beside it carry the meaning, the bar only reinforces it. */

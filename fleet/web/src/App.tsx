@@ -62,14 +62,14 @@ export function App() {
         ))}
       </nav>
       {view === 'resources' ? (
-        <ResourcesView nodes={nodes.data ?? []} loading={nodes.isPending} />
+        <ResourcesView nodes={nodes.data ?? []} loading={nodes.isPending} failed={nodes.isError} />
       ) : (
         <>
           {status.error && (
             <p role="alert">无法读取状态。登录过期时请刷新页面；旧观测不代表当前健康。</p>
           )}
           {!snapshot && !status.error && <p role="status">正在读取状态…</p>}
-          {snapshot && <Overview view={snapshot} nodes={nodes.data ?? []} nodesError={nodes.isError} now={now} />}
+          {snapshot && <Overview view={snapshot} nodes={nodes.data} nodesError={nodes.isError} now={now} />}
         </>
       )}
       <footer>

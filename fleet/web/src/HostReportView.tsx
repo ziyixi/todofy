@@ -1,5 +1,5 @@
 import type { HostReport } from '@ziyixi/proto/fleet/telemetry/v1/host_report_wire';
-import { daemonLabel, label, percent, time } from './format.ts';
+import { daemonLabel, label, time } from './format.ts';
 import { Mark } from './Mark.tsx';
 import { RuntimeView } from './RuntimeView.tsx';
 
@@ -28,7 +28,6 @@ export function HostReportView({ report }: { report: HostReport }) {
             ))}
           </ul>
           <p className="muted">观察器版本：<code>{report.observer_source_sha ?? '未知'}</code></p>
-          <p className="muted">报告百分比：磁盘（观察器卷）{percent(report.disk_used_percent)} · 内存 {percent(report.memory_used_percent)}</p>
         </section>
         <section>
           <h2>k3s 集群</h2>
