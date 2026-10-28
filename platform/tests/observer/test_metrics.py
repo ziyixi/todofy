@@ -37,6 +37,17 @@ MemAvailable:    9000000 kB
 SwapTotal:       4000000 kB
 SwapFree:        3000000 kB
 """
+# 4 GB of ARC above its 0.5 GB floor; neighbouring rows share the names' prefixes.
+ARCSTATS = """13 1 0x01 147 39984 1000000000 2000000000000
+name                            type data
+hits                            4    1000
+c                               4    6000000000
+c_min                           4    500000000
+c_max                           4    8000000000
+size                            4    4500000000
+compressed_size                 4    3000000000
+hdr_size                        4    50000000
+"""
 BOOT = "5f0c8a52-7d1e-4b8a-9c3f-2a6b1d4e8f70"
 
 
@@ -99,6 +110,32 @@ class KernelFiles(unittest.TestCase):
         )
         self.assertIsNone(metrics.memory(MEMINFO.replace("SwapFree", "Other")))
         self.assertIsNone(metrics.memory(MEMINFO.replace("9000000", "17000000")))
+
+    def test_reclaimable_zfs_arc_is_available_up_to_total(self):
+        self.assertEqual(metrics.arc_reclaimable(ARCSTATS), 4_000_000_000)
+        value = metrics.memory(MEMINFO, ARCSTATS)
+        self.assertEqual(value["available_bytes"], 13_216_000_000)
+        self.assertEqual(value["total_bytes"], 16_384_000_000)
+        # No ZFS, or an ARC below its floor, leaves MemAvailable unchanged.
+        below = ARCSTATS.replace("4500000000", "400000000")
+        for arcstats in (None, "", below):
+            self.assertEqual(metrics.arc_reclaimable(arcstats), 0)
+            self.assertEqual(metrics.memory(MEMINFO, arcstats), metrics.memory(MEMINFO))
+        # A malformed or incomplete table is ignored, never guessed.
+        for malformed in (
+            "garbage",
+            ARCSTATS.replace("4    4500000000", "4    lots"),
+            ARCSTATS.replace("c_min ", "c_low "),
+            ARCSTATS.replace("4500000000", str(2**60)),
+        ):
+            self.assertEqual(metrics.arc_reclaimable(malformed), 0)
+        huge = ARCSTATS.replace("4500000000", "90000000000")
+        self.assertEqual(
+            metrics.memory(MEMINFO, huge)["available_bytes"], 16_384_000_000
+        )
+        self.assertIsNone(
+            metrics.memory(MEMINFO.replace("9000000", "17000000"), ARCSTATS)
+        )
 
     def test_network_sums_only_physical_interfaces_and_never_names_them(self):
         value = metrics.network(NET_DEV)
@@ -240,6 +277,20 @@ class NodeReport(unittest.TestCase):
         self.assertEqual(
             to_wire(from_wire(NodeMetrics, value, strict=True).message), value
         )
+
+    def test_metrics_and_heartbeat_count_the_arc_only_where_zfs_reports_it(self):
+        for arcstats, available, percent in (
+            (None, 9_216_000_000, 43.8),
+            (ARCSTATS, 13_216_000_000, 19.3),
+        ):
+            with (
+                tempfile.TemporaryDirectory() as directory,
+                self.files(directory, **{metrics.ARCSTATS: arcstats}),
+            ):
+                value = metrics.node_metrics("personal-cloud")
+                _, memory = collector.resource_percentages()
+            self.assertEqual(value["memory"]["available_bytes"], available)
+            self.assertEqual(memory, percent)
 
     def test_without_boot_identity_there_are_no_metrics(self):
         for override in ({"sys/kernel/random/boot_id": "nope"}, {"uptime": "x"}):

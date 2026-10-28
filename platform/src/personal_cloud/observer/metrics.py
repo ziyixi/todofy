@@ -18,7 +18,9 @@ from ..deployment.kubernetes import Client
 
 # Kernel-wide files are the host's inside any Pod; /proc/net/dev is not (it follows the Pod's network
 # namespace), so the host's view comes from PID 1's file, mounted read-only at HOST_NET_DEV.
+# ZFS's world-readable arcstats is kernel-wide too, and absent on a host without ZFS.
 PROC = Path("/proc")
+ARCSTATS = "spl/kstat/zfs/arcstats"
 HOST_MEMINFO = Path("/host-meminfo")
 HOST_NET_DEV = Path("/host-net-dev")
 # statvfs only; nothing below these mounts is listed or read.
@@ -115,7 +117,25 @@ def load_average(text: str | None) -> dict[str, float] | None:
     return {"one_minute": one, "five_minutes": five, "fifteen_minutes": fifteen}
 
 
-def memory(text: str | None) -> dict[str, float] | None:
+def arc_reclaimable(text: str | None) -> int:
+    """The ZFS ARC above its floor `c_min`, as htop and btop count it; 0 without a complete, numeric reading.
+
+    The ARC is not page cache, so MemAvailable leaves it out although the kernel shrinks it to c_min under pressure.
+    """
+    fields: dict[str, int] = {}
+    for line in (text or "").splitlines():
+        parts = line.split()
+        if len(parts) == 3 and parts[0] in ("size", "c_min"):
+            if not parts[2].isdigit():
+                return 0
+            fields[parts[0]] = int(parts[2])
+    if len(fields) != 2 or not _safe(*fields.values()):
+        return 0
+    return max(0, fields["size"] - fields["c_min"])
+
+
+def memory(text: str | None, arcstats: str | None = None) -> dict[str, float] | None:
+    """Available is MemAvailable plus the reclaimable ZFS ARC, never above MemTotal."""
     fields: dict[str, int] = {}
     for line in (text or "").splitlines():
         name, _, rest = line.partition(":")
@@ -138,7 +158,15 @@ def memory(text: str | None) -> dict[str, float] | None:
         or value["swap_free_bytes"] > value["swap_total_bytes"]
     ):
         return None
+    value["available_bytes"] = min(
+        value["total_bytes"], value["available_bytes"] + arc_reclaimable(arcstats)
+    )
     return value
+
+
+def host_memory() -> dict[str, float] | None:
+    """Both files are host-wide (not a container's cgroup view), so their sum is the host's."""
+    return memory(_read(HOST_MEMINFO), _read(PROC / ARCSTATS))
 
 
 def filesystem(path: Path) -> dict[str, float] | None:
@@ -289,7 +317,7 @@ def node_metrics(namespace: str) -> dict[str, object] | None:
     groups = {
         "cpu": cpu_times(_read(PROC / "stat", prefix=True), os.sysconf("SC_CLK_TCK")),
         "load": load_average(_read(PROC / "loadavg")),
-        "memory": memory(_read(HOST_MEMINFO)),
+        "memory": host_memory(),
         "network": network(_read(HOST_NET_DEV)),
     }
     value.update({name: group for name, group in groups.items() if group is not None})

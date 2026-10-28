@@ -32,7 +32,8 @@ configured. Kubernetes state, readiness, daemon state and Newsletter process/dra
 Codex, Notion or email success. `unknown_count` means provider outcomes need reconciliation, not a retry permission.
 
 Optional `metrics` (2026-10-28) carries numbers only: cumulative CPU milliseconds from `/proc/stat`, load averages,
-memory and swap bytes, statvfs of fixed filesystem roles (`root`, `k3s`, `state`), summed byte counters of physical
+memory and swap bytes (available memory includes the ZFS ARC above `c_min`), statvfs of fixed filesystem roles
+(`root`, `k3s`, `state`), summed byte counters of physical
 interfaces (never their names), the kernel boot ID with uptime, and up to 16 workloads' CPU cores and working-set bytes
 summed by `app` label or CronJob name (never Pod names). Counters are doubles because the wire profile has no 64-bit
 integers; values stay below 2^53. A report without `metrics`, or with only some groups, is valid; an unreadable group is
