@@ -61,7 +61,7 @@ the one check that needs a real login is in §9.
 ### 3.1 Owner mutation compatibility
 
 Owner JSON clients send `X-CSRF-Token: 1` directly. Authenticated compatibility GET endpoints
-(`/api/csrf`, `/_/api/csrf` or `/api/tasks/csrf`) may return the static value
+(`/api/csrf`, `/_/api/csrf` or `/api/tasks/csrf`; Todofy and Mail Hero serve none) may return the static value
 `1` under their existing response field. They set no cookie and make no business change. Current
 clients do not call them. A bounded nonempty old header remains accepted for cached clients, subject
 to the same exact Origin and JSON checks; the old cookie/signature is ignored.

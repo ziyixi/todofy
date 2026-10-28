@@ -320,7 +320,7 @@ Local runtime quirks (not production behaviour)
   that breaks a rule, and `tests/unit/test_report_wire.py` pins the bytes of synthetic reports
   (`golden/reports-v1.json`, written before the move onto the IDL).
 - Owner API (todofy.ui.v1, `proto/todofy/ui/v1`): the gateway checks Access on every request, then serves
-  `/api/v1/*` with the shared transcoder: Origin and CSRF on writes (it also issues `GET /api/csrf`),
+  `/api/v1/*` with the shared transcoder: Origin and CSRF on writes,
   `MAINTENANCE_MODE`, a 16 KiB body limit and a strict read of every request; page tokens are the gateway's
   (bound to the list's other fields). Every rpc but `GetIntegration` is one `owner_ui` call: the object reads
   the request strictly again with the generated Python code, does the work (30 s CPU, single writer; writes
@@ -533,13 +533,11 @@ minute; `alg`/`kid`/no `crit`, `iss`, `aud`, `exp`, `iat`, optional `nbf`, non-e
 matched case-insensitively over ASCII only, non-ASCII addresses refused; `ACCESS_OWNER_ALIASES` ≤ 8 emails mapped to `ACCESS_OWNER`),
 `csrf.ts` (after Access authentication and before body parsing: exact allowed `Origin`, a nonempty
 `X-CSRF-Token` of at most 1024 characters, and `application/json`; local HTTP origins follow the existing
-`.localhost` dev rule). Clients send header `1` directly, including for bodyless mutations. `GET /api/csrf`
-returns static `{"token":"1"}` for cached clients without a cookie or signing key; old nonempty headers remain
-accepted under the same Origin and JSON checks. A failed check is 403 `CSRF_FAILED`.
+`.localhost` dev rule). Clients send header `1` directly, including for bodyless mutations; there is no token endpoint (an unknown
+`/api/csrf` is NOT_FOUND). Old nonempty headers remain accepted under the same Origin and JSON checks. A failed check is 403 `CSRF_FAILED`.
 The other modules are `http.ts` (error
 envelopes; the package's private headers plus the `/assets/` cache exception), `crypto.ts` (the hooks
-hosts' Bearer and Basic digest checks only), `owner.ts` (the gate: Access → the old paths' 410 →
-`/api/csrf` → the owner API, private headers on every response), `mail.ts` (the `Mail` entrypoint:
+hosts' Bearer and Basic digest checks only), `owner.ts` (the gate: Access → the old paths' 410 → the owner API, private headers on every response), `mail.ts` (the `Mail` entrypoint:
 todofy.mail.v1 on the shared transcoder, its binding's `access` prop, one `mail` call per rpc; mail-api.md),
 `ops.ts` (the `Ops` entrypoint, below), `ui.ts` (TodofyUiService on the shared
 transcoder: CSRF and `MAINTENANCE_MODE` on writes in its `authorize` hook, one `owner_ui` call per rpc with

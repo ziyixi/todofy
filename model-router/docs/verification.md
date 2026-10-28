@@ -15,6 +15,8 @@ workflow. Two synthetic BGE-M3 inputs returned two finite 1,024-dimension vector
 unknown rather than zero. Todofy's settings select Sol 6.1 for summaries and reports, completed content stays
 frozen, and a synthetic Mail Hero/Todofy canary completed through the normal controller observation.
 Evidence: [release of `dfc814d7`](https://github.com/ziyixi/todofy/actions/runs/40457569495).
+Since the October 27 cleanup the Newsletter identity may call Codex models only, so a rerun of the Opus, Gemini or
+BGE-M3 checks uses the owner's Access identity.
 
 ## Slim API, console and backups
 

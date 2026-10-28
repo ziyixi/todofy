@@ -244,8 +244,8 @@ scheduled reconciliation use that same path. Site publishing does not release un
 
 Mail Hero's [native backup](../mail-hero/docs/native-backup.md) executes in its existing Cloudflare DO/R2
 and ships through `Mail Hero checks/deploy`. Recovery tests require GnuPG and synthetic fixtures.
-The [legacy collector image workflow](../.github/workflows/mail-hero-backup-image.yml) is manual-only;
-no push automatically publishes a VPS collector. Existing v1 ciphertext and recovery tools remain compatible.
+The v1 collector, its image and its workflow are retired; old GHCR images and existing v1 ciphertext are left in
+place, and the offline tools still verify and restore v1 bundles.
 Neither Newsletter nor the Platform observer claims backup coverage through process health.
 
 recall builds no image: its Worker writes the archive to the owner's Dropbox itself (recall/docs/design.md §7.2), and
@@ -302,10 +302,9 @@ separately in HANDOFF, not inferred from a successful image build.
 
 ## Other release paths
 
-Mail Hero's collector image is likewise independent from its Worker. Neither a published image nor a successful
-Worker upload proves a VPS update, a complete backup or live business success. Release probes share
-[production.sh](../tools/deploy-probes/production.sh) and [access.sh](../tools/deploy-probes/access.sh), with each
-application retaining its own config, credentials, wrapper and expected paths.
+Neither a published image nor a successful Worker upload proves a VPS update, a complete backup or live business
+success. Release probes share [production.sh](../tools/deploy-probes/production.sh) and
+[access.sh](../tools/deploy-probes/access.sh), with each application retaining its own config, credentials, wrapper and expected paths.
 
 The old generated-config rollback procedure is retained in [history](history.md#committed-config-rollback).
 Follow the current application runbook and HANDOFF before attempting a rollback.

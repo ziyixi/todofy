@@ -929,7 +929,7 @@ class Classify(unittest.TestCase):
         self.assertEqual(push(["wrangler.toml"]), expect(F, F, F, F, F))
 
     def test_backup_tool_counts_as_mail_hero(self):
-        self.assertEqual(push(["mail-hero/deploy/backup/Dockerfile"]), expect(F, T, T, F, T))
+        self.assertEqual(push(["mail-hero/deploy/backup/native_backup.py"]), expect(F, T, T, F, T))
 
     def test_a_rename_between_apps_touches_both(self):
         paths = ["todofy/api/mail-received-v1.schema.json", "contracts/mail-received-v1/mail-received-v1.schema.json"]

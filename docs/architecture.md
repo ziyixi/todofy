@@ -206,7 +206,7 @@ accepted report nor a ready deployment receipt proves successful Newsletter deli
 - **Mail Hero:** Email Routing to one configured address, private raw mail in R2, D1 lifecycle ledger and
   SQLite DO alarms. Persistent retries resend the same frozen event identity/bytes/endpoint revision.
   [AGENTS](../mail-hero/AGENTS.md) and [setup](../mail-hero/docs/cloudflare-setup.md) govern storage, budget,
-  backup leases, deletion and recovery. The backup collector image is separate from the Worker.
+  backup leases, deletion and recovery. The daily backup runs in the Worker itself; there is no collector image.
 - **Todofy:** TypeScript gateway plus Python SQLite DO core, the ledger's only writer/scheduler. Mail receipts,
   summary work and reconciliation use distinct durable states; it writes no task since 2026-10-21. See the
   [development invariants](../todofy/docs/dev-notes.md) and [gateway contract](../todofy/docs/gateway-contract.md).

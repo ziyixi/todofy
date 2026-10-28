@@ -8,7 +8,7 @@ Mail Hero 位于单仓库的 `mail-hero/` 目录，与 `todofy/` 共用根目录
 
 这条流水线发布 Cloudflare Worker 和静态资源，使用现有D1、R2和SQLite DO资源。来源邮箱转发、Access策略及根域MX由各自设置管理；流水线不会创建新的Cloudflare收费计划。Todofy 在同一仓库的 `todofy/` 中，由独立的 `Todofy checks`/`Todofy deploy` job 发布；两者只共享 `contracts/` 与 `packages/`（目前是 `packages/edge-auth`，由各自Worker编译进去），互不导入代码；共享包改动会同时检查并发布两者，其余发布互不依赖。
 
-[原生备份](native-backup.md)随同一个 Mail Hero Worker 检查与发布。恢复工具测试使用 GnuPG 和合成数据；自动备份不构建镜像、不依赖 VPS。旧 `mail-hero-backup-image.yml` 仅供显式手工 dispatch 的 v1 兼容打包，不再由 push 自动发布收集器；现有旧密文保留。
+[原生备份](native-backup.md)随同一个 Mail Hero Worker 检查与发布。恢复工具测试使用 GnuPG 和合成数据；自动备份不构建镜像、不依赖 VPS。旧 v1 收集器、镜像及其 workflow 已退役；GHCR 中的旧镜像和现有旧密文保留，离线工具仍可校验并恢复 v1 包。
 
 ## 仓库设置
 
