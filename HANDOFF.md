@@ -102,6 +102,9 @@ Release effects to expect (one push deploys every Worker and the VPS images):
 - Fleet may reject host reports and show host_stale for up to about 15 minutes, until the new gateway Pod and
   Platform status daemon stop sending `inference_status`. If the VPS release is skipped or fails, Fleet stays stale
   until a gateway or Platform release lands; rolling back means redeploying the previous Fleet.
+- The Router chain now fails closed: this run selects the gateway, so a failed gateway VPS release also holds the
+  Model Router and, behind it, Todofy, Mailsort, Brief, Home and the Platform/Newsletter VPS release. Re-run the
+  failed jobs after fixing the gateway rather than dispatching single apps out of order.
 - Each evidence-enabled watch writes one new snapshot and one EVIDENCE_CHANGED event on its first capture (the
   comparison hash changed), so each linked open Work gets one progress report. Old and new `content_sha256` values
   are not comparable.
