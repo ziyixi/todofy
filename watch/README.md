@@ -10,6 +10,7 @@ change inbox. Chinese, mobile first. Design: [`docs/design.md`](docs/design.md).
 | `web/` | The UI, built into `web/dist` and served by the Worker |
 | `wrangler.toml` | The production config (top level = production), deployed by CI's `Watch deploy` |
 | `deploy/` | The deploy wrapper `deploy-vars.mjs` and the bundle budget |
+| `tools/` | `backup-restore.ts`: download, verify and upload a daily backup ([`docs/backup.md`](docs/backup.md)) |
 | `../proto/watch/ui/v1/` | The owner API `watch.ui.v1` |
 
 ## Use
@@ -67,6 +68,14 @@ baseline and notification semantics. Page text and screenshots are untrusted sou
 with `page_size` up to 100. It orders evidence changes and health transitions by a stable sequence, independently of
 Tasks delivery and of rule confirmations. The feed keeps 30 days or 500 events; after `CURSOR_EXPIRED` the caller takes a
 new baseline and treats the gap as unknown history (`ListChanges` still has the changes).
+
+## Backup and restore
+
+Every day at 11:23 UTC `WatchState` backs up every table of its store and every evidence object its snapshots name
+into the private bucket `watch-backups` (binding `BACKUPS`), in bounded alarm steps while writes wait, and keeps the
+newest 30 complete backups. On an empty store, 健康 offers 从备份恢复: the object restores a named backup itself,
+checks every part's SHA-256 and shows its verification, without sending an old notification again. What is backed up,
+the layout, retention, the restore step by step and the tool: [`docs/backup.md`](docs/backup.md).
 
 ## Develop
 
@@ -134,6 +143,10 @@ an alarm when none is set): it must show a 下次调度 time (never 未设定) w
 dashboard's next tick (every 30 minutes) calls `status()`, which arms a missing alarm too, and shows `scheduler_stale`
 if passes stop. Then add a watch of a page the owner controls (W2 step 8 in `docs/design.md` §11) and see its first
 check within a minute.
+
+After the release that bound `BACKUPS` (and after any deploy that changed the backup), 健康 shows 备份 with an age of
+minutes: the first job runs at once ([`docs/backup.md`](docs/backup.md)); Home's tile then carries `backup_age_seconds`
+and raises `backup_stale` if no backup completes for three days.
 
 The dashboard's daily drift check compares the live Worker with `dashboard/worker/src/drift-desired.json` (these two
 secrets, `BUILD_SHA`, the bindings and the Custom Domain); its registry shows the 网页监视 tile (ops-v1 through the
