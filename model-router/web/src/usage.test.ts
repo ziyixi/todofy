@@ -87,6 +87,24 @@ describe('usage projections', () => {
     expect(points[1]).toMatchObject({ requests: 1, input: null, output: null, apiCost: null, apiUnpriced: 1 })
     expect(points[2]).toMatchObject({ requests: 0, input: 0, output: 0, apiCost: 0 })
   })
+  it('graphs text tokens as complete beside embeddings, which report no tokens', () => {
+    const points = usagePoints(
+      [
+        bucket,
+        {
+          ...bucket,
+          model: '@cf/baai/bge-m3',
+          billing_kind: 'platform_quota',
+          input_tokens: 0,
+          output_tokens: 0,
+          usage_available_count: 0,
+        },
+      ],
+      1,
+      '2026-10-26T00:15:00Z',
+    )
+    expect(points[0]).toMatchObject({ requests: 2, input: 100, output: 20 })
+  })
   it('uses daily bins for longer ranges and refuses to graph incomplete token totals as complete', () => {
     const points = usagePoints(
       [{ ...bucket, request_count: 2, usage_available_count: 1 }],

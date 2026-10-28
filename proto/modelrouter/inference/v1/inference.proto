@@ -89,11 +89,7 @@ message Model {
   bool configured = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Supported thinking effort values.
   repeated string efforts = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Conservative input reservation rate used by Brief, in micro-USD per token.
-  double reservation_input_microusd_per_token = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Conservative output reservation rate used by Brief, in micro-USD per token.
-  double reservation_output_microusd_per_token = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Workers AI quota reservation rate used by Brief.
+  // Estimated Workers AI quota units per input token.
   double reservation_quota_units_per_token = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
@@ -275,7 +271,39 @@ message ModelError {
   int32 code = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Safe explanation without request content or credentials.
   string message = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Actionable failure reason.
+  // Actionable failure reason. Refusals before execution carry the same names
+  // in their google.rpc.Status ErrorInfo. Callers branch on the reason, and
+  // treat an unlisted one by its code: 3 content, 4 timeout, 7, 9 and 16
+  // configuration, anything else infrastructure.
+  //
+  // Configuration; hold the work without spending per-item attempts:
+  // MODEL_AUTH (16 or 7, a Gemini key rejected with 400 included),
+  // MODEL_NOT_CONFIGURED (9: provider 404, a Gemini 400 FAILED_PRECONDITION,
+  // missing key or route), MODEL_NOT_ALLOWED (7: this caller may not use
+  // that model or operation), MODEL_SPEND_LIMIT (8: provider spend cap or
+  // credit).
+  //
+  // Content-dependent; count per-item attempts with a small cap:
+  // MODEL_INVALID_REQUEST (3: provider 400, 413 or 422, or an option the
+  // model rejects), MODEL_INVALID_ANSWER (13), MODEL_REFUSED (9),
+  // MODEL_OUTPUT_LIMIT (13), MODEL_UNSUPPORTED_TOOL (13).
+  //
+  // MODEL_TIMEOUT (4): the request exceeded its deadline, including the
+  // Router's own. MODEL_CANCELLED (1): only a real caller cancellation, such
+  // as closing the context during its turn.
+  //
+  // Infrastructure or capacity; defer the whole pass, honoring
+  // retry_after_seconds, without spending attempts: MODEL_QUOTA (8),
+  // MODEL_RATE_LIMIT (8), MODEL_UNAVAILABLE (14), MODEL_BUSY (14),
+  // MODEL_MAINTENANCE (14), MODEL_STORAGE_UNAVAILABLE (14),
+  // MODEL_EXECUTOR_UNAVAILABLE, MODEL_EXECUTOR_INTERRUPTED and
+  // MODEL_EXECUTOR_INVALID_RESPONSE (14), MODEL_CLEANUP_PENDING (14, close
+  // only) and MODEL_INTERNAL (13, Router-internal).
+  //
+  // Request validation answers INVALID_ARGUMENT before execution with
+  // MODEL_NOT_FOUND, MODEL_CAPABILITY_UNSUPPORTED or a field-specific reason,
+  // and the executor answers an unknown method with MODEL_METHOD_UNSUPPORTED
+  // (12); the call itself must change.
   string reason = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Provider retry delay in seconds, when supplied.
   // (-- api-linter: core::0140::prepositions=disabled

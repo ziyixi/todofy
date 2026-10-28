@@ -7,8 +7,19 @@ export function apiKey(context: ProviderContext, provider: 'ANTHROPIC' | 'GEMINI
 }
 
 export function providerStatus(code: number, message: string, reason?: string, retryAfterSeconds = 0): { code: number; message: string; reason: string; retryAfterSeconds: number } {
-  const reasons: Record<number, string> = { 1: 'MODEL_CANCELLED', 3: 'MODEL_INVALID_ANSWER', 4: 'MODEL_TIMEOUT', 7: 'MODEL_AUTH', 8: 'MODEL_QUOTA', 9: 'MODEL_NOT_CONFIGURED', 13: 'MODEL_INVALID_ANSWER', 14: 'MODEL_UNAVAILABLE' };
+  const reasons: Record<number, string> = { 1: 'MODEL_CANCELLED', 3: 'MODEL_INVALID_REQUEST', 4: 'MODEL_TIMEOUT', 7: 'MODEL_AUTH', 8: 'MODEL_QUOTA', 9: 'MODEL_NOT_CONFIGURED', 13: 'MODEL_INVALID_ANSWER', 14: 'MODEL_UNAVAILABLE' };
   return { code, message, reason: reason ?? reasons[code] ?? 'MODEL_UNAVAILABLE', retryAfterSeconds };
+}
+
+/** The engine deadline and AbortSignal.timeout abort with a TimeoutError; any other abort is a caller cancellation. */
+export function timedOut(signal: AbortSignal): boolean {
+  const reason: unknown = signal.reason;
+  return typeof reason === 'object' && reason !== null && (reason as { name?: unknown }).name === 'TimeoutError';
+}
+
+/** Providers bill nothing for a request they refuse with a 4xx before generating; 408 and 5xx stay unknown. */
+export function refusedBeforeGeneration(status: number): boolean {
+  return status >= 400 && status < 500 && status !== 408;
 }
 
 /** Delta seconds or HTTP-date, with the caller's existing one-day backoff ceiling. */
@@ -19,7 +30,7 @@ export function parseRetryAfter(value: string | null, nowMs = Date.now()): numbe
 }
 
 export function httpError(provider: string, status: number, headers?: Headers): ReturnType<typeof providerStatus> {
-  const code = status === 401 || status === 403 ? 7 : status === 429 ? 8 : status === 408 ? 4 : status >= 500 || status === 409 ? 14 : 9;
+  const code = status === 401 || status === 403 ? 7 : status === 429 ? 8 : status === 408 ? 4 : status >= 500 || status === 409 ? 14 : [400, 413, 422].includes(status) ? 3 : 9;
   return providerStatus(code, `${provider}_http_${String(status)}`, status === 429 ? 'MODEL_RATE_LIMIT' : undefined, parseRetryAfter(headers?.get('retry-after') ?? null));
 }
 

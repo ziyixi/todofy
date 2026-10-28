@@ -120,7 +120,7 @@ describe('Claude adapter', () => {
   it.each([['refusal', 'claude_refused'], ['max_tokens', 'claude_output_limit']])('keeps billable usage for %s', async (stop, message) => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json(claudeMessage(stop)));
     const result = await generateClaude(config(), 'synthetic', context('anthropic', fetcher));
-    expect(result.error?.message).toBe(message);
+    expect(result.error).toMatchObject({ message, code: stop === 'refusal' ? 9 : 13 });
     expect(result.output).toBe('');
     expect(result.usage.available).toBe(true);
   });
@@ -142,6 +142,26 @@ describe('Claude adapter', () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ error: { type: 'rate_limit_error', details: { error_code: 'enforced_spend_limit_reached' } } }, { status: 429 }));
     const result = await generateClaude(config(), 'synthetic', context('anthropic', fetcher));
     expect(result.error).toMatchObject({ code: 8, reason: 'MODEL_SPEND_LIMIT' });
+    const credits = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ type: 'error', error: { type: 'invalid_request_error', message: 'Your credit balance is too low to access the API.' } }, { status: 400 }));
+    expect((await generateClaude(config(), 'synthetic', context('anthropic', credits))).error).toMatchObject({ code: 8, reason: 'MODEL_SPEND_LIMIT' });
+  });
+
+  it.each([[400, 3, 'MODEL_INVALID_REQUEST'], [413, 3, 'MODEL_INVALID_REQUEST'], [422, 3, 'MODEL_INVALID_REQUEST'], [404, 9, 'MODEL_NOT_CONFIGURED'], [401, 7, 'MODEL_AUTH']])('reports HTTP %s before generation as %s with zero billed usage', async (status, code, reason) => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ type: 'error', error: { type: 'invalid_request_error', message: 'private provider text' } }, { status }));
+    const result = await generateClaude(config(), 'synthetic', context('anthropic', fetcher));
+    expect(result.error).toMatchObject({ code, reason });
+    expect(result.usage).toMatchObject({ available: true, inputTokens: 0, outputTokens: 0, estimatedCostMicrousd: 0 });
+    expect(JSON.stringify(result)).not.toContain('private provider text');
+  });
+
+  it('reports the Router deadline as a timeout and only a real cancellation as cancelled', async () => {
+    const hang = vi.fn<typeof fetch>().mockImplementation((_input, init) => new Promise((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(new Error('synthetic aborted')))));
+    for (const [reason, code, expected] of [[new DOMException('deadline', 'TimeoutError'), 4, 'MODEL_TIMEOUT'], [undefined, 1, 'MODEL_CANCELLED']] as const) {
+      const controller = new AbortController();
+      const pending = generateClaude(config(), 'synthetic', { ...context('anthropic', hang), signal: controller.signal });
+      setTimeout(() => controller.abort(reason), 10);
+      expect((await pending).error).toMatchObject({ code, reason: expected });
+    }
   });
 
   it('permits fallback on a Haiku route that has no fallback policy', async () => {
@@ -185,7 +205,30 @@ describe('Gemini adapter', () => {
     const result = await generateGemini(config({ ...{ allowFallback: true, effort: 'low', maxOutputTokens: 4096 } }), 'synthetic', { ...ctx });
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(result.error?.reason).toBe('MODEL_RATE_LIMIT');
+    // A refusal before generation bills nothing.
+    expect(result.usage).toMatchObject({ available: true, inputTokens: 0, outputTokens: 0, estimatedCostMicrousd: 0 });
+  });
+
+  it.each([408, 503])('keeps usage unknown after HTTP %s', async status => {
+    const result = await generateGemini(config(), 'synthetic', context('gemini', vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status }))));
+    expect(result.error?.code).toBe(status === 408 ? 4 : 14);
     expect(result.usage.available).toBe(false);
+  });
+
+  it.each([
+    [{ status: 'INVALID_ARGUMENT', details: [{ '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: 'API_KEY_INVALID' }] }, 7, 'MODEL_AUTH'],
+    [{ status: 'FAILED_PRECONDITION' }, 9, 'MODEL_NOT_CONFIGURED'],
+    [{ status: 'INVALID_ARGUMENT' }, 3, 'MODEL_INVALID_REQUEST'],
+  ])('reads a Gemini 400 that is configuration, not the request: %j', async (error, code, reason) => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ error: { code: 400, message: 'private provider text', ...error } }, { status: 400 }));
+    const result = await generateGemini(config(), 'synthetic', context('gemini', fetcher));
+    expect(result.error).toMatchObject({ code, reason, message: 'gemini_http_400' });
+    expect(JSON.stringify(result)).not.toContain('private provider text');
+  });
+
+  it('reports an already expired Router deadline as a timeout', async () => {
+    const result = await generateGemini(config(), 'synthetic', { ...context('gemini'), signal: AbortSignal.abort(new DOMException('deadline', 'TimeoutError')) });
+    expect(result.error).toMatchObject({ code: 4, reason: 'MODEL_TIMEOUT' });
   });
 
   it.each([400, 401, 403])('does not try another model after HTTP %s', async status => {
@@ -207,7 +250,7 @@ describe('Gemini adapter', () => {
   it('does not return truncated output as a success', async () => {
     const result = await generateGemini(config(), 'synthetic', context('gemini', vi.fn<typeof fetch>().mockResolvedValue(Response.json(geminiMessage('MAX_TOKENS')))));
     expect(result.output).toBe('');
-    expect(result.error?.message).toBe('gemini_output_limit');
+    expect(result.error).toMatchObject({ code: 13, reason: 'MODEL_OUTPUT_LIMIT', message: 'gemini_output_limit' });
     expect(result.usage.available).toBe(true);
   });
 
@@ -285,6 +328,14 @@ describe('Workers AI embeddings', () => {
     const result = await embedWorkersAI(['synthetic'], { ...ctx, env: { AI: { run: () => Promise.resolve({ data: [[1, 2]] }) } } as unknown as ProviderContext['env'] });
     expect(result.vectors).toEqual([]);
     expect(result.error?.message).toBe('embedding_invalid_response');
+  });
+
+  it('reports its own expired deadline as a timeout', async () => {
+    const ctx = context('workers_ai');
+    const run = vi.fn(() => Promise.resolve({ data: [Array<number>(1024).fill(1)] }));
+    const result = await embedWorkersAI(['synthetic'], { ...ctx, env: { AI: { run } } as unknown as ProviderContext['env'], signal: AbortSignal.abort(new DOMException('deadline', 'TimeoutError')) });
+    expect(result.error).toMatchObject({ code: 4, reason: 'MODEL_TIMEOUT' });
+    expect(run).not.toHaveBeenCalled();
   });
 
   it('recognizes platform quota errors without exposing their content', async () => {

@@ -50,7 +50,7 @@ describe('the shell', () => {
     const root = await open(fake, '/')
     expect(statusLine(root).slice(0, 3)).toEqual([
       ['仅归档', 'chip muted'],
-      ['未设置 Claude 密钥', 'problem'],
+      ['未绑定 Model Router', 'problem'],
       ['制作中：写作', ''],
     ])
   })

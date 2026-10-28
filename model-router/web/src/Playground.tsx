@@ -116,7 +116,7 @@ export function Playground({
         )}
         <form ref={form} onSubmit={submit} onKeyDown={shortcut}>
           <p className="small muted">
-            Claude 共用原 Brief 工作区的 US$80/月支出上限。此处只运行推理，不执行应用业务操作。
+            Claude 调用计入供应商处的共享消费上限。此处只运行推理，不执行应用业务操作。
           </p>
           <label>
             模型

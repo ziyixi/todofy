@@ -23,6 +23,8 @@ import { Code, RpcError, invalid } from './errors.ts';
 export const DAY = 86_400_000;
 export const CONTENT_DAYS = 7;
 export const METADATA_DAYS = 90;
+/** Longer than the longest 840-second turn; a row still running after this lost its invocation. */
+export const STUCK_MS = 20 * 60_000;
 export function timestamp(ms: number): Timestamp {
   return timestampFromDate(new Date(ms));
 }
@@ -115,9 +117,14 @@ export class Store {
     } catch {
       value = { ...value, contentAvailable: false };
     }
-    await this.env.DB.prepare('UPDATE requests SET model = ?, state = ?, completed_ms = ?, generation_json = ? WHERE id = ?')
-      .bind(generation.model, value.state, millis(value.completedAt), metadata(value), id)
-      .run();
+    try {
+      await this.env.DB.prepare('UPDATE requests SET model = ?, state = ?, completed_ms = ?, generation_json = ? WHERE id = ?')
+        .bind(generation.model, value.state, millis(value.completedAt), metadata(value), id)
+        .run();
+    } catch {
+      // The caller still receives its result; the daily sweep marks the running row interrupted.
+      console.warn('model_request_finish_unrecorded');
+    }
   }
   async detail(id: string): Promise<RequestRecord> {
     const row = await this.env.DB.prepare('SELECT * FROM requests WHERE id = ?').bind(id).first<RequestRow>();
@@ -249,6 +256,12 @@ export class Store {
     });
   }
   async cleanup(now = Date.now()): Promise<void> {
+    // A deploy or reset can cut a call off before finish(); its result is unknown, never retried.
+    await this.env.DB.prepare(`UPDATE requests SET state = 'interrupted', completed_ms = ?1,
+      generation_json = json_set(generation_json, '$.state', 'interrupted', '$.completed_at', ?2)
+      WHERE id IN (SELECT id FROM requests WHERE state = 'running' AND started_ms < ?3 LIMIT 1000)`)
+      .bind(now, new Date(now).toISOString(), now - STUCK_MS)
+      .run();
     await this.env.DB.prepare('DELETE FROM requests WHERE id IN (SELECT id FROM requests WHERE started_ms < ? LIMIT 1000)')
       .bind(now - METADATA_DAYS * DAY)
       .run();

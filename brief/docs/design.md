@@ -10,11 +10,11 @@ a Haiku entailment check logs overstatements. One send per day through Resend, n
 outcome; a private archive behind Access shows every issue, its sources, its quotes and what it cost. The owner's
 👍 / 👎 / 多来点 adjust source and topic weights weekly.
 
-**Status: deployed in archive mode** (2026-10-11). The implementation landed in `0e48a59`; the first deployment,
-`7bea3ec`, passed [CI](https://github.com/ziyixi/todofy/actions/runs/38128504001). The Access applications and
-`BriefState` namespace exist, and production has both provider secret names configured. Production `MODE` and the
-GitHub variable `BRIEF_MODE` are `archive`: the pipeline can call the paid Claude API and archive issues, but sends
-no email. Real model quality and delivery remain separate acceptance steps (§16).
+**Status: stopped** (2026-10-18, `BRIEF_MODE=off`): no Claude call, issue or email; the code is kept, and Newsletter
+is the active daily briefing. Before that it ran in archive mode from 2026-10-11: the implementation landed in
+`0e48a59`; the first deployment, `7bea3ec`, passed [CI](https://github.com/ziyixi/todofy/actions/runs/38128504001).
+The Access applications and `BriefState` namespace exist. Real model quality and delivery remain separate acceptance
+steps (§16).
 
 The resource registration and Home Ops integration were implemented on `codex/brief-home-monitoring`.
 [`HANDOFF.md`](../../HANDOFF.md) records their release status, production checks and the initial synthetic
@@ -76,8 +76,8 @@ No D1, R2, KV, Queues, Workflows or cron trigger. Bindings: `BRIEF` (the object)
 GitHub: `ACCESS_OWNER`, `ACCESS_OWNER_ALIASES`, `FEEDBACK_SIGNING_KEY` (64 hex),
 `MAIL_FROM`, `MAIL_TO` (personal values). Brief's only owner-machine secret is `RESEND_API_KEY`, kept outside
 GitHub and preserved by deployment. Model Router alone holds the shared `ANTHROPIC_API_KEY` and `GEMINI_API_KEY`.
-Claude uses the original Brief workspace, with an aggregate $80/month provider cap across all callers; Brief keeps
-its own persisted business budget. Provider credentials and API adapters stay in Router; the official Codex SDK
+Provider keys are Router secrets, and spending is capped at the provider; Brief keeps its own persisted business
+budget. Provider credentials and API adapters stay in Router; the official Codex SDK
 and subscription login remain on the VPS. Current setup is in
 [Model Router deployment](../../model-router/docs/deployment.md).
 
@@ -389,29 +389,29 @@ the whole shortlist; Opus may leave a weak packet out (`omitted`), and a short i
   ID, the model that served it, the stop reason), and its cost replaces the reservation.
 - Outcomes:
   - `end_turn` with a valid answer goes to the check; one whose items are all `omitted` ends the day with the note.
-  - `max_tokens`, the deadline or a stall: the same request would run as long again, so the shortlist is halved through
-    the bisection below (each half writes about half as much; a half that runs out again is halved in turn), within
-    its 4 calls; with one packet, another attempt.
-  - An invalid answer or a mid-stream error (an `overloaded_error` after HTTP 200 arrives as an `APIError` without
-    status and is not retried by the SDK) uses one of 3 attempts, 15 minutes apart; an answer that is no JSON is never
-    stored to be read again.
+  - `max_tokens` or the deadline (`MODEL_OUTPUT_LIMIT`, `MODEL_TIMEOUT`, a stall included): the same request would run
+    as long again, so the shortlist is halved through the bisection below (each half writes about half as much; a half
+    that runs out again is halved in turn), within its 4 calls; with one packet, another attempt.
+  - An invalid answer or a stream interrupted after it started (the Router reports its partial usage) uses one of 3
+    attempts, 15 minutes apart; an answer that is no JSON is never stored to be read again.
   - A deploy that kills the call does not use an attempt: the attempt row's `BUILD_SHA` is older than the running
     build's and no final message was stored (a deploy kills in-flight work after 30 s, and every change to `proto/` or a
     shared package redeploys the brief). The call runs again at once, bounded by the send cutoff and the monthly budget
     (a killed call keeps its reservation).
-  - 408, 409, 429, 529 or 5xx before the stream starts costs nothing and is retried with backoff until the send cutoff.
+  - A rate, quota or spend limit, an unavailable provider with nothing observed (a 5xx or 529 before the stream) and
+    the Router's maintenance cost nothing and are retried with backoff until the send cutoff. A call to the Router that
+    fails in transport is recorded as a deploy-killed one (no attempt, its reservation kept) and retried the same way.
   - No call starts past the send cutoff (12:00): every retry is due at the cutoff at the latest, where the step ends the
     day with its note, archived (`issue_missed`); an earlier day's unfinished run is stepped at once, so it never holds
     up the next day's.
   - Paused (设置 → 暂停) or switched off (`BRIEF_MODE=off`) while an issue runs: the model calls stop at once (both are
     read at the moment of every call); the step uses no attempt, looks again every 10 minutes and resumes when the stop
     lifts, or ends the day at the cutoff (archived: 发信时已暂停, 部署为关闭模式).
-  - Any other 4xx before the stream starts is a state that repeats, not a bad moment: 400 (a beta header the
-    organization is not enabled for, a credit or limit message, a request the API refuses), 401, 402 `billing_error`
-    (the credits are used up), 403, 404 (a model the organization cannot use), 413. Every model call stops at once, no
-    attempt is used, and the critical signal `anthropic_rejected` carries the status and the error type (never the
-    message's text), until the key changes (the object keeps a SHA-256 prefix of it, never the key), a new build
-    deploys, or the owner presses 设置 → 恢复调用. Otherwise a gate that scores nothing would end the day in
+  - A rejection is a state that repeats, not a bad moment: the codes 3, 7, 9 and 16, answered or refused by the Router
+    before the call (`MODEL_INVALID_REQUEST`: a provider 400, 413 or 422; `MODEL_AUTH`; `MODEL_NOT_CONFIGURED`: a
+    missing connection or a provider 404; `MODEL_NOT_ALLOWED`). Every model call stops at once, no attempt is used, and
+    the critical signal `anthropic_rejected` carries the code and the reason (never the message's text), until a new
+    build deploys or the owner presses 设置 → 恢复调用. Otherwise a gate that scores nothing would end the day in
     `STATE_EMPTY` and look like a quiet day.
 - Refusals. Opus 5.5's classifiers decline in an open set of categories (`cyber`, `bio`, `reasoning_extraction`, and
   any the API adds). The server-side fallback answers most declines with the model Anthropic routes that category to
@@ -663,8 +663,9 @@ the picks have none (one call a day each). Output and thinking dominate, so effo
 **Three walls**, metered in code:
 
 1. **The call's reservation.** Before every model call its maximum is reserved: the estimated input and `max_tokens`
-   at the dearest model that may serve it (an Opus call at its fallbacks' $5/$25: about $1.85 for a 64K write). The call
-   starts only if every reservation in flight still fits under what is left of the month's budget. When the final
+   at the rates of `worker/src/limits.ts`, the dearest model that may serve it (an Opus call at its fallbacks' $25
+   output, input at the dearest cache write: about $2 for a 64K write). The call starts only if every reservation in
+   flight still fits under what is left of the month's budget. When the final
    message arrives, its real cost replaces the reservation. A call that dies keeps its reservation: the stream reports
    output tokens only in its last event (`message_delta`) and the thinking text is omitted, so what a dead call
    generated cannot be counted from what streamed (only its input, from `message_start`); the conservative charge is
@@ -745,12 +746,12 @@ an issue.
 
 | Failure | What happens | Signal |
 | --- | --- | --- |
-| The Claude API refuses a request before its stream (400, 401, 402, 403, 404, 413) | every model call stops, no attempt used, until the key changes, a build deploys or 设置 → 恢复调用 | `anthropic_rejected` (critical; status and error type) |
-| No Claude key, or no Resend key or addresses | issues are not made, or made and archived | `anthropic_not_configured`, `mail_not_configured` |
-| 408, 409, 429, 529 or 5xx before a stream | retried with backoff until the cutoff, then the note, archived | `issue_late` past 07:30, `issue_missed` |
-| A write runs out of tokens or time (`max_tokens`, the deadline, a stall) | the shortlist halved through the bisection | `issue_failed` when nothing answers |
-| A write dies otherwise (an invalid answer, a mid-stream error) | its attempt counts; at most 3 | `issue_failed` when they run out |
-| A deploy kills a write | runs again at once, no attempt used, never past 12:00 | — |
+| The Router rejects a request (codes 3, 7, 9, 16: a provider 400/401/403/404/413, a missing connection, a caller not allowed) | every model call stops, no attempt used, until a build deploys or 设置 → 恢复调用 | `anthropic_rejected` (critical; code and reason) |
+| No `MODEL_ROUTER` binding, or no Resend key or addresses | issues are not made, or made and archived | `anthropic_not_configured`, `mail_not_configured` |
+| A rate, quota or spend limit, a 5xx or 529 before a stream, Router maintenance | retried with backoff until the cutoff, then the note, archived | `issue_late` past 07:30, `issue_missed` |
+| A write runs out of tokens or time (`MODEL_OUTPUT_LIMIT`, `MODEL_TIMEOUT`) | the shortlist halved through the bisection | `issue_failed` when nothing answers |
+| A write dies otherwise (an invalid answer, a stream interrupted after it started) | its attempt counts; at most 3 | `issue_failed` when they run out |
+| A deploy kills a write, or its call to the Router fails in transport | runs again, no attempt used, never past 12:00 | — |
 | 设置 → 暂停, or `BRIEF_MODE=off` deployed, while an issue runs | no model call starts and no attempt is used; the step resumes when the stop lifts, or the day ends at 12:00, archived | — (the archive says why) |
 | `BRIEF_MODE=off` deployed | no issue is made; `anthropic_not_configured`, `issue_late`, `issue_missed`, `sources_stale` and `section_thin` are not raised (a refused key or a send's outcome still is) | `brief_off` (info) |
 | Haiku refuses candidates | the fallback score (§5.1) | `gate_refused_high` (warning) above 5% of a day |

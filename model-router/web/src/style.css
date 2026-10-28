@@ -21,21 +21,6 @@
   font-synthesis: none;
   -webkit-font-smoothing: antialiased;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
-    --bg: #111513;
-    --surface: #191e1c;
-    --fg: #e4eae7;
-    --muted: #a0ada6;
-    --border: #303934;
-    --accent: #8cd2b9;
-    --accent-soft: #22382e;
-    --danger: #f18b80;
-    --warn: #e2b161;
-    --code-bg: #141916;
-  }
-}
 *,
 *::before,
 *::after {
@@ -535,16 +520,6 @@ tbody tr:last-child td {
 .catalog-row > .tag {
   margin-top: 1px;
 }
-.capabilities {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 9px;
-  margin-top: 8px;
-}
-.capabilities span {
-  color: var(--muted);
-  font-size: 0.68rem;
-}
 .tag {
   font-size: 0.66rem;
   font-weight: 500;
@@ -909,33 +884,6 @@ tbody tr:last-child td {
   font-size: 1em;
   overflow-wrap: anywhere;
 }
-.parameters {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 9px;
-  background: var(--code-bg);
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  padding: 12px;
-}
-.parameters legend {
-  float: left;
-  width: 100%;
-  padding: 0;
-  grid-column: 1 / -1;
-  margin: 0;
-  font-size: 0.73rem;
-}
-.parameters label {
-  font-size: 0.7rem;
-  font-weight: 500;
-}
-.parameters select,
-.parameters input {
-  min-width: 0;
-  font-size: 0.78rem;
-  padding: 6px 8px;
-}
 .instruction-block {
   margin-bottom: 9px;
 }
@@ -1055,9 +1003,6 @@ tbody tr:last-child td {
   .playground-layout {
     gap: 14px;
   }
-  .parameters {
-    grid-template-columns: 1fr;
-  }
 }
 @media (max-width: 720px) {
   .app-header {
@@ -1169,21 +1114,6 @@ tbody tr:last-child td {
   .playground-result {
     width: 100%;
   }
-  .parameters {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    padding: 10px;
-  }
-  .parameters label {
-    font-size: 0.65rem;
-  }
-  .parameters input,
-  .parameters select {
-    font-size: 0.7rem;
-    padding: 6px;
-  }
-  .parameters legend .muted {
-    font-size: 0.67rem;
-  }
   .playground-result {
     min-height: 250px;
   }
@@ -1207,9 +1137,6 @@ tbody tr:last-child td {
   }
   .metric-label svg {
     display: none;
-  }
-  .parameters {
-    grid-template-columns: minmax(0, 1fr);
   }
   .form-footer {
     flex-wrap: wrap;

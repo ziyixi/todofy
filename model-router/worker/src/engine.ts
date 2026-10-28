@@ -27,6 +27,7 @@ import { generateClaude } from './providers/claude.ts';
 import { generateGemini } from './providers/gemini.ts';
 import { embedWorkersAI } from './providers/workers-ai.ts';
 import { estimateCostMicrousd } from './providers/pricing.ts';
+import { timedOut } from './providers/common.ts';
 import { backupStep, newBackup, type BackupCursor } from './backup.ts';
 import { Code, RpcError, invalid, precondition, resourceId } from './errors.ts';
 import type { Env, ProviderResult } from './types.ts';
@@ -42,6 +43,11 @@ interface Context {
   expireMs: number;
 }
 const knownApps = new Set(['console', 'mailsort', 'todofy', 'brief', 'newsletter']);
+/** The external Newsletter token reaches only subscription Codex models; in-account bindings stay unrestricted. */
+function allowModel(app: string, provider: string): void {
+  if (app === 'newsletter' && provider !== 'codex')
+    throw new RpcError(Code.PERMISSION_DENIED, 'MODEL_NOT_ALLOWED', 'This caller may use only Codex models.');
+}
 const modelApi = new HttpTranscoder(ModelService, {
   listModels: (_req, ctx: ApiContext) =>
     Promise.resolve(create(ListModelsResponseSchema, { models: modelCatalog(ctx.engine.environment) })),
@@ -119,9 +125,10 @@ export class RouterEngine extends DurableObject<Env> {
     validateConfig(effective);
     const providerRequest = { ...effective, outputSchemaJson: providerOutputSchema(effective.outputSchemaJson) };
     const route = routeFor(effective.model);
+    allowModel(app, route.provider);
     const started = Date.now();
     const duration = Math.min(budget(req.timeoutMs), context ? context.expireMs - started : 840000);
-    const timer = setTimeout(() => controller.abort(), duration);
+    const timer = setTimeout(() => controller.abort(new DOMException('The model exceeded its time budget.', 'TimeoutError')), duration);
     let value = create(GenerationSchema, {
       name: `requests/${crypto.randomUUID()}`,
       model: route.upstreamModel,
@@ -188,10 +195,14 @@ export class RouterEngine extends DurableObject<Env> {
       let code: Code = Code.INTERNAL;
       let reason = 'MODEL_INTERNAL';
       let message = 'The model execution did not complete.';
-      if (controller.signal.aborted) {
+      if (controller.signal.aborted && timedOut(controller.signal)) {
         code = Code.DEADLINE_EXCEEDED;
         reason = 'MODEL_TIMEOUT';
         message = 'The model exceeded its time budget.';
+      } else if (controller.signal.aborted) {
+        code = Code.CANCELLED;
+        reason = 'MODEL_CANCELLED';
+        message = 'The context was closed during this turn.';
       } else if (error instanceof RpcError) {
         code = error.code;
         reason = error.reason;
@@ -252,6 +263,7 @@ export class RouterEngine extends DurableObject<Env> {
   }
   async embed(req: EmbedRequest, app: string) {
     const route = routeFor(req.model);
+    allowModel(app, route.provider);
     if (
       route.provider !== 'workers_ai' || req.inputs.length < 1 || req.inputs.length > 50 ||
       req.inputs.some((text) => !text || new TextEncoder().encode(text).length > 32768)
@@ -316,17 +328,9 @@ export class RouterEngine extends DurableObject<Env> {
   override async alarm(): Promise<void> {
     const contexts = await this.ctx.storage.list<Context>({ prefix: 'conversations/' });
     for (const [name, context] of contexts) {
-      if (context.expireMs > Date.now()) {
-        await this.wakeAt(context.expireMs);
-        continue;
-      }
-      try {
-        await this.closeConversation(name, context.app);
-      } catch {
-        // An unavailable VPS must not prevent the independent Cloudflare backup step.
-        await this.wakeAt(Date.now() + 60000);
-        console.warn('model_context_cleanup_unavailable');
-      }
+      // The gateway closes its SDK context at the same deadline; only the ownership record remains here.
+      if (context.expireMs <= Date.now()) await this.ctx.storage.delete(name);
+      else await this.wakeAt(context.expireMs);
     }
     const cursor = await this.ctx.storage.get<BackupCursor>('backup');
     if (!cursor) return;

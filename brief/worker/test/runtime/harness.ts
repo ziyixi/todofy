@@ -89,7 +89,8 @@ export interface SentMail {
 }
 
 export interface HarnessOptions {
-  readonly modelConfigured?: boolean;
+  /** false: no MODEL_ROUTER binding. */
+  readonly modelRouter?: boolean;
   readonly bindings?: Record<string, string | undefined>;
   readonly inspectorPort?: number;
   /** Runs BriefState in a Worker of its own, as Cloudflare runs a Durable Object apart from its caller. */
@@ -169,11 +170,9 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     durableObjects: { BRIEF: { className: 'BriefState', useSQLite: true, ...(split ? { scriptName: objectWorker } : {}) } },
     serviceBindings: {
       ASSETS: () => new Response(TEST_PAGE, { headers: { 'content-type': 'text/html; charset=utf-8' } }),
-      MODEL_ROUTER: async (request: Request) => {
+      ...(options.modelRouter === false ? {} : { MODEL_ROUTER: async (request: Request) => {
         const path = new URL(request.url).pathname;
         if (path === '/api/model/v1/models') return Response.json(toWire(ListModelsResponseSchema, create(ListModelsResponseSchema, { models: [
-          { id: 'claude-opus-5-5', configured: options.modelConfigured !== false, reservationInputMicrousdPerToken: 5, reservationOutputMicrousdPerToken: 25 },
-          { id: 'claude-haiku-5-5', configured: options.modelConfigured !== false, reservationInputMicrousdPerToken: 0.5, reservationOutputMicrousdPerToken: 2.5 },
           { id: '@cf/baai/bge-m3', configured: true, kind: 'embedding', reservationQuotaUnitsPerToken: QUOTA_RATE },
         ] })));
         if (path === '/api/model/v1/embeddings:embed') {
@@ -184,7 +183,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
         }
         if (path === '/api/model/v1/generations:generate') return claude.answer(fromWire(GenerateRequestSchema, await request.json()).message);
         return new Response('unexpected model route', { status: 404 });
-      },
+      } }),
     },
     bindings,
     outboundService: outbound,

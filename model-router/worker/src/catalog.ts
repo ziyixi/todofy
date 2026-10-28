@@ -48,13 +48,6 @@ export function modelCatalog(env: Env): Model[] {
       default:
         configured = !!secretFor(env, route.provider);
     }
-    let inputRate = 0;
-    let outputRate = 0;
-    if (route.provider === 'anthropic') {
-      const opus = route.upstreamModel.startsWith('claude-opus');
-      inputRate = opus ? 10 : 1;
-      outputRate = opus ? 25 : 2.5;
-    }
     return create(ModelSchema, {
       id: route.upstreamModel,
       displayName: route.displayName,
@@ -62,8 +55,6 @@ export function modelCatalog(env: Env): Model[] {
       kind: route.provider === 'workers_ai' ? 'embedding' : 'text',
       configured,
       efforts: route.efforts,
-      reservationInputMicrousdPerToken: inputRate,
-      reservationOutputMicrousdPerToken: outputRate,
       reservationQuotaUnitsPerToken: route.quotaUnitsPerToken ?? 0,
     });
   });

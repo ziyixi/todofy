@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ServiceStatus_KeyState } from '@ziyixi/proto/brief/ui/v1/status_pb';
-import { modelError, jsonAnswer } from '../fakes/claude.ts';
+import { modelError, jsonAnswer, type FakeMessage } from '../fakes/claude.ts';
 import { la, op, reasonOf, rejection, SECOND, startHarness, type Harness, type HarnessOptions } from './harness.ts';
 
 let h: Harness | null = null;
@@ -127,13 +127,14 @@ describe('Router model failures', () => {
     expect(resumed.keyState).toBe(ServiceStatus_KeyState.OK);
   });
 
-  it('retries a rate-limited model with backoff, without using an attempt', async () => {
+  const overloaded: FakeMessage = { error: { code: 14, reason: 'MODEL_UNAVAILABLE', message: 'claude_http_529' }, usage: { available: false, inputTokens: 0, outputTokens: 0 } };
+  it.each([['a rate-limited model', modelError('MODEL_RATE_LIMIT', 8)], ['a 529 before the stream', overloaded]])('retries %s with backoff, without using an attempt', async (_name, failure) => {
     const { h, at } = await toMondayRun();
     let failures = 0;
     h.claude.script = (_body, step) => {
       if (step === 'write' && failures < 2) {
         failures++;
-        return modelError('MODEL_RATE_LIMIT', 8);
+        return failure;
       }
       return null;
     };
@@ -156,9 +157,9 @@ describe('Router model failures', () => {
     expect((await h.opsStatus())['signals']).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'issue_failed', severity: 'critical' })]));
   });
 
-  it('halves a write that ran out of tokens (the same request would again): the halves make the issue', async () => {
+  it.each([['tokens', { finishReason: 'output_limit' }], ['time', 'stall']] as const)('halves a write that ran out of %s (the same request would again): the halves make the issue', async (_name, failure) => {
     const { h, at } = await toMondayRun();
-    h.claude.script = (body, step) => (step === 'write' && packetsIn(body) > 3 ? { finishReason: 'output_limit' } : null);
+    h.claude.script = (body, step) => (step === 'write' && packetsIn(body) > 3 ? failure : null);
     await h.runUntil(at, la('2026-10-12', '07:00'));
     const calls = await h.sql<{ step: string }>(`SELECT step FROM calls WHERE step IN ('write', 'bisect') ORDER BY id`);
     expect(calls.map((call) => call.step)).toEqual(['write', 'bisect', 'bisect']);
@@ -429,8 +430,8 @@ describe('the walls and the switches', () => {
     expect(shadow.sent[0]?.body.subject).toBe('[影子版] 简报 · 10月12日（周一）');
   });
 
-  it('makes no issue and no model call without the configured model connection', async () => {
-    const harness = await startHarness({ modelConfigured: false });
+  it('makes no issue and no model call without the Model Router binding', async () => {
+    const harness = await startHarness({ modelRouter: false });
     h = harness;
     await harness.runUntil(la('2026-10-11', '12:30'), la('2026-10-12', '08:00'));
     expect(harness.claude.requests).toHaveLength(0);

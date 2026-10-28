@@ -210,6 +210,14 @@ export const TEXT_KEPT_MS = 7 * DAY;
 // ---- the model calls (design §7, §9, §13) ---------------------------------------------------------------------------------
 
 export const OPUS_MODEL = 'claude-opus-5-5';
+/**
+ * The reservation's worst-case rates (§13), in micro-USD per token: the dearest model that may serve the request (an
+ * Opus call's fallbacks, Haiku's long-prompt card), its input at the dearest cache-write price.
+ */
+export const RESERVATION_RATES: Readonly<Record<string, { readonly input: number; readonly output: number }>> = {
+  [OPUS_MODEL]: { input: 10, output: 25 },
+  [GATE_MODEL]: { input: 1, output: 2.5 },
+};
 /** A model stream's own deadline, never past the alarm's time left minus a minute. */
 export const MODEL_DEADLINE_MS = 13 * MINUTE;
 export const MODEL_DEADLINE_MARGIN_MS = 60 * SECOND;

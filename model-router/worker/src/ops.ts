@@ -11,16 +11,22 @@ export class Ops extends WorkerEntrypoint<Env> implements wire.OpsService {
   async status(): Promise<wire.OpsStatus> {
     const now = Date.now();
     const row = await this.env.DB.prepare(
-      "SELECT count(*) AS requests, sum(state = 'succeeded') AS succeeded, sum(state IN ('failed','cancelled','interrupted')) AS failed, sum(state = 'running' AND started_ms < ?) AS stale FROM requests WHERE started_ms >= ?",
+      "SELECT count(*) AS requests, sum(state = 'succeeded') AS succeeded, sum(state IN ('failed','cancelled','interrupted')) AS failed FROM requests WHERE started_ms >= ?",
     )
-      .bind(now - 15 * 60000, Math.floor(now / DAY) * DAY)
-      .first<{ requests: number; succeeded: number; failed: number; stale: number }>();
+      .bind(Math.floor(now / DAY) * DAY)
+      .first<{ requests: number; succeeded: number; failed: number }>();
+    // Two days keep a stuck call visible past UTC midnight until the daily sweep marks it interrupted.
+    const stuck = await this.env.DB.prepare(
+      "SELECT count(*) AS stale FROM requests WHERE state = 'running' AND started_ms >= ? AND started_ms < ?",
+    )
+      .bind(now - 2 * DAY, now - 15 * 60000)
+      .first<{ stale: number }>();
     const engine = this.env.ENGINE.get(this.env.ENGINE.idFromName('router-v1')) as DurableObjectStub<RouterEngine>;
     const backup = await engine.backupStatus();
     const backupAge = Math.floor((now - (backup.completedMs || backup.startedMs)) / 1000);
     const backupStale = backupAge > 26 * 3600;
     const signals = [];
-    if (row?.stale) signals.push({ code: 'model_execution_unknown', severity: Severity.WARNING, metrics: { count: row.stale } });
+    if (stuck?.stale) signals.push({ code: 'model_execution_unknown', severity: Severity.WARNING, metrics: { count: stuck.stale } });
     if (backupStale) signals.push({ code: 'backup_stale', severity: Severity.WARNING, metrics: { age_hours: Math.floor(backupAge / 3600) } });
     return toWire(
       OpsStatusSchema,
@@ -38,7 +44,7 @@ export class Ops extends WorkerEntrypoint<Env> implements wire.OpsService {
           requests_today: row?.requests ?? 0,
           succeeded_today: row?.succeeded ?? 0,
           failed_today: row?.failed ?? 0,
-          interrupted: row?.stale ?? 0,
+          interrupted: stuck?.stale ?? 0,
           ...(backup.completedMs ? { backup_age_seconds: backupAge } : {}),
         },
         signals,

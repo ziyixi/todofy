@@ -78,7 +78,7 @@ export function statusParts(status: ServiceStatus, now: number): HTMLElement[] {
   const parts = [chip(MODE_NAMES[status.mode] ?? '—', status.mode === Mode.LIVE ? 'accent' : status.mode === Mode.OFF ? 'warn' : 'muted')]
   if (status.paused) parts.push(problem('已暂停'))
   if (status.keyState === ServiceStatus_KeyState.REJECTED) parts.push(problem('调用被拒'))
-  else if (status.keyState === ServiceStatus_KeyState.NOT_CONFIGURED) parts.push(problem('未设置 Claude 密钥'))
+  else if (status.keyState === ServiceStatus_KeyState.NOT_CONFIGURED) parts.push(problem('未绑定 Model Router'))
   if (!status.mailConfigured && (status.mode === Mode.SHADOW || status.mode === Mode.LIVE)) parts.push(problem('发信未配置'))
   if (status.currentIssue !== '') parts.push(quiet(`制作中：${stepName(status.currentStep)}`))
   else if (status.nextAlarmTime !== undefined) parts.push(quiet(`下次运行 ${relative(status.nextAlarmTime, now)}`))

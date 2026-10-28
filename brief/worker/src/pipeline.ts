@@ -273,7 +273,7 @@ function stopStep(env: PipelineEnv, run: RunRow, step: StepName, stop: Stop): St
 
 /** An answer that ran out of tokens or time: the same request would again (design §7). */
 function tooLong(outcome: ModelOutcome): boolean {
-  return (outcome.kind === 'invalid' && outcome.code === 'max_tokens') || (outcome.kind === 'failed' && (outcome.code === 'deadline' || outcome.code === 'stall'));
+  return (outcome.kind === 'invalid' && outcome.code === 'max_tokens') || (outcome.kind === 'failed' && outcome.code === 'MODEL_TIMEOUT');
 }
 
 // ---- the weekday pick (design §5.3) ------------------------------------------------------------------------------------------------

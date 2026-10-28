@@ -46,30 +46,30 @@ provider payload or caller-chosen execution identity. Newsletter alone uses the 
 Create, up to two Generate calls on the same SDK thread, then Close with an empty cleanup acknowledgement.
 Owner request history and usage use the separate console API in `console.proto`.
 
-Owner UI, request history, usage and session endpoints stay behind owner Access. A narrow Bypass application
+Owner UI, request history and usage stay behind owner Access. A narrow Bypass application
 covers only ModelService's catalog, generation, embedding and context paths. The Worker authenticates each call
 with the owner Access assertion or exact Newsletter token. Owner JSON mutations require exact Origin,
-`X-CSRF-Token: 1` and `application/json` before body parsing.
+`X-CSRF-Token: 1` and `application/json` before body parsing. The Newsletter token reaches only Codex models:
+other providers and embeddings answer `PERMISSION_DENIED` with `MODEL_NOT_ALLOWED` before a request is recorded,
+so synthetic Claude, Gemini and embedding checks use the owner's Access identity.
 
 Cloudflare callers use the `Inference` binding with immutable `props.app` naming `mailsort`, `todofy` or `brief`.
 Home binds the content-free `Ops` entrypoint. Application request fields cannot choose either identity.
 
 `MODEL_ROUTER_WORKER_SECRETS` in GitHub's protected production environment contains only `ACCESS_OWNER` and
-optional `ACCESS_OWNER_ALIASES`. The following owner-machine connections are installed directly in Router
-secrets and preserved by normal publication:
+optional `ACCESS_OWNER_ALIASES`. The connections named in [app.toml](../app.toml) are Router secrets that normal
+publication preserves:
 
-- `ANTHROPIC_API_KEY`: one shared key in the existing Claude workspace, including Playground use, under the
-  owner's configured US$80/month workspace cap. Application budgets and history remain in their applications.
-- `GEMINI_API_KEY`: the shared Gemini key.
-- `CODEX_ACCESS_CLIENT_ID` and `CODEX_ACCESS_CLIENT_SECRET`: the existing dedicated Access identity for the VPS
-  executor. The backend verifies Access JWTs. Its public issuer/audience are baked into the gateway image.
-- `MODEL_ROUTER_NEWSLETTER_TOKEN`: Newsletter's inference-only credential. Its VPS configuration uses the same
-  value as `NEWSLETTER_MODEL_ROUTER_TOKEN`, with `NEWSLETTER_MODEL_ROUTER_URL` naming the Models origin.
+- `ANTHROPIC_API_KEY` and `GEMINI_API_KEY`: one shared key per provider for every caller, Playground included.
+  Provider keys are Router secrets; spending is capped at the provider. Application budgets and history remain
+  in their applications.
+- `CODEX_ACCESS_CLIENT_ID` and `CODEX_ACCESS_CLIENT_SECRET`: the executor's Access service credential. The backend
+  verifies Access JWTs. Its public issuer/audience are baked into the gateway image.
+- `MODEL_ROUTER_NEWSLETTER_TOKEN`: Newsletter's inference-only credential, sent as `NEWSLETTER_MODEL_ROUTER_TOKEN`
+  with `NEWSLETTER_MODEL_ROUTER_URL` naming the Models origin.
 
-Provider keys stay only in Router secrets. Backups do not export any credentials. The gateway keeps its existing
-subscription login/PVC; privileged Platform deployment authentication remains separate. Gmail grants and Brief's
-Resend connection stay with their applications. Playground calls record source `console` and perform no application
-business action.
+Backups do not export any credentials. Gmail grants and Brief's Resend connection stay with their applications.
+Playground calls record source `console` and perform no application business action.
 
 ## Checks and coordinated release
 

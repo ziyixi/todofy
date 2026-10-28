@@ -53,8 +53,8 @@ export async function startHarness({ ownerBypass = true, maintenance = false }: 
   const geminiOutputs: string[] = []
   const executorOutputs: string[] = []
   const conversations = new Map<string, string>()
-  let closeFailures = 0
   let generationFailureReason = ''
+  let geminiDelayMs = 0
   async function outbound(request: Request): Promise<Response> {
     const url = new URL(request.url)
     if (url.href === `${issuer}/cdn-cgi/access/certs`) return Response.json((await signingKeys).jwks)
@@ -69,7 +69,10 @@ export async function startHarness({ ownerBypass = true, maintenance = false }: 
       bearer: request.headers.get('authorization'),
       userAgent: request.headers.get('user-agent'),
     })
-    if (url.hostname === 'generativelanguage.googleapis.com')
+    if (url.hostname === 'generativelanguage.googleapis.com') {
+      const delay = geminiDelayMs
+      geminiDelayMs = 0
+      if (delay) await new Promise((resolve) => setTimeout(resolve, delay))
       return Response.json({
         modelVersion: 'gemini-3.5-flash-lite',
         candidates: [
@@ -77,6 +80,7 @@ export async function startHarness({ ownerBypass = true, maintenance = false }: 
         ],
         usageMetadata: { promptTokenCount: 12, candidatesTokenCount: 4, totalTokenCount: 16 },
       })
+    }
     if (url.hostname !== 'executor.example.test')
       return new Response('Synthetic external request denied', { status: 599 })
     if (url.pathname.endsWith('generations:generate')) {
@@ -104,10 +108,6 @@ export async function startHarness({ ownerBypass = true, maintenance = false }: 
       return Response.json({})
     }
     const name = url.pathname.replace('/api/codex/v1/model/', '').replace(/:close$/, '')
-    if (url.pathname.endsWith(':close') && closeFailures > 0) {
-      closeFailures -= 1
-      return Response.json({ error: { code: 503, status: 'UNAVAILABLE', message: 'Synthetic executor unavailable' } }, { status: 503 })
-    }
     if (url.pathname.endsWith(':close')) conversations.set(name, 'closed')
     return Response.json({})
   }
@@ -179,6 +179,12 @@ export async function startHarness({ ownerBypass = true, maintenance = false }: 
   }
   const owner = createHttpClient(ConsoleService, send)
   const models = createHttpClient(ModelService, send)
+  const newsletter = createHttpClient(ModelService, async (call) =>
+    mf.dispatchFetch(origin + call.url, {
+      method: call.httpMethod,
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${machineToken}` },
+      ...(call.body === undefined ? {} : { body: call.body }),
+    }) as unknown as Promise<Response>)
   const forCaller = (app: string) =>
     createHttpClient(ModelService, async (call) => {
       const worker = await mf.getWorker(`caller-${app}`)
@@ -210,12 +216,13 @@ export async function startHarness({ ownerBypass = true, maintenance = false }: 
     backups,
     owner,
     models,
+    newsletter,
     forCaller,
     calls,
     geminiOutputs,
     executorOutputs,
-    failNextClose() { closeFailures += 1 },
     failNextGeneration(reason: string) { generationFailureReason = reason },
+    delayNextGemini(ms: number) { geminiDelayMs = ms },
     caller,
     async dispose() {
       await mf.dispose()
