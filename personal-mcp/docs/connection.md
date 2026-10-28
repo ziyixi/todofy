@@ -19,7 +19,7 @@ Only HTTPS callbacks on the exact configured `CALLBACK_HOSTS` are accepted. Redi
 Workers fetch uses `redirect: manual`. The real Dots subscription uses `connectors.api.openai.com`; this exact
 hostname is the production allowlist. Record only the hostname, never the callback path or signing secret.
 Arbitrary webhook destinations are outside this personal ChatGPT integration. The current live acceptance
-record is in [Personal MCP verification](../../docs/personal-mcp-verification.md).
+record is in [Personal MCP verification](verification.md).
 
 ## Release and real-client checks
 

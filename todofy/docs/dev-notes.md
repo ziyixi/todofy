@@ -12,18 +12,17 @@ the git history at `6c46ed4`.
 
 ## 1. Run everything locally
 
-Prerequisites: Node 26 (root `package.json`), uv 0.12.10, Python 3.14 (`.python-version`; uv fetches it).
+Prerequisites: Node 26 (root `package.json`), pnpm 11.25.0, uv 0.12.10, Python 3.14 (`.python-version`; uv fetches it).
 Run everything from `todofy/` in the monorepo.
 
 ```sh
-npm ci --no-audit --no-fund          # wrangler 4.142.0 only; npm 11 warns about workerd/esbuild
-                                     # postinstall scripts, which is harmless
+pnpm --dir .. install --frozen-lockfile   # the root workspace lock (docs/dependencies.md), gateway/ and web/ included
 uv sync --locked                     # dev tools; the Worker itself has no third-party packages
 uv run ruff check worker tests tools deploy && uv run ruff format --check worker tests tools deploy
 uv run pytest tests/unit tests/fakes tools deploy   # host CPython (tools includes a local-D1 round trip)
-(cd gateway && npm ci --no-audit --no-fund && npm run lint && npm run typecheck && npm test)
+(cd gateway && npm run lint && npm run typecheck && npm test)
 (cd gateway && npm run test:runtime) # the gateway alone in workerd: the owner API's CPU per request (gateway-contract.md §8)
-(cd web && npm ci --no-audit --no-fund && npm run typecheck && npm test && npm run build)  # build checks the JS budget
+(cd web && npm run typecheck && npm test && npm run build)  # build checks the JS budget
 uv run pytest tests/runtime          # real workerd via `wrangler dev`, serially: ~10 min (about 80
                                      # dev servers, each running the gateway and todofy-core in one process)
 uv run pytest tests/runtime -n 4     # the same tests in 4 processes (pytest-xdist): ~3 min

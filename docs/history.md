@@ -5,6 +5,12 @@ current production state; [HANDOFF](../HANDOFF.md) names the current rollout and
 
 ## Archived handoffs
 
+[Handoff of October 27, 2026](history/handoff-2026-10-27.md) keeps the released notes of October 22-27: the Model
+Router cutover and its cost visibility, the Codex gateway, its 6.1 runtime and [monitor](history/codex-monitor.md),
+the shared dependency workspaces, Mailsort's priorities, providers, interval and recent intake, Tasks planning, GTD
+and Goals, Mail Hero's backup write reduction, the configuration-drift correction and Watch page evidence.
+[Handoff of October 22, 2026](history/handoff-2026-10-22.md) keeps the Tasks UI refinement and the approved Tasks
+interface.
 [Handoff of October 21, 2026](history/handoff-2026-10-21.md) keeps the completed notes of the Private MCP release and
 its acceptance, the done steps in Plan's Week calendar, the Tasks desktop PWA features and the FlowDay retirement
 with Todofy's planning-store drop.

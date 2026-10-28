@@ -37,7 +37,7 @@ Production batch results must be recorded separately from the initializer and sy
 
 The one-time follow-up rechecks (**重判保底 P1**, **重判最初100封**) are retired: their request fields answer
 RELOAD_REQUIRED, and a stored recheck batch still reports its unchanged results. Their history is in the
-[verification record](../../docs/mailsort-priority-verification.md#in-progress-priority-evidence-and-calibration).
+[verification record](verification.md#original-100-and-workers-ai-calibration).
 
 ## Local verification (2026-10-24 UTC)
 
@@ -66,6 +66,6 @@ Implementation `a70ff257526e8baa3d47e783da1980fff9d9ce11` passed the complete
 Only Mailsort and the matching website privacy page uploaded. The initializer remains a separate explicit owner
 operation; a code release never proves the old Gmail labels have been removed.
 
-The [current production verification](../../docs/mailsort-priority-verification.md) records the actual cutover
+The [current production verification](verification.md#priority-labels-and-cutover) records the actual cutover
 state, source read-back and any still-pending owner action. Its metadata-only evidence is separate from the local
 synthetic tests above. Real Chrome also completed setup and reload against the isolated empty fake mailbox.

@@ -20,11 +20,13 @@ The documents below have different jobs; keep one authoritative home for each fa
 
 - **README:** an introduction and useful links, not a deployment manifest or test ledger.
 - **AGENTS:** mandatory collaboration, privacy, contract and release constraints; link implementation detail.
-- **HANDOFF:** active work, latest release evidence and remaining acceptance; completed detail belongs in dated history.
+- **HANDOFF:** in-flight and unreleased work in detail, one latest verified release, open checks and owner items.
+  Released detail moves to dated history; no run-ID or Worker-version ledgers.
 - **app.toml + Wrangler:** validated service declarations and committed Cloudflare configuration.
   The catalog references Wrangler hostnames/resources; it does not invent a parallel production configuration.
 - **proto + contracts:** the IDL and wire profile, consumer semantics and frozen compatibility evidence.
-- **App docs:** current operations and implementation. Verification entries say what was actually tested and when.
+- **App docs:** current operations and implementation. Each app's `docs/verification.md` says what was actually
+  tested and when, as behavioural conclusions with at most one evidence link each, rather than in root `docs/`.
 - **History:** superseded choices and migration context, clearly labelled so they cannot be mistaken for current behavior.
 
 ## Application runbooks
@@ -37,7 +39,11 @@ The documents below have different jobs; keep one authoritative home for each fa
 | Home | [Current views](../dashboard/docs/design-v2.md), [storage and jobs](../dashboard/docs/design.md) | [Setup](../dashboard/docs/setup.md), [limits](../dashboard/docs/limits.md), [verification](../dashboard/docs/verification.md) |
 | Links | [Design](../links/docs/design.md), [AGENTS](../links/AGENTS.md) | [README](../links/README.md) |
 | Watch | [Design](../watch/docs/design.md), [AGENTS](../watch/AGENTS.md) | [README](../watch/README.md) |
-| Website | [Architecture](../website/docs/architecture.md) | [Release](../website/docs/release.md), [cutover](../website/docs/cutover.md) |
+| Mailsort | [Design](../mailsort/docs/design.md), [AGENTS](../mailsort/AGENTS.md) | [README](../mailsort/README.md), [verification](../mailsort/docs/verification.md) |
+| Recall | [Design](../recall/docs/design.md), [AGENTS](../recall/AGENTS.md) | [Mobile](../recall/docs/mobile.md), [verification](../recall/docs/verification.md) |
+| Model Router | [Design](../model-router/docs/design.md), [AGENTS](../model-router/AGENTS.md) | [Deployment](../model-router/docs/deployment.md), [backup](../model-router/docs/backup.md), [verification](../model-router/docs/verification.md) |
+| Personal MCP | [README](../personal-mcp/README.md), [AGENTS](../personal-mcp/AGENTS.md) | [Connection](../personal-mcp/docs/connection.md), [verification](../personal-mcp/docs/verification.md) |
+| Website | [Architecture](../website/docs/architecture.md) | [Release](../website/docs/release.md), [cutover](../website/docs/cutover.md), [verification](../website/docs/verification.md) |
 | Newsletter | [README](../newsletter/README.md) | Its independent container release and VPS runbook in `newsletter/` |
 
 Adding or moving a document means updating its incoming links and this guide when relevant.
