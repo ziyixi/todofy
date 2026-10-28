@@ -193,6 +193,13 @@ Verify after deploy (read-only):
   cloudflared), the upload into a new bucket, and a restore's real Free-plan rows-written cost. Mailsort's restore
   writes at most 50k SQLite rows a UTC day, so a large store takes several days. These are separate, owner-authorized
   exercises.
+- The links cron is the account's fifth: check that the release kept its `*/5` schedule (Home's Cloudflare check
+  reports a missing one as a schedule drift). Without it no links backup runs and `backup_stale` follows in 3 days.
+
+An independent verification pass re-ran the selected local checks and added two commits. Watch now tells a retired
+object by its id, as Mailsort and Personal MCP do, instead of `ctx.id.name`. An invocation without the name would
+otherwise keep an old object checking and notifying next to a restored one. The CI/CD and Home docs now list links
+and Personal MCP among the deploys Home waits for, and say that all five cron triggers are in use.
 
 ## Latest verified release
 
