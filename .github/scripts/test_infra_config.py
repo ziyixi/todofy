@@ -433,6 +433,11 @@ class MatchesTheApps(unittest.TestCase):
                 with self.subTest(worker=worker):
                     self.assertIn(config(worker)["name"], keys)
 
+    # Buckets declared before any production config binds them: an "Infra apply" creates them between the release
+    # that declares them and the one that binds them, whose preflight stops on a missing bucket. The own backups of
+    # Mailsort, Personal MCP, Watch and Links.
+    AHEAD_OF_BINDING = {"mailsort-backups", "personal-mcp-backups", "watch-backups", "links-backups"}
+
     def test_d1_databases_and_buckets_are_the_ones_the_production_configs_bind(self):
         storage = (INFRA / "storage.tf").read_text()
         imports = (INFRA / "ids.tf").read_text()
@@ -447,7 +452,9 @@ class MatchesTheApps(unittest.TestCase):
             bound_r2.update(bucket["bucket_name"] for bucket in data.get("r2_buckets", []))
         self.assertEqual(d1_names, set(bound_d1))
         self.assertEqual(ids, bound_d1)
-        self.assertEqual(buckets, bound_r2)
+        self.assertEqual(buckets - self.AHEAD_OF_BINDING, bound_r2)
+        self.assertLessEqual(self.AHEAD_OF_BINDING, buckets)
+        self.assertFalse(self.AHEAD_OF_BINDING & bound_r2, "a bound bucket is no longer ahead of its binding")
 
 
 if __name__ == "__main__":

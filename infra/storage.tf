@@ -23,6 +23,10 @@ locals {
     "watch-evidence"              = "watch (EVIDENCE_STORE)"
     "model-router-request-bodies" = "model-router (REQUEST_BODIES)"
     "model-router-backups"        = "model-router (BACKUPS)"
+    "mailsort-backups"            = "mailsort (BACKUPS)"
+    "personal-mcp-backups"        = "personal-mcp (BACKUPS)"
+    "watch-backups"               = "watch (BACKUPS)"
+    "links-backups"               = "links (BACKUPS)"
   }
 }
 
