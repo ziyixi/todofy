@@ -628,6 +628,233 @@
         },
         "additionalProperties": false
       }
+    },
+    "metrics": {
+      "description": "Node resource counters and gauges; absent from older observers and when the kernel files are unreadable.",
+      "type": "object",
+      "required": [
+        "boot_id",
+        "uptime_seconds"
+      ],
+      "properties": {
+        "boot_id": {
+          "description": "/proc/sys/kernel/random/boot_id; counters of another boot are never subtracted.",
+          "type": "string",
+          "pattern": "^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$(?!\\n)"
+        },
+        "uptime_seconds": {
+          "description": "Seconds since boot, with the kernel's centisecond resolution; the interval between two reports.",
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 9007199254740991.0
+        },
+        "cpu": {
+          "description": "Cumulative CPU time of every CPU, null when /proc/stat is unreadable.",
+          "type": "object",
+          "required": [
+            "cpu_count",
+            "total_milliseconds",
+            "idle_milliseconds",
+            "iowait_milliseconds"
+          ],
+          "properties": {
+            "cpu_count": {
+              "description": "Logical CPUs counted in /proc/stat.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4096
+            },
+            "total_milliseconds": {
+              "description": "Every state's time: user, nice, system, idle, iowait, irq, softirq and steal.",
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 9007199254740991.0
+            },
+            "idle_milliseconds": {
+              "description": "Idle time, without iowait.",
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 9007199254740991.0
+            },
+            "iowait_milliseconds": {
+              "description": "Idle time with storage I/O outstanding.",
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 9007199254740991.0
+            }
+          },
+          "additionalProperties": false
+        },
+        "load": {
+          "description": "Run-queue load averages, null when unreadable.",
+          "type": "object",
+          "required": [
+            "one_minute",
+            "five_minutes",
+            "fifteen_minutes"
+          ],
+          "properties": {
+            "one_minute": {
+              "description": "One-minute average.",
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 1000000.0
+            },
+            "five_minutes": {
+              "description": "Five-minute average.",
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 1000000.0
+            },
+            "fifteen_minutes": {
+              "description": "Fifteen-minute average.",
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 1000000.0
+            }
+          },
+          "additionalProperties": false
+        },
+        "memory": {
+          "description": "Host memory and swap, null when unreadable.",
+          "type": "object",
+          "required": [
+            "total_bytes",
+            "available_bytes",
+            "swap_total_bytes",
+            "swap_free_bytes"
+          ],
+          "properties": {
+            "total_bytes": {
+              "description": "MemTotal.",
+              "type": "number",
+              "minimum": 1.0,
+              "maximum": 9007199254740991.0
+            },
+            "available_bytes": {
+              "description": "MemAvailable: what new work can use without swapping; used is total minus available.",
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 9007199254740991.0
+            },
+            "swap_total_bytes": {
+              "description": "SwapTotal; 0 without swap.",
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 9007199254740991.0
+            },
+            "swap_free_bytes": {
+              "description": "SwapFree.",
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 9007199254740991.0
+            }
+          },
+          "additionalProperties": false
+        },
+        "filesystems": {
+          "description": "Filesystem usage by fixed role (`root`, `k3s`, `state`); a role whose mount is unreadable is absent.",
+          "type": "object",
+          "maxProperties": 4,
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^(?:[a-z][a-z0-9_-]{0,31})$(?!\\n)"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "size_bytes",
+              "used_bytes",
+              "available_bytes"
+            ],
+            "properties": {
+              "size_bytes": {
+                "description": "Size in bytes (f_blocks).",
+                "type": "number",
+                "minimum": 1.0,
+                "maximum": 9007199254740991.0
+              },
+              "used_bytes": {
+                "description": "Used bytes (f_blocks - f_bfree).",
+                "type": "number",
+                "minimum": 0.0,
+                "maximum": 9007199254740991.0
+              },
+              "available_bytes": {
+                "description": "Bytes available to unprivileged writers (f_bavail).",
+                "type": "number",
+                "minimum": 0.0,
+                "maximum": 9007199254740991.0
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "network": {
+          "description": "Physical interface byte counters in the host network namespace, null when unreadable.",
+          "type": "object",
+          "required": [
+            "interface_count",
+            "receive_bytes",
+            "transmit_bytes"
+          ],
+          "properties": {
+            "interface_count": {
+              "description": "Interfaces summed; a change restarts the rates like a reboot.",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 64
+            },
+            "receive_bytes": {
+              "description": "Cumulative received bytes.",
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 9007199254740991.0
+            },
+            "transmit_bytes": {
+              "description": "Cumulative transmitted bytes.",
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 9007199254740991.0
+            }
+          },
+          "additionalProperties": false
+        },
+        "workloads": {
+          "description": "Per-workload usage from the Kubernetes metrics API, sorted by key; empty when unavailable.",
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "required": [
+              "workload_key",
+              "cpu_cores",
+              "memory_bytes"
+            ],
+            "properties": {
+              "workload_key": {
+                "description": "The Pod's `app` label, or its CronJob's name; never a Pod name or hostname.",
+                "type": "string",
+                "pattern": "^(?:[a-z][a-z0-9_-]{0,31})$(?!\\n)"
+              },
+              "cpu_cores": {
+                "description": "CPU in cores, averaged by metrics-server over its last window.",
+                "type": "number",
+                "minimum": 0.0,
+                "maximum": 4096.0
+              },
+              "memory_bytes": {
+                "description": "Working-set memory.",
+                "type": "number",
+                "minimum": 0.0,
+                "maximum": 9007199254740991.0
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

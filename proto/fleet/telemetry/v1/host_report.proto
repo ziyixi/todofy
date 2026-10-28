@@ -35,6 +35,11 @@ option (common.wire.v1.formats) = {
   pattern: "(k3s|cloudflared|ssh|cloudflared_platform)"
   description: "Explicit host daemon allowlist."
 };
+option (common.wire.v1.formats) = {
+  name: "BootId"
+  pattern: "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+  description: "Random kernel boot identity; a new value means every cumulative counter restarted."
+};
 // One bounded, content-free observation, not proof of business success.
 message HostReport {
   // Always fleet-report-v1.
@@ -114,8 +119,219 @@ message HostReport {
     key_format: "DaemonAlias"
     max_items: 4
   }];
+  // Node resource counters and gauges; absent from older observers and when the kernel files are unreadable.
+  NodeMetrics metrics = 17;
   reserved 12, 13;
   reserved "desired_sha", "deployment_ready";
+}
+// Raw node readings. Cumulative counters are doubles because the wire profile has no 64-bit integers;
+// every integral value below 2^53 is exact. Fleet derives rates from two consecutive reports of one boot.
+message NodeMetrics {
+  // /proc/sys/kernel/random/boot_id; counters of another boot are never subtracted.
+  string boot_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "BootId"
+  ];
+  // Seconds since boot, with the kernel's centisecond resolution; the interval between two reports.
+  // (-- api-linter: core::0142::time-field-type=disabled
+  //     aip.dev/not-precedent: the wire profile has no Duration; a double keeps /proc/uptime's resolution. --)
+  double uptime_seconds = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      minimum: 0
+      maximum: 9007199254740991
+    }
+  ];
+  // Cumulative CPU time of every CPU, null when /proc/stat is unreadable.
+  CpuTimes cpu = 3;
+  // Run-queue load averages, null when unreadable.
+  LoadAverage load = 4;
+  // Host memory and swap, null when unreadable.
+  MemoryUsage memory = 5;
+  // Filesystem usage by fixed role (`root`, `k3s`, `state`); a role whose mount is unreadable is absent.
+  map<string, FilesystemUsage> filesystems = 6 [(common.wire.v1.field) = {
+    key_format: "Code"
+    max_items: 4
+  }];
+  // Physical interface byte counters in the host network namespace, null when unreadable.
+  NetworkCounters network = 7;
+  // Per-workload usage from the Kubernetes metrics API, sorted by key; empty when unavailable.
+  repeated WorkloadUsage workloads = 8 [(common.wire.v1.field).max_items = 16];
+}
+// Cumulative CPU time since boot summed over every CPU, from /proc/stat.
+message CpuTimes {
+  // Logical CPUs counted in /proc/stat.
+  int32 cpu_count = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      minimum: 1
+      maximum: 4096
+    }
+  ];
+  // Every state's time: user, nice, system, idle, iowait, irq, softirq and steal.
+  double total_milliseconds = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      minimum: 0
+      maximum: 9007199254740991
+    }
+  ];
+  // Idle time, without iowait.
+  double idle_milliseconds = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      minimum: 0
+      maximum: 9007199254740991
+    }
+  ];
+  // Idle time with storage I/O outstanding.
+  double iowait_milliseconds = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      minimum: 0
+      maximum: 9007199254740991
+    }
+  ];
+}
+// Exponentially damped run-queue lengths from /proc/loadavg.
+message LoadAverage {
+  // One-minute average.
+  double one_minute = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      minimum: 0
+      maximum: 1000000
+    }
+  ];
+  // Five-minute average.
+  double five_minutes = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      minimum: 0
+      maximum: 1000000
+    }
+  ];
+  // Fifteen-minute average.
+  double fifteen_minutes = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      minimum: 0
+      maximum: 1000000
+    }
+  ];
+}
+// Host memory from /proc/meminfo.
+message MemoryUsage {
+  // MemTotal.
+  double total_bytes = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      minimum: 1
+      maximum: 9007199254740991
+    }
+  ];
+  // MemAvailable: what new work can use without swapping; used is total minus available.
+  double available_bytes = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      minimum: 0
+      maximum: 9007199254740991
+    }
+  ];
+  // SwapTotal; 0 without swap.
+  double swap_total_bytes = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      minimum: 0
+      maximum: 9007199254740991
+    }
+  ];
+  // SwapFree.
+  double swap_free_bytes = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      minimum: 0
+      maximum: 9007199254740991
+    }
+  ];
+}
+// statvfs of one read-only mount. On a pooled filesystem (ZFS) it describes that dataset.
+message FilesystemUsage {
+  // Size in bytes (f_blocks).
+  double size_bytes = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      minimum: 1
+      maximum: 9007199254740991
+    }
+  ];
+  // Used bytes (f_blocks - f_bfree).
+  double used_bytes = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      minimum: 0
+      maximum: 9007199254740991
+    }
+  ];
+  // Bytes available to unprivileged writers (f_bavail).
+  double available_bytes = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      minimum: 0
+      maximum: 9007199254740991
+    }
+  ];
+}
+// Summed byte counters of the physical interfaces (`en*`, `eth*`, `wl*`, `ww*`); names are never sent.
+message NetworkCounters {
+  // Interfaces summed; a change restarts the rates like a reboot.
+  int32 interface_count = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      minimum: 0
+      maximum: 64
+    }
+  ];
+  // Cumulative received bytes.
+  double receive_bytes = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      minimum: 0
+      maximum: 9007199254740991
+    }
+  ];
+  // Cumulative transmitted bytes.
+  double transmit_bytes = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      minimum: 0
+      maximum: 9007199254740991
+    }
+  ];
+}
+// One workload's current usage, summed over its running Pods and containers.
+message WorkloadUsage {
+  // The Pod's `app` label, or its CronJob's name; never a Pod name or hostname.
+  string workload_key = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Code"
+  ];
+  // CPU in cores, averaged by metrics-server over its last window.
+  double cpu_cores = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      minimum: 0
+      maximum: 4096
+    }
+  ];
+  // Working-set memory.
+  double memory_bytes = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field) = {
+      minimum: 0
+      maximum: 9007199254740991
+    }
+  ];
 }
 // A daemon's observed state. Logs and unit file contents are excluded.
 message Daemon {
