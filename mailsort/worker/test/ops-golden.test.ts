@@ -206,6 +206,31 @@ test('a status holds counts and codes only: never a subject, a sender or a label
   for (const leak of ['合成主题', 'example.org', 'Sender', 'synthetic.apps']) expect(text).not.toContain(leak);
 });
 
+/** The daily backup's facts as MailsortState reads them (src/backup.ts): the last job failed, the last backup is 4 days old. */
+function backupStale(): unknown {
+  const target = store();
+  writeSettings(target, { ...DEFAULTS, mode: 'live' }, NOW - HOUR);
+  target.setMeta('auth_state', 'ok');
+  target.setMeta('last_sync_at', String(NOW - 4 * MINUTE));
+  return sortStatus(target, env, NOW, { status: 'failed', last_backup_at: NOW - 4 * 24 * HOUR - MINUTE, since: NOW - 40 * 24 * HOUR });
+}
+
+test("the daily backup's age, a stale backup (critical) and a failed job are the contract's fixture, byte for byte", () => {
+  const answer = backupStale();
+  expect(JSON.stringify(answer)).toBe(JSON.stringify(fixture('OpsStatus/mailsort-backup-stale.json')));
+  expect(validate(SCHEMA, 'OpsStatus', answer)).toEqual([]);
+  expect(answer).toMatchObject({
+    health: 'degraded',
+    signals: [{ code: 'backup_stale', severity: 'critical', metrics: { age_seconds: 345_660, has_backup: 1 } }, { code: 'backup_failed', severity: 'warning', metrics: {} }],
+    counters: { backup_age_seconds: 345_660 },
+    last_backup_at: '2026-10-02T13:59:00Z',
+  });
+  // Without the bucket: no backup counter, signal or time.
+  const unbound = sortStatus(store(), env, NOW);
+  expect(unbound).toMatchObject({ last_backup_at: null, signals: [] });
+  expect(unbound.counters).not.toHaveProperty('backup_age_seconds');
+});
+
 test('the owner UI URL keeps the contract format, else it is left out', () => {
   expect(uiUrl('sort.example.com')).toBe('https://sort.example.com/');
   expect(uiUrl(null)).toBeUndefined();

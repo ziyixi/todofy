@@ -208,7 +208,7 @@ const ENTRIES: readonly EntryDef[] = [
     access: true,
     status: { type: 'ops_v1', binding: 'MAILSORT', guard: false },
     tile_metric: { kind: 'counter', name: 'pending' },
-    app_only_signals: [],
+    app_only_signals: ['backup_stale', 'backup_failed'],
     order: 9,
   },
   {
