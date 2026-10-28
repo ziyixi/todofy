@@ -78,7 +78,7 @@ async function fixture() {
     ),
   );
   for (const [id, task, when] of [
-    ["parent-done", "parent", at("2030-11-01")],
+    ["parent-done", "parent", at("2030-11-04")],
     ["step-done", "step", at("2030-11-02")],
     ["quick-done", "quick", at("2030-11-03")],
     ["routine-done", "routine", at("2030-11-04")],
@@ -199,7 +199,7 @@ test("unassigned Steps and nested Subtasks inherit the nearest current area whil
       `INSERT INTO completions(id,task_id,title,completed_at)
     SELECT id,id,title,? FROM tasks WHERE id IN ('subtask','nested-step')`,
     )
-    .bind(at("2030-11-02"))
+    .bind(at("2030-11-04"))
     .run();
   const work = await report("2030-11-01", "2030-11-07", "work");
   expect(work).toMatchObject({
@@ -258,9 +258,10 @@ test("Steps of a Routine parent are excluded from main metrics without changing 
 
 test("older and first partial commitment periods expose counts without inventing a Task rate", async () => {
   await fixture();
+  // Capture started inside the week of 2030-11-03, the only week that starts in the default dates.
   await harness.db
     .prepare("UPDATE gtd_reporting SET started_at=?")
-    .bind(at("2030-11-02"))
+    .bind(at("2030-11-04"))
     .run();
   const result = await report();
   expect(result.taskPlanHistoryComplete).toBe(false);
@@ -270,6 +271,44 @@ test("older and first partial commitment periods expose counts without inventing
   expect(
     (await report("2030-11-04", "2030-11-10")).taskPlanHistoryComplete,
   ).toBe(true);
+});
+
+test("a month judges each week that starts in it through that Saturday and leaves its first partial week to the month before", async () => {
+  await harness.db.exec(
+    `INSERT INTO tasks(id,title,kind,parent_id,area,planning_flags,duration_minutes,completed,created_at,updated_at) VALUES
+    ('late','Synthetic last-week outcome','task','','work','[]',0,1,1,1),
+    ('twice','Synthetic two-week outcome','task','','work','[]',0,1,1,1),
+    ('open','Synthetic open outcome','task','','work','[]',0,0,1,1);
+    INSERT INTO gtd_week_commitments(week_start,task_id,created_at) VALUES
+      ('2030-12-02','twice',1),('2030-12-09','twice',2),('2030-12-30','late',1),('2030-12-30','open',1);`.replace(
+      /\n/g,
+      " ",
+    ),
+  );
+  for (const [id, task, when] of [
+    ["twice-done", "twice", at("2030-12-10")],
+    // December's last week runs from Sunday 2030-12-29 to Saturday 2031-01-04.
+    ["late-done", "late", at("2031-01-02")],
+  ] as const)
+    await harness.db
+      .prepare(
+        "INSERT INTO completions(id,task_id,title,completed_at) VALUES(?,?,?,?)",
+      )
+      .bind(id, task, "Synthetic completion", when)
+      .run();
+  expect(await report("2030-12-01", "2030-12-31")).toMatchObject({
+    taskPlanHistoryComplete: true,
+    taskCompletionCount: 1,
+    plannedTaskCount: 3,
+    completedPlannedTaskCount: 2,
+  });
+  // January's first days are in that week, so January neither counts it again nor judges it on four days.
+  expect(await report("2031-01-01", "2031-01-31")).toMatchObject({
+    taskPlanHistoryComplete: true,
+    taskCompletionCount: 1,
+    plannedTaskCount: 0,
+    completedPlannedTaskCount: 0,
+  });
 });
 
 test("create/update capture each committed week atomically and replay does not duplicate membership", async () => {

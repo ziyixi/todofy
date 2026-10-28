@@ -417,7 +417,7 @@ it("reads related Steps only when expanded and completes Tasks without changing 
   fireEvent.click(
     screen.getByRole("button", { name: "Add task for this goal" }),
   );
-  expect(onCreateTask).toHaveBeenCalledWith("result-1-1");
+  expect(onCreateTask).toHaveBeenCalledWith("result-1-1", "Result 1.1");
 });
 
 it("Refresh Goals updates linked tasks and already expanded Steps", async () => {

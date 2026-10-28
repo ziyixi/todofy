@@ -27,7 +27,7 @@ export function GoalRelatedTasks({
   plan?: Plan;
   refreshRevision: number;
   onOpenTask: (id: string) => void;
-  onCreateTask: (keyResultId: string) => void;
+  onCreateTask: (keyResultId: string, keyResultTitle: string) => void;
   onCompleteTask: Completion;
 }) {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -121,7 +121,7 @@ export function GoalRelatedTasks({
           <button
             className="icon-button"
             aria-label="Add task for this goal"
-            onClick={() => onCreateTask(keyResultId)}
+            onClick={() => onCreateTask(keyResultId, keyResultTitle)}
           >
             <Plus size={16} />
           </button>

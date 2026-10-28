@@ -16,7 +16,7 @@ import { useSortable } from "@dnd-kit/react/sortable";
 import { SortableKeyboardPlugin } from "@dnd-kit/dom/sortable";
 import { pointerIntersection } from "@dnd-kit/collision";
 import { Flag, GripVertical } from "lucide-react";
-import { displayedTitle, effectiveArea } from "./domain";
+import { addDays, displayedTitle, effectiveArea } from "./domain";
 import { deadlineTitle, spokenDeadline } from "./deadlines";
 import { dependencyIndex } from "./dependencies";
 import {
@@ -264,11 +264,8 @@ export function ReviewBoard({
   const hintId = useId();
   // A drag speaks of card titles, lane names and positions.
   const plugins = useMemo(() => {
-    const { startNow, waiting, parked } = words(language);
     const laneTitles: Record<string, string> = {
-      start: startNow,
-      waiting,
-      parked,
+      parked: words(language).parked,
       ...Object.fromEntries(
         reviewLanes(language).map((lane) => [lane.stage, lane.title]),
       ),
@@ -377,10 +374,26 @@ export function ReviewBoard({
         if (!column || (!column.stage && to !== "parked")) return;
         const parking = to === "parked";
         const stage: Stage = column.stage ?? "none";
-        // Picking up an automatically surfaced card acknowledges it in the existing stage write.
+        // Moving a ready card acknowledges it in the existing stage write: one surfaced in Parked,
+        // committed work in its start window, or a manually parked one whose start window has
+        // opened or whose prerequisites are done. Otherwise it would come straight back as ready.
+        const index = dependencyIndex(plan);
+        const state = cardState(
+          task,
+          currentDate,
+          index.waitingFor.get(task.id),
+          index.done.has(task.id),
+        );
+        const opens =
+          Boolean(task.deadline) &&
+          (task.deadline < currentDate ||
+            (task.leadDays > 0 &&
+              addDays(task.deadline, -task.leadDays) <= currentDate));
         const active =
-          (from === "start" || (from === "parked" && !isParked(task))) &&
-          !parking;
+          !parking &&
+          (state === "start" ||
+            state === "ready" ||
+            (isParked(task) && (index.done.has(task.id) || opens)));
         // Only manual parking owns a parked flag; automatic readiness is read-derived.
         const parked = parking
           ? true
@@ -400,9 +413,9 @@ export function ReviewBoard({
         );
         const onBoard = (lane: LaneId) =>
           after[lane].some((item) => item.id === task.id);
-        // Acknowledged, a Start now card may leave the board, but not come straight back. Any other
-        // card must land in the lane it was dropped on: one that would come straight back, or be
-        // only a step of its outcome's card again, writes nothing.
+        // Acknowledged, a ready card may leave the board, but not come straight back to Parked. Any
+        // other card must land in the lane it was dropped on: one that would come straight back, or
+        // be only a step of its outcome's card again, writes nothing.
         if (active ? onBoard(from) : !onBoard(to)) return;
         // The card moves at once and waits in its new lane until Todoist confirms.
         void run(() => actions.updateTask(task, update), {
@@ -498,7 +511,7 @@ function ReviewLane({
   /** A stage lane's stage. */
   stage?: Exclude<Stage, "none">;
   title: string;
-  /** The label a drop writes; a drop on Start now or Waiting changes nothing. */
+  /** The label a drop writes. */
   label?: string;
   /** The cards shown, which an area filter may leave out. */
   tasks: PlanningTask[];
@@ -519,8 +532,6 @@ function ReviewLane({
   const { ref } = useDroppable({
     id: `review-lane:${lane}`,
     accept: "review-outcome",
-    // Start now and Waiting catch a drop without a label, which changes nothing, so that a card
-    // let go over them goes back instead of into the lane its preview overlaps.
     disabled: busy,
     // Below its cards, which are the targets wherever the pointer is on one.
     collisionPriority: 1,
@@ -650,11 +661,7 @@ function DraggableOutcome({
     index,
     group: lane,
     type: "review-outcome",
-    // Start now and Waiting take no drops from other lanes, only their own cards' moves.
-    accept:
-      lane === "start" || lane === "waiting"
-        ? (source) => source.data?.lane === lane
-        : "review-outcome",
+    accept: "review-outcome",
     // The arrow keys step from card to card. Without dnd-kit's optimistic sorting nothing moves
     // the DOM during a drag: the order on screen is the data's, so a drop that writes nothing
     // leaves it as it was.

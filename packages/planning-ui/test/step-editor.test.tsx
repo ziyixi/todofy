@@ -279,6 +279,23 @@ it("deletes a Step from Plan after confirmation, without opening the full task e
   expect(data.days.every((day) => !day.taskIds.includes("copy"))).toBe(true);
 });
 
+it("says a Standalone task's deletion takes its children too, as Tasks' own dialog does", async () => {
+  const actions = native();
+  const load = actions.load.bind(actions);
+  actions.load = async (week) => {
+    const data = await load(week);
+    data.plan.tasks.find((task) => task.id === "release")!.planningFlags = [
+      "task",
+    ];
+    return data;
+  };
+  const dialog = await open(actions, "release");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Delete task" }));
+  expect(
+    within(dialog).getByRole("group", { name: "Delete task" }).textContent,
+  ).toContain("Delete “Ship the small website refresh” and its children?");
+});
+
 it("keeps the Step and confirmation after failed deletion, reusing its identity on retry", async () => {
   const actions = native();
   const remove = vi

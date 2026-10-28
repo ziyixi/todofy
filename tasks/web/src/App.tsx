@@ -66,6 +66,8 @@ export function App() {
   const [editor, setEditor] = useState<{
     task?: Task;
     defaults?: Partial<TaskDraft>;
+    /** The title of `defaults.keyResultId`, for the goal picker. */
+    goalTitle?: string;
     previous?: string[];
   }>();
   const [catalogEditor, setCatalogEditor] = useState<{
@@ -451,8 +453,8 @@ export function App() {
                   selectedId={route.id}
                   refreshRevision={actions.mutationRevision}
                   onOpenTask={(id) => void openTask(id)}
-                  onCreateTask={(keyResultId) =>
-                    setEditor({ defaults: { keyResultId } })
+                  onCreateTask={(keyResultId, goalTitle) =>
+                    setEditor({ defaults: { keyResultId }, goalTitle })
                   }
                   onCompleteTask={complete}
                 />
@@ -524,6 +526,7 @@ export function App() {
               key={editor.task?.id || "new"}
               task={editor.task}
               defaults={editor.defaults}
+              goalTitle={editor.goalTitle}
               catalog={catalog}
               onClose={closeTaskEditor}
               onSaveComplete={async () => {

@@ -312,20 +312,20 @@ test("Focus statistics open GTD Time, and its calendar returns to editable daily
   const stats = page.locator('dl[aria-label="Recorded time totals"]');
   const totals = stats.locator(":scope > div > dd:first-of-type");
   await expect(totals).toHaveText(["1h 5m", "45m", "20m"]);
-  const bars = page.locator(".gtd-time .plus-focus-bars > button");
+  const bars = page.locator(".gtd-time .gtd-time-bars > button");
   await expect(bars).toHaveCount(7);
   await expect(bars.first()).toHaveAccessibleName(/^Sun,/u);
-  const todayBar = page.locator(".gtd-time .plus-focus-bars > button.is-today");
+  const todayBar = page.locator(".gtd-time .gtd-time-bars > button.is-today");
   await expect(todayBar).toHaveAccessibleName(
     /: 1h 5m recorded, Work 45m, Personal 20m$/u,
   );
   await expect(todayBar).toHaveClass("is-today");
   const [workPart, personalPart] = await todayBar
-    .locator(".plus-focus-bar > span")
+    .locator(".gtd-time-bar > span")
     .evaluateAll((parts) =>
       parts.map((part) => part.getBoundingClientRect().height),
     );
-  const fullBar = await box(todayBar.locator(".plus-focus-bar"));
+  const fullBar = await box(todayBar.locator(".gtd-time-bar"));
   expect(workPart! + personalPart!).toBeCloseTo(fullBar.height, 0);
   expect(workPart! / personalPart!).toBeCloseTo(45 / 20, 1);
   await expect(page.locator(".gtd-time-task-title")).toHaveText([
@@ -343,7 +343,7 @@ test("Focus statistics open GTD Time, and its calendar returns to editable daily
   });
   const period = page.getByRole("group", { name: "GTD period" });
   await period.getByRole("button", { name: "Month", exact: true }).click();
-  const day = page.locator(".gtd-time .plus-focus-month-day.is-today");
+  const day = page.locator(".gtd-time .gtd-time-month-day.is-today");
   await expect(day).toHaveAccessibleName(
     /: 1h 5m recorded, Work 45m, Personal 20m$/u,
   );
@@ -361,7 +361,7 @@ test("Focus statistics open GTD Time, and its calendar returns to editable daily
   await period.getByRole("button", { name: "Week", exact: true }).click();
   await expect(bars).toHaveCount(7);
   expect(await sideways(page)).toBe(false);
-  const labels = await page.locator(".plus-focus-bar-day").evaluateAll((days) =>
+  const labels = await page.locator(".gtd-time-bar-day").evaluateAll((days) =>
     days.map((day) => day.getBoundingClientRect().height),
   );
   expect(labels[0]).toBeGreaterThan(0);

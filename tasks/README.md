@@ -4,10 +4,10 @@ Personal task management for the Todofy cloud. Tasks owns tasks, projects, secti
 
 ## Development status
 
-Native Tasks and Todofy are live, with normal processing restored. Task/history import and native planning conversion are complete; the original Todoist account is unchanged. Plan and Focus need no extension connection. Mail holds summaries until you explicitly create a task. See the [verification record](docs/verification.md) for dated production evidence.
+Native Tasks and Todofy are live, with normal processing restored. Task/history import and native planning conversion are complete; the original Todoist account is unchanged. Plan and Focus need no extension connection. Mail holds summaries until you explicitly create a task. See the [verification record](docs/verification.md) for what each release established.
 
 The current refinement separates Tasks/Subtasks from executable Steps and brings planning controls into the
-ordinary task editor. Its release and acceptance evidence is tracked in [refinement verification](docs/refinement-verification.md).
+ordinary task editor.
 
 ## Interface
 
@@ -59,7 +59,7 @@ ordinary task editor. Its release and acceptance evidence is tracked in [refinem
 Comments, attachments, reminders, assignment, calendar integration and voice input are excluded. Mobile-specific layouts and offline writes are not part of this release.
 
 The [design](docs/design.md) explains service boundaries and the interface. [Verification](docs/verification.md)
-separates local results from the remaining release and migration work. [Import](docs/import.md) lists private
+records what each release established and its limits. [Import](docs/import.md) lists private
 export and identity-check commands. [Backup](docs/backup.md) describes Tasks' own weekly backup, Time Travel, the
 restore into a new database and the one-time copy of what Todofy kept for Tasks.
 
@@ -71,12 +71,13 @@ calendar cards show its configured time, or Quick when no time is set, without a
 with a Deadline stays out of the Quick tray until its start-ahead window opens, unless already active; zero lead opens
 on the Deadline day.
 Task editors no longer offer manual In progress, Waiting, On hold or Parked controls. Their saved flags still
-affect planning and survive unrelated edits; choosing a planning stage still takes a task out of Parked.
+affect planning and survive unrelated edits. Task details show a saved Waiting or On hold as a chip that can only
+clear it; choosing a planning stage there takes a task out of Parked and Waiting.
 A Step cannot contain children. Task details can add, complete, reopen or delete either kind
 of child. A dependency names its prerequisite; Blocked is derived from unfinished prerequisites. A task waits
 for at most 5 tasks, the account holds at most 300 dependencies, and none may close a cycle.
 
-[Goals](docs/goals.md) describes the annual view, the optional associations and the one-time private Notion import.
+[Goals](docs/goals.md) describes the annual view, the optional associations and the annual private Notion import.
 Routine and exploration goals keep their own notes; exploration has no required metrics or completion score.
 
 Completing a task completes its open children, recurring ones included. Completing a recurring task records

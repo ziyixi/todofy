@@ -597,21 +597,8 @@ export function createPlanningActions(transports: {
       if (!confirmed.timer) throw new Error("The timer could not be read.");
       return timerSnapshot(confirmed.timer, confirmed.entry);
     },
-    async readFocus(start, end) {
-      // One ListFocusDays reads at most 7 days; a month is at most 6 of them, read together.
-      const starts: string[] = [];
-      for (let day = start; day <= end; day = addDays(day, 7)) starts.push(day);
-      const ranges = await Promise.all(
-        starts.map((day) => {
-          const last = addDays(day, 6);
-          return readDays(day, last < end ? last : end);
-        }),
-      );
-      return {
-        days: ranges.flatMap((range) => range.days),
-        tasks: Object.assign({}, ...ranges.map((range) => range.tasks)),
-        today: ranges[0]?.today ?? "",
-      };
+    async readFocus(day) {
+      return readDays(day, day);
     },
     async addEntry(entry) {
       const saved = await once(

@@ -6,6 +6,11 @@ import "./execution-fields.css";
 
 export type ExecutionMode = "steps" | "standalone" | "quick";
 
+/** The planning flags a mode sets; routine and the task's other flags stay as they are. */
+export function executionFlags(mode: ExecutionMode) {
+  return { singleAction: mode !== "steps", quick: mode === "quick" };
+}
+
 export interface ExecutionFieldsProps {
   mode: ExecutionMode;
   routine: boolean;

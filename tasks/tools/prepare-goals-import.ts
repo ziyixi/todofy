@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** One-time private annual OKR import. It inserts definitions only, never progress or task associations. */
+/** Annual private OKR import. It inserts definitions only, never progress or task associations. */
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";

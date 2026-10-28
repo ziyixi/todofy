@@ -626,11 +626,12 @@ it("measures the rule as Focus's card does", () => {
     progress: 0,
     label: "",
   });
-  expect(miniRule(running, 600, 1200, 45, "en")).toMatchObject({
+  // Below 90%, no label of its own: the logged time / estimate shows.
+  expect(miniRule(running, 600, 1200, 45, "en")).toEqual({
     band: "on",
-    label: "45m",
+    progress: 1200 / 2700,
+    label: "",
   });
-  expect(miniRule(running, 600, 1200, 90, "en").label).toBe("1h 30m");
   // From 90%, the minutes left, rounded up.
   expect(miniRule(running, 0, 2430, 45, "en")).toMatchObject({
     band: "near",
@@ -654,7 +655,7 @@ it("measures the rule as Focus's card does", () => {
       45,
       "en",
     ),
-  ).toEqual({ band: "on", progress: 0.25, label: "25m" });
+  ).toEqual({ band: "on", progress: 0.25, label: "" });
 });
 
 it("counts a pomodoro down and fills an unassigned step's rule in the muted tone", async () => {

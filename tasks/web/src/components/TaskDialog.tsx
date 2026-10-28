@@ -41,6 +41,7 @@ export function TaskDialog({
   task,
   catalog,
   defaults,
+  goalTitle: defaultGoalTitle = "",
   onClose,
   onSaveComplete = onClose,
   onSave,
@@ -52,6 +53,8 @@ export function TaskDialog({
   task?: Task;
   catalog: Catalog;
   defaults?: Partial<TaskDraft>;
+  /** The title of `defaults.keyResultId`, which the goal picker shows. */
+  goalTitle?: string;
   onClose: () => void;
   /** Return to the previous view after an explicit Save has succeeded. */
   onSaveComplete?: () => void | Promise<void>;
@@ -69,7 +72,9 @@ export function TaskDialog({
   onChildAdded: () => void;
 }) {
   const [currentTask, setCurrentTask] = useState(task);
-  const [goalTitle, setGoalTitle] = useState(task?.keyResultTitle ?? "");
+  const [goalTitle, setGoalTitle] = useState(
+    task?.keyResultTitle ?? defaultGoalTitle,
+  );
   // A create closes once saved; keep its form compact until then.
   const displayTask = task ? currentTask : undefined;
   const [draft, setDraft] = useState<TaskDraft>(() =>

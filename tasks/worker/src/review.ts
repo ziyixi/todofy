@@ -4,22 +4,16 @@
  * never a task title (ported from Todofy's core/gtd.py review_body). The review row and its task are written in one
  * batch, and the row's primary key refuses a second review of a week. Reviews copied from Todofy keep their states.
  */
-import { encodePageToken } from '@ziyixi/proto/page-token';
 import { create } from '@ziyixi/proto/protobuf';
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt';
 import { WeeklyReview_State, WeeklyReviewSchema, type WeeklyReview } from '@ziyixi/proto/tasks/ui/v1/gtd_pb';
-import {
-  ListWeeklyReviewsResponseSchema,
-  type GetWeeklyReviewRequest,
-  type ListWeeklyReviewsRequest,
-} from '@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb';
+import type { GetWeeklyReviewRequest } from '@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb';
 import { addDays, localDate, validDate } from '@ziyixi/task-dates';
 import { accountZone, type Env } from './env.ts';
 import { invalid, storage } from './errors.ts';
-import { DAY_MS, mailInbox, textCursor, type DayRow } from './gtd.ts';
+import { DAY_MS, mailInbox, type DayRow } from './gtd.ts';
 import { routedProject } from './inbox-routes.ts';
 
-const MAX_REVIEWS = 13;
 /** The oldest Inbox tasks the review links to. */
 const OLDEST_LINKS = 3;
 const MAX_BODY_BYTES = 8192;
@@ -91,21 +85,6 @@ export async function getWeeklyReview(env: Env, input: GetWeeklyReviewRequest): 
   review.reviewTaskId = review.reviewTaskId || before?.task_id || '';
   if (mail) review.mailPendingCount = mail.pending;
   return review;
-}
-/** The weeks with a review, newest first; the token is the last week shown. */
-export async function listWeeklyReviews(db: D1Database, input: ListWeeklyReviewsRequest) {
-  if (!Number.isInteger(input.pageSize) || input.pageSize < 0) invalid('Invalid page size');
-  const size = Math.min(input.pageSize || MAX_REVIEWS, MAX_REVIEWS);
-  const after = input.pageToken ? textCursor(input.pageToken) : '9999-W99';
-  if (!/^\d{4}-W\d\d$/.test(after)) invalid('Invalid page token');
-  const rows = await storage(() =>
-    db.prepare(`${REVIEWS} WHERE r.week<? ORDER BY r.week DESC LIMIT ?`).bind(after, size + 1).all<ReviewRow>(),
-  );
-  const page = rows.results.slice(0, size);
-  return create(ListWeeklyReviewsResponseSchema, {
-    weeklyReviews: page.map(reviewMessage),
-    nextPageToken: rows.results.length > size ? encodePageToken(page.at(-1)?.week ?? '', {}) : '',
-  });
 }
 
 // ---- the Sunday review -----------------------------------------------------------------------------------------

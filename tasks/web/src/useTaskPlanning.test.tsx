@@ -55,7 +55,7 @@ it("Quick enables standalone immediately and keeps it after Quick is cleared", (
   ).toBe(true);
 });
 
-it("parks without a stage or in progress, and a stage or in progress takes it out of Parked", () => {
+it("parks without a stage or in progress, and a stage or in progress takes it out of Parked and Waiting", () => {
   const { result } = renderHook(() => useTaskPlanning(task));
   act(() => result.current.patch("active", true));
   act(() => result.current.patch("parked", true));
@@ -65,7 +65,7 @@ it("parks without a stage or in progress, and a stage or in progress takes it ou
     parked: true,
   });
   act(() => result.current.patch("stage", "monthly"));
-  expect(result.current.draft.parked).toBe(false);
+  expect(result.current.draft).toMatchObject({ parked: false, waiting: false });
 });
 
 it("adds only the changed planning paths to the dialog's one write", () => {

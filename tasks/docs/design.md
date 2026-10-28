@@ -40,7 +40,8 @@ the optional estimate for all three. Quick keeps clock-time editing; calendar ca
 configured time and timezone, or the Quick label if untimed.
 Missing Quick estimates do not count as unknown, while stored estimates and time records remain intact. Task editors omit manual In progress,
 Waiting, On hold and Parked controls; saved flags retain their planning behavior and survive unrelated edits.
-Choosing a planning stage still clears Parked, and Plan's existing Start and drag actions remain available.
+Native details show a saved Waiting or On hold as a small chip whose only action clears it, since Plan hides
+Waiting work. Choosing a planning stage there clears Parked and Waiting; Plan's Start and drag actions remain.
 
 The sidebar places Search and Add task first, followed by Tasks (Inbox, Today, Upcoming, Mail), Planning
 (Plan, Focus, GTD), Favorites and My projects. Project branches expand independently and remember their open
@@ -127,8 +128,9 @@ edge was added. A set that keeps an edge keeps it as it is, done or not, so Plan
 prerequisite's next completion by removing it and adding it again.
 
 Completed prerequisites and open Deadline windows surface inactive tasks in Review's Parked area without
-changing their stored stages, dates or Focus queues. Plan hides Waiting/Blocked tasks and unfinished dependencies
-with their descendants in Review, Week, trays and calendar cards, without modifying Focus. Start or dragging a surfaced task to a stage acknowledges
+changing their stored stages, dates or Focus queues; committed work shows that status in Committed. Plan hides
+Waiting/Blocked tasks and unfinished dependencies with their descendants in Review, Week, trays and calendar
+cards, without modifying Focus. Start or dragging a surfaced task to a stage acknowledges
 it with the existing active flag. Manual Parked remains a separate stored choice. Both task editors show
 read-only Dependents with clickable titles; only the dependent task's Depends on editor changes the edge.
 See [planning readiness](planning-readiness.md).
@@ -213,7 +215,7 @@ trends against a week before, what stands out, the mail awaiting a decision and 
 (`#/gtd`) now reviews Task/Step completion and recorded time through Overview, Completion and Time, using the
 bounded `GetGtdReport` rather than the legacy day counts. Its Time tab contains the former Focus Week/Month
 statistics; selecting a day opens editable Focus records. Plan's weekly review still reads GetWeeklyReview
-(the review task and mail count) and links to it. Legacy days/reviews keep their values
+(the review task and mail count) and links to GTD Overview. Legacy days/reviews keep their values
 ([backup](backup.md#one-time-todofy-import)); [GTD](gtd.md) defines rates, inherited areas and historical limits.
 Every Sunday at 10:00 UTC, and at once when the object has no backup state yet, it copies every table into the bucket
 `tasks-backups` (`backup-runner.ts`), one bounded step a second: the plan, then pages of each table into gzip parts,
@@ -267,8 +269,8 @@ Pause/Resume, Stop and Complete call the timer bar's own functions through App's
 write waits; there is no second timer state and nothing is stored in the browser. The window asks for 320 × 120
 (Chrome then reuses the size and place the owner leaves it at). At 64px high, the Step title stays visible above
 the clock and the controls. Taller windows also show the parent outcome and cumulative time against the estimate.
-Pause/Resume, Stop and Complete stay visible without hover; each has a text tooltip. The clock uses tabular digits
-at medium weight; the main Focus bar uses the same weight. See the [rendered review](ui-refinement.md). It gets one
+Pause/Resume, Stop and Complete stay visible without hover; each is at least 24px with a text tooltip and a visible
+focus outline. The clock uses tabular digits at medium weight; the main Focus bar uses the same weight. It gets one
 `<style>` (`mini-timer.css`, imported as text) and the opener's computed `--plus-*` tokens and font, so Tasks'
 overrides carry over without copying the app's stylesheets: Plan and Focus's calmer accent, `#50743b`, which
 `.app-shell .planning-ui` sets over planning-ui's own tokens (they load later, so the plain class would lose). It ticks on its own window's timers, to the session's
@@ -398,5 +400,5 @@ These images contain only local synthetic data. The shared planning interface is
 ![Mail in a narrow window](images/tasks-mail-narrow-synthetic.png)
 ![Upcoming with synthetic tasks](images/tasks-upcoming-synthetic.png)
 
-Import commands and the remaining real-data boundaries are in [import.md](import.md). Actual verification,
-including what has not been deployed or migrated, is in [verification.md](verification.md).
+Import commands and the remaining real-data boundaries are in [import.md](import.md). What each release
+established, and its limits, is in [verification.md](verification.md).

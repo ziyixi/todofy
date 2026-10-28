@@ -48,7 +48,7 @@ export default function GoalsPage({
   selectedId: string;
   refreshRevision: number;
   onOpenTask: (id: string) => void;
-  onCreateTask: (keyResultId: string) => void;
+  onCreateTask: (keyResultId: string, keyResultTitle: string) => void;
   onCompleteTask: (task: Task) => Promise<string | undefined>;
 }) {
   const [year, setYear] = useState(0);

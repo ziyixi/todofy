@@ -74,13 +74,14 @@ it("opens Review with four real stages and keeps an unplanned task outside the c
   expect(screen.getByRole("region", { name: "Quarter" })).toBeTruthy();
   expect(screen.getByRole("region", { name: "Month" })).toBeTruthy();
   expect(screen.getByRole("region", { name: "Week" })).toBeTruthy();
+  // The lane holds what the count counts: research in its start window stays committed.
   const committed = within(screen.getByRole("region", { name: "Committed" }));
   expect(
     committed.getAllByRole("button", { name: /No priority/u }),
-  ).toHaveLength(3);
+  ).toHaveLength(4);
   expect(
-    within(screen.getByRole("region", { name: "Parked" })).getByRole("button", {
-      name: /^Prepare the next research check-in, Work, No priority/u,
+    committed.getByRole("button", {
+      name: /^Prepare the next research check-in, Work, No priority, 2 days left/u,
     }),
   ).toBeTruthy();
   expect(screen.queryByText("Independent unplanned task")).toBeNull();

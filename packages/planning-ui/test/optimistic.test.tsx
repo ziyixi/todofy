@@ -470,7 +470,7 @@ it("keeps a pending card's details read-only until its drag settles, and the Bet
   );
 });
 
-it("acknowledges an automatic Parked drag immediately and keeps the picked-up card pending", async () => {
+it("acknowledges committed work in its start window when dragged to another stage, and keeps it pending", async () => {
   const actions = createPrototype();
   const writes = hold(actions, "updateTask");
   await mountPlan(actions);
@@ -484,7 +484,7 @@ it("acknowledges an automatic Parked drag immediately and keeps the picked-up ca
       }) as HTMLButtonElement
     ).disabled,
   ).toBe(false);
-  await drop({ task: research, lane: "parked" }, { lane: "weekly" });
+  await drop({ task: research, lane: "committed" }, { lane: "weekly" });
   const card = within(screen.getByRole("region", { name: "Week" }))
     .getByText("Prepare the next research check-in")
     .closest<HTMLElement>(".review-draggable")!;
@@ -497,7 +497,9 @@ it("acknowledges an automatic Parked drag immediately and keeps the picked-up ca
   expect(writes[0]!.args[1]).toEqual({ stage: "weekly", active: true });
   await act(async () => writes[0]!.confirm());
   expect(card.getAttribute("aria-busy")).toBeNull();
+  // Acknowledged, it stays where it was dropped instead of surfacing in Parked.
   expect(laneTitles("Parked")).not.toContain(research.title);
+  expect(laneTitles("Week")).toContain(research.title);
 });
 
 /** The cards of a lane, by title. */
@@ -508,14 +510,13 @@ function laneTitles(name: string) {
 }
 
 it("acknowledges an automatic Parked card by dragging it into a stage lane in one write", async () => {
-  // The full preview has three ready tasks ahead of the manual Parked card.
+  // The full preview has two ready tasks ahead of the manual Parked card.
   const actions = createPrototype(true);
   const writes = hold(actions, "updateTask");
   await mountPlan(actions);
   expect(laneTitles("Parked")).toEqual([
     "Renew the passport",
     "Submit the travel expense claim",
-    "Prepare the next research check-in",
     "Plan a small balcony garden",
   ]);
   const claim = (await actions.load()).plan.tasks.find(
@@ -528,7 +529,6 @@ it("acknowledges an automatic Parked card by dragging it into a stage lane in on
   // Shown at once in its chosen stage while the other ready and manual cards stay in Parked.
   expect(laneTitles("Parked")).toEqual([
     "Renew the passport",
-    "Prepare the next research check-in",
     "Plan a small balcony garden",
   ]);
   const card = within(screen.getByRole("region", { name: "Committed" }))
@@ -545,15 +545,11 @@ it("acknowledges an automatic Parked card by dragging it into a stage lane in on
     (task) => task.id === "passport",
   )!;
   await drop({ task: passport, lane: "parked" }, { lane: "weekly" });
-  expect(laneTitles("Parked")).toEqual([
-    "Prepare the next research check-in",
-    "Plan a small balcony garden",
-  ]);
+  expect(laneTitles("Parked")).toEqual(["Plan a small balcony garden"]);
   // A failed write puts the card back where it was.
   await act(async () => writes[1]!.fail());
   expect(laneTitles("Parked")).toEqual([
     "Renew the passport",
-    "Prepare the next research check-in",
     "Plan a small balcony garden",
   ]);
   expect(screen.getByRole("alert").textContent).toContain(
@@ -668,10 +664,7 @@ it("sets a card aside by dragging it into Parked, and takes one out into a stage
   await mountPlan(actions);
   const task = async (id: string) =>
     (await actions.load()).plan.tasks.find((item) => item.id === id)!;
-  expect(laneTitles("Parked")).toEqual([
-    "Prepare the next research check-in",
-    "Plan a small balcony garden",
-  ]);
+  expect(laneTitles("Parked")).toEqual(["Plan a small balcony garden"]);
   await drop({ task: await task("tools"), lane: "weekly" }, { lane: "parked" });
   // Set aside alone: Todofy takes the stage off with it.
   expect(writes.map((write) => write.args[1])).toEqual([{ parked: true }]);
@@ -682,7 +675,6 @@ it("sets a card aside by dragging it into Parked, and takes one out into a stage
   expect(laneTitles("Week")).not.toContain("Try the new charting library");
   await act(() => writes[0]!.confirm());
   expect(laneTitles("Parked")).toEqual([
-    "Prepare the next research check-in",
     "Plan a small balcony garden",
     "Try the new charting library",
   ]);
@@ -704,50 +696,71 @@ it("sets a card aside by dragging it into Parked, and takes one out into a stage
     { lane: "waiting" },
   );
   expect(writes).toHaveLength(2);
-  expect(laneTitles("Parked")).toEqual([
-    "Prepare the next research check-in",
-    "Try the new charting library",
-  ]);
+  expect(laneTitles("Parked")).toEqual(["Try the new charting library"]);
 });
 
 it("picks up a dependency-ready task with one stage write and keeps its dates and Focus queues after refresh", async () => {
   const actions = createPrototype();
   withParked(actions, (data) => {
     data.plan.dependencies.push({
-      taskId: "notes",
+      taskId: "cleanup",
       prerequisiteId: "completed",
       done: true,
     });
   });
   const before = await actions.load();
-  const notes = before.plan.tasks.find((task) => task.id === "notes")!;
+  const cleanup = before.plan.tasks.find((task) => task.id === "cleanup")!;
   const writes = hold(actions, "updateTask");
   await mountPlan(actions);
   expect(
     within(screen.getByRole("region", { name: "Parked" })).getByRole("button", {
-      name: "Organize the experiment notes, Work, No priority, Prerequisites completed",
+      name: "Clear out the old development branch, Work, No priority, Prerequisites completed",
     }),
   ).toBeTruthy();
-  await drop({ task: notes, lane: "parked" }, { lane: "monthly" });
+  await drop({ task: cleanup, lane: "parked" }, { lane: "monthly" });
   expect(writes.map((write) => write.args[1])).toEqual([
     { stage: "monthly", active: true },
   ]);
-  expect(laneTitles("Parked")).not.toContain(notes.title);
+  expect(laneTitles("Parked")).not.toContain(cleanup.title);
   await act(() => writes[0]!.confirm());
   fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
-  await waitFor(() => expect(laneTitles("Month")).toContain(notes.title));
-  expect(laneTitles("Parked")).not.toContain(notes.title);
+  await waitFor(() => expect(laneTitles("Month")).toContain(cleanup.title));
+  expect(laneTitles("Parked")).not.toContain(cleanup.title);
   const after = await actions.load();
-  expect(after.plan.tasks.find((task) => task.id === notes.id)).toMatchObject({
+  expect(after.plan.tasks.find((task) => task.id === cleanup.id)).toMatchObject({
     explicitStage: "monthly",
     planningFlags: ["active"],
-    due: notes.due,
-    deadline: notes.deadline,
-    leadDays: notes.leadDays,
+    due: cleanup.due,
+    deadline: cleanup.deadline,
+    leadDays: cleanup.leadDays,
   });
   expect(after.plan.dependencies).toEqual(before.plan.dependencies);
   expect(after.days).toEqual(before.days);
   expect(after.focus.taskIds).toEqual(before.focus.taskIds);
+});
+
+it("picks up a manually parked task whose prerequisites are done, instead of letting it come straight back", async () => {
+  const actions = createPrototype();
+  withParked(actions, (data) => {
+    data.plan.dependencies.push({
+      taskId: "garden",
+      prerequisiteId: "completed",
+      done: true,
+    });
+  });
+  const writes = hold(actions, "updateTask");
+  await mountPlan(actions);
+  const garden = (await actions.load()).plan.tasks.find(
+    (task) => task.id === "garden",
+  )!;
+  expect(laneTitles("Parked")).toContain(garden.title);
+  await drop({ task: garden, lane: "parked" }, { lane: "monthly" });
+  // Without the active flag it would be ready again, back in Parked.
+  expect(writes.map((write) => write.args[1])).toEqual([
+    { stage: "monthly", active: true, parked: false },
+  ]);
+  expect(laneTitles("Parked")).not.toContain(garden.title);
+  expect(laneTitles("Month")).toContain(garden.title);
 });
 
 it("writes nothing for a parked step dropped into its outcome's lane, where it would be a step again", async () => {

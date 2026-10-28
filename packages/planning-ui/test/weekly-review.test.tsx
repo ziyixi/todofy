@@ -626,6 +626,48 @@ it("writes next week's two Bets in Saturday's fifth line, apart from the commitm
   expect(update).not.toHaveBeenCalled();
 });
 
+it("writes this week's two Bets in Sunday's fifth line, after the rollover", async () => {
+  // Sunday 2026-10-11 begins the week 2026-10-12.
+  const actions = createPrototype(false, "2026-10-11");
+  const save = vi.spyOn(actions, "setWeeklyBet");
+  const update = vi.spyOn(actions, "updateTask");
+  renderApp(actions);
+  await screen.findByRole("region", { name: "Committed" });
+  const review = openReview();
+  expect(review.queryByText(/^On Saturday,/u)).toBeNull();
+  const goals = within(
+    within(line(review, "This week's goals")).getByRole("list", {
+      name: "This week's goals",
+    }),
+  );
+  // No commitments to keep: the rollover has already happened.
+  expect(review.queryByRole("button", { name: /^Choose commitments/u })).toBeNull();
+  expect(
+    goals.getByRole("button", {
+      name: "Edit work goal: Get the website refresh ready for review",
+    }),
+  ).toBeTruthy();
+  fireEvent.click(
+    goals.getByRole("button", {
+      name: "Keep last week's personal goal: A quiet, unhurried weekend",
+    }),
+  );
+  await goals.findByRole("button", {
+    name: "Edit personal goal: A quiet, unhurried weekend",
+  });
+  expect(save.mock.calls).toEqual([
+    [
+      {
+        weekStart: "2026-10-12",
+        area: "personal",
+        text: "A quiet, unhurried weekend",
+        etag: "",
+      },
+    ],
+  ]);
+  expect(update).not.toHaveBeenCalled();
+});
+
 it("completes the review task only when Finish review is clicked, outside Focus", async () => {
   const actions = createPrototype();
   const complete = vi.spyOn(actions, "completeTask");

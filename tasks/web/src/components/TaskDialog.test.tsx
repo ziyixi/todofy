@@ -502,6 +502,43 @@ it("keeps an imported parked flag on an unrelated edit and clears it only when c
   expect(save.mock.calls[1]?.[3]?.values.planningFlags).toEqual([]);
 });
 
+it("shows saved Waiting and On hold as chips that only clear, and a stage choice leaves Waiting", async () => {
+  const task = create(TaskSchema, {
+    ...original,
+    stage: "weekly",
+    planningFlags: ["waiting", "onhold", "routine"],
+  });
+  const save = vi
+    .fn<SaveTask>()
+    .mockImplementation(async (draft, current, _id, planning) =>
+      create(TaskSchema, {
+        ...(current || original),
+        ...draft,
+        ...planning?.values,
+        etag: String(Number(current?.etag || 0) + 1),
+      }),
+    );
+  const { onClose } = editor(save, task);
+  fireEvent.click(screen.getByRole("button", { name: "Clear On hold" }));
+  expect(screen.queryByRole("button", { name: "Clear On hold" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+  expect(save.mock.calls[0]?.[3]).toMatchObject({
+    paths: ["planning_flags"],
+    values: { stage: "weekly", planningFlags: ["waiting", "routine"] },
+  });
+  fireEvent.change(screen.getByRole("combobox", { name: "Planning stage" }), {
+    target: { value: "committed" },
+  });
+  expect(screen.queryByRole("button", { name: "Clear Waiting" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+  expect(save.mock.calls[1]?.[3]?.values.planningFlags).toEqual(["routine"]);
+  // Nothing in details sets either flag again.
+  expect(screen.queryByRole("button", { name: /^Clear / })).toBeNull();
+  expect(screen.queryByRole("checkbox", { name: "Waiting" })).toBeNull();
+});
+
 it("leaves an actual Step executable without offering an Execution mode", () => {
   editor(
     async () => original,
@@ -603,6 +640,25 @@ it("keeps the direct goal on description, planning and date edits without loadin
   expect(save.mock.calls[0]?.[0].keyResultId).toBe("synthetic-result");
   expect(save.mock.calls[0]?.[3]?.paths).toContain("stage");
   expect(catalogRead).not.toHaveBeenCalled();
+});
+
+it("names the goal a new task from Goals starts with", () => {
+  render(
+    <TaskDialog
+      catalog={catalog}
+      defaults={{ keyResultId: "synthetic-result" }}
+      goalTitle="Synthetic annual result"
+      onSave={async () => original}
+      onClose={() => {}}
+      onDelete={async () => {}}
+      onComplete={async () => undefined}
+      onOpen={() => {}}
+      onChildAdded={() => {}}
+    />,
+  );
+  expect(
+    screen.getByRole("button", { name: "Associated goal" }).textContent,
+  ).toBe("Synthetic annual result");
 });
 
 it("shows a Step's inherited goal without offering a direct assignment", async () => {

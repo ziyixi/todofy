@@ -66,7 +66,9 @@ answer, `MoveFocusStep` adds, removes, reorders or moves one step), the one time
 stopped in the same batch. `mail.proto` and `gtd.proto` (2026-10-21) are what Tasks keeps of Mail and GTD:
 `ConvertMailItem` turns a mail Todofy summarised into a task, with an ID derived from the mail so that any retry
 finishes the same conversion, `GetMailCategories` and `UpdateMailCategories` the owner's category shortcuts, and
-`ListGtdDays`, `ListWeeklyReviews` and `GetWeeklyReview` the daily GTD counts and the Sunday reviews.
+`GetGtdReport` the GTD page's counts and time for 1 to 31 days and `GetWeeklyReview` one week's Sunday review.
+`ListGtdDays` and `ListWeeklyReviews` lost their last caller and were retired on 2026-10-27 (`retired.json`); the
+daily counts stay in D1 for the Sunday review.
 
 `todofy/mail/v1/mail_service.proto` (2026-10-21) is Todofy's private Mail entry, `todofy.mail.v1.MailService`: the mail
 summaries Todofy keeps (`ListMailItems`, `GetMailItem`), their counts (`GetMailInbox`), the readiness feed

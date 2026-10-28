@@ -82,8 +82,8 @@ export interface PlanningAppProps {
   onViewChange?: (view: View) => void;
   /** The weekly review's mail line opens the host's Mail page. */
   onOpenMail?: () => void;
-  /** Focus and the weekly review open the host's GTD page. */
-  onOpenGtd?: () => void;
+  /** Focus opens the host's GTD page at its Time tab; the weekly review at Overview, with no tab. */
+  onOpenGtd?: (tab?: "overview" | "time") => void;
   /** A selected statistics day opens Focus there; subsequent day navigation stays local. */
   focusDay?: string;
   /** Data from an earlier visit, shown at once while it is read again in the background. */

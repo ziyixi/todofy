@@ -1,18 +1,5 @@
-export type ListView =
-  | "inbox"
-  | "today"
-  | "upcoming"
-  | "project"
-  | "search"
-  | "label"
-  | "filter"
-  | "completed";
-export type Page = ListView | "goals" | "plan" | "focus" | "mail" | "gtd" | "catalog";
-export interface Route {
-  page: Page;
-  id: string;
-}
-const pages: ReadonlySet<string> = new Set([
+/** The pages that show a ListTasks view; the others read their own APIs. */
+const listViews = [
   "inbox",
   "today",
   "upcoming",
@@ -21,6 +8,18 @@ const pages: ReadonlySet<string> = new Set([
   "label",
   "filter",
   "completed",
+] as const;
+export type ListView = (typeof listViews)[number];
+export type Page = ListView | "goals" | "plan" | "focus" | "mail" | "gtd" | "catalog";
+export interface Route {
+  page: Page;
+  id: string;
+}
+export function isListView(page: Page): page is ListView {
+  return (listViews as readonly string[]).includes(page);
+}
+const pages: ReadonlySet<string> = new Set([
+  ...listViews,
   "goals",
   "plan",
   "focus",

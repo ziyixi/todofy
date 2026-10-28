@@ -199,11 +199,15 @@ test("a dependency is added in the details, and completing its prerequisite in F
   await expect(
     slot.getByRole("button", { name: /^Complete task:/u }),
   ).toHaveCount(0);
-  // A done prerequisite holds nothing: Plan says so with no call to Todofy.
+  // A done prerequisite holds nothing: Plan says so with no call to Todofy, in Committed, its own lane.
   await page.getByRole("link", { name: "Plan", exact: true }).click();
   await expect(waiting).toHaveCount(0);
   await expect(
-    page.getByRole("region", { name: "Parked", exact: true }).getByRole("button", { name: /^Synthetic launch,/u }),
+    page
+      .getByRole("region", { name: "Committed", exact: true })
+      .getByRole("button", {
+        name: /^Synthetic launch,.*Prerequisites completed$/u,
+      }),
   ).toBeVisible();
   expect(state.requests).toEqual([]);
 });

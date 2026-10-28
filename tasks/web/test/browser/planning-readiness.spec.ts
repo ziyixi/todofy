@@ -199,3 +199,52 @@ test("Dependents are read-only, arrive with task details, and their links use Sa
     }),
   ).toBeVisible();
 });
+
+test("a saved Waiting flag clears from task details, and the task returns to Plan", async ({
+  page,
+  request,
+}) => {
+  await stubPlanning(page, {
+    tasks: [
+      {
+        id: "leave-waiting",
+        title: "Synthetic held outcome",
+        stage: "monthly",
+        planning_flags: ["waiting", "onhold"],
+      },
+    ],
+  });
+  await page.goto("/#/plan");
+  const month = page.getByRole("region", { name: "Month", exact: true });
+  await expect(month).toBeVisible();
+  await expect(page.locator('[data-outcome-id="leave-waiting"]')).toHaveCount(
+    0,
+  );
+  await page.goto("/?task=leave-waiting#/plan");
+  const dialog = page.getByRole("dialog", {
+    name: "Task details",
+    exact: true,
+  });
+  await dialog
+    .getByRole("button", { name: "Clear Waiting", exact: true })
+    .click();
+  await expect(
+    dialog.getByRole("button", { name: "Clear Waiting", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    dialog.getByRole("button", { name: "Clear On hold", exact: true }),
+  ).toBeVisible();
+  await dialog
+    .getByRole("button", { name: "Save changes", exact: true })
+    .click();
+  await expect(dialog).toHaveCount(0);
+  const saved = await (
+    await request.get("/api/tasks/v1/tasks/leave-waiting")
+  ).json();
+  expect(saved.planning_flags).toEqual(["onhold"]);
+  expect(saved.stage).toBe("monthly");
+  await page.reload();
+  await expect(
+    month.locator('[data-outcome-id="leave-waiting"]'),
+  ).toBeVisible();
+});

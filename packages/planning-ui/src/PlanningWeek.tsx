@@ -800,11 +800,7 @@ function TrayStep({
       >
         <FullTitle text={title} />
         <small>
-          {hasPlanningFlag(task, "quick") ? (
-            text.executionQuick
-          ) : task.estimatedMinutes === undefined ? (
-            text.unknown
-          ) : (
+          {task.estimatedMinutes !== undefined ? (
             <span
               className={
                 task.estimatedMinutes >= 120 ? "planning-step-long" : undefined
@@ -812,6 +808,10 @@ function TrayStep({
             >
               {formattedMinutes(task.estimatedMinutes)}
             </span>
+          ) : hasPlanningFlag(task, "quick") ? (
+            text.executionQuick
+          ) : (
+            text.unknown
           )}
           {scheduled.length > 0 &&
             ` · ${scheduled.map((day) => shortDay(day.date, language)).join(", ")}`}

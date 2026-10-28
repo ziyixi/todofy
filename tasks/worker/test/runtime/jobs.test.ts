@@ -1,19 +1,15 @@
 /**
- * Tasks' jobs (src/schedule.ts, gtd.ts, review.ts) on real D1 at fixed clocks, the GTD and review reads, and the jobs
+ * Tasks' jobs (src/schedule.ts, gtd.ts, review.ts) on real D1 at fixed clocks, the review read, and the jobs
  * object's Alarm through Ops. America/Los_Angeles: 2026-10-21 is a Wednesday, 2026-10-25 a Sunday (PDT, UTC-7), and
  * 2026-11-01 a Sunday in PST (UTC-8). Synthetic tasks and mail only.
  */
 import { create } from '@ziyixi/proto/protobuf';
-import {
-  GetWeeklyReviewRequestSchema,
-  ListGtdDaysRequestSchema,
-  ListWeeklyReviewsRequestSchema,
-} from '@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb';
+import { GetWeeklyReviewRequestSchema } from '@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb';
 import { WeeklyReview_State } from '@ziyixi/proto/tasks/ui/v1/gtd_pb';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import type { Env } from '../../src/env.ts';
-import { collectDay, listGtdDays } from '../../src/gtd.ts';
-import { getWeeklyReview, listWeeklyReviews } from '../../src/review.ts';
+import { collectDay } from '../../src/gtd.ts';
+import { getWeeklyReview } from '../../src/review.ts';
 import { runJobs } from '../../src/schedule.ts';
 import { fakeMail, type FakeMail } from './fake-mail.ts';
 import { measuredReads, startHarness, type Harness } from './harness.ts';
@@ -132,7 +128,8 @@ test('without Todofy the day is counted with no mail count; the counts read a bo
   todofy.failures.set('GetMailInbox', 1);
   const { db, metrics } = measuredReads(harness.db);
   await collectDay(env(db), Date.parse('2026-10-22T14:00:00Z'));
-  expect(await day('2026-10-22')).toMatchObject({ open: 6, mail_open: null });
+  // On 2026-10-22 the second timed task is overdue too.
+  expect(await day('2026-10-22')).toMatchObject({ open: 6, overdue: 3, mail_open: null });
   expect(metrics.statements).toBe(1);
   // Every task and completion a few times over (the open set, the week's creations and the day's closures), not
   // once per task.
@@ -181,7 +178,7 @@ test("the review goes to its routed project, and a week Todofy reviewed keeps To
   });
 });
 
-test("the reviews read with their completion, and a week without its own task links the week before's", async () => {
+test("a review reads with its completion, and a week without its own task links the week before's", async () => {
   const reviewTask = await harness.db
     .prepare("SELECT task_id FROM weekly_reviews WHERE week='2026-W43'")
     .first<{ task_id: string }>();
@@ -189,21 +186,11 @@ test("the reviews read with their completion, and a week without its own task li
     .prepare('UPDATE tasks SET completed=1,completed_at=? WHERE id=?')
     .bind(Date.parse('2026-10-26T18:00:00Z'), reviewTask?.task_id)
     .run();
-  const listed = await listWeeklyReviews(harness.db, create(ListWeeklyReviewsRequestSchema, { pageSize: 2 }));
-  expect(listed.weeklyReviews.map((review) => [review.name, review.state])).toEqual([
-    ['weeklyReviews/2026-11-02', WeeklyReview_State.UNKNOWN],
-    ['weeklyReviews/2026-10-26', WeeklyReview_State.CREATED],
-  ]);
-  const rest = await listWeeklyReviews(
-    harness.db,
-    create(ListWeeklyReviewsRequestSchema, { pageToken: listed.nextPageToken }),
-  );
-  expect(rest.weeklyReviews.map((review) => review.name)).toEqual(['weeklyReviews/2026-10-19']);
-  expect(rest.weeklyReviews[0]?.completeTime?.seconds).toBe(BigInt(Date.parse('2026-10-26T18:00:00Z') / 1000));
-  expect(rest.nextPageToken).toBe('');
-
   const reviewed = await getWeeklyReview(env(), create(GetWeeklyReviewRequestSchema, { name: 'weeklyReviews/2026-10-19' }));
   expect(reviewed).toMatchObject({ reviewTaskId: reviewTask?.task_id, mailPendingCount: 3, state: WeeklyReview_State.CREATED });
+  expect(reviewed.completeTime?.seconds).toBe(BigInt(Date.parse('2026-10-26T18:00:00Z') / 1000));
+  const copied = await getWeeklyReview(env(), create(GetWeeklyReviewRequestSchema, { name: 'weeklyReviews/2026-11-02' }));
+  expect(copied.state).toBe(WeeklyReview_State.UNKNOWN);
   // The next week has no review yet: it links last Sunday's task, open or not.
   const next = await getWeeklyReview(env(), create(GetWeeklyReviewRequestSchema, { name: 'weeklyReviews/2026-11-09' }));
   expect(next).toMatchObject({ name: 'weeklyReviews/2026-11-09', state: WeeklyReview_State.UNSPECIFIED, reviewTaskId: '' });
@@ -215,28 +202,6 @@ test("the reviews read with their completion, and a week without its own task li
   await expect(
     getWeeklyReview(env(), create(GetWeeklyReviewRequestSchema, { name: 'weeklyReviews/2026-10-20' })),
   ).rejects.toThrow(/Monday/);
-});
-
-test('the GTD days read newest first, counted or not, back to the oldest counted day', async () => {
-  const at = Date.parse('2026-10-23T14:00:00Z');
-  const first = await listGtdDays(env(), create(ListGtdDaysRequestSchema, { pageSize: 2 }), at);
-  expect(first.gtdDays.map((day) => [day.name, day.recorded])).toEqual([
-    ['gtdDays/2026-10-23', false],
-    ['gtdDays/2026-10-22', true],
-  ]);
-  // On 2026-10-22 the second timed task is overdue too.
-  expect(first.gtdDays[1]?.allProjects).toMatchObject({ openCount: 6, overdueCount: 3 });
-  expect(first.gtdDays[1]?.allProjects?.openMailCount).toBeUndefined();
-  const second = await listGtdDays(env(), create(ListGtdDaysRequestSchema, { pageSize: 2, pageToken: first.nextPageToken }), at);
-  expect(second.gtdDays.map((day) => day.name)).toEqual(['gtdDays/2026-10-21', 'gtdDays/2026-10-20']);
-  expect(second.gtdDays[0]?.inbox).toMatchObject({ openCount: 4, oldestAgeDays: 40, complete: true });
-  expect(second.gtdDays[0]?.inbox?.closedLastDayCount).toBeUndefined();
-  expect(second.nextPageToken).toBe('');
-  // Over HTTP, today first.
-  const response = await harness.fetch('/api/tasks/v1/gtdDays?page_size=1');
-  expect(response.status).toBe(200);
-  expect(((await response.json()) as { gtd_days: unknown[] }).gtd_days).toHaveLength(1);
-  expect((await harness.fetch('/api/tasks/v1/gtdDays?page_size=-1')).status).toBe(400);
 });
 
 test("Home's status arms the jobs object's Alarm and reports the newest day and the review's age", async () => {

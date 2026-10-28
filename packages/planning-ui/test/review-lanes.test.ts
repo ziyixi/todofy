@@ -105,14 +105,14 @@ it("surfaces unstarted tasks in Parked once and hides waiting tasks from every l
   ];
   expect(laneIds(tasks)).toEqual({
     start: [],
-    parked: ["past", "dated-start", "step", "staged-start"],
+    parked: ["past", "dated-start", "step"],
     quarterly: [],
     monthly: [],
     weekly: ["dated", "week"],
-    committed: [],
+    committed: ["staged-start"],
     waiting: [],
   });
-  // The automatic Parked card keeps its start status, including one with a saved stage.
+  // A ready card keeps its start status: in Parked, or committed work in its own lane.
   expect(
     Object.fromEntries(tasks.map((item) => [item.id, cardState(item, TODAY)])),
   ).toEqual({
@@ -198,6 +198,8 @@ it("keeps manually parked tasks in Parked while excluding a parked task that wai
 it("lists the commitments Review's Committed lane shows, none of them parked", () => {
   const tasks = [
     task("kept", { stage: "committed", planningFlags: [] }),
+    // In its start window it stays committed, in both lists, with its status.
+    task("due", { stage: "committed", deadline: on(1), mustStart: true }),
     task("set-aside", { stage: "committed", planningFlags: ["parked"] }),
     task("waits", { stage: "committed", planningFlags: ["waiting"] }),
     task("week", { stage: "weekly", explicitStage: "weekly" }),
@@ -208,10 +210,14 @@ it("lists the commitments Review's Committed lane shows, none of them parked", (
   ).toEqual(boardLanes(plan, TODAY).committed);
   expect(boardLanes(plan, TODAY).committed.map((item) => item.id)).toEqual([
     "kept",
+    "due",
+  ]);
+  expect(boardLanes(plan, TODAY).parked.map((item) => item.id)).toEqual([
+    "set-aside",
   ]);
   expect(
     committedOutcomes({ tasks, laneOrders: {} }).map((item) => item.id),
-  ).toEqual(["kept", "waits"]);
+  ).toEqual(["kept", "due", "waits"]);
 });
 
 it("puts newly ready tasks before arranged automatic cards and the manual Parked backlog", () => {
@@ -258,8 +264,8 @@ it("puts newly ready tasks before arranged automatic cards and the manual Parked
 
 it("surfaces both readiness reasons once without changing a saved stage, dates or flags", () => {
   const item = task("ready", {
-    stage: "committed",
-    explicitStage: "committed",
+    stage: "quarterly",
+    explicitStage: "quarterly",
     deadline: on(3),
     due: on(1),
     leadDays: 7,
@@ -271,7 +277,7 @@ it("surfaces both readiness reasons once without changing a saved stage, dates o
     dependencies: [
       { taskId: item.id, prerequisiteId: "completed", done: true },
     ],
-    laneOrders: { committed: [item.id] },
+    laneOrders: { quarterly: [item.id] },
     today: TODAY,
     week: "2026-10-12",
     timezone: "America/Los_Angeles",
@@ -431,8 +437,11 @@ it("hides every waiting task and shows eligible ready or parked tasks at most on
                 continue;
               }
               if (mustStart) {
-                expect(lanes.parked, name).toContain(item);
                 expect(cardState(item, TODAY), name).toBe("start");
+                // Committed work keeps its status in Committed: its own card, or a step of its outcome's.
+                if (plan.stage === "committed")
+                  expect(lanes.committed.includes(item), name).toBe(!parentId);
+                else expect(lanes.parked, name).toContain(item);
               }
             }
 });

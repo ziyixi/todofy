@@ -102,8 +102,8 @@ afterwards.
    - From a clean checkout of that commit, deploy Tasks once by hand as `.github/actions/release-tasks` does,
      but without `--secrets-file`, so the Worker keeps its secrets:
      ```sh
-     for dir in packages/planning-ui packages/task-dates tasks/worker tasks/web; do npm ci --prefix "$dir"; done
-     npm run build --prefix tasks/web
+     pnpm install --frozen-lockfile
+     pnpm --dir tasks/web run build
      (cd tasks/worker && GITHUB_SHA=$(git rev-parse HEAD) node ../deploy/deploy-vars.mjs exec -- \
        npx --no-install wrangler deploy --config ../wrangler.toml)
      ```
@@ -116,7 +116,7 @@ afterwards.
      to it ([import notes](../../infra/README.md#import-notes)). Keep the old database until then.
 6. Open Plan: the restored tasks carry their planning facts and dependencies. Mail links of tasks created after
    the backup point at tasks the restored database lacks; converting such a Mail item creates a new Inbox task.
-7. Open Mail and GTD: Mail lists the pending mail and the categories, and GTD the restored days.
+7. Open Mail and GTD: Mail lists the pending mail and the categories, and GTD the restored completions and time.
 8. Open Focus. The timer comes back as it was backed up: a session that was running then still runs, counting from
    then (at most 4 hours, or its pomodoro's length). Stop it, then fix the new record's minutes if needed.
 

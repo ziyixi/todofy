@@ -63,8 +63,8 @@ export const MAX_LANE_TASKS = 100;
 
 /**
  * A lane's tasks in the owner's order: the ones in the stored order first, as stored (IDs no
- * longer in the lane are skipped), then the rest in the lane's own order. In Start now the rest
- * come first instead: a task that has just become due is its newest news.
+ * longer in the lane are skipped), then the rest in the lane's own order. For "start", Parked's
+ * ready cards, the rest come first instead: a task that has just become ready is its newest news.
  */
 export function inLaneOrder(
   lane: LaneId,
@@ -113,8 +113,9 @@ export function planningOutcomes(tasks: PlanningTask[]): PlanningTask[] {
 }
 
 /**
- * This week's commitments as Review's Committed lane lists them, in its order and none set aside:
- * Week's overview, the toolbar's counts and the weekly review all use this one list.
+ * This week's commitments as Review's Committed lane lists them from the same tasks, in its order
+ * and none set aside; one whose start window has opened stays here with its status. Week's
+ * overview, the toolbar's counts and the weekly review all use this one list.
  */
 export function committedOutcomes(
   plan: Pick<PlanState, "tasks" | "laneOrders">,

@@ -4,11 +4,10 @@ The tools prepare private files and can be tested against local D1. They do not 
 
 ## Prepare the tools
 
-Run from the repository root with Node 26:
+Run from the repository root with Node 26; the root lock installs the shared packages with the Worker:
 
 ```sh
-npm ci --prefix packages/task-dates
-npm ci --prefix tasks/worker
+pnpm install --frozen-lockfile
 ```
 
 Keep the token, snapshot and generated SQL outside the repository. The writers create new files with mode `0600` and refuse to overwrite an existing file. Terminal output contains counts and error codes only.

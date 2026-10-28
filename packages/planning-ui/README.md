@@ -53,9 +53,11 @@ switch. The parent maps the choice to `task`/`quick` flags without changing the 
 Planning state is the task's saved stage and its planning flags (`waiting`, `parked`, `active`, …), never its
 ordinary tags. Manual In progress, Waiting, On hold and Parked controls are absent from task editors; persisted
 flags and dependencies remain readable. The start-ahead field accepts 0–365 calendar days. Open deadline
-windows and completed prerequisites surface inactive tasks in Parked. Start or dragging to a stage acknowledges
-readiness through the existing active flag; manual parking keeps its own flag. Both dependency directions are
-visible, with Dependents read-only. See [readiness](../../tasks/docs/planning-readiness.md).
+windows and completed prerequisites surface inactive tasks in Parked; committed work keeps that status in
+Committed. Start or dragging a ready card to a stage acknowledges readiness through the existing active flag;
+manual parking keeps its own flag, and dragging a parked task that has become ready out acknowledges it too.
+Both dependency directions are visible, with Dependents read-only. See
+[readiness](../../tasks/docs/planning-readiness.md).
 
 Focus keeps its day queues, the one timer and time records in Tasks (`proto/tasks/ui/v1/focus.proto`). The
 timer counts up by default or runs a 25/50-minute pomodoro; Start counts on Tasks' today and keeps the step's
@@ -67,11 +69,13 @@ change is one `MoveFocusStep`, and every write keeps its request ID until confir
 `updateEntry` and `deleteEntry`. Focus shows daily execution with previous/next day and Today controls.
 Each card's logged time opens the day's records (`FocusEntries`); past records remain editable. Only today's
 steps run, complete and reorder by their whole row. A header checkbox shows the day's completed steps.
-The View statistics link opens [Tasks GTD](../../tasks/docs/gtd.md), which owns the weekly bars, monthly
-calendar and time-by-task report. Selecting a statistics day opens it in Focus for record editing. Plan and Focus both count from Tasks' today (`PlanState.today`, `FocusState.date`). A task's estimate is its Tasks
+The View statistics link opens [Tasks GTD](../../tasks/docs/gtd.md) at its Time tab (`onOpenGtd("time")`),
+which owns the weekly bars, monthly calendar and time-by-task report; the weekly review's GTD overview link
+passes no tab. Selecting a statistics day opens it in Focus for record editing. Plan and Focus both count from Tasks' today (`PlanState.today`, `FocusState.date`). A task's estimate is its Tasks
 duration: the host supplies `updateEstimate`, which writes Tasks and answers the saved duration
 and the task's new etag (`{ estimate, etag }`). Steps, Standalone and Quick actions share the panel for
-optional estimates and direct deletion with confirmation (`StepEditor`); other tasks open the full planning panel. Deletion uses Tasks' existing
+optional estimates and direct deletion with confirmation, which names the children deleted with a task
+(`StepEditor`); other tasks open the full planning panel. Deletion uses Tasks' existing
 DeleteTask under Plan's etag and a stable request ID, then reads the authoritative task and Focus state.
 
 Review keeps candidate columns together and gives Committed a separate full-width row of horizontal cards.
@@ -82,10 +86,11 @@ day: calendar cards pass their own day, the rest Focus's. A retry resends the fi
 Step stays in its day after the open ones, in Focus's done style, outside the day's total; its title opens Tasks' own
 dialog, where it can be reopened. Quick actions always qualify as standalone, even when an older
 response contains only the Quick flag. Every executable kind also offers an optional estimate in native task details. Calendar cards preserve the task's
-configured clock time and timezone; an untimed Quick shows Quick, not an unknown estimate. Quick does not
+configured clock time and timezone, else its estimate; an untimed Quick without an estimate shows Quick, not
+an unknown estimate. Quick does not
 contribute to unknown-estimate counters. Existing stored estimates and time records are retained.
 Ordinary labels do not imply planning properties.
 Quick's existing Due selection and order also respect its Deadline start window: future windows stay
 hidden, zero lead opens on the deadline day, and active work remains eligible.
 
-Plan, Focus and weekly calendars run Sunday through Saturday in the account time zone. The stable week ID remains the Monday after that Sunday, so saved weekly goals and history keep their identities. Saturday choices may be kept for next week; other unfinished commitments return to Week at Sunday 00:00, with no second rollover on Monday.
+Plan, Focus and weekly calendars run Sunday through Saturday in the account time zone. The stable week ID remains the Monday after that Sunday, so saved weekly goals and history keep their identities. Saturday choices may be kept for next week; other unfinished commitments return to Week at Sunday 00:00, with no second rollover on Monday. The weekly review writes next week's two goals on Saturday and, as the automatic review arrives after the rollover, this week's on Sunday.

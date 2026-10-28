@@ -261,7 +261,7 @@ it("shows no Quick line without a quick task to plan", async () => {
   expect(screen.queryByRole("region", { name: "快速事项" })).toBeNull();
 });
 
-it("shows a scheduled Quick's configured clock in its task zone, with account fallback and no missing-estimate count", async () => {
+it("shows a scheduled Quick's configured clock in its task zone, else its estimate, with account fallback and no missing-estimate count", async () => {
   const actions = createPrototype();
   const data = await actions.load();
   data.plan.timezone = "UTC";
@@ -273,6 +273,7 @@ it("shows a scheduled Quick's configured clock in its task zone, with account fa
     }),
     task("fallback", { due: TODAY, dueDatetime: `${TODAY}T04:25:00Z` }),
     task("untimed"),
+    task("estimated", { estimatedMinutes: 20 }),
     task("ordinary", { planningFlags: [], kind: "step", estimatedMinutes: 45 }),
     task("unknown", { planningFlags: [], kind: "step" }),
   ];
@@ -310,10 +311,11 @@ it("shows a scheduled Quick's configured clock in its task zone, with account fa
   expect(meta("clock")).toBe("13:25");
   expect(meta("fallback")).toBe("04:25");
   expect(meta("untimed")).toBe("Quick");
+  expect(meta("estimated")).toBe("20m");
   expect(meta("ordinary")).toBe("45m");
   expect(meta("unknown")).toBe("?");
   expect(day.querySelector(".planning-day-heading small")!.textContent).toBe(
-    "45m + 1 ?",
+    "1h 5m + 1 ?",
   );
   expect(data).toEqual(before);
 });

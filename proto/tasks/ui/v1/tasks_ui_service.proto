@@ -452,14 +452,6 @@ service TasksUiService {
     option (google.api.http) = {get: "/api/tasks/v1/{name=weeklyReviews/*}"};
     option (google.api.method_signature) = "name";
   }
-  // The weeks that have a review, newest first.
-  rpc ListWeeklyReviews(ListWeeklyReviewsRequest) returns (ListWeeklyReviewsResponse) {
-    option (google.api.http) = {get: "/api/tasks/v1/weeklyReviews"};
-  }
-  // The account days up to today, newest first, counted or not.
-  rpc ListGtdDays(ListGtdDaysRequest) returns (ListGtdDaysResponse) {
-    option (google.api.http) = {get: "/api/tasks/v1/gtdDays"};
-  }
   // Completion, planning and recorded time for at most 31 account-local days.
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
@@ -1129,34 +1121,6 @@ message GetWeeklyReviewRequest {
     (google.api.field_behavior) = REQUIRED,
     (google.api.resource_reference).type = "tasks.ziyixi.science/WeeklyReview"
   ];
-}
-// List the reviews.
-message ListWeeklyReviewsRequest {
-  // At most this many reviews: 0 means 13, and a larger value is read as 13.
-  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
-  // The previous page's next_page_token.
-  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
-}
-// A page of reviews.
-message ListWeeklyReviewsResponse {
-  // Newest week first.
-  repeated WeeklyReview weekly_reviews = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Empty on the last page.
-  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-}
-// List the GTD days.
-message ListGtdDaysRequest {
-  // At most this many days: 0 means 30, and a larger value is read as 120.
-  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
-  // The previous page's next_page_token.
-  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
-}
-// A page of days.
-message ListGtdDaysResponse {
-  // Every account day of the page, newest first (today first on the first page), counted or not.
-  repeated GtdDay gtd_days = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Older days, back to the oldest counted one; empty on the last page.
-  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // One bounded GTD reporting period.

@@ -38,6 +38,7 @@ import { FocusBlock, focusTitle, type FocusBlockProps } from "./FocusBlock";
 import type { RecordWrite } from "./FocusEntries";
 import { areaColor, outcomeForTask } from "./planning-outcomes";
 import { moved, pendingStep, predictMove, withRecord } from "./plan-updates";
+import { planVisibility } from "./plan-visibility";
 import { planningSensors } from "./row-drag";
 import { readableDate } from "./PlanningCalendar";
 import { LoggedTime } from "./StatusMarks";
@@ -74,14 +75,14 @@ interface Props {
   focus: FocusState;
   /** The queues the quiet deadline line looks in: this week's, or only today's. */
   days?: readonly DayPlan[];
-  /** Opens Plan › Review with Start now focused. */
+  /** Opens Plan › Review with Parked focused. */
   onShowStart?: () => void;
   /** The day the view is around; today unless another is chosen. */
   date?: string;
   /** Shows another day. */
   onNavigate?: (date: string) => void;
-  /** Opens the host's statistics page. */
-  onOpenGtd?: () => void;
+  /** Opens the host's statistics page, its GTD Time tab. */
+  onOpenGtd?: (tab?: "overview" | "time") => void;
   language: Language;
   busy: boolean;
   /** Day cards whose queue write is not yet confirmed. */
@@ -211,7 +212,7 @@ function useFocusDay(
   useEffect(() => {
     if (skip || fresh) return;
     let current = true;
-    actions.readFocus(date, date).then(
+    actions.readFocus(date).then(
       (range) => {
         if (!current) return;
         cache.current.set(date, { range, written });
@@ -265,7 +266,7 @@ function FocusToolbar({
   today: string;
   language: Language;
   onNavigate: (date: string) => void;
-  onOpenGtd?: () => void;
+  onOpenGtd?: (tab?: "overview" | "time") => void;
 }) {
   const text = words(language);
   return (
@@ -295,7 +296,10 @@ function FocusToolbar({
         </button>
       </nav>
       {onOpenGtd && (
-        <button className="plus-focus-statistics" onClick={onOpenGtd}>
+        <button
+          className="plus-focus-statistics"
+          onClick={() => onOpenGtd("time")}
+        >
           {language === "zh" ? "查看统计" : "View statistics"}
         </button>
       )}
@@ -386,8 +390,14 @@ function FocusDay({
   ).length;
   let stepLabel = language === "zh" ? "个步骤" : "steps";
   if (language === "en" && queue.length === 1) stepLabel = "step";
-  // A hint only: something that should have started has nothing planned this week.
-  const due = unplannedDue(plan.tasks, days, focus.date, plan.dependencies);
+  // A hint only: something that should have started has nothing planned this week. Only what
+  // Plan shows counts, so the jump to Review finds every one.
+  const due = unplannedDue(
+    planVisibility(plan).tasks,
+    days,
+    focus.date,
+    plan.dependencies,
+  );
   const openPlan = (
     <button className="plus-button" onClick={onOpenPlan}>
       <ArrowLeft size={15} />

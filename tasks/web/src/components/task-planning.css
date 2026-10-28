@@ -48,6 +48,14 @@
   color: var(--muted);
   pointer-events: none;
 }
+.task-planning-flags {
+  margin: -6px 0 14px 25px;
+}
+.task-planning-flags button {
+  display: inline-flex;
+  padding: 0;
+  color: var(--muted);
+}
 .task-planning-fields .task-execution {
   --plus-accent: var(--accent);
   --plus-line: var(--line);

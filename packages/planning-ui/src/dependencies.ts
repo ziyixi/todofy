@@ -1,5 +1,5 @@
 import { displayedTitle, taskAncestors, taskIndex } from "./domain";
-import { byUntouched, waits } from "./weekly-review";
+import { waits } from "./weekly-review";
 import type { StatusText } from "./deadlines";
 import type { Language, PlanningTask, TaskDependency } from "./model";
 
@@ -89,12 +89,6 @@ export function dependencyIndex(plan: DependencyView): DependencyIndex {
 /** A task that waits: a `waiting` or `blocked` label, or a dependency that holds. */
 export function isWaiting(task: PlanningTask, index: DependencyIndex): boolean {
   return waits(task) || index.waitingFor.has(task.id);
-}
-
-/** Every task that waits, by label or by dependency, the longest untouched first. */
-export function waitingTasks(plan: DependencyView): PlanningTask[] {
-  const index = dependencyIndex(plan);
-  return byUntouched(plan.tasks.filter((task) => isWaiting(task, index)));
 }
 
 /** Whether `taskId` already waits for `prerequisiteId`, directly or through others (core/plan.py waits_for). */

@@ -19,7 +19,7 @@ queue, mini timer and away-pause. **View statistics** opens GTD Time.
 
 Approved synthetic designs: [Overview](images/gtd/overview-approved.png),
 [Completion](images/gtd/completion-approved.png), [Time](images/gtd/time-approved.png).
-Actual browser evidence belongs in `tasks/design-qa.md`.
+New captures stay out of Git ([design QA](../design-qa.md)).
 
 ## What the numbers mean
 
@@ -28,9 +28,10 @@ Actual browser evidence belongs in `tasks/design-qa.md`.
   are not changed. Routine occurrences are separate; its time is already included in overall recorded time.
 - Completions count occurrences inside account-local dates. Completing a parent also completes its open children,
   following existing Tasks behavior. Task and Step counts are never added into a score.
-- Task rate counts unique non-Routine Tasks committed to any week overlapping the selected dates, and how many
-  have a completion inside those dates. A Task committed in two weeks still counts once; a later release from
-  commitment does not erase the earlier plan.
+- Task rate counts unique non-Routine Tasks committed to a week whose Sunday falls in the selected dates, and how
+  many have a completion from that first Sunday through the last such week's Saturday. A month's last week is
+  judged through its Saturday, even in the next month, and its first partial week belongs to the month before.
+  A Task committed in two weeks still counts once; a later release from commitment does not erase the earlier plan.
 - Step rate counts unique non-Routine literal Steps ever placed in a day queue inside the selected dates, and
   how many have a completion inside those dates. Moving/removing a queued Step does not erase or duplicate it.
 - Child progress shows current direct Steps. Dates describe the selected period. A parent returned only as
@@ -49,7 +50,9 @@ denominator. Existing imported history, task IDs and old GTD day rows remain int
 Root proto defines one owner-authenticated, read-only `GetGtdReport`, for 1–31 account-local days and optional
 Work/Personal filtering. Five indexed D1 statements return daily counts, totals, membership and at most 100
 related task rows. Summary totals include the full matching period; the UI states when details are limited.
-The report does not read Mail. The existing `GtdDay` and weekly-review APIs remain compatible.
+The report does not read Mail. The day counts (`gtd_days`) are still written daily for the Sunday review and
+Ops; `ListGtdDays` and `ListWeeklyReviews` had no caller left and were retired (`proto/retired.json`), with no
+410 route: a stale tab gets the reload prompt from `x-tasks-build`. `GetWeeklyReview` remains.
 
 `gtd_week_commitments` retains membership in the same transaction as task create/update. The small
 `gtd_reporting` singleton holds capture start. Existing day-queue rows provide Step membership; there is no new

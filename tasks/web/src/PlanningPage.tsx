@@ -114,8 +114,8 @@ export default function PlanningPage({
         onOpenMail={() => {
           window.location.hash = "/mail";
         }}
-        onOpenGtd={() => {
-          window.location.hash = "/gtd/time";
+        onOpenGtd={(tab) => {
+          window.location.hash = tab ? `/gtd/${tab}` : "/gtd";
         }}
         snapshot={snapshot}
         onSnapshot={setSnapshot}

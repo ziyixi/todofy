@@ -221,10 +221,10 @@ export function FocusBlock({
           {/* The card's one time number: what is logged, ticking while its session runs. */}
           <div className="plus-focus-block-footer">
             <span className="plus-focus-estimate">
-              {task && hasPlanningFlag(task, "quick")
-                ? text.executionQuick
-                : minutes
-                  ? text.est(formattedMinutes(minutes))
+              {minutes
+                ? text.est(formattedMinutes(minutes))
+                : task && hasPlanningFlag(task, "quick")
+                  ? text.executionQuick
                   : text.unknown}
             </span>
             {records && (

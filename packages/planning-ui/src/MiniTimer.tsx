@@ -10,6 +10,7 @@ type Timer = NonNullable<FocusState["timer"]>;
 export interface MiniRule {
   band: "none" | "on" | "near" | "over";
   progress: number;
+  /** Near or past the estimate, the minutes left or over; otherwise empty, and the ratio shows. */
   label: string;
 }
 
@@ -27,11 +28,7 @@ export function miniRule(
 ): MiniRule {
   const text = words(language);
   if (timer.mode === "pomodoro" && timer.targetSeconds)
-    return {
-      band: "on",
-      progress: seconds / timer.targetSeconds,
-      label: formattedMinutes(timer.targetSeconds / 60),
-    };
+    return { band: "on", progress: seconds / timer.targetSeconds, label: "" };
   if (!estimate) return { band: "none", progress: 0, label: "" };
   const target = estimate * 60;
   if (logged > target)
@@ -47,7 +44,7 @@ export function miniRule(
         progress,
         label: text.left(Math.ceil((target - logged) / 60)),
       }
-    : { band: "on", progress, label: formattedMinutes(estimate) };
+    : { band: "on", progress, label: "" };
 }
 
 function Control({
@@ -162,8 +159,7 @@ export function MiniTimer({
   const ratio = target
     ? `${formattedMinutes(Math.floor(total / 60))} / ${formattedMinutes(target)}`
     : "";
-  const progressLabel =
-    rule.band === "over" || rule.band === "near" ? rule.label : ratio;
+  const progressLabel = rule.label || ratio;
   return (
     <div
       className="mini"

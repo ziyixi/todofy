@@ -510,18 +510,15 @@ it("keeps Focus daily, opens statistics separately, rereads a past day after wri
   expect(screen.getByRole("checkbox", { name: "Completed" })).toBeTruthy();
   expect(screen.queryByRole("tab")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "View statistics" }));
-  expect(onOpenGtd).toHaveBeenCalledOnce();
+  expect(onOpenGtd).toHaveBeenCalledExactlyOnceWith("time");
   const dayReads = () =>
-    readFocus.mock.calls.filter(
-      ([start, end]) => start === "2026-10-12" && end === "2026-10-12",
-    ).length;
+    readFocus.mock.calls.filter(([day]) => day === "2026-10-12").length;
   expect(dayReads()).toBe(2);
   // Stopping today's timer from its bar also refreshes the historical day on screen.
   await act(async () => {
     fireEvent.click(screen.getByRole("button", { name: "Stop session" }));
   });
   await vi.waitFor(() => expect(dayReads()).toBe(3));
-  expect(readFocus.mock.calls.every(([start, end]) => start === end)).toBe(true);
 });
 
 it("opens the day selected from statistics and keeps daily navigation local", async () => {
@@ -539,7 +536,7 @@ it("opens the day selected from statistics and keeps daily navigation local", as
   await screen.findByRole("list", {
     name: `Steps: ${readableDate("2026-10-12", "en")}`,
   });
-  expect(readFocus).toHaveBeenLastCalledWith("2026-10-12", "2026-10-12");
+  expect(readFocus).toHaveBeenLastCalledWith("2026-10-12");
   fireEvent.click(screen.getByRole("button", { name: "Next day" }));
   await screen.findByRole("list", { name: "Today's steps" });
   expect(document.querySelector(".plus-subtitle")!.textContent).toContain(
@@ -550,7 +547,7 @@ it("opens the day selected from statistics and keeps daily navigation local", as
   await screen.findByRole("list", {
     name: `Steps: ${readableDate("2026-10-14", "en")}`,
   });
-  expect(readFocus).toHaveBeenLastCalledWith("2026-10-14", "2026-10-14");
+  expect(readFocus).toHaveBeenLastCalledWith("2026-10-14");
   rerender(<App {...props} background focusDay="2026-10-14" />);
   rerender(<App {...props} focusDay="2026-10-14" />);
   await screen.findByRole("list", {

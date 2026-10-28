@@ -369,8 +369,8 @@ export interface PlusActions {
     area?: Area,
     at?: string,
   ): Promise<TimerSnapshot>;
-  /** Focus days from `start` to `end`, both included, with their records and the tasks they name. */
-  readFocus(start: string, end: string): Promise<FocusRange>;
+  /** One Focus day, with its records and the tasks they name. */
+  readFocus(day: string): Promise<FocusRange>;
   /** Adds time by hand, on a day no later than Tasks' today. */
   addEntry(entry: NewFocusEntry): Promise<SavedEntry>;
   /** Changes a record's whole minutes, as seconds. */

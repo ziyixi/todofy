@@ -211,8 +211,10 @@ it("shows uncreated native Mail in weekly review and opens Mail and GTD without 
   );
   fireEvent.click(within(line).getByRole("button", { name: "Open" }));
   expect(openMail).toHaveBeenCalledTimes(1);
-  fireEvent.click(screen.getByRole("button", { name: "GTD trends" }));
+  fireEvent.click(screen.getByRole("button", { name: "GTD overview" }));
   expect(openGtd).toHaveBeenCalledTimes(1);
+  // No tab: the host's GTD page opens at Overview.
+  expect(openGtd).toHaveBeenCalledWith();
   expect(updateTask).not.toHaveBeenCalled();
 });
 

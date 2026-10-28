@@ -1,165 +1,90 @@
 # Tasks verification
 
-## Native refinement and conversion, October 18
+What each Tasks release established, as behaviour. Release runs, Deployments and Worker versions live in GitHub
+Actions and Deployments, and the dated detail in git history; this page keeps the conclusions. Local checks use
+synthetic tasks, mail and goals only. Production acceptance read owner pages without printing task or mail text and
+changed no real task unless noted.
 
-Implementation `77edb46915f6939675fa98e011dd21516738fdff` passed the complete
-[branch CI 39086347716](https://github.com/ziyixi/todofy/actions/runs/39086347716). The
-[same-SHA main 39086983750](https://github.com/ziyixi/todofy/actions/runs/39086983750) verified the Cloudflare
-releases, including Tasks → FlowDay → Todofy → Home. The whole main run failed its separate VPS job at
-`RELEASE_HELD`, following the earlier `UNAVAILABLE`; the held server release was not resumed.
+## Migration and native source (October 17–18)
 
-The [old-version maintenance release 39085839713](https://github.com/ziyixi/todofy/actions/runs/39085839713)
-completed before final metadata capture. All three live pause switches were true, and the in-flight Mail
-write count was zero. Actual Tasks, FlowDay, Core and gateway build identities and migrations were checked
-before applying the private conversion files.
+- The Todoist import matched a final private source snapshot, with an empty post-export delta, by identity and
+  digest for every project, section, label, filter, task and completion occurrence. Parent and project orphans were
+  zero; historical labels kept recovered native identities. The original Todoist account was not modified.
+- Native planning conversion matched every frozen planning choice field by field, retired only the exact replaced
+  technical labels and filters, and left the task count unchanged. Pending legacy Mail stayed visible for the owner;
+  no real mail was converted or deleted for acceptance. Day queues and time references matched their baseline.
+- Real D1 refuses a seven-way compound identity SELECT, so the [import runbook](import.md) reads each table on its
+  own, and source activity in bounded seven-day windows. Local SQLite and endpoint reads alone do not prove a complete
+  migration; the private identity and digest comparison did.
+- One synthetic production task was created, edited, reloaded and soft-deleted; imported tasks were not edited.
+  The PWA manifest is served behind Access; installability, the honest offline page, an empty private CacheStorage
+  and reconnect were checked in a disposable profile. Installing into the owner's desktop is the owner's action.
 
-- Every planning-state row matches the frozen original choices, field by field. There are no orphan state rows.
-- Exactly the planned technical labels and replaced filters were soft-retired. Their task memberships were
-  removed; the ordinary labels and filter remain. The task count was unchanged across conversion.
-- Imported filter colors were filled only where empty, including the retained historical filter rows.
-- Every matched, still-pending legacy Mail entry remains visible. Already handled legacy summaries were marked
-  triaged; existing task IDs were retained. New native processing saves a taskless summary; conversion is an
-  explicit owner action. No real Mail was converted or deleted for acceptance.
-- In actual owner Chrome, FlowDay showed **Tasks connected**, **no API key needed** and **Sync complete**.
-  The native pending-feed marker was absent and its cursor present. Every queue row, completed-queue row
-  and time reference matches the private pre-conversion baseline, including ordering and timestamps.
-- Actual Tasks settings show an enabled native plan with no connection inputs or mapping confirmation. Plan
-  and Focus load without errors. Mail loads its first 50 rows, offers pagination and has no task checkboxes.
-  These checks did not edit real tasks, move cards, start timers or open real mail summaries.
+## Editing, planning facts and reads (October 17–18)
 
-[Todofy-only restoration 39087810767](https://github.com/ziyixi/todofy/actions/runs/39087810767) passed in full,
-Deployment `7148606156`. The three actual switches are back to their recorded false values. Independent
-provider comparison verified the declarations and persistent resources of all five Workers. Owner
-`serviceStatus` returned build `77edb469`, zero active jobs and an armed future Alarm; `VerifyPlanStore` returned
-the expected state rows and zero orphans. The authenticated old `/plus` bookmark redirects to Tasks settings.
+The owner's 28 refinement items were accepted one by one. What they established:
 
-| Worker | Verified version after restoration |
-| --- | --- |
-| Tasks | `2e13fcad-76f2-49a7-8272-56a40fee77df` |
-| FlowDay | `d64d3066-3014-47f2-83dd-060f597634b0` |
-| Todofy Core | `7b24c25b-c43d-40cd-9757-2059a510d98a` |
-| Todofy gateway | `e0b7e560-45ef-47ec-9366-7fcd44958956` |
-| Home | `884554ee-e99a-4561-977f-2b987ee50588` |
+- Counts beside every view, projects managed from the sidebar, native Deep/Shallow effort, structured Repeat,
+  separate Subtasks and Steps (only receipt-proven children became Steps), dependencies that name prerequisites and
+  derive Blocked, Start ahead beside Deadline, and clock time only for Steps and Standalone or Quick work.
+- The production cleanup preserved every task ID, parent and project identity, business date, estimate and
+  completion occurrence; obsolete labels, key suffixes and the redundant Mail favorite are gone.
+- Detail reads reuse a page-memory cache of at most 20 full replies for 30 seconds, cleared by writes, focus and
+  visibility changes; a late reply cannot replace a newer task. An unchanged Save writes nothing.
+- With 40 active and 2,000 completed tasks, a full Catalog read fell from 4,254 to 179 rows and a metadata-only
+  read takes 10; doubling completed history leaves label counts at 298 rows. These are synthetic measurements, not
+  a guarantee that the account stays inside its shared Free D1 allowance.
+- Dialog and popover checks compare internal geometry and scroll position on first open, cached reopen and late
+  data, not only the outer frame; they caught a shifting dependency heading and a date popup shrinking as it closed.
+- An owner-reported 20-second refresh stall recovered on its own; its cause was not established.
 
-No post-resume natural taskless summary had completed at this metadata observation. The taskless pipeline
-has actual isolated Worker/D1 coverage; it is not reported as real incoming-mail acceptance. No mail was
-manually injected, recomputed or converted to create that evidence.
+## Lists, drag and selection (October 18–19)
 
-The local evidence below uses synthetic data. Desktop installation of the PWA remains the owner's browser
-action; browser installability and reconnect/offline behavior passed in an isolated profile.
+- Parents start collapsed and read children only on expand, 100 rows a page; ordinary views omit Steps; Today and
+  search do not duplicate a child already listed. Refreshes keep rendered rows until their replacement arrives.
+- A row has one completion circle; Select task or a modifier click enters selection in the same slot. Dragging the
+  row's edges inserts beside a task and its middle moves under it; pointer movement makes no request and a drop
+  writes only parent, location and order under a fresh etag, keeping IDs, dates, kind and descendants.
+- Plan writes: the week rollover expires memberships in bounded pages, so the first write of a new week no longer
+  fails; a confirmed reorder keeps the returned etags; the drop animation can no longer intercept the next drag.
+- An obsolete project was archived with the owner's approval; every task ID, open and completed, was kept.
 
-## Initial native source, October 17
+## Focus mini timer and dialog (October 22)
 
-The initial native Tasks, FlowDay, Todofy and Home release ran `86bb978621c81ce09b1355c4fd931b4f7e8e028e`.
-The original Todoist account was read for migration and UI comparison, without modifying its tasks.
+The 64px mini timer keeps the Step title, clock and visible Pause/Resume, Stop and Complete; its controls are at
+least 24px with names and focus outlines at 320×64, 320×120, 260×100, 420×180 and 420×240. Description Done saves
+the whole draft through the one task write and keeps the editor open on failure. Delete step in Plan removes the
+Step and its queue rows while its time records stay.
 
-- [Full branch CI 39076491784](https://github.com/ziyixi/todofy/actions/runs/39076491784) passed.
-- [Same-SHA main 39077273261](https://github.com/ziyixi/todofy/actions/runs/39077273261) released Tasks →
-  FlowDay → Todofy → Home successfully. Its unrelated VPS job failed `UNAVAILABLE`; the whole run is not green.
-- [Todofy-only 39078766543](https://github.com/ziyixi/todofy/actions/runs/39078766543) succeeded and restored the
-  original maintenance, processing and source-write pauses to false. Live status independently confirmed them.
-- The final private source snapshot has an empty post-export Sync delta. Every project, section, label, filter,
-  task resource and completion occurrence matches it by identity and digest. Parent/project orphan counts are
-  zero. Historical label names no longer in the source catalog have recovered native identities.
-- Planning's final identity preflight matched zero rows, so no provider SQL was executed. FlowDay completed
-  its bounded native sync. Queue and time-reference multisets are unchanged, including preexisting historical
-  cache gaps. The initial cache included every active external ID.
-- With owner permission, one synthetic production task was created, edited, reloaded and soft-deleted.
-  Readback confirms exactly one such row and its soft-delete. Imported tasks were not edited for acceptance.
-- The desktop PWA manifest is served behind owner Access. Disposable Chromium installability APIs pass;
-  offline reload gives an honest notice, private CacheStorage stays empty and reconnect returns to Today.
-  Installing into the owner's desktop remains a user action.
+## Goals (October 24)
 
-Source import count checks precede subsequent ordinary native mail creation. They describe that frozen
-migration, not a permanently fixed task count. Private snapshots, SQL and API outputs remain outside GitHub.
+Goals adds three tables to the existing Worker, D1 and backup; no new service, Notion token, model call or
+schedule. The private annual import inserted definitions only, with stable source identities: every Objective and
+KR was compared with its source with no mismatch, no progress, milestone, focus or task link was invented, and the
+before/after Plan, task counts and catalog matched. The plaintext input and SQL were deleted after readback. Task
+or Step completion never changes a Goal's milestones or completion. Catalog CPU stays under the unchanged Free
+budget in the cold-isolate check.
 
-## Refinement local evidence
+## GTD execution review (October 25)
 
-These are the local checks behind the October 18 release. All local task content, mail and credentials are synthetic.
+Report tests separate Task, Step and Routine, Standalone and Quick, inherited task area and saved record area;
+cross DST; keep weekly and removed-Step membership; omit Task rates before the first fully recorded week; and keep
+full totals while limiting details to 100 rows. With 3,000 unrelated history rows a small period reads under 600
+rows. The 31-day CPU fixture stays within the original budgets. In production, GTD showed its three tabs and the
+calendar opened editable Focus days, read-only. Task rates count each week that starts in the period, through its
+Saturday ([GTD](gtd.md)).
 
-- Tasks Worker: lint/types, 2 units and 29 real workerd/D1 cases pass. Atomic duplication copies full text and
-  active descendants, excludes completed descendants, sits below the original and replays one copy after a
-  lost response. Atomic reordering verifies all supplied etags before changing any position; a stale or missing
-  row leaves the whole batch unchanged. The 100-task/full-description CPU case remains within the existing budget.
-- Tasks web: lint/types/build, 19 units and the final combined 30-case Chromium run pass in a UTC browser.
-  Coverage includes persisted CRUD,
-  colors/property menus, right-click operations, complete/reopen inside a parent, dates across daylight saving,
-  Markdown, chronological Upcoming, real drag persistence, search refresh without blank rows, responsive
-  360–1440px editing/Plan and sidebar width persistence. The PWA case uses its own disposable profile.
-- The first branch CI caught the account/browser timezone boundary after UTC midnight. Quick Add, Upcoming
-  and date labels now use the account calendar. A new UTC-browser/Pacific-account case verifies the stored
-  task date and Upcoming request, alongside the existing persisted CRUD scenario. It releases the real catalog
-  response only after Quick Add starts, so the editor cannot freeze a browser-local date during startup.
-  The combined 30-case run passes in 36 seconds.
-- Shared planning UI: 14 cases pass; the legacy host's 308 units pass. Native host browser coverage uses
-  same-origin synthetic planning replies: fixed-stage dragging with no label mapping, explicit Quick state,
-  Settings, Focus timer and Mail summary. It proves UI/transport usage, not production writes.
-- Native backend: actual Python Core → private TasksApi → real D1 cases verify planning-state CAS/replay,
-  stages/areas/Quick, independent deadline and lead, attached estimated steps and controlled Monday rollover.
-  Physical task labels and unrelated fields remain unchanged. A normal Cron was not used for the clock test.
-- Native Mail pipeline tests use no Tasks binding: successful summarization saves a taskless Mail item and
-  completes processing. Conversion tests create one Inbox task after an explicit request, even without a Plan
-  configuration or Inbox project resource. Lost replies replay the same task. Deleting Mail retains linked
-  tasks; long text keeps its full summary accessible through a deep link. Old already-frozen writes retain
-  their reconciliation path. These are disposable runtime tests, not real-mail conversion or deletion.
-- Native Watch intents, reminders and weekly review tasks use the generic Inbox default. Explicit/frozen
-  project choices remain. Real D1 tests cover unknown-write lookup, producer routing and GTD Inbox scopes.
-- The final combined Python host check passed 2,190 cases with one existing skip for the absent separate
-  legacy `protos` checkout. Scoped native backend, Mail, producer and planning checks pass; the branch gate
-  must validate their combined SHA.
-- Repository checks: 456 cases pass, one skipped. Proto format/lint, schema and API lint pass for 71 files.
-  Existing shared extension browser regressions remain in CI while ZIP publication is removed.
+## Planning readiness and task details (October 26)
 
-Actual Chrome was used for comparison with the logged-in Todoist. Only public menu names, palette options
-and theme styles were recorded. The native 20-color order, checked state, menu rows and priority flags were
-matched. In a separate ephemeral Tasks instance, normal Chrome confirmed saved project/task/subtask edits,
-right-click menus and 245→320px sidebar dragging/reload. The color menu was visibly clipped to about 167px;
-fixed positioning restores its full 272px list/280px popup, covered by a regression. Screenshots contain only
-synthetic data; see [design](design.md).
+Synthetic journeys verified that completed prerequisites and Deadline windows surface work in Parked and that
+planning acknowledges it after reload; that Waiting work and its descendants stay out of Plan while Focus keeps its
+queue; Save return navigation; dependency geometry on first and cached open; read-only reverse links; Quick's clock
+and time zone after a real queue drag; and Enter/Escape deletion without an unintended Save or delete. See
+[planning readiness](planning-readiness.md).
 
-The combined browser run also exposed a focus race: closing the Project popup could force focus back after
-Priority had opened, dismissing the new menu. Normal property menus now use Base UI's default focus check;
-explicit context-menu anchors retain their return target. The original failing keyboard/project/priority
-sequence passes without added delays or diagnostic code.
+## Limits
 
-## Native planning and Mail conversion method
-
-The owner requires GTD status to be native planning facts, not hidden technical tags. `0009_native_plan.sql`
-adds explicit state in Todofy. Public planning replies use stage/area/lead and fixed status fields; ordinary
-Tasks labels stay separate. The native settings UI no longer offers label mappings or extension credentials.
-
-The operator sequence was: pause existing writers; capture final private metadata and conversion SQL; publish the same green
-SHA; seed planning state, retire only exact replaced native label/filter IDs, then mark initialization and
-restore the recorded switches after verification. The read-only preview listed the saved planning states, the technical
-labels and the replaced filters. The remaining filter does not reference those labels. Legacy Mail candidates
-with matching summaries stay visible for owner triage; unrelated or previously handled items are not reopened.
-The final capture's matched entries are verified above. Existing tasks
-are retained. New mail remains taskless until the owner converts it. Old Todoist is unchanged.
-
-After migration 0002, source colors were copied into imported filters only where the new color was empty.
-The source snapshot was not re-imported over native owner writes.
-
-## Earlier release corrections
-
-Refinement branch [39085010635](https://github.com/ziyixi/todofy/actions/runs/39085010635) was held before
-production. Its protocol guard rejected relaxing old required inputs; three additive native Mail RPCs now
-reuse the existing handlers and receipts while retaining those contracts. It also found an old FlowDay binding
-assertion, two retired-host Mail fixtures affected by omitted empty fields, temporary macOS screenshot paths,
-and the calendar mismatch above. Follow-up [39085815272](https://github.com/ziyixi/todofy/actions/runs/39085815272)
-confirmed the old contracts and Mail cases, then exposed the still-early Quick Add and the gateway's 86 KiB
-review budget. Quick Add now awaits missing account settings; the native Mail schema measures 86.2 KiB gzip,
-so the reviewed budget is 87 KiB, with no platform-limit change. A new full branch gate is required.
-
-The first branch `4895d4a5` failed integration enrollment, fixtures and a FlowDay cold codec path. Later checks
-fixed those issues without reducing the existing CPU workload. The full `7eae7465` branch gate passed.
-
-Main [39075576241](https://github.com/ziyixi/todofy/actions/runs/39075576241) uploaded Tasks version
-`734fd419-398f-4d70-8feb-4e08e42636f0` after migration/build/Access probes. Its final declaration check failed:
-Tasks' deploy wrapper had not been enrolled in the drift generator, so BUILD_SHA was undeclared. Release
-inputs already merge the secret fields; they were not four separate Action verifier failures. Wrapper
-registration fixes the comparison, with zero differences, and the next normal release recorded success.
-
-Real D1 rejected the seven-way compound identity read (`too many terms in compound SELECT`); seven separate
-per-table reads succeeded. The [import runbook](import.md) uses that verified approach. Source Activity also
-required bounded seven-day windows. Neither local SQLite acceptance nor an endpoint read alone established
-complete migration; the final private coverage, identity and digest checks did.
+- Backup and restore of each new table passed locally; the first natural weekly backup that holds a new table is
+  checked in production separately ([backup](backup.md)).
+- Older periods have no trustworthy commitment denominator, so GTD shows their completion counts without a rate.
+- Screenshots are synthetic and do not establish screen-reader or contrast compliance.
