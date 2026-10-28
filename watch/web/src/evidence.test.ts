@@ -46,7 +46,6 @@ describe('stored page evidence', () => {
     capture(server, AFTER, '<script>do not execute</script>\n<img src="https://remote.example.com/pixel">', true)
     const saved = server.snapshots.get(AFTER)
     if (saved !== undefined) {
-      saved.structureJson = '{"role":"heading","name":"Synthetic"}'
       saved.links = [{ $typeName: 'watch.ui.v1.SnapshotLink', text: 'Untrusted', url: 'javascript:alert(1)' }]
       saved.metadata = [{ $typeName: 'watch.ui.v1.SnapshotMetadata', name: 'description', content: 'Synthetic metadata' }]
     }

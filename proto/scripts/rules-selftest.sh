@@ -117,8 +117,8 @@ case_ "add STORAGE_STATUS_EXPIRED to the closed StorageStatus (Todofy refuses it
 case_ "add an optional field to Mail (consumers skip what they do not know)" breaking pass 's/(  repeated Attachment attachments = 15 \[)/  \/\/ A newer flag.\n  optional bool newer_flag = 16;\n$1/' "$MAIL"
 case_ "change a binding of the test fixtures (prototest is ignored, as by buf)" breaking pass 's/\{get: "\/v1\/\{parent=shelves\/\*\}\/books"\}/{get: "\/v2\/{parent=shelves\/*}\/books"}/' prototest/v1/prototest.proto
 # Retiring an element (tools/retired.py, retired.json): a deletion breaks unless the copy's retired.json lists it, and
-# the listed element must stay deleted (an enum value with its number and name reserved; a message with every rpc and
-# field that uses it). Nothing else is excused.
+# the listed element must stay deleted (an enum value or a field with its number and name reserved; a message with every
+# rpc and field that uses it). Nothing else is excused.
 RETIRE_WATCH_UI='{"packages": [{"path": "watch/ui/v1/", "package": "watch.ui.v1"}]}'
 RETIRE_INBOX_UNAVAILABLE='{"enum_values": [{"enum": "tasks.inbox.v1.ErrorCode", "name": "ERROR_CODE_UNAVAILABLE", "number": 3}]}'
 RETIRE_WATCH_GUARD='{"allowed_values": [{"field": "dashboard.ui.v1.OverrideGuardRequest.app", "value": "watch"}]}'

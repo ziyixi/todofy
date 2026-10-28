@@ -202,7 +202,6 @@ export const handlers: ServiceHandlers<ShapeOf<typeof WatchUiService>, ApiContex
     return readEvidenceImage(ctx.store, ctx.evidenceStore, request.name);
   },
   pollWatchEvents(request, ctx) {
-    if (request.filter !== '' && request.filter !== 'evidence') bad('filter must be empty or evidence');
     if (request.baseline && request.cursor !== '') bad('baseline requires an empty cursor');
     if (!request.baseline && request.cursor === '') bad('start with baseline before polling events');
     const head = ctx.store.eventHead();
@@ -214,12 +213,12 @@ export const handlers: ServiceHandlers<ShapeOf<typeof WatchUiService>, ApiContex
     if (after === null || after > head) bad('cursor is ahead of the source');
     if (after < ctx.store.eventFloor()) throw watchError('CURSOR_EXPIRED');
     const size = pageSize(request.pageSize, 100);
-    const rows = ctx.store.watchEvents(after, size + 1, request.filter === 'evidence');
+    const rows = ctx.store.watchEvents(after, size + 1);
     const page = rows.slice(0, size);
-    const kinds = { change_confirmed: WatchEvent_Kind.CHANGE_CONFIRMED, watch_broken: WatchEvent_Kind.WATCH_BROKEN, watch_paused: WatchEvent_Kind.WATCH_PAUSED };
     return Promise.resolve(create(PollWatchEventsResponseSchema, {
-      events: page.map(row => ({ sequence: String(row.id), kind: row.evidence_only ? WatchEvent_Kind.EVIDENCE_CHANGED : kinds[row.kind], watch: `watches/${row.watch_id}`,
-        change: row.change_id === null ? '' : `watches/${row.watch_id}/changes/${row.change_id}`, createTime: timestampFromMs(row.created_at), beforeSnapshot: row.before_evidence ?? '', afterSnapshot: row.after_evidence ?? '' })),
+      events: page.map(row => ({ sequence: String(row.id), watch: `watches/${row.watch_id}`,
+        kind: row.evidence_only ? WatchEvent_Kind.EVIDENCE_CHANGED : row.kind === 'watch_broken' ? WatchEvent_Kind.WATCH_BROKEN : WatchEvent_Kind.WATCH_PAUSED,
+        createTime: timestampFromMs(row.created_at), beforeSnapshot: row.before_evidence ?? '', afterSnapshot: row.after_evidence ?? '' })),
       cursor: encodePageToken(page.at(-1)?.id ?? head, { feed: 'watch-events-v1' }),
       hasMore: rows.length > size,
     }));

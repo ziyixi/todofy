@@ -211,7 +211,7 @@ See [`todofy/docs/mail-api.md`](../todofy/docs/mail-api.md). It replaced `PlusSe
    whose consumers branch on every value of an enum, with no default to fall back to, marks it
    `option (common.wire.v1.closed) = true` (every enum ops-v1 writes): every read refuses an unknown name, a
    lenient one too, and a new value is a new major version (`PROFILE_ENUM_CLOSED`).
-6. **Retiring an element.** Deleting a published package, file, enum value, allowed value, rpc, message or field is
+6. **Retiring an element.** Deleting a published package, file, enum value, field, allowed value, rpc or message is
    breaking by every rule above, and that stays so. When no producer or consumer of it remains (the app that used it is removed in
    the same change), [`retired.json`](retired.json) lists it by full name with the date and the reason, and
    `tools/retired.py` (run by `scripts/breaking.sh` and the self-test before `buf breaking` and the profile rules)
@@ -220,7 +220,7 @@ See [`todofy/docs/mail-api.md`](../todofy/docs/mail-api.md). It replaced `PlusSe
    message and enum it defines, and no kept file of the base may import it, `RETIRED_FILE_IMPORTED`), no retired
    allowed value, and a retired enum value absent with **both its number and its name reserved**
    (`reserved 1; reserved "NAME";`, so neither is ever reused: a stored row may still hold the old name), and so is
-   a retired field (`fields`, by message, name and number). A retired rpc (`methods`, by service and name) is absent
+   a retired field (`fields`, by full name and number). A retired rpc (`methods`, by service and name) is absent
    from its service, and a service whose every rpc is retired goes with them. A retired top-level message (`messages`) is absent from the head, and no kept field or rpc of the
    base uses it (`RETIRED_MESSAGE_REFERENCED`): a message is retired together with everything that uses it. A kept
    file may import a retired package or file only for retired fields; the base drops that import with them. It then

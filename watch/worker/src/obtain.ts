@@ -285,67 +285,14 @@ export async function obtain(
   };
 }
 
-/** Stage 0 by the browser: robots.txt and the host's etiquette for the watched URL, the ledger, one render. */
+/**
+ * Stage 0 by the browser: the day's ledger, then one render whose navigations pass the HTTP gate (robots, host locks,
+ * budget and Retry-After).
+ */
 async function render(deps: ObtainDeps, config: WatchConfig, budget: Budget, failed: (failure: FailureCode, meta?: Partial<AnswerMeta>, retryAfter?: number | null) => Obtained): Promise<Obtained> {
-  if (deps.browser === null) return failed('BROWSER_UNAVAILABLE');
-  if (!browserAllowed(deps.store.ledger(utcDay(deps.now())))) return failed('JS_QUOTA_EXHAUSTED');
-  if (deps.browser.navigationGate === true) return renderNavigation(deps, config, budget, failed);
-  const url = new URL(config.uri);
-  const host = url.hostname.toLowerCase();
-  const busy = hostRefusal(deps.store.host(host), deps.now());
-  if (busy?.kind === 'host') return { status: 0, finalUrl: config.uri, redirects: 0, robotsAllowed: true, fetched: false, fetchedAt: null, kind: 'deferred', until: busy.until };
-  if (!config.ignoreRobots) {
-    const verdict = await robotsVerdict(deps, url, config, budget, { left: ROBOTS_REQUESTS_PER_CHECK });
-    if (verdict === null || !robotsAllows(verdict, `${url.pathname}${url.search}`)) return failed('ROBOTS_DISALLOWED', { robotsAllowed: false });
-  }
-  const release = await deps.hosts.acquire(host);
-  try {
-    const now = deps.now();
-    const again = hostRefusal(deps.store.host(host), now);
-    if (again?.kind === 'host') return { status: 0, finalUrl: config.uri, redirects: 0, robotsAllowed: true, fetched: false, fetchedAt: null, kind: 'deferred', until: again.until };
-    reserveHost(deps.store, host, now);
-    deps.store.putUrlFetch(config.uri, now);
-    deps.store.setMeta('browser_next_at', String(now + BROWSER_SPACING_MS));
-    // A render is a subrequest of the invocation like any fetch.
-    budget.requests -= 1;
-    budget.used += 1;
-    const rendered = await deps.browser.render({ url: config.uri, locale: config.locale, timeoutMs: deps.timeoutMs });
-    const day = utcDay(now);
-    const sent = { robotsAllowed: true, fetched: true, fetchedAt: now };
-    if (rendered.kind === 'quota') {
-      deps.store.addLedger(day, 0, 0, true);
-      return failed('JS_QUOTA_EXHAUSTED', sent, nextUtcMidnight(now) - now);
-    }
-    // Every render that reached the binding is charged, a failed one too.
-    deps.store.addLedger(day, 0, rendered.browserMs);
-    if (rendered.kind === 'refused') {
-      if (rendered.refusal.kind === 'robots') return failed('ROBOTS_DISALLOWED', { ...sent, robotsAllowed: false });
-      if (rendered.refusal.kind === 'budget') return failed('REDIRECT_REFUSED', sent);
-      return { ...blankAnswer(sent), kind: 'deferred', until: rendered.refusal.until };
-    }
-    if (rendered.kind === 'failed') {
-      if (rendered.error) throw rendered.error;
-      return failed(rendered.failure, sent);
-    }
-    budget.bytes += rendered.html.byteLength;
-    recordAnswer(deps.store, host, now, rendered.status, null);
-    const finalUrl = rendered.finalUrl ?? config.uri;
-    const meta = { ...sent, status: rendered.status, finalUrl };
-    // Where the browser ended up obeys the same rule as a redirect (when the renderer tells).
-    if (rendered.finalUrl !== null && checkUri(rendered.finalUrl, { allowHttp: config.allowHttp }) === null) return failed('REDIRECT_REFUSED', meta);
-    const failure = statusFailure(rendered.status);
-    if (isChallenge(rendered.status, new Headers(), rendered.html)) return failed('CHALLENGE_PAGE', meta);
-    if (failure !== null) return failed(failure, meta);
-    return { ...blankAnswer(meta), kind: 'answer', contentType: 'text/html; charset=utf-8', etag: null, lastModified: null, body: rendered.html, ...(rendered.evidence ? { evidence: rendered.evidence } : {}) };
-  } finally {
-    release();
-  }
-}
-
-/** Real browser navigation shares the HTTP gate, including robots, host locks, budget and Retry-After. */
-async function renderNavigation(deps: ObtainDeps, config: WatchConfig, budget: Budget, failed: (failure: FailureCode, meta?: Partial<AnswerMeta>, retryAfter?: number | null) => Obtained): Promise<Obtained> {
   const browser = deps.browser;
   if (browser === null) return failed('BROWSER_UNAVAILABLE');
+  if (!browserAllowed(deps.store.ledger(utcDay(deps.now())))) return failed('JS_QUOTA_EXHAUSTED');
   // Check the initial host before allocating a metered browser. Navigation checks it again under the shared lock.
   const target = new URL(config.uri);
   const busy = hostRefusal(deps.store.host(target.hostname.toLowerCase()), deps.now());

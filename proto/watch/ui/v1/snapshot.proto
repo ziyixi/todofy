@@ -29,15 +29,16 @@ message Snapshot {
   string title = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Structured readable text, at most 256 KiB of UTF-8.
   string markdown = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Optional browser accessibility tree as bounded JSON, at most 64 KiB.
-  string structure_json = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The browser accessibility tree, no longer captured.
+  reserved 6;
+  reserved "structure_json";
   // At most 200 source links, with their visible labels.
   repeated SnapshotLink links = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
   // At most 50 page-supplied metadata entries, never model-generated claims.
   repeated SnapshotMetadata metadata = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Whether saved reading evidence was available for this read.
   bool content_available = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // A text, structure or extraction limit omitted content.
+  // A text or extraction limit omitted content.
   bool content_truncated = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Empty on success, otherwise a safe code such as unavailable or expired.
   string content_error = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
@@ -51,7 +52,8 @@ message Snapshot {
   int32 image_height = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
   // image/jpeg when a screenshot was saved.
   string image_mime_type = 16 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // SHA-256 of reading content, excluding capture time.
+  // SHA-256 of the compared reading text: the title and Markdown after Watch's default masks, with link and
+  // image query strings removed. Capture time, URI, links and metadata are stored but not compared.
   string content_sha256 = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
   // SHA-256 of screenshot bytes, empty if absent.
   string image_sha256 = 18 [(google.api.field_behavior) = OUTPUT_ONLY];

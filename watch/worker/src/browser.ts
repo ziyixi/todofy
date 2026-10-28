@@ -1,11 +1,10 @@
-/** Browser Run transport and bounded page capture; the official client handles the browser protocol.
- * Production uses puppeteerRenderer so every navigation reaches the existing hop gate. Manual local tests
- * retain the small synthetic quick-action adapter; both return the same source-owned RenderResult.
+/** Browser Run transport and bounded page capture; the official client handles the browser protocol, and every
+ * navigation reaches the existing hop gate. Tests inject a synthetic launcher.
  */
 import puppeteer, { type Browser, type HTTPRequest, type HTTPResponse } from '@cloudflare/puppeteer';
 import type { SourceConfig } from './config.ts';
-import { CAPTURE_ACCESSIBILITY_MAX, CAPTURE_SCREENSHOT_MAX, captureText, extractCapture, type CaptureDocument } from './evidence-extract.ts';
-import { readCapped, type HopGate, type HopRefusal, type TransportFailure } from './fetcher.ts';
+import { CAPTURE_SCREENSHOT_MAX, extractCapture, type CaptureDocument } from './evidence-extract.ts';
+import type { HopGate, HopRefusal, TransportFailure } from './fetcher.ts';
 import { BROWSER_DAILY_MS, BROWSER_RESERVE_MS, MAX_REDIRECTS, USER_AGENT } from './limits.ts';
 import { checkUri } from './url-policy.ts';
 
@@ -25,12 +24,10 @@ export type RenderResult =
   | { readonly kind: 'failed'; readonly failure: TransportFailure; readonly browserMs: number; readonly error?: Error };
 
 export interface BrowserRenderer {
-  /** The real adapter gates each navigation itself; synthetic content adapters use obtain's initial gate. */
-  readonly navigationGate?: boolean;
   render(request: RenderRequest): Promise<RenderResult>;
 }
 
-type BrowserLauncher = (binding: Fetcher) => Promise<Pick<Browser, 'newPage' | 'close'>>;
+export type BrowserLauncher = (binding: Fetcher) => Promise<Pick<Browser, 'newPage' | 'close'>>;
 const VIEWPORT = { width: 1280, height: 960, deviceScaleFactor: 1 };
 
 /** Only baseline/progressive JPEGs from our fixed viewport are accepted; no decoding or image library is needed. */
@@ -58,7 +55,6 @@ export function jpegDimensions(bytes: Uint8Array): { readonly width: number; rea
 /** Official Puppeteer handles CDP; this adapter only applies Watch's request policy and captures bounded evidence. */
 export function puppeteerRenderer(binding: Fetcher, maxBytes: number, launch: BrowserLauncher = endpoint => puppeteer.launch(endpoint), now: () => number = Date.now): BrowserRenderer {
   return {
-    navigationGate: true,
     async render(request) {
       const gate = request.gate;
       if (gate === undefined || checkUri(request.url, { allowHttp: request.allowHttp === true }) === null)
@@ -158,13 +154,6 @@ export function puppeteerRenderer(binding: Fetcher, maxBytes: number, launch: Br
           const html = new TextEncoder().encode(content);
           if (html.byteLength > maxBytes) return { kind: 'failed', failure: 'TOO_LARGE', browserMs: cost() };
           let evidence = await extractCapture({ body: html, contentType: 'text/html; charset=utf-8', finalUrl, ...(request.source ? { source: request.source } : {}) });
-          try {
-            const tree = await page.accessibility.snapshot({ interestingOnly: true });
-            const accessibility = captureText(JSON.stringify(tree), CAPTURE_ACCESSIBILITY_MAX);
-            evidence = accessibility.truncated
-              ? { ...evidence, truncated: true, errors: [...evidence.errors, 'accessibility_too_large'] }
-              : { ...evidence, accessibilityJson: tree === null ? null : accessibility.text };
-          } catch { evidence = { ...evidence, errors: [...evidence.errors, 'accessibility_failed'] }; }
           evidence = { ...evidence, metadata: [...evidence.metadata, { name: 'screenshot_scope', content: 'viewport:1280x960' }] };
           try {
             const bytes = new Uint8Array(await page.screenshot({ type: 'jpeg', quality: 65, fullPage: false, captureBeyondViewport: false }));
@@ -197,47 +186,6 @@ export function puppeteerRenderer(binding: Fetcher, maxBytes: number, launch: Br
       }
       if (state.gateError !== null) return { kind: 'failed', failure: 'NETWORK_ERROR', browserMs: cost(), error: state.gateError };
       return outcome.kind === 'quota' ? outcome : { ...outcome, browserMs: cost() };
-    },
-  };
-}
-
-/** The `content` quick action through a Fetcher (the browser binding, or the tests' fake). */
-export function quickActionRenderer(binding: Fetcher, maxBytes: number): BrowserRenderer {
-  return {
-    async render({ url, locale, timeoutMs }) {
-      const controller = new AbortController();
-      const timer = setTimeout(() => {
-        controller.abort();
-      }, timeoutMs);
-      try {
-        const response = await binding.fetch('https://browser.invalid/content', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            url,
-            gotoOptions: { waitUntil: 'networkidle2', timeout: timeoutMs },
-            setExtraHTTPHeaders: { 'Accept-Language': locale },
-            rejectResourceTypes: ['image', 'media', 'font'],
-          }),
-          signal: controller.signal,
-        });
-        if (response.status === 429) {
-          await response.body?.cancel();
-          return { kind: 'quota' };
-        }
-        const used = Number(response.headers.get('x-browser-ms-used') ?? '');
-        const browserMs = Number.isFinite(used) && used > 0 ? Math.round(used) : BROWSER_RESERVE_MS;
-        const html = await readCapped(response, maxBytes);
-        if (html === null) return { kind: 'failed', failure: 'TOO_LARGE', browserMs };
-        // The page's own status, when the renderer reports it; else the action's.
-        const status = Number(response.headers.get('x-page-status') ?? response.status);
-        return { kind: 'rendered', status: Number.isInteger(status) ? status : response.status, html, browserMs, finalUrl: response.headers.get('x-final-url') };
-      } catch {
-        // The browser may have run up to the timeout: charged as the reserve (the render's own timeout).
-        return { kind: 'failed', failure: controller.signal.aborted ? 'TIMEOUT' : 'NETWORK_ERROR', browserMs: Math.max(BROWSER_RESERVE_MS, controller.signal.aborted ? timeoutMs : 0) };
-      } finally {
-        clearTimeout(timer);
-      }
     },
   };
 }

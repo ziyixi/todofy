@@ -15,7 +15,6 @@ interface Probe {
   readonly denyUrl?: string;
   readonly screenshotError?: boolean;
   readonly screenshotLarge?: boolean;
-  readonly accessibilityLarge?: boolean;
   readonly contentLarge?: boolean;
   readonly timeout?: boolean;
   readonly protocolTimeout?: boolean;
@@ -49,7 +48,6 @@ export default {
     let finalUrl = url;
     let screenshotOptions: unknown;
     let viewport: unknown;
-    let axOptions: unknown;
     const navigate = async (target: string, main: boolean, respond = true, navigation = main) => {
       let decide: (allowed: boolean) => void = () => undefined;
       const decision = new Promise<boolean>(resolve => { decide = resolve; });
@@ -87,7 +85,6 @@ export default {
       },
       url: () => input.documentUrl ?? finalUrl,
       evaluate: () => Promise.resolve(input.contentLarge ? null : html),
-      accessibility: { snapshot: (options: unknown) => { axOptions = options; return Promise.resolve({ role: 'RootWebArea', name: input.accessibilityLarge ? '字'.repeat(100_000) : 'Fixture', children: [{ role: 'button', name: 'Buy' }] }); } },
       screenshot: (options: unknown) => {
         screenshotOptions = options;
         if (input.screenshotError) return Promise.reject(new Error('synthetic_screenshot_failure'));
@@ -114,7 +111,7 @@ export default {
           leave: target => { gates.push(`leave:${target.href}`); if (input.gateLeaveError) throw new Error('synthetic_storage_failure'); },
         },
       });
-      return Response.json({ result, admitted, denied, gates, closed, launches, screenshotOptions, viewport, axOptions,
+      return Response.json({ result, admitted, denied, gates, closed, launches, screenshotOptions, viewport,
         error: result.kind === 'failed' ? result.error?.message : undefined });
     } catch { return Response.json({ error: 'synthetic_storage_failure', closed }); }
   },

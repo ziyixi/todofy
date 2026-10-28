@@ -95,10 +95,10 @@ Tiers, cheapest first:
 3. **Browser** (`FETCHER_BROWSER`): the official `@cloudflare/puppeteer` package opens one Browser Run session
    per check. Main-frame navigations pass the same async robots/host/redirect gate as HTTP; HTTP(S) subresources
    follow the URL policy too. Images, fonts and public frames may render; frame documents are not recursively
-   extracted. The same page supplies its rendered HTML,
-   native meaningful accessibility tree and a fixed 1280 × 960 JPEG (quality 65, at most 1 MiB). The screenshot is
-   a viewport, not the full page. The session closes after capture, including failure. Text remains available when
-   only the screenshot or accessibility capture fails, with explicit source error codes.
+   extracted. The same page supplies its rendered HTML and a fixed 1280 × 960 JPEG (quality 65, at most 1 MiB). The
+   screenshot is a viewport, not the full page. The session closes after capture, including failure. Text remains
+   available when only the screenshot fails, with an explicit source error code. A rendered page whose text is too
+   short fails `TOO_SHORT` like any page; its screenshot is still saved as evidence.
    The app retains its 480-second daily ledger under the account's shared allowance. Budget exhaustion is
    `JS_QUOTA_EXHAUSTED`, never no change. The existing browser slot spaces new sessions at least 20 seconds
    apart, including manual previews. Browser checks retain their existing six-hour minimum interval.
@@ -327,11 +327,12 @@ reads all event rows, including those delivered to Tasks; it does not consume `d
 continue to default to DIGEST.
 
 `PollWatchEvents` starts from an explicit baseline and returns ascending transition sequences, a persistent opaque
-cursor and `has_more`; each page contains at most 100 events and no page content. Confirmation inserts its event
-at confirmation time, so a candidate detected before the baseline still appears if confirmed afterwards. The
-SQLite autoincrement sequence retains the head after deletion; pruning records the highest expired sequence.
-A cursor below that floor fails as `CURSOR_EXPIRED` instead of silently skipping history. Retention stays at
-30 days or 500 events; the private reader must reconcile a gap before taking a new baseline.
+cursor and `has_more`; each page contains at most 100 events and no page content. It carries reading-evidence
+changes (inserted when a capture is saved; see Page evidence) and health transitions, never the rule
+confirmations of Tasks' outbox. The SQLite autoincrement sequence retains the head after deletion; pruning records
+the highest expired sequence. A cursor below that floor fails as `CURSOR_EXPIRED` instead of silently skipping
+history. Retention stays at 30 days or 500 events; the private reader then takes a new baseline and reports the gap
+as unknown history (the changes stay readable through `ListChanges`).
 
 Each change freezes normalized context around changed lines while both compared texts exist: at most 40 lines,
 500 characters per line and 8 KiB JSON per side. Insertions and deletions include neighboring unchanged anchors
@@ -439,8 +440,8 @@ All hermetic: synthetic content only, the only network is loopback, clocks are i
 - Unit (`npm test` in `worker/`, Node): normalization and every mask (deadlines kept, linear on hostile runs), the
   diff, the triggers (edges, floors, values, the kept diff's bytes), robots.txt, scheduling and backoff, the URL
   policy (the own names), JSONPath, feeds, JSON-LD, markdown, numbers, charsets (GBK), the health gate, snapshots,
-  settings and hashes, the fetch with a stub (redirects, the hop gate, caps, per-request timers), the browser
-  renderer's cap and cost, the dev rewrite.
+  settings and hashes, the fetch with a stub (redirects, the hop gate, caps, per-request timers), the browser ledger,
+  the dev rewrite.
 - workerd (`npm run test:runtime`): Miniflare runs the bundled Worker with a real SQLite WatchState; every request it
   makes goes to `test/fake-sites.ts` through the outbound service, a proxy Worker that streams each body as it is read
   (`test/runtime/fake-net.ts`: a body written ahead of a busy WatchState into Miniflare's loopback connection crawled
@@ -450,8 +451,9 @@ All hermetic: synthetic content only, the only network is loopback, clocks are i
   request at a time per host across previews and the alarm, the URL's 15 minutes for previews and edits, the time each
   check is stamped with), every stage, every trigger, confirmation, flicker, third versions and the window, ignored
   lines with a change pending, a check that throws, BROKEN and the auto-pause, GBK, UTF-16, an omitted `</head>`,
-  masks, shadow mode, the API surface (AIP-155 replays), the browser tier with a fake binding (the ledger charges
-  failed renders), real alarms, storage bounds, the rows budget and the CPU (§8).
+  masks, shadow mode, the API surface (AIP-155 replays), the browser tier (the production renderer on a synthetic
+  launcher, `test/stubs/browser-state.ts`; the ledger charges failed renders), real alarms, storage bounds, the rows
+  budget and the CPU (§8).
 - UI (`npm test` in `web/`, jsdom): the transport, the formats, the inbox and drawer with ignore and undo, the add
   flow from a fragment (nothing fetched before 预览, the fragment cleared) with the block picker, a create whose
   response was lost, the settings form's round trip and mask, taking an ignored line back, accessibility, the health
@@ -531,25 +533,27 @@ All hermetic: synthetic content only, the only network is loopback, clocks are i
 
 Reading evidence is captured before the raw-HTML and normalized-text short circuits. The HTTP extractor retains
 unmasked Markdown headings, lists, tables, labels/links and page metadata. Rendered captures additionally keep the
-native accessibility tree (at most 64 KiB) and JPEG. This representation is independent of the small normalized
-`Content` used by existing typed rules. No model, OCR or semantic judge runs in Watch.
+JPEG. This representation is independent of the small normalized `Content` used by existing typed rules; a feed, JSON or
+embedded source's capture is its rule extraction's own lines, parsed once. No model, OCR or semantic judge runs in Watch.
 
 SQLite's `evidence_snapshots` indexes immutable text object addresses and content/image hashes; private
 `EVIDENCE_STORE` (`watch-evidence`) holds bounded JSON documents and JPEGs. Image hashes reuse exact image bytes;
-an entirely identical capture reuses the latest ready snapshot. Capture times do not enter the hash. A changed
-text, structure, URL metadata or image creates a candidate even when an ordinary rule would suppress it. The
-private feed's `filter=evidence` returns only those candidates and health, excluding ordinary rule confirmations.
-Legacy callers retain confirmed-rule transitions and health. Both views share the monotonic cursor. Notifications
-carry refs only; the paired snapshots are read through the authenticated API, not refetched from today's page.
+a capture compared equal reuses the latest ready snapshot. The comparison is the title and Markdown after the default
+masks, with link and image query strings removed, plus the image bytes; capture time, URI, links and metadata are
+stored but not compared, so per-request tokens never wake a Dot. A changed text or image creates a candidate even when
+an ordinary rule would suppress it. The private feed returns only those candidates and health, never the ordinary rule
+confirmations (Tasks' outbox). Notifications carry refs only; the paired snapshots are read through the authenticated
+API, not refetched from today's page.
 
 The latest 20 reading captures per watch and the rule baseline/previous/pending references are retained.
 Normal pruning/deletion queues private object cleanup for the
 existing Alarm; image objects still referenced by a retained capture stay. Interrupted uploads remain indexed and
-are reclaimed at the serialized scheduler boundary. R2 failure does not become an unchanged check. Historical
+are reclaimed at the serialized scheduler boundary. An R2 failure leaves that one check without capture refs (logged
+as a code) while its rules run as usual; the next capture compares with the last saved one, so no change is lost. Historical
 reading refs may expire; existing frozen short text context remains. `GetSnapshot` and `GetSnapshotImage` report
 unavailable/expired evidence explicitly and do not reconstruct an old page from a new request.
 
-MCP `watch_read` returns one Unicode-safe Markdown/structure window plus metadata; `watch_view` returns the saved
+MCP `watch_read` returns one Unicode-safe Markdown window plus metadata; `watch_view` returns the saved
 JPEG as real MCP image content. Dots judges relevance, records its decision in Work and decides subsequent action.
 The UI lazily reads current and before/after evidence in existing watch/change details. Historical records without
 capture refs remain readable using their original frozen context.

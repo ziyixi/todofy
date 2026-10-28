@@ -183,7 +183,6 @@ export interface WatchEventRow extends Record<string, SqlStorageValue> {
   id: number;
   kind: 'change_confirmed' | 'watch_broken' | 'watch_paused';
   watch_id: string;
-  change_id: string | null;
   created_at: number;
   evidence_only?: number;
   before_evidence?: string;
@@ -613,9 +612,10 @@ export class Store {
     return first === undefined ? this.eventHead() : first.id - 1;
   }
 
-  watchEvents(after: number, limit: number, evidence = false): WatchEventRow[] {
-    return this.all<WatchEventRow>(`SELECT id, kind, watch_id, change_id, created_at, evidence_only, before_evidence, after_evidence
-      FROM notifications WHERE id > ? AND (evidence_only = ? OR kind IN ('watch_broken','watch_paused')) ORDER BY id LIMIT ?`, after, evidence ? 1 : 0, limit);
+  /** The private feed: evidence changes and health transitions (the ordinary outbox's confirmations are Tasks'). */
+  watchEvents(after: number, limit: number): WatchEventRow[] {
+    return this.all<WatchEventRow>(`SELECT id, kind, watch_id, created_at, evidence_only, before_evidence, after_evidence
+      FROM notifications WHERE id > ? AND (evidence_only = 1 OR kind IN ('watch_broken','watch_paused')) ORDER BY id LIMIT ?`, after, limit);
   }
 
   enqueueEvidence(watchId: string, before: string, after: string, now: number): void {

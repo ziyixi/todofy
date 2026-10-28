@@ -93,6 +93,21 @@ def status(*, gone: bool = True, also: bool = False) -> dict[str, Any]:
     }
 
 
+NESTED = {"fields": [{"field": "t.v1.Page.Part.tree", "number": 6}]}
+
+
+def page(*, tree: bool) -> dict[str, Any]:
+    """A message with a nested message whose field 6 is `tree`."""
+    part: dict[str, Any] = {"name": "Part", "field": [{"name": "text", "number": 5}]}
+    if tree:
+        part["field"].append({"name": "tree", "number": 6})
+    return {
+        "file": [
+            {"name": "t/v1/page.proto", "package": "t.v1", "messageType": [{"name": "Page", "nestedType": [part]}]}
+        ]
+    }
+
+
 class FieldsTest(unittest.TestCase):
     def test_the_head_keeps_a_retired_field_deleted_with_its_number_and_name_reserved(self) -> None:
         retired = {"fields": FIELD["fields"]}
@@ -119,6 +134,20 @@ class FieldsTest(unittest.TestCase):
     def test_an_import_another_kept_field_still_uses_is_an_error(self) -> None:
         _, _, problems = tool.without_retired(FIELD, status(also=True))
         self.assertEqual(problems, [f"RETIRED_PACKAGE_IMPORTED k/v1/status.proto imports the retired {GONE}"])
+
+    def test_the_base_loses_exactly_the_listed_field_of_a_nested_message(self) -> None:
+        out, removed, problems = tool.without_retired(NESTED, page(tree=True))
+        self.assertEqual(out, page(tree=False))
+        self.assertEqual((removed, problems), (["field t.v1.Page.Part.tree"], []))
+
+    def test_another_field_with_the_number_is_a_mismatch(self) -> None:
+        base = page(tree=False)
+        base["file"][0]["messageType"][0]["nestedType"][0]["field"].append({"name": "other", "number": 6})
+        _, removed, problems = tool.without_retired(NESTED, base)
+        self.assertEqual(removed, [])
+        self.assertEqual(
+            problems, ["RETIRED_FIELD_MISMATCH t.v1.Page.Part.tree: the base has another name or number (other = 6)"]
+        )
 
 
 def services() -> dict[str, Any]:

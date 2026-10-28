@@ -31,7 +31,8 @@ beforeAll(async () => {
     import { encodeSnapshot } from './src/snapshot.ts';
     import { obtain } from './src/obtain.ts';
     import { PreviewCache, preview } from './src/preview.ts';
-    import { readConfig } from './src/config.ts';
+    import { runCheck } from './src/pipeline.ts';
+    import { checkHash, readConfig, readHash, settingsWire } from './src/config.ts';
     import { HostLocks } from './src/host-locks.ts';
     import { create } from '@ziyixi/proto/protobuf';
     import { WatchSchema, Watch_Fetcher } from '@ziyixi/proto/watch/ui/v1/watch_pb';
@@ -56,7 +57,7 @@ beforeAll(async () => {
           if (typeof config === 'string') throw new Error('synthetic_config_invalid');
           const body = new TextEncoder().encode(input.html);
           const extracted = await extractCapture({body,contentType:'text/html',finalUrl:config.uri});
-          const evidence = {...extracted,markdown:'UNMASKED_READING_MARKER'+'m'.repeat(64*1024),accessibilityJson:'AX_CACHE_MARKER',
+          const evidence = {...extracted,markdown:'UNMASKED_READING_MARKER'+'m'.repeat(64*1024),
             screenshot:{bytes:new Uint8Array(64*1024).fill(127),width:1280,height:960,mimeType:'image/jpeg'}};
           const cache = new PreviewCache(this.store);
           await cache.put(config,{at:input.now,obtained:{kind:'answer',status:200,finalUrl:config.uri,redirects:0,
@@ -66,7 +67,7 @@ beforeAll(async () => {
           const response = await preview({store:this.store,browser:null,hosts:new HostLocks(),timeoutMs:1000,now:()=>input.now+1000,
             fetch:async()=>{throw new Error('unexpected_synthetic_fetch')},sleep:async()=>undefined},cache,config,false,null);
           return Response.json({hasEvidence:Object.hasOwn(JSON.parse(row.meta),'evidence'),metadataBytes:new TextEncoder().encode(row.meta).length,
-            containsReadingText:row.meta.includes('UNMASKED_READING_MARKER'),containsStructure:row.meta.includes('AX_CACHE_MARKER'),
+            containsReadingText:row.meta.includes('UNMASKED_READING_MARKER'),
             cachedBody:new TextDecoder().decode(cached.obtained.body),cached:response.fetch.cached,
             extractedLines:response.extractedLines,failure:response.failure});
         }
@@ -74,7 +75,7 @@ beforeAll(async () => {
           const input = await request.json();
           const config = readConfig(create(WatchSchema,{displayName:'Synthetic session',uri:input.uri,fetcher:Watch_Fetcher.BROWSER}),{selectorOk:()=>true,browserEnabled:true});
           if (typeof config === 'string') throw new Error('synthetic_config_invalid');
-          const browser = { navigationGate:true, render:async request => {
+          const browser = { render:async request => {
             this.store.setMeta('synthetic_launches',String(Number(this.store.getMeta('synthetic_launches') ?? 0)+1));
             const target = new URL(request.url);
             const refusal = await request.gate.enter(target,0,null);
@@ -86,10 +87,31 @@ beforeAll(async () => {
             fetch:async () => new Response(null,{status:404})},config,{requests:40,used:0,bytes:0},null);
           return Response.json({result,launches:Number(this.store.getMeta('synthetic_launches') ?? 0),ledger:this.store.ledger(new Date(input.now).toISOString().slice(0,10))});
         }
+        if (url.pathname === '/check') {
+          // One ordinary check with the private bucket working, or failing every write.
+          const input = await request.json();
+          const watch = create(WatchSchema,{displayName:'Synthetic check',uri:'https://check.example.com/page',checkIntervalMinutes:60,stability:{skipConfirmation:true}});
+          const config = readConfig(watch,{selectorOk:()=>true,browserEnabled:false});
+          if (typeof config === 'string') throw new Error('synthetic_config_invalid');
+          if (!this.store.watch('check')) this.store.insertWatch({id:'check',settings:JSON.stringify(settingsWire(watch)),host:config.host,
+            read_hash:await readHash(config),check_hash:await checkHash(config),state:'active',pause_reason:null,etag:'1',create_time:input.now,
+            update_time:input.now,shadow_end:null,next_check_at:input.now,check_requested:0,last_fetch_at:null,last_check_at:null,
+            last_success_at:null,last_outcome:null,last_failure:null,last_http_status:0,failures:0,failure_start:null,masked_count:0,
+            http_etag:null,http_last_modified:null,raw_sha:null,raw_check_hash:null,seen_sha:null,seen_check_hash:null,
+            seen_snapshot_id:null,baseline_id:null,baseline_read_hash:null,pending_change:null});
+          const outage = { put: async () => { throw new Error('synthetic_r2_outage'); } };
+          const outcome = await runCheck({store:this.store,browser:null,hosts:new HostLocks(),timeoutMs:1000,now:()=>input.now,judge:null,
+            transact:fn => this.ctx.storage.transactionSync(fn), evidenceStore:input.outage ? outage : this.env.EVIDENCE_STORE,
+            fetch:async req => new URL(req.url).pathname === '/robots.txt' ? new Response('',{status:404})
+              : new Response(input.html,{headers:{'content-type':'text/html'}})},'check',input.now,{requests:40,used:0,bytes:0});
+          const row = this.store.watch('check');
+          return Response.json({outcome,failure:row.last_failure,latest:latestEvidence(this.store,'check'),
+            changes:this.store.all("SELECT before_evidence,after_evidence FROM changes WHERE watch_id='check' ORDER BY id")});
+        }
         if (url.pathname !== '/capture') return new Response(null, {status:404});
         const input = await request.json();
         const extracted = await extractCapture({ body:new TextEncoder().encode(input.html), contentType:'text/html', finalUrl:'https://synthetic.example.com/page' });
-        const document = { ...extracted, accessibilityJson:JSON.stringify({role:'RootWebArea',name:'Synthetic evidence'}),
+        const document = { ...extracted,
           errors:input.imageError ? [...extracted.errors,input.imageError] : extracted.errors,
           screenshot:input.image ? {bytes:Uint8Array.from(input.image),width:3,height:2,mimeType:'image/jpeg'} : null };
         let edited = false;
@@ -110,7 +132,7 @@ beforeAll(async () => {
         await cleanEvidence(this.store, this.env.EVIDENCE_STORE);
         const counts = this.store.one('SELECT count(*) AS captures FROM evidence_snapshots');
         return Response.json({ pair, latest:latestEvidence(this.store,'synthetic'), state:this.store.watch('synthetic').state, ...counts,
-          evidenceEvents:this.store.watchEvents(0,100,true).length, legacyEvents:this.store.watchEvents(0,100,false).length });
+          evidenceEvents:this.store.watchEvents(0,100).length });
       }
     }
     export default {fetch(request,env) { return env.PROBE.getByName(new URL(request.url).searchParams.get('fixture')).fetch(request); }};
@@ -138,7 +160,6 @@ interface CaptureResult {
   state: string;
   captures: number;
   evidenceEvents: number;
-  legacyEvents: number;
 }
 async function capture(fixture: string, now: number, input: { html?: string; image?: number[]; imageError?: string; editDuringPut?: boolean; pauseDuringPut?: boolean; pinBaseline?: boolean } = {}) {
   const response = await mf.dispatchFetch(`https://probe.invalid/capture?fixture=${fixture}`, {
@@ -166,11 +187,10 @@ describe('real SQLite and R2 capture storage', () => {
     });
     expect(response.status).toBe(200);
     const cached = await response.json() as { hasEvidence: boolean; metadataBytes: number; containsReadingText: boolean;
-      containsStructure: boolean; cachedBody: string; cached: boolean; extractedLines: string[]; failure: number };
+      cachedBody: string; cached: boolean; extractedLines: string[]; failure: number };
     expect(cached.hasEvidence).toBe(false);
     expect(cached.metadataBytes).toBeLessThan(2048);
     expect(cached.containsReadingText).toBe(false);
-    expect(cached.containsStructure).toBe(false);
     expect(cached.cachedBody).toBe(html);
     expect(cached.cached).toBe(true);
     expect(cached.failure).toBe(0);
@@ -202,7 +222,6 @@ describe('real SQLite and R2 capture storage', () => {
     expect(snapshot.markdown).toContain('# Version 123');
     expect(snapshot.links).toContainEqual(expect.objectContaining({ text: 'Details', url: 'https://synthetic.example.com/details' }));
     expect(snapshot.metadata).toContainEqual(expect.objectContaining({ name: 'description', content: 'Synthetic metadata' }));
-    expect(snapshot.structureJson).toContain('RootWebArea');
     const screenshot = await image('reuse', saved.latest);
     expect(screenshot.available).toBe(true);
     expect(Array.from(atob(screenshot.jpegBase64), char => char.charCodeAt(0))).toEqual(JPEG);
@@ -213,12 +232,12 @@ describe('real SQLite and R2 capture storage', () => {
     expect((await bucket.list()).objects.map(object => object.key).sort()).toEqual(objects);
   });
 
-  it('keeps an image-only change as a distinct capture and evidence event outside the legacy feed', async () => {
+  it('keeps an image-only change as a distinct capture and evidence event', async () => {
     const before = await capture('image-change', T0, { image: JPEG });
     const changedImage = [...JPEG];
     changedImage[25] = 1;
     const after = await capture('image-change', T0 + HOUR, { image: changedImage });
-    expect(after).toMatchObject({ pair: { before: before.latest, after: after.latest }, captures: 2, evidenceEvents: 1, legacyEvents: 0 });
+    expect(after).toMatchObject({ pair: { before: before.latest, after: after.latest }, captures: 2, evidenceEvents: 1 });
     expect(after.latest).not.toBe(before.latest);
     const first = await read('image-change', before.latest);
     const second = await read('image-change', after.latest);
@@ -306,6 +325,31 @@ describe('real SQLite and R2 capture storage', () => {
     expect(await bucket.get(`images/${unusedSnapshot.imageSha256}.jpg`)).toBeNull();
   });
 
+  it('compares captures by title and masked Markdown, not link queries, metadata or relative times', async () => {
+    const html = '<html><head><title>Synthetic evidence</title><meta name="description" content="First"></head><body><h1>Version 123</h1>'
+      + '<p>Updated 3 minutes ago</p><a href="/details?session=one">Details</a><img src="/chart.png?sig=one" alt="Chart"></body></html>';
+    const first = await capture('noise', T0, { html });
+    const noisy = html.replace('First', 'Second').replace('3 minutes', '5 minutes').replace('session=one', 'session=two').replace('sig=one', 'sig=two');
+    expect(await capture('noise', T0 + HOUR, { html: noisy })).toMatchObject({ pair: { before: first.latest, after: first.latest }, captures: 1, evidenceEvents: 0 });
+    const changed = await capture('noise', T0 + 2 * HOUR, { html: noisy.replace('Version 123', 'Version 124') });
+    expect(changed).toMatchObject({ pair: { before: first.latest, after: changed.latest }, captures: 2, evidenceEvents: 1 });
+    // What is stored stays unmasked: the comparison alone ignores the noise.
+    expect((await read('noise', changed.latest)).markdown).toContain('session=two');
+  });
+
+  it('keeps checking the ordinary rules when the private bucket fails, leaving that check without capture refs', async () => {
+    const check = async (now: number, html: string, outage = false) => {
+      const response = await mf.dispatchFetch('https://probe.invalid/check?fixture=outage', { method: 'POST', body: JSON.stringify({ now, html, outage }) });
+      expect(response.status, await response.clone().text()).toBe(200);
+      return await response.json() as { outcome: string; failure: string | null; latest: string; changes: { before_evidence: string; after_evidence: string }[] };
+    };
+    const first = await check(T0, page('Synthetic release', '<h1>Version 1</h1><p>Registration is closed.</p>'));
+    expect(first).toMatchObject({ outcome: 'unchanged', failure: null });
+    const changed = await check(T0 + 2 * HOUR, page('Synthetic release', '<h1>Version 2</h1><p>Registration is closed.</p>'), true);
+    expect(changed).toMatchObject({ outcome: 'changed', failure: null, latest: first.latest });
+    expect(changed.changes).toEqual([{ before_evidence: first.latest, after_evidence: '' }]);
+  });
+
   it('keeps an owner settings edit during R2 upload from accepting a stale capture', async () => {
     const before = await capture('edit-during-put', T0, { image: JPEG });
     const rejected = await capture('edit-during-put', T0 + HOUR, {
@@ -339,16 +383,15 @@ describe('normal Watch pipeline evidence feed', () => {
     await h.run(T0);
     const first = await client.getWatch({ name: 'watches/suppressed-evidence' });
     expect(first.latestSnapshot).toMatch(/^watches\/suppressed-evidence\/snapshots\/[a-z0-9]{16}$/);
-    const baseline = await client.pollWatchEvents({ baseline: true, filter: 'evidence' });
+    const baseline = await client.pollWatchEvents({ baseline: true });
     h.sites.html(uri, page('Synthetic release', '<h1>Version 2</h1><p>Registration is closed.</p>'));
     await h.clock(T0 + 2 * HOUR);
     await h.run(T0 + 2 * HOUR);
-    const evidence = await client.pollWatchEvents({ cursor: baseline.cursor, filter: 'evidence' });
+    const evidence = await client.pollWatchEvents({ cursor: baseline.cursor });
     expect(evidence.events).toHaveLength(1);
     const event = evidence.events[0];
     expect(event).toMatchObject({ kind: WatchEvent_Kind.EVIDENCE_CHANGED, beforeSnapshot: first.latestSnapshot });
     expect(event?.afterSnapshot).not.toBe(first.latestSnapshot);
-    expect((await client.pollWatchEvents({ cursor: baseline.cursor })).events).toEqual([]);
     const changes = await client.listChanges({ parent: first.name });
     expect(changes.changes).toHaveLength(1);
     expect(changes.changes[0]?.state).toBe(Change_State.SUPPRESSED);
@@ -415,7 +458,7 @@ describe('normal Watch pipeline evidence feed', () => {
     const client = createHttpClient(WatchUiService, call => h.serviceFetch(call.url, {
       method: call.httpMethod, ...(call.body === undefined ? {} : { body: call.body, headers: { 'content-type': 'application/json' } }),
     }));
-    const baseline = await client.pollWatchEvents({ baseline: true, filter: 'evidence' });
+    const baseline = await client.pollWatchEvents({ baseline: true });
 
     // Enrichment does not bypass the existing minimum spacing, even for an owner-requested check.
     await h.clock(now + 10 * MINUTE);
@@ -430,7 +473,7 @@ describe('normal Watch pipeline evidence feed', () => {
     expect(enriched.latestSnapshot).toMatch(/^watches\/legacy-validators\/snapshots\/[a-z0-9]{16}$/);
     expect((await client.getSnapshot({ name: enriched.latestSnapshot })).markdown).toContain('# Stable release');
     expect(await h.sql('SELECT baseline_id FROM watches WHERE id=?', id)).toEqual([original]);
-    expect((await client.pollWatchEvents({ cursor: baseline.cursor, filter: 'evidence' })).events.filter(event => event.watch === name)).toEqual([]);
+    expect((await client.pollWatchEvents({ cursor: baseline.cursor })).events.filter(event => event.watch === name)).toEqual([]);
 
     await h.clock(now + 4 * HOUR);
     await h.run(now + 4 * HOUR);

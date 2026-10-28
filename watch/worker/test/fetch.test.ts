@@ -1,10 +1,11 @@
 /**
- * The transport (src/fetcher.ts) and the browser renderer (src/browser.ts) with stubs: bodies are read through a cap
- * and never buffered whole, robots.txt keeps its first bytes, every hop passes the gate and reports back to it, and a
- * render that failed still says what it cost. Synthetic inputs only; nothing leaves the process.
+ * The transport (src/fetcher.ts) with stubs, and the browser's daily ledger (src/browser.ts): bodies are read through a
+ * cap and never buffered whole, robots.txt keeps its first bytes, and every hop passes the gate and reports back to it.
+ * The renderer itself is tested in workerd (runtime/evidence-extract.test.ts). Synthetic inputs only; nothing leaves the
+ * process.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { browserAllowed, quickActionRenderer } from '../src/browser.ts';
+import { browserAllowed } from '../src/browser.ts';
 import { fetchPage, readCapped, type HopGate } from '../src/fetcher.ts';
 import { HostLocks } from '../src/host-locks.ts';
 import { BROWSER_DAILY_MS, BROWSER_RESERVE_MS } from '../src/limits.ts';
@@ -125,24 +126,7 @@ describe('HostLocks', () => {
   });
 });
 
-describe('the browser renderer', () => {
-  const binding = (response: () => Response) => ({ fetch: () => Promise.resolve(response()) }) as unknown as Fetcher;
-
-  it('stops reading a rendered page once it is over the cap (never buffers the whole answer), and says what it cost', async () => {
-    const cap = 64 * 1024;
-    const body = counted(64 * cap);
-    const result = await quickActionRenderer(binding(() => new Response(body.stream, { headers: { 'x-browser-ms-used': '30000' } })), cap).render({ url: 'https://render.example.com/p', locale: 'en', timeoutMs: 5000 });
-    expect(result).toEqual({ kind: 'failed', failure: 'TOO_LARGE', browserMs: 30_000 });
-    expect(body.pulled()).toBeLessThanOrEqual(cap + 2 * 16 * 1024);
-  });
-
-  it('charges the reserve for a failed render that reported nothing, and reads where the render ended', async () => {
-    const failing = { fetch: () => Promise.reject(new Error('connection reset')) } as unknown as Fetcher;
-    expect(await quickActionRenderer(failing, 1024).render({ url: 'https://render.example.com/p', locale: 'en', timeoutMs: 5000 })).toEqual({ kind: 'failed', failure: 'NETWORK_ERROR', browserMs: BROWSER_RESERVE_MS });
-    const moved = await quickActionRenderer(binding(() => new Response('<p>x</p>', { headers: { 'x-final-url': 'https://elsewhere.example.com/' } })), 1024).render({ url: 'https://render.example.com/p', locale: 'en', timeoutMs: 5000 });
-    expect(moved).toMatchObject({ kind: 'rendered', finalUrl: 'https://elsewhere.example.com/', browserMs: BROWSER_RESERVE_MS });
-  });
-
+describe('the browser ledger', () => {
   it('allows a render only with its reserve left in the day', () => {
     expect(browserAllowed({ browser_ms: BROWSER_DAILY_MS - BROWSER_RESERVE_MS, browser_exhausted: 0 })).toBe(true);
     expect(browserAllowed({ browser_ms: BROWSER_DAILY_MS - BROWSER_RESERVE_MS + 1, browser_exhausted: 0 })).toBe(false);

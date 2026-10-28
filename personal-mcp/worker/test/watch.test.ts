@@ -263,25 +263,21 @@ it.each(['http', 'browser'])('passes the native %s fetcher through preview, crea
   expect(client.seen[2]?.query.get('update_mask')).toBe('fetcher,etag');
 });
 
-it('reads stored snapshot windows with source completeness and metadata while keeping representations separate', async () => {
+it('reads stored snapshot windows with source completeness and metadata', async () => {
   const client = tools(request => {
     expect([request.method, request.path]).toEqual(['GET', '/api/v1/watches/synthetic-watch/snapshots/0000000000000001']);
     return Response.json({ name: SNAPSHOT, create_time: AT, uri: 'https://example.org/synthetic', title: 'Synthetic page',
-      markdown: 'A😀BC', structure_json: '{"synthetic":true}', links: [{ text: 'Synthetic link', url: 'https://example.org/item' }],
+      markdown: 'A😀BC', links: [{ text: 'Synthetic link', url: 'https://example.org/item' }],
       metadata: [{ name: 'description', content: 'Synthetic metadata' }], content_available: true, content_truncated: true,
       image_available: false, image_error: 'not_captured' });
   });
   const first = await client.call('watch_read', { snapshot: SNAPSHOT, limit: 2 });
   expect(first.result?.structuredContent).toMatchObject({ name: SNAPSHOT, create_time: AT, title: 'Synthetic page',
-    markdown: 'A😀', representation: 'markdown', offset: 0, next_offset: 2, total_characters: 4,
+    markdown: 'A😀', offset: 0, next_offset: 2, total_characters: 4,
     content_available: true, content_truncated: true, image_available: false, image_error: 'not_captured',
     links: [{ text: 'Synthetic link' }], metadata: [{ name: 'description' }] });
-  expect(first.result?.structuredContent).not.toHaveProperty('structure_json');
   const rest = await client.call('watch_read', { snapshot: SNAPSHOT, offset: 2, limit: 2 });
   expect(rest.result?.structuredContent).toMatchObject({ markdown: 'BC', next_offset: null, content_truncated: true });
-  const structure = await client.call('watch_read', { snapshot: SNAPSHOT, representation: 'structure' });
-  expect(structure.result?.structuredContent).toMatchObject({ structure_json: '{"synthetic":true}', next_offset: null });
-  expect(structure.result?.structuredContent).not.toHaveProperty('markdown');
   expect(client.preparations()).toBe(0);
   expect(client.work.list().works).toEqual([]);
 });
@@ -292,7 +288,8 @@ it('keeps old or unavailable snapshot content explicit and rejects unbounded win
   const read = await client.call('watch_read', { snapshot: SNAPSHOT });
   expect(read.result?.structuredContent).toMatchObject({ markdown: '', content_available: false,
     content_truncated: true, content_error: 'historical_evidence_unavailable', image_available: false, next_offset: null });
-  for (const input of [{ snapshot: CHANGE }, { snapshot: SNAPSHOT, limit: 24001 }, { snapshot: SNAPSHOT, offset: -1 }]) {
+  for (const input of [{ snapshot: CHANGE }, { snapshot: SNAPSHOT, limit: 24001 }, { snapshot: SNAPSHOT, offset: -1 },
+    { snapshot: SNAPSHOT, representation: 'structure' }]) {
     expect((await client.call('watch_read', input)).result?.isError).toBe(true);
   }
   expect(client.seen).toHaveLength(1);

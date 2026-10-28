@@ -15,7 +15,7 @@ Tasks 保存正式任务和规划事实。先读取相关记录，再按用户�
 - `work_create` 用 request UUID 登记职责。外部操作前用 `work_checkpoint(work_id, request_id, etag, changes, entry?)` 保存意图和接续点；操作后按真实 receipt 或观察结果写回。只传要改的字段。未知结果保持未知，沿用源工具的 request ID、etag 和输入核对或重试。
 - checkpoint 静默保存 Dot 自己的进度，不会唤醒自己。外部来源有意义的观察、问题、阻碍或结果用 `work_report`，携带稳定 `report_id` 和已在 links 中的真实 `source`；精确重试不换 ID 或输入。active/waiting 期间 report 才通知，终态后只留日志，也不改工作状态。读完并处理报告后，用 checkpoint 推进 `handled_through_report_seq`，不另发 report 确认收件。`work_export` 用于交接接续材料；导出不会增加授权。
 - `links` 的 `type` 可为 `task`、`codex`、`watch`、`recall`、`schedule`、`artifact`，`ref` 保存真实 ID。资源创建成功后才存引用。`owned` 只标记这件工作专用的资源，共享 Watch 或总巡检 schedule 保持共享。更新 `links` 要保留其他引用。
-- 每件工作保持一个执行负责人。恢复、事件和定时巡检先核对当前执行情况，已有负责人运行时不要再次派发同一步。本地 Codex 使用 Dots 原生能力接续已有线程；MCP 中保存的 Codex 引用不会直接唤醒本地进程。
+- 每件工作保持一个执行负责人。恢复、事件和定时巡检先核对当前执行情况，已有负责人运行时不要再次派发同一步。本地 Codex 使用 Dots 原生能力接续已有线程，原生交接成功前不要报告委托已开始；MCP 中保存的 Codex 引用不会直接唤醒本地进程。
 - `review_at` 是复查提示，不会创建定时器。需要定时跟进时先真实创建或复用 Dots 原生 schedule，再存返回的 ID。每小时总巡检可复用一个原生 schedule：读最新 context，只检查到期或可行动的工作，无变化保持安静；不要为每项工作另建重复巡检。
 - `done` 要有完成条件的实际证据。完成或取消前暂停真实 owned Watch、停止专用 schedule，并确认专用 Codex 工作已停止或完成；保留引用并记录 `stop_state`、实际 `observed_at`、`observation`，终态还要有 `result`。需要完成通知时先 report，再处理 pending reports 并写终态 checkpoint；done 不接受未处理报告。不要终止共享资源，也不要删引用绕过停止确认。停止失败时保留待处理状态和卡点。回调 `accepted` 只代表 ChatGPT 收到事件。
 
@@ -60,9 +60,9 @@ Work 摘要保存必要的决定、结果和来源引用，不复制整封邮件
 
 `watch_update(name, request_id, etag, changes)` 只传已授权的设置字段，保留原通知策略。`watch_control` 的 action 只有 `pause`、`resume`、`check`；pause/resume 需当前 Watch etag，check 只是按源间隔安排检查。确认暂停后工具写入 owned link 的停止观察，resume 清除它；共享引用仍保持共享。未知结果重试复用原 request ID 和输入。`watch_changes` 用具体变化 `name`，或 `parent` 加分页参数；`parent: "watches/-"` 跨监视读取。
 
-页面证据变化会交给 Dot 按 Work goal 判断，不受 Watch 业务触发规则、候选抑制或通知策略影响。同一证据后续被规则确认时不重复发 Work 报告。先读 Work、Watch 健康，再按报告 summary 中的精确 before/after snapshot 引用读取冻结证据；`evidence_ref` 是 after snapshot。`watch_get.latest_snapshot` 指向最新保存的捕获，`watch_changes.before_snapshot`、`after_snapshot` 指向候选对应的历史捕获。
+页面证据变化会交给 Dot 按 Work goal 判断，不受 Watch 业务触发规则、候选抑制或通知策略影响；规则确认不另发 Work 报告。比较只看标题和遮盖默认噪声（相对时间、随机串、链接与图片的查询参数）后的正文及截图，links、metadata 照常保存但不触发报告。Watch 事件过期造成的空档会以一条 blocked 报告提示：用 `watch_changes` 补读相关变化后再依赖这件工作。先读 Work、Watch 健康，再按报告 summary 中的精确 before/after snapshot 引用读取冻结证据；`evidence_ref` 是 after snapshot。`watch_get.latest_snapshot` 指向最新保存的捕获，`watch_changes.before_snapshot`、`after_snapshot` 指向候选对应的历史捕获。
 
-用 `watch_read(snapshot, representation?, offset?, limit?)` 读取已存正文与来源 metadata。`representation` 默认 `markdown`，也可选 `structure` 读取结构 JSON；每次默认 12,000 字符、最多 24,000，offset 按 Unicode 字符计数。沿同一 snapshot 和 representation 的 `next_offset` 继续需要的部分，直到 null。`content_available`、`content_error`、`content_truncated` 说明保存证据是否可用和完整；读到末尾不会消除源捕获的截断。links、metadata、捕获时间和图片状态用于核对来源，不能把空正文当作页面无内容。工具只读存储，不重新抓取网页。
+用 `watch_read(snapshot, offset?, limit?)` 读取已存 Markdown 正文与来源 links、metadata。每次默认 12,000 字符、最多 24,000，offset 按 Unicode 字符计数。沿同一 snapshot 的 `next_offset` 继续需要的部分，直到 null。`content_available`、`content_error`、`content_truncated` 说明保存证据是否可用和完整；读到末尾不会消除源捕获的截断。links、metadata、捕获时间和图片状态用于核对来源，不能把空正文当作页面无内容。工具只读存储，不重新抓取网页。
 
 需要看页面时调用 `watch_view(snapshot)`，读取实际 MCP image 内容并核对 `image_available`、错误和尺寸；捕获时间用同一 snapshot 的 `watch_read` 核对。base64 字符串或描述截图的 metadata 不能算已看图。首版截图是固定视口，范围见同一快照的 metadata，不能当作整页。图片缺失或失败时保留视觉事实未验证，不换其他捕获代替；只据保存图片中可见的内容判断。
 

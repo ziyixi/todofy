@@ -18,7 +18,7 @@ import { DurableObject } from 'cloudflare:workers';
 import { HttpTranscoder } from '@ziyixi/proto/http-transcoder';
 import { WatchUiService } from '@ziyixi/proto/watch/ui/v1/watch_ui_service_pb';
 import { handlers, type ApiContext } from './api.ts';
-import { quickActionRenderer, puppeteerRenderer, type BrowserRenderer } from './browser.ts';
+import { puppeteerRenderer, type BrowserRenderer } from './browser.ts';
 import { buildSha, devFetch, publicHost, PRIVATE_API_HEADER, REQUEST_ID_HEADER, type Env } from './env.ts';
 import { supportedSelector } from './extract/html.ts';
 import type { FetchFn } from './fetcher.ts';
@@ -88,10 +88,9 @@ export class WatchState extends DurableObject<Env> {
     return this.manual() && Number.isInteger(override) && override > 0 ? override : FETCH_TIMEOUT_MS;
   }
 
-  private browser(): BrowserRenderer | null {
-    if (this.env.BROWSER === undefined) return null;
-    if (this.manual() && this.env.DEV_AUTH_BYPASS === 'true') return quickActionRenderer(this.env.BROWSER, FETCH_MAX_BYTES);
-    return puppeteerRenderer(this.env.BROWSER, FETCH_MAX_BYTES);
+  /** Browser Run through the official client (the workerd tests override this with a synthetic launcher). */
+  protected browser(): BrowserRenderer | null {
+    return this.env.BROWSER === undefined ? null : puppeteerRenderer(this.env.BROWSER, FETCH_MAX_BYTES);
   }
 
   private transact = <T>(fn: () => T): T => this.ctx.storage.transactionSync(fn);

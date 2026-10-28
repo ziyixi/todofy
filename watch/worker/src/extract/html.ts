@@ -53,9 +53,9 @@ export interface HtmlExtraction {
 }
 
 /** Elements whose content is never text the owner reads. */
-const SKIP = new Set(['head', 'script', 'style', 'noscript', 'template', 'svg', 'iframe', 'textarea', 'object']);
+export const SKIP = new Set(['head', 'script', 'style', 'noscript', 'template', 'svg', 'iframe', 'textarea', 'object']);
 /** Elements without an end tag (onEndTag throws for them). */
-const VOID = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'keygen', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
+export const VOID = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'keygen', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
 /** Elements that start a new line. */
 const BLOCK = new Set([
   'address', 'article', 'aside', 'blockquote', 'body', 'caption', 'dd', 'details', 'dialog', 'div', 'dl', 'dt', 'fieldset',
@@ -64,7 +64,7 @@ const BLOCK = new Set([
 ]);
 const LANDMARK_ROLES = new Set(['navigation', 'banner', 'contentinfo']);
 /** What may stand inside `head`; any other start tag closes an open head (its end tag is optional). */
-const HEAD_CONTENT = new Set(['base', 'link', 'meta', 'noscript', 'script', 'style', 'template', 'title']);
+export const HEAD_CONTENT = new Set(['base', 'link', 'meta', 'noscript', 'script', 'style', 'template', 'title']);
 /** An id that looks generated (a long number, a hash, a CSS-module or BEM name) makes a poor selector; `reviews` does not. */
 const UNSTABLE_NAME = /\d{3,}|(?=[a-z0-9]*\d)(?=[a-z0-9]*[a-z])[a-z0-9]{8,}|^[a-z]{1,4}-(?=[a-z0-9]*\d)[a-z0-9]{4,}$|__|--/i;
 const SELECTOR_MAX_CHARS = 200;
