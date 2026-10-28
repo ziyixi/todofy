@@ -153,6 +153,7 @@ describe('the registry', () => {
     const unmatched = REGISTRY.resources.filter((r) => r.match === null).map((r) => r.id);
     expect(unmatched).toEqual(RESOURCE_IDENTITIES['model-router-engine'] ? [] : ['model-router-engine']);
     expect(resourceByMatch('do', '7d90ef3fb1d44ac591a3b21c99fdcccc')).toMatchObject({ id: 'tasks-jobs', kind: 'do', entry: 'tasks', script: 'tasks' });
+    expect(resourceByMatch('do', '17bc24e2ecee44f5887d3a82ba9578d5')).toMatchObject({ id: 'links-backup', kind: 'do', entry: 'links', script: 'links' });
     expect(REGISTRY.resources.find((r) => r.id === 'recall-state')).toMatchObject({ kind: 'do', entry: 'recall', script: 'recall' });
     expect(resourceByMatch('r2', 'recall-store')).toMatchObject({ id: 'recall-store', entry: 'recall' });
     expect(REGISTRY.resources.find((r) => r.id === 'mailsort-state')).toMatchObject({ kind: 'do', entry: 'mailsort', script: 'mailsort' });

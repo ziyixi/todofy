@@ -337,6 +337,8 @@ const RESOURCES: readonly ResourceDef[] = [
   { id: 'home-state', kind: 'do', name: 'HomeState', entry: 'home', script: 'home', match: RESOURCE_IDENTITIES['home-state'] ?? null },
   // Created for the links app's first deploy (L2, 2026-10-01).
   { id: 'links-db', kind: 'd1', name: 'links 短链接库', entry: 'links', match: RESOURCE_IDENTITIES['links-db'] ?? null },
+  // The links app's daily backup Alarm (links/wrangler.toml BACKUP_ALARM).
+  { id: 'links-backup', kind: 'do', name: 'LinksBackup', entry: 'links', script: 'links', match: RESOURCE_IDENTITIES['links-backup'] ?? null },
   { id: 'tasks-db', kind: 'd1', name: 'Tasks 任务库', entry: 'tasks', match: RESOURCE_IDENTITIES['tasks-db'] ?? null },
   // Tasks' scheduled work (GTD counts, the Sunday review, the weekly backup).
   { id: 'tasks-jobs', kind: 'do', name: 'TaskJobs', entry: 'tasks', script: 'tasks', match: RESOURCE_IDENTITIES['tasks-jobs'] ?? null },

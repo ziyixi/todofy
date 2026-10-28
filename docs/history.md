@@ -5,6 +5,9 @@ current production state; [HANDOFF](../HANDOFF.md) names the current rollout and
 
 ## Archived handoffs
 
+[Handoff of October 28, 2026](history/handoff-2026-10-28.md) keeps the released notes of October 28: the review
+cleanup wave, the fixed K3s node address and DNS, the backups wave and its links follow-up, Fleet node telemetry
+with the ZFS ARC correction, and the Newsletter researcher.
 [Handoff of October 27, 2026](history/handoff-2026-10-27.md) keeps the released notes of October 22-27: the Model
 Router cutover and its cost visibility, the Codex gateway, its 6.1 runtime and [monitor](history/codex-monitor.md),
 the shared dependency workspaces, Mailsort's priorities, providers, interval and recent intake, Tasks planning, GTD

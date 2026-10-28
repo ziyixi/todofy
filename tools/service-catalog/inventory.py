@@ -16,8 +16,7 @@ from cloudflare import DO_KEYS  # noqa: E402
 # Workers awaiting namespace capture. Their Worker and buckets stay registered but may be absent;
 # namespaces are ignored until their first deployment assigns IDs. Record those IDs in config/resources.toml
 # and clear the corresponding names here. CHECK_ONLY controls release readiness independently.
-# links: its LinksBackup namespace (links-backup) is created by the release that adds it.
-FIRST_DEPLOY_PENDING: set[str] = {"links"}
+FIRST_DEPLOY_PENDING: set[str] = set()
 OUTPUT = "dashboard/worker/src/account-inventory.json"
 BUCKET_NAME = re.compile(r"[a-z0-9][a-z0-9-]{1,61}[a-z0-9]")
 PAGE_LIMIT = 100
