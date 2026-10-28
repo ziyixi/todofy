@@ -13,7 +13,7 @@
 - **历史学习**：旧例子、回放和决策保持可读；Workers AI embedding、弱学习、双视图和回放代码已删除，新判定不再生成例子；旧例子保留到 owner 删除或撤回对应判定。旧 UI 启动回放时明确拒绝，不静默执行旧模型。不要重写原预测或冻结 fixture。
 - **模型入口**：所有模型调用只经 `@ziyixi/model-router-client` 与私有 `MODEL_ROUTER` service binding。保留 Claude/Codex 的既有设置、模式、历史和各自计费口径；请求使用公共 model route、通用参数与标准 JSON Schema。Mailsort 不持有 provider key、VPS endpoint、SDK 或厂商请求格式。Router 按已认证 Mailsort caller 选择独立凭据，不能共用 Brief 的 Claude workspace。Gmail grant 仍只由 owner 本机写入；发布不覆盖。配置、实际模型推理与 Gmail 写入分别验收。
 
-- **隐私**：主题最多200字符，正文最多12,000字符。邮箱与长数字掩码、链接只保留域名。依 owner 选择，掩码输入发送给 Anthropic，或经 owner VPS 发送给 OpenAI；不进请求内容日志或 fixture。Gateway 不持有 Gmail 授权，不保存推理 job 或邮件内容日志；Ops 只有计数、时间和安全错误码。保留期修改同提交更新网站 `/privacy/mailsort`。
+- **隐私**：主题最多200字符，正文最多12,000字符。邮箱与长数字掩码、链接只保留域名。依 owner 选择，掩码输入发送给 Anthropic，或经 owner VPS 发送给 OpenAI；不进请求内容日志或 fixture。Gateway 不持有 Gmail 授权，不保存推理 job 或邮件内容日志；Ops 只有计数、时间和安全错误码。owner 是唯一开发者和用户，修改保留期不需要同时修改网站 `/privacy/mailsort`，该页面从不阻塞改动。
 - **保留期**：决策内容14天、旧待审14天、非内容决策/账本180天、旧回放7天、每日计数400天；历史例子最多2000条，可删除。保留最近一个未读批次的 ID/进度，不存其正文。off 模式也清理。
 - **接口与 UI**：根 `proto/mailsort/ui/v2`、共享转码器/客户端。IDL 用根工具生成，做 lint/API lint/breaking/schema。三页概览、分级、设置；旧数据明确标历史，不把 neuron、fallback 或学习额度当当前状态。
 - **备份与恢复**：同一 DO 的 Alarm 每天 11:41 UTC 把全部表备份到私有 R2 `mailsort-backups`，代码保留最近30份完整备份，不用生命周期规则；备份期间流水线暂停。恢复只进空存储，由 owner 经既有 Access/Origin/CSRF 调用 `StartBackupRestore`，在对象内分步加载并先核对每个分片的 SHA-256 与行数；未成功前拒绝其他修改、暂停流水线和备份。恢复后在途写入转为历史，不向 Gmail 重放或撤销，并从邮箱当前状态继续收件。Gmail 授权是 Worker secret，不在备份内。见 [备份与恢复](docs/backup.md)。
