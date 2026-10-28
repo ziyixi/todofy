@@ -14,7 +14,7 @@ log: secrets are entered only in GitHub's or Cloudflare's own settings pages.
 | Durable Object | class `HomeState`, SQLite-backed (migration `v1`, `new_sqlite_classes`), one instance named `home-v1` | the deploy |
 | Service bindings | `MAIL_HERO` → `mail-hero`; `TODOFY` → `todofy`; `WATCH` → `watch`; `FLEET` → `fleet`; `MAILSORT` → `mailsort`; `RECALL` → `recall`; `BRIEF` → `brief`; `TASKS` → `tasks`; `PERSONAL_MCP` → `personal-mcp`; `MODEL_ROUTER` → `model-router`; `LINKS` → `links`; `NOTION_PUBLISH` → `ziyixi-notion-publish` (all entrypoint `Ops`); `WEBSITE_SYNC` → `ziyixi-notion-publish`, entrypoint `WebsiteSync`; `NEWSLETTER` → `fleet`, entrypoint `NewsletterOps`; `CODEX_GATEWAY` → `fleet`, entrypoint `CodexGatewayOps`; `TASK_INBOX` → `tasks`, entrypoint `TaskInbox` | the deploy; each target Worker must already export the named entrypoint (contracts/ops-v1) |
 | Static assets | `web/dist`, binding `ASSETS`, `run_worker_first = true` | built in the job |
-| Cron Trigger | `*/30 * * * *` (the account's second of 5 Free triggers) | the deploy |
+| Cron Trigger | `*/30 * * * *` (one of the account's 5 Free triggers, all in use; [limits](limits.md)) | the deploy |
 | Access application | "Home", self-hosted, `home.ziyixi.science` | the owner, once (§2); already exists |
 
 There is no D1 database, R2 bucket, KV namespace or queue. The dashboard's state (latest statuses,
