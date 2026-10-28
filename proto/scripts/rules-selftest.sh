@@ -89,14 +89,15 @@ case_ "widen Code to 64 characters (older dashboards refuse a newer app's longer
 case_ "narrow Code to 30 characters (a newer dashboard refuses an older app's code)" breaking fail 's/\[a-z\]\[a-z0-9_\]\{0,47\}/[a-z][a-z0-9_]{0,29}/' "$OPS"
 case_ "lower OpsStatus.counters max_items 32 -> 16" breaking fail 's/max_items: 32/max_items: 16/' "$OPS"
 case_ "change OpsStatus.version's closed allowed value (every older reader refuses it)" breaking fail 's/\(common.wire.v1.field\).allowed = "ops-v1"/(common.wire.v1.field).allowed = "ops-v2"/' "$OPS"
-case_ "add an app to OpsStatus.app's open list (next)" breaking pass 's/(        "model-router"\n)(      \]\n      open: true)/        "model-router",\n        "next"\n$2/' "$OPS"
-case_ "close OpsStatus.app (drop open)" breaking fail 's/(        "model-router"\n      \]\n)      open: true\n/$1/' "$OPS"
+case_ "add a code to CanaryResult.waiting_code's open list (next)" breaking pass 's/(      "retry_wait"\n)(    \]\n    open: true)/      "retry_wait",\n      "next"\n$2/' "$OPS"
+case_ "close CanaryResult.waiting_code (drop open)" breaking fail 's/(      "retry_wait"\n    \]\n)    open: true\n/$1/' "$OPS"
+case_ "drop CanaryResult.waiting_code's open list (every code it listed is a Code)" breaking pass 's/(    format: "Code"\n)    allowed: \[\n[^\]]*\]\n    open: true\n(    cases: \{\n      when: "processing")/$1$2/' "$OPS"
 case_ "close StartCanaryResult.reason (drop open)" breaking fail 's/(    format: "Code"\n)    open: true\n(    cases: \{\n      when: "paused")/$1$2/' "$OPS"
 case_ "drop non_null from CanaryDelivery.state (a newer producer may write null)" breaking fail 's/(  State state = 1 \[\n    \(google.api.field_behavior\) = REQUIRED),\n    \(common.wire.v1.field\).non_null = true\n/$1\n/' "$OPS"
 case_ "add a code to an open list (StartCanaryResult paused: consumer_paused)" breaking pass 's/          "endpoint_blocked"\n/          "endpoint_blocked",\n          "consumer_paused"\n/' "$OPS"
 # An input's rule may loosen (the apps deploy before the dashboard), never tighten:
-case_ "raise OpsReport.items max_items 20 -> 30 (an input accepts more)" breaking pass 's/\(common.wire.v1.field\).max_items = 20/(common.wire.v1.field).max_items = 30/' "$OPS"
-case_ "lower OpsReport.items max_items 20 -> 10 (an input refuses older reports)" breaking fail 's/\(common.wire.v1.field\).max_items = 20/(common.wire.v1.field).max_items = 10/' "$OPS"
+case_ "raise CreateInboxTaskRequest.subtasks max_items 30 -> 40 (an input accepts more)" breaking pass 's/\(common.wire.v1.field\).max_items = 30/(common.wire.v1.field).max_items = 40/'
+case_ "lower CreateInboxTaskRequest.subtasks max_items 30 -> 10 (an input refuses older requests)" breaking fail 's/\(common.wire.v1.field\).max_items = 30/(common.wire.v1.field).max_items = 10/'
 case_ "drop StartCanaryInput.run_id's format (an input accepts more)" breaking pass 's/(string run_id = 1 \[\n    \(google.api.field_behavior\) = REQUIRED),\n    \(common.wire.v1.field\).format = "RunId"\n/$1\n/' "$OPS"
 case_ "give StartCanaryInput.run_id an allowed list (an input refuses older run IDs)" breaking fail 's/\(common.wire.v1.field\).format = "RunId"/(common.wire.v1.field) = {\n      format: "RunId"\n      allowed: "canary-1"\n    }/' "$OPS"
 # A closed enum's values are fixed for the major version; buf (FILE) allows the new value.

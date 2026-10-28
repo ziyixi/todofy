@@ -25,7 +25,6 @@ import briefOk from '../../../../contracts/ops-v1/fixtures/OpsStatus/brief-ok.js
 import tasksOk from '../../../../contracts/ops-v1/fixtures/OpsStatus/tasks-ok.json'
 import briefDegraded from '../../../../contracts/ops-v1/fixtures/OpsStatus/brief-degraded.json'
 import shedWatch from '../../../../contracts/ops-v1/fixtures/GuardState/shed-watch.json'
-import report from '../../../../contracts/ops-v1/fixtures/OpsReport/daily.json'
 
 /** Every quota of the IDL (Usage.rows), read from the descriptors. */
 const QUOTA_RESOURCES = wireEnum(QuotaResourceSchema, QuotaResource).names
@@ -47,7 +46,7 @@ describe('labels', () => {
 
   it('labels every code in the contract fixtures', () => {
     const signals = [...mailHeroDegraded.signals, ...todofyDegraded.signals, ...watchDegraded.signals, ...recallDegraded.signals, ...briefDegraded.signals].map((signal) => signal.code)
-    for (const code of [...signals, ...report.items.map((item) => item.code)]) expect(signalLabel(code)).not.toBe(code)
+    for (const code of signals) expect(signalLabel(code)).not.toBe(code)
     const counters = [mailHeroOk, todofyOk, watchOk, watchDegraded, recallOk, briefOk, tasksOk].flatMap((status) => Object.keys(status.counters))
     for (const name of counters) expect(counterInfo(name).label).not.toBe(name)
     const modes = [mailHeroOk, todofyOk, watchOk, briefOk].flatMap((status) => Object.keys(status.modes))

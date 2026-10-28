@@ -16,7 +16,8 @@ full name, with the date and the reason:
   and its name are reserved in the enum, so neither can be reused.
 - ``allowed_values``: ``{"field": "a.v1.Message.field", "value": "x"}``: the value left the field's
   ``(common.wire.v1.field).allowed`` list.
-- ``methods``: ``{"service": "a.v1.Service", "name": "DoThing"}``: the rpc left the service.
+- ``methods``: ``{"service": "a.v1.Service", "name": "DoThing"}``: the rpc left the service; a service whose every
+  rpc is listed went with them.
 - ``messages``: ``{"message": "a.v1.DoThingRequest"}``: the top-level message is gone.
 - ``fields``: ``{"field": "a.v1.Message.name", "number": 13}``: the field left its message and both its number and
   its name are reserved there, so neither can be reused.
@@ -278,6 +279,14 @@ def without_retired(retired: dict[str, Any], base: dict[str, Any]) -> tuple[dict
         if service is not None and len(kept_methods) < len(methods):
             service["method"] = kept_methods
             removed.append(f"method {entry['service']}.{entry['name']}")
+    # A service whose every rpc is retired goes with them.
+    retiring = {entry["service"] for entry in retired.get("methods", [])}
+    for file in image["file"]:
+        package = file.get("package", "")
+        empty = [s for s in file.get("service", []) if f"{package}.{s['name']}" in retiring and not s.get("method")]
+        if empty:
+            file["service"] = [s for s in file["service"] if s not in empty]
+            removed += [f"service {package}.{s['name']}" for s in empty]
     gone_messages = {entry["message"] for entry in retired.get("messages", [])} & set(messages(image))
     for file in image["file"]:
         listed = [m for m in file.get("messageType", []) if f"{file.get('package', '')}.{m['name']}" in gone_messages]

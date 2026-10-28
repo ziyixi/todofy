@@ -22,6 +22,13 @@ export type StubApp = OpsApp;
 /** What the "tasks" stub's TaskInbox answers by default: a created task. */
 export const SYNTHETIC_TASK = { task_id: '00000000-0000-4000-8000-0000000000aa', subtask_ids: [], replayed: false } as const;
 
+/** What the "notion-publish" stub's WebsiteSync answers by default: one unchanged daily check. */
+export const SYNTHETIC_SYNC = {
+  observed_at: '2026-10-01T14:00:00Z',
+  next_check_at: '2026-10-02T14:00:00Z',
+  last_check: { checked_at: '2026-10-01T14:00:00Z', decision: 'unchanged', run_id: '12001', run_url: 'https://github.com/example/cloud/actions/runs/12001' },
+} as const;
+
 /** The methods of `app`'s Ops entrypoint (the generated services it implements): the stubs expose exactly these. */
 export function declaredMethodsOf(app: StubApp): string[] {
   return declaredMethods(app);
@@ -41,7 +48,7 @@ async function defaults(app: StubApp): Promise<Record<string, unknown>> {
       canaryDelivery: await fixture('CanaryDelivery/delivered.json'),
     };
   }
-  if (app === 'notion-publish') return { status: await fixture('OpsStatus/notion-publish-ok.json') };
+  if (app === 'notion-publish') return { status: await fixture('OpsStatus/notion-publish-ok.json'), getSyncStatus: SYNTHETIC_SYNC };
   // recall has no guard: its setGuard always refuses, and Home never calls it.
   if (app === 'tasks') return { status: await fixture('OpsStatus/tasks-ok.json'), createInboxTask: SYNTHETIC_TASK };
   if (app === 'model-router') return { status: JSON.parse(await readFile(join(ROOT, 'test/fixtures/model-router-ok.json'), 'utf8')) as unknown };
@@ -159,7 +166,8 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
             FLEET: { name: 'fleet', entrypoint: 'Ops' },
             NEWSLETTER: { name: 'newsletter', entrypoint: 'Ops' },
             CODEX_GATEWAY: { name: 'codex-gateway', entrypoint: 'Ops' },
-            WEBSITE_SYNC: { name: 'notion-publish', entrypoint: 'Ops' },
+            NOTION_PUBLISH: { name: 'notion-publish', entrypoint: 'Ops' },
+            WEBSITE_SYNC: { name: 'notion-publish', entrypoint: 'WebsiteSync' },
             MAILSORT: { name: 'mailsort', entrypoint: 'Ops' },
             RECALL: { name: 'recall', entrypoint: 'Ops' },
             BRIEF: { name: 'brief', entrypoint: 'Ops' },
@@ -193,7 +201,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
           compatibilityDate: '2026-09-08',
           script: `export default { async fetch(request, env) {
             const { app, method, args } = await request.json()
-            const target = app === 'mail-hero' ? env.MAIL_HERO : app === 'watch' ? env.WATCH : app === 'fleet' ? env.FLEET : app === 'newsletter' ? env.NEWSLETTER : app === 'codex-gateway' ? env.CODEX_GATEWAY : app === 'notion-publish' ? env.WEBSITE_SYNC : app === 'mailsort' ? env.MAILSORT : app === 'recall' ? env.RECALL : app === 'brief' ? env.BRIEF : app === 'tasks' ? env.TASKS : app === 'personal-mcp' ? env.PERSONAL_MCP : app === 'model-router' ? env.MODEL_ROUTER : env.TODOFY
+            const target = app === 'mail-hero' ? env.MAIL_HERO : app === 'watch' ? env.WATCH : app === 'fleet' ? env.FLEET : app === 'newsletter' ? env.NEWSLETTER : app === 'codex-gateway' ? env.CODEX_GATEWAY : app === 'notion-publish' ? (['getSyncStatus', 'requestSync', 'getSyncRequest'].includes(method) ? env.WEBSITE_SYNC : env.NOTION_PUBLISH) : app === 'mailsort' ? env.MAILSORT : app === 'recall' ? env.RECALL : app === 'brief' ? env.BRIEF : app === 'tasks' ? env.TASKS : app === 'personal-mcp' ? env.PERSONAL_MCP : app === 'model-router' ? env.MODEL_ROUTER : env.TODOFY
             try { return Response.json({ ok: await target[method](...args) }) }
             catch (error) { return Response.json({ error: error instanceof Error ? error.message : 'not_an_error' }) }
           } }`,
@@ -204,7 +212,8 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
             FLEET: { name: 'fleet', entrypoint: 'Ops' },
             NEWSLETTER: { name: 'newsletter', entrypoint: 'Ops' },
             CODEX_GATEWAY: { name: 'codex-gateway', entrypoint: 'Ops' },
-            WEBSITE_SYNC: { name: 'notion-publish', entrypoint: 'Ops' },
+            NOTION_PUBLISH: { name: 'notion-publish', entrypoint: 'Ops' },
+            WEBSITE_SYNC: { name: 'notion-publish', entrypoint: 'WebsiteSync' },
             MAILSORT: { name: 'mailsort', entrypoint: 'Ops' },
             RECALL: { name: 'recall', entrypoint: 'Ops' },
             BRIEF: { name: 'brief', entrypoint: 'Ops' },

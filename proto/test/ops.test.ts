@@ -21,7 +21,6 @@ const MESSAGES: Record<string, DescMessage> = {
   CanaryDelivery: ops.CanaryDeliverySchema,
   CanaryResult: ops.CanaryResultSchema,
   GuardState: ops.GuardStateSchema,
-  OpsReport: ops.OpsReportSchema,
   OpsReportReceipt: ops.OpsReportReceiptSchema,
   OpsStatus: ops.OpsStatusSchema,
   SetGuardInput: ops.SetGuardInputSchema,
@@ -31,16 +30,13 @@ const MESSAGES: Record<string, DescMessage> = {
 
 /**
  * The invalid fixtures a lenient read (a consumer) accepts, and why: ops-v1's consumers ignore fields they do not
- * know and keep a newer code of an open list as read (an app's name included: OpsStatus.app is open, so a dashboard
- * reads the status of an app that joined after it was built; it keeps only the answer of the app it called). Every other invalid fixture breaks a rule a consumer keeps too:
+ * know and keep a newer code of an open list as read. Every other invalid fixture breaks a rule a consumer keeps too:
  * a newer value of one of ops-v1's enums (all closed, (common.wire.v1.closed)) and a null REQUIRED enum or message
  * (non_null) included.
  */
 const LENIENT: Record<string, readonly string[]> = {
   'CanaryResult/ok-with-summary.json': ['summary'],
-  'OpsReport/item-with-text.json': ['items[0].text'],
   'OpsStatus/extra-field-subject.json': ['subject'],
-  'OpsStatus/unknown-app.json': [],
   'StartCanaryInput/extra-field.json': ['to'],
   'StartCanaryResult/unknown-reason.json': [],
 };
@@ -74,7 +70,7 @@ describe('the rules give the contract’s verdicts', () => {
   );
 
   test('a strict read (a producer’s view, the generated JSON Schema’s) refuses every invalid fixture', () => {
-    expect(invalid.length).toBeGreaterThanOrEqual(28);
+    expect(invalid.length).toBeGreaterThanOrEqual(22);
     for (const { def, key, value } of invalid) {
       expect(() => fromWire(MESSAGES[def] as DescMessage, value, { strict: true }), key).toThrow(WireJsonError);
     }
@@ -120,11 +116,11 @@ describe('the rules give the contract’s verdicts', () => {
 describe('the services are each app’s entrypoint', () => {
   test('methods by service, and how a binding passes their arguments', () => {
     const methods = (service: { method: Record<string, { name: string }> }): string[] => Object.keys(service.method);
-    // Every app: status, setGuard. Mail Hero: the canary producer; Todofy: the consumer and the digest.
+    // Every app: status, setGuard. Mail Hero: the canary producer; Todofy: the consumer.
     expect(methods(ops.OpsService)).toEqual(['status', 'setGuard']);
     expect(methods(ops.CanaryProducerService)).toEqual(['startCanary', 'canaryDelivery']);
     expect(methods(ops.CanaryConsumerService)).toEqual(['canaryResult']);
-    expect(methods(ops.OpsDigestService)).toEqual(['reportOps']);
+    expect(ops.file_ops_v1_ops.services.map((service) => service.name)).toEqual(['OpsService', 'CanaryProducerService', 'CanaryConsumerService']);
     const eventId = '6d3b2f0e-4c1a-4b7e-8a52-0c9e7f1d2a31';
     expect(toWireArguments(ops.OpsService.method.status, create(ops.StatusRequestSchema))).toEqual([]);
     expect(toWireArguments(ops.CanaryProducerService.method.canaryDelivery, create(ops.CanaryDeliveryRequestSchema, { eventId }))).toEqual([eventId]);
@@ -138,15 +134,11 @@ describe('the services are each app’s entrypoint', () => {
     expect(fieldRules(ops.OpsStatusSchema.field.signals).maxItems).toBe(16);
     expect(fieldRules(ops.OpsStatusSchema.field.counters).maxItems).toBe(32);
     expect(fieldRules(ops.SignalSchema.field.metrics).maxItems).toBe(12);
-    expect(fieldRules(ops.OpsReportSchema.field.items).maxItems).toBe(20);
-    expect(fieldRules(ops.OpsStatusSchema.field.app).allowed).toEqual(['mail-hero', 'todofy', 'watch', 'fleet', 'newsletter', 'codex-gateway', 'notion-publish', 'mailsort', 'recall', 'brief', 'tasks', 'personal-mcp', 'model-router']);
+    // No list names the apps: any app answers ops-v1 under its name.
+    expect(fieldRules(ops.OpsStatusSchema.field.app).allowed).toEqual([]);
+    expect(fieldRules(ops.OpsStatusSchema.field.app).format).toBe('AppName');
     expect(wireEnum(ops.ErrorCodeSchema, ops.ErrorCode).names).toEqual(['invalid_input', 'busy', 'unavailable']);
     expect(wireEnum(ops.GuardLevelSchema, ops.GuardLevel).names).toEqual(['normal', 'shed']);
-  });
-
-  test('a receipt counts at most the items a report holds (one bound, read from the report)', () => {
-    // A stored report of N items answers item_count N: the receipt's bound must follow the report's.
-    expect(fieldRules(ops.OpsReportReceiptSchema.field.itemCount).maximum).toBe(fieldRules(ops.OpsReportSchema.field.items).maxItems);
   });
 
   test('every REQUIRED enum and message is non_null and every enum on the wire is closed', () => {

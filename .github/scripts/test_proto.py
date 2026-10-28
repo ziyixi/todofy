@@ -510,13 +510,11 @@ class Users(unittest.TestCase):
         self.assertIn("@ziyixi/proto/website/sync/v1/sync_pb", values)
         self.assertIn("@ziyixi/proto/ops/v1/ops_pb", values)
 
-    def test_ops_descriptors_include_the_embedded_website_sync_package(self):
+    def test_website_sync_reaches_the_relay_and_home_not_the_ops_v1_apps(self):
+        # ops.v1 no longer embeds website.sync.v1: Home reads the evidence from the relay's WebsiteSync entrypoint.
         imports = value_importers()
-        users = {app for app, paths in imports.items() if any(path.startswith("proto/ops/") for path in paths)}
-        self.assertEqual(users, {"mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp", "model-router"})
-        for app in users:
-            with self.subTest(app=app):
-                self.assertIn("proto/website/sync/v1/sync.proto", imports[app])
+        users = {app for app, paths in imports.items() if "proto/website/sync/v1/sync.proto" in paths}
+        self.assertEqual(users, {"website", "dashboard", "personal-mcp"})
 
     def test_type_only_imports_are_told_apart(self):
         text = (

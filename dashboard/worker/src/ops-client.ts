@@ -18,7 +18,6 @@ import {
   GuardLevelSchema,
   GuardStateSchema,
   OpsReportItemSchema,
-  OpsReportSchema,
   OpsService,
   OpsStatusSchema,
   StartCanaryResultSchema,
@@ -50,8 +49,7 @@ export const OPS_APPS = [...OPS_SOURCES.keys()] as readonly OpsApp[];
 export const GUARD_LEVELS: readonly ops.GuardLevel[] = wireEnum(GuardLevelSchema, GuardLevel).names;
 /** The codes an Ops method rejects with (`new Error(code)`). */
 export const OPS_ERROR_CODES: readonly ops.ErrorCode[] = wireEnum(ErrorCodeSchema, ErrorCode).names;
-/** At most this many items in an OpsReport, and metrics per item. */
-export const REPORT_MAX_ITEMS = fieldRules(OpsReportSchema.field.items).maxItems;
+/** At most this many metrics per digest item. */
 export const METRICS_MAX_KEYS = fieldRules(OpsReportItemSchema.field.metrics).maxItems;
 /** Whether a name is an ops-v1 `Code` (a signal code, a counter or metric name): the IDL's format, the one definition. */
 export function isOpsCode(value: string): boolean {

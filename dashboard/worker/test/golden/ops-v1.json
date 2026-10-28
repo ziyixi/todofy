@@ -120,8 +120,6 @@
       "daily_sweep"
     ]
   },
-  "read/OpsReport/daily.json": null,
-  "read/OpsReport/empty.json": null,
   "read/OpsReportReceipt/kept-newer.json": null,
   "read/OpsReportReceipt/stored.json": null,
   "read/OpsStatus/brief-degraded.json": {
@@ -604,17 +602,7 @@
     "counters": {},
     "last_backup_at": null,
     "ui_url": "https://home.example.com/",
-    "capabilities": [],
-    "website_sync": {
-      "observed_at": "2026-10-01T14:00:00Z",
-      "next_check_at": "2026-10-02T14:00:00Z",
-      "last_check": {
-        "checked_at": "2026-10-01T14:00:00Z",
-        "decision": "unchanged",
-        "run_id": "12001",
-        "run_url": "https://github.com/example/cloud/actions/runs/12001"
-      }
-    }
+    "capabilities": []
   },
   "read/OpsStatus/recall-degraded.json": {
     "version": "ops-v1",
@@ -1047,11 +1035,6 @@
   "read/invalid/CanaryResult/state-null.json": null,
   "read/invalid/GuardState/level-null.json": null,
   "read/invalid/GuardState/unknown-level.json": null,
-  "read/invalid/OpsReport/item-severity-null.json": null,
-  "read/invalid/OpsReport/item-with-text.json": null,
-  "read/invalid/OpsReport/string-metric.json": null,
-  "read/invalid/OpsReport/too-many-items.json": null,
-  "read/invalid/OpsReport/url-with-query.json": null,
   "read/invalid/OpsReportReceipt/too-many.json": null,
   "read/invalid/OpsStatus/address-as-counter-name.json": null,
   "read/invalid/OpsStatus/code-trailing-newline.json": null,
@@ -1108,7 +1091,6 @@
   "read/invalid/OpsStatus/offset-timestamp.json": null,
   "read/invalid/OpsStatus/signal-severity-null.json": null,
   "read/invalid/OpsStatus/string-mode.json": null,
-  "read/invalid/OpsStatus/unknown-app.json": null,
   "read/invalid/SetGuardInput/free-text-reason.json": null,
   "read/invalid/SetGuardInput/level-null.json": null,
   "read/invalid/SetGuardInput/normal-with-until.json": null,

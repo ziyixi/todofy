@@ -136,7 +136,7 @@ const ENTRIES: readonly EntryDef[] = [
     accent: 'slate',
     url: null,
     access: false,
-    status: { type: 'ops_v1', binding: 'WEBSITE_SYNC', guard: false },
+    status: { type: 'ops_v1', binding: 'NOTION_PUBLISH', guard: false },
     tile_metric: null,
     app_only_signals: [],
     order: 1,
@@ -576,22 +576,27 @@ export function resourceByMatch(kind: ResourceDef['kind'], id: string, registry:
 }
 
 /**
- * Outbound calls of one tick computed from the registry (design-v2.md §5): status() per ops_v1 entry,
- * one GET per enabled public_http probe, the GraphQL query, setGuard per guarded entry, two canary
- * calls per canary, one createInboxTask (the digest's daily task) and the drift check's read-only calls (at most
- * DRIFT_CALLS_PER_TICK).
+ * Outbound calls of one tick computed from the registry (design-v2.md §5): status() per ops_v1 entry (and the
+ * website relay's getSyncStatus with notion-publish's), one GET per enabled public_http probe, the GraphQL query,
+ * setGuard per guarded entry, two canary calls per canary, one createInboxTask (the digest's daily task) and the
+ * drift check's read-only calls (at most DRIFT_CALLS_PER_TICK).
  */
 export function outboundPerTick(registry: RegistryDef = REGISTRY): number {
   const ops = registry.entries.filter((entry) => entry.status.type === 'ops_v1');
   const guarded = ops.filter((entry) => entry.status.type === 'ops_v1' && entry.status.guard);
   const canaries = registry.flows.filter((flow) => flow.canary !== null).length;
-  return ops.length + probeCount(registry) + 1 + guarded.length + 2 * canaries + 1 + DRIFT_CALLS_PER_TICK;
+  return statusCalls(registry) + probeCount(registry) + 1 + guarded.length + 2 * canaries + 1 + DRIFT_CALLS_PER_TICK;
 }
 
 /** Outbound calls of one owner refresh: status() and probes of /home, or GraphQL and a drift batch of /cloudflare. */
 export function outboundPerRefresh(registry: RegistryDef = REGISTRY): number {
-  const ops = registry.entries.filter((entry) => entry.status.type === 'ops_v1').length;
-  return Math.max(ops + probeCount(registry), 1 + DRIFT_CALLS_PER_TICK);
+  return Math.max(statusCalls(registry) + probeCount(registry), 1 + DRIFT_CALLS_PER_TICK);
+}
+
+/** status() per ops_v1 entry, plus the relay's sync evidence read with notion-publish's (website-sync.ts). */
+function statusCalls(registry: RegistryDef): number {
+  const ops = registry.entries.filter((entry) => entry.status.type === 'ops_v1');
+  return ops.length + (ops.some((entry) => entry.id === 'notion-publish') ? 1 : 0);
 }
 
 function probeCount(registry: RegistryDef): number {

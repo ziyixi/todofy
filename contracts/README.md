@@ -72,8 +72,8 @@ text (`README.md`) and the per-app plan (`IMPLEMENTATION.md`). Checks:
   `gateway/test/ops.test.ts` (Todofy's entrypoint forwarding); every value they produce is read back strictly.
 - The caller, on the host: `dashboard/worker` `test/ops-client.test.ts` (the dashboard calls only the methods of
   each app's generated services and handles every `ErrorCode`, timeouts and invalid output) and
-  `test/guard.test.ts`, `canary.test.ts`, `digest.test.ts` (every `SetGuardInput`, `StartCanaryInput` and
-  `OpsReport` it builds passes the contract's rules).
+  `test/guard.test.ts`, `canary.test.ts`, `digest.test.ts` (every `SetGuardInput` and `StartCanaryInput` it builds
+  passes the contract's rules).
 
 The real-binding tests (`mail-hero/cloudflare/test/native-ops-runtime.test.mjs`,
 `todofy/tests/runtime/test_ops.py`) call each app's `Ops` over a service binding in workerd, the way the

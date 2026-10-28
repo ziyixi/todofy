@@ -62,5 +62,5 @@ position = 8
 [entries.status]
 # Complete content checks and verified publication receipts, via a private binding.
 type = "ops_v1"
-binding = "WEBSITE_SYNC"
+binding = "NOTION_PUBLISH"
 guard = false

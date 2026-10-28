@@ -267,6 +267,11 @@
           "source": "config"
         },
         {
+          "name": "NOTION_PUBLISH",
+          "type": "service",
+          "source": "config"
+        },
+        {
           "name": "PERSONAL_MCP",
           "type": "service",
           "source": "config"

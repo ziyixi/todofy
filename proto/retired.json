@@ -45,7 +45,8 @@
     {"service": "todofy.ui.v1.PlusService", "name": "CompleteTask", "since": "2026-10-20", "reason": "Tasks completes a task and settles its Focus day itself; the FlowDay settlement Todofy added is gone"},
     {"service": "todofy.ui.v1.TodofyUiService", "name": "ListDailyReminders", "since": "2026-10-21", "reason": "Home sends the daily reminder; Todofy no longer creates it, and its owner page is gone"},
     {"service": "todofy.ui.v1.TodofyUiService", "name": "ListGtdDays", "since": "2026-10-21", "reason": "Tasks keeps GTD (tasks.ui.v1 ListGtdDays); Todofy no longer takes the snapshot, and its owner page is gone"},
-    {"service": "todofy.ui.v1.TodofyUiService", "name": "ListGtdReviews", "since": "2026-10-21", "reason": "Tasks keeps GTD; Todofy no longer creates the weekly review, and its owner page is gone"}
+    {"service": "todofy.ui.v1.TodofyUiService", "name": "ListGtdReviews", "since": "2026-10-21", "reason": "Tasks keeps GTD; Todofy no longer creates the weekly review, and its owner page is gone"},
+    {"service": "ops.v1.OpsDigestService", "name": "ReportOps", "since": "2026-10-27", "reason": "no app implements it since 2026-10-21, when Home began creating the digest's daily task in Tasks; its service goes with it"}
   ],
   "messages": [
     {"message": "todofy.ui.v1.IssueExtensionConnectionRequest", "since": "2026-10-18", "reason": "used only by a retired PlusService method"},
@@ -105,9 +106,11 @@
     {"message": "todofy.ui.v1.ListGtdReviewsResponse", "since": "2026-10-21", "reason": "used only by a retired TodofyUiService method"},
     {"message": "todofy.ui.v1.GtdDay", "since": "2026-10-21", "reason": "used only by a retired TodofyUiService method"},
     {"message": "todofy.ui.v1.GtdScope", "since": "2026-10-21", "reason": "used only by a retired TodofyUiService method"},
-    {"message": "todofy.ui.v1.GtdReview", "since": "2026-10-21", "reason": "used only by a retired TodofyUiService method"}
+    {"message": "todofy.ui.v1.GtdReview", "since": "2026-10-21", "reason": "used only by a retired TodofyUiService method"},
+    {"message": "ops.v1.OpsReport", "since": "2026-10-27", "reason": "the input of the retired ReportOps; Home keeps its digest items in dashboard.ui.v1's Digest"}
   ],
   "fields": [
+    {"field": "ops.v1.OpsStatus.website_sync", "number": 12, "since": "2026-10-27", "reason": "website-only evidence in the shared status; Home reads it from the relay's WebsiteSync entrypoint (website.sync.v1 GetSyncStatus)"},
     {"field": "ops.v1.OpsStatus.codex_inference", "number": 13, "since": "2026-10-27", "reason": "the retired codex.monitor.v1 telemetry; Fleet stopped writing it and Home stopped reading it"},
     {"field": "platform.runtime.v1.WorkloadStatus.inference_status", "number": 11, "since": "2026-10-27", "reason": "the retired codex.monitor.v1 telemetry; Platform stopped writing it and Fleet stopped reading it"}
   ]

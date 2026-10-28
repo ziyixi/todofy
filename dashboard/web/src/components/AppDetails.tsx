@@ -16,7 +16,6 @@ import {
 } from '../lib/labels'
 import { httpsUrl } from '../lib/url'
 import { Card, Fact, Facts, Metrics, Notice, Pill, Time } from './ui'
-import { WebsiteSyncDetails } from './WebsiteSyncPanel'
 import { SignalActions } from './AttentionActions'
 import { PersonalMcpDetails } from './PersonalMcpDetails'
 
@@ -26,7 +25,7 @@ const STATUS_STALE_MS = 60 * 60_000
 function headline(card: AppDetail): { label: string; tone: Tone } {
   if (card.reachable === false) return { label: '无法连接', tone: 'danger' }
   if (!card.status) return { label: '暂无状态', tone: 'neutral' }
-  if (card.status.app === 'notion-publish' && card.status.website_sync?.error_code) return { label: '同步记录无法确认', tone: 'neutral' }
+  if (card.status.app === 'notion-publish' && card.status.signals.some((signal) => signal.code === 'website_sync_provider_unavailable')) return { label: '同步记录无法确认', tone: 'neutral' }
   return HEALTH[card.status.health] ?? { label: card.status.health, tone: 'neutral' }
 }
 
@@ -104,7 +103,6 @@ function StatusDetails({ status, source, guard, now }: { status: OpsStatus; sour
 
   return (
     <>
-      {status.website_sync ? <div className="subsection"><h4>网站同步</h4><WebsiteSyncDetails status={status.website_sync} now={now} /></div> : null}
       {status.app === 'personal-mcp' ? <PersonalMcpDetails status={status} now={now} /> : null}
       <div className="subsection">
         <h4>运行模式</h4>

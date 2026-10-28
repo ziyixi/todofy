@@ -63,7 +63,7 @@ runs:
     # Caller: the dashboard calls only the methods of each app's generated ops-v1 services, handles every
     # declared error code plus timeouts and invalid output, accepts the valid fixtures and refuses the
     # invalid ones, keeps the bytes it read and sent before the move onto proto/ (ops-golden), and every value
-    # it sends (SetGuardInput, StartCanaryInput, OpsReport) passes the contract's rules. Host only (vitest in
+    # it sends (SetGuardInput, StartCanaryInput) passes the contract's rules. Host only (vitest in
     # Node); Dashboard checks runs the workerd flows.
     - name: The dashboard calls ops-v1 as declared
       working-directory: dashboard/worker

@@ -52,7 +52,7 @@ const READERS: Readonly<Record<string, ((value: unknown) => unknown) | undefined
   // Inputs the dashboard sends: the same schema check, as its own tests run on what it builds.
   SetGuardInput: (value) => conform(SetGuardInputSchema, value),
   StartCanaryInput: (value) => conform(StartCanaryInputSchema, value),
-  // OpsReport and OpsReportReceipt (reportOps): the digest is a task in Tasks since 2026-10-21, nothing is sent or read.
+  // OpsReportReceipt: Home's own digest record, never sent or read (the digest is a task in Tasks since 2026-10-21).
 };
 
 const statusOk = JSON.parse(readFileSync(`${FIXTURES}OpsStatus/mail-hero-ok.json`, 'utf8')) as Record<string, unknown>;

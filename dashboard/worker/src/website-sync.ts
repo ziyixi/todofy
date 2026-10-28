@@ -1,6 +1,6 @@
-/** Website request calls use the internal contract; all monitoring arrives in the one Ops.status() poll. */
-import { WebsiteSyncRequestResultSchema, RequestSyncRequestSchema } from '@ziyixi/proto/website/sync/v1/sync_pb';
-import type { WebsiteSyncRequestResult } from './api-types.ts';
+/** The relay's WebsiteSync entrypoint (proto/website/sync/v1): its sync evidence and the owner's requests. */
+import { WebsiteSyncRequestResultSchema, RequestSyncRequestSchema, WebsiteSyncStatusSchema } from '@ziyixi/proto/website/sync/v1/sync_pb';
+import type { WebsiteSyncRequestResult, WebsiteSyncStatus } from './api-types.ts';
 import type { Env } from './env.ts';
 import { callOps, conform, type OpsCall } from './ops-client.ts';
 import { fromWire, toWire } from '@ziyixi/proto/wire-json';
@@ -16,6 +16,14 @@ export async function callWebsiteRequest(env: Env, requestId: string, lookup: bo
     if (result.state === 'accepted' && (!result.run_id || !result.run_url)) return null;
     return result;
   });
+}
+
+/** The sync evidence, read next to each status() poll of notion-publish (the relay's signals come with that). */
+export function callWebsiteSyncStatus(env: Env): Promise<OpsCall<WebsiteSyncStatus>> {
+  return callOps(() => {
+    if ((env.WEBSITE_SYNC as Env['WEBSITE_SYNC'] | undefined) === undefined) return Promise.reject(new Error('unavailable'));
+    return env.WEBSITE_SYNC.getSyncStatus();
+  }, value => conform(WebsiteSyncStatusSchema, value));
 }
 
 export function unconfirmedWebsiteRequest(requestId: string, error = 'dispatch_unconfirmed'): WebsiteSyncRequestResult {

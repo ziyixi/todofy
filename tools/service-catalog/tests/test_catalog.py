@@ -83,7 +83,7 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(entries, existing)
         sync = next(entry for entry in loaded.entries if entry["id"] == "notion-publish")
         self.assertEqual(sync["name"], "网站同步")
-        self.assertEqual(sync["status"], {"type": "ops_v1", "binding": "WEBSITE_SYNC", "guard": False})
+        self.assertEqual(sync["status"], {"type": "ops_v1", "binding": "NOTION_PUBLISH", "guard": False})
         workers = [{key: worker[key] for key in ("script", "entry", "role")} for worker in loaded.workers]
         self.assertEqual([worker for worker in workers if worker["script"] not in {"fleet", "mailsort", "recall", "brief", "tasks", "personal-mcp", "model-router"}], before["workers"])
 

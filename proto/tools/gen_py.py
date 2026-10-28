@@ -55,7 +55,6 @@ PYTHON_PACKAGES = {
     "modelrouter.inference.v1": True,
     "todofy.report.v1": True,
     "ops.v1": True,
-    "website.sync.v1": True,
     "mailhero.webhook.v1": True,
     "todofy.ui.v1": True,
     "todofy.mail.v1": True,

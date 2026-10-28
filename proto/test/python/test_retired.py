@@ -1,7 +1,8 @@
-"""tools/retired.py's `files` and `fields` kinds on synthetic buf images (JSON form), next to the module's own
-self-test (scripts/rules-selftest.sh, which deletes real .proto files): a retired file stays out of the head, leaves
-the base with everything it defines, and may not be imported by a file the base keeps; a retired field stays out of
-the head with its number and name reserved, and takes with it the import that only it used.
+"""tools/retired.py's `files`, `fields` and `methods` kinds on synthetic buf images (JSON form), next to the module's
+own self-test (scripts/rules-selftest.sh, which deletes real .proto files): a retired file stays out of the head,
+leaves the base with everything it defines, and may not be imported by a file the base keeps; a retired field stays
+out of the head with its number and name reserved, and takes with it the import that only it used; a service whose
+every rpc is retired leaves the base with them.
 """
 
 import sys
@@ -118,6 +119,29 @@ class FieldsTest(unittest.TestCase):
     def test_an_import_another_kept_field_still_uses_is_an_error(self) -> None:
         _, _, problems = tool.without_retired(FIELD, status(also=True))
         self.assertEqual(problems, [f"RETIRED_PACKAGE_IMPORTED k/v1/status.proto imports the retired {GONE}"])
+
+
+def services() -> dict[str, Any]:
+    """Package s.v1: a service with one rpc, and one with two."""
+    one = {"name": "OneService", "method": [{"name": "Report"}]}
+    two = {"name": "TwoService", "method": [{"name": "Read"}, {"name": "Write"}]}
+    return {"file": [{"name": "s/v1/s.proto", "package": "s.v1", "service": [one, two]}]}
+
+
+class MethodsTest(unittest.TestCase):
+    def test_a_service_whose_every_rpc_is_retired_leaves_the_base_with_them(self) -> None:
+        retired = {
+            "methods": [
+                {"service": "s.v1.OneService", "name": "Report"},
+                {"service": "s.v1.TwoService", "name": "Write"},
+            ]
+        }
+        out, removed, problems = tool.without_retired(retired, services())
+        self.assertEqual(problems, [])
+        self.assertEqual(
+            removed, ["method s.v1.OneService.Report", "method s.v1.TwoService.Write", "service s.v1.OneService"]
+        )
+        self.assertEqual(out["file"][0]["service"], [{"name": "TwoService", "method": [{"name": "Read"}]}])
 
 
 if __name__ == "__main__":

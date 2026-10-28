@@ -306,9 +306,9 @@ the strip's observed items, §4), the canary rows or the reminder ledger. The me
 older estimates; reads grow with retained decisions while views continue to poll every five minutes.
 A partial index (`canary_runs_active`) keeps the "run in progress" lookup at one row for ticks and views.
 
-Per tick: at most `outboundPerTick()` outbound calls, computed from the registry: one `status()` per ops_v1 entry, one
-GET per enabled probe, 1 GraphQL, ≤ 1 `setGuard` per guarded entry, ≤ 2 canary calls, ≤ 1 `createInboxTask` and
-≤ `DRIFT_CALLS_PER_TICK` read-only drift calls (§10). It is tested ≤ `MAX_OUTBOUND_PER_TICK`, a fixed margin under
+Per tick: at most `outboundPerTick()` outbound calls, computed from the registry: one `status()` per ops_v1 entry (and
+the website relay's `getSyncStatus` with notion-publish's), one GET per enabled probe, 1 GraphQL, ≤ 1 `setGuard` per
+guarded entry, ≤ 2 canary calls, ≤ 1 `createInboxTask` and ≤ `DRIFT_CALLS_PER_TICK` read-only drift calls (§10). It is tested ≤ `MAX_OUTBOUND_PER_TICK`, a fixed margin under
 Free's 50, and asserted per tick in workerd, so a new app changes neither constant. Mailsort's Claude budget is
 independent of account Workers AI shedding. The probes run in parallel with the status polls. GraphQL stays one query per tick (48/day) plus refreshes ≤ 1/min. DO rows written grow by ~3 per tick
 (`cf_scripts` and one `probe:<entry>` per probe). The links probe is one request of its Worker per tick (≤ 144 a day with refreshes, no D1 query); the website's is a static asset. Everything else as in

@@ -5,7 +5,8 @@ import mailHeroDegraded from '../../../contracts/ops-v1/fixtures/OpsStatus/mail-
 import todofyOk from '../../../contracts/ops-v1/fixtures/OpsStatus/todofy-ok.json';
 import unavailable from '../../../contracts/ops-v1/fixtures/OpsStatus/status-unavailable.json';
 import type { OpsReportItem, OpsStatus } from '@ziyixi/proto/ops/v1/ops_wire';
-import { METRICS_MAX_KEYS, REPORT_MAX_ITEMS } from '../src/ops-client.ts';
+import { DIGEST_ITEMS_MAX } from '../src/idl.ts';
+import { METRICS_MAX_KEYS } from '../src/ops-client.ts';
 import type { QuotaRow } from '../src/api-types.ts';
 import { finish, newRun } from '../src/canary.ts';
 import { NO_DRIFT } from '../src/drift.ts';
@@ -227,7 +228,7 @@ describe('digest items', () => {
       new Map([['b:x', NOW - 1000]]),
       NOW,
     );
-    expect(list).toHaveLength(REPORT_MAX_ITEMS);
+    expect(list).toHaveLength(DIGEST_ITEMS_MAX);
     expect(list.slice(0, 3).map((i) => `${itemKey(i)}:${i.severity}`)).toEqual(['a:y:critical', 'b:x:critical', 'c:c00:warning']);
     expect(list[1]?.since).toBe(new Date(NOW - 1000).toISOString());
     expect(list[0]?.since).toBe(new Date(NOW).toISOString());
@@ -264,7 +265,7 @@ describe("the day's task", () => {
   it('lists 20 items and counts the rest', () => {
     const many: OpsReportItem[] = Array.from({ length: 23 }, (_, i) => ({ source: 'mail-hero', code: `code_${String(i)}`, severity: 'warning', since: '2026-09-29T14:00:00.000Z', metrics: {} }));
     const lines = digestTask(many, '2026-09-29', null).description.split('\n');
-    expect(lines.filter((line) => line.startsWith('- warning'))).toHaveLength(REPORT_MAX_ITEMS);
+    expect(lines.filter((line) => line.startsWith('- warning'))).toHaveLength(DIGEST_ITEMS_MAX);
     expect(lines.at(-1)).toBe('- … 另有 3 项');
   });
 

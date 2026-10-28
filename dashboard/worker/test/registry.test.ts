@@ -171,7 +171,7 @@ describe('the registry', () => {
   it('keeps the tick within the Workers Free subrequest budget', () => {
     expect(outboundPerTick()).toBeLessThanOrEqual(MAX_OUTBOUND_PER_TICK);
     expect(MAX_OUTBOUND_PER_TICK).toBeLessThan(50);
-    expect(outboundPerRefresh()).toBe(15);
+    expect(outboundPerRefresh()).toBe(16);
   });
 
   it('serves a public view without bindings or probe URLs, within its budget', () => {

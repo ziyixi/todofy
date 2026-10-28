@@ -175,8 +175,8 @@ subrequests and 32 Worker invocations per request.
 
 - Only the methods of each app's generated ops-v1 services (`proto/ops/v1/ops.proto`: `OpsService`,
   `CanaryProducerService`, `CanaryConsumerService`) are called (tested, §9), plus Tasks' create-only
-  `TaskInbox.createInboxTask` (`proto/tasks/inbox/v1`) for the digest's daily task (§5.5). No app implements
-  `OpsDigestService` since 2026-10-21.
+  `TaskInbox.createInboxTask` (`proto/tasks/inbox/v1`) for the digest's daily task (§5.5) and the website relay's
+  `WebsiteSync` (`proto/website/sync/v1`: its evidence with each of its status polls, and the owner's sync requests).
 - Result: `{ok: true, value}` or `{ok: false, code}`. A rejection whose `Error.message` is an
   `ErrorCode` (`invalid_input`, `busy`, `unavailable`) keeps that code; the timeout gives `timeout`;
   any other rejection (binding error, deploy in progress, unknown method) gives `unavailable`; a value
@@ -555,7 +555,7 @@ Unit (`worker`, vitest in Node, `cloudflare:workers` aliased to `test/cloudflare
 - `canary`: every transition of §5.4 including all deadlines, idempotent start, limits of manual runs,
   run-ID format against `RunId`.
 - `digest`: item table, ordering, 20 items, 8192 bytes, `since`, change key, 6 h and 23:30 rules, the
-  hold at the start of a UTC day (23:30 breach, 00:00 cleared: no send until 00:30), empty report; every report passes the contract's rules as `OpsReport`.
+  hold at the start of a UTC day (23:30 breach, 00:00 cleared: no send until 00:30), empty report.
 - `ops-client`: **only declared methods** (a recording proxy env; the called names equal the methods of
   each app's generated services, `test/contract.ts`, the list the runtime stubs use) and **every
   `ErrorCode` value** plus timeout, foreign

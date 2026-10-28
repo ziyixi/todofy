@@ -10,7 +10,8 @@ import { CANARY_DISABLED_CODE, type CanaryRecord } from './canary.ts';
 import type { DigestDoc } from './docs.ts';
 import { CONFIG_DRIFT_CATEGORIES, configurationFindings, type DriftDoc } from './drift.ts';
 import { hoursLeft, reachesPercent, type DesiredGuard } from './guard.ts';
-import { isOpsCode, isOpsSource, METRICS_MAX_KEYS, OPS_APPS, REPORT_MAX_ITEMS } from './ops-client.ts';
+import { DIGEST_ITEMS_MAX } from './idl.ts';
+import { isOpsCode, isOpsSource, METRICS_MAX_KEYS, OPS_APPS } from './ops-client.ts';
 import { DAY_MS, HOUR_MS, MINUTE_MS, iso, isTimestamp, utcDay } from './time.ts';
 
 /** A usage fetch failing for this long becomes `usage_unavailable`. */
@@ -201,7 +202,7 @@ export function candidates(input: DigestInput): Candidate[] {
     }
     const status = health.status;
     if (status === null || health.status_at === null || now - health.status_at > STATUS_SIGNAL_MAX_AGE_MS) continue;
-    if (status.health === 'down' && !(app === 'notion-publish' && status.website_sync?.error_code)) out.push({ source: app, code: 'app_down', severity: 'critical', metrics: {} });
+    if (status.health === 'down' && !(app === 'notion-publish' && status.signals.some((signal) => signal.code === 'website_sync_provider_unavailable'))) out.push({ source: app, code: 'app_down', severity: 'critical', metrics: {} });
     for (const signal of status.signals) {
       if (signal.severity === 'info' || !isOpsCode(signal.code)) continue;
       out.push({
@@ -226,7 +227,7 @@ export function itemKey(item: { readonly source: string; readonly code: string }
  * Warning/critical only, deduplicated by source:code (highest severity wins), critical first then
  * source then code, at most 20. `since` is the app's own when it has one, else `firstSeen` of the key.
  */
-export function finalizeItems(list: readonly Candidate[], firstSeen: ReadonlyMap<string, number>, now: number, limit = REPORT_MAX_ITEMS): OpsReportItem[] {
+export function finalizeItems(list: readonly Candidate[], firstSeen: ReadonlyMap<string, number>, now: number, limit = DIGEST_ITEMS_MAX): OpsReportItem[] {
   const byKey = new Map<string, Candidate>();
   for (const candidate of list) {
     if (candidate.severity === 'info' || !isOpsSource(candidate.source) || !isOpsCode(candidate.code)) continue;
@@ -250,7 +251,7 @@ export function finalizeItems(list: readonly Candidate[], firstSeen: ReadonlyMap
 
 /** The day's task: its items as codes, severities, times and numbers (never an app's text), and a link to Home. */
 export function digestTask(items: readonly OpsReportItem[], day: string, dashboardUrl: string | null): { title: string; description: string } {
-  const listed = items.slice(0, REPORT_MAX_ITEMS);
+  const listed = items.slice(0, DIGEST_ITEMS_MAX);
   const lines = listed.map((item) => {
     const metrics = Object.entries(item.metrics).map(([name, value]) => `${name}=${String(value)}`);
     return `- ${[item.severity, item.source, item.code, `自 ${item.since}`, ...(metrics.length > 0 ? [metrics.join(', ')] : [])].join(' · ')}`;
