@@ -22,7 +22,7 @@ import newsletter.settings as newsletter_settings
 import newsletter.store as newsletter_store
 import newsletter.worker as newsletter_worker
 import newsletter.workflow.pipeline as newsletter_workflow_pipeline
-import newsletter.workflow.sources as sources
+import newsletter.workflow.researcher as researcher
 import newsletter.workflow.story_editor as story_editor
 import tests.support.news_first_policy as news_first_policy
 import tests.support.publication as publication
@@ -148,9 +148,9 @@ async def test_frozen_config_drives_pipeline_despite_midrun_switch(
             "No legacy collector, whole-issue editor, external API or email"
         )
 
-    async def empty_public_metadata(self, issue_date):
-        return sources.MetadataResult(
-            [], ["Synthetic offline metadata boundary"]
+    async def no_registry_fetch(self, *args, **kwargs):
+        raise AssertionError(
+            "A bundle without researcher.yaml must not fetch any feed"
         )
 
     async def provider(self, prompt, schema, instructions, workspace):
@@ -255,9 +255,7 @@ async def test_frozen_config_drives_pipeline_despite_midrun_switch(
         kwargs["on_checkpoint"](value)
         return value
 
-    monkeypatch.setattr(
-        sources.PublicMetadataFeed, "fetch", empty_public_metadata
-    )
+    monkeypatch.setattr(researcher.Researcher, "fetch", no_registry_fetch)
     monkeypatch.setattr(editor.ModelEditor, "execute", provider)
     monkeypatch.setattr(collector.MockCollector, "collect", forbidden)
     monkeypatch.setattr(story_editor.StoryEditor, "prepare", prepare_story)

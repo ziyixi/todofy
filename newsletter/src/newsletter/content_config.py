@@ -27,6 +27,7 @@ import newsletter.files as newsletter_files
 import newsletter.types as types
 import newsletter.workflow.content as content
 import newsletter.workflow.definition as newsletter_workflow_definition
+import newsletter.workflow.researcher as researcher
 import newsletter.workflow.story_recipe as story_recipe
 
 CONFIG_API = 1
@@ -160,7 +161,7 @@ def _validate_files(files: object) -> tuple[dict[str, str], dict[str, int]]:
         if not isinstance(name, str) or not (
             name in REQUIRED_FILES
             or _DIRECTION.fullmatch(name)
-            or name == "discovery/_sources/ai-ml.md"
+            or name in {"discovery/_sources/ai-ml.md", researcher.REGISTRY_FILE}
         ):
             raise ContentConfigError()
         if (
@@ -173,6 +174,11 @@ def _validate_files(files: object) -> tuple[dict[str, str], dict[str, int]]:
     selected = cast(dict[str, str], files)
     editorial = _editorial(selected["editorial.yaml"])
     instructions = config_instructions(selected)
+    if researcher.REGISTRY_FILE in selected:
+        # Optional: without it the researcher node supplies no seeds.
+        researcher.validate_registry(
+            selected[researcher.REGISTRY_FILE], {i.id for i in instructions}
+        )
     definition = newsletter_workflow_definition.load_definition(
         selected["workflow.yaml"]
     )

@@ -12,7 +12,9 @@ import newsletter.contracts as contracts
 import newsletter.settings as newsletter_settings
 import newsletter.store as newsletter_store
 import newsletter.workflow.pipeline as pipeline
+import newsletter.workflow.researcher as researcher
 import newsletter.workflow.state as newsletter_workflow_state
+import tests.support.researcher as tests_support_researcher
 
 
 @pytest.fixture
@@ -295,3 +297,50 @@ def test_offline_cli_build_and_validate_do_not_touch_business_state(
     )
     assert "never-print-this" not in capsys.readouterr().err
     assert not list(tmp_path.glob("*.sqlite*"))
+
+
+def test_packaged_baseline_has_no_researcher_registry(baseline):
+    # Packaged and demo runs therefore fetch no feed and get no seeds.
+    assert researcher.REGISTRY_FILE not in baseline["files"]
+
+
+def test_researcher_registry_is_an_optional_validated_file(baseline):
+    files = dict(baseline["files"])
+    files[researcher.REGISTRY_FILE] = tests_support_researcher.registry(
+        tests_support_researcher.source()
+    )
+    snapshot = content_config.build_snapshot(files, "a" * 40)
+    assert content_config.validate_snapshot(snapshot) == snapshot
+    assert researcher.REGISTRY_FILE in snapshot["files"]
+
+
+@pytest.mark.parametrize(
+    "name,value",
+    [
+        (
+            "researcher.yaml",
+            tests_support_researcher.registry(
+                tests_support_researcher.source(direction="09-missing")
+            ),
+        ),
+        (
+            "researcher.yaml",
+            tests_support_researcher.registry(
+                tests_support_researcher.source(proxy="https://x.example")
+            ),
+        ),
+        ("researcher.yaml", "version: 1\nsources:\n  - &a {id: a}\n"),
+        (
+            "discovery/_sources/researcher.yaml",
+            tests_support_researcher.registry(
+                tests_support_researcher.source()
+            ),
+        ),
+    ],
+)
+def test_invalid_or_misplaced_registry_fails_before_activation(
+    baseline, name, value
+):
+    baseline["files"][name] = value
+    with pytest.raises(content_config.ContentConfigError):
+        content_config.validate_snapshot(resign(baseline))

@@ -21,6 +21,7 @@ import newsletter.usage as usage
 import newsletter.workflow.content as content
 import newsletter.workflow.definition as newsletter_workflow_definition
 import newsletter.workflow.engine as engine
+import newsletter.workflow.researcher as researcher
 import newsletter.workflow.sources as sources
 import newsletter.workflow.state as newsletter_workflow_state
 
@@ -48,7 +49,7 @@ class EditorialNodes:
         )
         self.state = newsletter_workflow_state.WorkflowState(store)
         self.content = content.ContentPreparation(editor)
-        self.feed = sources.PublicMetadataFeed()
+        self.researcher = researcher.Researcher()
         self.kinds = {node.id: node.type for node in definition.nodes}
 
     def inputs(self, ctx: engine.NodeContext, kind: str) -> list[Any]:
@@ -152,33 +153,73 @@ class EditorialNodes:
 
     async def _api_feed(
         self, ctx: engine.NodeContext, path: pathlib.Path
-    ) -> types.Payload:
-        """Fetch the configured public metadata feed."""
-        date = ctx.run_inputs["issue_date"]
-        metadata = await self.feed.fetch(date)
-        return dataclasses.asdict(metadata)
+    ) -> engine.NodeResult | types.Payload:
+        """Run the frozen researcher registry; no registry means no seeds.
+
+        There is no code fallback list. Any failed source keeps the leads of
+        the others and marks the node ``partial_failure``.
+        """
+        config = ctx.run_inputs.get("content_config")
+        files = config.get("files", {}) if isinstance(config, dict) else {}
+        text = files.get(researcher.REGISTRY_FILE)
+        if not isinstance(text, str):
+            return dataclasses.asdict(
+                sources.MetadataResult([], ["registry:absent"])
+            )
+        try:
+            registry = researcher.validate_registry(
+                text, {item["id"] for item in ctx.run_inputs["instructions"]}
+            )
+        except researcher.RegistryError:
+            return engine.NodeResult(
+                dataclasses.asdict(
+                    sources.MetadataResult([], ["registry:invalid"])
+                ),
+                error_code="partial_failure",
+            )
+        # Leave the node's own timeout room to persist what finished.
+        budget = max(1, ctx.params.get("timeout_seconds", 600) - 15)
+        metadata = await self.researcher.fetch(
+            registry,
+            ctx.run_inputs["issue_date"],
+            history=ctx.run_inputs.get("history", []),
+            budget_seconds=budget,
+        )
+        value = dataclasses.asdict(metadata)
+        if researcher.failed(metadata):
+            return engine.NodeResult(value, error_code="partial_failure")
+        return value
 
     async def _discover(
         self, ctx: engine.NodeContext, path: pathlib.Path
     ) -> types.Payload:
-        """Discover one direction against the frozen history."""
+        """Discover one direction with only the seeds routed to it."""
         date = ctx.run_inputs["issue_date"]
+        direction = cast(types.Payload, ctx.item)
         history = self.one(
             ctx, "history", {"candidates": [], "editions": [], "watchlist": []}
         )
+        feeds = [value for value in self.inputs(ctx, "api_feed") if value]
         seeds = [
             item
-            for value in self.inputs(ctx, "api_feed")
-            if value
+            for value in feeds
             for item in value["candidates"]
+            if item["direction"] == direction["id"]
         ]
+        # Older artifacts have no notes; notes never leave this prompt.
+        notes = {
+            key: note
+            for value in feeds
+            for key, note in value.get("notes", {}).items()
+        }
         discovered = await self.content.discover(
-            instructions.Instruction(**cast(types.Payload, ctx.item)),
+            instructions.Instruction(**direction),
             date,
             path,
             seeds=seeds,
             history=history["candidates"],
             watchlist=history["watchlist"],
+            seed_notes=notes,
             **(
                 {"content_config": ctx.run_inputs["content_config"]}
                 if "content_config" in ctx.run_inputs
