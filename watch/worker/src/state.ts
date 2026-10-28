@@ -122,10 +122,13 @@ export class WatchState extends DurableObject<Env> {
     return { store: this.store, backups: this.env.BACKUPS, evidence: this.env.EVIDENCE_STORE, transact: this.transact };
   }
 
-  /** An object the Worker no longer addresses (its name is not WATCH_OBJECT): it keeps its data and stops. */
+  /**
+   * An object the Worker no longer addresses (its id is not WATCH_OBJECT's): it keeps its data and stops. Compared
+   * by id, as Mailsort and Personal MCP do, never by `ctx.id.name`, which an invocation may not carry: an old object
+   * read as current would go on checking and notifying next to the restored one.
+   */
   private retired(): boolean {
-    const name = this.ctx.id.name;
-    return name !== undefined && name !== WATCH_OBJECT;
+    return !this.ctx.id.equals(this.env.WATCH.idFromName(WATCH_OBJECT));
   }
 
   /**
