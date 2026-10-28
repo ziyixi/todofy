@@ -165,7 +165,10 @@ const refused: OpsCall<never> = { ok: false, code: 'invalid_input' };
 
 // ---- one wrapper per declared method ---------------------------------------------------------------
 
-/** The methods each app's entrypoint has (the generated services it implements); a test compares them with the IDL. */
+/**
+ * The methods each app's entrypoints have (the generated services they implement; the website relay's are split over
+ * its Ops and WebsiteSync entrypoints); a test compares them with the IDL.
+ */
 export const CALLED_METHODS = {
   'mail-hero': ['status', 'setGuard', 'startCanary', 'canaryDelivery'],
   todofy: ['status', 'setGuard', 'canaryResult'],
