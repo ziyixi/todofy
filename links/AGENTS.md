@@ -26,8 +26,9 @@ The root [`AGENTS.md`](../AGENTS.md) applies here too. Rules of the links app:
   the owner's real links, an export file or a screenshot of real data.
 - **Workers Free.** 10 ms of CPU per request (the owner API is bounded by `src/limits.ts`: LINKS_MAX, a page of 100 or
   250, an import of 100 lines), and D1 writes stay minimal (`test/runtime/budget.test.ts`: two rows per create or edit).
-  No KV and no cron trigger (the account's five are taken); one SQLite Durable Object, `LinksBackup`, whose Alarm runs
-  the daily backup. A redirect never reaches it: only Ops.status() and the owner's half arm it.
+  No KV and no cron trigger (Workers Free has five per account; the other apps use four); one SQLite Durable Object,
+  `LinksBackup`, whose Alarm runs the daily backup. A redirect never reaches it: only Ops.status() and the owner's half
+  arm it.
 - **Backups** ([`docs/backup.md`](docs/backup.md)): every table and column of `migrations/` goes into the daily backup
   (`worker/src/backup.ts` `BACKUP_TABLES`; `test/runtime/backup.test.ts` fails on a table or column it lacks) and
   back through `tools/backup-restore.ts` (`RESTORE_ORDER`). Each Alarm runs one bounded step (under 50 D1 statements,

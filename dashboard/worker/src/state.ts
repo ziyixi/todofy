@@ -925,6 +925,8 @@ export class HomeState extends DurableObject<Env> {
     // A probe's failure (a public_http entry's, or the one beside an app's status) resolves only with a passing probe.
     const probeFailed = PROBE_ERRORS.includes(condition.code);
     if (probeFailed && probe !== undefined) return probe.ok && now - probe.checked_at <= 60 * MINUTE_MS;
+    // A probed tile's error rate (an app's too) resolves only with fresh analytics, never with its Ops answer.
+    if (condition.code === 'error_rate') return scriptsFresh;
     if (OPS_APPS.includes(condition.source as OpsApp)) {
       const app = condition.source as OpsApp, doc = evaluation.statuses[app], status = freshStatus(doc, now);
       if (doc?.ok !== true || status === null) return false;
@@ -934,7 +936,6 @@ export class HomeState extends DurableObject<Env> {
       if (status.health === 'down' || status.signals.some((signal) => signal.code.endsWith('_unavailable') || ['host_never_seen', 'host_stale', 'host_missing'].includes(signal.code))) return false;
       return true;
     }
-    if (condition.code === 'error_rate') return scriptsFresh;
     if (condition.code.startsWith('drift_') || condition.code === 'config_drift') {
       const drift = storedDrift(this.doc<DriftDoc>('drift'));
       const fresh = drift.checked_at !== null && now - drift.checked_at <= 48 * HOUR_MS && drift.last_error === null;
