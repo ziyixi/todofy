@@ -155,10 +155,10 @@ and [verification](../tasks/docs/verification.md).
 ## Home
 
 Home is the owner launcher and operations console, not a second administrator of each application's storage.
-Besides its own `HOME` object and `ASSETS`, its bindings in `dashboard/wrangler.toml` are thirteen Ops services, the
+Besides its own `HOME` object and `ASSETS`, its bindings in `dashboard/wrangler.toml` are fourteen Ops services, the
 website relay's sync entrypoint and one task inbox. It calls only generated Ops methods through `MAIL_HERO`, `TODOFY`,
-`TASKS`, `WATCH`, `MAILSORT`, `RECALL`, `BRIEF`, `MODEL_ROUTER`, `PERSONAL_MCP`, `NOTION_PUBLISH`, `FLEET`, `NEWSLETTER`
-and `CODEX_GATEWAY`. `NOTION_PUBLISH` targets the website relay's `Ops`; `WEBSITE_SYNC` targets the relay's own
+`TASKS`, `WATCH`, `MAILSORT`, `RECALL`, `BRIEF`, `MODEL_ROUTER`, `PERSONAL_MCP`, `LINKS`, `NOTION_PUBLISH`, `FLEET`,
+`NEWSLETTER` and `CODEX_GATEWAY`. `NOTION_PUBLISH` targets the website relay's `Ops`; `WEBSITE_SYNC` targets the relay's own
 `WebsiteSync` entrypoint for the sync evidence and requests (`website.sync.v1`). The last three Ops bindings all target
 Fleet: its `Ops`, and the `NewsletterOps` and `CodexGatewayOps` projections of the latest bounded host report.
 `TASK_INBOX` is Tasks' create-only `TaskInbox` for the daily digest task. Home does not call the VPS directly or read an

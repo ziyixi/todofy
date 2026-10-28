@@ -298,13 +298,13 @@ class MatchesTheApps(unittest.TestCase):
 
     def test_the_dashboard_probes_only_paths_outside_access(self):
         """Each public_http probe of dashboard/worker/src/registry.ts is anonymous, so Access must not govern its path: no
-        destination matches it (the links app's /robots.txt is outside its application's /_ paths). A probe on a host
-        with any Access application declares `outside_access: true`."""
+        destination matches it. A probe on a host with any Access application declares `outside_access: true` (none
+        does since the links app answers ops-v1)."""
         code = (INFRA / "access.tf").read_text()
         destinations = self.access_destinations(code)
         registry = (REPO / "dashboard" / "worker" / "src" / "registry.ts").read_text()
         probes = re.findall(r"type: 'public_http',(.*?)\}", registry, re.DOTALL)
-        self.assertGreaterEqual(len(probes), 2)
+        self.assertGreaterEqual(len(probes), 1)
 
         def governs(destination: str, host: str, path: str) -> bool:
             """Whether the destination covers host+path."""

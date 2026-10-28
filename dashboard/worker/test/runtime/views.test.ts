@@ -162,8 +162,8 @@ describe('GetHomeView and RefreshHomeView', () => {
     expect(tiles.todofy).toMatchObject({ level: 'ok', metric: { kind: 'counter', name: 'received_24h', value: 63 } });
     expect(tiles.website?.level).toBe('ok');
     expect(tiles.website?.metric?.kind).toBe('latency');
-    // The links app's robots.txt, answered by its own Worker.
-    expect(tiles.links).toMatchObject({ level: 'ok', reason: null, metric: { kind: 'latency' } });
+    // The links app answers through its Ops entrypoint: a recent backup, no tile metric.
+    expect(tiles.links).toMatchObject({ level: 'ok', reason: null, metric: null });
     // Content sync is evaluated from its check evidence, with no activity metric.
     expect(tiles['notion-publish']).toMatchObject({ level: 'ok', metric: null });
     expect(home.flows.map((f) => [f.id, f.level, f.partial])).toEqual([
@@ -194,12 +194,12 @@ describe('GetHomeView and RefreshHomeView', () => {
     expect((await h.called()).sort()).toEqual(['mail-hero.status', 'todofy.status']);
     expect([...h.outboundLog].sort()).toEqual(Object.values(PROBES).sort());
     expect(h.analytics.requests).toEqual([]);
-    for (const id of ['website', 'links']) expect(refreshed.entries.find((e) => e.id === id)?.level).toBe('ok');
+    expect(refreshed.entries.find((e) => e.id === 'website')?.level).toBe('ok');
     // Within the minute: nothing is fetched again.
     const second = await refreshedView<HomeView>(h, 'home');
     expect(second.refresh.refreshed).toBe(false);
     expect(await h.called()).toEqual([]);
-    expect(h.outboundLog).toHaveLength(2);
+    expect(h.outboundLog).toHaveLength(Object.keys(PROBES).length);
     // The next status poll is 10 minutes after the last one.
     expect(Date.parse(second.refresh.next_refresh_at) - Date.parse(refreshed.refresh.last_refresh_at ?? '')).toBeGreaterThanOrEqual(10 * MIN - MIN);
   });
@@ -225,27 +225,27 @@ describe('GetHomeView and RefreshHomeView', () => {
   });
 });
 
-describe('the links tile', () => {
+describe('the probes and the links tile', () => {
   it('probes exactly the public_http URLs of the registry', () => {
     const urls = REGISTRY.entries.flatMap((e) => (e.status.type === 'public_http' && e.status.enabled ? [[e.id, e.status.url]] : []));
     expect(Object.fromEntries(urls)).toEqual(PROBES);
   });
 
-  it('shows a wrong type from links on the tile and as one observed item', async () => {
+  it('shows a stale, failed links backup on its tile and in the strip, and no flow repeats it', async () => {
     h = await mockupDay();
-    // Something other than the links Worker answers 200 with HTML.
-    h.routes.set(PROBES.links, () => new Response('<html></html>', { headers: { 'content-type': 'text/html; charset=utf-8' } }));
-    await h.tick(NOW - 31 * MIN);
+    const failed = await status('links', { health: 'degraded', signals: [
+      { code: 'backup_stale', severity: 'critical', metrics: { age_seconds: 345_600, has_backup: 1 } },
+      { code: 'backup_failed', severity: 'warning', metrics: {} },
+    ] });
+    await h.answer('links', 'status', { value: failed });
     await h.tick(NOW - MIN);
     const home = await view<HomeView>(h, 'home');
-    expect(home.entries.find((e) => e.id === 'links')).toMatchObject({ level: 'critical', reason: 'content_type', consecutive_failures: 2, metric: null });
-    expect(attentionFacts(home.attention.items)).toEqual([
-      { source: 'links', code: 'content_type', severity: 'critical', since: null, metrics: {}, target: { view: 'home', entry: 'links' }, observed: 'critical' },
+    expect(home.entries.find((e) => e.id === 'links')).toMatchObject({ level: 'critical', reason: 'backup_stale', metric: null });
+    expect(home.attention.items.filter((item) => item.source === 'links').map((item) => [item.code, item.severity])).toEqual([
+      ['backup_stale', 'critical'],
+      ['backup_failed', 'warning'],
     ]);
-    expect(home.badges).toEqual({ home: 1, flows: 0, cloudflare: 0, ops: 0 });
-    // No flow names the app, and the digest to Todofy keeps v1's item set.
     expect(home.flows.every((f) => f.level === 'ok')).toBe(true);
-    expect((await view<OpsView>(h, 'ops')).digest.items).toEqual([]);
   });
 });
 
@@ -398,6 +398,7 @@ describe('GetFlowsView, GetOpsView and the mutations', () => {
     expect(ops.apps.map((a) => [a.entry, a.reachable, a.status?.app])).toEqual([
       ['mail-hero', true, 'mail-hero'],
       ['todofy', true, 'todofy'],
+      ['links', true, 'links'],
       ['watch', true, 'watch'],
       ['notion-publish', true, 'notion-publish'],
       ['newsletter', true, 'newsletter'],

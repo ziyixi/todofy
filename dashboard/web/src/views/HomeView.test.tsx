@@ -207,28 +207,29 @@ describe('首页', () => {
     expect(button).toHaveFocus()
   })
 
-  it('shows a failing links probe on its tile and in its sheet, with its Worker and no flow', async () => {
+  it('shows a stale links backup on its tile and in its sheet, with its Worker and no flow', async () => {
     const base = healthy()
-    const links = { level: 'critical' as const, reason: 'content_type', consecutive_failures: 2, metric: null }
-    const item = { source: 'links', code: 'content_type', severity: 'critical' as const, since: null, metrics: {}, target: { view: 'home' as const, entry: 'links' }, observed: 'critical' as const }
+    const since = '2026-09-26T05:30:00Z'
+    const links = { level: 'critical' as const, reason: 'backup_stale', consecutive_failures: 0, metric: null, top_signals: [{ code: 'backup_stale', severity: 'critical' as const, since }] }
+    const item = { source: 'links', code: 'backup_stale', severity: 'critical' as const, since, metrics: { age_seconds: 345_600, has_backup: 1 }, target: { view: 'ops' as const, entry: 'links' } }
     const home = {
       ...base.home,
       entries: base.home.entries.map((e) => (e.id === 'links' ? { ...e, ...links } : e)),
       attention: { level: 'critical' as const, items: [item], info: [], held: [] },
-      badges: { ...base.home.badges, home: 1 },
+      badges: { ...base.home.badges, ops: 1 },
     }
     await showHome({ ...base, home })
     const user = userEvent.setup()
     const strip = screen.getByRole('region', { name: '1 项故障' })
-    expect(within(strip).getByRole('listitem')).toHaveTextContent('短链接：响应类型不符')
+    expect(within(strip).getByRole('listitem')).toHaveTextContent('短链接：备份过旧')
     const button = within(launcher()).getByRole('button', { name: '短链接 状态：故障，查看详情' })
-    expect(button).toHaveTextContent('故障· 响应类型不符')
+    expect(button).toHaveTextContent('故障· 备份过旧')
     await user.click(button)
     const sheet = screen.getByRole('dialog', { name: '短链接 状态' })
-    expect(within(sheet).getByText('连续失败').nextElementSibling).toHaveTextContent('2 次')
     const related = within(within(sheet).getByRole('list', { name: '相关位置' })).getAllByRole('link')
     expect(related.map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
       ['查看 Worker：links →', '#/cloudflare/worker/links'],
+      ['应用详情 →', '#/ops'],
       ['打开 短链接（新标签页）', 'https://s.ziyixi.science/_/'],
     ])
   })

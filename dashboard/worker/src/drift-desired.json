@@ -247,6 +247,11 @@
           "source": "config"
         },
         {
+          "name": "LINKS",
+          "type": "service",
+          "source": "config"
+        },
+        {
           "name": "MAILSORT",
           "type": "service",
           "source": "config"

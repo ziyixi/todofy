@@ -183,6 +183,7 @@ export const CALLED_METHODS = {
   tasks: ['status', 'setGuard'],
   'personal-mcp': ['status', 'setGuard'],
   'model-router': ['status', 'setGuard'],
+  links: ['status', 'setGuard'],
 } as const;
 
 type Bindings = Pick<Env, OpsSource['binding'] | 'TASK_INBOX'>;

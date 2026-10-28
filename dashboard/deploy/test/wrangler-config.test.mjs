@@ -53,6 +53,7 @@ test("the Durable Object, the Ops service bindings, Tasks' create-only TaskInbox
     { binding: 'TASK_INBOX', service: 'tasks', entrypoint: 'TaskInbox', props: { source: 'home' } },
     { binding: 'PERSONAL_MCP', service: 'personal-mcp', entrypoint: 'Ops' },
     { binding: 'MODEL_ROUTER', service: 'model-router', entrypoint: 'Ops' },
+    { binding: 'LINKS', service: 'links', entrypoint: 'Ops' },
   ])
   assert.deepEqual(config.triggers, { crons: ['*/30 * * * *'] })
 })

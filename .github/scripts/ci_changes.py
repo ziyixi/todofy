@@ -33,8 +33,9 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
                     extra release is harmless, a missed one is not. A dispatch for recall (or all) and a run of
                     everything publish too. The extension is never deployed.
   The links app (links/, the short links on s.ziyixi.science) is checked and deployed since L2 (links/docs/design.md
-  section 11). It uses no contract (NO_CONTRACTS) and compiles in packages/edge-auth and the TypeScript proto runtime
-  with proto/links/ui/, so a change to those checks and deploys it too. The watch app (watch/, the web watches on watch.ziyixi.science) is
+  section 11). It answers ops-v1 (its Ops entrypoint, which reports its daily backup; Contracts runs that test; Home
+  binds it, HOME_BOUND) and compiles in packages/edge-auth and the TypeScript proto runtime with proto/links/ui/ and
+  proto/ops/, so a change to those checks and deploys it too. The watch app (watch/, the web watches on watch.ziyixi.science) is
   checked and deployed since W2 (watch/docs/design.md section 11). It creates its tasks through Tasks' TaskInbox (its
   notification sink) and answers ops-v1 (its Ops entrypoint; Contracts runs that test) and compiles in
   packages/edge-auth and the TypeScript proto runtime with proto/watch/ui/, proto/tasks/inbox/ and proto/ops/, so a
@@ -139,7 +140,7 @@ PREFIX = {app: app.replace("-", "_") for app in APPS}
 CHECK_ONLY: set[str] = set()
 # Apps whose Ops entrypoint Home binds (dashboard/wrangler.toml): while one of them is CHECK_ONLY its Worker does not
 # exist yet, so Home's deploy (whose binding would name a missing service) waits too.
-HOME_BOUND = {"fleet", "mailsort", "recall", "brief", "tasks", "personal-mcp", "model-router"}
+HOME_BOUND = {"fleet", "mailsort", "recall", "brief", "tasks", "personal-mcp", "model-router", "links"}
 KEYS = (
     "todofy_check",
     "mail_hero_check",
@@ -207,7 +208,7 @@ RELAY = "website/relay/"
 # Release (recall_extension_publish).
 EXTENSION = ("recall/extension/", "recall/shared/")
 # Apps that neither provide nor consume a contract: their own changes do not run Contracts.
-NO_CONTRACTS = {"links", "newsletter"}
+NO_CONTRACTS = {"newsletter"}
 # The OpenTofu configuration (infra/README.md) and its plan-summary tool: checked here without a token; only
 # .github/workflows/infra.yml plans it against Cloudflare, and only the manually dispatched infra-apply.yml applies it.
 INFRA = ("infra/", "tools/infra-plan-summary/")

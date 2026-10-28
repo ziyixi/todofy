@@ -975,7 +975,7 @@ jobs:
     # After the app deploys: Home's service bindings (dashboard/wrangler.toml) name each app's "Ops" entrypoint, the
     # website relay's "WebsiteSync" and Tasks' "TaskInbox", which must be live first. An app deploy that did not run
     # (nothing of that app changed) is fine; one that failed or was cancelled stops this job.
-    needs: [changes, dashboard-checks, gate, todofy-deploy, mail-hero-deploy, watch-deploy, fleet-deploy, mailsort-deploy, recall-deploy, brief-deploy, tasks-deploy, website-relay-deploy, personal-mcp-deploy, model-router-deploy]
+    needs: [changes, dashboard-checks, gate, todofy-deploy, mail-hero-deploy, links-deploy, watch-deploy, fleet-deploy, mailsort-deploy, recall-deploy, brief-deploy, tasks-deploy, website-relay-deploy, personal-mcp-deploy, model-router-deploy]
     # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
     if: >-
       ${{ !cancelled()
@@ -985,6 +985,7 @@ jobs:
       && needs.gate.result == 'success'
       && (needs.todofy-deploy.result == 'success' || needs.todofy-deploy.result == 'skipped')
       && (needs.mail-hero-deploy.result == 'success' || needs.mail-hero-deploy.result == 'skipped')
+      && (needs.links-deploy.result == 'success' || needs.links-deploy.result == 'skipped')
       && (needs.watch-deploy.result == 'success' || needs.watch-deploy.result == 'skipped')
       && (needs.fleet-deploy.result == 'success' || needs.fleet-deploy.result == 'skipped')
       && (needs.mailsort-deploy.result == 'success' || needs.mailsort-deploy.result == 'skipped')

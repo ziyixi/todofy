@@ -13,6 +13,7 @@ import mailsortOk from '../../../contracts/ops-v1/fixtures/OpsStatus/mailsort-ok
 import recallOk from '../../../contracts/ops-v1/fixtures/OpsStatus/recall-ok.json';
 import briefOk from '../../../contracts/ops-v1/fixtures/OpsStatus/brief-ok.json';
 import tasksOk from '../../../contracts/ops-v1/fixtures/OpsStatus/tasks-ok.json';
+import linksOk from '../../../contracts/ops-v1/fixtures/OpsStatus/links-ok.json';
 import personalMcpOk from './fixtures/personal-mcp-ok.json';
 import modelRouterOk from './fixtures/model-router-ok.json';
 import type { OpsApp, OpsSignal, OpsStatus } from '../src/api-types.ts';
@@ -56,8 +57,21 @@ export function withLinkOnly(registry: RegistryDef = REGISTRY): RegistryDef {
   return { ...registry, entries: [...registry.entries, LINK_ONLY_ENTRY] };
 }
 
+/**
+ * The registry with the links tile probed as it was until links answered ops-v1 with its backup (2026-10-28): a GET of
+ * its robots.txt outside Access, its media type, and the Worker's error rate. The registry has no such probe since,
+ * and the kind stays covered.
+ */
+export function withProbedLinks(registry: RegistryDef = REGISTRY): RegistryDef {
+  const status = { type: 'public_http', expect: [200], content_type: 'text/plain', outside_access: true, error_rate: true, enabled: true, url: 'https://s.ziyixi.science/robots.txt' } as const;
+  return {
+    ...registry,
+    entries: registry.entries.map((e) => (e.id === 'links' ? { ...e, status, tile_metric: { kind: 'latency' }, app_only_signals: [] } : e)),
+  };
+}
+
 export function status(app: OpsApp, patch: Partial<OpsStatus> = {}, at = NOW - 2 * MIN): StatusDoc {
-  const base = { 'mail-hero': mailHeroOk, todofy: todofyOk, watch: watchOk, fleet: fleetOk, newsletter: newsletterOk, 'codex-gateway': codexGatewayOk, 'notion-publish': notionPublishOk, mailsort: mailsortOk, recall: recallOk, brief: briefOk, tasks: tasksOk, 'personal-mcp': personalMcpOk, 'model-router': modelRouterOk }[app] as OpsStatus;
+  const base = { 'mail-hero': mailHeroOk, todofy: todofyOk, watch: watchOk, fleet: fleetOk, newsletter: newsletterOk, 'codex-gateway': codexGatewayOk, 'notion-publish': notionPublishOk, mailsort: mailsortOk, recall: recallOk, brief: briefOk, tasks: tasksOk, 'personal-mcp': personalMcpOk, 'model-router': modelRouterOk, links: linksOk }[app] as OpsStatus;
   // notion-publish's sync evidence: read from the relay's WebsiteSync with its status (website-sync.ts).
   const checked = new Date(at).toISOString();
   const evidence = app !== 'notion-publish' ? {} : { website_sync: { observed_at: checked, next_check_at: new Date(at + DAY).toISOString(), last_check: { checked_at: checked, decision: 'unchanged' as const, run_id: '12001', run_url: 'https://github.com/example/cloud/actions/runs/12001' } } };
@@ -115,7 +129,7 @@ export function input(patch: Partial<EvalInput> = {}): EvalInput {
     now: NOW,
     lastTickAt: NOW,
     analyticsConfigured: true,
-    statuses: { 'mail-hero': status('mail-hero'), todofy: status('todofy'), watch: status('watch'), fleet: status('fleet'), newsletter: status('newsletter'), 'codex-gateway': status('codex-gateway'), 'notion-publish': status('notion-publish'), mailsort: status('mailsort'), recall: status('recall'), brief: status('brief'), tasks: status('tasks'), 'personal-mcp': status('personal-mcp'), 'model-router': status('model-router') },
+    statuses: { 'mail-hero': status('mail-hero'), todofy: status('todofy'), watch: status('watch'), fleet: status('fleet'), newsletter: status('newsletter'), 'codex-gateway': status('codex-gateway'), 'notion-publish': status('notion-publish'), mailsort: status('mailsort'), recall: status('recall'), brief: status('brief'), tasks: status('tasks'), 'personal-mcp': status('personal-mcp'), 'model-router': status('model-router'), links: status('links') },
     probes: { website: probe(), links: probe({ latency_ms: 40 }) },
     scripts: scripts(),
     digest: {

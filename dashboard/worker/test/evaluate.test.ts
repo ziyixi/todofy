@@ -6,7 +6,7 @@ import type { EntryDef, RegistryDef } from '../src/registry-types.ts';
 import { mergeScripts } from '../src/discovery.ts';
 import { attentionView, entryState, flowStates, flowSummaries, holdCodes, rollup, targetOf, type AttentionInput, type EvalInput } from '../src/evaluate.ts';
 import { REGISTRY, entryById } from '../src/registry.ts';
-import { DAY, HOUR, LINK_ONLY_ENTRY, MIN, NOW, failedStatus, fortnight, input, probe, run, scripts, signal, status, withLinkOnly } from './v2-fixtures.ts';
+import { DAY, HOUR, LINK_ONLY_ENTRY, MIN, NOW, failedStatus, fortnight, input, probe, run, scripts, signal, status, withLinkOnly, withProbedLinks } from './v2-fixtures.ts';
 
 function entry(id: string, registry: RegistryDef = REGISTRY): EntryDef {
   const found = entryById(id, registry);
@@ -16,6 +16,12 @@ function entry(id: string, registry: RegistryDef = REGISTRY): EntryDef {
 
 function state(id: string, patch: Partial<EvalInput> = {}) {
   return entryState(entry(id), input(patch));
+}
+
+/** The links tile as a probe outside Access with the error rate (withProbedLinks). */
+const PROBED = withProbedLinks();
+function probed(patch: Partial<EvalInput> = {}) {
+  return entryState(entry('links', PROBED), input(patch), PROBED);
 }
 
 function flow(id: string, patch: Partial<EvalInput> = {}): Omit<FlowState, 'canary'> {
@@ -56,7 +62,7 @@ describe('entry health (the tile: the entry\'s own health, Q2)', () => {
     expect(tiles.todofy).toMatchObject({ level: 'ok', metric: { kind: 'counter', name: 'received_24h', value: 63 } });
     expect(tiles[LINK_ONLY_ENTRY.id]).toMatchObject({ level: 'link', reason: null, metric: null, checked_at: null });
     expect(tiles.website).toMatchObject({ level: 'ok', metric: { kind: 'latency', ms: 180 } });
-    expect(tiles.links).toMatchObject({ level: 'ok', reason: null, metric: { kind: 'latency', ms: 40 } });
+    expect(tiles.links).toMatchObject({ level: 'ok', reason: null, metric: null, top_signals: [] });
     expect(tiles['notion-publish']).toMatchObject({ level: 'ok', metric: null });
     expect(tiles.newsletter).toMatchObject({ level: 'ok', reason: null, metric: null });
     expect(tiles.home).toMatchObject({ level: 'ok' });
@@ -118,32 +124,40 @@ describe('entry health (the tile: the entry\'s own health, Q2)', () => {
     expect(entryState(entry('website', off), input(), off)).toMatchObject({ level: 'unmonitored', reason: null });
   });
 
-  it('judges the links app by its probe like the website, plus a wrong media type', () => {
+  it('judges the links app by its Ops status: a stale or failed backup on its tile', () => {
+    expect(entry('links').app_only_signals).toEqual(['backup_stale', 'backup_failed']);
+    expect(state('links', { statuses: {} })).toMatchObject({ level: 'unknown', reason: 'never_checked', metric: null });
+    const stale = status('links', { health: 'degraded', signals: [signal('backup_stale', 'critical', { age_seconds: 345_600, has_backup: 1 }), signal('backup_failed', 'warning')] });
+    expect(state('links', { statuses: { links: stale } })).toMatchObject({ level: 'critical', reason: 'backup_stale' });
+    expect(targetOf('links', 'backup_failed')).toEqual({ view: 'ops', entry: 'links' });
+  });
+
+  it('judges a probe outside Access like the website, plus a wrong media type', () => {
     const wrongType = probe({ ok: false, http_status: 200, error: 'content_type', consecutive_failures: 1 });
-    expect(state('links', { probes: {} })).toMatchObject({ level: 'unknown', reason: 'never_checked', metric: null });
-    expect(state('links', { probes: { links: wrongType } })).toMatchObject({ level: 'warning', reason: 'content_type', consecutive_failures: 1, metric: null });
+    expect(probed({ probes: {} })).toMatchObject({ level: 'unknown', reason: 'never_checked', metric: null });
+    expect(probed({ probes: { links: wrongType } })).toMatchObject({ level: 'warning', reason: 'content_type', consecutive_failures: 1, metric: null });
     // Access's login redirect on a path that should be public: an http_status failure, critical the second time.
     const redirected = probe({ ok: false, http_status: 302, error: 'http_status', consecutive_failures: 2 });
-    expect(state('links', { probes: { links: redirected } })).toMatchObject({ level: 'critical', reason: 'http_status', metric: null });
-    expect(state('links', { probes: { links: probe({ checked_at: NOW - 2 * HOUR }) } })).toMatchObject({ level: 'unknown', reason: 'stale', metric: null });
+    expect(probed({ probes: { links: redirected } })).toMatchObject({ level: 'critical', reason: 'http_status', metric: null });
+    expect(probed({ probes: { links: probe({ checked_at: NOW - 2 * HOUR }) } })).toMatchObject({ level: 'unknown', reason: 'stale', metric: null });
   });
 
   it('adds the Workers\' error rate to a probe that asks for it (fresh data only), and never to the website\'s', () => {
     const errors = (script: string, requests: number, failed: number) =>
       mergeScripts(scripts(), [{ script, requests, errors: failed, subrequests: 0, cpu_p50_us: 1, cpu_p99_us: 2, do_requests: null, do_errors: null }], false, NOW);
     // 30 % errors over 100 requests: critical, while the probe itself passed; the latency gives way to the reason.
-    expect(state('links', { scripts: errors('links', 100, 30) })).toMatchObject({ level: 'critical', reason: 'error_rate', metric: null });
-    expect(state('links', { scripts: errors('links', 100, 6) })).toMatchObject({ level: 'warning', reason: 'error_rate', metric: null });
+    expect(probed({ scripts: errors('links', 100, 30) })).toMatchObject({ level: 'critical', reason: 'error_rate', metric: null });
+    expect(probed({ scripts: errors('links', 100, 6) })).toMatchObject({ level: 'warning', reason: 'error_rate', metric: null });
     // Too few requests to judge, or another Worker's errors: the probe decides.
-    expect(state('links', { scripts: errors('links', 10, 9) })).toMatchObject({ level: 'ok', metric: { kind: 'latency', ms: 40 } });
-    expect(state('links', { scripts: errors('watch', 100, 30) })).toMatchObject({ level: 'ok' });
+    expect(probed({ scripts: errors('links', 10, 9) })).toMatchObject({ level: 'ok', metric: { kind: 'latency', ms: 40 } });
+    expect(probed({ scripts: errors('watch', 100, 30) })).toMatchObject({ level: 'ok' });
     // A failing probe stays the reason when it is the worse of the two.
     const down = probe({ ok: false, http_status: 503, error: 'http_status', consecutive_failures: 2 });
-    expect(state('links', { probes: { links: down }, scripts: errors('links', 100, 6) })).toMatchObject({ level: 'critical', reason: 'http_status' });
+    expect(probed({ probes: { links: down }, scripts: errors('links', 100, 6) })).toMatchObject({ level: 'critical', reason: 'http_status' });
     // Stale analytics never make the tile unknown: the fresh probe still says ok.
     const staleNow = NOW + 2 * HOUR;
     const fresh = { links: probe({ checked_at: staleNow - MIN, latency_ms: 40 }) };
-    expect(state('links', { now: staleNow, lastTickAt: staleNow, probes: fresh, scripts: errors('links', 100, 30) })).toMatchObject({ level: 'ok' });
+    expect(probed({ now: staleNow, lastTickAt: staleNow, probes: fresh, scripts: errors('links', 100, 30) })).toMatchObject({ level: 'ok' });
     // The website's assets-only Worker is not judged by its error rate.
     expect(state('website', { scripts: errors('ziyixi-website', 100, 30) })).toMatchObject({ level: 'ok' });
   });
@@ -227,13 +241,13 @@ describe('flows (stage chains)', () => {
 
   it('shows a hold as 已暂停 on its stage, never as a fault', () => {
     const paused = withSignals('mail-hero', [signal('force_send_paused', 'warning')]);
-    const mail = flow('mail-to-task', { statuses: { 'mail-hero': paused, todofy: status('todofy'), watch: status('watch'), newsletter: status('newsletter'), 'codex-gateway': status('codex-gateway'), fleet: status('fleet'), 'notion-publish': status('notion-publish'), mailsort: status('mailsort'), recall: status('recall'), brief: status('brief'), tasks: status('tasks'), 'personal-mcp': status('personal-mcp'), 'model-router': status('model-router') } });
+    const mail = flow('mail-to-task', { statuses: { 'mail-hero': paused, todofy: status('todofy'), watch: status('watch'), newsletter: status('newsletter'), 'codex-gateway': status('codex-gateway'), fleet: status('fleet'), 'notion-publish': status('notion-publish'), mailsort: status('mailsort'), recall: status('recall'), brief: status('brief'), tasks: status('tasks'), 'personal-mcp': status('personal-mcp'), 'model-router': status('model-router'), links: status('links') } });
     expect(stage(mail, 'deliver')).toMatchObject({ level: 'held', held: true, reason: 'force_send_paused' });
     expect(stage(mail, 'ingest')).toMatchObject({ level: 'ok', held: false });
     expect(mail.level).toBe('held');
     // Maintenance is claimed by the first stage of the app and stays critical.
     const maintenance = withSignals('mail-hero', [signal('maintenance_mode', 'critical')], 'down');
-    const down = flow('mail-to-task', { statuses: { 'mail-hero': maintenance, todofy: status('todofy'), watch: status('watch'), newsletter: status('newsletter'), 'codex-gateway': status('codex-gateway'), fleet: status('fleet'), 'notion-publish': status('notion-publish'), mailsort: status('mailsort'), recall: status('recall'), brief: status('brief'), tasks: status('tasks'), 'personal-mcp': status('personal-mcp'), 'model-router': status('model-router') } });
+    const down = flow('mail-to-task', { statuses: { 'mail-hero': maintenance, todofy: status('todofy'), watch: status('watch'), newsletter: status('newsletter'), 'codex-gateway': status('codex-gateway'), fleet: status('fleet'), 'notion-publish': status('notion-publish'), mailsort: status('mailsort'), recall: status('recall'), brief: status('brief'), tasks: status('tasks'), 'personal-mcp': status('personal-mcp'), 'model-router': status('model-router'), links: status('links') } });
     expect(stage(down, 'ingest')).toMatchObject({ level: 'critical', reason: 'maintenance_mode' });
     // Later stages of the app see the app down through its health.
     expect(stage(down, 'parse')).toMatchObject({ level: 'critical', reason: 'maintenance_mode' });
@@ -269,7 +283,7 @@ describe('flows (stage chains)', () => {
 
   it('names the worst stage as the first issue, not an earlier lesser one', () => {
     const mailHero = withSignals('mail-hero', [signal('capacity_70', 'warning', { percent: 72 }), signal('endpoint_blocked', 'critical')]);
-    const mail = flow('mail-to-task', { statuses: { 'mail-hero': mailHero, todofy: status('todofy'), watch: status('watch'), newsletter: status('newsletter'), 'codex-gateway': status('codex-gateway'), fleet: status('fleet'), 'notion-publish': status('notion-publish'), mailsort: status('mailsort'), recall: status('recall'), brief: status('brief'), tasks: status('tasks'), 'personal-mcp': status('personal-mcp'), 'model-router': status('model-router') } });
+    const mail = flow('mail-to-task', { statuses: { 'mail-hero': mailHero, todofy: status('todofy'), watch: status('watch'), newsletter: status('newsletter'), 'codex-gateway': status('codex-gateway'), fleet: status('fleet'), 'notion-publish': status('notion-publish'), mailsort: status('mailsort'), recall: status('recall'), brief: status('brief'), tasks: status('tasks'), 'personal-mcp': status('personal-mcp'), 'model-router': status('model-router'), links: status('links') } });
     expect(stage(mail, 'ingest').level).toBe('warning');
     expect(stage(mail, 'deliver').level).toBe('critical');
     expect(mail).toMatchObject({ level: 'critical', first_issue: { stage: 'deliver', code: 'endpoint_blocked' } });
@@ -277,7 +291,7 @@ describe('flows (stage chains)', () => {
 
   it('shows unmonitored stages as 未接入 and an unreachable app on every one of its stages', () => {
     const unreachable = failedStatus(status('todofy'), 2);
-    const f = flow('daily-newsletter', { statuses: { 'mail-hero': status('mail-hero'), todofy: unreachable, watch: status('watch'), newsletter: status('newsletter'), 'codex-gateway': status('codex-gateway'), fleet: status('fleet'), 'notion-publish': status('notion-publish'), mailsort: status('mailsort'), recall: status('recall'), brief: status('brief'), tasks: status('tasks'), 'personal-mcp': status('personal-mcp'), 'model-router': status('model-router') } });
+    const f = flow('daily-newsletter', { statuses: { 'mail-hero': status('mail-hero'), todofy: unreachable, watch: status('watch'), newsletter: status('newsletter'), 'codex-gateway': status('codex-gateway'), fleet: status('fleet'), 'notion-publish': status('notion-publish'), mailsort: status('mailsort'), recall: status('recall'), brief: status('brief'), tasks: status('tasks'), 'personal-mcp': status('personal-mcp'), 'model-router': status('model-router'), links: status('links') } });
     expect(f.stages.map((s) => s.level)).toEqual(['critical', 'ok', 'unmonitored']);
     expect(f).toMatchObject({ level: 'critical', partial: false, first_issue: { stage: 'report', code: 'unreachable' } });
   });
@@ -357,10 +371,10 @@ describe('the attention strip', () => {
     expect(attentionView(base({ neverRan: true, evaluation: input({ statuses: {}, probes: {}, scripts: null }) })).attention.items).toEqual([]);
   });
 
-  it('raises a failing links probe as one observed item on its tile, like the website (no flow repeats it)', () => {
+  it('raises a failing probe outside Access as one observed item on its tile, like the website (no flow repeats it)', () => {
     const redirected = probe({ ok: false, http_status: 302, error: 'http_status', consecutive_failures: 2 });
     const evaluation = input({ probes: { ...input().probes, links: redirected } });
-    const { attention, badges } = attentionView(base({ evaluation }));
+    const { attention, badges } = attentionView(base({ evaluation }), PROBED);
     expect(attention.level).toBe('critical');
     expect(attention.items).toEqual([
       { source: 'links', code: 'http_status', severity: 'critical', since: null, metrics: {}, target: { view: 'home', entry: 'links' }, observed: 'critical' },
@@ -368,14 +382,14 @@ describe('the attention strip', () => {
     expect(badges).toEqual({ home: 1, flows: 0, cloudflare: 0, ops: 0 });
     // A high error rate shows once, on the tile: the Worker row of the same entry and code is not repeated.
     const failing = mergeScripts(scripts(), [{ script: 'links', requests: 100, errors: 30, subrequests: 0, cpu_p50_us: 1, cpu_p99_us: 2, do_requests: null, do_errors: null }], false, NOW);
-    const errors = attentionView(base({ evaluation: input({ scripts: failing }) })).attention;
+    const errors = attentionView(base({ evaluation: input({ scripts: failing }) }), PROBED).attention;
     expect(errors.items.map((i) => [i.source, i.code, i.observed, i.target])).toEqual([['links', 'error_rate', 'critical', { view: 'home', entry: 'links' }]]);
     // Two causes, two items: when the probe failure is at least as severe it keeps the tile (a tie keeps the probe's
     // reason), and the Worker row on the Cloudflare view lists the error rate, as it does for any other entry.
     for (const errorCount of [30, 6]) {
       const both = mergeScripts(scripts(), [{ script: 'links', requests: 100, errors: errorCount, subrequests: 0, cpu_p50_us: 1, cpu_p99_us: 2, do_requests: null, do_errors: null }], false, NOW);
       const down = probe({ ok: false, http_status: 503, error: 'http_status', consecutive_failures: 2 });
-      const tie = attentionView(base({ evaluation: input({ probes: { ...input().probes, links: down }, scripts: both }) }));
+      const tie = attentionView(base({ evaluation: input({ probes: { ...input().probes, links: down }, scripts: both }) }), PROBED);
       expect(tie.attention.items.map((i) => [i.source, i.code, i.observed, i.target])).toEqual([
         ['links', 'http_status', 'critical', { view: 'home', entry: 'links' }],
         ['links', 'error_rate', errorCount === 30 ? 'critical' : 'warning', { view: 'cloudflare', script: 'links' }],
@@ -386,7 +400,7 @@ describe('the attention strip', () => {
 
   it('shows an app that failed once as ◆ 未知 above the warnings, and counts it in the badges (F1)', () => {
     const down = failedStatus(status('todofy', {}, NOW - 2 * HOUR), 1);
-    const evaluation = input({ statuses: { 'mail-hero': status('mail-hero'), todofy: down, watch: status('watch'), newsletter: status('newsletter'), 'codex-gateway': status('codex-gateway'), fleet: status('fleet'), 'notion-publish': status('notion-publish'), mailsort: status('mailsort'), recall: status('recall'), brief: status('brief'), tasks: status('tasks'), 'personal-mcp': status('personal-mcp'), 'model-router': status('model-router') } });
+    const evaluation = input({ statuses: { 'mail-hero': status('mail-hero'), todofy: down, watch: status('watch'), newsletter: status('newsletter'), 'codex-gateway': status('codex-gateway'), fleet: status('fleet'), 'notion-publish': status('notion-publish'), mailsort: status('mailsort'), recall: status('recall'), brief: status('brief'), tasks: status('tasks'), 'personal-mcp': status('personal-mcp'), 'model-router': status('model-router'), links: status('links') } });
     const gemini = item('mail-hero', 'backup_stale');
     const { attention, badges } = attentionView(base({ items: [gemini], statuses: evaluation.statuses, evaluation }));
     expect(attention.level).toBe('unknown');
@@ -398,7 +412,7 @@ describe('the attention strip', () => {
     expect(attention.items[0]?.target).toEqual({ view: 'home', entry: 'todofy' });
     expect(badges).toEqual({ home: 1, flows: 0, cloudflare: 0, ops: 1 });
     // Two failures: the digest's app_unreachable explains it; no observed duplicate.
-    const twice = input({ statuses: { 'mail-hero': status('mail-hero'), todofy: failedStatus(status('todofy'), 2), watch: status('watch'), newsletter: status('newsletter'), 'codex-gateway': status('codex-gateway'), fleet: status('fleet'), 'notion-publish': status('notion-publish'), mailsort: status('mailsort'), recall: status('recall'), brief: status('brief'), tasks: status('tasks'), 'personal-mcp': status('personal-mcp'), 'model-router': status('model-router') } });
+    const twice = input({ statuses: { 'mail-hero': status('mail-hero'), todofy: failedStatus(status('todofy'), 2), watch: status('watch'), newsletter: status('newsletter'), 'codex-gateway': status('codex-gateway'), fleet: status('fleet'), 'notion-publish': status('notion-publish'), mailsort: status('mailsort'), recall: status('recall'), brief: status('brief'), tasks: status('tasks'), 'personal-mcp': status('personal-mcp'), 'model-router': status('model-router'), links: status('links') } });
     const digest = item('todofy', 'app_unreachable', 'critical');
     const critical = attentionView(base({ items: [digest], statuses: twice.statuses, evaluation: twice })).attention;
     expect(critical.level).toBe('critical');

@@ -96,12 +96,11 @@ and the page says so.
 Hero ≤ 6 and Todofy ≤ 5 indexed D1 statements each, contracts/ops-v1); at most 48 GraphQL queries; a
 few `setGuard` and canary calls, at most 6 `createInboxTask` calls a day; one canary a day (one synthetic message stored in Mail
 Hero's R2 and D1 and normally one Gemini call in Todofy, up to 3 when a transient failure is retried),
-up to 3 more when the owner runs it by hand; two public GETs per tick, plus owner refreshes (each probe
-≥ 10 min apart, so at most 144 a day each): the website's `build-info.json` (a static asset, outside
-Cloudflare's allowances) and the links app's `/robots.txt`, one request of the links Worker (about 48 a day,
-under 0.2 % of the daily requests even at the refresh cap) and no D1 query (`robots.txt` is a constant answered
-before any D1 read). Each tick writes about 10–40 SQLite rows in `HomeState` (v2 adds three: `cf_scripts` and
-one `probe:<entry>` per probe). With durable reminder controls, the ordinary workerd fixtures read
+up to 3 more when the owner runs it by hand; one public GET per tick, plus owner refreshes (≥ 10 min apart, so at
+most 144 a day): the website's `build-info.json` (a static asset, outside Cloudflare's allowances). The links app
+answers through its Ops binding since its daily backup (one D1 row and one R2 read of its backup state per
+`status()`). Each tick writes about 10–40 SQLite rows in `HomeState` (v2 adds two: `cf_scripts` and one
+`probe:<entry>` per probe). With durable reminder controls, the ordinary workerd fixtures read
 36–37 rows per rebuilt view (40-row regression budget). A 101-item synthetic warning case reads 110–111;
 retained-decision stress cases use a separate 320-row test budget. These are measured examples and test
 budgets, not an account-wide or universal per-view limit; see [`design-v2.md`](design-v2.md) §5. Each owner page load

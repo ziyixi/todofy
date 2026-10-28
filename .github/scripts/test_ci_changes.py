@@ -450,9 +450,9 @@ class Classify(unittest.TestCase):
         finally:
             ci_changes.CHECK_ONLY = saved
 
-    def test_links_checks_and_deploys_only_itself(self):
-        """The links app uses no contract (NO_CONTRACTS): its changes run only its checks and, on main, its deploy
-        (L2)."""
+    def test_links_checks_and_deploys_only_itself_plus_contracts(self):
+        """The links app answers ops-v1 with its backup (Contracts runs that test): its changes run its checks and
+        Contracts and, on main, its deploy (L2); the dashboard is neither checked nor deployed."""
         for path in (
             "links/worker/src/resolve.ts",
             "links/web/src/view.ts",
@@ -464,8 +464,8 @@ class Classify(unittest.TestCase):
             "links/README.md",
         ):
             with self.subTest(path=path):
-                self.assertEqual(push([path]), expect(F, F, F, F, F, **LINKS))
-                self.assertEqual(push([path], ref=BRANCH), expect(F, F, F, F, F, **LINKS))
+                self.assertEqual(push([path]), expect(F, F, T, F, F, **LINKS))
+                self.assertEqual(push([path], ref=BRANCH), expect(F, F, T, F, F, **LINKS))
 
     def test_watch_checks_and_deploys_only_itself_plus_contracts(self):
         """The watch app answers ops-v1 (Contracts runs that test): its changes run its
@@ -599,7 +599,7 @@ class Classify(unittest.TestCase):
         for path in ("infrastructure.md", "tools/other/x.py", "mail-hero/infra/x.tf"):
             with self.subTest(path=path):
                 self.assertFalse(push([path])["infra"])
-        self.assertEqual(push(["infra/storage.tf", "links/wrangler.toml"]), expect(F, F, F, F, F, **LINKS, infra=T))
+        self.assertEqual(push(["infra/storage.tf", "links/wrangler.toml"]), expect(F, F, T, F, F, **LINKS, infra=T))
 
     def test_proto_checks_its_users_runs_contracts_and_deploys_only_the_bundles_a_path_reaches(self):
         """proto/ re-checks every PROTO_USERS app and runs Proto checks and Contracts (the contracts' tests check the
@@ -1427,6 +1427,7 @@ class DeployConditions(unittest.TestCase):
         ("codex-gateway-deploy", "fleet-deploy"),
         ("dashboard-deploy", "todofy-deploy"),
         ("dashboard-deploy", "mail-hero-deploy"),
+        ("dashboard-deploy", "links-deploy"),
         ("dashboard-deploy", "watch-deploy"),
         ("dashboard-deploy", "fleet-deploy"),
         ("dashboard-deploy", "mailsort-deploy"),
@@ -1620,7 +1621,7 @@ class DeployConditions(unittest.TestCase):
         # Todofy too: a failed Todofy deploy leaves Tasks deploy skipped, which alone would let Watch ship.
         self.assertLessEqual({"todofy-deploy", "tasks-deploy"}, set(self.needs(self.jobs()["watch-deploy"])))
         block = self.jobs()["dashboard-deploy"]
-        self.assertLessEqual({"todofy-deploy", "mail-hero-deploy", "watch-deploy", "fleet-deploy", "mailsort-deploy", "recall-deploy", "brief-deploy"},
+        self.assertLessEqual({"todofy-deploy", "mail-hero-deploy", "links-deploy", "watch-deploy", "fleet-deploy", "mailsort-deploy", "recall-deploy", "brief-deploy"},
                              set(self.needs(block)))
         self.assertIn("group: dashboard-production", block)
 

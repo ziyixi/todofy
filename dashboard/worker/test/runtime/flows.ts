@@ -31,23 +31,20 @@ export const NOW = Date.parse('2026-10-01T12:00:00Z');
 /** The registry's public_http probes by entry (the only public GETs the Worker makes; v2.test.ts keeps them in step). */
 export const PROBES = {
   website: 'https://www.ziyixi.science/build-info.json',
-  links: 'https://s.ziyixi.science/robots.txt',
 } as const;
 export const WEBSITE_PROBE = PROBES.website;
 
-/** What each app's own Worker answers to its probe (synthetic bodies; only the status and the media type count). */
-export function healthyProbe(entry: keyof typeof PROBES): Response {
-  switch (entry) {
-    case 'website':
-      return Response.json({ build: 'synthetic' }, { headers: { 'cache-control': 'no-store' } });
-    case 'links':
-      return new Response('User-agent: *\nDisallow: /\n', { headers: { 'content-type': 'text/plain; charset=utf-8' } });
-  }
+/**
+ * What the website's own Worker answers to its probe, the one probe since the links app answers ops-v1 (a synthetic
+ * body; only the status and the media type count).
+ */
+export function healthyProbe(): Response {
+  return Response.json({ build: 'synthetic' }, { headers: { 'cache-control': 'no-store' } });
 }
 
 /** Every probe of `harness` answers as its healthy app would. */
 export function answerProbes(harness: FlowHarness): void {
-  for (const entry of Object.keys(PROBES) as (keyof typeof PROBES)[]) harness.routes.set(PROBES[entry], () => healthyProbe(entry));
+  for (const url of Object.values(PROBES)) harness.routes.set(url, () => healthyProbe());
 }
 
 /** The owner API's paths (DashboardUiService and the transport's CSRF route). */
@@ -177,12 +174,12 @@ export async function startFlows(
       return fake ?? new Response('no outbound fetch expected', { status: 599 });
     },
   });
-  const pending: Record<StubApp, { app: StubApp; method: string; args: unknown[] }[]> = { 'mail-hero': [], todofy: [], watch: [], fleet: [], newsletter: [], 'codex-gateway': [], 'notion-publish': [], mailsort: [], recall: [], brief: [], tasks: [], 'personal-mcp': [], 'model-router': [] };
+  const pending: Record<StubApp, { app: StubApp; method: string; args: unknown[] }[]> = { 'mail-hero': [], todofy: [], watch: [], fleet: [], newsletter: [], 'codex-gateway': [], 'notion-publish': [], mailsort: [], recall: [], brief: [], tasks: [], 'personal-mcp': [], 'model-router': [], links: [] };
   const drain = async (app: StubApp) => {
     pending[app].push(...(await harness.calls(app)));
     return pending[app].splice(0);
   };
-  const scenarios: Record<StubApp, Record<string, StubAnswer>> = { 'mail-hero': {}, todofy: {}, watch: {}, fleet: {}, newsletter: {}, 'codex-gateway': {}, 'notion-publish': {}, mailsort: {}, recall: {}, brief: {}, tasks: {}, 'personal-mcp': {}, 'model-router': {} };
+  const scenarios: Record<StubApp, Record<string, StubAnswer>> = { 'mail-hero': {}, todofy: {}, watch: {}, fleet: {}, newsletter: {}, 'codex-gateway': {}, 'notion-publish': {}, mailsort: {}, recall: {}, brief: {}, tasks: {}, 'personal-mcp': {}, 'model-router': {}, links: {} };
   const flows: FlowHarness = {
     ...harness,
     analytics,
@@ -231,7 +228,7 @@ export async function startFlows(
           items: [...digestItems, ...ops.attention.info].map(({ source, code, severity }) => ({ source, code, severity })),
         },
         observed: ops.attention.items.flatMap((item) => (item.observed === undefined ? [] : [{ source: item.source, code: item.code, level: item.observed }])),
-        apps: { 'mail-hero': app('mail-hero'), todofy: app('todofy'), watch: app('watch'), fleet: app('fleet'), newsletter: app('newsletter'), 'codex-gateway': app('codex-gateway'), 'notion-publish': app('notion-publish'), mailsort: app('mailsort'), recall: app('recall'), brief: app('brief'), tasks: app('tasks'), 'personal-mcp': app('personal-mcp'), 'model-router': app('model-router') },
+        apps: { 'mail-hero': app('mail-hero'), todofy: app('todofy'), watch: app('watch'), fleet: app('fleet'), newsletter: app('newsletter'), 'codex-gateway': app('codex-gateway'), 'notion-publish': app('notion-publish'), mailsort: app('mailsort'), recall: app('recall'), brief: app('brief'), tasks: app('tasks'), 'personal-mcp': app('personal-mcp'), 'model-router': app('model-router'), links: app('links') },
         usage: cloudflare.usage,
         guard: ops.guard,
         canary: ops.canary,
