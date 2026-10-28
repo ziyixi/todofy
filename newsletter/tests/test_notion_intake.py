@@ -8,12 +8,14 @@ import json
 import types
 
 import pytest
+import ziyixi_protos.newsletter.editorial_pb2 as editorial_pb2
 
 import newsletter.contracts as contracts
 import newsletter.notion_content as newsletter_notion_content
 import newsletter.notion_intake as notion_intake
 import newsletter.notion_journal as notion_journal
 import newsletter.store as newsletter_store
+import newsletter.workflow.sources as sources
 import tests.support.notion_content as notion_content
 
 BOOTSTRAP = "2026-09-07T12:00:00+00:00"
@@ -691,3 +693,166 @@ def test_candidate_import_keeps_legacy_projection_receipts(
     add_artifact(rig, [notion_content.candidate()])
     rig.intake.scan()
     assert rig.journal.rows("SELECT * FROM packets") == before
+
+
+def researcher_seed(**changes):
+    """Return a researcher lead exactly as the pool node normalizes it."""
+    values = {
+        "title": "Synthetic seismology lead",
+        "url": "https://journal.example.org/articles/synthetic-1",
+        "doi": "10.1234/synthetic-seismology",
+        "direction": "02-science",
+        "venue": "Synthetic Geophysics Journal",
+        "version": "",
+        "names": ["Synthetic Geophysics Journal", "Synthetic Preprints"],
+        "provenance": "rss_metadata",
+        **changes,
+    }
+    seed = sources.metadata_candidate(
+        values["title"],
+        values["url"],
+        values["doi"],
+        "2026-09-06",
+        values["provenance"],
+        direction=values["direction"],
+        version=values["version"],
+        venue=values["venue"],
+        source_basis="研究员订阅源："
+        + "、".join(values["names"])
+        + "（仅元数据，未打开原文）",
+    )
+    return contracts.to_dict(
+        contracts.parse_message(seed, editorial_pb2.Candidate)
+    )
+
+
+def test_unopened_researcher_seed_projects_attribution_and_lead_scope(rig):
+    seed = researcher_seed()
+    add_artifact(rig, [seed])
+    rig.intake.scan()
+    (material,) = entities(rig)
+    assert prop_text(material, "venue") == "Synthetic Geophysics Journal"
+    assert properties(material)["access_scope"] == {
+        "select": {"name": "仅线索"}
+    }
+    assert properties(material)["category"] == {"select": {"name": "科学"}}
+    assert properties(material)["direction"] == {
+        "multi_select": [{"name": "02-science"}]
+    }
+    assert properties(material)["progress"] == {"select": {"name": "候选"}}
+    text = notion_content.block_text(
+        json.loads(rig.journal.versions(material["key"])[-1]["blocks"])
+    )
+    assert "来源选择依据" in text
+    assert (
+        "研究员订阅源：Synthetic Geophysics Journal、Synthetic Preprints"
+        "（仅元数据，未打开原文）"
+    ) in text
+    assert rig.journal.summary()["import_errors"] == []
+    # Intake only queues local work: the drain's Notion in-flight and unknown
+    # counts (creating/appending/unknown) stay zero.
+    for table, column in (
+        ("notion_entities", "create_state"),
+        ("notion_versions", "state"),
+    ):
+        assert (
+            rig.store.db.execute(
+                f"SELECT COUNT(*) FROM {table} WHERE {column} IN "
+                "('creating','appending','unknown')"
+            ).fetchone()[0]
+            == 0
+        )
+
+
+def test_raw_researcher_feed_artifact_is_never_projected(rig):
+    seed = researcher_seed()
+    body = {
+        "candidates": [seed],
+        "diagnostics": ["synthetic-feed:ok"],
+        "notes": {
+            seed["id"]: {
+                "source": "Synthetic Geophysics Journal",
+                "excerpt_untrusted": "UNTRUSTED FEED EXCERPT",
+                "signals": {"independent_sources": 1},
+            }
+        },
+    }
+    add_run(rig)
+    rig.journal.execute(
+        "INSERT INTO workflow_artifacts VALUES(?,?,?,?,?,?,?)",
+        (
+            "raw-researcher-feed",
+            "run-one",
+            "feed",
+            "",
+            contracts.canonical_json(body),
+            contracts.content_hash(body),
+            CURRENT,
+        ),
+    )
+    assert rig.intake.scan() == 1
+    assert entities(rig) == []
+    assert rig.journal.rows("SELECT * FROM notion_candidates") == []
+    assert rig.journal.summary()["import_errors"] == []
+
+
+ARXIV_PAPER = {
+    "url": "https://arxiv.org/abs/2609.01234v2",
+    "doi": "10.48550/arxiv.2609.01234",
+    "version": "v2",
+    "event_key": "",
+}
+
+
+@pytest.mark.parametrize("researcher_first", [False, True])
+def test_arxiv_seed_shares_the_discovered_paper_material(rig, researcher_first):
+    discovered = notion_content.candidate(id="discovered-paper", **ARXIV_PAPER)
+    seed = researcher_seed(
+        url="https://arxiv.org/abs/2609.01234",
+        doi="",
+        version="v2",
+        venue="arXiv",
+        names=["arXiv", "Hugging Face Daily Papers"],
+        direction="08-llm-architectures",
+    )
+    order = [seed, discovered]
+    if not researcher_first:
+        order.reverse()
+    for run_id, value in zip(("run-one", "run-two"), order, strict=True):
+        add_artifact(rig, [value], run_id=run_id, artifact_id="pool-" + run_id)
+        rig.intake.scan()
+    (material,) = entities(rig)
+    keys = {
+        row["entity_key"]
+        for row in rig.journal.rows("SELECT * FROM notion_candidates")
+    }
+    assert keys == {material["key"]}
+    assert len(rig.journal.rows("SELECT * FROM notion_candidates")) == 2
+    assert rig.journal.summary()["import_errors"] == []
+    directions = {
+        item["name"]
+        for item in properties(material)["direction"]["multi_select"]
+    }
+    assert directions == {"01-ai-ml", "08-llm-architectures"}
+
+
+def test_a_journal_doi_on_an_arxiv_seed_would_quarantine_it(rig):
+    # Why arXiv leads never carry a DOI: a disjoint DOI is an identity
+    # conflict, and the lead would never reach Notion.
+    discovered = notion_content.candidate(id="discovered-paper", **ARXIV_PAPER)
+    add_artifact(rig, [discovered], artifact_id="pool-one")
+    rig.intake.scan()
+    seed = researcher_seed(
+        url="https://arxiv.org/abs/2609.01234", doi="10.1234/journal-version"
+    )
+    add_artifact(rig, [seed], run_id="run-two", artifact_id="pool-two")
+    rig.intake.scan()
+    assert len(entities(rig)) == 1
+    assert (
+        rig.journal.rows(
+            "SELECT * FROM notion_candidates WHERE candidate_id=?",
+            (seed["id"],),
+        )
+        == []
+    )
+    assert rig.journal.summary()["import_errors"]
