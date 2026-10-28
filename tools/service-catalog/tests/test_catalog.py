@@ -78,8 +78,11 @@ class CatalogTests(unittest.TestCase):
         # reminder (2026-10-21).
         renamed = {"todofy": "邮件摘要与每日报告"}
         existing = [entry | {"description": renamed.get(entry["id"], entry["description"])} for entry in existing]
-        # The links app answers ops-v1 with its daily backup's age and failures instead of a public probe (2026-10-28).
-        monitored = {"links": {"status": {"type": "ops_v1", "binding": "LINKS", "guard": False}, "tile_metric": None,
+        # The links app answers ops-v1 with its daily backup's age and failures (2026-10-28), and keeps its public probe
+        # beside it.
+        probe = {key: value for key, value in next(e for e in existing if e["id"] == "links")["status"].items()
+                 if key not in {"type", "enabled"}}
+        monitored = {"links": {"status": {"type": "ops_v1", "binding": "LINKS", "guard": False, "probe": probe},
                                "app_only_signals": ["backup_stale", "backup_failed"]},
                      # Watch's own daily backup adds its two signals to the app-only list (2026-10-28).
                      "watch": {"app_only_signals": ["maintenance_mode", "backup_stale", "backup_failed"]}}
@@ -213,6 +216,28 @@ class CatalogTests(unittest.TestCase):
                          manifest.replace('path = "/health"', 'path = "https://elsewhere.test/health"')]:
             with self.assertRaises(catalog.CatalogError):
                 catalog.load_catalog(self.fixture(mutation))
+
+    def test_a_probe_beside_ops_is_typed_and_same_origin(self):
+        manifest = DEMO.replace('type = "none"', 'type = "ops_v1"\nbinding = "DEMO"\nguard = false\n'
+                                '[entries.status.probe]\npath = "/robots.txt"\nexpect = [200]\ncontent_type = "text/plain"')
+        bindings = '[[services]]\nbinding = "DEMO"\nservice = "demo"\nentrypoint = "Ops"\n'
+        original = catalog.read_toml
+
+        def load(text):
+            root = self.fixture(text)
+            # Home's binding of the Ops entrypoint, outside the configs the catalog discovers (as for the VPS monitor).
+            (root / 'bindings.toml').write_text(bindings)
+            read = lambda path: original(root / 'bindings.toml' if path == root / 'dashboard/wrangler.toml' else path)
+            with mock.patch.object(catalog, 'read_toml', read):
+                return catalog.load_catalog(root)
+
+        self.assertEqual(load(manifest).entries[0]['status']['probe'],
+                         {'url': 'https://demo.ziyixi.science/robots.txt', 'expect': [200], 'content_type': 'text/plain'})
+        for mutation in [manifest.replace('expect = [200]', 'expect = [302]'),
+                         manifest + 'enabled = true\n',
+                         manifest.replace('path = "/robots.txt"', 'path = "https://elsewhere.test/robots.txt"')]:
+            with self.subTest(mutation=mutation), self.assertRaises(catalog.CatalogError):
+                load(mutation)
 
     def test_an_audience_requires_catalog_access_application(self):
         root = self.fixture(config=CONFIG + 'ACCESS_AUDIENCE = "synthetic-audience"\n')

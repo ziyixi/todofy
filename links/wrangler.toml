@@ -16,8 +16,8 @@
 #
 # Run wrangler from worker/ (the pinned wrangler lives in worker/node_modules) with --config ../wrangler.toml.
 # Local dev: local bindings only (D1 commands always --local, never --remote), local values in links/.dev.vars (see
-# .dev.vars.example). No Durable Object, no KV: a redirect is one D1 read. The one cron trigger runs the daily backup
-# into the private bucket links-backups (docs/backup.md).
+# .dev.vars.example). No KV and no cron trigger: a redirect is one D1 read, and the Alarm of one Durable Object runs the
+# daily backup into the private bucket links-backups (docs/backup.md).
 name = "links"
 account_id = "f57937bd1d93bf59e737b6d8445fb7a3"
 main = "worker/src/index.ts"
@@ -65,10 +65,19 @@ migrations_dir = "migrations"
 binding = "BACKUPS"
 bucket_name = "links-backups"
 
-# Every five minutes a tick reads the backup's state.json and, while a job is due or running, runs one bounded step
-# of it (a job starts daily at 05:25 UTC). This account's fifth cron trigger, Workers Free's limit.
+# The backup's clock (worker/src/backup-alarm.ts): one object, backup-v1, whose Alarm runs one bounded step while a job
+# runs (five minutes apart) and otherwise sleeps until the next start (05:25 UTC daily). It stores nothing but its Alarm.
+[[durable_objects.bindings]]
+name = "BACKUP_ALARM"
+class_name = "LinksBackup"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["LinksBackup"]
+
+# No cron trigger. The empty list removes the five-minute one the backup had (a config without it would leave it).
 [triggers]
-crons = ["*/5 * * * *"]
+crons = []
 
 [vars]
 # The links host: the only origin a mutation may come from (CSRF), and the one host no target may name.

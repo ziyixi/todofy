@@ -1,7 +1,7 @@
 /**
- * The `public_http` status source (docs/design-v2.md §3): one GET from HomeState to a public, not
- * Access-protected URL of the registry, at most once per tick (and per PROBE_MIN_INTERVAL_SECONDS for
- * owner refreshes). Only the status code, the media type of the Content-Type header and the latency are
+ * The probe of a `public_http` status source or of an `ops_v1` one's `probe` (docs/design-v2.md §3): one GET from
+ * HomeState to a public, not Access-protected URL of the registry, at most once per tick (and per
+ * PROBE_MIN_INTERVAL_SECONDS for owner refreshes). Only the status code, the media type of the Content-Type header and the latency are
  * looked at: `redirect: 'manual'` (a redirect is an answer, never followed), no credentials or cookies,
  * and the body is cancelled unread.
  */
@@ -16,6 +16,9 @@ export interface ProbeTarget {
   /** Lowercase media type without parameters; absent: any (or no) Content-Type passes. */
   readonly content_type?: string;
 }
+
+/** The reasons a failed probe gives (ProbeDoc.error), which only a passing probe resolves. */
+export const PROBE_ERRORS: readonly string[] = ['timeout', 'network_error', 'http_status', 'content_type'] satisfies NonNullable<ProbeDoc['error']>[];
 
 export interface ProbeResult {
   readonly ok: boolean;

@@ -21,14 +21,21 @@ or a column that `BACKUP_TABLES` does not name.
 
 ### Schedule and steps
 
-The Worker's one cron trigger (`*/5 * * * *`, `wrangler.toml`) runs the backup (`worker/src/backup-runner.ts`). A
-tick reads the bucket's `state.json`; when no job is due or running it stops there. A job starts every day at
-05:25 UTC, and at the first tick when the bucket holds no `state.json` yet: right after the release that bound the
-bucket, or after the state was lost. It needs no secret, credential or binding to another app; "Infra apply"
-created the bucket (`infra/storage.tf`).
+The Alarm of one SQLite Durable Object, `LinksBackup` (binding `BACKUP_ALARM`, one object `backup-v1`,
+`worker/src/backup-alarm.ts`), runs the backup (`worker/src/backup-runner.ts`); there is no cron trigger. Each run
+reads the bucket's `state.json`, takes the step that is due and sets the next Alarm: five minutes later while a job
+runs, else the job's next start. A job starts every day at 05:25 UTC, and at once when the bucket holds no
+`state.json` yet: right after the release that bound the bucket, or after the state was lost. The object stores
+nothing but its Alarm.
 
-Each tick of a job is one bounded step, within Workers Free's 10 ms of CPU (`test/runtime/cpu.test.ts` measures each
-kind of step, about 1 to 4 ms) and well under 50 D1 statements:
+Every run sets the next Alarm, so once armed the backup depends on no other app. `arm()` sets the first one and brings
+back a lost one: Home's tick calls it through `Ops.status()`, which brings the Alarm forward to now while there is no
+backup state, and so does the owner's first request under `/_/` in each isolate; a short link never does. It needs no
+secret, credential or binding to another app; "Infra apply" created the bucket (`infra/storage.tf`). Each run logs one
+line: the step, the next run's time and an error's name.
+
+Each run of a job is one bounded step, well under 50 D1 statements and within 10 ms of CPU, although an Alarm may use
+30 s (`test/runtime/cpu.test.ts` measures each kind of step, about 1 to 4 ms):
 
 1. The plan, one batch: the newest applied migration and the change mark (each table's row count and the newest
    `links.update_time`).
@@ -39,11 +46,12 @@ kind of step, about 1 to 4 ms) and well under 50 D1 statements:
 3. The last step: the change mark again, a check that every part in the bucket has the size and SHA-256 the job
    recorded, then `manifest.json` and `latest.json`, then retention.
 
-Three failed steps in a row fail the job; it starts again an hour later, or at the next daily slot after the third
-failed job in a row. A backup of a few hundred links and their revisions takes a handful of ticks, under half an
-hour. At the app's caps (1,000 links with 20 kept revisions each and every field at its longest, some 70-80 MB of
-rows) a job needs about 600 steps, about two days at one tick every five minutes; the next starts at the following
-slot, so `backup_stale` may then show between two complete backups.
+A failed step runs again five minutes later, and so does a run that could not read `state.json`. Three failed steps
+in a row fail the job; it starts again an hour later, or at the next daily slot after the third failed job in a row.
+A backup of a few hundred links and their revisions takes a handful of steps, under half an hour. At the app's caps
+(1,000 links with 20 kept revisions each and every field at its longest, some 70-80 MB of rows) a job needs about 600
+steps, about two days at one step every five minutes; the next starts at the following slot, so `backup_stale` may
+then show between two complete backups.
 
 ### Layout
 
@@ -72,7 +80,8 @@ the code, not an R2 lifecycle rule: a stopped job never ages out the last good c
 The 短链接 tile is the app's Ops answer (`worker/src/ops.ts`, contracts/ops-v1): `backup_age_seconds` and
 `last_backup_at` once a backup is complete, `backup_stale` (critical: no complete backup for 3 days, or 3 days after
 the first step while there is none) and `backup_failed` (warning: the last job failed, or the bucket did not answer
-for `state.json`).
+for `state.json`). Beside it Home probes `/robots.txt` anonymously, so a broken Custom Domain or route shows on the
+same tile.
 
 Owner edits continue while a job runs, so the copy is a fuzzy snapshot: an edit made meanwhile may or may not be in
 it. The restore tool warns when the manifest's two change marks differ. The bucket holds every link, private ones
@@ -156,7 +165,8 @@ Keep the old database until the restored one has run for a while, then delete it
   it exists, and the launcher's 导出 file is another copy of the live links.
 - `request_log` holds a day of request IDs at most: a restored one is answered again only within a day of its
   first request, and the next write purges the older ones. A request repeated after that applies anew.
-- The backup's own `state.json` is not restored: a new bucket, or a lost state, starts a new job at the first tick.
+- The backup's own `state.json` is not restored: a new bucket, or a lost state, starts a new job at Home's next
+  status call (or the owner's next visit) that arms the Alarm.
 - The Worker, its secrets, the Custom Domain and the Access application are not data: `infra/` and `Links deploy`
   recreate them ([README](../README.md#deploy)). In another account, pass that account's bucket with
   `download --bucket <name>` and restore into its own new database the same way.
@@ -165,6 +175,6 @@ Keep the old database until the restored one has run for a while, then delete it
 
 The same commands work on a local copy: pass `--local --persist-to "$PRIV/d1"` in place of `--remote` to
 `migrations apply`, `execute` and `verify`, and any new UUID as the database id; `download --local --persist-to <dir>`
-reads a local bucket. `worker/test/runtime/backup.test.ts` runs the backup from the cron tick on real D1 and R2,
+reads a local bucket. `worker/test/runtime/backup.test.ts` runs the backup from the object's Alarm on real D1 and R2,
 downloads it with wrangler, restores it into a new local D1, verifies it and compares every table of the restored
 database with the original row for row; `node --test tools/test/*.test.mjs` covers the tool on synthetic data.

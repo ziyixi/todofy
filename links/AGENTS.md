@@ -21,15 +21,18 @@ The root [`AGENTS.md`](../AGENTS.md) applies here too. Rules of the links app:
   path segment by segment; refuse dot segments, encoded separators and control characters; the result must keep the
   stored target's origin (`src/targets.ts`). No query passthrough.
 - **Never log keys, paths or targets.** Invocation logs and traces are off in `wrangler.toml`; the Worker logs only
-  `{request_id, status, reason}` for a refused owner request and the backup's prefixes, counts and error names. Tests and fixtures use synthetic links only; never commit
+  `{request_id, status, reason}` for a refused owner request and the backup's step, next time, prefixes, counts and
+  error names. Tests and fixtures use synthetic links only; never commit
   the owner's real links, an export file or a screenshot of real data.
 - **Workers Free.** 10 ms of CPU per request (the owner API is bounded by `src/limits.ts`: LINKS_MAX, a page of 100 or
   250, an import of 100 lines), and D1 writes stay minimal (`test/runtime/budget.test.ts`: two rows per create or edit).
-  No KV, no Durable Object; the one cron trigger is the daily backup's.
+  No KV and no cron trigger (the account's five are taken); one SQLite Durable Object, `LinksBackup`, whose Alarm runs
+  the daily backup. A redirect never reaches it: only Ops.status() and the owner's half arm it.
 - **Backups** ([`docs/backup.md`](docs/backup.md)): every table and column of `migrations/` goes into the daily backup
   (`worker/src/backup.ts` `BACKUP_TABLES`; `test/runtime/backup.test.ts` fails on a table or column it lacks) and
-  back through `tools/backup-restore.ts` (`RESTORE_ORDER`). A cron tick runs one bounded step (10 ms of CPU, under 50
-  D1 statements; `cpu.test.ts` measures each); a cursor moves only after its part is stored; the manifest is written
+  back through `tools/backup-restore.ts` (`RESTORE_ORDER`). Each Alarm runs one bounded step (under 50 D1 statements,
+  and within 10 ms of CPU although an Alarm may use 30 s; `cpu.test.ts` measures each) and sets the next one
+  (`worker/src/backup-alarm.ts`); a cursor moves only after its part is stored; the manifest is written
   last and a complete backup is never rewritten. Retention stays in the code (the newest 30), never an R2 lifecycle
   rule on `links-backups`. Home reads the backup's facts only through the `Ops` entrypoint (its `LINKS` binding).
 - **The API is `links.ui.v1`** (`proto/links/ui/v1`, AIP-style, through the shared transcoder and client of

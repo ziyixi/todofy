@@ -6,33 +6,44 @@
  */
 import type { CanaryDef, EntryGroup, Flow, FlowGroup, RegistryEntry, RegistryResource, RegistryWorker, Stage } from './api-types.ts';
 
+/**
+ * One GET per tick from the Durable Object to a public (not Access-protected) URL: status code, Content-Type header and
+ * latency only, `redirect: 'manual'`, body cancelled unread. A `public_http` status is one; an `ops_v1` status may add
+ * one (`probe`), so a tile also shows what only an anonymous request sees: the app's Custom Domain and route.
+ */
+export interface PublicProbe {
+  readonly url: string;
+  readonly expect: readonly number[];
+  /**
+   * The media type (lowercase, without parameters) the answer must carry, e.g. `text/plain`: proves that the app's own
+   * Worker answered and not an error or login page of the edge. A mismatch is `content_type`.
+   */
+  readonly content_type?: string;
+  /**
+   * The entry's `url` is behind Access but the probe path is not (a bypass application or a path-scoped one). Requires
+   * `content_type` and 2xx-only `expect`, so Access's login redirect can never pass as healthy;
+   * `.github/scripts/test_infra_config.py` checks the path against infra/access.tf.
+   */
+  readonly outside_access?: true;
+  /** Also judge the error rate of the entry's Workers today (fresh GraphQL only), as an `analytics` stage does. */
+  readonly error_rate?: true;
+}
+
 /** Where an entry's own health comes from (docs/design-v2.md §3). Its `type` is RegistryEntry.status_type. */
 export type StatusSource =
-  /** contracts/ops-v1 `Ops.status()` over the named service binding; guard: receives setGuard. */
-  | { readonly type: 'ops_v1'; readonly binding: 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'CODEX_GATEWAY' | 'NOTION_PUBLISH' | 'MAILSORT' | 'RECALL' | 'BRIEF' | 'TASKS' | 'PERSONAL_MCP' | 'MODEL_ROUTER' | 'LINKS'; readonly guard: boolean; readonly provider?: 'fleet' }
   /**
-   * One GET per tick from the Durable Object to a public (not Access-protected) URL: status code, Content-Type
-   * header and latency only, `redirect: 'manual'`, body cancelled unread. `enabled: false` shows 未接入 instead.
+   * contracts/ops-v1 `Ops.status()` over the named service binding; guard: receives setGuard. With `probe`, the tile is
+   * the worse of the app's answer and the probe's.
    */
   | {
-      readonly type: 'public_http';
-      readonly url: string;
-      readonly expect: readonly number[];
-      /**
-       * The media type (lowercase, without parameters) the answer must carry, e.g. `text/plain`: proves that the
-       * app's own Worker answered and not an error or login page of the edge. A mismatch is `content_type`.
-       */
-      readonly content_type?: string;
-      /**
-       * The entry's `url` is behind Access but the probe path is not (a bypass application or a path-scoped one).
-       * Requires `content_type` and 2xx-only `expect`, so Access's login redirect can never pass as healthy;
-       * `.github/scripts/test_infra_config.py` checks the path against infra/access.tf.
-       */
-      readonly outside_access?: true;
-      /** Also judge the error rate of the entry's Workers today (fresh GraphQL only), as an `analytics` stage does. */
-      readonly error_rate?: true;
-      readonly enabled: boolean;
+      readonly type: 'ops_v1';
+      readonly binding: 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'CODEX_GATEWAY' | 'NOTION_PUBLISH' | 'MAILSORT' | 'RECALL' | 'BRIEF' | 'TASKS' | 'PERSONAL_MCP' | 'MODEL_ROUTER' | 'LINKS';
+      readonly guard: boolean;
+      readonly provider?: 'fleet';
+      readonly probe?: PublicProbe;
     }
+  /** The probe alone; `enabled: false` shows 未接入 instead. */
+  | ({ readonly type: 'public_http'; readonly enabled: boolean } & PublicProbe)
   /** From the tick's GraphQL data of the entry's workers: error rate and hours since the last request. */
   | { readonly type: 'analytics'; readonly max_idle_hours: number }
   /** The dashboard's own tick freshness (tick_stale). */

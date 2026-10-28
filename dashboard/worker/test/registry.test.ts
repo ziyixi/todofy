@@ -3,7 +3,7 @@ import { RESOURCE_IDENTITIES } from '../src/resource-identities.ts';
 import opsReadme from '../../../contracts/ops-v1/README.md?raw';
 import { describe, expect, it } from 'vitest';
 import { MAX_OUTBOUND_PER_TICK, VIEW_BODY_BUDGET } from '../src/api-types.ts';
-import type { EntryDef, FlowDef, RegistryDef, ResourceDef } from '../src/registry-types.ts';
+import type { EntryDef, FlowDef, PublicProbe, RegistryDef, ResourceDef } from '../src/registry-types.ts';
 import { ICON_KEYS } from '../src/idl.ts';
 import {
   REGISTRY,
@@ -16,7 +16,7 @@ import {
   resourceByMatch,
 } from '../src/registry.ts';
 import { validateRegistry } from '../src/registry-check.ts';
-import { LINK_ONLY_ENTRY, withLinkOnly, withProbedLinks } from './v2-fixtures.ts';
+import { LINK_ONLY_ENTRY, withLinkOnly } from './v2-fixtures.ts';
 import { expectWire, VIEW_SCHEMAS } from './wire-conformance.ts';
 
 /**
@@ -48,11 +48,6 @@ type Mutable<T> = { -readonly [K in keyof T]: T[K] extends readonly (infer U)[] 
 /** A mutable copy of the registry plus the synthetic link-only entry `link-demo`. */
 function copy(): Mutable<RegistryDef> {
   return structuredClone(withLinkOnly()) as Mutable<RegistryDef>;
-}
-
-/** copy() with the links tile probed outside Access (withProbedLinks). */
-function probedCopy(): Mutable<RegistryDef> {
-  return structuredClone(withProbedLinks(withLinkOnly())) as Mutable<RegistryDef>;
 }
 
 function entry(registry: Mutable<RegistryDef>, id: string): Mutable<EntryDef> {
@@ -176,7 +171,9 @@ describe('the registry', () => {
   it('keeps the tick within the Workers Free subrequest budget', () => {
     expect(outboundPerTick()).toBeLessThanOrEqual(MAX_OUTBOUND_PER_TICK);
     expect(MAX_OUTBOUND_PER_TICK).toBeLessThan(50);
-    expect(outboundPerRefresh()).toBe(16);
+    // 14 Ops entries, the relay's sync evidence and 2 probes (the website's and the links app's beside its status).
+    expect(outboundPerRefresh()).toBe(17);
+    expect(outboundPerTick()).toBe(37);
   });
 
   it('serves a public view without bindings or probe URLs, within its budget', () => {
@@ -186,12 +183,8 @@ describe('the registry', () => {
     expectWire(VIEW_SCHEMAS.registry, registryView('abc123', withLinkOnly()));
     expect(new TextEncoder().encode(body).byteLength).toBeLessThanOrEqual(VIEW_BODY_BUDGET.registry);
     expect(body).not.toContain('MAIL_HERO');
-    // A probe outside Access (withProbedLinks) is not served either.
-    const probed = JSON.stringify(registryView('abc123', withProbedLinks()));
-    for (const probe of ['build-info', 'manifest.webmanifest', 'robots.txt', 'content_type', 'outside_access']) {
-      expect(body).not.toContain(probe);
-      expect(probed).not.toContain(probe);
-    }
+    // Nor are the probes, the links app's outside Access beside its Ops status included.
+    for (const probe of ['build-info', 'manifest.webmanifest', 'robots.txt', 'content_type', 'outside_access', 'probe']) expect(body).not.toContain(probe);
     expect(body).not.toContain('GitHub');
     const view = registryView('abc123');
     expect(view.entries.find((e) => e.id === 'links')).toMatchObject({
@@ -295,7 +288,8 @@ describe('validateRegistry', () => {
   });
 
   it('allows a probe of an Access-protected host only where the login redirect can never pass as healthy', () => {
-    type Probe = Extract<Mutable<EntryDef>['status'], { type: 'public_http' }>;
+    type Probe = Mutable<PublicProbe>;
+    type Ops = Extract<Mutable<EntryDef>['status'], { type: 'ops_v1' }>;
     const cases: [(probe: Probe) => void, string][] = [
       [(p) => delete p.content_type, 'entry links: a probe outside Access needs content_type'],
       [(p) => (p.expect = [200, 302]), 'entry links: a probe outside Access expects 2xx only'],
@@ -304,14 +298,27 @@ describe('validateRegistry', () => {
       [(p) => delete p.outside_access, 'entry links: an Access-protected host cannot be probed publicly'],
       [(p) => (p.content_type = 'Application/JSON; charset=utf-8'), 'entry links: content_type is not a lowercase media type'],
     ];
-    expect(problems(probedCopy())).toEqual([]);
+    expect(problems(copy())).toEqual([]);
     for (const [change, problem] of cases) {
-      const r = probedCopy();
-      const probe = { ...(entry(r, 'links').status as Probe) };
+      // The links app's probe beside its Ops status, and the same probe as a public_http status of its own.
+      const besideOps = copy();
+      const ops = entry(besideOps, 'links').status as Ops;
+      const probe: Probe = { ...(ops.probe as Probe) };
       change(probe);
-      entry(r, 'links').status = probe;
-      expect(problems(r), problem).toContain(problem);
+      ops.probe = probe;
+      expect(problems(besideOps), problem).toContain(problem);
+      const alone = copy();
+      entry(alone, 'links').status = { type: 'public_http', ...probe, enabled: true };
+      entry(alone, 'links').app_only_signals = [];
+      expect(problems(alone), problem).toContain(problem);
     }
+    // The probe's latency is the tile's metric only while there is a probe; it needs the app's own Worker.
+    const unprobed = copy();
+    delete (entry(unprobed, 'links').status as Ops).probe;
+    expect(problems(unprobed)).toContain('entry links: tile_metric latency does not fit status ops_v1');
+    const workerless = copy();
+    withoutWorkers(workerless, 'links');
+    expect(problems(workerless)).toContain('entry links: a probe beside ops_v1 needs a worker');
     // A public host never claims to be outside Access, and error_rate needs Workers to judge.
     const site = copy();
     entry(site, 'website').status = { type: 'public_http', url: 'https://www.ziyixi.science/build-info.json', expect: [200], outside_access: true, error_rate: true, enabled: true };

@@ -6,7 +6,7 @@ import type { EntryDef, RegistryDef } from '../src/registry-types.ts';
 import { mergeScripts } from '../src/discovery.ts';
 import { attentionView, entryState, flowStates, flowSummaries, holdCodes, rollup, targetOf, type AttentionInput, type EvalInput } from '../src/evaluate.ts';
 import { REGISTRY, entryById } from '../src/registry.ts';
-import { DAY, HOUR, LINK_ONLY_ENTRY, MIN, NOW, failedStatus, fortnight, input, probe, run, scripts, signal, status, withLinkOnly, withProbedLinks } from './v2-fixtures.ts';
+import { DAY, HOUR, LINK_ONLY_ENTRY, MIN, NOW, failedStatus, fortnight, input, probe, run, scripts, signal, status, withLinkOnly } from './v2-fixtures.ts';
 
 function entry(id: string, registry: RegistryDef = REGISTRY): EntryDef {
   const found = entryById(id, registry);
@@ -18,10 +18,9 @@ function state(id: string, patch: Partial<EvalInput> = {}) {
   return entryState(entry(id), input(patch));
 }
 
-/** The links tile as a probe outside Access with the error rate (withProbedLinks). */
-const PROBED = withProbedLinks();
+/** The links tile: its Ops status and, beside it, a probe outside Access with the error rate. */
 function probed(patch: Partial<EvalInput> = {}) {
-  return entryState(entry('links', PROBED), input(patch), PROBED);
+  return state('links', patch);
 }
 
 function flow(id: string, patch: Partial<EvalInput> = {}): Omit<FlowState, 'canary'> {
@@ -62,7 +61,7 @@ describe('entry health (the tile: the entry\'s own health, Q2)', () => {
     expect(tiles.todofy).toMatchObject({ level: 'ok', metric: { kind: 'counter', name: 'received_24h', value: 63 } });
     expect(tiles[LINK_ONLY_ENTRY.id]).toMatchObject({ level: 'link', reason: null, metric: null, checked_at: null });
     expect(tiles.website).toMatchObject({ level: 'ok', metric: { kind: 'latency', ms: 180 } });
-    expect(tiles.links).toMatchObject({ level: 'ok', reason: null, metric: null, top_signals: [] });
+    expect(tiles.links).toMatchObject({ level: 'ok', reason: null, metric: { kind: 'latency', ms: 40 }, top_signals: [] });
     expect(tiles['notion-publish']).toMatchObject({ level: 'ok', metric: null });
     expect(tiles.newsletter).toMatchObject({ level: 'ok', reason: null, metric: null });
     expect(tiles.home).toMatchObject({ level: 'ok' });
@@ -124,12 +123,24 @@ describe('entry health (the tile: the entry\'s own health, Q2)', () => {
     expect(entryState(entry('website', off), input(), off)).toMatchObject({ level: 'unmonitored', reason: null });
   });
 
-  it('judges the links app by its Ops status: a stale or failed backup on its tile', () => {
+  it('judges the links app by its Ops status and its probe together: the worse of the two on its tile', () => {
     expect(entry('links').app_only_signals).toEqual(['backup_stale', 'backup_failed']);
     expect(state('links', { statuses: {} })).toMatchObject({ level: 'unknown', reason: 'never_checked', metric: null });
     const stale = status('links', { health: 'degraded', signals: [signal('backup_stale', 'critical', { age_seconds: 345_600, has_backup: 1 }), signal('backup_failed', 'warning')] });
-    expect(state('links', { statuses: { links: stale } })).toMatchObject({ level: 'critical', reason: 'backup_stale' });
+    expect(state('links', { statuses: { links: stale } })).toMatchObject({ level: 'critical', reason: 'backup_stale', metric: null });
     expect(targetOf('links', 'backup_failed')).toEqual({ view: 'ops', entry: 'links' });
+    // A broken Custom Domain or route while Ops (a service binding) still answers: only the probe sees it.
+    const unrouted = probe({ ok: false, http_status: 522, error: 'http_status', consecutive_failures: 1 });
+    expect(state('links', { probes: { links: unrouted } })).toMatchObject({ level: 'warning', reason: 'http_status', consecutive_failures: 1, top_signals: [] });
+    const failed = status('links', { health: 'degraded', signals: [signal('backup_failed', 'warning')] });
+    const twice = probe({ ok: false, http_status: 522, error: 'http_status', consecutive_failures: 2 });
+    expect(state('links', { statuses: { links: failed }, probes: { links: twice } })).toMatchObject({
+      level: 'critical', reason: 'http_status', consecutive_failures: 2, top_signals: [{ code: 'backup_failed', severity: 'warning' }],
+    });
+    // A tie keeps the app's own reason; an app the dashboard cannot reach stays unreachable whatever the probe says.
+    expect(state('links', { statuses: { links: failed }, probes: { links: unrouted } })).toMatchObject({ level: 'warning', reason: 'backup_failed' });
+    expect(state('links', { statuses: { links: failedStatus(status('links'), 2) } })).toMatchObject({ level: 'critical', reason: 'unreachable', metric: null });
+    expect(state('links', { probes: {} })).toMatchObject({ level: 'unknown', reason: 'never_checked', metric: null });
   });
 
   it('judges a probe outside Access like the website, plus a wrong media type', () => {
@@ -157,7 +168,8 @@ describe('entry health (the tile: the entry\'s own health, Q2)', () => {
     // Stale analytics never make the tile unknown: the fresh probe still says ok.
     const staleNow = NOW + 2 * HOUR;
     const fresh = { links: probe({ checked_at: staleNow - MIN, latency_ms: 40 }) };
-    expect(probed({ now: staleNow, lastTickAt: staleNow, probes: fresh, scripts: errors('links', 100, 30) })).toMatchObject({ level: 'ok' });
+    const statuses = { links: status('links', {}, staleNow - MIN) };
+    expect(probed({ now: staleNow, lastTickAt: staleNow, statuses, probes: fresh, scripts: errors('links', 100, 30) })).toMatchObject({ level: 'ok' });
     // The website's assets-only Worker is not judged by its error rate.
     expect(state('website', { scripts: errors('ziyixi-website', 100, 30) })).toMatchObject({ level: 'ok' });
   });
@@ -374,7 +386,7 @@ describe('the attention strip', () => {
   it('raises a failing probe outside Access as one observed item on its tile, like the website (no flow repeats it)', () => {
     const redirected = probe({ ok: false, http_status: 302, error: 'http_status', consecutive_failures: 2 });
     const evaluation = input({ probes: { ...input().probes, links: redirected } });
-    const { attention, badges } = attentionView(base({ evaluation }), PROBED);
+    const { attention, badges } = attentionView(base({ evaluation }));
     expect(attention.level).toBe('critical');
     expect(attention.items).toEqual([
       { source: 'links', code: 'http_status', severity: 'critical', since: null, metrics: {}, target: { view: 'home', entry: 'links' }, observed: 'critical' },
@@ -382,14 +394,14 @@ describe('the attention strip', () => {
     expect(badges).toEqual({ home: 1, flows: 0, cloudflare: 0, ops: 0 });
     // A high error rate shows once, on the tile: the Worker row of the same entry and code is not repeated.
     const failing = mergeScripts(scripts(), [{ script: 'links', requests: 100, errors: 30, subrequests: 0, cpu_p50_us: 1, cpu_p99_us: 2, do_requests: null, do_errors: null }], false, NOW);
-    const errors = attentionView(base({ evaluation: input({ scripts: failing }) }), PROBED).attention;
+    const errors = attentionView(base({ evaluation: input({ scripts: failing }) })).attention;
     expect(errors.items.map((i) => [i.source, i.code, i.observed, i.target])).toEqual([['links', 'error_rate', 'critical', { view: 'home', entry: 'links' }]]);
     // Two causes, two items: when the probe failure is at least as severe it keeps the tile (a tie keeps the probe's
     // reason), and the Worker row on the Cloudflare view lists the error rate, as it does for any other entry.
     for (const errorCount of [30, 6]) {
       const both = mergeScripts(scripts(), [{ script: 'links', requests: 100, errors: errorCount, subrequests: 0, cpu_p50_us: 1, cpu_p99_us: 2, do_requests: null, do_errors: null }], false, NOW);
       const down = probe({ ok: false, http_status: 503, error: 'http_status', consecutive_failures: 2 });
-      const tie = attentionView(base({ evaluation: input({ probes: { ...input().probes, links: down }, scripts: both }) }), PROBED);
+      const tie = attentionView(base({ evaluation: input({ probes: { ...input().probes, links: down }, scripts: both }) }));
       expect(tie.attention.items.map((i) => [i.source, i.code, i.observed, i.target])).toEqual([
         ['links', 'http_status', 'critical', { view: 'home', entry: 'links' }],
         ['links', 'error_rate', errorCount === 30 ? 'critical' : 'warning', { view: 'cloudflare', script: 'links' }],

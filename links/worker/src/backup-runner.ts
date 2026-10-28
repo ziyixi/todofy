@@ -1,6 +1,7 @@
 /**
  * The daily backup (../../docs/backup.md): every table of backup.ts into the private bucket `links-backups` (binding
- * BACKUPS), one bounded step per tick of the Worker's one cron trigger (index.ts). The layout:
+ * BACKUPS), one bounded step per Alarm of the LinksBackup object (backup-alarm.ts), which sets its next Alarm from the
+ * time runBackup answers. The layout:
  *
  *   backups/<job start>/<table>/<seq:05d>.ndjson.gz   one gzip part per table and step, one JSON array per row
  *   backups/<job start>/manifest.json                 written after every part: a prefix without it is incomplete
@@ -11,11 +12,12 @@
  * the applied migration, the change mark when the job planned and when it ended, and each table with its columns,
  * key, rows and every part's SHA-256 (tools/backup-restore.ts reads it).
  *
- * A job starts every day at 05:25 UTC, and at the first tick when the bucket holds no state yet (the first job after
- * the release that bound it). A tick with no job due reads state.json and stops. A step reads at most QUERY_BUDGET D1
- * statements and STEP_BYTES of rows, within Workers Free's 10 ms of CPU, and stores each table it read as one part; a
- * cursor moves only after its part is stored, so a failed step repeats its pages and overwrites the same keys. The
- * last step checks every part's stored SHA-256 and size against the job's record before it writes the manifest.
+ * A job starts every day at 05:25 UTC, and at once when the bucket holds no state yet (the first job after the release
+ * that bound it). A run with no job due reads state.json and sleeps until the next start; while a job runs, its steps
+ * are STEP_MS apart. A step reads at most QUERY_BUDGET D1 statements and STEP_BYTES of rows, and stores each table it
+ * read as one part; a cursor moves only after its part is stored, so a failed step repeats its pages and overwrites
+ * the same keys. The last step checks every part's stored SHA-256 and size against the job's record before it writes
+ * the manifest.
  * Owner edits continue while a job runs: the restore tool warns when the two change marks differ. A job never touches
  * another backup; after its manifest, all but the newest KEEP complete backups are deleted with every incomplete
  * prefix older than it. MAX_ERRORS failed steps in a row fail the job, which starts again FAILED_RETRY_MS later, or at
@@ -34,9 +36,14 @@ export const STATE = 'state.json';
 export const KEEP = 30;
 /** D1 statements a step may read: under Free's 50 per invocation. */
 export const QUERY_BUDGET = 30;
-/** Bytes of row JSON a step may read and store: gzip and SHA-256 stay within Free's 10 ms (test/runtime/cpu.test.ts). */
+/**
+ * Bytes of row JSON a step may read and store: gzip and SHA-256 stay within 10 ms of CPU (test/runtime/cpu.test.ts),
+ * the size the steps had under a cron trigger, though an Alarm may use 30 s.
+ */
 export const STEP_BYTES = 128 << 10;
 export const MAX_ERRORS = 3;
+/** Between two steps of a running job, and after a run that failed before it saved the state. */
+export const STEP_MS = 5 * 60_000;
 const HOUR_MS = 3_600_000;
 export const FAILED_RETRY_MS = HOUR_MS;
 export const MAX_FAILED_JOBS = 3;
@@ -95,6 +102,11 @@ export interface BackupFacts {
   since: number | null;
 }
 export type BackupStep = 'unbound' | 'idle' | 'plan' | 'export' | 'finish';
+/** The step a run took and when the next one is due (ms); null without the bucket: nothing to schedule. */
+export interface BackupRun {
+  step: BackupStep;
+  next: number | null;
+}
 
 /** Keys, counts and codes only: never row content. */
 function log(fields: Record<string, unknown>): void {
@@ -174,10 +186,10 @@ function newJob(now: number): Job {
   };
 }
 
-/** Runs the backup's step due at `now` (a cron tick) and answers which one it was. */
-export async function runBackup(env: Env, now: number): Promise<BackupStep> {
+/** Runs the backup's step due at `now` (an Alarm) and answers which one it was and when the next is due. */
+export async function runBackup(env: Env, now: number): Promise<BackupRun> {
   const bucket = env.BACKUPS;
-  if (!bucket) return 'unbound';
+  if (!bucket) return { step: 'unbound', next: null };
   const state = (await readState(bucket)) ?? {
     since: now,
     next_run: 0,
@@ -189,7 +201,7 @@ export async function runBackup(env: Env, now: number): Promise<BackupStep> {
     job: null,
   };
   if (!state.job) {
-    if (state.next_run > now) return 'idle';
+    if (state.next_run > now) return { step: 'idle', next: state.next_run };
     state.job = newJob(now);
   }
   const job = state.job;
@@ -200,7 +212,7 @@ export async function runBackup(env: Env, now: number): Promise<BackupStep> {
     else await finish(env.DB, bucket, state, job, now);
     job.errors = 0;
   } catch (error) {
-    // D1 or R2 failed (or a bug): the next tick runs the step again from the parts stored so far.
+    // D1 or R2 failed (or a bug): the next run takes the step again from the parts stored so far.
     const code = error instanceof Error && error.message === PART_MISMATCH ? PART_MISMATCH : 'storage_error';
     job.errors += 1;
     log({ error: error instanceof Error ? error.name : 'unknown', code, step, errors: job.errors });
@@ -214,7 +226,7 @@ export async function runBackup(env: Env, now: number): Promise<BackupStep> {
     }
   }
   await bucket.put(STATE, JSON.stringify(state), { httpMetadata: { contentType: 'application/json' } });
-  return step;
+  return { step, next: state.job ? now + STEP_MS : state.next_run };
 }
 
 /** Fixes the migration and the change mark in one batch, and opens every table. */

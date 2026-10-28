@@ -32,6 +32,16 @@ position = 5
 type = "ops_v1"
 binding = "LINKS"
 guard = false
+[entries.status.probe]
+# Beside it, what only an anonymous request sees: the Custom Domain and the route reach the Worker outside Access.
+# Constant public text before any D1 read; unused links do not imply idle failure.
+path = "/robots.txt"
+expect = [200]
+content_type = "text/plain"
+outside_access = true
+error_rate = true
+[entries.tile_metric]
+kind = "latency"
 
 [[access]]
 key = "links"

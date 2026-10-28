@@ -212,11 +212,8 @@ Landing, in two steps:
    `Ops` it now binds. Refresh Home's Cloudflare check, because its desired config gained Home's `LINKS` binding, the four
    `BACKUPS` bindings, the links cron and the four buckets in the account inventory.
 
-Blocking before or with this release, which this branch does not change:
-`website/src/app/privacy/mailsort/page.tsx` (the Gmail OAuth consent policy) must say that daily backups of
-Mailsort's records stay in a private bucket in the owner's account, and that a deleted record can remain in a backup
-for up to 30 more days. `mailsort/AGENTS.md` requires this change together with the retention table in
-[design](mailsort/docs/design.md).
+Not blocking: `mailsort/AGENTS.md` no longer ties a retention change to the website's `/privacy/mailsort` page
+(the owner is the only developer and user; `claude/backup-followup-links`). The page is unchanged.
 
 Verify after deploy (read-only):
 
@@ -238,6 +235,34 @@ An independent verification pass re-ran the selected local checks and added two 
 object by its id, as Mailsort and Personal MCP do, instead of `ctx.id.name`. An invocation without the name would
 otherwise keep an old object checking and notifying next to a restored one. The CI/CD and Home docs now list links
 and Personal MCP among the deploys Home waits for, and say that all five cron triggers are in use.
+
+### Backup follow-up (`claude/backup-followup-links`, local, not pushed)
+
+Based on `claude/backups-integrated` (`08a2f5d4`); merge after it reaches `main`. It supersedes that wave's links
+cron and the 短链接 tile without a probe:
+
+- Home's registry lets an `ops_v1` status carry a `probe` (`[entries.status.probe]` in `app.toml`, generated into
+  `registry.ts`): an anonymous GET of a path the app's own Worker answers outside Access, judged as `public_http` and
+  added to the tile (the worse of the two, a tie keeps the app's reason; latency as the tile metric). The links app
+  probes `/robots.txt` beside its Ops answer again, as before the wave (`text/plain`, 2xx, error rate), so a broken
+  Custom Domain or route shows on Home. Outbound calls: 37 per tick (bound 45 < 50), 17 per refresh (bound 20).
+  A view reads one more row (`probe:links`): 40/41/40/41, `VIEW_ROWS_READ` 44.
+- The links backup runs on the Alarm of a new SQLite Durable Object, `LinksBackup` (binding `BACKUP_ALARM`, object
+  `backup-v1`, migration `v1`); `[triggers] crons = []` removes the `*/5` cron at deploy, so the account uses 4 of
+  Workers Free's 5. Same steps, five minutes apart while a job runs, 05:25 UTC daily, failed-job retry an hour later,
+  newest 30 kept. `Ops.status()` and the owner's first `/_/` request per isolate arm it, at once while there is no
+  `state.json`; every run sets the next Alarm.
+- `mailsort/AGENTS.md`: a retention change no longer requires a `/privacy/mailsort` edit.
+
+Release: push, full `CI gate`, promote to `main`. The links deploy adds the namespace (the inventory lists `links` as
+`FIRST_DEPLOY_PENDING`); Home deploys after it. Then a follow-up commit records the `links-backup` namespace ID in
+`config/resources.toml`, clears `FIRST_DEPLOY_PENDING`, regenerates the inventory and adds the DO to Home's registry
+resources, as Tasks did for `TaskJobs`. Refresh Home's Cloudflare check (desired: no links cron, the `BACKUP_ALARM`
+binding).
+
+Verify after deploy (read-only): the links Worker has no schedule; Home's next status arms the Alarm and the links
+Worker's logs show one `{"backup":{"step":...}}` line per run; the 短链接 tile shows the probe's latency and the backup
+age; the next 05:25 UTC run completes a backup (`latest.json` names a new prefix, keys only).
 
 ## Latest verified release
 

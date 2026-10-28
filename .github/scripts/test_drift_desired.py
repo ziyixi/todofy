@@ -149,16 +149,24 @@ class DesiredState(unittest.TestCase):
                 ("ACCESS_ISSUER", "plain_text"),
                 ("ASSETS", "assets"),
                 ("BACKUPS", "r2_bucket"),
+                ("BACKUP_ALARM", "durable_object_namespace"),
                 ("DB", "d1"),
                 ("PUBLIC_HOST", "plain_text"),
             },
         )
         self.assertNotIn("CSRF_SIGNING_KEY", bindings)
         self.assertNotIn("links", drift_desired.MANUAL_SECRETS)
-        # The daily backup's one cron trigger (links/docs/backup.md).
-        self.assertEqual((worker["workers_dev"], worker["preview_urls"], worker["crons"]), (False, False, ["*/5 * * * *"]))
+        # No cron trigger: the daily backup runs on a Durable Object's Alarm (links/docs/backup.md).
+        self.assertEqual((worker["workers_dev"], worker["preview_urls"], worker["crons"]), (False, False, []))
         self.assertEqual(worker["custom_domains"], ["s.ziyixi.science"])
         self.assertEqual((worker["routes"], worker["personal"]), ([], []))
+
+    def test_the_account_keeps_a_free_cron_trigger(self):
+        """Workers Free allows 5 cron triggers per account. Four Workers use one each; the links app's backup runs on a
+        Durable Object Alarm instead, so a fifth stays free."""
+        crons = {name: worker["crons"] for name, worker in self.state["workers"].items() if worker["crons"]}
+        self.assertEqual(sum(len(schedule) for schedule in crons.values()), 4)
+        self.assertNotIn("links", crons)
 
     def test_tasks_enrolls_its_complete_owner_secret_map_and_verified_build(self):
         bindings = {binding["name"]: binding for binding in self.state["workers"]["tasks"]["bindings"]}

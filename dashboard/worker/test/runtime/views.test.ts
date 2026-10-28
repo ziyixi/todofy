@@ -7,7 +7,7 @@
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { BREAKDOWN_UNCLASSIFIED } from '../../src/api-types.ts';
 import { VIEW_BODY_BUDGET, VIEW_ROWS_READ, type AttentionItem, type CloudflareView, type FlowsView, type HomeView, type OpsView, type Registry, type ViewId } from '../../src/api-types.ts';
-import { REGISTRY, outboundPerTick } from '../../src/registry.ts';
+import { REGISTRY, entryProbe, outboundPerTick } from '../../src/registry.ts';
 import { REALISTIC_USAGE, SYNTHETIC_D1, SYNTHETIC_NS, usageWithScripts } from '../graphql-fixture.ts';
 import { accessClaims, testIssuer, type TestIssuer } from '../jwt.ts';
 import { GRAPHQL, NOW, PATHS, PROBES, SYNTHETIC_BINDINGS, WEBSITE_PROBE, answerProbes, startFlows, status, type FlowHarness } from './flows.ts';
@@ -162,8 +162,8 @@ describe('GetHomeView and RefreshHomeView', () => {
     expect(tiles.todofy).toMatchObject({ level: 'ok', metric: { kind: 'counter', name: 'received_24h', value: 63 } });
     expect(tiles.website?.level).toBe('ok');
     expect(tiles.website?.metric?.kind).toBe('latency');
-    // The links app answers through its Ops entrypoint: a recent backup, no tile metric.
-    expect(tiles.links).toMatchObject({ level: 'ok', reason: null, metric: null });
+    // The links app: a recent backup through its Ops entrypoint, and its robots.txt answered by its own Worker.
+    expect(tiles.links).toMatchObject({ level: 'ok', reason: null, metric: { kind: 'latency' } });
     // Content sync is evaluated from its check evidence, with no activity metric.
     expect(tiles['notion-publish']).toMatchObject({ level: 'ok', metric: null });
     expect(home.flows.map((f) => [f.id, f.level, f.partial])).toEqual([
@@ -194,7 +194,7 @@ describe('GetHomeView and RefreshHomeView', () => {
     expect((await h.called()).sort()).toEqual(['mail-hero.status', 'todofy.status']);
     expect([...h.outboundLog].sort()).toEqual(Object.values(PROBES).sort());
     expect(h.analytics.requests).toEqual([]);
-    expect(refreshed.entries.find((e) => e.id === 'website')?.level).toBe('ok');
+    for (const id of ['website', 'links']) expect(refreshed.entries.find((e) => e.id === id)?.level).toBe('ok');
     // Within the minute: nothing is fetched again.
     const second = await refreshedView<HomeView>(h, 'home');
     expect(second.refresh.refreshed).toBe(false);
@@ -226,9 +226,29 @@ describe('GetHomeView and RefreshHomeView', () => {
 });
 
 describe('the probes and the links tile', () => {
-  it('probes exactly the public_http URLs of the registry', () => {
-    const urls = REGISTRY.entries.flatMap((e) => (e.status.type === 'public_http' && e.status.enabled ? [[e.id, e.status.url]] : []));
+  it('probes exactly the probe URLs of the registry', () => {
+    const urls = REGISTRY.entries.flatMap((e) => {
+      const probe = entryProbe(e);
+      return probe === null ? [] : [[e.id, probe.url]];
+    });
     expect(Object.fromEntries(urls)).toEqual(PROBES);
+  });
+
+  it('shows a broken links host on its tile while its Ops entrypoint still answers, and as one observed item', async () => {
+    h = await mockupDay();
+    // Something other than the links Worker answers 200 with HTML (a Custom Domain or a route gone astray).
+    h.routes.set(PROBES.links, () => new Response('<html></html>', { headers: { 'content-type': 'text/html; charset=utf-8' } }));
+    await h.tick(NOW - 31 * MIN);
+    await h.tick(NOW - MIN);
+    const home = await view<HomeView>(h, 'home');
+    expect(home.entries.find((e) => e.id === 'links')).toMatchObject({ level: 'critical', reason: 'content_type', consecutive_failures: 2, metric: null, top_signals: [] });
+    expect(attentionFacts(home.attention.items)).toEqual([
+      { source: 'links', code: 'content_type', severity: 'critical', since: null, metrics: {}, target: { view: 'home', entry: 'links' }, observed: 'critical' },
+    ]);
+    expect(home.badges).toEqual({ home: 1, flows: 0, cloudflare: 0, ops: 0 });
+    // No flow names the app, and the digest to Todofy keeps v1's item set.
+    expect(home.flows.every((f) => f.level === 'ok')).toBe(true);
+    expect((await view<OpsView>(h, 'ops')).digest.items).toEqual([]);
   });
 
   it('shows a stale, failed links backup on its tile and in the strip, and no flow repeats it', async () => {

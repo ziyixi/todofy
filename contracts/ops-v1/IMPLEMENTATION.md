@@ -678,9 +678,10 @@ is `maintenance`, true while a restore is unfinished (health `down`); no capabil
 ## 3i. the links app (added 2026-10-28 with its daily backup, additive)
 
 The links app (`links/`, Worker `links`) joined `OpsStatus.app` as `links` when it began backing itself up
-(`links/docs/backup.md`); until then Home probed its `/robots.txt`. `links/worker/src/ops.ts` is the entrypoint;
-`links/worker/src/ops-status.ts` builds the answer. `status()` reads one D1 row (`SELECT key FROM links LIMIT 1`:
-the database answers) and the backup's `state.json` from its private bucket; the bucket not answering is
+(`links/docs/backup.md`); Home still probes its `/robots.txt` beside it (the Custom Domain and the route).
+`links/worker/src/ops.ts` is the entrypoint; `links/worker/src/ops-status.ts` builds the answer. `status()` reads one
+D1 row (`SELECT key FROM links LIMIT 1`: the database answers) and the backup's `state.json` from its private bucket,
+and arms the backup's Durable Object Alarm (at once while there is no state); the bucket not answering is
 `backup_failed`, D1 not answering is `status_unavailable`. Counters: `database_ready`, and `backup_age_seconds`
 once a backup is complete. Signals: `backup_stale` (critical, `age_seconds` and `has_backup`: no complete daily
 backup for 3 days, counted from the first backup step while there is none) and `backup_failed` (warning: the last

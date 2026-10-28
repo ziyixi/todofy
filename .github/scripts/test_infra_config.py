@@ -297,14 +297,15 @@ class MatchesTheApps(unittest.TestCase):
         return {**owner, "mail-hero-backup": [backup.group(1)]}
 
     def test_the_dashboard_probes_only_paths_outside_access(self):
-        """Each public_http probe of dashboard/worker/src/registry.ts is anonymous, so Access must not govern its path: no
-        destination matches it. A probe on a host with any Access application declares `outside_access: true` (none
-        does since the links app answers ops-v1)."""
+        """Each probe of dashboard/worker/src/registry.ts (a public_http status, or the `probe` beside an ops_v1 one) is
+        anonymous, so Access must not govern its path: no destination matches it (the links app's /robots.txt is
+        outside its application's /_ paths). A probe on a host with any Access application declares
+        `outside_access: true`."""
         code = (INFRA / "access.tf").read_text()
         destinations = self.access_destinations(code)
         registry = (REPO / "dashboard" / "worker" / "src" / "registry.ts").read_text()
-        probes = re.findall(r"type: 'public_http',(.*?)\}", registry, re.DOTALL)
-        self.assertGreaterEqual(len(probes), 1)
+        probes = re.findall(r"type: 'public_http',(.*?)\}", registry, re.DOTALL) + re.findall(r"probe: \{(.*?)\}", registry)
+        self.assertGreaterEqual(len(probes), 2)
 
         def governs(destination: str, host: str, path: str) -> bool:
             """Whether the destination covers host+path."""

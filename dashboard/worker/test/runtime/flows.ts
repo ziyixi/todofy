@@ -28,23 +28,29 @@ export const GRAPHQL = 'https://api.cloudflare.com/client/v4/graphql';
  * the same UTC day and starts no scheduled canary.
  */
 export const NOW = Date.parse('2026-10-01T12:00:00Z');
-/** The registry's public_http probes by entry (the only public GETs the Worker makes; v2.test.ts keeps them in step). */
+/**
+ * The registry's probes by entry (entryProbe: the only public GETs the Worker makes; views.test.ts keeps them in
+ * step): the website's, and the links app's beside its Ops status.
+ */
 export const PROBES = {
   website: 'https://www.ziyixi.science/build-info.json',
+  links: 'https://s.ziyixi.science/robots.txt',
 } as const;
 export const WEBSITE_PROBE = PROBES.website;
 
-/**
- * What the website's own Worker answers to its probe, the one probe since the links app answers ops-v1 (a synthetic
- * body; only the status and the media type count).
- */
-export function healthyProbe(): Response {
-  return Response.json({ build: 'synthetic' }, { headers: { 'cache-control': 'no-store' } });
+/** What each app's own Worker answers to its probe (synthetic bodies; only the status and the media type count). */
+export function healthyProbe(entry: keyof typeof PROBES): Response {
+  switch (entry) {
+    case 'website':
+      return Response.json({ build: 'synthetic' }, { headers: { 'cache-control': 'no-store' } });
+    case 'links':
+      return new Response('User-agent: *\nDisallow: /\n', { headers: { 'content-type': 'text/plain; charset=utf-8' } });
+  }
 }
 
 /** Every probe of `harness` answers as its healthy app would. */
 export function answerProbes(harness: FlowHarness): void {
-  for (const url of Object.values(PROBES)) harness.routes.set(url, () => healthyProbe());
+  for (const entry of Object.keys(PROBES) as (keyof typeof PROBES)[]) harness.routes.set(PROBES[entry], () => healthyProbe(entry));
 }
 
 /** The owner API's paths (DashboardUiService and the transport's CSRF route). */

@@ -1,12 +1,16 @@
 /**
  * Bindings, vars and secrets of the Worker "links" (../../wrangler.toml, ../../docs/design.md §7).
  */
+import type { LinksBackup } from './backup-alarm.ts';
+
 export interface Env {
   readonly DB: D1Database;
   /** The launcher's static files (web/dist); the Worker serves its index for /_/ and /_/k/... itself. */
   readonly ASSETS: Fetcher;
   /** The private bucket links-backups: the daily backup (backup-runner.ts); none runs without it (local dev). */
   readonly BACKUPS?: R2Bucket;
+  /** The LinksBackup object whose Alarm runs the backup (backup-alarm.ts); none runs without it (local dev). */
+  readonly BACKUP_ALARM?: DurableObjectNamespace<LinksBackup>;
 
   // vars (committed in ../../wrangler.toml; BUILD_SHA added at deploy by deploy/deploy-vars.mjs)
   /** The links host, e.g. s.ziyixi.science: the CSRF Origin, and the one host no target may name. */

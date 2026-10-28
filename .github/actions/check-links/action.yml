@@ -24,7 +24,7 @@ runs:
     # Real D1 with the migrations and a synthetic Access issuer: redirects, visibility and the enumeration rule,
     # passthrough and open-redirect attempts, the owner API, the D1 writes per action, the daily backup on real R2 and
     # its restore with wrangler into a new local D1, and the CPU of the redirect, the heaviest owner requests and the
-    # backup's cron ticks against bounds scaled by the machine's measured speed (tools/workerd-cpu).
+    # backup's Alarm runs against bounds scaled by the machine's measured speed (tools/workerd-cpu).
     - name: Runtime tests (workerd with real D1 and R2)
       working-directory: links/worker
       shell: bash -e {0}

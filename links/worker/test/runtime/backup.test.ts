@@ -1,7 +1,8 @@
 /**
- * The daily backup (src/backup.ts, src/backup-runner.ts) on real D1 and R2 at fixed clocks, then the cron tick running
- * the first one, Ops reporting it, and tools/backup-restore.ts restoring it with wrangler into a new, empty local D1
- * that holds, row for row, what the store held (docs/backup.md "Rehearse locally"). Synthetic rows only.
+ * The daily backup (src/backup.ts, src/backup-runner.ts) on real D1 and R2 at fixed clocks, then the LinksBackup
+ * object's Alarm (src/backup-alarm.ts) running the first one at the real clock as soon as Home's status finds no state,
+ * Ops reporting it, and tools/backup-restore.ts restoring it with wrangler into a new, empty local D1 that holds, row
+ * for row, what the store held (docs/backup.md "Rehearse locally"). Synthetic rows only.
  */
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
@@ -28,6 +29,7 @@ import {
   runBackup,
   STATE,
   STEP_BYTES,
+  STEP_MS,
   type BackupPart,
   type BackupState,
 } from '../../src/backup-runner.ts';
@@ -106,10 +108,18 @@ async function json<T>(key: string): Promise<T> {
   return object.json<T>();
 }
 const state = () => json<BackupState>(STATE);
+/** The LinksBackup object's runs so far (its one log line each). */
+function runsSoFar(): number {
+  return h.logs.filter((line) => line.startsWith('{"backup":{"step"')).length;
+}
+/** The step a run at `now` took. */
+async function step(environment: Env, now: number): Promise<string> {
+  return (await runBackup(environment, now)).step;
+}
 /** Steps the job at `now` until it ends: the number of steps. */
 async function finish(now: number, environment = env()): Promise<number> {
   for (let steps = 1; steps < 200; steps++) {
-    await runBackup(environment, now);
+    await step(environment, now);
     if (!(await state()).job) return steps;
   }
   throw new Error('The job did not end');
@@ -168,7 +178,8 @@ describe('a daily job', () => {
     expect(await backupFacts(env())).toEqual({ status: 'never', last_backup_at: null, since: null });
     // The first step only plans, in one batch; nothing is stored yet but the state.
     const planning = measuredReads(h.db);
-    expect(await runBackup(env({ DB: planning.db }), SLOT)).toBe('plan');
+    // Its next step is due STEP_MS later.
+    expect(await runBackup(env({ DB: planning.db }), SLOT)).toEqual({ step: 'plan', next: SLOT + STEP_MS });
     expect(planning.metrics.statements).toBe(PLAN_STATEMENTS);
     expect((await state()).job?.prefix).toBe('backups/2026-10-28T052500Z/');
     expect((await bucket.list({ prefix: 'backups/' })).objects).toEqual([]);
@@ -181,7 +192,7 @@ describe('a daily job', () => {
       const before = await state();
       if (!before.job?.cursors.some((cursor) => !cursor.done)) break;
       const step = measuredReads(h.db);
-      expect(await runBackup(env({ DB: step.db }), SLOT)).toBe('export');
+      expect(await runBackup(env({ DB: step.db }), SLOT)).toEqual({ step: 'export', next: SLOT + STEP_MS });
       expect(step.metrics.statements).toBeLessThanOrEqual(QUERY_BUDGET);
       expect(step.metrics.rowsRead).toBeLessThanOrEqual(step.metrics.statements * (3 * PAGE_ROWS + 5));
       const after = await state();
@@ -198,7 +209,8 @@ describe('a daily job', () => {
 
     // The last step reads the change mark again, checks the parts, writes the manifest and latest.json.
     const closing = measuredReads(h.db);
-    expect(await runBackup(env({ DB: closing.db }), SLOT + 60_000)).toBe('finish');
+    // Then nothing before tomorrow's slot.
+    expect(await runBackup(env({ DB: closing.db }), SLOT + 60_000)).toEqual({ step: 'finish', next: SLOT + DAY });
     expect(closing.metrics.statements).toBe(MARK_STATEMENTS);
     expect(await state()).toMatchObject({ status: 'ok', last_backup_at: SLOT + 60_000, failed_jobs: 0, job: null });
     expect((await state()).next_run).toBe(SLOT + DAY);
@@ -222,9 +234,10 @@ describe('a daily job', () => {
     }
     expect(manifest.links.tables.find((table) => table.name === 'link_revisions')?.parts.length).toBeGreaterThan(1);
 
-    // Not due again before tomorrow's slot: a tick only reads the state.
-    expect(await runBackup(env(), SLOT + HOUR)).toBe('idle');
-    expect(await runBackup({ DB: h.db } as unknown as Env, SLOT + DAY)).toBe('unbound');
+    // Not due again before tomorrow's slot: a run only reads the state and sleeps until then; without the bucket there
+    // is nothing to schedule.
+    expect(await runBackup(env(), SLOT + HOUR)).toEqual({ step: 'idle', next: SLOT + DAY });
+    expect(await runBackup({ DB: h.db } as unknown as Env, SLOT + DAY)).toEqual({ step: 'unbound', next: null });
   });
 
   it('repeats a failed step without duplicates, and fails the job after three in a row, retried later', async () => {
@@ -243,9 +256,10 @@ describe('a daily job', () => {
       list: bucket.list.bind(bucket),
       delete: bucket.delete.bind(bucket),
     } as unknown as R2Bucket;
-    await runBackup(env({ BACKUPS: flaky }), SLOT); // the plan
+    await step(env({ BACKUPS: flaky }), SLOT); // the plan
     failures = 1;
-    expect(await runBackup(env({ BACKUPS: flaky }), SLOT)).toBe('export');
+    // The failed step runs again STEP_MS later.
+    expect(await runBackup(env({ BACKUPS: flaky }), SLOT)).toEqual({ step: 'export', next: SLOT + STEP_MS });
     expect((await state()).job?.errors).toBe(1);
     expect((await state()).job?.cursors.every((cursor) => cursor.parts.length === 0 && cursor.after === null)).toBe(true);
     await finish(SLOT, env({ BACKUPS: flaky }));
@@ -257,25 +271,27 @@ describe('a daily job', () => {
     // D1 failing every page: three failed steps in a row fail the job; it starts again an hour later.
     await clearBucket();
     const later = SLOT + 2 * DAY;
-    await runBackup(env(), later); // the plan
+    await step(env(), later); // the plan
     const broken = { prepare: () => ({ bind: () => ({ all: () => Promise.reject(new Error('Synthetic D1 failure')) }) }) };
-    for (let step = 1; step <= MAX_ERRORS; step++) await runBackup(env({ DB: broken as unknown as D1Database }), later);
+    let last = await runBackup(env({ DB: broken as unknown as D1Database }), later);
+    for (let failed = 2; failed <= MAX_ERRORS; failed++) last = await runBackup(env({ DB: broken as unknown as D1Database }), later);
+    expect(last).toEqual({ step: 'export', next: later + FAILED_RETRY_MS });
     expect(await state()).toMatchObject({ status: 'failed', error_code: 'storage_error', failed_jobs: 1, job: null });
     expect((await state()).next_run).toBe(later + FAILED_RETRY_MS);
     expect(await backupFacts(env())).toMatchObject({ status: 'failed', last_backup_at: null });
-    expect(await runBackup(env(), later + FAILED_RETRY_MS - 1)).toBe('idle');
+    expect(await step(env(), later + FAILED_RETRY_MS - 1)).toBe('idle');
     expect(await finish(later + FAILED_RETRY_MS)).toBeGreaterThan(2);
     expect(await state()).toMatchObject({ status: 'ok', failed_jobs: 0 });
   });
 
   it('never writes a manifest over a part that differs from its record', async () => {
-    await runBackup(env(), SLOT);
-    while ((await state()).job?.cursors.some((cursor) => !cursor.done)) await runBackup(env(), SLOT);
+    await step(env(), SLOT);
+    while ((await state()).job?.cursors.some((cursor) => !cursor.done)) await step(env(), SLOT);
     const part = (await state()).job?.cursors[0]?.parts[0];
     if (!part) throw new Error('No part');
     // Another step (an overlapping tick) rewrote the part with other rows.
     await bucket.put(part.key, 'other', { customMetadata: { sha256: '0'.repeat(64) } });
-    for (let step = 1; step <= MAX_ERRORS; step++) expect(await runBackup(env(), SLOT)).toBe('finish');
+    for (let failed = 1; failed <= MAX_ERRORS; failed++) expect(await step(env(), SLOT)).toBe('finish');
     expect(await state()).toMatchObject({ status: 'failed', error_code: 'part_mismatch', job: null });
     expect(await bucket.head(`backups/2026-10-28T052500Z/${MANIFEST}`)).toBeNull();
     expect(await bucket.head(LATEST)).toBeNull();
@@ -297,14 +313,14 @@ describe('a daily job', () => {
       list: bucket.list.bind(bucket),
       delete: bucket.delete.bind(bucket),
     } as unknown as R2Bucket;
-    await runBackup(env({ BACKUPS: flaky }), SLOT);
-    while ((await state()).job?.cursors.some((cursor) => !cursor.done)) await runBackup(env({ BACKUPS: flaky }), SLOT);
-    expect(await runBackup(env({ BACKUPS: flaky }), SLOT + 60_000)).toBe('finish');
+    await step(env({ BACKUPS: flaky }), SLOT);
+    while ((await state()).job?.cursors.some((cursor) => !cursor.done)) await step(env({ BACKUPS: flaky }), SLOT);
+    expect(await step(env({ BACKUPS: flaky }), SLOT + 60_000)).toBe('finish');
     const key = `backups/2026-10-28T052500Z/${MANIFEST}`;
     const first = await bucket.head(key);
     expect(first).not.toBeNull();
     expect((await state()).job?.errors).toBe(1);
-    expect(await runBackup(env({ BACKUPS: flaky }), SLOT + 120_000)).toBe('finish');
+    expect(await step(env({ BACKUPS: flaky }), SLOT + 120_000)).toBe('finish');
     expect((await bucket.head(key))?.etag).toBe(first?.etag);
     expect((await json<Manifest>(key)).created_at).toBe('2026-10-28T05:26:00Z');
     expect(await json(LATEST)).toEqual({ key: 'backups/2026-10-28T052500Z/' });
@@ -366,62 +382,60 @@ describe('Ops', () => {
     const facts = await backupFacts(env({ BACKUPS: silent }));
     expect(facts).toEqual({ status: 'failed', last_backup_at: null, since: null });
     expect(backupOps(facts, SLOT).signals).toEqual([{ code: 'backup_failed', severity: Severity.WARNING, metrics: {} }]);
-    // A tick does not mistake it for a lost state: it starts no job and writes nothing.
+    // A run does not mistake it for a lost state: it starts no job and writes nothing (the Alarm tries again STEP_MS later).
     await expect(runBackup(env({ BACKUPS: silent }), SLOT)).rejects.toThrow('Synthetic R2 failure');
-  });
-
-  it('answers Home through the entrypoint: the database, the backup facts and no guard', async () => {
-    const ops = await h.mf.getWorker('links-ops');
-    const status = async () =>
-      (await (await ops.fetch('https://links-ops.internal/')).json()) as {
-        app: string;
-        health: string;
-        counters: Record<string, number>;
-        signals: { code: string; severity: string }[];
-        last_backup_at: string | null;
-        ui_url?: string;
-      };
-    expect(await status()).toMatchObject({ app: 'links', health: 'ok', counters: { database_ready: 1 }, signals: [], last_backup_at: null, ui_url: 'https://s.example.com/_/' });
-    const now = Date.now();
-    const written: BackupState = {
-      since: now - 10 * DAY,
-      next_run: now + HOUR,
-      failed_jobs: 1,
-      status: 'failed',
-      last_backup_at: now - 4 * DAY,
-      last_key: 'backups/2026-10-24T052500Z/',
-      error_code: 'storage_error',
-      job: null,
-    };
-    await bucket.put(STATE, JSON.stringify(written));
-    const failed = await status();
-    expect(failed.health).toBe('degraded');
-    expect(failed.signals).toEqual([
-      { code: 'backup_stale', severity: 'critical', metrics: { age_seconds: expect.any(Number) as number, has_backup: 1 } },
-      { code: 'backup_failed', severity: 'warning', metrics: {} },
-    ]);
-    expect(failed.counters.backup_age_seconds).toBeGreaterThanOrEqual(4 * 86_400);
-    expect(Date.parse(failed.last_backup_at ?? '')).toBe(written.last_backup_at);
-    await bucket.put(STATE, JSON.stringify({ ...written, status: 'ok', failed_jobs: 0, last_backup_at: now - HOUR }));
-    expect(await status()).toMatchObject({ health: 'ok', signals: [] });
-    const guard = await ops.fetch('https://links-ops.internal/guard');
-    expect(guard.status).toBe(400);
-    expect(await guard.json()).toEqual({ error: 'invalid_input' });
   });
 });
 
-describe('the cron tick and a restore', () => {
-  it('runs the first backup at once, and the backup restores into an empty database row for row', async () => {
-    const worker = await h.mf.getWorker('links');
-    // No state yet: the first tick starts the job; each later tick is one step.
-    const start = Date.parse('2026-10-29T13:05:00Z');
-    for (let tick = 0; ; tick++) {
-      expect(tick).toBeLessThan(60);
-      await worker.scheduled({ scheduledTime: new Date(start + tick * 300_000), cron: '*/5 * * * *' });
-      if ((await state()).status === 'ok') break;
+/** Home's view through the entrypoint (the Worker "links-ops"); each call also arms the backup's Alarm. */
+async function opsStatus() {
+  const ops = await h.mf.getWorker('links-ops');
+  return (await (await ops.fetch('https://links-ops.internal/')).json()) as {
+    app: string;
+    health: string;
+    counters: Record<string, number>;
+    signals: { code: string; severity: string }[];
+    last_backup_at: string | null;
+    ui_url?: string;
+  };
+}
+
+// At the real clock, after the fixed-clock tests: nothing armed the object before.
+describe('the Alarm, Home and a restore', () => {
+  it('starts the first backup as soon as Home finds no state, a step every STEP_MS, and restores row for row', async () => {
+    // No state yet: Home's status arms the Alarm at once, and its run starts the job.
+    expect(await opsStatus()).toMatchObject({ app: 'links', health: 'ok', counters: { database_ready: 1 }, signals: [], last_backup_at: null, ui_url: 'https://s.example.com/_/' });
+    let before = Date.now();
+    let run = await h.alarmRun(1);
+    expect(run.step).toBe('plan');
+    // The next step STEP_MS later; arming again (Home's next status) keeps it.
+    expect(run.next).toBeGreaterThanOrEqual(before - 60_000 + STEP_MS);
+    expect(run.next).toBeLessThanOrEqual(Date.now() + STEP_MS);
+    expect(await h.arm()).toBe(run.next);
+    expect((await opsStatus()).last_backup_at).toBeNull();
+    expect(await h.arm()).toBe(run.next);
+    // Each later step, brought forward instead of waiting STEP_MS, until the last one.
+    for (let runs = 2; run.step !== 'finish'; runs++) {
+      expect(runs).toBeLessThan(60);
+      before = Date.now();
+      await h.arm(true);
+      run = await h.alarmRun(runs);
+      if (run.step === 'export') expect(run.next).toBeGreaterThanOrEqual(before + STEP_MS);
     }
+    // Done: the Alarm sleeps until tomorrow's slot, 05:25 UTC.
+    const done = await state();
+    expect(done).toMatchObject({ status: 'ok', job: null });
+    expect(run.next).toBe(done.next_run);
+    expect(new Date(done.next_run).toISOString()).toMatch(/T05:25:00\.000Z$/);
+    expect(done.next_run - Date.now()).toBeGreaterThan(0);
+    expect(await h.arm()).toBe(done.next_run);
+    // A run before then only reads the state and sleeps until it again.
+    const runs = runsSoFar();
+    await h.arm(true);
+    expect(await h.alarmRun(runs + 1)).toEqual({ step: 'idle', next: done.next_run });
     const latest = await json<{ key: string }>(LATEST);
-    expect(latest.key).toBe('backups/2026-10-29T130500Z/');
+    expect(latest.key).toBe(done.last_key);
+    expect(await opsStatus()).toMatchObject({ health: 'ok', signals: [], counters: { database_ready: 1 } });
     expect(h.logs.join('\n')).not.toMatch(/k0\d{3}|example\.com|Synthetic/);
 
     const work = await mkdtemp(join(tmpdir(), 'links-restore-'));
@@ -464,5 +478,38 @@ describe('the cron tick and a restore', () => {
     } finally {
       await rm(work, { recursive: true, force: true });
     }
+  });
+
+  it('answers Home with the backup facts and no guard, and leaves an armed Alarm as it is', async () => {
+    // After the backup above: the Alarm waits for tomorrow's slot, which no status moves.
+    const armed = await h.arm();
+    const runs = runsSoFar();
+    const now = Date.now();
+    const written: BackupState = {
+      since: now - 10 * DAY,
+      next_run: now + HOUR,
+      failed_jobs: 1,
+      status: 'failed',
+      last_backup_at: now - 4 * DAY,
+      last_key: 'backups/2026-10-24T052500Z/',
+      error_code: 'storage_error',
+      job: null,
+    };
+    await bucket.put(STATE, JSON.stringify(written));
+    const failed = await opsStatus();
+    expect(failed.health).toBe('degraded');
+    expect(failed.signals).toEqual([
+      { code: 'backup_stale', severity: 'critical', metrics: { age_seconds: expect.any(Number) as number, has_backup: 1 } },
+      { code: 'backup_failed', severity: 'warning', metrics: {} },
+    ]);
+    expect(failed.counters.backup_age_seconds).toBeGreaterThanOrEqual(4 * 86_400);
+    expect(Date.parse(failed.last_backup_at ?? '')).toBe(written.last_backup_at);
+    await bucket.put(STATE, JSON.stringify({ ...written, status: 'ok', failed_jobs: 0, last_backup_at: now - HOUR }));
+    expect(await opsStatus()).toMatchObject({ health: 'ok', signals: [] });
+    expect(await h.arm()).toBe(armed);
+    expect(runsSoFar()).toBe(runs);
+    const guard = await (await h.mf.getWorker('links-ops')).fetch('https://links-ops.internal/guard');
+    expect(guard.status).toBe(400);
+    expect(await guard.json()).toEqual({ error: 'invalid_input' });
   });
 });

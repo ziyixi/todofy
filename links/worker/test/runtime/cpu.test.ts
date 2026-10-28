@@ -10,10 +10,11 @@
  * page of LIST_PAGE or EXPORT_PAGE, an import of IMPORT_LINES_MAX lines). No dev bypass: Access is verified as in
  * production.
  *
- * The daily backup's cron ticks run in the same isolates after the requests, on LINKS_MAX links with three revisions
- * each: the plan, export steps of STEP_BYTES of rows (D1's JSON, gzip and SHA-256), the last step (the parts checked,
- * the manifest, retention) and an idle tick that only reads state.json. Each is a scheduled invocation with Free's
- * 10 ms, held to the owner API's bounds.
+ * The daily backup's Alarm runs (the LinksBackup object, in the same isolates after the requests) on LINKS_MAX links
+ * with three revisions each: the plan, export steps of STEP_BYTES of rows (D1's JSON, gzip and SHA-256), the last step
+ * (the parts checked, the manifest, retention) and an idle run that only reads state.json. An Alarm may use 30 s of CPU
+ * on Workers Free; each run is still held to the owner API's bounds, so the steps keep the size they had under a cron
+ * trigger's 10 ms.
  *
  * The whole session runs in COLD_ISOLATES fresh isolates (a new harness each, measureInIsolates): every number is
  * divided by its own isolate's speed (never below 1), and the bounds hold each number's median across the isolates,
@@ -21,7 +22,7 @@
  */
 import { beforeAll, describe, expect, it } from 'vitest';
 import { COLD_ISOLATES, connectCpuMeter, CPU_TEST_TIMEOUT_MS, FREE_CPU_MS, measureInIsolates, type Isolate, type Measurement } from '../../../../tools/workerd-cpu/workerd-cpu.mts';
-import { STATE } from '../../src/backup-runner.ts';
+import { STATE, type BackupState } from '../../src/backup-runner.ts';
 import { EXPORT_PAGE, IMPORT_LINES_MAX, LINKS_MAX, LIST_PAGE } from '../../src/limits.ts';
 import { accessClaims, testIssuer } from '../jwt.ts';
 import { op, startHarness, SYNTHETIC_BINDINGS, type Harness } from './harness.ts';
@@ -102,6 +103,8 @@ async function startIsolate(): Promise<LinksIsolate> {
        SELECT l.key, r.value, l.create_time, l.target, l.path_mode, l.visibility, l.description, l.tags, l.expire_time
        FROM links l, json_each('[1,2,3]') r`,
     );
+    // A backup state with nothing due, so the Alarm the owner's first request arms only reads it.
+    await putState(h, { next_run: Date.parse('2099-01-01T00:00:00Z') });
     const meter = await connectCpuMeter(h.mf, 'links');
     return {
       h,
@@ -115,6 +118,12 @@ async function startIsolate(): Promise<LinksIsolate> {
     await h.dispose();
     throw error;
   }
+}
+
+/** Writes state.json with no job, `fields` over a never-run backup. */
+async function putState(h: Harness, fields: Partial<BackupState>): Promise<void> {
+  const state: BackupState = { since: Date.now(), next_run: 0, failed_jobs: 0, status: 'never', last_backup_at: null, last_key: '', error_code: '', job: null, ...fields };
+  await (await h.mf.getR2Bucket('BACKUPS', 'links')).put(STATE, JSON.stringify(state));
 }
 
 async function expectStatus(h: Harness, path: string, status: number, init: RequestInit = {}): Promise<void> {
@@ -163,12 +172,14 @@ async function session({ h, meter }: LinksIsolate): Promise<Measurement[]> {
       });
     }, RUNS),
   ];
-  // The backup's cron ticks, at 05:25 UTC on a day after the isolate started: the job is due at once.
-  const worker = await h.mf.getWorker('links');
-  let at = Date.parse('2026-10-28T05:25:00Z');
+  // The owner's first request armed the Alarm, whose run found nothing due. Then a job is due at once, and each run is
+  // brought forward to now (arm(true)) instead of waiting STEP_MS.
+  await h.alarmRun(1);
+  let runs = 1;
+  await putState(h, { next_run: 0 });
   const tick = async () => {
-    await worker.scheduled({ scheduledTime: new Date(at), cron: '*/5 * * * *' });
-    at += 300_000;
+    await h.arm(true);
+    await h.alarmRun(++runs);
   };
   const step = async () => {
     const object = await h.mf.getR2Bucket('BACKUPS', 'links').then((bucket) => bucket.get(STATE));
@@ -185,12 +196,12 @@ async function session({ h, meter }: LinksIsolate): Promise<Measurement[]> {
   return [cold, ...redirects, apiInit, ...api, ...backup];
 }
 
-const BACKUP_PLAN = 'cron tick: the backup plan';
+const BACKUP_PLAN = 'Alarm: the backup plan';
 /** LINKS_MAX links and their revisions fill more export steps than this, so every measured one reads STEP_BYTES. */
 const EXPORT_STEPS = 3;
-const BACKUP_EXPORT = 'cron tick: a backup export step';
-const BACKUP_FINISH = 'cron tick: the backup check, manifest and retention';
-const BACKUP_IDLE = 'cron tick: idle (reads state.json)';
+const BACKUP_EXPORT = 'Alarm: a backup export step';
+const BACKUP_FINISH = 'Alarm: the backup check, manifest and retention';
+const BACKUP_IDLE = 'Alarm: idle (reads state.json)';
 
 /** The redirects measured after the isolate's first request (each is bounded by the redirect bounds). */
 const REDIRECTS = new Set([

@@ -105,7 +105,7 @@ Each entry has one status kind:
 
 | Kind | Fields and meaning |
 | --- | --- |
-| `ops_v1` | `binding`, `guard`; binding must name the same Worker's `Ops` entrypoint in Home's Wrangler config. The explicit VPS Fleet adapters use `NEWSLETTER`/`NewsletterOps` or `CODEX_GATEWAY`/`CodexGatewayOps`. |
+| `ops_v1` | `binding`, `guard`; binding must name the same Worker's `Ops` entrypoint in Home's Wrangler config. The explicit VPS Fleet adapters use `NEWSLETTER`/`NewsletterOps` or `CODEX_GATEWAY`/`CodexGatewayOps`. Optional `[entries.status.probe]` with `public_http`'s fields but `enabled`: a probe of the app's own Worker beside its Ops answer; the tile shows the worse of the two. |
 | `public_http` | `path`, nonempty 2xx `expect`, boolean `enabled`; optional `content_type`, `outside_access`, `error_rate` |
 | `analytics` | `max_idle_hours`, an integer from 1 to 168; existing traffic-based activity signal |
 | `self` | Home's own status |
@@ -113,8 +113,9 @@ Each entry has one status kind:
 
 Optional `tile_metric` is `counter` plus a counter `name`, `latency`, or `last_active`. `app_only_signals`
 lists existing public counter names that stay in the detail view. This metadata does not add a new
-signal or collector. The one probe left is the website's `build-info.json`; the links app answers `ops_v1`
-(`LINKS`) with its daily backup's age and failures, and its Worker's error rate stays on the Cloudflare view.
+signal or collector. Two probes remain: the website's `build-info.json`, and the links app's `robots.txt` beside its
+`ops_v1` answer (`LINKS`, its daily backup's age and failures), so a broken Custom Domain or route still shows on its
+tile with the Worker's error rate and the probe's latency.
 
 Newsletter uses `target = "vps"`, its image repository and no `workers` or `access`. Its Home entry uses
 `ops_v1` through the exact Fleet provider/binding above, with `guard = false`. This reports the latest

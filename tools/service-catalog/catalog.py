@@ -98,6 +98,22 @@ def production_configs(root: Path) -> set[str]:
     return found
 
 
+PROBE_FIELDS = {"path", "expect", "content_type", "outside_access", "error_rate"}
+
+
+def probe(status: dict, host: str | None, field: str) -> dict:
+    """A same-origin probe path becomes its URL on the entry's host (a public_http status, or an ops_v1 status's probe)."""
+    require(host is not None, f"{field} host")
+    require(isinstance(status["expect"], list) and bool(status["expect"]) and all(type(code) is int and 200 <= code <= 299 for code in status["expect"]), f"{field} codes")
+    status["url"] = f"https://{host}{route_path(status.pop('path'), f'{field} path')}"
+    for flag in ("enabled", "outside_access", "error_rate"):
+        if flag in status:
+            require(type(status[flag]) is bool, f"{field} {flag}")
+    if "content_type" in status:
+        require(isinstance(status["content_type"], str) and re.fullmatch(r"[a-z0-9.+-]+/[a-z0-9.+-]+", status["content_type"]) is not None, f"{field} media")
+    return status
+
+
 def primary_host(config: dict, field: str, zone: str) -> str | None:
     routes = config.get("routes", [])
     require(isinstance(routes, list) and all(isinstance(route, dict) for route in routes), field)
@@ -223,24 +239,21 @@ def load_catalog(root: Path = REPO, *, bootstrap: bool = False) -> Catalog:
             host = primary_host(configs[worker], f"{app}.entry host", zone) if worker is not None else None
             require("url_path" not in entry or host is not None, f"{app}.entry link")
             entry["url"] = f"https://{host}{route_path(entry['url_path'], f'{app}.url_path')}" if "url_path" in entry else None
-            status = fields(entry["status"], {"type", "provider", "binding", "guard", "path", "expect", "content_type", "outside_access", "error_rate", "enabled", "max_idle_hours"},
+            status = fields(entry["status"], {"type", "provider", "binding", "guard", "probe", "enabled", "max_idle_hours", *PROBE_FIELDS},
                             {"type"}, f"{app}.status")
             status = dict(status)
             kind = status["type"]
             require(isinstance(kind, str) and kind in {"ops_v1", "public_http", "analytics", "self", "none"}, f"{app}.status type")
-            shapes = {"ops_v1": ({"type", "provider", "binding", "guard"}, {"type", "binding", "guard"}),
-                      "public_http": ({"type", "path", "expect", "content_type", "outside_access", "error_rate", "enabled"}, {"type", "path", "expect", "enabled"}),
+            shapes = {"ops_v1": ({"type", "provider", "binding", "guard", "probe"}, {"type", "binding", "guard"}),
+                      "public_http": ({"type", "enabled", *PROBE_FIELDS}, {"type", "path", "expect", "enabled"}),
                       "analytics": ({"type", "max_idle_hours"}, {"type", "max_idle_hours"}), "self": ({"type"}, {"type"}), "none": ({"type"}, {"type"})}
             fields(status, *shapes[kind], f"{app}.status fields")
             if kind == "public_http":
-                require(host is not None, f"{app}.probe host")
-                require(isinstance(status["expect"], list) and bool(status["expect"]) and all(type(code) is int and 200 <= code <= 299 for code in status["expect"]), f"{app}.probe codes")
-                status["url"] = f"https://{host}{route_path(status.pop('path'), f'{app}.probe path')}"
-                for flag in ("enabled", "outside_access", "error_rate"):
-                    if flag in status:
-                        require(type(status[flag]) is bool, f"{app}.probe {flag}")
-                if "content_type" in status:
-                    require(isinstance(status["content_type"], str) and re.fullmatch(r"[a-z0-9.+-]+/[a-z0-9.+-]+", status["content_type"]) is not None, f"{app}.probe media")
+                probe(status, host, f"{app}.probe")
+            if kind == "ops_v1" and "probe" in status:
+                # A public probe beside the Ops answer: what only an anonymous request sees (the host and route).
+                nested = probe(dict(fields(status["probe"], PROBE_FIELDS, {"path", "expect"}, f"{app}.probe")), host, f"{app}.probe")
+                status["probe"] = {"url": nested.pop("url"), **nested}
             if kind == "ops_v1":
                 require(isinstance(status["binding"], str) and re.fullmatch(r"[A-Z][A-Z0-9_]*", status["binding"]) is not None,
                         f"{app}.ops binding")

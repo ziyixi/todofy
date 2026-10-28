@@ -1,10 +1,12 @@
 /**
  * Ops (contracts/ops-v1): Home's read-only view of the links app through its service binding, never a public route.
  * One D1 read of at most one row shows the database answers, and state.json gives the daily backup's facts
- * (ops-status.ts builds the answer). There is no guard: setGuard refuses, as for the other unguarded apps.
+ * (ops-status.ts builds the answer); each call also arms the backup's Alarm (backup-alarm.ts). There is no guard:
+ * setGuard refuses, as for the other unguarded apps.
  */
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import type * as wire from '@ziyixi/proto/ops/v1/ops_wire';
+import { armBackup } from './backup-alarm.ts';
 import { backupFacts } from './backup-runner.ts';
 import { type Env, publicHost } from './env.ts';
 import { linksStatus } from './ops-status.ts';
@@ -22,6 +24,9 @@ export class Ops extends WorkerEntrypoint<Env> implements wire.OpsService {
           () => false,
         ),
     ]);
+    // Arms the backup's Alarm (a lost one comes back at Home's next tick), at once while there is no backup state yet.
+    // Not arming leaves the answer as it is: the next call tries again.
+    await armBackup(this.env, backup?.status === 'never').catch(() => undefined);
     return linksStatus({ now, host: publicHost(this.env), database, backup });
   }
 

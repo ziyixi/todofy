@@ -65,7 +65,7 @@ Bindings: `MAIL_HERO` = service `mail-hero`, entrypoint `Ops`; `TODOFY` = servic
 (`../web/dist`, `run_worker_first = true`, SPA fallback; every asset request therefore invokes the Worker
 and counts as a Worker request, `limits.md` §2). `workers_dev = false`, `preview_urls = false`,
 route `home.ziyixi.science` with `custom_domain = true`. One cron
-`*/30 * * * *` (one of the account's 5 Free cron triggers, all in use since the links app's daily backup; [limits](limits.md)).
+`*/30 * * * *` (one of the account's 5 Free cron triggers, 4 in use; [limits](limits.md)).
 
 | Name | Kind | Value / rule |
 | --- | --- | --- |

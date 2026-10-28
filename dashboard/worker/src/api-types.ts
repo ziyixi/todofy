@@ -22,10 +22,10 @@
  * | Method                | HTTP                                  | Served by      | Budget per call                |
  * | --------------------- | ------------------------------------- | -------------- | ------------------------------ |
  * | GetRegistry           | GET  /api/v1/registry                 | Worker (no DO) | ≤ 20 KiB; ETag "<build>" → 304 |
- * | GetHomeView           | GET  /api/v1/homeView                 | DO, 1 call     | ≤ 10 KiB; ≤ 40 rows read       |
- * | GetFlowsView          | GET  /api/v1/flowsView                | DO, 1 call     | ≤ 20 KiB; ≤ 40 rows read       |
- * | GetCloudflareView     | GET  /api/v1/cloudflareView           | DO, 1 call     | ≤ 24 KiB; ≤ 40 rows read       |
- * | GetOpsView            | GET  /api/v1/opsView                  | DO, 1 call     | ≤ 24 KiB; ≤ 40 rows read       |
+ * | GetHomeView           | GET  /api/v1/homeView                 | DO, 1 call     | ≤ 10 KiB; ≤ 44 rows read       |
+ * | GetFlowsView          | GET  /api/v1/flowsView                | DO, 1 call     | ≤ 20 KiB; ≤ 44 rows read       |
+ * | GetCloudflareView     | GET  /api/v1/cloudflareView           | DO, 1 call     | ≤ 24 KiB; ≤ 44 rows read       |
+ * | GetOpsView            | GET  /api/v1/opsView                  | DO, 1 call     | ≤ 24 KiB; ≤ 44 rows read       |
  * | RefreshHomeView       | POST /api/v1/homeView:refresh         | DO             | CSRF + Origin; once a minute   |
  * | RefreshCloudflareView | POST /api/v1/cloudflareView:refresh   | DO             | CSRF + Origin; once a minute   |
  * | OverrideGuard         | POST /api/v1/guard:override           | DO             | CSRF + Origin; request_id      |
@@ -324,13 +324,13 @@ export const VIEW_BODY_BUDGET = {
  * Durable Object rows one view may read (SqlStorageCursor.rowsRead per call; the workerd suite asserts it with a
  * full 14-run canary history and 20 Workers). Every view reads the shared shell (meta, digest, the guard docs, one
  * status per ops_v1 entry) and, for the strip's observed items, what the evaluation reads (one probe document per
- * public_http entry, cf_scripts, the 14 recent canary runs); cloudflare adds the usage and drift documents. Each
+ * probed entry, cf_scripts, the 14 recent canary runs); cloudflare adds the usage and drift documents. Each
  * document is read once per build (HomeState's read cache). The reminder ledger and episode index bring the
- * representative ordinary case to 36 / 37 / 36 / 37 (home / flows / cloudflare / ops); budget 40 per view.
+ * representative ordinary case to 40 / 41 / 40 / 41 (home / flows / cloudflare / ops); budget 44 per view.
  * Larger stress cases use VIEW_ROWS_READ_MAX, including up to 256 retained reminder decisions. These are
  * per-build regression budgets, not Cloudflare billing limits; the runtime tests measure actual cursor reads.
  */
-export const VIEW_ROWS_READ: Readonly<Record<ViewId, number>> = { home: 40, flows: 40, cloudflare: 40, ops: 40 };
+export const VIEW_ROWS_READ: Readonly<Record<ViewId, number>> = { home: 44, flows: 44, cloudflare: 44, ops: 44 };
 export const VIEW_ROWS_READ_MAX = 320;
 
 /**

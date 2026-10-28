@@ -327,9 +327,7 @@
         "s.ziyixi.science"
       ],
       "routes": [],
-      "crons": [
-        "*/5 * * * *"
-      ],
+      "crons": [],
       "bindings": [
         {
           "name": "ACCESS_AUDIENCE",
@@ -360,6 +358,11 @@
         {
           "name": "BACKUPS",
           "type": "r2_bucket",
+          "source": "config"
+        },
+        {
+          "name": "BACKUP_ALARM",
+          "type": "durable_object_namespace",
           "source": "config"
         },
         {

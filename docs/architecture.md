@@ -218,9 +218,9 @@ accepted report nor a ready deployment receipt proves successful Newsletter deli
   [design](../tasks/docs/design.md), [backup](../tasks/docs/backup.md) and [migration runbook](../tasks/docs/import.md).
 - **Links:** public short links and an owner launcher under `/_/`. A redirect does one primary-key D1 read,
   zero writes/logs, and uses 302 only. A private key and a nonexistent key give anonymous callers the same
-  response. Only `/_` and `/_/*` are behind Access. Its one cron trigger runs a daily backup of every D1 table into
-  its own private bucket in bounded steps; a restore goes into a new database (or Time Travel within 7 days), and Home
-  reads its Ops entrypoint. See [AGENTS](../links/AGENTS.md) and [backup](../links/docs/backup.md).
+  response. Only `/_` and `/_/*` are behind Access. The Alarm of one Durable Object (no cron trigger) runs a daily
+  backup of every D1 table into its own private bucket in bounded steps; a restore goes into a new database (or Time
+  Travel within 7 days). Home reads its Ops entrypoint and probes its `/robots.txt` anonymously. See [AGENTS](../links/AGENTS.md) and [backup](../links/docs/backup.md).
 - **Watch:** one SQLite DO, private R2 for bounded reading captures and screenshots, no D1 and no cron.
   The optional Browser Run binding captures rendered pages within its existing daily ledger. Dots reads stored
   before/after evidence through MCP and judges relevance; Watch does not call a model. Its exact fetch/redirect/robots/size/time budgets and URL
