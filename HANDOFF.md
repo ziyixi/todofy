@@ -43,8 +43,10 @@ Remaining, in order:
    accepted release) and stage it on the host. Only its installer and units are used.
 3. The owner runs once on the host:
    `sudo /usr/bin/python3 -E -s <bundle>/installer/node_address.py --bundle <bundle>`
-   Expect one K3s restart (the API is usually back within a minute; Pods are not restarted) and a last line with
-   `"status": "stable"`. Re-running is safe; `--rollback` on the same command restores the previous K3s files.
+   Expect one K3s restart (the API is usually back within a minute; Pods are not restarted; the Node address follows
+   on the cloud controller's one-minute sync) and a last line with `"status": "stable"`. Re-running is safe: it
+   restarts K3s only if a file changed or the running K3s was started with another node-ip, so a rerun after a
+   timeout keeps waiting. `--rollback` on the same command restores the previous K3s files.
 4. Resume the held release with the CI resume command for its original SHA ([rebuild](docs/rebuild.md#检查与修复)).
 
 Verify after: `pcloud0` holds only the fixed address; Node InternalIP and the `default/kubernetes` EndpointSlice show

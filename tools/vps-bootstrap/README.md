@@ -177,8 +177,11 @@ It accepts only host K3s files equal to this bundle's or to their pre-address re
 the unit and address, writes the new K3s configuration and firewall, restarts K3s once
 (`KillMode=process` keeps containers running), then waits until the Node InternalIP and the
 `default/kubernetes` EndpointSlice show only the fixed address and the daemon's own Pod reads the
-API through `kubernetes.default.svc`. The last line is `"status": "stable"`. A repeat run only
-verifies; `--rollback` restores the previous K3s files and restarts K3s once.
+API through `kubernetes.default.svc` (K3s's cloud controller syncs Node addresses every minute;
+each wait allows 5 minutes). The last line is `"status": "stable"`. It restarts K3s only when a
+file changes or the running K3s was started with another node-ip (the Node's `k3s.io/internal-ip`
+annotation), so a repeat run only verifies and a rerun after a timeout keeps waiting instead of
+restarting again. `--rollback` restores the previous K3s files and restarts K3s once.
 
 ## Failures and retries
 

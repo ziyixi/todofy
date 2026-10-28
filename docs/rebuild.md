@@ -240,7 +240,7 @@ bootstrap 给 K3s 一个只属于本机、永不变化的节点地址：
 该地址属于 RFC 1918 的 10.254/16，不在 K3s 的 10.42/16、10.43/16，不在 Docker 默认地址池、CGNAT/Tailscale 的 100.64/10，
 也不在家用路由器常用的 192.168/16 和 10.0–10.10 网段。安装、迁移和恢复都会先检查主机现有网段，任何网段包含它就在写入前停止
 （`NODE_ADDRESS_CONFLICT`）。Pod 出网仍按当时的默认路由做地址转换，公网入口仍是 Tunnel 到 `127.0.0.1` 的 hostPort，
-所以局域网地址变化、Wi-Fi 重连、开机时暂时没有网络都不影响集群内访问 API。没有 DHCP 钩子、定时器或常驻进程。
+所以局域网地址变化或网络重连都不改变 Node 与 API 端点的地址。没有 DHCP 钩子、定时器或常驻进程。
 
 #### 已安装主机的一次性迁移
 
@@ -253,9 +253,11 @@ sudo /usr/bin/python3 -E -s <bundle>/installer/node_address.py --bundle <bundle>
 它先核对 bundle 校验和与安装完成标记，并要求主机上的 `k3s.service`、`config.yaml`、`firewall.v4`、`firewall.v6`
 恰好是该 bundle 的版本或其加入固定地址之前的版本；其他改动、`pcloud0` 已被别的用途占用、地址冲突或使用内嵌 etcd 时，
 在任何写入前停止。然后写入单元、创建地址，写入新的 K3s 配置与防火墙，只重启一次 K3s，等待 API 就绪、
-Node InternalIP 和 `default/kubernetes` EndpointSlice 都只剩固定地址，最后在 daemon 自己的 Pod 里经
-`https://kubernetes.default.svc` 读取一次 `platform-release`。成功的最后一行为 `"status": "stable"`。
-已迁移的主机重复运行只做核对，不重启 K3s；中途失败时直接重跑同一命令。
+Node InternalIP 和 `default/kubernetes` EndpointSlice 都只剩固定地址（K3s 的 cloud controller 每分钟同步一次 Node 地址，
+每项最多等 5 分钟），最后在 daemon 自己的 Pod 里经 `https://kubernetes.default.svc` 读取一次 `platform-release`。
+成功的最后一行为 `"status": "stable"`。是否重启只看文件是否改变，以及正在运行的 K3s 启动时用的 node-ip
+（Node 注解 `k3s.io/internal-ip`）：已迁移的主机重复运行只做核对；中途失败时直接重跑同一命令，
+K3s 已按固定地址启动时只继续等待，不再重启。
 
 控制面中断通常不到一分钟：`KillMode=process` 让现有容器继续运行（[K3s 停止规则](https://docs.k3s.io/upgrades/killall)），
 业务 Pod 不重启，Tunnel 入口不中断。完成后用[检查与修复](#检查与修复)中的 CI resume 命令继续原 SHA 的发布；

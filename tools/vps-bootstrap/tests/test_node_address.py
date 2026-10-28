@@ -117,13 +117,28 @@ def link(name, kind, *addresses):
 
 
 class FakeHost:
-    """Synthetic ip/systemctl/kubectl: K3s advertises the DHCP address until restarted."""
+    """Synthetic ip/systemctl/kubectl: K3s advertises the DHCP address until restarted.
 
-    def __init__(self, node, *, interface=None, lan=LAN + "/24", advertised=None):
+    `running` is the node-ip K3s last started with. With `lag`, the Node addresses follow it after
+    that many reads, as the cloud controller's periodic sync does.
+    """
+
+    def __init__(
+        self,
+        node,
+        *,
+        interface=None,
+        lan=LAN + "/24",
+        advertised=None,
+        running=None,
+        lag=None,
+    ):
         self.node = node
         self.interface = interface
         self.lan = lan
         self.advertised = advertised or LAN
+        self.running = running or self.advertised
+        self.lag = lag
         self.calls = []
         self.kubectl_calls = []
         self.restarts = 0
@@ -152,20 +167,27 @@ class FakeHost:
             )
         if argv == ["systemctl", "restart", "k3s.service"]:
             self.restarts += 1
-            self.advertised = node_address.ADDRESS
+            self.advertised = self.running = node_address.ADDRESS
         return CompletedProcess(argv, 0, b"", b"")
 
     def kubectl(self, args, **options):
         self.kubectl_calls.append(args)
         if args[:2] == ["get", "node"]:
+            if self.lag:
+                self.lag -= 1
+            elif self.lag == 0:
+                self.advertised = self.running
             return self.reply(
                 {
+                    "metadata": {
+                        "annotations": {node_address.RUNNING_ADDRESS: self.running}
+                    },
                     "status": {
                         "addresses": [
                             {"type": "InternalIP", "address": self.advertised},
                             {"type": "Hostname", "address": self.node},
                         ]
-                    }
+                    },
                 }
             )
         if "endpointslices" in args:
@@ -457,6 +479,30 @@ class NodeAddressTests(unittest.TestCase):
         with self.synthetic_host(fake):
             result = node_address.migrate(self.bundle)
         self.assertTrue(result["restarted"])
+        self.assertEqual(fake.restarts, 1)
+
+    def test_a_rerun_waits_for_k3s_already_started_on_the_fixed_address(self):
+        # An earlier run restarted K3s and timed out before the Node addresses followed.
+        self.install_host(legacy=False)
+        fake = FakeHost(self.node, running=node_address.ADDRESS, lag=3)
+        with self.synthetic_host(fake):
+            result = node_address.migrate(self.bundle)
+        self.assertFalse(result["restarted"])
+        self.assertEqual(fake.restarts, 0)
+        self.assertEqual(fake.advertised, node_address.ADDRESS)
+
+    def test_an_interrupted_rollback_restarts_k3s_on_the_next_run(self):
+        # Previous files already restored, K3s still started on the fixed address.
+        self.install_host()
+        fake = FakeHost(self.node, advertised=node_address.ADDRESS)
+        with self.synthetic_host(fake):
+            result = node_address.rollback(self.bundle)
+        self.assertTrue(result["restarted"])
+        self.assertEqual(fake.restarts, 1)
+        fake.running = LAN
+        with self.synthetic_host(fake):
+            again = node_address.rollback(self.bundle)
+        self.assertFalse(again["restarted"])
         self.assertEqual(fake.restarts, 1)
 
     def test_unreviewed_host_configuration_is_refused_before_any_change(self):

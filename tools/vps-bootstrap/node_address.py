@@ -61,7 +61,10 @@ K3S = Path("/etc/rancher/k3s")
 NETWORK_MANAGER_DIRECTORY = Path("/etc/NetworkManager/conf.d")
 # Embedded etcd stores peer URLs by address; this single node uses the default SQLite datastore.
 ETCD = Path("/var/lib/rancher/k3s/server/db/etcd")
-DEADLINE = 180
+# The cloud controller copies a new node-ip into the Node addresses on its one-minute sync.
+DEADLINE = 300
+# Written by the K3s agent at every start: the node-ip of the K3s process now running.
+RUNNING_ADDRESS = "k3s.io/internal-ip"
 # Runs inside the daemon's own container: the same identity, DNS name, Service NAT and firewall
 # path as its normal client. It prints nothing and reads one control ConfigMap it may already read.
 PROBE = """
@@ -246,13 +249,28 @@ def json_output(result):
     return value if isinstance(value, dict) else None
 
 
-def advertised(node_name):
-    """Node InternalIP and the API Service endpoints both name only the fixed address."""
-    node = json_output(
+def node_object(node_name):
+    return json_output(
         cluster.kubectl(
             ["get", "node", node_name, "-o", "json"], check=False, timeout=10
         )
     )
+
+
+def running_address(node_name):
+    """The node-ip K3s was last started with, or None while the API cannot say."""
+    try:
+        node = node_object(node_name)
+    except BootstrapError:
+        return None
+    if node is None:
+        return None
+    return node.get("metadata", {}).get("annotations", {}).get(RUNNING_ADDRESS)
+
+
+def advertised(node_name):
+    """Node InternalIP and the API Service endpoints both name only the fixed address."""
+    node = node_object(node_name)
     slices = json_output(
         cluster.kubectl(
             [
@@ -375,9 +393,11 @@ def migrate(bundle):
     event("interface", "ready")
     node_name = public["profile"]["observer_node_key"]
     planned = [(path, desired, mode) for _, path, desired, mode in files]
-    # Written files with K3s still on the old address (an interrupted run) also restart.
+    # Written files with K3s still started on the old address (an interrupted run) also restart.
+    # K3s already started on the fixed address only waits: a run that timed out while the Node
+    # addresses caught up must not restart K3s again.
     restarted = any(path.read_bytes() != content for path, content, _ in planned)
-    restarted = restarted or not succeeds(lambda: advertised(node_name))
+    restarted = restarted or running_address(node_name) != ADDRESS
     if restarted:
         restart_k3s(planned)
     wait_cluster(node_name)
@@ -394,12 +414,15 @@ def migrate(bundle):
 
 def rollback(bundle):
     """Restore the DHCP-derived K3s files; the unused unit and interface stay."""
-    _, files = reviewed(bundle)
+    public, files = reviewed(bundle)
     event("inputs", "verified")
     planned = [
         (path, legacy(name, desired), mode) for name, path, desired, mode in files
     ]
     restarted = any(path.read_bytes() != content for path, content, _ in planned)
+    # Restored files with K3s still started on the fixed address (an interrupted rollback).
+    node_name = public["profile"]["observer_node_key"]
+    restarted = restarted or running_address(node_name) == ADDRESS
     if restarted:
         restart_k3s(planned)
     until(api_ready, "NODE_ADDRESS_CLUSTER_UNAVAILABLE")
