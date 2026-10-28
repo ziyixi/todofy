@@ -194,7 +194,10 @@ const commands: Record<string, () => Promise<void>> = {
     await output("commit", sha);
   },
 
-  /** The newest commit that touched the website or its shared build inputs. */
+  /**
+   * The newest commit that touched the website or its shared build inputs. Other apps' proto packages are excluded by
+   * name, so a new shared proto input is tracked by default.
+   */
   async "code-sha"() {
     const { stdout } = await execFileAsync(
       "git",
@@ -205,6 +208,18 @@ const commands: Record<string, () => Promise<void>> = {
         "--",
         ".",
         "../proto",
+        ":(exclude)../proto/brief",
+        ":(exclude)../proto/dashboard",
+        ":(exclude)../proto/fleet",
+        ":(exclude)../proto/links",
+        ":(exclude)../proto/mailhero",
+        ":(exclude)../proto/mailsort",
+        ":(exclude)../proto/modelrouter",
+        ":(exclude)../proto/platform",
+        ":(exclude)../proto/recall",
+        ":(exclude)../proto/tasks",
+        ":(exclude)../proto/todofy",
+        ":(exclude)../proto/watch",
         "../package.json",
         "../pnpm-workspace.yaml",
         "../pnpm-lock.yaml",

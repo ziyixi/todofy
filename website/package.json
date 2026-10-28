@@ -4,9 +4,6 @@
   "private": true,
   "type": "module",
   "description": "Ziyi Xi's personal academic and engineering website.",
-  "engines": {
-    "node": "26.x"
-  },
   "scripts": {
     "content:prepare": "node --import tsx scripts/content/prepare.ts",
     "content:prepare:empty": "node --import tsx scripts/content/prepare.ts --source=empty --baseline=tests/fixtures/baseline-empty.json",

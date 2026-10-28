@@ -4,9 +4,6 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Worker \"brief\": the owner's daily research-and-world briefing (BriefState, one SQLite Durable Object that schedules itself with setAlarm), its fetchers, its Claude calls, its grounding check, its Resend ledger and its owner API (brief.ui.v1) behind Access.",
-  "engines": {
-    "node": "26.x"
-  },
   "scripts": {
     "postinstall": "node ../../proto/tools/ensure.mjs",
     "pretypecheck": "node ../../proto/tools/ensure.mjs",

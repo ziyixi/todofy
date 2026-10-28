@@ -4,9 +4,6 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Personal Fleet owner status UI",
-  "engines": {
-    "node": "26.x"
-  },
   "scripts": {
     "postinstall": "node ../../proto/tools/ensure.mjs",
     "predev": "node ../../proto/tools/ensure.mjs",

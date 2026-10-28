@@ -4,9 +4,6 @@
   "version": "1.0.0",
   "type": "module",
   "description": "Todofy edge gateway (Worker \"todofy\"): routing, auth and assets; the work runs in todofy-core.",
-  "engines": {
-    "node": "26.x"
-  },
   "scripts": {
     "postinstall": "node ../../proto/tools/ensure.mjs",
     "pretypecheck": "node ../../proto/tools/ensure.mjs",

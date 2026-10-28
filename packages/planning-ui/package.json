@@ -4,9 +4,6 @@
   "version": "0.0.0",
   "type": "module",
   "description": "Plan, Focus and Mail categories UI for Tasks.",
-  "engines": {
-    "node": "26.x"
-  },
   "exports": {
     ".": "./src/index.ts",
     "./weekly-review.css": "./src/weekly-review.css",

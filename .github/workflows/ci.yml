@@ -123,7 +123,7 @@ jobs:
           python3 tools/service-catalog/inventory.py --check
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: '26'
+          node-version-file: package.json
       # The deploy hostname guard every deploy job runs (dependency-free; synthetic API, no token).
       - name: Test the deploy hostname guard
         run: node --test tools/cf-guard/test/*.test.mjs tools/cloud-config/tests/worker-secrets.test.mjs
@@ -816,7 +816,7 @@ jobs:
       && needs.changes.result == 'success'
       && github.ref == 'refs/heads/main'
       && needs.newsletter-deploy.result == 'success' && needs.platform-image.result == 'success'
-      && needs.codex-gateway-image.result == 'success' }}
+      && (needs.codex-gateway-image.result == 'success' || needs.changes.outputs.codex_gateway_deploy != 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -846,7 +846,7 @@ jobs:
           && needs.newsletter-deploy.result == 'success' && needs.platform-image.result == 'success'
           && needs.vps-bootstrap-bundle.result == 'success'))
       && (needs.fleet-deploy.result == 'success' || needs.fleet-deploy.result == 'skipped')
-      && (needs.model-router-deploy.result == 'success' || needs.model-router-deploy.result == 'skipped')
+      && (needs.model-router-deploy.result == 'success' || needs.changes.outputs.model_router_deploy != 'true')
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
@@ -935,7 +935,7 @@ jobs:
       && (needs.todofy-static.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.todofy-static.result == 'skipped'))
       && (needs.todofy-runtime.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.todofy-runtime.result == 'skipped'))
       && (needs.todofy-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.todofy-checks.result == 'skipped'))
-      && (needs.model-router-deploy.result == 'success' || needs.model-router-deploy.result == 'skipped')
+      && (needs.model-router-deploy.result == 'success' || needs.changes.outputs.model_router_deploy != 'true')
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
@@ -981,7 +981,7 @@ jobs:
       ${{ !cancelled()
       && needs.changes.result == 'success'
       && (needs.dashboard-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.dashboard-checks.result == 'skipped'))
-      && (needs.model-router-deploy.result == 'success' || needs.model-router-deploy.result == 'skipped')
+      && (needs.model-router-deploy.result == 'success' || needs.changes.outputs.model_router_deploy != 'true')
       && needs.gate.result == 'success'
       && (needs.todofy-deploy.result == 'success' || needs.todofy-deploy.result == 'skipped')
       && (needs.mail-hero-deploy.result == 'success' || needs.mail-hero-deploy.result == 'skipped')
@@ -1083,7 +1083,7 @@ jobs:
       ${{ !cancelled()
       && needs.changes.result == 'success'
       && (needs.mailsort-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.mailsort-checks.result == 'skipped'))
-      && (needs.model-router-deploy.result == 'success' || needs.model-router-deploy.result == 'skipped')
+      && (needs.model-router-deploy.result == 'success' || needs.changes.outputs.model_router_deploy != 'true')
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
@@ -1216,7 +1216,7 @@ jobs:
       ${{ !cancelled()
       && needs.changes.result == 'success'
       && (needs.brief-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.brief-checks.result == 'skipped'))
-      && (needs.model-router-deploy.result == 'success' || needs.model-router-deploy.result == 'skipped')
+      && (needs.model-router-deploy.result == 'success' || needs.changes.outputs.model_router_deploy != 'true')
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
@@ -1254,11 +1254,14 @@ jobs:
   model-router-deploy:
     name: Model Router deploy
     needs: [changes, model-router-checks, gate, codex-gateway-deploy]
+    # After its executor: a gateway release this run selected (with VPS releases enabled) must succeed, since a failed
+    # one leaves this job's need skipped. Its callers (Todofy, Mailsort, Brief, Home, VPS deploy) likewise accept a
+    # skipped Router only when this run did not select it.
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
       && (needs.model-router-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.model-router-checks.result == 'skipped'))
-      && (needs.codex-gateway-deploy.result == 'success' || needs.codex-gateway-deploy.result == 'skipped')
+      && (needs.codex-gateway-deploy.result == 'success' || needs.changes.outputs.codex_gateway_deploy != 'true' || vars.VPS_DEPLOY_ENABLED != 'true')
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')

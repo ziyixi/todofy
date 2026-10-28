@@ -4,9 +4,6 @@
   "version": "0.1.0",
   "type": "module",
   "description": "The archive of the owner's daily brief (Chinese, mobile first, no framework): the issues, an issue with its quotes, votes and costs, the sources' health, the learned weights and the settings, built into ../web/dist and served by the Worker \"brief\".",
-  "engines": {
-    "node": "26.x"
-  },
   "scripts": {
     "postinstall": "node ../../proto/tools/ensure.mjs",
     "predev": "node ../../proto/tools/ensure.mjs",

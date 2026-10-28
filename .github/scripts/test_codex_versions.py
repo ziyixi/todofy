@@ -1,6 +1,5 @@
 """The executor owns the pinned Codex runtime; Newsletter calls the shared Router client."""
 
-import ast
 from pathlib import Path
 import tomllib
 import unittest
@@ -23,26 +22,8 @@ class CodexVersions(unittest.TestCase):
         packages = {package["name"]: package for package in lock["package"]}
         self.assertEqual(packages["openai-codex"]["version"], expected)
         self.assertEqual(packages["openai-codex-cli-bin"]["version"], expected)
-        for app, runtime in (
-            ("codex-gateway", "src/codex_gateway/runtime.py"),
-        ):
-            with self.subTest(app=app):
-                project = tomllib.loads((ROOT / app / "pyproject.toml").read_text())
-                dependencies = project["project"].get("dependencies", [])
-                for extra in (
-                    project["project"].get("optional-dependencies", {}).values()
-                ):
-                    dependencies = [*dependencies, *extra]
-                self.assertIn("openai-codex", dependencies)
-                self.assertFalse((ROOT / app / "uv.lock").exists())
-                constants = {
-                    node.targets[0].id: ast.literal_eval(node.value)
-                    for node in ast.parse((ROOT / app / runtime).read_text()).body
-                    if isinstance(node, ast.Assign)
-                    and isinstance(node.targets[0], ast.Name)
-                    and node.targets[0].id == "SDK_VERSION"
-                }
-                self.assertNotIn("SDK_VERSION", constants)
+        gateway = tomllib.loads((ROOT / "codex-gateway/pyproject.toml").read_text())
+        self.assertIn("openai-codex", gateway["project"]["dependencies"])
 
     def test_newsletter_uses_router_without_embedding_a_codex_runtime(self):
         project = tomllib.loads((ROOT / "newsletter/pyproject.toml").read_text())

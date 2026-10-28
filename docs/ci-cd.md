@@ -8,7 +8,9 @@ explains the release guarantees rather than maintaining another application or d
 
 [Rebuild](rebuild.md) covers a new account/VPS. The reusable [Worker release](../.github/workflows/worker-release.yml)
 keeps each application's checks, migration order, probes and release lock. A selected source checkout and
-`BUILD_SOURCE_SHA` let repair publish the app's last verified revision. GitHub deployment success is recorded
+`BUILD_SOURCE_SHA` let repair publish the app's last verified revision. Release recipes install only from the root
+workspace lock and read Node's version from the root `package.json`, so the selected revision must come from the
+shared workspace (2026-10-25) or later. GitHub deployment success is recorded
 after the actual provider version/configuration or VPS running identities pass verification.
 The static website retains its independent content registry, release and rollback workflow.
 
@@ -115,9 +117,9 @@ existing namespace, removes the first-deploy exceptions and binds Home to Brief'
 | `Recall extension release` | After main's gate, when `recall/extension/` or `recall/shared/` changed (`recall_extension_publish`; also a dispatch for recall or all, and a run of everything): publish the extension artifact `Recall checks` tested (from the reused run on same-SHA reuse) as the GitHub Release `recall-extension-v<version>` with its zip, the commit and the CI run; a version whose tag exists is skipped. The extension publication job with `contents: write`; it reads no secret, and no job needs it, so a failure delays no deploy (the failed run's diff is retried by the next push). |
 | Cloudflare app deploy jobs | After main's gate and app checks: build the verified UI, write private values, dry-run, enforce hostname safety, apply only the app's required D1 migrations and deploy its committed config. Each app retains its production probes and concurrency group. |
 | `Tasks deploy`, `Watch deploy` | Tasks waits for Todofy (its `MAIL` binding names Todofy's `Mail` entry); Watch waits for Tasks (its `TASKS` binding names Tasks' `TaskInbox`) and for Todofy, because a failed Todofy deploy leaves Tasks deploy skipped rather than failed. Each also proceeds when the jobs it waits for are skipped. |
-| `Dashboard deploy` | Also waits for Todofy, Mail Hero, Tasks, Watch, Fleet, Mailsort, Recall, Brief and website relay deploys to succeed or be skipped. Its `FLEET`/`NEWSLETTER` service bindings require Fleet's `Ops`/`NewsletterOps`, `BRIEF` requires Brief's `Ops` and `TASK_INBOX` Tasks' `TaskInbox`; selected providers deploy before Home in the same SHA's release. |
+| `Dashboard deploy` | Also waits for Todofy, Mail Hero, Tasks, Watch, Fleet, Mailsort, Recall, Brief and website relay deploys to succeed or be skipped, and for a selected Router deploy to succeed. Its `FLEET`/`NEWSLETTER` service bindings require Fleet's `Ops`/`NewsletterOps`, `BRIEF` requires Brief's `Ops` and `TASK_INBOX` Tasks' `TaskInbox`; selected providers deploy before Home in the same SHA's release. |
 | `VPS deploy` | After both image publications and the gate, when `VPS_DEPLOY_ENABLED=true`: call the daemon's shared-proto release API and verify the durable result and fresh physical provenance. See the VPS section below. |
-| `Codex gateway deploy` | After its image publication and any selected Fleet release, use one gateway target through the existing daemon API. Router waits for this executor release; the paired VPS/Newsletter release then waits for Router, so their rollouts stay ordered and do not overlap. Verify baked source, startup identity, digest and generation; retain Newsletter admission and trigger state. |
+| `Codex gateway deploy` | After its image publication and any selected Fleet release, use one gateway target through the existing daemon API. Router waits for this executor release; the paired VPS/Newsletter release then waits for Router, so their rollouts stay ordered and do not overlap. A selected gateway release that does not succeed (with `VPS_DEPLOY_ENABLED=true`) stops Router, and a selected Router release that does not succeed stops Todofy, Mailsort, Brief, Home and the paired VPS release; only an unselected one may be skipped. Verify baked source, startup identity, digest and generation; retain Newsletter admission and trigger state. The gateway releases before the paired VPS release updates the Platform renderer: when a diff changes the gateway's rendered resources or that renderer, dispatch `app=codex-gateway` once after the paired release (reconcile's plan reports the leftover difference until then). |
 
 On main, the diff base is the last successful push run of this workflow; failed/cancelled releases do not
 lose their changes. Branch checks compare with the merge base against `origin/main`. No usable base runs
@@ -130,10 +132,16 @@ same-SHA, non-expired artifacts, and the extension release its build artifact. A
 required check, missing artifact, different SHA or manual run runs checks again. Reuse changes neither deploy selection nor the cumulative main base.
 
 A package change checks and deploys its actual `PACKAGE_USERS`; a Markdown-only package change checks
-those consumers without deploying. Contract runtime values deploy only `BUNDLED_BY` consumers; schemas
-and fixtures still trigger checks. Generic CI/check tooling checks applications without deploying them.
-Explicit image build/publication/VPS release tooling changes publish the runtime pair and gateway for
-a complete bootstrap bundle. Gateway-only source changes leave Newsletter and Platform untouched.
+those consumers without deploying. A root workspace change checks every member of that workspace. A pnpm
+catalog version bump deploys only the members whose `package.json` lists the name (the VPS images only for
+the proto toolchain's `dependencies`), and a root uv constraint only the Python members that declare it; a lock
+follows the manifest changes beside it. The root `package.json`, any other workspace key, a lock changed alone
+or a pin no member declares still deploys the whole workspace. Contract runtime values deploy only
+`BUNDLED_BY` consumers; schemas and fixtures still trigger checks. Generic CI/check tooling checks applications without deploying them.
+Explicit image build/publication/VPS release tooling changes publish the runtime pair and the gateway.
+Newsletter or Platform changes release only that pair, and gateway-only source changes leave them untouched.
+The bootstrap bundle includes the gateway image only when the same run built it; a fresh host bootstrapped
+from a pair-only bundle gets the gateway with the next gateway release or an `app=codex-gateway` dispatch.
 A Dashboard-only change does not redeploy its Ops providers. Root documentation alone runs
 `Changes` and the gate. These rules are tested against dependencies/imports, including proto import closure.
 

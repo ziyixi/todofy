@@ -4,9 +4,6 @@
   "version": "0.1.0",
   "type": "module",
   "description": "The launcher of the owner's short links (Chinese, no framework), built into ../web/dist/_ and served by the Worker \"links\" under /_/.",
-  "engines": {
-    "node": "26.x"
-  },
   "scripts": {
     "postinstall": "node ../../proto/tools/ensure.mjs",
     "predev": "node ../../proto/tools/ensure.mjs",

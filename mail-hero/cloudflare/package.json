@@ -29,8 +29,5 @@
     "@ziyixi/proto": "workspace:*",
     "parse5": "catalog:",
     "postal-mime": "catalog:"
-  },
-  "engines": {
-    "node": "26.x"
   }
 }

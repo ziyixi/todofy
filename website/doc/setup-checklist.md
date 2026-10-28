@@ -87,9 +87,9 @@
 
 ### 1.4 本地连接验收
 
-- [ ] 本机准备 Node 24 和项目固定的 pnpm 11.25.0。
+- [ ] 本机准备 Node 26 和项目固定的 pnpm 11.25.0。
 
-macOS 使用 Homebrew 时，一次性运行 `brew install node@24`。Makefile 优先使用当前 Node 24；当前版本不匹配时，会为本项目命令自动选择已安装的 Homebrew Node 24，不修改终端默认版本。已有 nvm 则运行 `nvm install && nvm use`，仓库的 `.nvmrc` 已指定 24。版本检查会在 Notion 同步之前完成。直接执行 `pnpm` 不经过 Makefile，需先自行切到 Node 24。
+macOS 使用 Homebrew 时，一次性运行 `brew install node@26`。Makefile 优先使用当前 Node 26；当前版本不匹配时，会为本项目命令自动选择已安装的 Homebrew Node 26，不修改终端默认版本。已有 nvm 则运行 `nvm install 26 && nvm use 26`（版本见根 `package.json` 的 `engines`）。版本检查会在 Notion 同步之前完成。直接执行 `pnpm` 不经过 Makefile，需先自行切到 Node 26。
 
 - [ ] 建立被 Git 忽略的 `.env.local`，在编辑器中填写：
 

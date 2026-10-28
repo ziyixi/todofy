@@ -4,9 +4,6 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Content-free personal VPS observer ingress and owner UI",
-  "engines": {
-    "node": "26.x"
-  },
   "scripts": {
     "postinstall": "node ../../proto/tools/ensure.mjs",
     "pretypecheck": "node ../../proto/tools/ensure.mjs",

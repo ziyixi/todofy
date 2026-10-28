@@ -21,7 +21,7 @@ runs:
   using: composite
   steps:
     - name: Install the selected Node workspaces
-      if: inputs.required == 'true' && hashFiles('.release-source/pnpm-lock.yaml') != ''
+      if: inputs.required == 'true'
       uses: ./.github/actions/setup-workspace
       with:
         root: .release-source

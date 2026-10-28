@@ -141,13 +141,13 @@ MAILSORT = {"mailsort_check": True, "mailsort_deploy": True}
 RECALL = {"recall_check": True, "recall_deploy": True}
 BRIEF = {"brief_check": True, "brief_deploy": True}
 CODEX_GATEWAY = {"codex_gateway_check": True, "codex_gateway_deploy": True}
-PLATFORM = {"platform_check": True, "platform_publish": True, "platform_deploy": True, **CODEX_GATEWAY}
+PLATFORM = {"platform_check": True, "platform_publish": True, "platform_deploy": True}
 VPS = {**PLATFORM, "newsletter_check": True, "newsletter_deploy": True}
 ALL = {**DASH}
 # Every app that compiles in packages/edge-auth besides Todofy and Mail Hero: the dashboard, the links app, the watch
 # app, Fleet, mailsort, recall, the brief and Tasks, each checked and deployed.
 EDGE_AUTH = {"model_router_check": True, "model_router_deploy": True,"personal_mcp_check": True, "personal_mcp_deploy": True, "tasks_check": True, "tasks_deploy": True, **ALL, **LINKS, **WATCH, **FLEET, **MAILSORT, **RECALL, **BRIEF}
-EVERY = {"model_router_check": True, "model_router_deploy": True,"personal_mcp_check": True, "personal_mcp_deploy": True, "tasks_check": True, "tasks_deploy": True, **ALL, "website_check": True, "website_deploy": True, **LINKS, **WATCH, **FLEET, **MAILSORT, **RECALL, **BRIEF, **PLATFORM, "newsletter_check": True, "newsletter_deploy": True}
+EVERY = {"model_router_check": True, "model_router_deploy": True,"personal_mcp_check": True, "personal_mcp_deploy": True, "tasks_check": True, "tasks_deploy": True, **ALL, "website_check": True, "website_deploy": True, **LINKS, **WATCH, **FLEET, **MAILSORT, **RECALL, **BRIEF, **PLATFORM, **CODEX_GATEWAY, "newsletter_check": True, "newsletter_deploy": True}
 
 
 def push(paths, ref=MAIN, last_success=BASE, ancestor=True, merge_base=BASE):
@@ -740,7 +740,7 @@ class Classify(unittest.TestCase):
                 newsletter_check=T,
                 newsletter_deploy=paired,
                 codex_gateway_check=T,
-                codex_gateway_deploy=paired or "codex-gateway" in deployed,
+                codex_gateway_deploy="codex-gateway" in deployed,
                 mailsort_check=T,
                 mailsort_deploy="mailsort" in deployed,
                 recall_check=T,
@@ -761,7 +761,7 @@ class Classify(unittest.TestCase):
         # Paths add up: a Python runtime change with a UI API change deploys both.
         self.assertEqual(
             push(["proto/python/src/ziyixi_proto/wire_json.py", "proto/links/ui/v1/link.proto"]),
-            checked_and({"todofy", "links", "platform"}),
+            checked_and(python | {"links"}),
         )
         self.assertEqual(ci_changes.proto_deploys("proto/ts/http-transcoder.ts"), ts)
         self.assertEqual(ci_changes.proto_deploys("proto/links/ui/v1/link.proto"), {"links"})
@@ -1423,12 +1423,6 @@ class DeployConditions(unittest.TestCase):
     SKIPPED_OK = {
         ("vps-deploy", "fleet-deploy"),
         ("codex-gateway-deploy", "fleet-deploy"),
-        ("model-router-deploy", "codex-gateway-deploy"),
-        ("vps-deploy", "model-router-deploy"),
-        ("dashboard-deploy", "model-router-deploy"),
-        ("mailsort-deploy", "model-router-deploy"),
-        ("todofy-deploy", "model-router-deploy"),
-        ("brief-deploy", "model-router-deploy"),
         ("dashboard-deploy", "todofy-deploy"),
         ("dashboard-deploy", "mail-hero-deploy"),
         ("dashboard-deploy", "watch-deploy"),
@@ -1446,6 +1440,16 @@ class DeployConditions(unittest.TestCase):
         ("personal-mcp-deploy", "todofy-deploy"),
         ("personal-mcp-deploy", "recall-deploy"),
         ("personal-mcp-deploy", "watch-deploy"),
+    }
+
+    # (job, need) pairs where the need may be skipped only when this run did not select it: a selected gateway or
+    # Router release that fails leaves the next job skipped, which must stop the jobs after it rather than let them ship.
+    # The bootstrap bundle carries the gateway image only when this run built it.
+    SELECTED_ONLY = {
+        ("vps-bootstrap-bundle", "codex-gateway-image"): "needs.changes.outputs.codex_gateway_deploy != 'true'",
+        ("model-router-deploy", "codex-gateway-deploy"): "needs.changes.outputs.codex_gateway_deploy != 'true' || vars.VPS_DEPLOY_ENABLED != 'true'",
+        **{(job, "model-router-deploy"): "needs.changes.outputs.model_router_deploy != 'true'"
+           for job in ("vps-deploy", "dashboard-deploy", "mailsort-deploy", "todofy-deploy", "brief-deploy")},
     }
 
     # Check jobs a deploy may also find skipped, but only when this push to main reuses a green branch run of
@@ -1517,7 +1521,10 @@ class DeployConditions(unittest.TestCase):
             with self.subTest(job=name):
                 self.assertTrue(condition.startswith("${{ !cancelled()"), condition)
                 for need in self.needs(block):
-                    if (name, need) in self.SKIPPED_OK:
+                    if (name, need) in self.SELECTED_ONLY:
+                        self.assertIn(f"(needs.{need}.result == 'success' || {self.SELECTED_ONLY[name, need]})", condition)
+                        self.assertNotIn(f"needs.{need}.result == 'skipped'", condition)
+                    elif (name, need) in self.SKIPPED_OK:
                         self.assertIn(
                             f"(needs.{need}.result == 'success' || needs.{need}.result == 'skipped')", condition
                         )
@@ -2002,25 +2009,13 @@ class WebsiteRelease(unittest.TestCase):
         block = jobs["release"]
         self.assertIn("    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'\n", block)
         pin = block.index("- name: Check out the newest main commit that passed the CI gate\n")
-        workspace = block.index("- name: Install the selected Node workspaces\n")
-        legacy_node = block.index("- name: Use the selected legacy website Node version\n")
-        install = block.index("- name: Install the pinned pnpm and locked dependencies\n")
-        toolchain = block.index("- name: Install the shared proto toolchain\n")
-        self.assertLess(pin, toolchain)
-        self.assertLess(pin, workspace)
-        self.assertLess(workspace, toolchain)
-        self.assertLess(pin, legacy_node)
-        self.assertLess(workspace, legacy_node)
-        self.assertLess(legacy_node, toolchain)
-        legacy_setup = block[legacy_node:toolchain]
-        self.assertIn("if: hashFiles('pnpm-lock.yaml') == ''", legacy_setup)
-        self.assertIn("uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e", legacy_setup)
-        self.assertIn("node-version-file: website/.nvmrc", legacy_setup)
-        self.assertIn("if: hashFiles('pnpm-lock.yaml') != ''", block[workspace:toolchain])
-        self.assertLess(toolchain, install)
-        self.assertIn("npm ci --prefix ../proto --no-audit --no-fund", block[toolchain:install])
-        self.assertNotIn("secrets.", block[toolchain:install])
-        self.assertNotIn("GITHUB_TOKEN:", block[toolchain:install])
+        install = block.index("- name: Install the selected Node workspaces\n")
+        context = block.index("- name: Assert the trusted release context and the pinned commit\n")
+        self.assertLess(pin, install)
+        self.assertLess(install, context)
+        self.assertIn("uses: ./.github/actions/setup-workspace", block[install:context])
+        self.assertNotIn("secrets.", block[install:context])
+        self.assertNotIn("GITHUB_TOKEN:", block[install:context])
         self.assertIn("scripts/release/green-commit.ts", block[pin:install])
         self.assertIn('git -c advice.detachedHead=false checkout --detach "$sha"', block[pin:install])
         self.assertIn("          fetch-depth: 0\n", block)

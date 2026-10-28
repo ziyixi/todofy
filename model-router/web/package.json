@@ -4,9 +4,6 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Private ModelRouter request console and inference playground",
-  "engines": {
-    "node": "26.x"
-  },
   "scripts": {
     "postinstall": "node ../../proto/tools/ensure.mjs",
     "predev": "node ../../proto/tools/ensure.mjs",

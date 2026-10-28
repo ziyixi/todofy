@@ -4,9 +4,6 @@
   "version": "0.0.0",
   "type": "module",
   "description": "The pinned protobuf toolchain of this repository (buf, protoc-gen-es, the protobuf-es runtime) and the checks of the proto/ module. Apps consume ./ts (TypeScript) and ./python (Python), never this package.",
-  "engines": {
-    "node": "26.x"
-  },
   "scripts": {
     "generate": "node tools/ensure.mjs --force",
     "ensure": "node tools/ensure.mjs",
