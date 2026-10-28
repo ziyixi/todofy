@@ -264,7 +264,7 @@ const ENTRIES: readonly EntryDef[] = [
     access: true,
     status: { type: 'ops_v1', binding: 'PERSONAL_MCP', guard: false },
     tile_metric: { kind: 'counter', name: 'active_subscriptions' },
-    app_only_signals: [],
+    app_only_signals: ['backup_stale', 'backup_failed', 'maintenance_mode'],
     order: 4,
   },
   {
@@ -369,6 +369,8 @@ const RESOURCES: readonly ResourceDef[] = [
   { id: 'tasks-backups', kind: 'r2', name: 'Tasks 备份', entry: 'tasks', match: 'tasks-backups' },
   // Mailsort's own daily backups (mailsort/wrangler.toml BACKUPS), created by "Infra apply" before mailsort bound it.
   { id: 'mailsort-backups', kind: 'r2', name: 'mailsort 备份', entry: 'mailsort', match: 'mailsort-backups' },
+  // The Personal MCP store's own daily backups (personal-mcp/wrangler.toml BACKUPS), created by "Infra apply" before it bound it.
+  { id: 'personal-mcp-backups', kind: 'r2', name: 'Personal MCP 备份', entry: 'personal-mcp', match: 'personal-mcp-backups' },
   // Watch's private captured page text and screenshots (watch/wrangler.toml EVIDENCE_STORE).
   { id: 'watch-evidence', kind: 'r2', name: 'Watch 页面证据与截图', entry: 'watch', match: 'watch-evidence' },
   // The self-hosted servers' backups (~790 MB on 2026-09-30), outside this repository.

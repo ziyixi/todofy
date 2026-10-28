@@ -23,6 +23,11 @@ class_name = "SubscriptionStore"
 tag = "v1"
 new_sqlite_classes = ["SubscriptionStore"]
 
+# The store's own daily backup (docs/backup.md), which a restore also reads.
+[[r2_buckets]]
+binding = "BACKUPS"
+bucket_name = "personal-mcp-backups"
+
 [vars]
 PUBLIC_HOST = "mcp.ziyixi.science"
 ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"

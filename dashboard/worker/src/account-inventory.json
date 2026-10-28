@@ -43,6 +43,7 @@
     "mailsort-backups",
     "model-router-backups",
     "model-router-request-bodies",
+    "personal-mcp-backups",
     "recall-store",
     "tasks-backups",
     "todofy-backups",

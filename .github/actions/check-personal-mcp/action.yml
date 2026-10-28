@@ -8,10 +8,12 @@ runs:
       with:
         root: .
         filters: 'personal-mcp-worker...'
-    - name: Check deploy values
+    - name: Check deploy values and the backup tool
       working-directory: personal-mcp
       shell: bash -e {0}
-      run: node --test deploy/test/*.test.mjs
+      run: |
+        node --test deploy/test/*.test.mjs
+        node --test tools/test/*.test.mjs
     - name: Lint, typecheck and test the Worker
       working-directory: personal-mcp/worker
       shell: bash -e {0}

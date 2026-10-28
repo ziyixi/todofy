@@ -435,8 +435,8 @@ class MatchesTheApps(unittest.TestCase):
 
     # Buckets declared before any production config binds them: an "Infra apply" creates them between the release
     # that declares them and the one that binds them, whose preflight stops on a missing bucket. The own backups of
-    # Personal MCP, Watch and Links.
-    AHEAD_OF_BINDING = {"personal-mcp-backups", "watch-backups", "links-backups"}
+    # Watch and Links.
+    AHEAD_OF_BINDING = {"watch-backups", "links-backups"}
 
     def test_d1_databases_and_buckets_are_the_ones_the_production_configs_bind(self):
         storage = (INFRA / "storage.tf").read_text()

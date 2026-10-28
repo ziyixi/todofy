@@ -655,6 +655,22 @@ no complete one), `gtd_stale` (warning, `age_hours`), `backup_failed` (warning: 
 (`tasks/app.toml`). No capability, guard or mode besides `maintenance` (always false). Tests:
 `tasks/worker/test/runtime/ops.test.ts`, `jobs.test.ts` and `backup-runner.test.ts`.
 
+## 3h. Personal MCP (its own backup and restore, 2026-10-28; additive)
+
+`personal-mcp/worker/src/ops.ts`. `status()` reads the SubscriptionStore object's `getOpsStatus()`: its subscription,
+delivery, source and Work counts (bounded SQL in the object), and the daily backup's and a restore's state from its
+storage. Reading it also re-arms the object's Alarm when none is set, or brings it forward to a backup due sooner
+(the one write ops-v1 allows); that starts the first backup after the release that bound the bucket. Counters:
+`active_subscriptions`, `pending_deliveries`, `accepted_deliveries`, `failed_deliveries`, `open_work`,
+`waiting_work`, `unhandled_work_reports`, the `last_*_ms` times, and `backup_age_seconds` once a backup is complete.
+Signals: `backup_stale` (critical, `age_seconds` and `has_backup`: 3 days, counted from the first backup job while
+there is no complete one), `maintenance_mode` (critical: a restore is unfinished and the app refuses every request),
+`backup_failed` (warning: the last job failed), `delivery_failed` (warning, `count`), `source_unavailable` (warning,
+`count`) and `subscription_rejected` (warning, `rpc_code`), critical first; `last_backup_at` is the newest complete
+backup. `backup_stale`, `backup_failed` and `maintenance_mode` are app-only (`personal-mcp/app.toml`). The only mode
+is `maintenance`, true while a restore is unfinished (health `down`); no capability or guard. Tests:
+`personal-mcp/worker/test/runtime/backup.test.ts`, `restore.test.ts` and `gate.test.ts`.
+
 ## 3b. The move onto proto/ (2026-10-01, no wire change)
 
 The contract's source of truth became the IDL [`proto/ops/v1/ops.proto`](../../proto/ops/v1/ops.proto)

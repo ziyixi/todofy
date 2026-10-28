@@ -251,6 +251,7 @@ APP_TEST_DIRECTORIES = (
     "tasks/tools/test/",
     "personal-mcp/worker/test/",
     "personal-mcp/deploy/test/",
+    "personal-mcp/tools/test/",
     "model-router/worker/test/",
     "model-router/tools/test/",
 )

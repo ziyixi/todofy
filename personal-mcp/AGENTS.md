@@ -30,6 +30,8 @@ Read the root AGENTS, this app's README and docs/connection.md.
   A Dot's judgment never alters a Watch baseline or creates permanent ignore rules.
 - Recall activity is a bounded timeline read. `recall_read` retains its text-only behavior; `recall_view` must
   return a real MCP image content block when an image is available. Do not treat a base64 string as a viewed image.
+- The DO backs up every table and KV key it keeps into its own bucket daily; leave out only what a restore rebuilds,
+  and say why in docs/backup.md. A restore fills only an empty store, through the owner call; other requests wait.
 - Tests use synthetic content and local receivers. Do not read real task, mail or browsing content to test a tool.
   Do not add a generic event bus, replay service, compensation framework or extra scheduling infrastructure.
 - Release by branch CI and the same-SHA main Actions path. Deploy private source entrypoints before binding them.

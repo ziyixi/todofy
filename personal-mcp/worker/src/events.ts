@@ -12,6 +12,13 @@ export type SourceState =
   | { name: 'service.attention'; seq: number };
 export interface SourceEvent { id: string; name: SourceName; data: Record<string, unknown> }
 export type SourceEnv = TaskToolEnv & Pick<ContentToolEnv, 'TODOFY_MAIL' | 'HOME'>;
+/**
+ * The error code a restore (restore.ts) gives every event source. A business source's next check takes a new baseline
+ * (rebaselineSource); the Work Watch source replays from its cursor (watch-events.ts). The mark stays until it succeeds.
+ */
+export const RESTORED = 'restored';
+/** A must-start revision advances at most once per check, a minute apart. */
+const MUST_START_INTERVAL_MS = 60_000;
 
 /** The same 2,000-task completeness bound as Tasks' planning read. No partial scan becomes a baseline. */
 async function mustStartIds(env: TaskToolEnv): Promise<string[]> {
@@ -48,6 +55,18 @@ export async function baselineSource(name: SourceName, env: SourceEnv, previous?
       return { name, seq: result.head_seq };
     }
   }
+}
+
+/**
+ * A restored source's new baseline, as a new subscription takes: nothing between the backup and now is replayed, and a
+ * cursor ahead of a source restored behind it is never polled. Must-start events are named by revision, and the lost
+ * store may have used the next ones after the backup: the revision moves to the minutes since the epoch, above any it
+ * could have reached.
+ */
+export async function rebaselineSource(name: SourceName, previous: SourceState, env: SourceEnv, now: number): Promise<SourceState> {
+  const state = await baselineSource(name, env, previous);
+  return state.name === 'task.must_start'
+    ? { ...state, revision: Math.max(state.revision, Math.floor(now / MUST_START_INTERVAL_MS)) } : state;
 }
 
 /** The caller persists this state with the frozen deliveries in one SQLite transaction. */
