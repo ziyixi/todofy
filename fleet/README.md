@@ -10,7 +10,7 @@ Fleet 保留只读；提醒的关闭与恢复在 Home 管理。导航地址由�
 UI 构建时读取；迁移 Home 域名时同步更新这一项，不从观察报告或另一应用的配置推断地址。
 
 - `worker/src/`：独立 HMAC 机器入口、Access owner API、SQLite DO 状态与 Home service bindings；`metrics.ts` 是节点遥测历史。
-- `web/`：只读 owner UI；每分钟读取缓存观测，不探测服务器。
+- `web/`：只读 owner UI，“概览”与“资源”两个标签；每分钟读取缓存观测，资源曲线每五分钟读取一次，不探测服务器。
 - `platform/src/personal_cloud/observer/`：非 root k3s CronJob，使用平台镜像每五分钟发送状态与节点数值；只读挂载见 `observer/README.md`。
 - `proto/fleet/` 与 `contracts/fleet-report-v1/`：owner API 与机器元数据合同。
 

@@ -1,5 +1,6 @@
 import type { HostReport } from '@ziyixi/proto/fleet/telemetry/v1/host_report_wire';
-import { label, percent } from './format.ts';
+import { daemonLabel, label, percent, time } from './format.ts';
+import { Mark } from './Mark.tsx';
 import { RuntimeView } from './RuntimeView.tsx';
 
 const CATEGORY_NAMES: Record<string, string> = {
@@ -18,39 +19,47 @@ export function HostReportView({ report }: { report: HostReport }) {
   const delivery = newsletter.latest_delivery_state;
   return (
     <>
+      <div className="pair">
+        <section>
+          <h2>系统 daemon</h2>
+          <ul className="states">
+            {Object.entries(report.configured_daemons ?? report.daemons).map(([name, daemon]) => (
+              <li key={name}><span>{name}</span><Mark state={daemon.state} text={daemonLabel(daemon.state)} /></li>
+            ))}
+          </ul>
+          <p className="muted">观察器版本：<code>{report.observer_source_sha ?? '未知'}</code></p>
+          <p className="muted">报告百分比：磁盘（观察器卷）{percent(report.disk_used_percent)} · 内存 {percent(report.memory_used_percent)}</p>
+        </section>
+        <section>
+          <h2>k3s 集群</h2>
+          <ul className="states">
+            <li><span>集群</span><Mark state={cluster.state} /></li>
+            <li><span>Newsletter ready</span><strong>{cluster.ready_count ?? '?'} / {cluster.desired_count ?? '?'}</strong></li>
+            <li><span>重启次数</span><strong>{cluster.restart_count ?? '未知'}</strong></li>
+          </ul>
+        </section>
+      </div>
       <section>
-        <h2>系统 daemon</h2>
-        <p>观察器版本：<code>{report.observer_source_sha ?? '未知'}</code></p>
-        <div className="grid">
-          {Object.entries(report.configured_daemons ?? report.daemons).map(([name, daemon]) => (
-            <article key={name}>
-              <h3>{name}</h3>
-              <strong>{label(daemon.state)}</strong>
-            </article>
-          ))}
-        </div>
-        <p>磁盘：{percent(report.disk_used_percent)} · 内存：{percent(report.memory_used_percent)}</p>
-      </section>
-      <section>
-        <h2>k3s 与发布</h2>
-        <p>
-          集群：{label(cluster.state)} · Newsletter ready：
-          {cluster.ready_count ?? '?'} / {cluster.desired_count ?? '?'}
-        </p>
-        <p>重启次数：{cluster.restart_count ?? '未知'}</p>
+        <h2>发布与运行时</h2>
         <RuntimeView runtime={report.runtime} />
       </section>
       <section>
         <h2>Newsletter</h2>
         <p>后台进程：{workerHealth} · 发布入口：{label(newsletter.drain_state)}</p>
-        <dl>
-          <dt>排队</dt><dd>{newsletter.queued_count ?? '未知'}</dd>
-          <dt>进行中</dt><dd>{newsletter.inflight_count ?? '未知'}</dd>
-          <dt>未确认完成记录</dt><dd>{newsletter.unknown_count ?? '未知'}</dd>
+        <dl className="counts">
+          <div><dt>排队</dt><dd>{newsletter.queued_count ?? '未知'}</dd></div>
+          <div><dt>进行中</dt><dd>{newsletter.inflight_count ?? '未知'}</dd></div>
+          <div><dt>未确认完成记录</dt><dd>{newsletter.unknown_count ?? '未知'}</dd></div>
         </dl>
-        {delivery ? <p>最近投递记录：{DELIVERY_NAMES[delivery]} · 更新于 {newsletter.latest_delivery_time}</p> : <p>最近投递记录：暂未取得</p>}
-        {newsletter.unknown_by_kind ? <dl>{Object.entries(newsletter.unknown_by_kind).map(([kind, count]) => <div key={kind}><dt>{CATEGORY_NAMES[kind] ?? kind}</dt><dd>{count}</dd></div>)}</dl> : null}
-        <p>六类记录可能重复计入，合计并非失败邮件数；只有邮件投递、采编记录和 Notion 写入可能已产生实际结果，需要核对。</p>
+        {delivery
+          ? <p>最近投递记录：{DELIVERY_NAMES[delivery]} · 更新于 <time dateTime={newsletter.latest_delivery_time}>{time(newsletter.latest_delivery_time)}</time></p>
+          : <p>最近投递记录：暂未取得</p>}
+        {newsletter.unknown_by_kind ? (
+          <dl className="counts small">
+            {Object.entries(newsletter.unknown_by_kind).map(([kind, count]) => <div key={kind}><dt>{CATEGORY_NAMES[kind] ?? kind}</dt><dd>{count}</dd></div>)}
+          </dl>
+        ) : null}
+        <p className="muted">六类记录可能重复计入，合计并非失败邮件数；只有邮件投递、采编记录和 Notion 写入可能已产生实际结果，需要核对。</p>
       </section>
     </>
   );

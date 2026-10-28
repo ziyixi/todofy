@@ -15,10 +15,10 @@ features, the FlowDay retirement), [October 20](docs/history/handoff-2026-10-20.
 
 ## Current work
 
-### Fleet node telemetry (`claude/fleet-telemetry`, not yet pushed; UI part follows on the same branch)
+### Fleet node telemetry (`claude/fleet-telemetry`, not yet pushed)
 
 Owner request 2026-10-28: per-node CPU, memory, load, disk, network and per-workload usage with history in Fleet,
-built in rather than a host monitoring service. Backend done on the branch:
+built in rather than a host monitoring service. Backend and UI done on the branch:
 
 - `fleet.telemetry.v1.NodeMetrics` (optional `HostReport.metrics`), contract fixture `node_metrics.json`; the observer
   reads kernel files, statvfs and `pods.metrics.k8s.io` (`platform/src/personal_cloud/observer/metrics.py`) with new
@@ -29,6 +29,10 @@ built in rather than a host monitoring service. Backend done on the branch:
 - Order: Fleet accepts reports with and without metrics, so the usual Fleet-before-platform-image order holds.
   Workload usage needs the bootstrap RBAC rule in `platform/k3s/bootstrap/rbac.yaml`; until it is applied the
   reports carry no `workloads` and everything else works.
+- UI (`fleet/web`): tabs 概览 / 资源. 概览 leads with host freshness and per-node tiles (CPU, memory, disks, network,
+  load, uptime); an older observer's report shows its two legacy percentages and everything else as 未知. 资源 draws
+  hand-rolled SVG charts per node for 24 小时 / 7 天 / 30 天 / 180 天 / 2 年 (gaps never bridged, local time, hover
+  and arrow keys for exact values, a table per chart) and per-workload small multiples. No chart library; light only.
 - After deploy: the next observer report carries `metrics`; the second one gives CPU and network rates.
   Live acceptance still has to show the PID 1 `net/dev` mount reports the host's interfaces from inside the Pod.
 
