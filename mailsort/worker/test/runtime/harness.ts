@@ -17,6 +17,7 @@ import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { createHttpClient, type HttpCall, type HttpClient } from '@ziyixi/proto/http-client';
 import type { ShapeOf } from '@ziyixi/proto/http-transcoder';
 import { MailsortUiService } from '@ziyixi/proto/mailsort/ui/v2/mailsort_ui_service_pb';
+import { MAILSORT_OBJECT } from '../../src/env.ts';
 import { FakeUpstream } from '../fakes/upstream.ts';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -161,7 +162,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
           serviceBindings: { OPS: { name: 'mailsort', entrypoint: 'Ops' } },
           script: `export default { async fetch(request, env) {
             const { op, args } = await request.json()
-            const stub = env.MAILSORT.get(env.MAILSORT.idFromName('mailsort-v1'))
+            const stub = env.MAILSORT.get(env.MAILSORT.idFromName(${JSON.stringify(MAILSORT_OBJECT)}))
             try {
               if (op === 'step') return Response.json({ ok: await stub.step(args[0]) })
               if (op === 'tick') return Response.json({ ok: await stub.tick(args[0]) })
