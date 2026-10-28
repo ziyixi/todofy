@@ -46,10 +46,7 @@ def worker_secret_values(private: dict, scalar: dict, specs: dict, *, complete: 
         else:
             identity_prefix = prefix
         for name in set(spec["required"]) | set(spec["optional"]):
-            if worker == "todofy-core" and name.startswith("TODOIST_"):
-                source = "TODOFY_" + name
-            else:
-                source = identity_prefix + "_" + name if name.startswith("ACCESS_OWNER") else prefix + "_" + name
+            source = identity_prefix + "_" + name if name.startswith("ACCESS_OWNER") else prefix + "_" + name
             if source in scalar:
                 if name in bindings and bindings[name] != scalar[source]:
                     raise BootstrapError("WORKER_SECRET_CONSUMER_MISMATCH")

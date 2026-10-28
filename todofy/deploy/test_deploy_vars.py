@@ -111,15 +111,23 @@ def test_a_missing_or_invalid_var_names_only_the_setting(name: str, value: str |
 
 
 def test_the_core_secrets_are_only_its_map() -> None:
-    """No personal value: the file holds what the TODOFY_CORE_WORKER_SECRETS map holds, or nothing."""
+    """No personal value and no declared secret: the file is empty, with or without the map."""
     assert generate_secrets("core", VALID) == {}
-    mapped = VALID | {"TODOFY_CORE_WORKER_SECRETS": json.dumps({"TODOIST_API_KEY": "synthetic-key"})}
-    assert generate_secrets("core", mapped) == {"TODOIST_API_KEY": "synthetic-key"}
+    assert generate_secrets("core", VALID | {"TODOFY_CORE_WORKER_SECRETS": "{}"}) == {}
 
 
 @pytest.mark.parametrize("retired", ["synthetic-private-provider-key", "", 7])
-def test_old_core_gemini_map_field_is_dropped_before_validation(retired: object, tmp_path: Path) -> None:
-    env = VALID | {"TODOFY_CORE_WORKER_SECRETS": json.dumps({"GEMINI_API_KEY": retired})}
+def test_old_core_map_fields_are_dropped_before_validation(retired: object, tmp_path: Path) -> None:
+    """An older map may still hold the provider key and Todoist's key and Tasks projects: it still validates, and
+    none of them is uploaded."""
+    names = (
+        "GEMINI_API_KEY",
+        "TODOIST_API_KEY",
+        "TODOIST_DEFAULT_PROJECT_ID",
+        "TODOIST_OPS_PROJECT_ID",
+        "TODOIST_REVIEW_PROJECT_ID",
+    )
+    env = VALID | {"TODOFY_CORE_WORKER_SECRETS": json.dumps(dict.fromkeys(names, retired))}
     assert generate_secrets("core", env) == {}
     path = tmp_path / "retired.json"
     assert main(["secrets", "core", str(path)], env) == 0

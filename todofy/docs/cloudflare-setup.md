@@ -76,8 +76,9 @@ Environment secrets:
 
 The secrets `TODOFY_TODOIST_DEFAULT_PROJECT_ID`, `TODOFY_TODOIST_OPS_PROJECT_ID` and
 `TODOFY_TODOIST_REVIEW_PROJECT_ID` (Tasks projects of the mail tasks, the reminder and the Sunday review) are
-retired since 2026-10-21: nothing reads them. Once that release is live, delete them, and the core's Worker secrets of
-the same names, which `app.toml` declares optional until then.
+retired since 2026-10-21: nothing reads them, so delete them. The core declares no Worker secret any more, so delete
+its retired `TODOIST_API_KEY` and `TODOIST_*_PROJECT_ID` secrets too
+(`npx wrangler secret delete <NAME> --name todofy-core`): a Todofy release stops at any undeclared binding.
 
 These are secrets rather than variables because the repository is public and wrangler prints every plain
 var with its value in the deploy log (pywrangler also echoes its command line). The deploy's "Write the

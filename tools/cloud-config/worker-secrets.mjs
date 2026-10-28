@@ -3,6 +3,9 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
 const specs = JSON.parse(readFileSync(new URL('./worker-secrets.json', import.meta.url), 'utf8'))
+// The core's retired secrets, as todofy/deploy/deploy_vars.py RETIRED_CORE_SECRETS: older maps may retain them.
+const RETIRED_CORE_SECRETS = ['GEMINI_API_KEY', 'TODOIST_API_KEY', 'TODOIST_DEFAULT_PROJECT_ID', 'TODOIST_OPS_PROJECT_ID',
+  'TODOIST_REVIEW_PROJECT_ID']
 
 export function workerSecretSpec(worker) {
   const spec = specs[worker]
@@ -26,7 +29,9 @@ export function mergeWorkerSecrets(worker, env, personal, SettingError) {
   try { parsed = JSON.parse(raw) } catch { throw new SettingError(spec.github_secret) }
   if (['home', 'links', 'watch', 'mailsort', 'recall', 'brief', 'tasks', 'todofy', 'model-router'].includes(worker)
     && parsed && typeof parsed === 'object' && !Array.isArray(parsed)) delete parsed.CSRF_SIGNING_KEY
-  if (worker === 'todofy-core' && parsed && typeof parsed === 'object' && !Array.isArray(parsed)) delete parsed.GEMINI_API_KEY
+  if (worker === 'todofy-core' && parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    for (const name of RETIRED_CORE_SECRETS) delete parsed[name]
+  }
   if (!validWorkerSecrets(worker, parsed, false)) throw new SettingError(spec.github_secret)
   const merged = { ...parsed, ...personal }
   if (!validWorkerSecrets(worker, merged, true)) throw new SettingError(spec.github_secret)
