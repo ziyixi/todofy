@@ -491,16 +491,17 @@ it("shows Focus's quiet line only for due tasks with nothing planned, and opens 
     onShowStart,
   };
   const { rerender } = render(<FocusView {...props} />);
-  // Research's step is in today's queue, so only the draft, the claim and the visa count.
+  // Research's step is in today's queue, and the committed visa waits in Committed, not Parked: only
+  // the draft and the claim count.
   const line = screen.getByRole("button", {
-    name: "1 past deadline and 2 in their start window, not planned this week",
+    name: "1 past deadline and 1 in its start window, not planned this week",
   });
   expect(line.getAttribute("title")).toBe("Show in Plan");
   fireEvent.click(line);
   expect(onShowStart).toHaveBeenCalledOnce();
   rerender(<FocusView {...props} language="zh" />);
   expect(
-    screen.getByText("1 项已过截止、2 项已到启动窗口，这周还没有安排"),
+    screen.getByText("1 项已过截止、1 项已到启动窗口，这周还没有安排"),
   ).toBeTruthy();
   // Planned this week: the line goes.
   rerender(

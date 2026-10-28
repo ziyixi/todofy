@@ -25,7 +25,7 @@ when its window has opened or its prerequisites are complete, so it does not com
 Start now column is shown.
 
 Focus's today view counts unarranged ready tasks by deadline or completed-prerequisite reason, among the tasks
-Plan shows (not under a waiting task). A task counts once, and not when it or an open descendant is in the
+Plan shows in Parked (not under a waiting task, and not committed work, which Committed shows). A task counts once, and not when it or an open descendant is in the
 displayed week's queues. Its hint opens Plan Review,
 shows all areas and focuses Parked. The hint does not schedule work or send a timed notification.
 

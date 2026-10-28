@@ -72,7 +72,8 @@ export function planningReadiness(
 /**
  * Ready tasks in Parked with nothing open planned in these
  * queues: neither the task nor any of its steps. A waiting task past its deadline waits there, by
- * label or by dependency, so it is not counted. Each task is counted once.
+ * label or by dependency, so it is not counted, and nor is committed work, which keeps its status in
+ * Committed. Each task is counted once.
  */
 export function unplannedDue(
   tasks: readonly PlanningTask[],
@@ -102,6 +103,7 @@ export function unplannedDue(
   const counts = { past: 0, window: 0, dependencies: 0 };
   const index = dependencyIndex({ tasks, dependencies });
   for (const task of tasks) {
+    if (task.stage === "committed") continue;
     const reason = planningReadiness(
       task,
       today,
