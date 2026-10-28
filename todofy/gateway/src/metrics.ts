@@ -25,6 +25,8 @@ export interface RequestMetric {
 const METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']);
 const HOOKS_ROUTES: ReadonlySet<string> = new Set(['/hooks/mail', '/api/summary', '/api/recommendation', '/health']);
 const OWNER_API_ROUTES: ReadonlySet<string> = new Set([
+  // The static token a UI from before the keyless change fetches, until 2026-11-02 (owner.ts).
+  '/api/csrf',
   '/api/v1/serviceStatus',
   '/api/v1/mailEvents',
   '/api/v1/latestReports',

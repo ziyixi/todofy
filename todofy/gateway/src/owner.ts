@@ -6,6 +6,8 @@
  * - /api/v1/*: the owner API, TodofyUiService (proto/todofy/ui/v1, ui.ts), served by the shared transcoder; for
  *   every method but GET its `authorize` hook checks the same-origin Origin and the custom CSRF header and JSON media type,
  *   then MAINTENANCE_MODE, before the body is read;
+ * - GET /api/csrf: static compatibility token `1`, without a cookie (transport, not part of the service), for a tab
+ *   still running a UI from before the keyless change, which fetches it before its first write (until 2026-11-02);
  * - GET /task/<id>: a 302 to that task in Tasks (TASKS_PUBLIC_URL), the link the UI shows for a task;
  * - the routes of the owner API before todofy.ui.v1 (api/owner-api-v1.openapi.yaml until 2026-10-02:
  *   /api/v1/overview, /api/v1/events/..., ...): 410 `reload_required` in their old error envelope, so a tab still
@@ -18,13 +20,15 @@
 import type { RouteInfo } from '@ziyixi/proto/http-transcoder';
 import { RpcError } from '@ziyixi/proto/rpc-status';
 import { authenticate } from './access.ts';
-import { verifyCsrf } from './csrf.ts';
+import { issueCsrf, verifyCsrf } from './csrf.ts';
 import { variable } from './env.ts';
 import { errorEnvelope, HttpError, MESSAGES, withPrivateHeaders, type Context } from './http.ts';
 import { maintenance, REASONS, transcoder, uiError, type Reason, type UiContext } from './ui.ts';
 import { warmCodec } from './warm.ts';
 
 const API_PREFIX = '/api/v1/';
+/** The static token a UI from before the keyless change fetches; served until 2026-11-02 (docs/history.md). */
+const CSRF_PATH = '/api/csrf';
 const TASK_PREFIX = '/task/';
 /** A Tasks task ID (its imported Todoist IDs included). */
 const TASK_ID = /^[A-Za-z0-9_-]{1,128}$/;
@@ -92,6 +96,10 @@ async function route(ctx: Context): Promise<Response> {
     return statusResponse(ctx, uiError(ACCESS_REASONS[error.code] ?? 'UNAUTHORIZED'));
   }
   if (legacyPath(path)) return errorEnvelope(ctx.requestId, 410, 'reload_required', RELOAD_MESSAGE);
+  if (path === CSRF_PATH) {
+    if (ctx.request.method !== 'GET') return statusResponse(ctx, methodNotAllowed('GET'));
+    return issueCsrf();
+  }
   if (path.startsWith(TASK_PREFIX)) {
     if (ctx.request.method !== 'GET' && ctx.request.method !== 'HEAD') return statusResponse(ctx, methodNotAllowed('GET, HEAD'));
     const id = path.slice(TASK_PREFIX.length);

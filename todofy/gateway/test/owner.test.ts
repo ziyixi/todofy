@@ -359,6 +359,18 @@ describe('same-origin JSON mutations', () => {
     expect((await reconcile(env, csrfHeaders('legacy.cached.header'))).status).toBe(200);
     expect(calls[0]?.args[0]).toBe(OWNER);
   });
+  it('still gives a UI from before the keyless change its static token, without a cookie, until 2026-11-02', async () => {
+    const { env, core: calls } = fakes({}, core);
+    const response = await owner(env, '/api/csrf');
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ token: '1' });
+    expect(response.headers.get('set-cookie')).toBeNull();
+    expectPrivate(response);
+    const post = await owner(env, '/api/csrf', { method: 'POST' });
+    expect(post.status).toBe(405);
+    expect(post.headers.get('allow')).toBe('GET');
+    expect(calls).toHaveLength(0);
+  });
 });
 
 describe('maintenance', () => {
@@ -375,6 +387,7 @@ describe('maintenance', () => {
     expect(calls).toHaveLength(0);
 
     expect((await owner(env, '/api/v1/serviceStatus')).status).toBe(200);
+    expect((await owner(env, '/api/csrf')).status).toBe(200);
     expect(calls).toHaveLength(1);
   });
 });

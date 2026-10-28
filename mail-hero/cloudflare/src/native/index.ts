@@ -16,7 +16,7 @@ export async function fetchHandler(request: Request, env: Env): Promise<Response
     }
     if (env.MAINTENANCE_MODE === 'true' && !['GET', 'HEAD'].includes(request.method) && path !== BACKUP_PREFIX + '/reconcile-writer') {
       // Before authentication, as always: the owner API answers its google.rpc.Status, every other path its envelope.
-      if (path.startsWith(API_PREFIX)) return refusedResponse('MAINTENANCE');
+      if (path.startsWith(API_PREFIX) || path === '/api/csrf') return refusedResponse('MAINTENANCE');
       return privateResponse(json({ error: { code: 'maintenance', message: '维护中，请稍后重试' } }, 503));
     }
     if (path.startsWith(BACKUP_PREFIX + '/')) return await handleBackupAPI(request, env);

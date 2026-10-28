@@ -533,11 +533,13 @@ minute; `alg`/`kid`/no `crit`, `iss`, `aud`, `exp`, `iat`, optional `nbf`, non-e
 matched case-insensitively over ASCII only, non-ASCII addresses refused; `ACCESS_OWNER_ALIASES` ≤ 8 emails mapped to `ACCESS_OWNER`),
 `csrf.ts` (after Access authentication and before body parsing: exact allowed `Origin`, a nonempty
 `X-CSRF-Token` of at most 1024 characters, and `application/json`; local HTTP origins follow the existing
-`.localhost` dev rule). Clients send header `1` directly, including for bodyless mutations; there is no token endpoint (an unknown
-`/api/csrf` is NOT_FOUND). Old nonempty headers remain accepted under the same Origin and JSON checks. A failed check is 403 `CSRF_FAILED`.
+`.localhost` dev rule). Clients send header `1` directly, including for bodyless mutations. Until 2026-11-02,
+`GET /api/csrf` still returns a static `{"token":"1"}` without a cookie for a cached UI from before the keyless change,
+which fetches it before its first write. Old nonempty headers remain accepted under the same Origin and JSON checks. A failed check is 403 `CSRF_FAILED`.
 The other modules are `http.ts` (error
 envelopes; the package's private headers plus the `/assets/` cache exception), `crypto.ts` (the hooks
-hosts' Bearer and Basic digest checks only), `owner.ts` (the gate: Access → the old paths' 410 → the owner API, private headers on every response), `mail.ts` (the `Mail` entrypoint:
+hosts' Bearer and Basic digest checks only), `owner.ts` (the gate: Access → the old paths' 410 →
+`/api/csrf` until 2026-11-02 → the owner API, private headers on every response), `mail.ts` (the `Mail` entrypoint:
 todofy.mail.v1 on the shared transcoder, its binding's `access` prop, one `mail` call per rpc; mail-api.md),
 `ops.ts` (the `Ops` entrypoint, below), `ui.ts` (TodofyUiService on the shared
 transcoder: CSRF and `MAINTENANCE_MODE` on writes in its `authorize` hook, one `owner_ui` call per rpc with

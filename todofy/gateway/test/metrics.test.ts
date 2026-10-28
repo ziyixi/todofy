@@ -20,6 +20,7 @@ function withMetrics(env: Env, fail = false): { env: Env; points: AnalyticsEngin
 
 describe('route labels', () => {
   it.each([
+    ['owner', '/api/csrf', '/api/csrf'],
     ['owner', '/api/v1/mailEvents', '/api/v1/mailEvents'],
     ['owner', `/api/v1/mailEvents/${EVENT_ID}`, '/api/v1/mailEvents/{id}'],
     ['owner', `/api/v1/mailEvents/${EVENT_ID}:reconcile`, '/api/v1/mailEvents/{id}:reconcile'],

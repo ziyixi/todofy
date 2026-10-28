@@ -75,7 +75,8 @@ Results by branch:
   root workspace. Home's static `GET /api/csrf` is dated to the 2026-11-02 cutoff with its old routes.
 - `claude/wave-apps`: Newsletter has one default model and no `codex` extra; Todofy stores native model IDs
   (migration 0017, data-only and idempotent; restoring an older weekly backup replays it) and explains the cost of
-  each model choice; Todofy and Mail Hero no longer serve `GET /api/csrf` (a cached pre-keyless tab must reload);
+  each model choice; Todofy's and Mail Hero's `GET /api/csrf` is dated to their cutoffs (a cached pre-keyless UI fetches it before its
+  first write, so it stays until then);
   Mail Hero's v1 collector endpoints, container, Dockerfile and image workflow are retired, while the native backup,
   its artifact downloads, `writers`/`reconcile-writer` and the offline v1/v2 restore tools stay.
 - `claude/wave-docs`: HANDOFF keeps in-flight work only and the released sections moved to the
@@ -90,7 +91,8 @@ file's import used only by retired fields leaves the base with them) serves all 
 tests and 76 self-test cases; `proto/retired.json` unions every branch's entries; the
 [architecture](docs/architecture.md#home) Home paragraph matches `dashboard/wrangler.toml`; archived handoffs link
 the condensed Tasks and Work-memory records; CI/CD and architecture docs no longer describe a Mail Hero collector
-image; Todofy's development notes drop `/api/csrf`; the compatibility tables name Home's `GET /api/csrf`; the audit
+image; the compatibility tables name each app's dated `GET /api/csrf` (Todofy's and Mail Hero's restored, since a
+pre-keyless tab fetches it before its first write and would otherwise get no reload prompt); the audit
 window comments say "at least the last day"; the Mailsort and Recall bundle budgets follow the smaller bundles.
 
 Release effects to expect (one push deploys every Worker and the VPS images):
@@ -117,8 +119,9 @@ Owner follow-ups after the release:
   gateway tiles return to fresh; Todofy's model settings show native IDs.
 - After the first green `main` run: the new `retired.json` entries may be removed (the `reserved` lines stay). The
   `RETIRED_BINDINGS` entries stay until their own verified-release rule allows removal.
-- On or after 2026-11-02: delete Home's `GET /api/csrf`, `CsrfResponse`, `PATHS.csrf` and the legacy-410 block
-  together with the other dated routes.
+- On or after 2026-11-01: delete Mail Hero's `GET /api/csrf` (`csrfResponse`) with its `/api/v1` 410 routes. On or
+  after 2026-11-02: delete Home's `GET /api/csrf`, `CsrfResponse`, `PATHS.csrf` and the legacy-410 block, and
+  Todofy's `GET /api/csrf` (`issueCsrf`), together with the other dated routes.
 
 ## Latest verified release
 
@@ -207,8 +210,8 @@ The authoritative [compatibility table](docs/history.md#owner-api-compatibility)
 
 | Surface | Earliest removal |
 | --- | --- |
-| Mail Hero legacy owner routes | 2026-11-01 |
-| Home and Todofy legacy owner routes (and Home's `GET /api/csrf`) | 2026-11-02 |
+| Mail Hero legacy owner routes (and `GET /api/csrf`) | 2026-11-01 |
+| Home and Todofy legacy owner routes (and their `GET /api/csrf`) | 2026-11-02 |
 | Mailsort v1 owner routes | 2026-11-10 |
 
 Keep Todofy core's `owner_api` RPC until the corresponding gateway compatibility window is complete. Dates permit a

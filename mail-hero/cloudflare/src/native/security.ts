@@ -125,6 +125,8 @@ export async function authenticate(request: Request, env: Env, verifier: AccessV
     default: throw new HttpError(401, 'unauthorized', 'Access 登录无效或无权限'); // invalid_token, keys_unavailable
   }
 }
+/** GET /api/csrf for a UI from before the keyless change: a static token, no cookie (until 2026-11-01). */
+export function csrfResponse(): Response { return json({ token: '1' }); }
 export async function requireCSRF(request: Request): Promise<void> {
   if (!(await verifyCsrf(request, { allowedOrigins: [new URL(request.url).origin] })).ok) throw new HttpError(403, 'csrf_failed', '请刷新页面后再试');
 }

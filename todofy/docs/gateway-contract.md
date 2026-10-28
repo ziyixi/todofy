@@ -84,7 +84,10 @@ Gate order for every request, assets included (`gateway/src/owner.ts`):
    envelope (`{"error":{"code","message","request_id"}}`, "Todofy 已更新，请刷新页面"), any method, so a tab still
    running the previous UI tells the owner to reload. After 2026-11-02
    ([history](../../docs/history.md#owner-api-compatibility)) they may answer 404 like any other path.
-3. `/task/<id>` (`GET`/`HEAD`, the id `^[A-Za-z0-9_-]{1,128}$`) → 302 to `${TASKS_PUBLIC_URL}/?task=<id>`, the
+3. `/api/csrf`: `GET` → `{"token":"1"}` without a cookie (§2.5), for a tab still running a UI from before the keyless
+   change, until 2026-11-02 ([history](../../docs/history.md#owner-api-compatibility)); any other method → 405
+   `METHOD_NOT_ALLOWED` with `allow: GET`. It is the API's transport, not a method of the service.
+   `/task/<id>` (`GET`/`HEAD`, the id `^[A-Za-z0-9_-]{1,128}$`) → 302 to `${TASKS_PUBLIC_URL}/?task=<id>`, the
    task's link in the UI; another id → 404 `NOT_FOUND`, another method → 405 (`allow: GET, HEAD`), no
    `TASKS_PUBLIC_URL` → 503 `NOT_CONFIGURED`. No DO call.
 4. `/api/v1/*`: the owner API, TodofyUiService (`proto/todofy/ui/v1`, `gateway/src/ui.ts`), served by the shared
@@ -191,9 +194,10 @@ After Access authentication, every owner mutation requires an exact allowed `Ori
 `X-CSRF-Token` (at most 1024 characters), and media type `application/json`, before reading the body.
 Missing, `null` and foreign origins fail with 403 `CSRF_FAILED`.
 
-Clients send `X-CSRF-Token: 1` directly, including for bodyless mutations; there is no token endpoint,
-cookie or signing key. Cached clients' bounded opaque headers remain accepted under the same origin and
-JSON checks. A refused mutation is not automatically repeated.
+Clients send `X-CSRF-Token: 1` directly, including for bodyless mutations; there is no cookie or signing key.
+Until 2026-11-02, `GET /api/csrf` still returns `{"token":"1"}` for a cached UI from before the keyless change,
+which fetches it before its first write. Cached clients' bounded opaque headers remain accepted under the same
+origin and JSON checks. A refused mutation is not automatically repeated.
 
 ## 3. The DO's RPC methods
 

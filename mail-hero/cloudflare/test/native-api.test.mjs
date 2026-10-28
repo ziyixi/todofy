@@ -8,7 +8,7 @@ import { endpoint, environment, message, session, withRevision } from './native-
 import { MAX_ZONE_SEGMENTS, zoneSegments } from '../src/native/api-delivery-stats.ts'
 import { ROUTE_BLOCK_COOLDOWN_MS, ROUTE_BLOCK_GRACE_MS, ROUTE_BLOCK_MAX_RECHECKS, buildPayload, runJob, runMaintenance, syntheticTestMail } from '../src/native/pipeline.ts'
 import { alertSignals, alertSnapshot } from '../src/native/alerts.ts'
-import { authenticate, decryptCredential, encryptCredential, HttpError, privateResponse, requireCSRF } from '../src/native/security.ts'
+import { authenticate, csrfResponse, decryptCredential, encryptCredential, HttpError, privateResponse, requireCSRF } from '../src/native/security.ts'
 
 /** SummarizeDeliveryAttempts' query for a range, a granularity (`hour`, `day`) and a zone. */
 function summarize(from, to, granularity, timeZone) {
@@ -539,6 +539,22 @@ test('CSRF checks are keyless and cookie-free: Origin, a nonempty header and JSO
   const csrfFailed = error => error instanceof HttpError && error.status === 403 && error.code === 'csrf_failed'
   await assert.rejects(requireCSRF(request('')), csrfFailed)
   await assert.rejects(requireCSRF(request('1', 'text/plain')), csrfFailed)
+})
+
+test('a UI from before the keyless change still gets its static, cookie-free token until 2026-11-01', async () => {
+  const issued = csrfResponse()
+  assert.equal(issued.headers.get('Set-Cookie'), null)
+  assert.equal(issued.headers.get('Cache-Control'), 'no-store')
+  assert.equal(issued.headers.get('X-Content-Type-Options'), 'nosniff')
+  assert.deepEqual(await issued.json(), { token: '1' })
+  const noKey = { ...environment(), CREDENTIAL_KEY: '' }
+  const compatibility = await handleAPI(new Request('http://127.0.0.1:8787/api/csrf'), noKey)
+  assert.equal(compatibility.status, 200)
+  assert.deepEqual(await compatibility.json(), { token: '1' })
+  assert.equal(compatibility.headers.get('set-cookie'), null)
+  const post = await handleAPI(new Request('http://127.0.0.1:8787/api/csrf', { method: 'POST' }), noKey)
+  assert.equal(post.status, 405)
+  assert.equal(post.headers.get('allow'), 'GET')
 })
 
 test('private responses carry the exact Mail Hero headers, including the sandboxed-HTML frame-src', async () => {
