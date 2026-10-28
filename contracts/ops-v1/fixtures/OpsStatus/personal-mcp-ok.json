@@ -1,0 +1,30 @@
+{
+  "version": "ops-v1",
+  "app": "personal-mcp",
+  "generated_at": "2026-10-28T06:00:00Z",
+  "health": "ok",
+  "modes": {
+    "maintenance": false
+  },
+  "guard": {
+    "level": "normal",
+    "reason": null,
+    "until": null,
+    "set_at": null,
+    "deferred": []
+  },
+  "signals": [],
+  "counters": {
+    "active_subscriptions": 3,
+    "pending_deliveries": 0,
+    "accepted_deliveries": 41,
+    "failed_deliveries": 0,
+    "open_work": 2,
+    "waiting_work": 1,
+    "unhandled_work_reports": 0,
+    "backup_age_seconds": 2215
+  },
+  "last_backup_at": "2026-10-28T05:23:05Z",
+  "ui_url": null,
+  "capabilities": []
+}

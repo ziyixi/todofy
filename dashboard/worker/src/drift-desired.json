@@ -739,6 +739,11 @@
           "optional": true
         },
         {
+          "name": "BACKUPS",
+          "type": "r2_bucket",
+          "source": "config"
+        },
+        {
           "name": "BUILD_SHA",
           "type": "plain_text",
           "source": "deploy"
