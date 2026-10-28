@@ -8,7 +8,7 @@ receive Kubernetes credentials or apply these RBAC, volume or Secret resources.
 | Identity | Scope | Permissions |
 | --- | --- | --- |
 | `platform-controller` | configured namespace | Deployments, CronJobs, Services and ConfigMaps get/list/create/patch/update; Pods get/list |
-| `platform-observer` | configured namespace | Deployments and Pods get/list |
+| `platform-observer` | configured namespace | Deployments and Pods get/list; pod metrics (`metrics.k8s.io`) list |
 | `platform-observer` | cluster | Nodes get/list only |
 
 Neither identity can read Secrets, create tokens, exec into Pods, change RBAC, delete resources,

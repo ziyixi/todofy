@@ -263,6 +263,7 @@ class ObserverTests(unittest.TestCase):
                 return_value={"state": "unknown", "drain_state": "unknown"},
             ),
             patch.object(collector, "runtime_status", return_value=None),
+            patch.object(collector, "node_metrics", return_value=None),
             patch.object(
                 collector,
                 "systemd_snapshot",

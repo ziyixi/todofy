@@ -267,7 +267,8 @@ accepted report nor a ready deployment receipt proves successful Newsletter deli
 - **Fleet:** an Access-protected, read-only Worker/UI and SQLite DO receive reports and expose k3s, release,
   system-unit and Newsletter status. The observer is a `*/5` CronJob with `Forbid` concurrency, the same Platform
   image, a separate state PVC and a projected read-only service account. It has no host PID/network, privileged
-  mode or Docker socket. Exact read-only mounts provide host meminfo and the system D-Bus socket; Jeepney reads
+  mode or Docker socket. Exact read-only mounts provide host meminfo, PID 1's network counters, statvfs targets for
+  the root and K3s filesystems and the system D-Bus socket; Jeepney reads
   only fixed units' properties. A read-only socket mount does not restrict D-Bus method permissions: the
   container UID must have no host polkit grant to manage units. Unreadable evidence is unknown. Since the
   observer runs inside k3s, a cluster outage yields a stale/missing report rather than an independent live host

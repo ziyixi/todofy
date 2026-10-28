@@ -15,7 +15,11 @@ hostPID, hostNetwork, Docker socket, private systemd socket or host root mount.
 It uses an explicitly projected rotating read-only ServiceAccount and its own receipt HMAC identity.
 Automatic token mounting is disabled for the pod; only the main container receives that projection.
 
-The main container's only host metadata mount is `/proc/meminfo` (File, read-only).
+The main container's host metadata mounts are all read-only: `/proc/meminfo` and `/proc/1/net/dev`
+(Files: PID 1's file is the host network namespace, while the Pod's own `/proc/net/dev` shows only the Pod's
+interfaces), and `/usr` and `/var/lib/rancher/k3s` (Directories, statvfs targets for the root and K3s
+filesystems; nothing below them is listed or read, and K3s's agent and server state are root-only).
+Kernel-wide `/proc/stat`, `/proc/loadavg`, `/proc/uptime` and the boot ID are the host's inside any Pod and need no mount.
 A standard init container from the same immutable image uses the host's existing UID65534 (`nobody`)
 and GID10001 to read `/run/dbus/system_bus_socket` (Socket, read-only). D-Bus authenticates the Unix
 identity on the host; a UID present only inside an image is insufficient for the host's user policy.
@@ -29,8 +33,12 @@ using the shared codec; the main container mounts it read-only and rejects malfo
 snapshots older than 120 seconds or timestamps more than five seconds in the future. The observer's
 durable sequence and pending receipt remain unchanged. An unreadable probe writes unknown states.
 
-Disk usage comes from statvfs on the main container's own PVC, sharing its host filesystem;
-on a separate ZFS dataset this describes that dataset, not the whole storage pool. No process
+Disk usage comes from statvfs on the main container's own PVC and the two directory mounts above;
+on ZFS each describes its dataset (its used bytes plus the pool's free space), not the whole storage pool.
+Only the summed byte counters of physical interfaces (`en*`, `eth*`, `wl*`, `ww*`) are sent, never their names.
+Per-workload CPU and memory come from the cluster's metrics API (K3s's bundled metrics-server), read with a
+namespaced `list` of `pods.metrics.k8s.io`; there is no node proxy, kubelet stats or node-metrics permission.
+Without that grant or metrics-server the report simply has no workload usage. No process
 environment, logs, mail, provider credentials or private application volumes are read.
 
 Jeepney 0.9.0 is a mature [pure Python D-Bus client](https://pypi.org/project/jeepney/)
