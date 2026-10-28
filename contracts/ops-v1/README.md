@@ -41,8 +41,8 @@ Checks (the `Contracts` CI job, `Proto checks`, and each app's own tests):
   before the move, and every one valid under the legacy schema. The watch app joined after the move
   (`watch/worker/test/ops-golden.test.ts`): its answers are held to the generated schema and to its own
   fixtures, not the legacy one, which no dashboard that binds it ever used.
-  The links app follows the same pattern
-  (`links/worker/test/ops-status.test.ts`) its answers to `OpsStatus/links-ok.json` and `OpsStatus/links-degraded.json`.
+  The links app follows the same pattern: `links/worker/test/ops-status.test.ts` fixes its answers to
+  `OpsStatus/links-ok.json` and `OpsStatus/links-degraded.json`.
 - `dashboard/worker/test/ops-client.test.ts` checks the caller: only the methods of the generated
   services, every declared error code.
 

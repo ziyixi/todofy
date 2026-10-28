@@ -33,6 +33,7 @@ workflow publishes the bundle (an older engine keeps its last bundle until the i
 07:00 run (read-only): the `feeds` node succeeded (or `partial_failure` with per-source codes in its artifact), the
 log line shows source/ok/failed/seed counts, discovery prompts carry only their own direction's seeds, and new
 材料库 rows with 研究员订阅源 attribution appear only for pool candidates. Fix unreachable feed URLs in the registry.
+
 ### Brief retirement (`claude/retire-brief`, local, not pushed)
 
 Owner decision 2026-10-28: Brief is removed from the repository and taken off Cloudflare (PR 2 of the researcher
@@ -64,8 +65,8 @@ Release and teardown, in order:
    and its DNS record are gone.
 3. "Infra drift" must show exactly `delete: 3` (`cloudflare_zero_trust_access_application.retired_brief`,
    `cloudflare_zero_trust_access_application.brief_feedback`, `cloudflare_zero_trust_access_policy.brief_feedback`),
-   every other row `no-op` and `output changes: 1` (`access_aud`); then dispatch "Infra apply" on `main` with that
-   expect line and `confirm_destructive=delete-replace-forget`. Done when its verify plan says "No changes" and the
+   every other row `no-op` and `output changes: 1` (`access_aud`); then the owner (or the agent with the owner's
+   explicit OK) dispatches "Infra apply" on `main` with that expect line and `confirm_destructive=delete-replace-forget`. Done when its verify plan says "No changes" and the
    next drift run is green.
 4. Owner: delete the GitHub `BRIEF_*` secrets and the `BRIEF_MODE` variable (repository and environment level) and
    Brief's entries in the private bootstrap input. Leave the shared Claude workspace, Newsletter's Resend and the
