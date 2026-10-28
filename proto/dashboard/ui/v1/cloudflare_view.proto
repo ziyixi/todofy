@@ -390,6 +390,7 @@ enum DriftCategory {
   DRIFT_CATEGORY_WORKERS_DEV = 6;
   // Whether each personal value is a secret.
   DRIFT_CATEGORY_PERSONAL = 7;
-  // Account changes since the previous check not made with an API token (the dashboard, a wrangler login).
+  // Account changes not made with an API token (the dashboard, a wrangler login) since the previous check, at least
+  // over the last day.
   DRIFT_CATEGORY_ACCOUNT_CHANGES = 8;
 }

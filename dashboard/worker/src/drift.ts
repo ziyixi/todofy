@@ -2,8 +2,8 @@
  * Configuration drift (docs/design-v2.md §10): the live Cloudflare account compared with the desired state
  * generated from every committed wrangler.toml and deploy wrapper (src/drift-desired.json, made by
  * .github/scripts/drift_desired.py and checked against a fresh generation in CI), and the account's changes
- * since the previous check that were not made with an API token (CI deploys only with API tokens): a
- * dashboard edit or a laptop's `wrangler login` deploy shows up once, the day after it happened.
+ * since the previous check, at least over the last day, that were not made with an API token (CI deploys only
+ * with API tokens): a dashboard edit or a laptop's `wrangler login` deploy shows up the day after it happened.
  *
  * Once per UTC day, across ticks, at most DRIFT_CALLS_PER_TICK read-only GETs to fixed paths under
  * CF_API_BASE, with CF_ANALYTICS_TOKEN as the bearer token (the same token as the GraphQL query; never
@@ -90,7 +90,7 @@ export interface LiveAccount {
   readonly scripts: readonly string[];
   readonly domains: readonly { readonly hostname: string; readonly service: string }[];
   readonly routes: readonly { readonly pattern: string; readonly script: string }[];
-  /** Changes not made with an API token since the previous check; null when the token cannot read the audit log. */
+  /** Changes not made with an API token in the check's window; null when the token cannot read the audit log. */
   readonly changes: readonly LiveChange[] | null;
   readonly zones_unchecked: number;
   readonly truncated: boolean;

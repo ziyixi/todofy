@@ -972,9 +972,9 @@ jobs:
 
   dashboard-deploy:
     name: Dashboard deploy
-    # After the app deploys: the service bindings MAIL_HERO, TODOFY, WATCH, FLEET, MAILSORT, RECALL and BRIEF name their "Ops"
-    # entrypoints, which must be live first. An app deploy that did not run (nothing of that app changed) is fine; one that
-    # failed or was cancelled stops this job.
+    # After the app deploys: Home's service bindings (dashboard/wrangler.toml) name each app's "Ops" entrypoint, the
+    # website relay's "WebsiteSync" and Tasks' "TaskInbox", which must be live first. An app deploy that did not run
+    # (nothing of that app changed) is fine; one that failed or was cancelled stops this job.
     needs: [changes, dashboard-checks, gate, todofy-deploy, mail-hero-deploy, watch-deploy, fleet-deploy, mailsort-deploy, recall-deploy, brief-deploy, tasks-deploy, website-relay-deploy, personal-mcp-deploy, model-router-deploy]
     # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
     if: >-
