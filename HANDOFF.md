@@ -90,7 +90,7 @@ Deployments.
   `deploy:mailsort` Deployments are at or after those commits and check the behaviour read-only. A natural Mailsort
   batch through the Router has not been observed.
 - Native hourly Work review: catalog refresh and Work event continuation passed in the owner's existing Dot
-  ([evidence](docs/work-memory-verification.md#native-dots-acceptance-2026-10-23-utc)); the first natural run of the
+  ([evidence](docs/work-memory-verification.md)); the first natural run of the
   saved shared review is unverified (the host's next-run field is null). Do not substitute a Codex heartbeat, an
   accepted delivery count or a local fake callback for client execution. Existing user Watches and the old stopped
   automations stay as they are.
@@ -158,7 +158,7 @@ The authoritative [compatibility table](docs/history.md#owner-api-compatibility)
 | Surface | Earliest removal |
 | --- | --- |
 | Mail Hero legacy owner routes | 2026-11-01 |
-| Home and Todofy legacy owner routes | 2026-11-02 |
+| Home and Todofy legacy owner routes (and Home's `GET /api/csrf`) | 2026-11-02 |
 | Mailsort v1 owner routes | 2026-11-10 |
 
 Keep Todofy core's `owner_api` RPC until the corresponding gateway compatibility window is complete. Dates permit a
