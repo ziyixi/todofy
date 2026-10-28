@@ -6,8 +6,9 @@ are cited from the code.
 
 ## 1. Scope
 
-- One owner, a few hundred links (at most `LINKS_MAX`, 1,000), on Workers Free at $0: one Worker, one D1 database, no
-  KV, no Durable Object, no cron, no queue.
+- One owner, a few hundred links (at most `LINKS_MAX`, 1,000), on Workers Free at $0: one Worker, one D1 database
+  and its private backup bucket, no KV, no Durable Object, no queue; one cron trigger, the daily backup's
+  ([backup](backup.md)).
 - Owner-defined keys and targets. No click analytics, no last-used time, no link shortening for others.
 - A launcher (`/_/`) that filters as you type, mobile first, usable as a home-screen bookmark; light and dark; no
   external resources.
@@ -105,7 +106,12 @@ key.
 
 Soft delete (AIP-164): a delete sets `delete_time` and `purge_time` (30 days later). Every list and every write batch
 first purges what is due: deleted links past their purge time with their revisions, and request IDs older than a day.
-There is no cron; a store nobody touches keeps its deleted rows, which no read returns once due.
+No purge runs from the cron trigger; a store nobody touches keeps its deleted rows, which no read returns once due.
+
+Every table is backed up daily into the private R2 bucket `links-backups` (`src/backup.ts`, `src/backup-runner.ts`):
+one bounded step per tick of the Worker's one cron trigger, gzip NDJSON parts with their SHA-256 in a manifest, the
+newest 30 backups kept. Home reads the backup's age and failures through the `Ops` entrypoint (`src/ops.ts`). What is
+copied, the restore into a new database and its rehearsal: [backup](backup.md).
 
 D1 has no interactive transactions, so each write is one batch built from what the request read: every `UPDATE` is
 conditional on the etag it read, every derived row (the revision, the request log entry) is inserted only where the
@@ -174,8 +180,13 @@ first API request was measured apart, the full list page carried it (4.9-5.3 ms 
 runs on a machine loaded with nine busy processes; measured apart, eight such loaded runs passed (speed 2.4-2.8). An
 export of all 1,000 links in one answer measured about 5 ms, which is why it is paged.
 
-Bundles: the Worker 300 KiB raw, 71.9 KiB gzip (budget 82 KiB, set at 67.5 KiB, `deploy/bundle-size.mjs`; 68.4 KiB
-before the wire codec gained its value-rule checker and the `common/wire/v1` descriptors with ops-v1); the
+The daily backup's cron ticks, measured the same way on `LINKS_MAX` links with three revisions each (2026-10-28):
+the plan about 1 ms, an export step of 128 KiB of rows (D1's JSON, gzip and SHA-256) 3.4-4.3 ms first and 3.8 ms warm
+(256 KiB steps measured 5-7 ms, hence 128), the last step (the parts checked, the manifest, retention) 1.5-3.1 ms, an
+idle tick that only reads `state.json` under 0.5 ms; the test holds them to the owner API's bounds.
+
+Bundles: the Worker 324 KiB raw, 81.1 KiB gzip (budget 90 KiB, set at 67.5 KiB and raised for the backup and the
+ops-v1 entrypoint, `deploy/bundle-size.mjs`; 71.9 KiB before them); the
 launcher's JavaScript 37.5 KiB gzip (budget 45 KiB, `web/scripts/js-budget.mjs`): the protobuf-es runtime and the
 embedded `links.ui.v1` descriptors are most of both.
 
@@ -187,7 +198,12 @@ embedded `links.ui.v1` descriptors are most of both.
 - `worker/test/runtime/*.test.ts` (workerd, real D1, `harness.ts`): `redirect` (headers, visibility, the byte-identical
   enumeration answer, passthrough, previews, no SPA fallback, no write and no log), `access` (RS256 tokens of a synthetic
   issuer, the cookie on short links, keys unavailable), `api` (the whole owner API), `schema`, `budget` (rows written
-  per action) and `cpu`.
+  per action), `backup` (real D1 and R2: every table and column, the step budgets, a failed step repeated without
+  duplicates, a failed job, a part that changed, retention, the Ops entrypoint, and the cron tick's first backup
+  restored with wrangler into a new D1 and compared row for row) and `cpu`.
+- `worker/test/ops-status.test.ts`: the Ops answers, byte for byte the contract fixtures `OpsStatus/links-ok.json` and
+  `OpsStatus/links-degraded.json`.
+- `tools/test/*.test.mjs`: the restore tool on node:sqlite (download, config, SQL, verify) with stand-ins for wrangler.
 - `web/src/*.test.ts` (jsdom): the launcher's logic, the transport (CSRF renewal, retries), the page against a fake API
   served by the same shared transcoder, and the no-external-request rules.
 - `deploy/test/*.test.mjs`: the committed config (assets, observability, the one Custom Domain, the real D1 id and
