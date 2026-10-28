@@ -24,18 +24,14 @@ flowchart LR
   Home -->|Ops bindings| Sort
   Chrome[Owner's Chrome extension] -->|recall.ingest.v1, ingest token| Recall[recall]
   Recall -->|recall-archive-v1 feed, export token| NAS[NAS archive]
-  Sources[Public feeds and pages] -->|polite polls, honest UA| Brief[Brief]
   Todo -->|ModelService binding| Router[Model Router]
   Sort -->|ModelService binding| Router
-  Brief -->|ModelService binding| Router
   News -->|ModelService HTTPS| Router
   Router --> Claude[Claude API]
   Router --> Gemini[Gemini API]
   Router --> AI[Workers AI]
   Router --> Executor[Official Codex SDK on VPS]
   Home -->|Ops binding| Router
-  Brief -->|shadow or live, at most one email a day| Resend[Resend]
-  Home -->|Ops binding| Brief
   Home -->|Fleet and Newsletter Ops bindings| Fleet[Fleet]
   Observer[Observer CronJob] -->|signed fleet.report.v1| Fleet
   Actions[GitHub Actions] -->|Access and deploy Bearer, typed release API| Runtime[Platform runtime in k3s]
@@ -81,7 +77,6 @@ runtime. Newsletter keeps its own locked container dependencies and existing ext
 | Watch | `watch.ui.v1` | `/api/v1/` |
 | Mailsort | `mailsort.ui.v2` | `/api/v2/` |
 | recall | `recall.ui.v1` | `/api/v1/` |
-| Brief | `brief.ui.v1` | `/api/v1/` |
 | Fleet | `fleet.ui.v1` | `/api/v1/` |
 
 The [proto HTTP pattern](../proto/README.md#http-apis) owns route descriptors, request/response types and
@@ -157,18 +152,14 @@ and [verification](../tasks/docs/verification.md).
 ## Home
 
 Home is the owner launcher and operations console, not a second administrator of each application's storage.
-Besides its own `HOME` object and `ASSETS`, its bindings in `dashboard/wrangler.toml` are fourteen Ops services, the
+Besides its own `HOME` object and `ASSETS`, its bindings in `dashboard/wrangler.toml` are thirteen Ops services, the
 website relay's sync entrypoint and one task inbox. It calls only generated Ops methods through `MAIL_HERO`, `TODOFY`,
-`TASKS`, `WATCH`, `MAILSORT`, `RECALL`, `BRIEF`, `MODEL_ROUTER`, `PERSONAL_MCP`, `LINKS`, `NOTION_PUBLISH`, `FLEET`,
+`TASKS`, `WATCH`, `MAILSORT`, `RECALL`, `MODEL_ROUTER`, `PERSONAL_MCP`, `LINKS`, `NOTION_PUBLISH`, `FLEET`,
 `NEWSLETTER` and `CODEX_GATEWAY`. `NOTION_PUBLISH` targets the website relay's `Ops`; `WEBSITE_SYNC` targets the relay's own
 `WebsiteSync` entrypoint for the sync evidence and requests (`website.sync.v1`). The last three Ops bindings all target
 Fleet: its `Ops`, and the `NewsletterOps` and `CodexGatewayOps` projections of the latest bounded host report.
 `TASK_INBOX` is Tasks' create-only `TaskInbox` for the daily digest task. Home does not call the VPS directly or read an
 application's D1, R2, private configuration or source. The four views are Home, Flows, Cloudflare and Ops.
-
-`BRIEF` targets Brief's `Ops`: bounded counts, costs, budget and signal codes, with no issue text or source URLs.
-Its guard defers embedding, learning and source probes. Home's release waits for Brief's, as for its other Ops
-services.
 
 Fetch/cron handlers authenticate, route and make one RPC; the SQLite `HomeState` owns the work. It serializes
 each view once and the Worker forwards `PreEncoded` bytes with ETag/304, avoiding another decode/encode under
@@ -252,14 +243,6 @@ accepted report nor a ready deployment receipt proves successful Newsletter deli
   Dropbox app folder (OAuth with PKCE, connected in 设置), which the NAS syncs with its own Dropbox support: nothing of
   recall's runs on the NAS. Its Access applications and bucket exist since 2026-10-10 and CI deploys it like any app;
   Home binds its Ops entrypoint. See [AGENTS](../recall/AGENTS.md) and [design](../recall/docs/design.md).
-- **Brief:** one SQLite DO that schedules itself with alarms (no D1, R2 or cron). Model Router supplies both
-  generation and bge-m3 embeddings. It fetches the registry's public feeds and pages itself (an honest user agent, per-host pacing, never a
-  paywall or a login), screens with Claude Haiku, picks and writes with Claude Opus through the common ModelService (the local call ledger is `claude.ts`), checks every quote and number in code, and sends at most one email a day through a ledger
-  (`send.ts`; an unknown outcome is never sent again). The Claude key belongs to Router and the Resend key to Brief; both are owner-written and never pass
-  through GitHub; `BRIEF_MODE` and 暂停 can only lower what it does. It has been stopped since
-  2026-10-18 (`BRIEF_MODE=off`, code kept); Newsletter remains the active daily briefing. Home monitors its Ops
-  entrypoint. See
-  [AGENTS](../brief/AGENTS.md) and [design](../brief/docs/design.md).
 - **Newsletter:** runs its persistent editorial workflows in an independent k3s image and invokes models
   through the same Router API. It installs no model SDK or CLI. It reads Todofy's machine
   reports through existing HTTPS/Basic auth and keeps its own persistent state. It does not import Todofy's

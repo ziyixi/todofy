@@ -595,7 +595,7 @@ instance cannot be destroyed". The order, for any app:
    policy could be deleted before the application still using it, which Cloudflare refuses, and the apply would
    stop half done. Left in place, the policy is deleted after the application. A release refuses to drop a live
    binding the desired state no longer declares (`BINDING_UNDECLARED`), so each binding another app had to the
-   Worker gets an entry in `RETIRED_SERVICE_BINDINGS` of [`control.py`](../tools/cloud-release/control.py): that
+   Worker gets an entry in `RETIRED_BINDINGS` of [`control.py`](../tools/cloud-release/control.py): that
    app's normal release may then remove exactly that name, while a repair still stops.
 2. **After it is on `main` and every app that bound the Worker has deployed without that binding**, delete the
    Worker in the Cloudflare dashboard (Wrangler owns it, not this directory). Then neither the hostname nor the
@@ -618,7 +618,7 @@ instance cannot be destroyed". The order, for any app:
    green. Until then the daily "Personal cloud reconcile" reports the plan as needing a manual review and applies
    nothing.
 5. **A later commit** removes the `moved` blocks, their `RETIRED` pairs and any policy-key map, and the app's
-   `RETIRED_SERVICE_BINDINGS` entries: once the state no longer holds the old addresses and no live Worker has the
+   `RETIRED_BINDINGS` entries: once the state no longer holds the old addresses and no live Worker has the
    binding, they do nothing.
 
 ## Removing the import blocks

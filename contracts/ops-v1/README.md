@@ -41,8 +41,7 @@ Checks (the `Contracts` CI job, `Proto checks`, and each app's own tests):
   before the move, and every one valid under the legacy schema. The watch app joined after the move
   (`watch/worker/test/ops-golden.test.ts`): its answers are held to the generated schema and to its own
   fixtures, not the legacy one, which no dashboard that binds it ever used.
-  Brief follows the same pattern: `brief/worker/test/ops-golden.test.ts` fixes its archive-ready and degraded
-  answers to `OpsStatus/brief-ok.json` and `OpsStatus/brief-degraded.json`, and the links app
+  The links app follows the same pattern
   (`links/worker/test/ops-status.test.ts`) its answers to `OpsStatus/links-ok.json` and `OpsStatus/links-degraded.json`.
 - `dashboard/worker/test/ops-client.test.ts` checks the caller: only the methods of the generated
   services, every declared error code.
@@ -58,7 +57,6 @@ next to its unchanged default handlers:
 | Todofy | `todofy` (the gateway) | `todofy/gateway/src/index.ts` | forwards to `TodofyCore` RPC methods in `todofy-core` |
 | the watch app | `watch` | `watch/worker/src/index.ts` | in the Worker; state in the `WatchState` object (its own SQLite only) |
 | mailsort | `mailsort` | `mailsort/worker/src/index.ts` | in the Worker; state in the `MailsortState` object (its own SQLite only) |
-| Brief | `brief` | `brief/worker/src/index.ts` | in the Worker; state in the `BriefState` object (its own SQLite only) |
 | the links app | `links` | `links/worker/src/index.ts` | in the Worker: one D1 read and its backup's `state.json` (its own bucket) |
 | Fleet | `fleet` | `fleet/worker/src/index.ts` (`Ops`) | read-only receipt projection in `FleetState` SQLite |
 | Newsletter | `fleet` | `fleet/worker/src/index.ts` (`NewsletterOps`) | independently observed VPS process/release metadata; no VPS command surface |
@@ -79,11 +77,6 @@ entrypoint = "Ops"
 [[services]]
 binding = "WATCH"
 service = "watch"
-entrypoint = "Ops"
-
-[[services]]
-binding = "BRIEF"
-service = "brief"
 entrypoint = "Ops"
 
 [[services]]
@@ -171,9 +164,7 @@ lost alarm; `IMPLEMENTATION.md` §3c). Poll it no more often than every 10 minut
   and `notifications` (its TASKS binding is configured: the daily digest and urgent changes go to Tasks). mailsort:
   `maintenance` (always false), `mode_limited` (the deployment variable MODE is below live), `live`, `sorting_off`,
   `breaker` (read from storage; a `status_unavailable` status has only `maintenance` and `mode_limited`). recall:
-  `maintenance` (always false: it has no maintenance switch). The brief: `maintenance` (always false), `paused` (the
-  owner's switch, read from storage), `mode_limited` (the deployment variable BRIEF_MODE is below live; a
-  `status_unavailable` status has only `maintenance` and `mode_limited`). Personal MCP: `maintenance` (true while a
+  `maintenance` (always false: it has no maintenance switch). Personal MCP: `maintenance` (true while a
   restore of its store is unfinished; it then refuses every request). The links app: `maintenance` (always
   false). A
   `status_unavailable` status has only the deployment variables (`deployment-modes.json` lists them per app); the
@@ -187,7 +178,7 @@ lost alarm; `IMPLEMENTATION.md` §3c). Poll it no more often than every 10 minut
 - `last_backup_at`: the app's last complete backup, or null.
 - `ui_url`: `https://<owner UI host>/`, or null when the Worker does not know its host.
 - `capabilities`: what this release supports. Mail Hero `canary_producer`, `guard`; Todofy
-  `canary_consumer`, `guard` (`ops_digest` until 2026-10-21); the watch app, mailsort and the brief `guard`. The dashboard checks them before
+  `canary_consumer`, `guard` (`ops_digest` until 2026-10-21); the watch app and mailsort `guard`. The dashboard checks them before
   using a feature. Fleet and Newsletter monitoring, recall and the links app expose no capabilities and never accept a
   quota guard mutation.
 
@@ -200,7 +191,6 @@ Signal codes (severity):
 | watch | `backup_stale` (critical, `age_seconds`, `has_backup`: no complete daily backup for 3 days; without one, 3 days after its first step), `backup_failed` (warning: the last daily backup job failed), `watches_broken` (warning, `count`: watches failing their third check in a row or more), `scheduler_stale` (warning, `hours`: no scheduler pass for over 12 h while a watch is to be checked; no metric when none ever ran), `notify_unsettled` (warning, `open`, `failed`: a notification whose task Tasks has not created 24 h after it was frozen, or one given up or refused in the last 7 days) |
 | mailsort | `backup_stale` (critical, `age_seconds`, `has_backup`: no complete daily backup for 3 days; without one, 3 days after its first job), `gmail_auth_failed` (critical, `failures`: Google refused the grant three times and the Worker stopped calling it), `backup_failed` (warning: the last backup job failed), `gmail_not_configured` (warning: the owner has not put the Gmail grant), `breaker_tripped` (warning, `applied_today`), `sync_stale` (warning, `minutes`: no complete sync for 30 min while the mode reads Gmail and the grant works), `ai_quota_exhausted` (info, `deferred`); `label_live_revoked` was raised until 2026-10-10, when per-label live gating was removed |
 | recall | `device_stale` (warning, `count`, `hours`: a device seen in the last 30 days without an upload for 24 h), `archive_not_connected` (warning: the Dropbox backup is not connected, or Dropbox refused its token), `archive_behind` (warning, `hours`, `since`: a change has waited more than 24 h for Dropbox, counted from the connection at the earliest), `no_captures` (warning, `visits`: yesterday had visits of ten seconds or more on pages that keep their text and no capture of them arrived), `items_rejected` (warning, `count`: uploads lost items in the last 24 h), `storage_high` (warning past 850 MiB, critical at the 900 MiB budget; `used_mib`, `budget_mib`), `upload_over_budget` (warning: today's row budget ran out), `reads_over_budget` (warning, `rows_read`, `budget`: today's rows read stopped the change feed, or the searches too), `no_device` (info: before the first upload) |
-| brief | `anthropic_rejected` (critical, `status` and the error type as a metric of 1: the Claude API refused a request with a state that repeats and every model call stopped), `issue_failed`, `send_unknown`, `send_rejected` (critical), `budget_spent` (critical when it ended an issue in its note, else info, `budget_cents`), `anthropic_not_configured`, `mail_not_configured` (warning: the mode makes or sends issues and the secret is missing), `issue_late` (warning: past 07:30 on an issue day with nothing ready), `issue_missed` (warning: past 12:00 in shadow/live with nothing sent; never raised merely because archive mode sends nothing), `gate_refused_high` (warning, `refused`, `screened`: Haiku refused more than 5% of the day's candidates), `ground_drop_high` (warning, `dropped`), `sources_stale` (warning, `count`), `section_thin` (warning, `geo`, `world`: yesterday's geo research or world candidates below 30% of their 14-day median), `scheduler_stale` (warning, `hours`), `pick_fallback`, `packet_refused`, `issue_empty`, `entail_skipped`, `sources_degraded`, `brief_off` (info: `BRIEF_MODE=off`, no issue is made; `sources_stale`, `section_thin`, `issue_late`, `issue_missed` and `anthropic_not_configured` are then not raised) |
 | Tasks | `backup_stale` (critical, `age_seconds`, `has_backup`: no complete weekly backup for 8 days; without one, 8 days after its first step), `gtd_stale` (warning, `age_hours`: no day counted for 48 h; without one, 48 h after the jobs object first ran), `backup_failed` (warning: the last backup job failed), `review_overdue` (info, `days`: no weekly review completed for more than 10 days) |
 | links | `backup_stale` (critical, `age_seconds`, `has_backup`: no complete daily backup for 3 days; without one, 3 days after its first step), `backup_failed` (warning: the last backup job failed) |
 | Todofy | `attention`, `due_backlog`, `processing_paused`, `gemini_budget_80`, `backup_failed` (warning); `gemini_budget_95`, `backup_stale` (critical); `backup_disabled`, `backup_active` (info) (retired on 2026-10-21, when Todofy stopped writing tasks: todoist_paused, reminder_failed, gtd_snapshot_stale, reminder_disabled and review_overdue) |

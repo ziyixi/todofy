@@ -27,6 +27,15 @@ waiting lists from `414925e`. Later observations in that snapshot supersede many
 remaining acceptance are in [HANDOFF](../HANDOFF.md); current rebuild steps and verified limits are in
 [Rebuild](rebuild.md) and [rebuild verification](rebuild-verification.md).
 
+## Brief retirement, decided October 28
+
+By the owner's decision of 2026-10-28, the release that merged `claude/retire-brief` removed Brief completely, with no
+data migration: the app, its owner API `brief.ui.v1` (`proto/retired.json`), its CI jobs, Home's tile and Ops
+binding, its Model Router caller entry and the catalog, tool and infrastructure entries. Its source collection lives
+on in Newsletter's researcher, and Newsletter stays the daily briefing. Its Access applications and feedback policy
+leave through `infra/retired.tf`; its Worker script with the Durable Object, and the GitHub `BRIEF_*` settings, are
+deleted by hand. The last commit with Brief's source is `c928f889`; see [Brief (retired)](history/brief.md).
+
 ## Todofy's task writes leave, decided October 21
 
 By the owner's decisions of 2026-10-21, Todofy writes no task: it summarises mail, keeps the summaries and the

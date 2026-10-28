@@ -92,7 +92,7 @@ and the page says so.
 
 ## 3. What the dashboard itself uses per day
 
-48 cron ticks: 48 Worker requests and 48 Durable Object requests; at most 528 `status()` calls across 11 apps (Mail
+48 cron ticks: 48 Worker requests and 48 Durable Object requests; at most 624 `status()` calls across 13 apps (Mail
 Hero ≤ 6 and Todofy ≤ 5 indexed D1 statements each, contracts/ops-v1); at most 48 GraphQL queries; a
 few `setGuard` and canary calls, at most 6 `createInboxTask` calls a day; one canary a day (one synthetic message stored in Mail
 Hero's R2 and D1 and normally one Gemini call in Todofy, up to 3 when a transient failure is retried),

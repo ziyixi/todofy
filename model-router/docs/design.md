@@ -1,6 +1,6 @@
 # 统一调用
 
-Mailsort、Todofy、Brief 通过同账户 service binding 调用 Router；Newsletter 使用一个外部调用口令，
+Mailsort、Todofy 通过同账户 service binding 调用 Router；Newsletter 使用一个外部调用口令，
 只能调用 Codex 模型，其他供应商和向量在登记请求前返回 `MODEL_NOT_ALLOWED`。
 Router 选择供应商、调用模型、归一用量，把结果一次返回。应用继续负责提示词、预算、业务重试和工作流。
 模型 key 只在 Router；VPS 保留原 Codex 订阅登录。
@@ -64,7 +64,7 @@ D1 保存内容之外的请求记录 90 天，私有 R2 保存输入/输出 7 �
 未报告的服务端模型身份继续显示未知，不把配置值冒充供应商回报。
 
 一天视图按小时聚合，较长范围按 UTC 日聚合；图表分模型展示请求、成功/失败、输入/输出和缓存 token。
-API 估价与订阅的假设 API 价值分开显示。后者不会进入 Mailsort/Brief 的 API 消费账本。
+API 估价与订阅的假设 API 价值分开显示。后者不会进入 Mailsort 的 API 消费账本。
 费用按已知请求求小计，另标出未计入的请求数；未知用量不按零计算。供应商在生成前以 4xx 拒绝的调用不计费，
 按零用量、零费用记录；超时、停滞和中断的流保持未知。向量走平台配额，不报告 token，不影响 token 完整性。
 订阅金额统一按 Standard 文本价折算，SDK 累计 token 不能确定每次内部调用的上下文档位。

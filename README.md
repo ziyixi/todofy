@@ -3,7 +3,7 @@
 把收邮件、邮件分拣、任务、网页监视、浏览记录、每日简报和个人网站放在一个仓库里维护。
 Home 是日常入口；各服务独立运行、独立发布，共享接口和必要的基础代码。
 
-One repository for personal mail, mail sorting, tasks, web watches, a browsing record, a daily brief and the website.
+One repository for personal mail, mail sorting, tasks, web watches, a browsing record, a daily newsletter and the website.
 Home is the daily starting point. Services run and release independently, sharing contracts and a small runtime.
 
 ## 服务 · Services
@@ -20,7 +20,6 @@ Home is the daily starting point. Services run and release independently, sharin
 | Model Router | 统一推理、用量与请求详情 / Unified inference, usage and request details | Cloudflare Worker + DO + D1 + R2 | [model-router/](model-router/README.md) |
 | Codex Gateway | 私有结构化推理 / Private structured inference | VPS k3s, independent image | [codex-gateway/](codex-gateway/README.md) |
 | Recall | 浏览记录、全文搜索与 Dropbox 归档 / Browsing record, full-text search and an archive in Dropbox (synced to the NAS) | Cloudflare Worker + DO + R2, Chrome extension | [recall/](recall/README.md) |
-| Brief | 每日研究前沿与世界简报、周六深读 / Daily research and world brief, a Saturday deep read | Cloudflare Worker + DO, Model Router | [brief/](brief/README.md) |
 | Website | Notion 驱动的个人网站 / Personal website from Notion | Cloudflare static assets + relay | [website/](website/README.md) |
 | Newsletter | 生成并发送简报 / Build and send the newsletter | VPS k3s, separate image | [newsletter/](newsletter/README.md) |
 | Fleet | VPS、daemon 与发布状态 / VPS, daemons and release status | Cloudflare Worker + DO | [fleet/](fleet/README.md) |
@@ -53,7 +52,7 @@ Release progress, business health and observation freshness stay separate. See [
 The repository shares one pnpm catalog/lock and one uv workspace/lock. See [dependencies](docs/dependencies.md).
 
 ```sh
-cd mail-hero    # 或 / or todofy, tasks, dashboard, links, watch, mailsort, recall, brief, website, newsletter, fleet, platform
+cd mail-hero    # 或 / or todofy, tasks, dashboard, links, watch, mailsort, recall, website, newsletter, fleet, platform
 ```
 
 仓库没有“一条命令启动所有服务”的要求。Cloudflare TypeScript 应用安装时生成 proto；Todofy 的 Python 代码由 `uv` 构建时生成。

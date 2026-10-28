@@ -18,7 +18,7 @@ features, the FlowDay retirement), [October 20](docs/history/handoff-2026-10-20.
 ### Newsletter researcher (`claude/newsletter-researcher`, local, not pushed)
 
 Owner decision 2026-10-28: Brief's collection moves into Newsletter as a deterministic "researcher"; Newsletter's
-model stays the editor. PR 1 of 2 (Newsletter only); PR 2 retires Brief right after it.
+model stays the editor. PR 1 of 2 (Newsletter only); PR 2 (`claude/retire-brief`, below) retires Brief.
 
 - `newsletter/content-config/researcher.yaml` registers 35 public sources ported from Brief at `b55b29b1` (dropped
   entries recoverable there). The existing `feeds` (api_feed) node runs it once per run inside the worker activity:
@@ -33,6 +33,47 @@ workflow publishes the bundle (an older engine keeps its last bundle until the i
 07:00 run (read-only): the `feeds` node succeeded (or `partial_failure` with per-source codes in its artifact), the
 log line shows source/ok/failed/seed counts, discovery prompts carry only their own direction's seeds, and new
 材料库 rows with 研究员订阅源 attribution appear only for pool candidates. Fix unreachable feed URLs in the registry.
+### Brief retirement (`claude/retire-brief`, local, not pushed)
+
+Owner decision 2026-10-28: Brief is removed from the repository and taken off Cloudflare (PR 2 of the researcher
+plan). Branch from `origin/main` `c928f889`, the last commit with `brief/` (recorded in
+[history](docs/history/brief.md); if the branch is rebased onto a newer `main`, record that base instead).
+
+- Done (one `refactor!: retire Brief` commit and a docs commit): `brief/`, `proto/brief/` (`brief.ui.v1` and the
+  `brief` guard value in `proto/retired.json`), its CI jobs and actions, every `ci_changes.py` entry, tool maps and
+  bootstrap defaults, Home's `BRIEF` binding, tile and labels, Model Router's caller entry (its request history
+  stays), the ops-v1 fixtures, and the infra objects: the owner application moves to `retired_brief`, the feedback
+  application and its policy leave with their blocks (managed count 54 → 51). `RETIRED_BINDINGS` names
+  `dashboard: {BRIEF}` so Home's normal release drops the live binding. Nothing under `newsletter/` changed.
+- Local checks passed: `.github/scripts` and tool tests, every generator `--check`, `tofu fmt`, the infra guard and
+  tests (not `tofu validate`, which needs the provider download), proto lint/API lint/breaking/self-test/
+  deterministic generation/schema/tests, the Contracts suite, Home worker/runtime/web/deploy tests with the
+  production dry run, Model Router worker/web tests with its dry run.
+- Expected selection (`ci_changes.py` on `origin/main...HEAD`): checks for every app (a `.github/` change), deploys
+  only Model Router, Home and Personal MCP; Newsletter, Platform and the VPS release stay off.
+
+Release and teardown, in order:
+
+1. Push, full green `CI gate`, fast-forward `main` to that SHA. Model Router, Home and Personal MCP deploy; Home's
+   release reports `RETIRED_BINDING` for `BRIEF` and removes it. Until step 3 these are red or noisy by design:
+   "Infra drift" (three deletes), the account-inventory check (the `brief` Worker and its namespace unregistered) and
+   Home's 配置漂移 (the `brief` script and custom domain as `extra`). The stopped Brief Worker gets
+   `CALLER_NOT_CONFIGURED` from Router meanwhile; it sends nothing.
+2. Owner, after Home's deploy succeeded: delete the Worker `brief` in the Cloudflare dashboard (this deletes the
+   `BriefState` namespace and its data for good). Agent then checks read-only that the Worker, namespace, custom domain
+   and its DNS record are gone.
+3. "Infra drift" must show exactly `delete: 3` (`cloudflare_zero_trust_access_application.retired_brief`,
+   `cloudflare_zero_trust_access_application.brief_feedback`, `cloudflare_zero_trust_access_policy.brief_feedback`),
+   every other row `no-op` and `output changes: 1` (`access_aud`); then dispatch "Infra apply" on `main` with that
+   expect line and `confirm_destructive=delete-replace-forget`. Done when its verify plan says "No changes" and the
+   next drift run is green.
+4. Owner: delete the GitHub `BRIEF_*` secrets and the `BRIEF_MODE` variable (repository and environment level) and
+   Brief's entries in the private bootstrap input. Leave the shared Claude workspace, Newsletter's Resend and the
+   `DASHBOARD_*` secrets alone. Public notes record the outcome only.
+5. Agent follow-up commit: remove the `moved` block in `infra/retired.tf`, its `RETIRED` pair in `infra_guard.py`,
+   `dashboard: {BRIEF}` in `RETIRED_BINDINGS`, and `BRIEF` from `private_input.py`'s retired-key filter; then move
+   this section to the dated history and wait for green reconcile and drift.
+
 ### ZFS ARC in Fleet memory (`claude/observer-zfs-arc`, not merged)
 
 On a ZFS host Fleet overstated memory pressure: used was total minus MemAvailable, and MemAvailable leaves out the
@@ -380,9 +421,8 @@ Deployments.
 - Remove Todoist Plus from `chrome://extensions` (its variable, releases and merged branches are gone).
 - Decided 2026-10-15, do not re-ask: Recall keeps its seven-day cloud file window, and native weekly rollover stays
   enabled; a commitment for an ended week reads as weekly in Tasks ([Tasks design](tasks/docs/design.md)).
-- Brief is stopped since 2026-10-18 (`BRIEF_MODE=off`, code kept) and Newsletter is the active daily briefing.
-  Resuming Brief means setting the mode and dispatching `app=brief`; its sender `onboarding@resend.dev` reaches only
-  the Resend account's own address and must change before any send. Retiring either app is a separate owner decision.
+- Brief is retired (2026-10-28); Newsletter is the one daily briefing. The Cloudflare and GitHub teardown steps are
+  in Current work.
 
 ## Operating boundaries
 
@@ -397,8 +437,8 @@ Deployments.
   its own D1 (both from release 2 of Boundary B). Model Router backs up request metadata and retained bodies daily
   into its private bucket ([backup](model-router/docs/backup.md)). With the backups wave, Mailsort, Personal MCP, Watch
   and the links app each back up daily into their own private bucket (see Current work).
-- Provider keys are Router secrets and never pass through GitHub; spending is capped at the provider. Brief's stored
-  budget and the other application budgets stay as they are; Workers Free remains in force.
+- Provider keys are Router secrets and never pass through GitHub; spending is capped at the provider. Application
+  budgets stay as they are; Workers Free remains in force.
 - Keep Home's persistent alert dismissal. Historical unknown business outcomes are not automatic replay permission;
   follow current [dashboard-state semantics](docs/dashboard-state.md).
 

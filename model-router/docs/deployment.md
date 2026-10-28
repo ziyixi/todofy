@@ -53,7 +53,7 @@ with the owner Access assertion or exact Newsletter token. Owner JSON mutations 
 other providers and embeddings answer `PERMISSION_DENIED` with `MODEL_NOT_ALLOWED` before a request is recorded,
 so synthetic Claude, Gemini and embedding checks use the owner's Access identity.
 
-Cloudflare callers use the `Inference` binding with immutable `props.app` naming `mailsort`, `todofy` or `brief`.
+Cloudflare callers use the `Inference` binding with immutable `props.app` naming `mailsort` or `todofy`.
 Home binds the content-free `Ops` entrypoint. Application request fields cannot choose either identity.
 
 `MODEL_ROUTER_WORKER_SECRETS` in GitHub's protected production environment contains only `ACCESS_OWNER` and
@@ -68,7 +68,7 @@ publication preserves:
 - `MODEL_ROUTER_NEWSLETTER_TOKEN`: Newsletter's inference-only credential, sent as `NEWSLETTER_MODEL_ROUTER_TOKEN`
   with `NEWSLETTER_MODEL_ROUTER_URL` naming the Models origin.
 
-Backups do not export any credentials. Gmail grants and Brief's Resend connection stay with their applications.
+Backups do not export any credentials. Gmail grants stay with Mailsort.
 Playground calls record source `console` and perform no application business action.
 
 ## Checks and coordinated release

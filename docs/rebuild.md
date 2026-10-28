@@ -26,7 +26,7 @@ npx --no-install wrangler secret put ANTHROPIC_API_KEY --config ../wrangler.toml
 npx --no-install wrangler secret put GEMINI_API_KEY --config ../wrangler.toml
 ```
 
-两把 key 都不进入 bootstrap JSON、GitHub 或 VPS。Gmail 授权和 Resend 凭据仍分别归 Mailsort、Brief。
+两把 key 都不进入 bootstrap JSON、GitHub 或 VPS。Gmail 授权仍归 Mailsort。
 首次上传后，连接检查会在凭据不全时失败并阻止下游发布；owner 配好后重跑同一 SHA。执行器 Access 连接和 Newsletter 独立口令见
 [Model Router 部署说明](../model-router/docs/deployment.md)。
 

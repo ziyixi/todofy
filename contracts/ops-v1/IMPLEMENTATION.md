@@ -622,29 +622,6 @@ it lists no capability, `setGuard` rejects with `invalid_input` as Fleet's does,
 - Counters: `visits_today`, `texts_today`, `rows_written_today`, `rows_read_today`. Signals in README. Never a URL,
   host, title or text.
 
-## 3f. the brief (added 2026-10-10, additive)
-
-The brief (`brief/`, Worker `brief`, `brief/docs/design.md` §15) joined `OpsStatus.app` (an open list) as `brief`, so
-that its `Ops` entrypoint writes a valid status; nothing of the other apps' surface changed. Home binds `BRIEF`
-to that entrypoint and waits for Brief's deploy. `OpsStatus/brief-ok.json` (an archive-ready issue after the send
-cutoff with an owner-set $80 budget) and `OpsStatus/brief-degraded.json` are fixed byte for byte by
-`brief/worker/test/ops-golden.test.ts`; the shared contract readers also check them.
-
-- Files: `brief/worker/src/ops.ts` (the entrypoint, forwards to `BriefState`), `brief/worker/src/ops-status.ts` (over
-  the object's SQLite, the same facts as the owner API's ServiceStatus). Rows read per `status()`: the sources' rows
-  (the registry's size), the month's calls by its index, the latest issue, 14 daily usage rows and a few meta rows. Its
-  one write: an alarm when none is set.
-- Counters: `items_today`, `candidates_today`, `gate_refused_today`, `sources_failing`, `sources_stale`,
-  `issues_sent_7d`, `last_issue_age_hours` (absent before the first issue), `cost_today_cents`, `cost_month_cents`,
-  `budget_month_cents`, `neurons_today`. Signals in README. Never a title, a text, a token or an address.
-- Archive mode still reports generation failures and late issues, but requires neither a Resend key nor a send.
-  A ready archived issue stays healthy after the send cutoff with `issues_sent_7d = 0`; `mode_limited` describes the
-  deployment mode without degrading health. `budget_month_cents` reads the owner's saved setting, not the default:
-  the workerd persistence test recreates BriefState under a new build and verifies that Ops reads and a pause-only
-  update preserve an $80 budget. Monitoring never changes the budget or the deployment mode.
-- Guard: a shed defers `embedding` (items deduplicate by key only), `learning` (the Sunday weights) and
-  `source_probe` (the daily retry of paused sources). An issue is never deferred.
-
 ## 3g. Tasks (GTD counters added 2026-10-21, its own backup in the release after; additive)
 
 `tasks/worker/src/ops.ts`. `status()` is one D1 batch of three reads (the newest change, the newest GTD day's rows

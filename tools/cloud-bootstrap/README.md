@@ -76,7 +76,7 @@ python3 tools/cloud-bootstrap/bootstrap.py secrets --mode fresh \
 
 `cloud` 先验证 token 所属账户、zone 和 workers.dev 子域，再创建私有 state 桶并运行同一 HCL。已有对象的任何 update/delete 都会拒绝。成功后导出公开 AUD/D1/owned ID 并正常生成配置；部署 token 和 connector token 只写回私有文件。失败可以从同一 prepared 文件继续，不创建另一套资源。
 
-`secrets` 通过 `gh` 的 stdin 写 GitHub `production` secrets，输出 VPS bootstrap 使用的私有 JSON。仅创建缺失的 operation variables：Mail Hero 投递暂停、Todofy 处理暂停、Brief 模式 `off`、Model Router 不维护；VPS 自动发布、自动修复、网站定时更新初始关闭。已有暂停/维护值不覆盖。缺失 `production` 限定 main；缺失 `infra-review` 在个人仓库要求 owner 显式审核。已有环境保护不修改，组织仓库需自行选择审核人。
+`secrets` 通过 `gh` 的 stdin 写 GitHub `production` secrets，输出 VPS bootstrap 使用的私有 JSON。仅创建缺失的 operation variables：Mail Hero 投递暂停、Todofy 处理暂停、Model Router 不维护；VPS 自动发布、自动修复、网站定时更新初始关闭。已有暂停/维护值不覆盖。缺失 `production` 限定 main；缺失 `infra-review` 在个人仓库要求 owner 显式审核。已有环境保护不修改，组织仓库需自行选择审核人。
 
 随后按主手册提交公开配置，让同一通过分支检查的 SHA 进入 main，Actions 构建镜像和固定 bundle。
 将新镜像设为公开，再下载该 bundle 执行一次 VPS bootstrap，最后启动首次 VPS 发布。

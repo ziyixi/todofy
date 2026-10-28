@@ -68,7 +68,7 @@ clients do not call them. A bounded nonempty old header remains accepted for cac
 to the same exact Origin and JSON checks; the old cookie/signature is ignored.
 
 This deliberate keyless change supersedes the signed-CSRF rules below as of the owner's request.
-Access JWT formats, Mail Hero preview/action signatures, Brief feedback signatures and encryption
+Access JWT formats, Mail Hero preview/action signatures and encryption
 keys retain their existing contracts.
 
 ### 3.2 Private headers
@@ -314,7 +314,7 @@ Its dev dependencies use the same root catalog as every application.
 ## 7. CI
 
 `.github/scripts/ci_changes.py` maps each package to the apps that compile it in
-(`PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "links", "watch", "fleet", "mailsort", "recall", "brief", "tasks"), ...}`).
+(`PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "links", "watch", "fleet", "mailsort", "recall", "tasks", "personal-mcp", "model-router"), ...}`).
 Any change inside
 `packages/edge-auth/` (this file included) runs the `Shared packages` job (`pnpm install --frozen-lockfile`, `npm run
 typecheck`, `pnpm test` in every `packages/*/`) and **checks and deploys** every user; an unmapped
@@ -348,7 +348,7 @@ production secret reaches the package job.
   sessions remain Cloudflare's cookies. Cached clients' nonempty old headers remain accepted with
   exact Origin and JSON checks. New clients send `1` without a token-fetch roundtrip. Remove obsolete
   Worker signing secrets only after verifying the keyless release; an older signed-CSRF revision
-  would need its key restored. Mail Hero preview tokens and Brief feedback are unchanged.
+  would need its key restored. Mail Hero preview tokens are unchanged.
 - The tightenings (#6–#12, #14, #19, #20, #36) should be invisible for real Access tokens. After a
   deploy that changes them, the owner opens each UI and makes one write that passes Origin and CSRF
   (for example a Mail Hero settings save, a Todofy dismiss, a confirmed 解除降载 on the dashboard,

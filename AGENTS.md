@@ -28,8 +28,8 @@
 ## 服务隔离与共享代码
 
 - Cloudflare 应用各自拥有代码、资源和发布；模型供应商凭据统一由 Model Router 持有。Newsletter 仍是独立 VPS 容器服务，不改成 Worker。
-  Brief 是另建的 Worker，2026-10-18 起停用（`BRIEF_MODE=off`，代码保留）；Newsletter 仍是当前的每日简报，
-  退役任一方由 owner 另行决定。
+  Brief 已于 2026-10-28 按 owner 决定退役（代码已删除，Cloudflare 资源按 HANDOFF 步骤下线）；它的来源采集并入 Newsletter 的研究员，
+  Newsletter 是唯一的每日简报。
 - 应用从不互相导入代码、配置或测试工具。允许共享的只有 `contracts/`、`proto/`、`packages/`；
   `tools/` 只供测试、构建和部署脚本使用，生产源码与包不得导入应用或这些工具。
 - `packages/<name>` 以 `workspace:*` 写进使用者的 package.json，依赖由根 `pnpm-lock.yaml` 锁定，编译进各应用；不是独立服务。
@@ -98,11 +98,9 @@
 - Model Router：[AGENTS](model-router/AGENTS.md)、[设计](model-router/docs/design.md)、[发布](model-router/docs/deployment.md)。
   Claude、Gemini 各共用一枚 API key，只留在 Router secrets；不进入 GitHub、客户端或 VPS。Codex 保留既有 VPS 订阅登录，Workers AI 使用 binding。
   应用只用根 proto，供应商协议留在 Router 与执行层。
-- Brief：[AGENTS](brief/AGENTS.md)、[设计](brief/docs/design.md)。`claude.ts` 经 Router 调用模型，`send.ts` 经账本发信，
-  每天至多一封、unknown 不重发；Resend 密钥只由 owner 写入 Brief、不经 GitHub；测试只用合成网页与假客户端，标题和正文不进日志。
 - Website：[架构约束](docs/architecture.md#website)、[架构](website/docs/architecture.md)、[发布](website/docs/release.md)。
   只用静态访客路径，内容不提交；不绕过发布身份、门禁、验收与回退。
-- Newsletter：[README](newsletter/README.md)。仍是当前的每日简报（Brief 已停用，退役任一方另行决定）；保持独立镜像、VPS 状态目录与业务排空边界，
+- Newsletter：[README](newsletter/README.md)。唯一的每日简报（Brief 已退役，见 [history](docs/history.md)）；保持独立镜像、VPS 状态目录与业务排空边界，
   镜像发布不等于服务器升级或发送成功。
   新包 `ghcr.io/ziyixi/todofy-newsletter` 由 monorepo Actions 创建/发布；不为旧 `newsletter` 包新增 monorepo Write 权限。
   现有 VPS 继续使用原镜像；切换必须符合任务授权并按 digest 验证。

@@ -43,5 +43,9 @@ For Python, edit the root constraint and run `uv lock`. Review the lock diff and
 Keep package dependency choices in their member manifests instead of installing every dependency into every image.
 
 Shared-lock and toolchain changes reach the corresponding applications in CI and release source selection.
+Retiring an app is the one workspace change that reaches no other member: when `pnpm-workspace.yaml` differs only by
+members whose directories the same diff deletes and `pnpm-lock.yaml` only drops their importers and packages nobody
+else uses, the remaining members resolve exactly as before (`retired_members` in
+[ci_changes.py](../.github/scripts/ci_changes.py)). Any other member, setting or lock change reaches every member.
 Each production image is still built, tested and published independently. The running service version is
 verified from its normal release receipt and actual workload state, not from a lockfile alone.
