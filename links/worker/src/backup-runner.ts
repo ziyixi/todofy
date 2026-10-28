@@ -125,10 +125,18 @@ async function readState(bucket: R2Bucket): Promise<BackupState | null> {
   }
 }
 
-/** The facts Ops reports; null without the binding. */
+/**
+ * The facts Ops reports; null without the binding. A bucket that does not answer is a failed backup: no step can run
+ * either, and a state that cannot be read could never turn stale.
+ */
 export async function backupFacts(env: Env): Promise<BackupFacts | null> {
   if (!env.BACKUPS) return null;
-  const state = await readState(env.BACKUPS);
+  let state: BackupState | null;
+  try {
+    state = await readState(env.BACKUPS);
+  } catch {
+    return { status: 'failed', last_backup_at: null, since: null };
+  }
   if (!state) return { status: 'never', last_backup_at: null, since: null };
   return { status: state.job ? 'running' : state.status, last_backup_at: state.last_backup_at, since: state.since };
 }
@@ -315,7 +323,8 @@ async function finish(db: D1Database, bucket: R2Bucket, state: BackupState, job:
     1,
   );
   const json = { httpMetadata: { contentType: 'application/json' } };
-  await bucket.put(job.prefix + MANIFEST, manifest, json);
+  // A finish that stored its manifest but failed after it runs again: the complete backup is never rewritten.
+  if (!stored.has(job.prefix + MANIFEST)) await bucket.put(job.prefix + MANIFEST, manifest, json);
   await bucket.put(LATEST, JSON.stringify({ key: job.prefix }), json);
   state.job = null;
   state.failed_jobs = 0;

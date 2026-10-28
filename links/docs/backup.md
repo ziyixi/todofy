@@ -69,7 +69,8 @@ stopped job never ages out the last good copies.
 
 The 短链接 tile is the app's Ops answer (`worker/src/ops.ts`, contracts/ops-v1): `backup_age_seconds` and
 `last_backup_at` once a backup is complete, `backup_stale` (critical: no complete backup for 3 days, or 3 days after
-the first step while there is none) and `backup_failed` (warning: the last job failed).
+the first step while there is none) and `backup_failed` (warning: the last job failed, or the bucket did not answer
+for `state.json`).
 
 Owner edits continue while a job runs, so the copy is a fuzzy snapshot: an edit made meanwhile may or may not be in
 it. The restore tool warns when the manifest's two change marks differ. The bucket holds every link, private ones
@@ -117,8 +118,9 @@ afterwards.
    backup's migration is applied and reads every table back in key order, 500 rows per query, comparing each row
    value for value with the backup; it prints `PASS` or `FAIL` per table (`differing=` counts rows that differ) and
    ends with `verify PASS`.
-5. Switch the Worker to the new database. A push alone does not do it: the release's preflight finds the live `DB`
-   binding on the old id and stops (`STATEFUL_BINDING_CHANGED` needs a manual change).
+5. Switch the Worker to the new database. This step is not rehearsed, and a push alone does not do it: the
+   release's preflight finds the live `DB` binding on the old id and stops (`STATEFUL_BINDING_CHANGED` needs a
+   manual change).
    - Set the `links` entry of `[d1_databases]` in `config/resources.toml` to the new id, run
      `python3.12 tools/cloud-config/generate.py` (it rewrites `links/wrangler.toml`) and commit without pushing. The
      committed `database_name` stays `links`, because wrangler binds the database by its id.
@@ -146,8 +148,8 @@ Keep the old database until the restored one has run for a while, then delete it
 
 - Edits made after the backup (at most a day of them): Time Travel covers the last 7 days of the old database while
   it exists, and the launcher's 导出 file is another copy of the live links.
-- `request_log` rows are a day's request IDs at most: the restored ones are older than a day, so the next write
-  purges them, and a client that repeats a request from before the backup gets a new answer.
+- `request_log` holds a day of request IDs at most: a restored one is answered again only within a day of its
+  first request, and the next write purges the older ones. A request repeated after that applies anew.
 - The backup's own `state.json` is not restored: a new bucket, or a lost state, starts a new job at the first tick.
 - The Worker, its secrets, the Custom Domain and the Access application are not data: `infra/` and `Links deploy`
   recreate them ([README](../README.md#deploy)). In another account, pass that account's bucket with

@@ -16,7 +16,7 @@ export interface StatusInput {
   host: string | null;
   /** Whether D1 answered: without it the app is down. */
   database: boolean;
-  /** The backup's facts; null without the bucket or when it did not answer. */
+  /** The backup's facts; null without the bucket (local dev). */
   backup: BackupFacts | null;
 }
 

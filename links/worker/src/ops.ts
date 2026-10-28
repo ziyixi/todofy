@@ -5,16 +5,16 @@
  */
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import type * as wire from '@ziyixi/proto/ops/v1/ops_wire';
-import { backupFacts, type BackupFacts } from './backup-runner.ts';
+import { backupFacts } from './backup-runner.ts';
 import { type Env, publicHost } from './env.ts';
 import { linksStatus } from './ops-status.ts';
 
 export class Ops extends WorkerEntrypoint<Env> implements wire.OpsService {
   async status(): Promise<wire.OpsStatus> {
     const now = Date.now();
-    // The bucket not answering leaves the backup's facts out; D1 not answering is the app down.
+    // The bucket not answering is a failed backup (backupFacts); D1 not answering is the app down.
     const [backup, database] = await Promise.all([
-      backupFacts(this.env).catch((): BackupFacts | null => null),
+      backupFacts(this.env),
       this.env.DB.prepare('SELECT key FROM links LIMIT 1')
         .all()
         .then(

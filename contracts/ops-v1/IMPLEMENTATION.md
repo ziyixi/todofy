@@ -654,8 +654,8 @@ no complete one), `gtd_stale` (warning, `age_hours`), `backup_failed` (warning: 
 The links app (`links/`, Worker `links`) joined `OpsStatus.app` as `links` when it began backing itself up
 (`links/docs/backup.md`); until then Home probed its `/robots.txt`. `links/worker/src/ops.ts` is the entrypoint;
 `links/worker/src/ops-status.ts` builds the answer. `status()` reads one D1 row (`SELECT key FROM links LIMIT 1`:
-the database answers) and the backup's `state.json` from its private bucket; the bucket not answering leaves the
-backup's facts out, D1 not answering is `status_unavailable`. Counters: `database_ready`, and `backup_age_seconds`
+the database answers) and the backup's `state.json` from its private bucket; the bucket not answering is
+`backup_failed`, D1 not answering is `status_unavailable`. Counters: `database_ready`, and `backup_age_seconds`
 once a backup is complete. Signals: `backup_stale` (critical, `age_seconds` and `has_backup`: no complete daily
 backup for 3 days, counted from the first backup step while there is none) and `backup_failed` (warning: the last
 job failed); `last_backup_at` is the newest complete backup; both are app-only (`links/app.toml`). `ui_url` is the

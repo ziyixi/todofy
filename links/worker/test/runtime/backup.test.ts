@@ -281,6 +281,36 @@ describe('a daily job', () => {
     expect(await bucket.head(LATEST)).toBeNull();
   });
 
+  it('never rewrites a manifest it stored when the last step runs again', async () => {
+    let failLatest = true;
+    // latest.json fails once after the manifest is stored, as when R2 drops a write.
+    const flaky = {
+      put: (...args: Parameters<R2Bucket['put']>) => {
+        if (failLatest && args[0] === LATEST) {
+          failLatest = false;
+          return Promise.reject(new Error('Synthetic R2 failure'));
+        }
+        return bucket.put(...args);
+      },
+      get: bucket.get.bind(bucket),
+      head: bucket.head.bind(bucket),
+      list: bucket.list.bind(bucket),
+      delete: bucket.delete.bind(bucket),
+    } as unknown as R2Bucket;
+    await runBackup(env({ BACKUPS: flaky }), SLOT);
+    while ((await state()).job?.cursors.some((cursor) => !cursor.done)) await runBackup(env({ BACKUPS: flaky }), SLOT);
+    expect(await runBackup(env({ BACKUPS: flaky }), SLOT + 60_000)).toBe('finish');
+    const key = `backups/2026-10-28T052500Z/${MANIFEST}`;
+    const first = await bucket.head(key);
+    expect(first).not.toBeNull();
+    expect((await state()).job?.errors).toBe(1);
+    expect(await runBackup(env({ BACKUPS: flaky }), SLOT + 120_000)).toBe('finish');
+    expect((await bucket.head(key))?.etag).toBe(first?.etag);
+    expect((await json<Manifest>(key)).created_at).toBe('2026-10-28T05:26:00Z');
+    expect(await json(LATEST)).toEqual({ key: 'backups/2026-10-28T052500Z/' });
+    expect(await state()).toMatchObject({ status: 'ok', job: null });
+  });
+
   it(`keeps the newest ${String(KEEP)} complete backups; older ones and incomplete leftovers go, newer ones stay`, async () => {
     const day = (n: number) => new Date(Date.UTC(2026, 8, 1) + n * DAY).toISOString().slice(0, 10);
     const older = Array.from({ length: KEEP + 1 }, (_, n) => `backups/${day(n)}T052500Z/`);
@@ -325,6 +355,15 @@ describe('Ops', () => {
       { code: 'backup_stale', severity: Severity.CRITICAL, metrics: { has_backup: 0 } },
       { code: 'backup_failed', severity: Severity.WARNING, metrics: {} },
     ]);
+  });
+
+  it('reports a bucket that does not answer as a failed backup', async () => {
+    const silent = { get: () => Promise.reject(new Error('Synthetic R2 failure')) } as unknown as R2Bucket;
+    const facts = await backupFacts(env({ BACKUPS: silent }));
+    expect(facts).toEqual({ status: 'failed', last_backup_at: null, since: null });
+    expect(backupOps(facts, SLOT).signals).toEqual([{ code: 'backup_failed', severity: Severity.WARNING, metrics: {} }]);
+    // A tick does not mistake it for a lost state: it starts no job and writes nothing.
+    await expect(runBackup(env({ BACKUPS: silent }), SLOT)).rejects.toThrow('Synthetic R2 failure');
   });
 
   it('answers Home through the entrypoint: the database, the backup facts and no guard', async () => {
