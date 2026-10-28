@@ -15,60 +15,110 @@ features, the FlowDay retirement), [October 20](docs/history/handoff-2026-10-20.
 
 ## Current work
 
-### Review cleanup wave (in progress)
+### Review cleanup wave (integrated, not yet pushed)
 
 The owner approved fixing the October 25-27 review findings within these limits: backups stay as complete and
 recoverable as before (Model Router request bodies stay in its backups), no backup scope, retention or restore tool
 is reduced, no stored production data is deleted and the privacy pages are not changed. Dated 410 routes and old
 core RPCs stay until their recorded dates; legacy contract schemas, fixtures and frozen bytes stay unchanged;
-`platform/src/personal_cloud/deployment/` is frozen. Branches run local checks only and deploy nothing.
+`platform/src/personal_cloud/deployment/` is frozen.
 
-Nine branches start from `origin/main` `4ed50919`, each in its own worktree with disjoint paths:
-
-| Branch | Owns |
-| --- | --- |
-| `claude/wave-router` | Model Router, Brief, `packages/model-router-client` |
-| `claude/wave-telemetry` | Codex gateway and its monitor removal, ops/Codex/Platform protos, Platform, Fleet, VPS bootstrap, website relay, Home's Ops routing |
-| `claude/wave-mailsort` | Mailsort |
-| `claude/wave-tasks` | Tasks, `packages/planning-ui`, Tasks protos, `docs/tasks-*.md` |
-| `claude/wave-home` | Home, except its Ops routing |
-| `claude/wave-watchmcp` | Watch, Personal MCP, their protos, the work-memory and Watch evidence records |
-| `claude/wave-ci` | `.github/`, `tools/`, toolchain declarations, [CI/CD](docs/ci-cd.md) |
-| `claude/wave-docs` | HANDOFF, AGENTS, root docs and history, the moved verification records |
-| `claude/wave-apps` | Newsletter, Todofy, Mail Hero |
-
-Landing: merge all nine into one integration branch in any order. Each branch reports the few edits it made outside
-its own paths; resolve those at the merge. Run the complete branch gate, promote the same green SHA to `main`, then
-wait for the matching Personal cloud reconcile and a current Home check before delivery. When it lands, record
-each branch's result and the release here, then move this section to a dated archive.
+Nine package branches started from `origin/main` `4ed50919` and were reviewed separately. `claude/wave-integrated`
+merges them in the order ci, telemetry, watchmcp, router, mailsort, tasks, home, apps, docs (one merge commit each),
+then adds the cross-package fixes below. Nothing is pushed or deployed. Landing: push the integrated branch, wait for
+the complete `CI gate`, promote the same green SHA to `main`, then wait for the matching Personal cloud reconcile and
+a current Home check before delivery. When it lands, record the release here and move this section to a dated archive.
 
 Next, in order: a backups wave, then the owner's secret cleanup and its small code follow-up (both tracked in
 private notes).
 
-#### `claude/wave-docs`
+Results by branch:
 
-- HANDOFF keeps in-flight work, one latest release, open checks, owner items and boundaries. The released sections
-  moved to the [October 27 archive](docs/history/handoff-2026-10-27.md), without credential-handling,
-  privileged-access or account-audit details.
-- One-off verification ledgers moved into their applications, condensed to behavioural conclusions with one
-  evidence link each: [Mailsort](mailsort/docs/verification.md) (four root records and the interval record),
-  [Model Router](model-router/docs/verification.md), [Recall](recall/docs/verification.md) (four records),
-  [Personal MCP](personal-mcp/docs/verification.md), [website](website/docs/verification.md) and a Gemini
-  email-model section in [Todofy's verification](todofy/docs/verification.md). The Codex monitor record moved to
-  [history](docs/history/codex-monitor.md). Older archives link to the removed files at `4ed50919`.
-- AGENTS: public docs never record credential custody, key lifetimes, host leftovers, privileged steps or open
-  security gaps; HANDOFF Current work holds only in-flight work; Brief is stopped and Newsletter is the active briefing.
-- [Architecture](docs/architecture.md): every current Home binding, keyless CSRF, no Mailsort breaker, provider keys
-  as Router secrets, Brief stopped, Recall's seven-day window. Mail Hero CI/CD, Todofy's development notes and
-  Recall's mobile page install from the root pnpm lock instead of `npm ci`.
-- Edits outside this branch's paths: inbound links in `mailsort/docs/priority-rollout.md`, `personal-mcp/README.md`
-  and `personal-mcp/docs/connection.md`, and the appended section in `todofy/docs/verification.md`.
-- For the merge: if `claude/wave-telemetry` drops Home's `CODEX_GATEWAY` binding, drop it from the architecture Home
-  paragraph too; if another branch moves `docs/tasks-*`, `docs/work-memory-verification.md` or
-  `docs/watch-evidence-verification.md`, repoint the links in HANDOFF and the October 27 archive. Markdown under an
-  app directory selects that app's checks and release in `ci_changes.py`.
-- Local checks: `.github/scripts` unit tests (461, one existing skip), service-catalog and cloud-config checks,
-  website Prettier and a relative-link and heading-anchor check over every changed Markdown file.
+- `claude/wave-ci`: the Router release chain fails closed; the Codex gateway releases only when its own inputs
+  change; a root dependency bump deploys only the members it reaches; the pre-workspace install fallbacks, member
+  `engines` blocks and `.nvmrc` files are gone (the Node version comes from the root `package.json`); other apps'
+  proto packages stay out of the website's code identity; a fresh bootstrap creates `MODEL_ROUTER_MAINTENANCE_MODE`
+  and `BRIEF_MODE`. Release repair or rollback can now rebuild only revisions from the shared workspace onward.
+- `claude/wave-telemetry`: the Codex gateway monitor is retired and the Model Router is the one Codex usage
+  ledger (`codex.monitor.v1`, `OpsStatus.codex_inference` and `WorkloadStatus.inference_status` retired; the gateway's
+  `/healthz` is liveness only; Home's gateway row opens the Router console). Newsletter no longer mounts the Codex
+  login. ops-v1 is app-agnostic (`OpsStatus.app` is a format, not a list), `OpsDigestService`/`OpsReport` are
+  retired, each app checks only its own deployment modes, and website sync evidence moved off `OpsStatus` to the
+  relay's own `WebsiteSync` entrypoint: Home's `NOTION_PUBLISH` binding targets the relay's `Ops`, `WEBSITE_SYNC`
+  its `WebsiteSync`. Home routes Ops calls through the registry's binding map.
+- `claude/wave-watchmcp`: Watch compares evidence by its masked title, Markdown and image hash only, no longer
+  captures the accessibility tree (`Snapshot.structure_json` retired) and drops rule confirmations from the private
+  feed (`KIND_CHANGE_CONFIRMED`, `WatchEvent.change` retired); a too-short browser render fails again; an evidence
+  storage error no longer fails the check. Personal MCP reads the Watch feed in pages, recovers from an expired cursor
+  with one gap report per open Work, and keeps its Dot-facing rules in `SKILL.md` and the tool descriptions.
+- `claude/wave-router`: the Newsletter identity may call Codex models only; failures carry the shared reason
+  contract (provider 400/413/422 are `MODEL_INVALID_REQUEST`, the Router's own deadline is `MODEL_TIMEOUT`, a credit
+  balance refusal is `MODEL_SPEND_LIMIT`, output limits are code 13 from every provider, a rejected Gemini key or
+  account stays a configuration error); stuck `running` rows are
+  closed by the daily cleanup; context expiry is left to the gateway; the dead `/api/session` endpoint and the
+  unused `conversations` table go (migration 0004); the console is light-only. Brief keeps its reservation rates
+  itself, stops spending attempts and budget on Router outages, and its README records it as stopped.
+- `claude/wave-mailsort`: the Workers AI path, new learning examples (historical ones stay), breaker, the
+  one-time rechecks, label consolidation, prompt-cache hints and the Codex usage ledger are retired; model failures
+  follow the Router contract (a Codex spend limit holds hourly, Claude's waits for the next month) and a failed mail
+  is retried alone; Codex is the default provider for a settings row without one; the
+  recent read intake skips sent copies; bundled prompts carry no personal details. The two recheck request fields
+  stay `deprecated` (an old page still gets `RELOAD_REQUIRED`), and the consolidation RPCs answer `RELOAD_REQUIRED`
+  for a restored unfinished job.
+- `claude/wave-tasks`: Plan and Focus lost code from retired lanes and views; committed ready work stays in
+  Committed; parked pickups are acknowledged; Quick estimates show; task details can clear a saved Waiting or On
+  hold; the GTD page no longer lists tasks; `ListGtdDays` and `ListWeeklyReviews` are retired (the daily counts stay
+  in D1); GTD task rates are judged per week. Dated QA captures and ledgers became
+  [approved interfaces](tasks/design-qa.md) and one [verification record](tasks/docs/verification.md).
+- `claude/wave-home`: every drift check reads at least the last day of account writes (a write may appear in two
+  checks within a day); stale CSRF-cookie comments are fixed; the token setup text is neutral; local installs use the
+  root workspace. Home's static `GET /api/csrf` is dated to the 2026-11-02 cutoff with its old routes.
+- `claude/wave-apps`: Newsletter has one default model and no `codex` extra; Todofy stores native model IDs
+  (migration 0017, data-only and idempotent; restoring an older weekly backup replays it) and explains the cost of
+  each model choice; Todofy and Mail Hero no longer serve `GET /api/csrf` (a cached pre-keyless tab must reload);
+  Mail Hero's v1 collector endpoints, container, Dockerfile and image workflow are retired, while the native backup,
+  its artifact downloads, `writers`/`reconcile-writer` and the offline v1/v2 restore tools stay.
+- `claude/wave-docs`: HANDOFF keeps in-flight work only and the released sections moved to the
+  [October 27 archive](docs/history/handoff-2026-10-27.md); one-off verification ledgers moved into their
+  applications ([Mailsort](mailsort/docs/verification.md), [Model Router](model-router/docs/verification.md),
+  [Recall](recall/docs/verification.md), [Personal MCP](personal-mcp/docs/verification.md),
+  [website](website/docs/verification.md), Todofy's Gemini section) and the Codex monitor record to
+  [history](docs/history/codex-monitor.md); public docs no longer describe credential custody or open gaps.
+
+Integration fixes: one `fields` retirement kind in `proto/tools/retired.py` (by full field name and number; a kept
+file's import used only by retired fields leaves the base with them) serves all five retired fields, with combined
+tests and 76 self-test cases; `proto/retired.json` unions every branch's entries; the
+[architecture](docs/architecture.md#home) Home paragraph matches `dashboard/wrangler.toml`; archived handoffs link
+the condensed Tasks and Work-memory records; CI/CD and architecture docs no longer describe a Mail Hero collector
+image; Todofy's development notes drop `/api/csrf`; the compatibility tables name Home's `GET /api/csrf`; the audit
+window comments say "at least the last day"; the Mailsort and Recall bundle budgets follow the smaller bundles.
+
+Release effects to expect (one push deploys every Worker and the VPS images):
+
+- Order: the website relay deploys before Home (its old `Ops` no longer serves sync); for the few minutes between
+  them the old Home shows no sync evidence and an owner 立即同步 tap ends unconfirmed (a later tap works).
+- Fleet may reject host reports and show host_stale for up to about 15 minutes, until the new gateway Pod and
+  Platform status daemon stop sending `inference_status`. If the VPS release is skipped or fails, Fleet stays stale
+  until a gateway or Platform release lands; rolling back means redeploying the previous Fleet.
+- Each evidence-enabled watch writes one new snapshot and one EVIDENCE_CHANGED event on its first capture (the
+  comparison hash changed), so each linked open Work gets one progress report. Old and new `content_sha256` values
+  are not comparable.
+- Migrations: Todofy 0017 rewrites stored legacy model IDs; Model Router 0004 drops the unused `conversations` table,
+  whose content-free bookkeeping rows were already past their own one-day cleanup. Request history is unchanged.
+- Every Node app redeploys once (manifests changed) and the website code identity changes once.
+
+Owner follow-ups after the release:
+
+- Press Refresh tools in the existing Personal Cloud App (`watch_read` lost its `representation` input) and
+  republish the plugin skill from `personal-mcp/plugin/skills/personal-cloud/SKILL.md` through the usual separately
+  authorized account update.
+- Refresh Home's Cloudflare check after deploy: its desired config gained the `NOTION_PUBLISH` binding.
+- Read-only checks: Home's 网站同步 panel shows evidence after the first tick or refresh; Fleet, Newsletter and the
+  gateway tiles return to fresh; Todofy's model settings show native IDs.
+- After the first green `main` run: the new `retired.json` entries may be removed (the `reserved` lines stay). The
+  `RETIRED_BINDINGS` entries stay until their own verified-release rule allows removal.
+- On or after 2026-11-02: delete Home's `GET /api/csrf`, `CsrfResponse`, `PATHS.csrf` and the legacy-410 block
+  together with the other dated routes.
 
 ## Latest verified release
 
