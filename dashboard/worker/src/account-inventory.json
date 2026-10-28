@@ -46,6 +46,7 @@
     "tasks-backups",
     "todofy-backups",
     "vultr-backup",
+    "watch-backups",
     "watch-evidence"
   ]
 }
