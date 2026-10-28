@@ -8,7 +8,9 @@
  *     nothing leaves the process tree;
  *   - a fake ASSETS binding (the UI's page) and, when asked, a fake BROWSER binding (each render's page, through
  *     fake-net too, played by the production renderer on a synthetic launcher: ../stubs/browser-state.ts), and the
- *     TASKS binding to "tasks", a stub of Tasks' `TaskInbox` entrypoint (../stubs/tasks-stub.ts).
+ *     TASKS binding to "tasks", a stub of Tasks' `TaskInbox` entrypoint (../stubs/tasks-stub.ts);
+ *   - when asked, the private buckets EVIDENCE_STORE and BACKUPS, persisted in wrangler's own layout under `persistTo`, so
+ *     `wrangler r2 object get --local --persist-to <persistTo>` reads them (tools/backup-restore.ts).
  * DEV_MANUAL_ALARMS=true: no alarm is ever armed and the tests drive the scheduler with explicit clocks; the owner is
  * signed in over loopback http by the dev bypass. All data is synthetic.
  */
@@ -91,6 +93,10 @@ export interface FakeBrowser {
 export interface HarnessOptions {
   /** Bind a local private R2 bucket for captured evidence. */
   readonly evidence?: boolean;
+  /** Bind a local private R2 bucket for the daily backups (BACKUPS). */
+  readonly backups?: boolean;
+  /** Persist into this directory (made by the caller, deleted by dispose) instead of a new one: buckets prepared there. */
+  readonly persistTo?: string;
   readonly bindings?: Record<string, string>;
   /** Bind a fake BROWSER, rendered through puppeteerRenderer on a synthetic launcher (../stubs/browser-state.ts). */
   readonly browser?: boolean;
@@ -109,6 +115,8 @@ export interface HarnessOptions {
 
 export interface Harness {
   readonly mf: Miniflare;
+  /** wrangler's `--persist-to` for this instance's local buckets. */
+  readonly persistTo: string;
   readonly sites: FakeSites;
   readonly browser: FakeBrowser;
   /** The Worker's log lines (console output). */
@@ -121,6 +129,11 @@ export interface Harness {
     calls: string[];
     tasks: { request_id: string; title: string; description?: string; subtasks?: { title: string; description?: string }[] }[];
   }>;
+  /**
+   * A WatchState addressed by another name than the Worker's: its armed alarm, after an owner API call when `call` (which
+   * arms one when none is set).
+   */
+  named(name: string, call: boolean): Promise<{ status: number; alarm: number | null }>;
   /** ops-v1 over the Ops entrypoint, as the dashboard calls it (a rejection's message is its error code). */
   opsStatus(): Promise<unknown>;
   opsSetGuard(input: unknown): Promise<unknown>;
@@ -145,7 +158,7 @@ export interface Harness {
 }
 
 export async function startHarness(options: HarnessOptions = {}): Promise<Harness> {
-  const temp = await mkdtemp(join(tmpdir(), 'watch-runtime-'));
+  const temp = options.persistTo ?? (await mkdtemp(join(tmpdir(), 'watch-runtime-')));
   const script = await workerBundle(options.browser === true ? 'test/stubs/browser-state.ts' : 'src/index.ts');
   const tasksScript = options.tasks === true ? await workerBundle('test/stubs/tasks-stub.ts') : '';
   const sites = new FakeSites();
@@ -164,6 +177,8 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     });
   });
   const bindings = { ...SYNTHETIC_BINDINGS, ...options.bindings };
+  // The production bucket names (watch/wrangler.toml), which wrangler's --local commands address.
+  const r2Buckets = { ...(options.evidence === true ? { EVIDENCE_STORE: 'watch-evidence' } : {}), ...(options.backups === true ? { BACKUPS: 'watch-backups' } : {}) };
   const mf = new Miniflare(
     convertV4MiniflareOptions({
       handleStructuredLogs: ({ level, message }) => {
@@ -172,7 +187,8 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
       },
       host: '127.0.0.1',
       port: 0,
-      resourcePersistencePath: temp,
+      // wrangler's own layout, so `--local --persist-to <persistTo>` reads the same buckets (tools/backup-restore.ts).
+      resourcePersistencePath: join(temp, 'v3'),
       ...(options.inspectorPort === undefined ? {} : { inspectorPort: options.inspectorPort }),
       workers: [
         {
@@ -181,7 +197,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
           script,
           compatibilityDate: '2026-09-08',
           compatibilityFlags: ['nodejs_compat'],
-          ...(options.evidence === true ? { r2Buckets: ['EVIDENCE_STORE'] } : {}),
+          ...(Object.keys(r2Buckets).length > 0 ? { r2Buckets } : {}),
           durableObjects: { WATCH: { className: 'WatchState', useSQLite: true, ...(options.splitObject === true ? { scriptName: OBJECT_WORKER } : {}) } },
           serviceBindings: {
             ASSETS: () => new Response(TEST_PAGE, { headers: { 'content-type': 'text/html; charset=utf-8' } }),
@@ -201,7 +217,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
                 script,
                 compatibilityDate: '2026-09-08',
                 compatibilityFlags: ['nodejs_compat'],
-                ...(options.evidence === true ? { r2Buckets: ['EVIDENCE_STORE'] } : {}),
+                ...(Object.keys(r2Buckets).length > 0 ? { r2Buckets } : {}),
                 durableObjects: { WATCH: { className: 'WatchState', useSQLite: true } },
                 serviceBindings: { ASSETS: () => new Response('', { status: 404 }) },
                 bindings,
@@ -236,6 +252,16 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
               if (op === 'meter') return Response.json({ ok: await stub.takeRowMeter() })
               if (op === 'ops_status') return Response.json({ ok: await env.OPS.status() })
               if (op === 'ops_guard') return Response.json({ ok: await env.OPS.setGuard(args[0]) })
+              if (op === 'named') {
+                const other = env.WATCH.get(env.WATCH.idFromName(args[0]))
+                let status = 0
+                if (args[1]) {
+                  const response = await other.fetch('https://watch.internal/api/v1/serviceStatus')
+                  await response.body?.cancel()
+                  status = response.status
+                }
+                return Response.json({ ok: { status, alarm: await other.alarmAt() } })
+              }
               return Response.json({ error: 'unknown op' })
             } catch (error) { return Response.json({ error: error instanceof Error ? error.message : 'not_an_error' }) }
           } }`,
@@ -262,10 +288,12 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
   };
   const harness: Harness = {
     mf,
+    persistTo: temp,
     sites,
     browser,
     logs,
     fetch: fetchWatch,
+    named: async (name, call) => (await probe('named', [name, call])) as { status: number; alarm: number | null },
     opsStatus: () => probe('ops_status', []),
     opsSetGuard: (input) => probe('ops_guard', [input]),
     async tasks(scenario) {

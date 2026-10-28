@@ -17,7 +17,8 @@
 # Run wrangler from worker/ (the pinned wrangler lives in worker/node_modules) with --config ../wrangler.toml.
 # Local dev: local bindings only, local values in watch/.dev.vars (see .dev.vars.example). No cron, D1 or KV:
 # WatchState schedules itself with setAlarm() and stores configuration, changes and evidence metadata in SQLite.
-# Private R2 holds page evidence; Browser Run renders browser-mode watches under the existing daily ledger.
+# Private R2 holds page evidence and, in its own bucket, the daily backups; Browser Run renders browser-mode watches
+# under the existing daily ledger.
 name = "watch"
 account_id = "f57937bd1d93bf59e737b6d8445fb7a3"
 main = "worker/src/index.ts"
@@ -65,6 +66,13 @@ new_sqlite_classes = ["WatchState"]
 [[r2_buckets]]
 binding = "EVIDENCE_STORE"
 bucket_name = "watch-evidence"
+
+# Private daily backups (docs/backup.md): every table of WatchState and one copy of each evidence object its snapshots
+# name, written by the object itself (worker/src/backup.ts) and read back only by RestoreBackup into an empty object.
+# Retention is in code (the newest 30 complete backups), never an R2 lifecycle rule. infra/ creates the bucket.
+[[r2_buckets]]
+binding = "BACKUPS"
+bucket_name = "watch-backups"
 
 # Official Browser Run binding; @cloudflare/puppeteer uses nodejs_compat for the per-hop navigation policy.
 [browser]

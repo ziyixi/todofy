@@ -335,6 +335,17 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
+/* The health view's restore of a backup: names are long, the verification is a short list. */
+.restore {
+  overflow-wrap: anywhere;
+}
+
+.restore-check {
+  margin: 0.25rem 0;
+  padding-left: 1.25rem;
+  color: var(--muted);
+}
+
 .settings {
   display: grid;
   gap: 0.6rem;

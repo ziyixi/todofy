@@ -36,6 +36,11 @@ export const REASONS: Readonly<Record<Reason, { readonly code: Code; readonly me
   WATCHES_FULL: { code: Code.FAILED_PRECONDITION, message: 'the store holds the most watches it may', zh: '监视数量已达上限（50 个）' },
   AI_NOT_AVAILABLE: { code: Code.FAILED_PRECONDITION, message: 'the AI judge is not part of v1', zh: 'AI 判断尚未开放' },
   BROWSER_NOT_AVAILABLE: { code: Code.FAILED_PRECONDITION, message: 'the deployment has no browser binding', zh: '浏览器抓取尚未开放' },
+  BACKUP_RUNNING: { code: Code.UNAVAILABLE, message: 'the daily backup is copying the store; repeat the request', zh: '正在备份，请稍后再试（通常几秒钟）' },
+  RESTORE_RUNNING: { code: Code.FAILED_PRECONDITION, message: 'a restore is running or did not finish; writes wait until one succeeds', zh: '正在从备份恢复，完成前不能修改' },
+  STORE_NOT_EMPTY: { code: Code.FAILED_PRECONDITION, message: 'a restore needs an empty store', zh: '只能恢复到空的存储（没有任何监视和变化）' },
+  BACKUP_NOT_FOUND: { code: Code.NOT_FOUND, message: 'no complete backup by that name, or no backup bucket', zh: '找不到这个完整备份' },
+  BACKUP_UNSUPPORTED: { code: Code.FAILED_PRECONDITION, message: "the backup's format, schema or tables cannot be restored by this release", zh: '这个备份的格式或版本无法由当前版本恢复' },
 };
 
 export function isReason(value: string): value is Reason {

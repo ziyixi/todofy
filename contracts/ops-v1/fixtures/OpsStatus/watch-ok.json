@@ -24,9 +24,10 @@
     "fetches_today": 37,
     "notifications_pending": 1,
     "intents_open": 0,
-    "intents_sent_today": 1
+    "intents_sent_today": 1,
+    "backup_age_seconds": 9416
   },
-  "last_backup_at": null,
+  "last_backup_at": "2026-10-01T11:23:04Z",
   "ui_url": "https://watch.example.com/",
   "capabilities": [
     "guard"

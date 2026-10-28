@@ -9,10 +9,11 @@ runs:
         root: .
         filters: 'watch-worker... watch-web...'
     # The config test reads wrangler.toml with the pinned wrangler (worker/node_modules), hence after the workspace install.
-    - name: Test the production config and deploy values
+    # The backup tool's own tests use a stand-in for wrangler (its real run is in the runtime tests below).
+    - name: Test the production config, deploy values and the backup tool
       working-directory: watch
       shell: bash -e {0}
-      run: node --test deploy/test/*.test.mjs
+      run: node --test deploy/test/*.test.mjs tools/test/*.test.mjs
     - name: Lint, typecheck and test the Worker
       working-directory: watch/worker
       shell: bash -e {0}

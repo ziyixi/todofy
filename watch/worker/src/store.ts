@@ -1,7 +1,8 @@
 /**
  * WatchState's SQLite storage (../../docs/design.md §6): every watch, snapshot, change, host and robots.txt verdict,
- * the daily ledger, the AIP-155 request log, the notification outbox and PreviewWatch's recent fetches, in the Durable Object's own database. No D1,
- * no R2. Synchronous (the Durable Object's SQL API), so a group of writes in one `transactionSync` is atomic.
+ * the daily ledger, the AIP-155 request log, the notification outbox and PreviewWatch's recent fetches, in the Durable Object's own database. No D1;
+ * evidence objects live in R2 (evidence.ts) and the daily backup's copies in their own bucket (backup.ts). Synchronous
+ * (the Durable Object's SQL API), so a group of writes in one `transactionSync` is atomic.
  *
  * Every table is bounded: WATCHES_MAX watches; per watch SNAPSHOTS_KEPT snapshots (plus the notified, the pending and
  * the previous check's), SUPPRESSED_KEPT suppressed and CHANGES_KEPT changes in all (the oldest acknowledged, then
@@ -34,7 +35,7 @@ import {
 } from './limits.ts';
 
 /** Bump with every schema change; `migrate` runs the steps above the stored version. */
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 const SCHEMA_V1 = [
   `CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
@@ -144,7 +145,8 @@ const SCHEMA_V3 = [
   `CREATE INDEX IF NOT EXISTS notifications_pending ON notifications (policy, id) WHERE delivered_at IS NULL`,
   // The sink's own inbox (tasks.ts; Todofy's task intents, todofy.ts, until 2026-10-21): each request frozen with the
   // events it took over, until its task exists. `state`: open (not created yet: sent again), then recorded (Tasks
-  // created it), refused, expired or superseded (an open row surely never created, folded into a later digest); held
+  // created it), refused, expired or superseded (an open row surely never created, folded into a later digest, or
+  // settled unsent by a restore: code `restored`, restore.ts); held
   // was Todofy's (recorded, its tasks not all created) and is written no more. `payload` is the request's wire JSON
   // (the owner's watch names, never page text or a watched URL) and `event_ids` the outbox rows it took (IDs only),
   // both kept while open and cleared at the end; `known_unrecorded` is 1 while every answer said nothing was created (0
@@ -334,6 +336,11 @@ export class Store {
         const columns = new Set(this.sql.exec<{name: string}>(`PRAGMA table_info(${table})`).toArray().map(row => row.name));
         for (const [name, declaration] of Object.entries(declarations)) if (!columns.has(name)) this.sql.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${declaration}`);
       }
+    }
+    if (version < 6) {
+      // The evidence copies in the backup bucket (backup.ts): one row per object copied, so it is copied once. The
+      // backup's own record, never backed up itself.
+      this.sql.exec(`CREATE TABLE IF NOT EXISTS backup_evidence (key TEXT PRIMARY KEY, sha256 TEXT NOT NULL, bytes INTEGER NOT NULL)`);
     }
     if (version < SCHEMA_VERSION) this.sql.exec(`INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?)`, String(SCHEMA_VERSION));
   }

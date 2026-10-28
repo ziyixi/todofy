@@ -2,7 +2,7 @@
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { expect, it } from 'vitest';
 import { changeMessage } from '../src/model.ts';
-import { Store } from '../src/store.ts';
+import { SCHEMA_VERSION, Store } from '../src/store.ts';
 
 function storage(): SqlStorage {
   const db = new DatabaseSync(':memory:');
@@ -30,5 +30,8 @@ it('adds evidence columns without losing legacy changes and tolerates rollback t
   expect(changeMessage(legacy, 'Synthetic').contextAvailable).toBe(false);
   target.run(`UPDATE meta SET value = '3' WHERE key = 'schema_version'`);
   expect(() => { target.migrate(); }).not.toThrow();
-  expect(target.getMeta('schema_version')).toBe('5');
+  expect(target.getMeta('schema_version')).toBe(String(SCHEMA_VERSION));
+  // v6: the backup's record of its evidence copies.
+  target.run(`INSERT INTO backup_evidence (key, sha256, bytes) VALUES ('captures/synthetic/a.json', ?, 2)`, 'a'.repeat(64));
+  expect(target.all(`SELECT key, bytes FROM backup_evidence`)).toEqual([{ key: 'captures/synthetic/a.json', bytes: 2 }]);
 });

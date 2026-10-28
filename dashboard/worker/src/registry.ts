@@ -105,7 +105,7 @@ const ENTRIES: readonly EntryDef[] = [
     access: true,
     status: { type: 'ops_v1', binding: 'WATCH', guard: true },
     tile_metric: { kind: 'counter', name: 'changes_new' },
-    app_only_signals: ['maintenance_mode'],
+    app_only_signals: ['maintenance_mode', 'backup_stale', 'backup_failed'],
     order: 7,
   },
   {
@@ -373,6 +373,8 @@ const RESOURCES: readonly ResourceDef[] = [
   { id: 'personal-mcp-backups', kind: 'r2', name: 'Personal MCP 备份', entry: 'personal-mcp', match: 'personal-mcp-backups' },
   // Watch's private captured page text and screenshots (watch/wrangler.toml EVIDENCE_STORE).
   { id: 'watch-evidence', kind: 'r2', name: 'Watch 页面证据与截图', entry: 'watch', match: 'watch-evidence' },
+  // Watch's own daily backups (watch/wrangler.toml BACKUPS), created by "Infra apply" before Watch bound it.
+  { id: 'watch-backups', kind: 'r2', name: 'Watch 备份', entry: 'watch', match: 'watch-backups' },
   // The self-hosted servers' backups (~790 MB on 2026-09-30), outside this repository.
   { id: 'vps-backup', kind: 'r2', name: 'VPS 备份', entry: 'self-hosted', match: 'vultr-backup' },
 ];

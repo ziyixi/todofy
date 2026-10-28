@@ -1189,6 +1189,11 @@
           "source": "config"
         },
         {
+          "name": "BACKUPS",
+          "type": "r2_bucket",
+          "source": "config"
+        },
+        {
           "name": "BROWSER",
           "type": "browser",
           "source": "config"

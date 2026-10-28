@@ -553,7 +553,7 @@ Example (attention 0, one critical item):
   after `setGuard(normal)`; `test_scenarios_webhook.py` keeps posting every fixture (the canary one now
   ends `complete` without a task).
 
-## 3c. The watch app (added 2026-10-01, additive)
+## 3c. The watch app (added 2026-10-01, its own daily backup on 2026-10-28; additive)
 
 The watch app (`watch/`, Worker `watch`, `watch/docs/design.md` §7) joined after Mail Hero and Todofy. `OpsStatus.app` became an open
 list first (its own change, so this one is compatible: `proto/tools/profile_breaking.py` refuses a new name in a closed
@@ -568,8 +568,12 @@ list), then gained `watch`; fixtures `OpsStatus/watch-ok.json`, `OpsStatus/watch
   (`STATUS_ROWS_MAX`, `watch/worker/test/runtime/ops.test.ts`), so 48 calls a day read at most 84,000. Its one write:
   when WatchState has no alarm set it arms one, so the dashboard's tick restarts a lost scheduler.
 - Counters: `watches_active`, `watches_paused`, `watches_broken`, `watches_failing`, `changes_new`, `fetches_today`,
-  `notifications_pending`, `intents_open`, `intents_sent_today`. Signals: `watches_broken`, `scheduler_stale`,
-  `notify_unsettled` (warning), `guard_shed` (info). Never a watch's name, URL, page text or a diff.
+  `notifications_pending`, `intents_open`, `intents_sent_today`, and `backup_age_seconds` once a daily backup is
+  complete. Signals: `backup_stale` (critical, `age_seconds` and `has_backup`: 3 days, counted from the first backup
+  step while there is no complete one), `backup_failed`, `watches_broken`, `scheduler_stale`, `notify_unsettled`
+  (warning), `guard_shed` (info); `last_backup_at` is the newest complete backup (`watch/docs/backup.md`). Both backup
+  signals are app-only (`watch/app.toml`); one more meta row is read per `status()`. Never a watch's name, URL, page
+  text or a diff.
 - Guard: a shed defers `scheduled_checks` (a scheduled check waits until the watch's last check is a day old, so
   every watch is still checked daily) and `daily_sweep` (the sweep of every watch's bounds waits for the shed's end).
   An owner's check, a pending change's confirmation, previews, the owner API and the notifications to Tasks are never

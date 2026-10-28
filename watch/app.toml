@@ -22,8 +22,9 @@ icon = "eye"
 # Avoid the danger color and the adjacent violet/slate tiles.
 accent = "blue"
 access = true
-# The shared code exists in ops-v1 but this app never raises it.
-app_only_signals = ["maintenance_mode"]
+# maintenance_mode: the shared code exists in ops-v1 but this app never raises it. The daily backup's two signals
+# (docs/backup.md) are the app's own.
+app_only_signals = ["maintenance_mode", "backup_stale", "backup_failed"]
 order = 7
 worker = "watch"
 url_path = "/"
