@@ -150,7 +150,9 @@ worker and accepting admission, verify Fleet's fresh report. Compose services ar
 bootstrap; they are not automatically restarted as a fallback. System-bus permissions also require the non-mutating
 polkit check described in [the observer boundary](../../platform/systemd/README.md).
 
-## Fixed node address
+## Fixed node address and DNS
+
+Neither the node address nor cluster DNS depends on DHCP.
 
 K3s never uses the DHCP address. Without `node-ip` it would take the default route's address
 once at startup and keep advertising it after a lease change, breaking every in-cluster API
@@ -167,21 +169,39 @@ Tailscale's 100.64/10 and the networks home routers usually assign. Install, mig
 recovery stop before writing if any existing host network contains it, if `pcloud0` exists for
 another purpose, or if K3s uses embedded etcd. See [host address recovery](../../docs/rebuild.md#主机地址变化).
 
+CoreDNS never uses the DHCP DNS servers. Without `resolv-conf`, K3s gives the kubelet the host's
+`/run/systemd/resolve/resolv.conf`, the servers DHCP supplied. CoreDNS runs with `dnsPolicy: Default`
+and `forward . /etc/resolv.conf`: its Pod gets a copy of that list when it is created and reads it
+once, so new DHCP DNS servers would break Pod DNS until CoreDNS was recreated. Bootstrap writes the
+root-owned `/etc/rancher/k3s/resolv.conf` with `1.1.1.1`, `1.0.0.1` (Cloudflare) and `8.8.8.8`
+(Google, another operator), all unfiltered and IPv4 like the Pod network, and points `resolv-conf`
+at it. The kubelet reads that file for every new Pod, so it must always exist; rollback keeps it.
+`ClusterFirst` Pods still resolve through CoreDNS and no longer inherit the DHCP search domain.
+Once K3s runs with it, bootstrap, migration and recovery set `personal-cloud/upstream-dns` on
+CoreDNS's pod template: that Deployment's own rolling update replaces its Pod once (cluster DNS pauses
+for a few seconds, as when a K3s upgrade replaces CoreDNS), and an equal value replaces nothing. The
+daemon's own Pod then resolves the Fleet host through CoreDNS. Queries to the resolvers are forwarded
+Pod traffic, the same path as other Pod egress; the INPUT-only `PCLOUD-K3S` neither sees nor opens them.
+
 A host installed before this change migrates once, from a bundle that contains it:
 
 ```sh
 sudo /usr/bin/python3 -E -s <bundle>/installer/node_address.py --bundle <bundle>
 ```
 
-It accepts only host K3s files equal to this bundle's or to their pre-address rendering, writes
-the unit and address, writes the new K3s configuration and firewall, restarts K3s once
-(`KillMode=process` keeps containers running), then waits until the Node InternalIP and the
-`default/kubernetes` EndpointSlice show only the fixed address and the daemon's own Pod reads the
-API through `kubernetes.default.svc` (K3s's cloud controller syncs Node addresses every minute;
-each wait allows 5 minutes). The last line is `"status": "stable"`. It restarts K3s only when a
-file changes or the running K3s was started with another node-ip (the Node's `k3s.io/internal-ip`
-annotation), so a repeat run only verifies and a rerun after a timeout keeps waiting instead of
-restarting again. `--rollback` restores the previous K3s files and restarts K3s once.
+It accepts only host K3s files equal to this bundle's or to their rendering before the fixed
+address and DNS, writes the unit, address and resolver file, writes the new K3s configuration and
+firewall, restarts K3s once (`KillMode=process` keeps containers running), then waits until the Node
+InternalIP and the `default/kubernetes` EndpointSlice show only the fixed address (K3s's cloud
+controller syncs Node addresses every minute; each wait allows 5 minutes). It then replaces CoreDNS
+once as above, and the daemon's own Pod reads the API through `kubernetes.default.svc` and resolves
+the Fleet host. The last line is `"status": "stable"`. It restarts K3s only when a file changes or
+the running K3s was started with another node-ip (the Node's `k3s.io/internal-ip` annotation; the
+same configuration file sets the DNS), and replaces CoreDNS only when its marker differs, so a repeat
+run only verifies and a rerun after a timeout keeps waiting instead of restarting again.
+`--rollback` restores the previous K3s files, restarts K3s once and removes the marker, so CoreDNS
+returns to the DHCP-provided servers. It also undoes a migration whose lookup failed
+(`CLUSTER_DNS_LOOKUP_FAILED`, for example on a network that blocks public DNS).
 
 ## Failures and retries
 

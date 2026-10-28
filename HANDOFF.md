@@ -15,25 +15,34 @@ features, the FlowDay retirement), [October 20](docs/history/handoff-2026-10-20.
 
 ## Current work
 
-### Fixed K3s node address (`claude/stable-node-address`, not yet pushed)
+### Fixed K3s node address and DNS (`claude/stable-node-address`, not yet pushed)
 
 On 2026-10-27 the host's DHCP lease changed. K3s kept the Node InternalIP and the `default/kubernetes` endpoint on
 the old address, so every in-cluster API client (the release and status daemons) failed and VPS releases are held at
 `UNAVAILABLE`; host-local kubectl and the business Pods kept working. The owner ruled this an architecture bug, not
-something for a restart hook. The branch makes the cluster independent of the DHCP address
-([design and runbook](docs/rebuild.md#主机地址变化), [bootstrap](tools/vps-bootstrap/README.md#fixed-node-address)):
+something for a restart hook, and ruled that the cluster must not depend on anything DHCP hands out. The branch
+makes both the node address and cluster DNS independent of DHCP
+([design and runbook](docs/rebuild.md#主机地址变化), [bootstrap](tools/vps-bootstrap/README.md#fixed-node-address-and-dns)):
 
 - A one-shot `personal-cloud-node-address.service`, which `k3s.service` requires, creates or keeps the dummy
   interface `pcloud0` with `10.254.0.42/32`. K3s sets `node-ip` and `advertise-address` to it and `flannel-iface` to
   `pcloud0`; `node-external-ip` stays unset. A NetworkManager drop-in marks only `pcloud0` unmanaged.
 - `PCLOUD-K3S` admits cni0 Pod traffic to 6443/10250 only at that address; LAN and Internet stay dropped.
-- Fresh install, `recover.py` and the new `installer/node_address.py` apply it. Recovery accepts an installed bundle
+- CoreDNS (`dnsPolicy: Default`) used to forward to the DHCP-provided DNS servers its Pod copied at creation. K3s now
+  sets `resolv-conf` to a root-owned `/etc/rancher/k3s/resolv.conf` with `1.1.1.1`, `1.0.0.1` and `8.8.8.8` (IPv4,
+  unfiltered, two operators). After K3s runs with it, the pod-template annotation `personal-cloud/upstream-dns` makes
+  the CoreDNS Deployment replace its Pod once (a few seconds of cluster DNS pause); an equal value replaces nothing.
+  The daemon's own Pod then resolves the Fleet host. Lookups are forwarded Pod traffic; the firewall is unchanged.
+- Fresh install, `recover.py` and the new `installer/node_address.py` apply both. Recovery accepts an installed bundle
   that predates the address or the observer AppArmor profile (the original install bundle has neither, so recovery
   could not read it before) and still refuses any other host difference.
 - Synthetic tests cover the rendered files, firewall verdicts, migration, interrupted retry, conflicts, rollback and
-  recovery. The CI k3s fixture is API-only (`--disable-agent`), so it cannot exercise node-ip, flannel or the Pod
+  recovery, including the CoreDNS replacement, its rerun and a blocked public DNS undone by rollback. The CI k3s
+  fixture is API-only (`--disable-agent`, no CoreDNS), so it cannot exercise node-ip, flannel, CoreDNS or the Pod
   path; the K3s behaviour (node-ip and advertise-address in the serving SANs, advertise-address defaulting to
-  node-ip, flannel-iface by name) was checked against the pinned K3s source.
+  node-ip, flannel-iface by name, resolv-conf passed unchanged to the kubelet, which reads it for each new Pod, and
+  CoreDNS's `forward . /etc/resolv.conf` read once at startup) was checked against the pinned K3s, Kubernetes and
+  CoreDNS sources.
 
 Remaining, in order:
 
@@ -43,15 +52,19 @@ Remaining, in order:
    accepted release) and stage it on the host. Only its installer and units are used.
 3. The owner runs once on the host:
    `sudo /usr/bin/python3 -E -s <bundle>/installer/node_address.py --bundle <bundle>`
-   Expect one K3s restart (the API is usually back within a minute; Pods are not restarted; the Node address follows
-   on the cloud controller's one-minute sync) and a last line with `"status": "stable"`. Re-running is safe: it
-   restarts K3s only if a file changed or the running K3s was started with another node-ip, so a rerun after a
-   timeout keeps waiting. `--rollback` on the same command restores the previous K3s files.
+   Expect one K3s restart (the API is usually back within a minute; business Pods are not restarted; the Node
+   address follows on the cloud controller's one-minute sync), one CoreDNS Pod replacement (a few seconds without
+   cluster DNS) and a last line with `"status": "stable"` and `"coredns_recreated": true`. Re-running is safe: it
+   restarts K3s only if a file changed or the running K3s was started with another node-ip, and replaces CoreDNS
+   only if its annotation differs, so a rerun after a timeout keeps waiting. `--rollback` on the same command
+   restores the previous K3s files and CoreDNS's DHCP-provided servers; use it if the run ends with
+   `CLUSTER_DNS_LOOKUP_FAILED`.
 4. Resume the held release with the CI resume command for its original SHA ([rebuild](docs/rebuild.md#检查与修复)).
 
 Verify after: `pcloud0` holds only the fixed address; Node InternalIP and the `default/kubernetes` EndpointSlice show
-it; the resumed release reaches ready; Fleet and Home return to fresh; business Pod UIDs and restart counts are
-unchanged. When verified, record it here and move this section to a dated archive.
+it; CoreDNS's pod template carries the annotation and runs one Pod created after the migration; the resumed release
+reaches ready; Fleet and Home return to fresh; business Pod UIDs and restart counts are unchanged. When verified,
+record it here and move this section to a dated archive.
 
 ### Review cleanup wave (integrated, not yet pushed)
 

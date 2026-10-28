@@ -14,7 +14,7 @@
 | 隔离漂移、无差异不重启 | 实际 CF cron/binding 漂移与恢复、真实 k3s SSA/409、两版生产 clean repair 的 Pod UID/generation 对照 | 实际验收通过，范围见下文 |
 | 隔离 DNS 漂移 | 固定 provider 合成 plan 与分类器通过；物理 fixture 的只读准备检查返回 403，未创建记录 | 真实 DNS 恢复待验；生产 DNS 检查已通过 |
 | 宿主入口恢复 | 固定 bundle 校验、接受版本、Secrets/PVC/账本保留回归 | 本地通过；真实宿主故障演练未做 |
-| 固定节点地址 | 单元/K3s 配置/防火墙渲染、迁移与恢复流程、冲突与回退的合成测试；按固定 K3s 版本源码核对 node-ip、advertise-address、证书 SAN 与 flannel-iface | 本地通过；现有主机迁移待执行 |
+| 固定节点地址与 DNS | 单元/上游 DNS 文件/K3s 配置/防火墙渲染、迁移与恢复流程、CoreDNS 替换、冲突与回退的合成测试；按固定 K3s 版本源码核对 node-ip、advertise-address、证书 SAN、flannel-iface，以及 resolv-conf 经 kubelet 进入新建 Pod、CoreDNS 只在启动时读取 | 本地通过；现有主机迁移待执行 |
 | 真实空账户、干净 VPS | 独立环境端到端演练 | 留待后续 |
 | 全部历史数据跨账户恢复 | 数据、密钥、冻结副作用对账 | 留待后续 |
 

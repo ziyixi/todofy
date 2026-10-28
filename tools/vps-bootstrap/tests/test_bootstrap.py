@@ -596,10 +596,12 @@ with patch.object(socket, "socket", side_effect=AssertionError("Network use is f
             (node_address, "install", None),
             (cluster, "start", None),
             (node_address, "wait_cluster", None),
+            (node_address, "upstream_dns", False),
             (cluster, "apply", None),
             (cluster, "secrets", None),
             (cluster, "held_runtime", None),
             (node_address, "in_cluster_read", None),
+            (node_address, "public_lookup", None),
             (cluster, "services", None),
             (host, "complete_bootstrap", None),
         ]
@@ -638,10 +640,12 @@ with patch.object(socket, "socket", side_effect=AssertionError("Network use is f
             (node_address, "install"),
             (cluster, "start"),
             (node_address, "wait_cluster"),
+            (node_address, "upstream_dns"),
             (cluster, "apply"),
             (cluster, "secrets"),
             (cluster, "held_runtime"),
             (node_address, "in_cluster_read"),
+            (node_address, "public_lookup"),
             (cluster, "services"),
             (host, "complete_bootstrap"),
         )
@@ -679,10 +683,12 @@ with patch.object(socket, "socket", side_effect=AssertionError("Network use is f
             (node_address, "install", None),
             (cluster, "start", None),
             (node_address, "wait_cluster", None),
+            (node_address, "upstream_dns", False),
             (cluster, "apply", None),
             (cluster, "secrets", None),
             (cluster, "held_runtime", None),
             (node_address, "in_cluster_read", None),
+            (node_address, "public_lookup", None),
         )
         with (
             contextlib.ExitStack() as stack,
@@ -720,10 +726,12 @@ with patch.object(socket, "socket", side_effect=AssertionError("Network use is f
             (node_address, "install", None),
             (cluster, "start", None),
             (node_address, "wait_cluster", None),
+            (node_address, "upstream_dns", False),
             (cluster, "apply", None),
             (cluster, "secrets", None),
             (cluster, "held_runtime", None),
             (node_address, "in_cluster_read", None),
+            (node_address, "public_lookup", None),
         )
 
         def path(value):

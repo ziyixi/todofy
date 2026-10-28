@@ -32,6 +32,7 @@ LATER_HOST_FILES = {
     "personal-cloud-systemd-observer-v1",
     node_address.UNIT,
     node_address.NETWORK_MANAGER,
+    node_address.RESOLV_CONF,
 }
 UUID = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
@@ -173,7 +174,7 @@ def host_services(installed, bundle):
     ):
         if name in LATER_HOST_FILES and "units/" + name not in listed:
             continue
-        # The fixed node address is the one reviewed change to an installed host's K3s files.
+        # The fixed node address and DNS are the one reviewed change to a host's K3s files.
         require(
             node_address.accepted(
                 name,
@@ -231,6 +232,7 @@ def host_services(installed, bundle):
     else:
         raise BootstrapError("RECOVERY_CLUSTER_UNAVAILABLE")
     node_address.wait_cluster(load_bundle(bundle)["profile"]["observer_node_key"])
+    node_address.upstream_dns()
     command(["systemctl", "enable", "cloudflared-platform.service"], timeout=30)
     command(["systemctl", "restart", "cloudflared-platform.service"], timeout=45)
 
@@ -353,6 +355,8 @@ def recover(installed, bundle):
         ],
         timeout=330,
     )
+    node_address.in_cluster_read(namespace)
+    node_address.public_lookup(namespace, public["profile"]["fleet_host"])
     return {
         "event": "vps_owner_recovery",
         "status": "runtime_restored",

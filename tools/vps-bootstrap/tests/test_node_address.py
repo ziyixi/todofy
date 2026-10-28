@@ -1,4 +1,4 @@
-"""Synthetic fixed node address: rendered files, firewall, migration and recovery; no host writes."""
+"""Synthetic fixed node address and DNS: files, firewall, migration, recovery; no host writes."""
 
 import contextlib
 import io
@@ -119,8 +119,10 @@ def link(name, kind, *addresses):
 class FakeHost:
     """Synthetic ip/systemctl/kubectl: K3s advertises the DHCP address until restarted.
 
-    `running` is the node-ip K3s last started with. With `lag`, the Node addresses follow it after
-    that many reads, as the cloud controller's periodic sync does.
+    `running` is the node-ip K3s last started with; a restart reads it and resolv-conf from
+    `config`. With `lag`, the Node addresses follow it after that many reads, as the cloud
+    controller's periodic sync does. `kubelet` is the DNS the running kubelet hands new Pods and
+    `coredns` the DNS the current CoreDNS Pod got when it was created; `blocked` drops public DNS.
     """
 
     def __init__(
@@ -132,6 +134,10 @@ class FakeHost:
         advertised=None,
         running=None,
         lag=None,
+        config=None,
+        coredns=None,
+        marker=None,
+        blocked=False,
     ):
         self.node = node
         self.interface = interface
@@ -139,9 +145,16 @@ class FakeHost:
         self.advertised = advertised or LAN
         self.running = running or self.advertised
         self.lag = lag
+        self.config = config
+        self.kubelet = "fixed" if self.running == node_address.ADDRESS else "dhcp"
+        self.coredns = coredns or self.kubelet
+        self.marker = marker
+        self.blocked = blocked
         self.calls = []
         self.kubectl_calls = []
+        self.log = []
         self.restarts = 0
+        self.recreations = 0
 
     @staticmethod
     def reply(value, returncode=0):
@@ -149,6 +162,7 @@ class FakeHost:
 
     def command(self, argv, **options):
         self.calls.append(argv)
+        self.log.append(argv)
         if argv[:2] == ["ip", "-j"] and argv[-1] == node_address.INTERFACE:
             if self.interface is None:
                 return CompletedProcess(argv, 1, b"", b"")
@@ -167,11 +181,18 @@ class FakeHost:
             )
         if argv == ["systemctl", "restart", "k3s.service"]:
             self.restarts += 1
-            self.advertised = self.running = node_address.ADDRESS
+            settings = (
+                json.loads(self.config.read_text())
+                if self.config
+                else node_address.SETTINGS
+            )
+            self.advertised = self.running = settings.get("node-ip", LAN)
+            self.kubelet = "fixed" if settings.get("resolv-conf") else "dhcp"
         return CompletedProcess(argv, 0, b"", b"")
 
     def kubectl(self, args, **options):
         self.kubectl_calls.append(args)
+        self.log.append(args)
         if args[:2] == ["get", "node"]:
             if self.lag:
                 self.lag -= 1
@@ -201,6 +222,22 @@ class FakeHost:
                     ]
                 }
             )
+        if args[2:5] == ["get", "deployment", "coredns"]:
+            marker = {node_address.UPSTREAM_MARKER: self.marker} if self.marker else {}
+            return self.reply(
+                {"spec": {"template": {"metadata": {"annotations": marker}}}}
+            )
+        if "patch" in args:
+            change = json.loads(args[-1])["spec"]["template"]["metadata"]
+            marker = change["annotations"][node_address.UPSTREAM_MARKER]
+            if marker != self.marker:
+                # The rolling update's new Pod gets what the running kubelet hands out.
+                self.marker, self.coredns = marker, self.kubelet
+                self.recreations += 1
+            return CompletedProcess(args, 0, b"", b"")
+        if "exec" in args and node_address.LOOKUP in args:
+            healthy = not (self.blocked and self.coredns == "fixed")
+            return CompletedProcess(args, 0 if healthy else 1, b"", b"")
         if "exec" in args:
             # The Pod path only works once K3s advertises an address the host still has.
             healthy = self.advertised == node_address.ADDRESS
@@ -233,6 +270,9 @@ class NodeAddressTests(unittest.TestCase):
 
     def unit(self, name):
         return (self.bundle / "units" / name).read_bytes()
+
+    def fake(self, **state):
+        return FakeHost(self.node, config=self.k3s / "config.yaml", **state)
 
     def install_host(self, *, legacy=True):
         for name, destination, _ in self.paths():
@@ -293,6 +333,11 @@ class NodeAddressTests(unittest.TestCase):
         self.assertEqual(settings["flannel-iface"], node_address.INTERFACE)
         self.assertNotIn("node-external-ip", settings)
         self.assertEqual(settings["bind-address"], "0.0.0.0")
+        self.assertEqual(settings["resolv-conf"], "/etc/rancher/k3s/resolv.conf")
+        self.assertEqual(
+            Path(settings["resolv-conf"]),
+            node_address.K3S / "resolv.conf",
+        )
         # Appended keys keep the earlier rendering byte-identical once they are removed.
         self.assertEqual(
             node_address.legacy("k3s-config.yaml", self.unit("k3s-config.yaml")),
@@ -348,11 +393,39 @@ class NodeAddressTests(unittest.TestCase):
             self.unit(node_address.NETWORK_MANAGER).decode().splitlines()[1:],
             ["match-device=interface-name:pcloud0", "managed=0"],
         )
-        for name in (UNIT, node_address.NETWORK_MANAGER):
+        for name in (UNIT, node_address.NETWORK_MANAGER, node_address.RESOLV_CONF):
             self.assertEqual(
                 self.public["files"]["units/" + name],
                 config.checksum(self.bundle / "units" / name),
             )
+
+    def test_bundle_gives_the_kubelet_fixed_public_ipv4_resolvers(self):
+        text = self.unit(node_address.RESOLV_CONF).decode()
+        # As the kubelet parses it: comments skipped, nameservers in order, no search or options.
+        fields = [
+            line.split()
+            for line in text.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        self.assertEqual({field[0] for field in fields}, {"nameserver"})
+        servers = [field[1] for field in fields]
+        self.assertEqual(servers, ["1.1.1.1", "1.0.0.1", "8.8.8.8"])
+        self.assertEqual(tuple(servers), node_address.RESOLVERS)
+        self.assertLessEqual(len(servers), 3)  # the kubelet passes at most three
+        for server in servers:
+            address = ipaddress.ip_address(server)
+            self.assertEqual(address.version, 4)  # the Pod network has no IPv6 egress
+            self.assertTrue(address.is_global)
+        # Two operators: Cloudflare's 1.0.0.0/24 and 1.1.1.0/24, then Google's 8.8.8.0/24.
+        self.assertEqual(
+            {ipaddress.ip_network(server + "/24", strict=False) for server in servers},
+            {
+                ipaddress.ip_network("1.1.1.0/24"),
+                ipaddress.ip_network("1.0.0.0/24"),
+                ipaddress.ip_network("8.8.8.0/24"),
+            },
+        )
+        self.assertEqual(node_address.UPSTREAMS, " ".join(servers))
 
     def test_fixed_address_stays_clear_of_cluster_and_common_networks(self):
         fixed = ipaddress.ip_address(node_address.ADDRESS)
@@ -402,6 +475,18 @@ class NodeAddressTests(unittest.TestCase):
                     ),
                     expected,
                 )
+        # CoreDNS reaches its upstreams as forwarded Pod traffic; this INPUT-only chain never
+        # sees it and opens nothing for DNS.
+        for ruleset in (rules, firewall.rules(True, include_jump=True)):
+            lines = ruleset.decode().splitlines()
+            self.assertEqual(
+                [line for line in lines if line.startswith("-I ")],
+                ["-I INPUT 1 -j " + firewall.CHAIN],
+            )
+            self.assertFalse(
+                [line for line in lines if "FORWARD" in line or "OUTPUT" in line]
+            )
+            self.assertNotIn(b" 53 ", ruleset)
         ipv6 = firewall.rules(True, include_jump=True)
         self.assertNotIn(fixed.encode(), ipv6)
         self.assertEqual(
@@ -418,7 +503,8 @@ class NodeAddressTests(unittest.TestCase):
 
     def test_existing_host_moves_with_one_k3s_restart_and_repeats_as_a_noop(self):
         self.install_host()
-        fake = FakeHost(self.node)
+        fake = self.fake()
+        self.assertEqual((fake.kubelet, fake.coredns), ("dhcp", "dhcp"))
         with self.synthetic_host(fake) as output:
             result = node_address.migrate(self.bundle)
         self.assertEqual(
@@ -428,13 +514,62 @@ class NodeAddressTests(unittest.TestCase):
                 "status": "stable",
                 "interface": "pcloud0",
                 "address": node_address.ADDRESS,
+                "upstream_dns": ["1.1.1.1", "1.0.0.1", "8.8.8.8"],
                 "restarted": True,
+                "coredns_recreated": True,
             },
         )
         for name, destination, mode in self.paths():
             self.assertEqual(destination.read_bytes(), self.unit(name))
             self.assertEqual(destination.stat().st_mode & 0o777, mode)
         self.assertEqual((self.systemd / UNIT).read_bytes(), self.unit(UNIT))
+        resolver = self.k3s / "resolv.conf"
+        self.assertEqual(resolver.read_bytes(), self.unit(node_address.RESOLV_CONF))
+        self.assertEqual(resolver.stat().st_mode & 0o777, 0o644)
+        # CoreDNS is recreated once, by its own Deployment, after K3s runs the new resolv-conf.
+        self.assertEqual((fake.coredns, fake.recreations), ("fixed", 1))
+        restart = fake.log.index(["systemctl", "restart", "k3s.service"])
+        patches = [index for index, argv in enumerate(fake.log) if "patch" in argv]
+        self.assertEqual(len(patches), 1)
+        self.assertGreater(patches[0], restart)
+        self.assertEqual(
+            fake.log[patches[0]][:-1],
+            [
+                "-n",
+                "kube-system",
+                "patch",
+                "deployment",
+                "coredns",
+                "--type=merge",
+                "--field-manager=personal-cloud",
+                "-p",
+            ],
+        )
+        self.assertEqual(
+            json.loads(fake.log[patches[0]][-1]),
+            {
+                "spec": {
+                    "template": {
+                        "metadata": {
+                            "annotations": {
+                                "personal-cloud/upstream-dns": "1.1.1.1 1.0.0.1 8.8.8.8"
+                            }
+                        }
+                    }
+                }
+            },
+        )
+        rollout = fake.log.index(
+            [
+                "-n",
+                "kube-system",
+                "rollout",
+                "status",
+                "deployment/coredns",
+                "--timeout=300s",
+            ]
+        )
+        self.assertGreater(rollout, patches[0])
         self.assertEqual(
             (self.network_manager / "personal-cloud-node-address.conf").read_bytes(),
             self.unit(node_address.NETWORK_MANAGER),
@@ -450,60 +585,135 @@ class NodeAddressTests(unittest.TestCase):
                 ["systemctl", "restart", "k3s.service"],
             ],
         )
-        probe = fake.kubectl_calls[-1]
+        # Both checks run in the daemon's own Pod, after CoreDNS is replaced.
+        read, lookup = [
+            (index, argv) for index, argv in enumerate(fake.log) if "exec" in argv
+        ]
+        self.assertGreater(read[0], rollout)
+        namespace = self.public["profile"]["namespace"]
+        for _, probe in (read, lookup):
+            self.assertEqual(
+                probe[:6],
+                [
+                    "-n",
+                    namespace,
+                    "exec",
+                    "deployment/platform-runtime",
+                    "-c",
+                    "platform-runtime",
+                ],
+            )
+        self.assertEqual(read[1][-2:], [node_address.PROBE, namespace])
         self.assertEqual(
-            probe[:5],
-            [
-                "-n",
-                self.public["profile"]["namespace"],
-                "exec",
-                "deployment/platform-runtime",
-                "-c",
-            ],
+            lookup[1][-2:],
+            [node_address.LOOKUP, self.public["profile"]["fleet_host"] + "."],
         )
-        self.assertEqual(probe[-1], self.public["profile"]["namespace"])
         events = [json.loads(line) for line in output.getvalue().splitlines()]
         self.assertEqual(
             [event["phase"] for event in events],
-            ["inputs", "interface", "k3s", "cluster"],
+            ["inputs", "interface", "k3s", "cluster", "dns"],
         )
         with self.synthetic_host(fake):
             again = node_address.migrate(self.bundle)
         self.assertFalse(again["restarted"])
-        self.assertEqual(fake.restarts, 1)
+        self.assertFalse(again["coredns_recreated"])
+        self.assertEqual((fake.restarts, fake.recreations), (1, 1))
 
     def test_interrupted_migration_restarts_k3s_on_the_next_run(self):
         # Files already written, K3s not yet restarted: still advertising the DHCP address.
         self.install_host(legacy=False)
-        fake = FakeHost(self.node)
+        fake = self.fake()
         with self.synthetic_host(fake):
             result = node_address.migrate(self.bundle)
         self.assertTrue(result["restarted"])
-        self.assertEqual(fake.restarts, 1)
+        self.assertTrue(result["coredns_recreated"])
+        self.assertEqual((fake.restarts, fake.recreations), (1, 1))
+        self.assertEqual(fake.coredns, "fixed")
 
     def test_a_rerun_waits_for_k3s_already_started_on_the_fixed_address(self):
-        # An earlier run restarted K3s and timed out before the Node addresses followed.
+        # An earlier run restarted K3s and timed out before the Node addresses followed, so
+        # CoreDNS still forwards to the DHCP servers it was created with.
         self.install_host(legacy=False)
-        fake = FakeHost(self.node, running=node_address.ADDRESS, lag=3)
+        fake = self.fake(running=node_address.ADDRESS, lag=3, coredns="dhcp")
         with self.synthetic_host(fake):
             result = node_address.migrate(self.bundle)
         self.assertFalse(result["restarted"])
-        self.assertEqual(fake.restarts, 0)
+        self.assertTrue(result["coredns_recreated"])
+        self.assertEqual((fake.restarts, fake.recreations), (0, 1))
         self.assertEqual(fake.advertised, node_address.ADDRESS)
+        self.assertEqual(fake.coredns, "fixed")
+
+    def test_a_rerun_after_the_coredns_update_only_waits_for_its_rollout(self):
+        # An earlier run timed out while the new CoreDNS Pod was starting.
+        self.install_host(legacy=False)
+        (self.k3s / "resolv.conf").write_bytes(self.unit(node_address.RESOLV_CONF))
+        fake = self.fake(advertised=node_address.ADDRESS, marker=node_address.UPSTREAMS)
+        with self.synthetic_host(fake):
+            result = node_address.migrate(self.bundle)
+        self.assertEqual(
+            (result["restarted"], result["coredns_recreated"]), (False, False)
+        )
+        self.assertFalse([argv for argv in fake.log if "patch" in argv])
+        self.assertTrue([argv for argv in fake.kubectl_calls if "rollout" in argv])
+        self.assertEqual((fake.restarts, fake.recreations), (0, 0))
 
     def test_an_interrupted_rollback_restarts_k3s_on_the_next_run(self):
         # Previous files already restored, K3s still started on the fixed address.
         self.install_host()
-        fake = FakeHost(self.node, advertised=node_address.ADDRESS)
+        fake = self.fake(advertised=node_address.ADDRESS, marker=node_address.UPSTREAMS)
         with self.synthetic_host(fake):
             result = node_address.rollback(self.bundle)
         self.assertTrue(result["restarted"])
-        self.assertEqual(fake.restarts, 1)
-        fake.running = LAN
+        self.assertTrue(result["coredns_recreated"])
+        self.assertEqual(
+            (fake.running, fake.kubelet, fake.coredns), (LAN, "dhcp", "dhcp")
+        )
+        self.assertEqual((fake.restarts, fake.recreations), (1, 1))
         with self.synthetic_host(fake):
             again = node_address.rollback(self.bundle)
         self.assertFalse(again["restarted"])
-        self.assertEqual(fake.restarts, 1)
+        self.assertFalse(again["coredns_recreated"])
+        self.assertEqual((fake.restarts, fake.recreations), (1, 1))
+
+    def test_unreachable_public_dns_fails_the_migration_and_rollback_restores_it(self):
+        self.install_host()
+        fake = self.fake(blocked=True)
+        with (
+            self.synthetic_host(fake),
+            patch.object(node_address, "DEADLINE", 0.05),
+            self.assertRaisesRegex(config.BootstrapError, "CLUSTER_DNS_LOOKUP_FAILED"),
+        ):
+            node_address.migrate(self.bundle)
+        self.assertEqual((fake.restarts, fake.coredns), (1, "fixed"))
+        with self.synthetic_host(fake):
+            result = node_address.rollback(self.bundle)
+        self.assertEqual(
+            result,
+            {
+                "event": "node_address",
+                "status": "rolled_back",
+                "restarted": True,
+                "coredns_recreated": True,
+            },
+        )
+        # K3s and CoreDNS are back on the DHCP-provided servers; the unused file stays for K3s.
+        self.assertEqual(
+            (fake.kubelet, fake.coredns, fake.marker), ("dhcp", "dhcp", None)
+        )
+        self.assertEqual((fake.restarts, fake.recreations), (2, 2))
+        self.assertTrue((self.k3s / "resolv.conf").is_file())
+        restarts = [
+            index
+            for index, argv in enumerate(fake.log)
+            if argv == ["systemctl", "restart", "k3s.service"]
+        ]
+        removal = [
+            index
+            for index, argv in enumerate(fake.log)
+            if "patch" in argv and "null" in argv[-1]
+        ]
+        self.assertEqual(len(removal), 1)
+        self.assertGreater(removal[0], restarts[-1])
 
     def test_unreviewed_host_configuration_is_refused_before_any_change(self):
         for name, change in (
@@ -519,7 +729,7 @@ class NodeAddressTests(unittest.TestCase):
                 content = destination.read_bytes()
                 lines = content.splitlines(keepends=True)
                 destination.write_bytes(b"".join([lines[0], change, *lines[1:]]))
-                fake = FakeHost(self.node)
+                fake = self.fake()
                 with (
                     self.synthetic_host(fake),
                     self.assertRaisesRegex(
@@ -528,7 +738,8 @@ class NodeAddressTests(unittest.TestCase):
                     ),
                 ):
                     node_address.migrate(self.bundle)
-                self.assertEqual(fake.calls, [])
+                self.assertEqual(fake.log, [])
+                self.assertFalse((self.k3s / "resolv.conf").exists())
                 self.assertFalse((self.systemd / UNIT).exists())
 
     def test_interface_network_and_datastore_conflicts_stop_before_writes(self):
@@ -544,19 +755,24 @@ class NodeAddressTests(unittest.TestCase):
                 {"interface": link("pcloud0", "dummy", "10.254.0.5/32")},
                 "NODE_ADDRESS_INTERFACE_CONFLICT",
             ),
-            ("unit", {}, "NODE_ADDRESS_UNIT_CONFLICT"),
+            ("unit", {}, "NODE_ADDRESS_FILE_CONFLICT"),
+            ("resolver", {}, "NODE_ADDRESS_FILE_CONFLICT"),
             ("etcd", {}, "NODE_ADDRESS_ETCD_UNSUPPORTED"),
         )
+        resolver = self.k3s / "resolv.conf"
         for case, state, code in cases:
             with self.subTest(case=case):
                 (self.systemd / UNIT).unlink(missing_ok=True)
+                resolver.unlink(missing_ok=True)
                 shutil.rmtree(self.root / "var", ignore_errors=True)
                 if case == "unit":
                     (self.systemd / UNIT).write_text("[Service]\nExecStart=/bin/true\n")
+                if case == "resolver":
+                    resolver.write_text("nameserver 192.0.2.1\n")
                 if case == "etcd":
                     (self.root / "var/lib/etcd").mkdir(parents=True)
                 self.install_host()
-                fake = FakeHost(self.node, **state)
+                fake = self.fake(**state)
                 with (
                     self.synthetic_host(fake),
                     self.assertRaisesRegex(config.BootstrapError, code),
@@ -608,12 +824,17 @@ class NodeAddressTests(unittest.TestCase):
 
     def test_rollback_restores_the_previous_files_with_one_restart(self):
         self.install_host(legacy=False)
-        fake = FakeHost(self.node, advertised=node_address.ADDRESS)
+        fake = self.fake(advertised=node_address.ADDRESS, marker=node_address.UPSTREAMS)
         with self.synthetic_host(fake):
             result = node_address.rollback(self.bundle)
         self.assertEqual(
             result,
-            {"event": "node_address", "status": "rolled_back", "restarted": True},
+            {
+                "event": "node_address",
+                "status": "rolled_back",
+                "restarted": True,
+                "coredns_recreated": True,
+            },
         )
         for name, destination, _ in self.paths():
             self.assertEqual(
@@ -624,6 +845,18 @@ class NodeAddressTests(unittest.TestCase):
             [["systemctl", "daemon-reload"], ["systemctl", "restart", "k3s.service"]],
         )
         self.assertFalse((self.systemd / UNIT).exists())
+        self.assertEqual(fake.coredns, "dhcp")
+
+    def test_fresh_host_gets_the_resolver_list_before_k3s_first_starts(self):
+        shutil.rmtree(self.root / "etc/rancher")
+        fake = self.fake()
+        with self.synthetic_host(fake), patch.object(os, "chown") as chown:
+            node_address.install(self.bundle)
+        self.assertEqual(self.k3s.stat().st_mode & 0o777, 0o700)
+        chown.assert_called_once_with(self.k3s, 0, 0)
+        resolver = self.k3s / "resolv.conf"
+        self.assertEqual(resolver.read_bytes(), self.unit(node_address.RESOLV_CONF))
+        self.assertEqual(resolver.stat().st_mode & 0o777, 0o644)
 
     def test_a_command_timeout_during_the_restart_is_retried(self):
         replies = iter([config.BootstrapError("SYSTEM_COMMAND_UNAVAILABLE"), False])
@@ -649,6 +882,7 @@ class NodeAddressTests(unittest.TestCase):
         for name in (
             UNIT,
             node_address.NETWORK_MANAGER,
+            node_address.RESOLV_CONF,
             "personal-cloud-systemd-observer-v1",
             "observer-apparmor-license.txt",
         ):
@@ -701,6 +935,9 @@ class NodeAddressTests(unittest.TestCase):
             patch.object(
                 node_address, "wait_cluster", side_effect=record("wait_cluster")
             ),
+            patch.object(
+                node_address, "upstream_dns", side_effect=record("upstream_dns")
+            ),
         ):
             yield
 
@@ -722,6 +959,8 @@ class NodeAddressTests(unittest.TestCase):
             if name == "command" and args[0] == ["systemctl", "restart", "k3s.service"]
         )
         self.assertEqual(order[restart + 1][:2], ("wait_cluster", (self.node,)))
+        # CoreDNS is recreated under the restarted K3s's fixed resolv-conf.
+        self.assertEqual(order[restart + 2][:2], ("upstream_dns", ()))
         written = {str(args[0]): args[1] for name, args, _ in order if name == "write"}
         self.assertEqual(
             written["/etc/rancher/k3s/config.yaml"], self.unit("k3s-config.yaml")

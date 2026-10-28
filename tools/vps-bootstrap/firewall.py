@@ -1,4 +1,8 @@
-"""Own one standard INPUT chain; atomic restore never flushes existing host firewall chains."""
+"""Own one standard INPUT chain; atomic restore never flushes existing host firewall chains.
+
+Pod egress, CoreDNS to its fixed upstreams included, is forwarded traffic: it never passes INPUT,
+so this chain neither sees nor opens it.
+"""
 
 from node_address import FIREWALL_DESTINATION
 from runner import command

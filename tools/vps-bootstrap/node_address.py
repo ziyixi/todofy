@@ -1,10 +1,15 @@
-"""Pin the single K3s node to one fixed host-local address that never follows DHCP.
+"""Keep the single K3s node independent of DHCP: a fixed host-local address and fixed upstream DNS.
 
 Without node-ip, K3s takes the node and API endpoint address from the default route once, at
 startup. A later DHCP lease leaves the Node InternalIP and default/kubernetes on an address the host
 no longer has: host kubectl on 127.0.0.1 still works, every in-cluster client fails. A dummy
 interface holds one fixed /32 instead. Nothing outside the host routes to it, and Pod egress still
 masquerades through whatever the default route is at the time.
+
+Without resolv-conf, the kubelet hands Pods with dnsPolicy Default the servers systemd-resolved got
+from DHCP. CoreDNS is such a Pod and forwards to the copy it received when it was created, so new
+DHCP DNS servers break Pod DNS until CoreDNS is recreated. A root-owned file with fixed public
+resolvers replaces that list, and CoreDNS is recreated once to read it.
 """
 
 import argparse
@@ -29,11 +34,22 @@ INTERFACE = "pcloud0"
 ADDRESS = "10.254.0.42"
 UNIT = "personal-cloud-node-address.service"
 NETWORK_MANAGER = "networkmanager-node-address.conf"
+# Fixed CoreDNS upstreams: Cloudflare's two addresses, then Google's from another operator in case
+# one operator fails. Both answer unfiltered, so CoreDNS's random choice among them never changes
+# an answer. IPv4 only, like the Pod network; the kubelet passes at most three nameservers.
+RESOLVERS = ("1.1.1.1", "1.0.0.1", "8.8.8.8")
+RESOLV_CONF = "k3s-resolv.conf"
+RESOLV_CONF_TEXT = (
+    "# Personal cloud: fixed CoreDNS upstreams, never from DHCP\n"
+    + "".join("nameserver " + resolver + "\n" for resolver in RESOLVERS)
+)
 # Appended to the K3s configuration; node-external-ip stays unset, so no LAN address is advertised.
 SETTINGS = {
     "node-ip": ADDRESS,
     "advertise-address": ADDRESS,
     "flannel-iface": INTERFACE,
+    # The kubelet reads this file whenever it creates a Pod; it must always exist.
+    "resolv-conf": "/etc/rancher/k3s/resolv.conf",
 }
 K3S_DEPENDENCY = "Requires=" + UNIT + "\nAfter=" + UNIT + "\n"
 FIREWALL_DESTINATION = " -d " + ADDRESS + "/32"
@@ -65,6 +81,10 @@ ETCD = Path("/var/lib/rancher/k3s/server/db/etcd")
 DEADLINE = 300
 # Written by the K3s agent at every start: the node-ip of the K3s process now running.
 RUNNING_ADDRESS = "k3s.io/internal-ip"
+# On the pod template of K3s's CoreDNS Deployment: the upstreams its current Pod was created with.
+# Changing it is that Deployment's own rolling update; an equal value changes nothing.
+UPSTREAM_MARKER = "personal-cloud/upstream-dns"
+UPSTREAMS = " ".join(RESOLVERS)
 # Runs inside the daemon's own container: the same identity, DNS name, Service NAT and firewall
 # path as its normal client. It prints nothing and reads one control ConfigMap it may already read.
 PROBE = """
@@ -76,6 +96,12 @@ connection = http.client.HTTPSConnection("kubernetes.default.svc", 443, context=
 path = "/api/v1/namespaces/" + sys.argv[1] + "/configmaps/platform-release"
 connection.request("GET", path, headers={"Authorization": "Bearer " + token})
 sys.exit(connection.getresponse().status != 200)
+"""
+# The same container resolves one public name through CoreDNS: an absolute name, so only the
+# upstreams answer, never a search domain. It prints nothing.
+LOOKUP = """
+import socket, sys
+socket.getaddrinfo(sys.argv[1], 443, socket.AF_INET, socket.SOCK_STREAM)
 """
 
 
@@ -121,9 +147,9 @@ def accepted(name, current, desired):
 
 
 def own_files(bundle):
-    """This address's systemd unit and, where NetworkManager runs, its unmanaged-device drop-in."""
+    """The address unit, the resolver list and, where NetworkManager runs, its unmanaged drop-in."""
     listed = read_json(Path(bundle) / "manifest.json")["files"]
-    files = [(UNIT, SYSTEMD / UNIT)]
+    files = [(UNIT, SYSTEMD / UNIT), (RESOLV_CONF, K3S / "resolv.conf")]
     if host.real_path(NETWORK_MANAGER_DIRECTORY).is_dir():
         files.append(
             (
@@ -187,7 +213,7 @@ def preflight(bundle, *, restore=False):
         if destination.exists() and not restore:
             require(
                 destination.is_file() and destination.read_bytes() == content,
-                "NODE_ADDRESS_UNIT_CONFLICT",
+                "NODE_ADDRESS_FILE_CONFLICT",
             )
     state = interface()
     require(
@@ -210,7 +236,10 @@ def preflight(bundle, *, restore=False):
 
 
 def install(bundle, *, restore=False):
-    """Write the unit, then create-or-keep the address before K3s needs it."""
+    """Write the unit and resolver list, then create-or-keep the address before K3s needs either."""
+    if not host.real_path(K3S).exists():
+        # A fresh host; cluster.start keeps this same root-only directory.
+        host.directory(K3S, mode=0o700)
     for destination, content in own_files(bundle):
         host.write_file(destination, content, mode=0o644, replace=restore)
     command(["systemctl", "daemon-reload"])
@@ -231,10 +260,12 @@ def succeeds(check):
 
 
 def until(check, code):
+    """The check's first true value within the deadline."""
     deadline = time.monotonic() + DEADLINE
     while time.monotonic() < deadline:
-        if succeeds(check):
-            return
+        value = succeeds(check)
+        if value:
+            return value
         time.sleep(2)
     raise BootstrapError(code)
 
@@ -314,32 +345,104 @@ def wait_cluster(node_name):
     until(lambda: advertised(node_name), "NODE_ADDRESS_NOT_ADVERTISED")
 
 
-def in_cluster_read(namespace):
-    """The daemon reaches https://kubernetes.default.svc from its own Pod, as in normal releases."""
+def coredns():
+    """K3s's CoreDNS Deployment, or None while the API cannot return it."""
+    return json_output(
+        cluster.kubectl(
+            ["-n", "kube-system", "get", "deployment", "coredns", "-o", "json"],
+            check=False,
+            timeout=10,
+        )
+    )
 
-    def probe():
+
+def upstream_dns(*, fixed=True):
+    """After K3s runs the wanted resolv-conf, recreate CoreDNS once so it forwards to that list.
+
+    The kubelet copies its resolver list into a Pod only when it creates the Pod, and CoreDNS reads
+    that copy once at startup. Returns whether CoreDNS was recreated; a repeat only waits for it.
+    """
+    deployment = until(coredns, "CLUSTER_DNS_UNAVAILABLE")
+    template = deployment.get("spec", {}).get("template", {}).get("metadata", {})
+    current = (template.get("annotations") or {}).get(UPSTREAM_MARKER)
+    desired = UPSTREAMS if fixed else None
+    if current != desired:
+        # The pod-template marker is the only field written; null removes it on rollback.
+        change = {
+            "spec": {
+                "template": {"metadata": {"annotations": {UPSTREAM_MARKER: desired}}}
+            }
+        }
         result = cluster.kubectl(
             [
                 "-n",
-                namespace,
-                "exec",
-                "deployment/platform-runtime",
-                "-c",
-                "platform-runtime",
-                "--",
-                "python",
-                "-I",
-                "-B",
-                "-c",
-                PROBE,
-                namespace,
+                "kube-system",
+                "patch",
+                "deployment",
+                "coredns",
+                "--type=merge",
+                "--field-manager=personal-cloud",
+                "-p",
+                json.dumps(change),
             ],
             check=False,
             timeout=30,
         )
-        return result.returncode == 0
+        require(result.returncode == 0, "CLUSTER_DNS_UPDATE_FAILED")
+    rollout = cluster.kubectl(
+        [
+            "-n",
+            "kube-system",
+            "rollout",
+            "status",
+            "deployment/coredns",
+            "--timeout=300s",
+        ],
+        check=False,
+        timeout=330,
+    )
+    require(rollout.returncode == 0, "CLUSTER_DNS_UNAVAILABLE")
+    return current != desired
 
-    until(probe, "NODE_ADDRESS_IN_CLUSTER_READ_FAILED")
+
+def daemon_python(namespace, script, argument):
+    """Run a short stdlib script in the daemon's own container; its output is never read."""
+    result = cluster.kubectl(
+        [
+            "-n",
+            namespace,
+            "exec",
+            "deployment/platform-runtime",
+            "-c",
+            "platform-runtime",
+            "--",
+            "python",
+            "-I",
+            "-B",
+            "-c",
+            script,
+            argument,
+        ],
+        check=False,
+        timeout=30,
+    )
+    return result.returncode == 0
+
+
+def in_cluster_read(namespace):
+    """The daemon reaches https://kubernetes.default.svc from its own Pod, as in normal releases."""
+    until(
+        lambda: daemon_python(namespace, PROBE, namespace),
+        "NODE_ADDRESS_IN_CLUSTER_READ_FAILED",
+    )
+
+
+def public_lookup(namespace, name):
+    """The daemon's Pod resolves a public name it needs through CoreDNS and its upstreams."""
+    until(
+        lambda: daemon_python(namespace, LOOKUP, name + "."),
+        "CLUSTER_DNS_LOOKUP_FAILED",
+    )
 
 
 def supported():
@@ -385,7 +488,7 @@ def restart_k3s(planned):
 
 
 def migrate(bundle):
-    """Move an installed host onto the fixed address with one K3s restart; repeat runs verify only."""
+    """Move an installed host to the fixed address and DNS with one K3s restart; repeats verify."""
     public, files = reviewed(bundle)
     preflight(bundle)
     event("inputs", "verified")
@@ -395,25 +498,32 @@ def migrate(bundle):
     planned = [(path, desired, mode) for _, path, desired, mode in files]
     # Written files with K3s still started on the old address (an interrupted run) also restart.
     # K3s already started on the fixed address only waits: a run that timed out while the Node
-    # addresses caught up must not restart K3s again.
+    # addresses caught up must not restart K3s again. resolv-conf is in the same configuration file,
+    # so a K3s started on the fixed address also hands out the fixed DNS.
     restarted = any(path.read_bytes() != content for path, content, _ in planned)
     restarted = restarted or running_address(node_name) != ADDRESS
     if restarted:
         restart_k3s(planned)
     wait_cluster(node_name)
     event("cluster", "advertised")
-    in_cluster_read(public["profile"]["namespace"])
+    recreated = upstream_dns()
+    event("dns", "fixed")
+    profile = public["profile"]
+    in_cluster_read(profile["namespace"])
+    public_lookup(profile["namespace"], profile["fleet_host"])
     return {
         "event": "node_address",
         "status": "stable",
         "interface": INTERFACE,
         "address": ADDRESS,
+        "upstream_dns": list(RESOLVERS),
         "restarted": restarted,
+        "coredns_recreated": recreated,
     }
 
 
 def rollback(bundle):
-    """Restore the DHCP-derived K3s files; the unused unit and interface stay."""
+    """Restore the DHCP-derived K3s files and CoreDNS upstreams; unit, file and interface stay."""
     public, files = reviewed(bundle)
     event("inputs", "verified")
     planned = [
@@ -426,7 +536,14 @@ def rollback(bundle):
     if restarted:
         restart_k3s(planned)
     until(api_ready, "NODE_ADDRESS_CLUSTER_UNAVAILABLE")
-    return {"event": "node_address", "status": "rolled_back", "restarted": restarted}
+    # CoreDNS goes back to the servers the restored K3s hands out, from DHCP.
+    recreated = upstream_dns(fixed=False)
+    return {
+        "event": "node_address",
+        "status": "rolled_back",
+        "restarted": restarted,
+        "coredns_recreated": recreated,
+    }
 
 
 def main():
@@ -435,7 +552,7 @@ def main():
     parser.add_argument(
         "--rollback",
         action="store_true",
-        help="restore the previous DHCP-derived K3s configuration and restart K3s once",
+        help="restore the previous DHCP-derived K3s configuration and CoreDNS upstreams",
     )
     args = parser.parse_args()
     try:

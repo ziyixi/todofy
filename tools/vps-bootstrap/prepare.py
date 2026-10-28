@@ -137,7 +137,8 @@ WantedBy=multi-user.target
                 "node-name": profile["vps"]["observer_node_key"],
                 "cluster-cidr": "10.42.0.0/16",
                 "bind-address": "0.0.0.0",
-                # Never the DHCP address: K3s would freeze whatever the default route had at startup.
+                # Never DHCP: K3s would freeze the default route's address at startup, and CoreDNS
+                # the DNS servers the host had when its Pod was created.
                 **node_address.SETTINGS,
             },
             indent=2,
@@ -164,6 +165,7 @@ WantedBy=multi-user.target
 """,
         node_address.UNIT: node_address.UNIT_TEXT,
         node_address.NETWORK_MANAGER: node_address.NETWORK_MANAGER_TEXT,
+        node_address.RESOLV_CONF: node_address.RESOLV_CONF_TEXT,
     }
     for name, text in templates.items():
         (output / "units" / name).write_text(text)
