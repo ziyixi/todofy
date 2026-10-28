@@ -179,7 +179,6 @@ export const CALLED_METHODS = {
   'notion-publish': ['status', 'setGuard', 'getSyncStatus', 'requestSync', 'getSyncRequest'],
   mailsort: ['status', 'setGuard'],
   recall: ['status', 'setGuard'],
-  brief: ['status', 'setGuard'],
   tasks: ['status', 'setGuard'],
   'personal-mcp': ['status', 'setGuard'],
   'model-router': ['status', 'setGuard'],

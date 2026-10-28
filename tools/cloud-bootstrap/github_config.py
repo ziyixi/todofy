@@ -8,7 +8,6 @@ import subprocess
 from private_input import BootstrapError
 
 DEFAULT_VARIABLES = {
-    "BRIEF_MODE": "off",
     "DASHBOARD_CANARY_ENABLED": "false",
     "MAIL_HERO_FORCE_SEND_PAUSED": "true",
     "MAIL_HERO_MAINTENANCE_MODE": "false",

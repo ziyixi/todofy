@@ -78,7 +78,7 @@ test('Router provider credentials cannot enter its GitHub deployment map', () =>
 })
 
 test('keyless owner maps drop only the exact retired CSRF binding and preserve strict validation', () => {
-  for (const worker of ['home', 'links', 'watch', 'mailsort', 'recall', 'brief', 'tasks', 'todofy', 'model-router']) {
+  for (const worker of ['home', 'links', 'watch', 'mailsort', 'recall', 'tasks', 'todofy', 'model-router']) {
     const spec = workerSecretSpec(worker)
     const complete = Object.fromEntries(spec.required.map(name => [name, privateValue]))
     const legacy = { ...complete, CSRF_SIGNING_KEY: 7 }

@@ -30,8 +30,6 @@ export interface Env {
   readonly MAILSORT: Service<WatchOpsEntrypoint>;
   /** recall's Ops entrypoint: status() (counts and codes of the browsing record); its setGuard always refuses. */
   readonly RECALL: Service<WatchOpsEntrypoint>;
-  /** Brief's Ops entrypoint: status and the guard for embedding, learning and source probes. */
-  readonly BRIEF: Service<WatchOpsEntrypoint>;
   /** Native Tasks health; no user content and no operational guard. */
   readonly TASKS: Service<WatchOpsEntrypoint>;
   /** Personal MCP connection and delivery observations; no owner or business-content API. */

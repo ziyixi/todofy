@@ -27,7 +27,7 @@ export function mergeWorkerSecrets(worker, env, personal, SettingError) {
   }
   let parsed
   try { parsed = JSON.parse(raw) } catch { throw new SettingError(spec.github_secret) }
-  if (['home', 'links', 'watch', 'mailsort', 'recall', 'brief', 'tasks', 'todofy', 'model-router'].includes(worker)
+  if (['home', 'links', 'watch', 'mailsort', 'recall', 'tasks', 'todofy', 'model-router'].includes(worker)
     && parsed && typeof parsed === 'object' && !Array.isArray(parsed)) delete parsed.CSRF_SIGNING_KEY
   if (worker === 'todofy-core' && parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
     for (const name of RETIRED_CORE_SECRETS) delete parsed[name]

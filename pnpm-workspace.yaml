@@ -1,6 +1,4 @@
 packages:
-  - "brief/web"
-  - "brief/worker"
   - "dashboard/web"
   - "dashboard/worker"
   - "fleet/web"

@@ -214,7 +214,7 @@ class DriftAcceptance(unittest.TestCase):
         self.assertEqual(len(fixture.deployments), 1)
 
     def test_keyless_release_accepts_only_the_exact_retained_csrf_secret(self):
-        for app in ("dashboard", "links", "watch", "mailsort", "recall", "brief", "tasks", "todofy", "model-router"):
+        for app in ("dashboard", "links", "watch", "mailsort", "recall", "tasks", "todofy", "model-router"):
             with self.subTest(app=app):
                 _, _, _, desired = release_inputs(ROOT, app)
                 worker = "home" if app == "dashboard" else app
@@ -238,7 +238,6 @@ class DriftAcceptance(unittest.TestCase):
     def test_retired_model_connections_are_optional_live_bindings_only(self):
         for app, worker, names in (
             ("todofy", "todofy-core", ["GEMINI_API_KEY"]),
-            ("brief", "brief", ["ANTHROPIC_API_KEY"]),
             ("mailsort", "mailsort", ["ANTHROPIC_API_KEY", "CODEX_ENDPOINT_TOKEN", "CODEX_ACCESS_CLIENT_ID", "CODEX_ACCESS_CLIENT_SECRET"]),
         ):
             _, _, _, desired = release_inputs(ROOT, app)
@@ -455,7 +454,7 @@ class DriftAcceptance(unittest.TestCase):
         self.assertEqual(control.RETIRED_BINDINGS, {
             "todofy": {"TASKS", "GEMINI_API_BASE", "GEMINI_EMAIL_MODELS", "GEMINI_MODELS"},
             "mailsort": {"AI", "CODEX_ENDPOINT_URL"},
-            "brief": {"AI"},
+            "dashboard": {"BRIEF"},
         })
         for app, names in control.RETIRED_BINDINGS.items():
             for path in control.WORKERS[app]:
@@ -509,6 +508,24 @@ class DriftAcceptance(unittest.TestCase):
                 with redirect_stdout(io.StringIO()), self.assertRaisesRegex(ReleaseError, "REPAIR_MANUAL_REQUIRED"):
                     preflight(ROOT, app, SHA, repair, fixture.cloud, fixture.github)
                 self.assert_readonly(fixture)
+
+    def test_normal_home_release_removes_the_retired_brief_binding(self):
+        fixture = self.fixture("dashboard")
+        fixture.bindings().append(
+            {"name": "BRIEF", "type": "service", "service": "brief", "entrypoint": "Ops",
+             "environment": "production"}
+        )
+        output = io.StringIO()
+        with redirect_stdout(output):
+            required = preflight(ROOT, fixture.app, SHA, False, fixture.cloud, fixture.github)
+        self.assertTrue(required)
+        self.assertEqual(
+            json.loads(output.getvalue()),
+            {"state": "repairable", "changes": [
+                {"script": "home", "field": "BRIEF", "reason": "RETIRED_BINDING"},
+            ]},
+        )
+        self.assert_readonly(fixture)
 
     @patch.dict("control.RETIRED_BINDINGS", {"dashboard": {"OLD_APP"}})
     def test_normal_home_release_removes_a_retired_binding(self):

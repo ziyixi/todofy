@@ -155,7 +155,7 @@ class CompositeActions(unittest.TestCase):
         ]
         self.assertEqual(
             job["env"]["MAILSORT_MODE"],
-            "${{ (inputs.app == 'mailsort' || inputs.app == 'brief') && vars.MAILSORT_MODE || '' }}",
+            "${{ inputs.app == 'mailsort' && vars.MAILSORT_MODE || '' }}",
         )
         call = next(
             step for step in job["steps"]
@@ -185,7 +185,6 @@ class CompositeActions(unittest.TestCase):
                 "MAIL_HERO_FORCE_SEND_PAUSED", "MAIL_HERO_MAINTENANCE_MODE",
                 "MAIL_HERO_NATIVE_BACKUP_ENABLED",
             ),
-            "brief": ("BRIEF_MODE",),
             "model-router": ("MODEL_ROUTER_MAINTENANCE_MODE",),
         }
         for app, names in switches.items():

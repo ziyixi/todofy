@@ -208,6 +208,57 @@ class DependencyWorkspaces(unittest.TestCase):
         commented = {"pnpm-workspace.yaml": workspace.replace("catalog:\n", "# Shared versions.\ncatalog:\n")}
         self.assertEqual(deployed(ci_changes.classify(["pnpm-workspace.yaml"], reader(commented))), set())
 
+    def test_a_retired_members_removal_reaches_no_remaining_member(self):
+        """An app's retirement drops its members from pnpm-workspace.yaml and their importers from the lock in the
+        diff that deletes their directories: nothing else resolves differently, so no other member is reached and no
+        VPS image is published. Anything more, or a member that still exists, keeps reaching every member."""
+        workspace = (ROOT / "pnpm-workspace.yaml").read_text()
+        lock = (ROOT / "pnpm-lock.yaml").read_text()
+        retired = "  - \"gone/web\"\n"
+        importer = "  gone/web:\n    devDependencies:\n      vitest:\n        specifier: 'catalog:'\n        version: 4.0.0\n\n"
+        before_workspace = workspace.replace("packages:\n", "packages:\n" + retired, 1)
+        before_lock = lock.replace("importers:\n\n", "importers:\n\n" + importer, 1)
+        self.assertNotEqual(before_lock, lock)
+
+        def read_retired(lock_before=before_lock, workspace_before=before_workspace, exists=False):
+            def read(path):
+                if path == "gone/web/package.json":
+                    if exists:
+                        return "{}", "{}"
+                    raise ValueError(path)
+                after = (ROOT / path).read_text()
+                return {"pnpm-workspace.yaml": workspace_before, "pnpm-lock.yaml": lock_before}.get(path, after), after
+            return read
+
+        paths = ["pnpm-workspace.yaml", "pnpm-lock.yaml", "gone/web/package.json"]
+        result = ci_changes.classify(paths, read_retired())
+        self.assertEqual(deployed(result), set())
+        self.assertEqual(checked(result), set(ci_changes.PROTO_USERS))
+        self.assertFalse(result["platform_publish"] or result["website_relay_deploy"] or result["recall_extension_publish"])
+        # A changed remaining importer, a changed package, another workspace change, a lock left alone or a directory
+        # that still exists reach every member as before.
+        changed_importer = before_lock.replace("  .: {}\n", "  .:\n    dependencies: {}\n", 1)
+        self.assertNotEqual(changed_importer, before_lock)
+        for read, changed in (
+            (read_retired(lock_before=changed_importer), paths),
+            (read_retired(workspace_before=before_workspace.replace("strictPeerDependencies: true", "strictPeerDependencies: false")), paths),
+            (read_retired(exists=True), paths),
+            (read_retired(), ["pnpm-workspace.yaml", "gone/web/package.json"]),
+            (read_retired(), ["pnpm-workspace.yaml", "pnpm-lock.yaml"]),
+        ):
+            with self.subTest(paths=changed):
+                self.assertEqual(deployed(ci_changes.classify(changed, read)), set(ci_changes.APPS))
+        added = lock.replace("packages:\n\n", "packages:\n\n  new-only@1.0.0:\n    resolution: {integrity: sha512-x}\n\n", 1)
+        self.assertNotEqual(added, lock)
+
+        def read_added(path):
+            if path == "gone/web/package.json":
+                raise ValueError(path)
+            after = added if path == "pnpm-lock.yaml" else (ROOT / path).read_text()
+            return {"pnpm-workspace.yaml": before_workspace, "pnpm-lock.yaml": before_lock}.get(path, after), after
+
+        self.assertEqual(deployed(ci_changes.classify(paths, read_added)), set(ci_changes.APPS))
+
     def test_a_root_constraint_deploys_only_the_python_members_that_declare_it(self):
         pin = r'^(  "{}==).+(",)$'
         bump = lambda name: ci_changes.classify(["pyproject.toml", "uv.lock"], reader({"pyproject.toml": older(name, "pyproject.toml", pin, r"\g<1>0.0.1\g<2>")}))

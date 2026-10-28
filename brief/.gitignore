@@ -1,9 +1,0 @@
-# Node toolchains of the Worker and the UI
-node_modules/
-# Vite output, served by the Worker as static assets (wrangler.toml [assets])
-web/dist/
-# Local workerd state and dev values (see .dev.vars.example)
-.wrangler/
-worker/.wrangler/
-.dev.vars*
-!.dev.vars.example

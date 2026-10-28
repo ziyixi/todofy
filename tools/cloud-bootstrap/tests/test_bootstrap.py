@@ -170,7 +170,6 @@ class GitHub(unittest.TestCase):
         owner_machine = cloud_profile.owner_machine_secrets(ROOT)
         retired = {
             "todofy-core": ["GEMINI_API_KEY"],
-            "brief": ["ANTHROPIC_API_KEY"],
             "mailsort": ["ANTHROPIC_API_KEY", "CODEX_ENDPOINT_TOKEN", "CODEX_ACCESS_CLIENT_ID", "CODEX_ACCESS_CLIENT_SECRET"],
             "model-router": ["ANTHROPIC_API_KEY", "GEMINI_API_KEY"],
         }
@@ -207,7 +206,6 @@ class GitHub(unittest.TestCase):
         self.assertEqual(variables["PERSONAL_CLOUD_AUTO_REPAIR"], "false")
         # Their deploy wrappers refuse a missing value.
         self.assertEqual(variables["MODEL_ROUTER_MAINTENANCE_MODE"], "false")
-        self.assertEqual(variables["BRIEF_MODE"], "off")
 
     def test_existing_protection_and_flags_are_never_overwritten(self):
         writes = []

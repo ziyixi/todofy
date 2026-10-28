@@ -47,7 +47,6 @@ test("the Durable Object, the Ops service bindings, Tasks' create-only TaskInbox
     { binding: 'WEBSITE_SYNC', service: 'ziyixi-notion-publish', entrypoint: 'WebsiteSync' },
     { binding: 'MAILSORT', service: 'mailsort', entrypoint: 'Ops' },
     { binding: 'RECALL', service: 'recall', entrypoint: 'Ops' },
-    { binding: 'BRIEF', service: 'brief', entrypoint: 'Ops' },
     { binding: 'TASKS', service: 'tasks', entrypoint: 'Ops' },
     // The digest's daily task: create only, under source home.
     { binding: 'TASK_INBOX', service: 'tasks', entrypoint: 'TaskInbox', props: { source: 'home' } },

@@ -276,7 +276,7 @@ describe('provider isolation and usage', () => {
 
   it('uses the same provider key for every authenticated calling app', () => {
     const ctx = context('anthropic');
-    for (const caller of ['console', 'mailsort', 'todofy', 'brief', 'newsletter']) {
+    for (const caller of ['console', 'mailsort', 'todofy', 'newsletter']) {
       expect(apiKey({ ...ctx, caller }, 'ANTHROPIC')).toBe('synthetic-claude-key');
       expect(apiKey({ ...ctx, caller }, 'GEMINI')).toBe('synthetic-gemini-key');
     }

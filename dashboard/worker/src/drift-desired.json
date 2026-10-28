@@ -4,91 +4,6 @@
     "ziyixi.science"
   ],
   "workers": {
-    "brief": {
-      "config": "brief/wrangler.toml",
-      "workers_dev": false,
-      "preview_urls": false,
-      "custom_domains": [
-        "brief.ziyixi.science"
-      ],
-      "routes": [],
-      "crons": [],
-      "bindings": [
-        {
-          "name": "ACCESS_AUDIENCE",
-          "type": "plain_text",
-          "source": "config"
-        },
-        {
-          "name": "ACCESS_ISSUER",
-          "type": "plain_text",
-          "source": "config"
-        },
-        {
-          "name": "ACCESS_OWNER",
-          "type": "secret_text",
-          "source": "deploy"
-        },
-        {
-          "name": "ACCESS_OWNER_ALIASES",
-          "type": "secret_text",
-          "source": "deploy",
-          "optional": true
-        },
-        {
-          "name": "ASSETS",
-          "type": "assets",
-          "source": "config"
-        },
-        {
-          "name": "BRIEF",
-          "type": "durable_object_namespace",
-          "source": "config"
-        },
-        {
-          "name": "BUILD_SHA",
-          "type": "plain_text",
-          "source": "deploy"
-        },
-        {
-          "name": "FEEDBACK_SIGNING_KEY",
-          "type": "secret_text",
-          "source": "deploy"
-        },
-        {
-          "name": "MAIL_FROM",
-          "type": "secret_text",
-          "source": "deploy"
-        },
-        {
-          "name": "MAIL_TO",
-          "type": "secret_text",
-          "source": "deploy"
-        },
-        {
-          "name": "MODE",
-          "type": "plain_text",
-          "source": "deploy"
-        },
-        {
-          "name": "MODEL_ROUTER",
-          "type": "service",
-          "source": "config"
-        },
-        {
-          "name": "PUBLIC_HOST",
-          "type": "plain_text",
-          "source": "config"
-        },
-        {
-          "name": "RESEND_API_KEY",
-          "type": "secret_text",
-          "source": "manual",
-          "optional": true
-        }
-      ],
-      "personal": []
-    },
     "fleet": {
       "config": "fleet/wrangler.toml",
       "workers_dev": false,
@@ -204,11 +119,6 @@
         {
           "name": "ASSETS",
           "type": "assets",
-          "source": "config"
-        },
-        {
-          "name": "BRIEF",
-          "type": "service",
           "source": "config"
         },
         {

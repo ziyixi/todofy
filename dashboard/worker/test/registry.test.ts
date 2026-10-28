@@ -78,7 +78,7 @@ describe('the registry', () => {
 
   it('registers the entries of the design, in their groups and order', () => {
     const byGroup = (group: string) => REGISTRY.entries.filter((e) => e.group === group).sort((a, b) => a.order - b.order).map((e) => e.id);
-    expect(byGroup('apps')).toEqual(['mail-hero', 'todofy', 'links', 'watch', 'fleet', 'mailsort', 'recall', 'brief', 'tasks', 'model-router']);
+    expect(byGroup('apps')).toEqual(['mail-hero', 'todofy', 'links', 'watch', 'fleet', 'mailsort', 'recall', 'tasks', 'model-router']);
     expect(byGroup('sites')).toEqual(['website']);
     expect(byGroup('services')).toEqual(['notion-publish', 'newsletter', 'personal-mcp', 'codex-gateway']);
     expect(byGroup('hidden')).toEqual(['home', 'self-hosted', 'platform-runtime']);
@@ -94,7 +94,6 @@ describe('the registry', () => {
       fleet: 'ops_v1',
       mailsort: 'ops_v1',
       recall: 'ops_v1',
-      brief: 'ops_v1',
       tasks: 'ops_v1',
       home: 'self',
       'self-hosted': 'none',
@@ -154,7 +153,6 @@ describe('the registry', () => {
     const unmatched = REGISTRY.resources.filter((r) => r.match === null).map((r) => r.id);
     expect(unmatched).toEqual(RESOURCE_IDENTITIES['model-router-engine'] ? [] : ['model-router-engine']);
     expect(resourceByMatch('do', '7d90ef3fb1d44ac591a3b21c99fdcccc')).toMatchObject({ id: 'tasks-jobs', kind: 'do', entry: 'tasks', script: 'tasks' });
-    expect(resourceByMatch('do', '6edfe7c19d6748b186ee38bb48c686be')).toMatchObject({ id: 'brief-state', kind: 'do', entry: 'brief', script: 'brief' });
     expect(REGISTRY.resources.find((r) => r.id === 'recall-state')).toMatchObject({ kind: 'do', entry: 'recall', script: 'recall' });
     expect(resourceByMatch('r2', 'recall-store')).toMatchObject({ id: 'recall-store', entry: 'recall' });
     expect(REGISTRY.resources.find((r) => r.id === 'mailsort-state')).toMatchObject({ kind: 'do', entry: 'mailsort', script: 'mailsort' });
@@ -171,9 +169,9 @@ describe('the registry', () => {
   it('keeps the tick within the Workers Free subrequest budget', () => {
     expect(outboundPerTick()).toBeLessThanOrEqual(MAX_OUTBOUND_PER_TICK);
     expect(MAX_OUTBOUND_PER_TICK).toBeLessThan(50);
-    // 14 Ops entries, the relay's sync evidence and 2 probes (the website's and the links app's beside its status).
-    expect(outboundPerRefresh()).toBe(17);
-    expect(outboundPerTick()).toBe(37);
+    // 13 Ops entries, the relay's sync evidence and 2 probes (the website's and the links app's beside its status).
+    expect(outboundPerRefresh()).toBe(16);
+    expect(outboundPerTick()).toBe(35);
   });
 
   it('serves a public view without bindings or probe URLs, within its budget', () => {

@@ -4,7 +4,6 @@ account_id = "f57937bd1d93bf59e737b6d8445fb7a3"
 zone_id = "39163aaaa9eba38eca58f3ea969710bf"
 
 [access_audiences]
-"brief" = "d9dd5577cada54bc585a0add6f508663c8f27288cdf085cfbae70a24b54b7bfb"
 "codex-gateway" = "f5d90ab5641ca41014e14af8e2b8a9c2479f78a56e103d78b7c1fe7d158f56cb"
 "fleet" = "43aba3693dea8e88a343446ce5c416f9c950e37a2b066c7dcfc1189d8ea0cb73"
 "home" = "7e0d033509e69a7f59c947ed4219b3898b79dffd24bfd4c1ea78e4d69269d5cc"
@@ -26,7 +25,6 @@ zone_id = "39163aaaa9eba38eca58f3ea969710bf"
 "todofy" = "151c1306-3885-4679-9592-08887b30ae68"
 
 [durable_objects]
-"brief-state" = "6edfe7c19d6748b186ee38bb48c686be"
 "fleet-state" = "a3d3d60939e54b49951af9586232c50e"
 "home-state" = "acddddf88d624194a68af430fd1a90ff"
 "mail-coordinator" = "55c248f9d82c45f3a89d2de1d719d5db"
@@ -39,7 +37,6 @@ zone_id = "39163aaaa9eba38eca58f3ea969710bf"
 "watch-state" = "d58e1bdabacb4d14bbba1887f169c8b4"
 
 [access_app_ids]
-"brief" = "6005b0c0-ddc3-4812-8b28-322f3601a95a"
 "fleet" = "03c9b2a9-05c5-49fa-9ffa-8ece99952894"
 "home" = "f190b413-241d-428d-8680-53eebe7f672d"
 "links" = "a6e2a6e3-b432-4093-ac20-0211ca180dce"
@@ -53,7 +50,6 @@ zone_id = "39163aaaa9eba38eca58f3ea969710bf"
 "watch" = "7d5134ca-1362-4fa3-9c84-d2ee9afb656c"
 
 [access_policy_ids]
-"brief-feedback" = "402ed2c7-f548-44e1-8b6c-e46424554ae2"
 "fleet-receipt" = "fb3608f4-bf0e-4db8-8983-5fb1340f20d5"
 "github-owner" = "eea00ced-7de7-4094-a705-c9741d835b7c"
 "model-router-inference" = "097fe721-2615-4cfa-847b-9f0d0448dd79"

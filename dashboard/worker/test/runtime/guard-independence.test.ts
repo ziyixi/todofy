@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, expect, it } from 'vitest';
 import type { HomeView, OverrideGuardResponse } from '../../src/api-types.ts';
-import { d1Reads, guardState, NOW, PATHS, shedState, startFlows, status, type FlowHarness } from './flows.ts';
+import { d1Reads, NOW, PATHS, shedState, startFlows, status, type FlowHarness } from './flows.ts';
 
 let h: FlowHarness | undefined;
 afterEach(async () => {
@@ -12,42 +12,10 @@ afterEach(async () => {
   h = undefined;
 });
 
-it('reads Brief status and changes only its guard while preserving archive mode and its budget', async () => {
-  h = await startFlows({ bindings: { CANARY_UTC_HOUR: '23' } });
-  await h.answer('brief', 'status', { value: await status('brief', {
-    health: 'degraded',
-    signals: [{ code: 'sources_stale', severity: 'warning', metrics: { count: 2 } }],
-  }) });
-  await h.tick(NOW - 20 * 60_000);
-  expect(await h.callsOf('brief', 'status')).toEqual([[]]);
-  const before = await h.snapshot();
-  expect(before.apps.brief.status).toMatchObject({
-    modes: { mode_limited: true },
-    counters: { budget_month_cents: 8000 },
-  });
-  expect(before.digest.items).toContainEqual(expect.objectContaining({ source: 'brief', code: 'sources_stale' }));
-
-  const held = guardState({
-    level: 'shed', reason: 'owner_shed', until: '2026-10-02T12:00:00.000Z',
-    set_at: '2026-10-01T12:00:00.000Z', deferred: ['embedding', 'learning', 'source_probe'],
-  });
-  await h.answer('brief', 'setGuard', { value: held });
-  const response = await h.post(PATHS.guard, { app: 'brief', level: 'shed' });
-  expect(response.status).toBe(200);
-  await response.arrayBuffer();
-  expect(await h.callsOf('brief', 'setGuard')).toEqual([[{ level: 'shed', reason: 'owner_shed', until: held.until }]]);
-  const after = await h.snapshot();
-  expect(after.guard.apps.brief?.state).toEqual(held);
-  expect(after.apps.brief.status).toEqual(before.apps.brief.status);
-  for (const app of ['mail-hero', 'todofy', 'watch', 'mailsort'] as const) {
-    expect(await h.callsOf(app, 'setGuard')).toEqual([]);
-  }
-});
-
 it('shows no aggregate shed after each service is restored while account usage remains high', async () => {
   h = await startFlows({ bindings: { CANARY_UTC_HOUR: '23' }, usage: d1Reads(90) });
   await h.tick(NOW - 20 * 60_000);
-  for (const app of ['mail-hero', 'todofy', 'watch', 'brief'] as const) {
+  for (const app of ['mail-hero', 'todofy', 'watch'] as const) {
     expect((await h.post(PATHS.guard, { app, level: 'normal' })).status).toBe(200);
   }
   expect((await h.snapshot()).digest.items.some((item) => item.code === 'guard_shed')).toBe(false);
@@ -65,7 +33,7 @@ it('excludes a service without the guard capability from the aggregate target', 
   h = await startFlows({ bindings: { CANARY_UTC_HOUR: '23' }, usage: d1Reads(90) });
   await h.answer('watch', 'status', { value: await status('watch', { capabilities: [] }) });
   await h.tick(NOW - 20 * 60_000);
-  for (const app of ['mail-hero', 'todofy', 'brief'] as const) {
+  for (const app of ['mail-hero', 'todofy'] as const) {
     expect((await h.post(PATHS.guard, { app, level: 'normal' })).status).toBe(200);
   }
 

@@ -67,7 +67,6 @@ WRAPPERS = {
     "fleet": {"language": "js", "file": "fleet/deploy/deploy-vars.mjs", "vars": "fleet", "secrets": "fleet"},
     "mailsort": {"language": "js", "file": "mailsort/deploy/deploy-vars.mjs", "vars": "mailsort", "secrets": "mailsort"},
     "recall": {"language": "js", "file": "recall/deploy/deploy-vars.mjs", "vars": "recall", "secrets": "recall"},
-    "brief": {"language": "js", "file": "brief/deploy/deploy-vars.mjs", "vars": "brief", "secrets": "brief"},
     "personal-mcp": {"language": "js", "file": "personal-mcp/deploy/deploy-vars.mjs", "vars": "personal-mcp", "secrets": "personal-mcp"},
     "website-relay": {"language": "js", "file": "website/relay/deploy/deploy-vars.mjs", "vars": "ziyixi-notion-publish", "secrets": "ziyixi-notion-publish"},
     "todofy": {
@@ -87,8 +86,8 @@ MANUAL_SECRETS = {
     if worker.get("manual_secrets")
 }
 
-# Secrets only the owner puts from their own machine (mailsort's Gmail grant, recall's machine-token digests, the
-# brief's Claude and Resend keys): expected, optional, never deployed.
+# Secrets only the owner puts from their own machine (mailsort's Gmail grant, recall's machine-token digests):
+# expected, optional, never deployed.
 OWNER_MACHINE_SECRETS = owner_machine_secrets(REPO)
 
 # Wrapper kinds whose value is personal (must be a Worker secret on the live Worker).
@@ -109,7 +108,7 @@ PLAIN_KEYS = {
     "observability",
     "migrations",
     "triggers",
-    # Module rules (the brief bundles its content config as text): bundling only.
+    # Module rules (mailsort bundles its prompts as text): bundling only.
     "rules",
 }
 

@@ -11,5 +11,14 @@
 # application that still uses it, which Cloudflare refuses. A policy only the retired app used leaves with its whole
 # resource block, keeps its old address, and is deleted after the application.
 #
-# No app is being retired now: FlowDay's Access applications, their two policies and its D1 database were deleted
-# by the apply of 2026-10-21.
+# Brief (retired 2026-10-28; README.md "Retiring an app"): its owner application moves below, to an address without an
+# instance key. Its feedback application and the reusable policy only that application used left with their resource
+# blocks and keep their old addresses (cloudflare_zero_trust_access_application.brief_feedback and
+# cloudflare_zero_trust_access_policy.brief_feedback); neither has an instance key, so the redacted drift summary
+# prints them as they are, and the apply deletes the policy after the application. Brief had no D1 database.
+# Remove the moved block and its RETIRED pair in .github/scripts/infra_guard.py in the commit after the apply that
+# deleted the objects.
+moved {
+  from = cloudflare_zero_trust_access_application.owner["brief"]
+  to   = cloudflare_zero_trust_access_application.retired_brief
+}

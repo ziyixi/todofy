@@ -42,7 +42,7 @@ interface Context {
   request: CreateConversationRequest;
   expireMs: number;
 }
-const knownApps = new Set(['console', 'mailsort', 'todofy', 'brief', 'newsletter']);
+const knownApps = new Set(['console', 'mailsort', 'todofy', 'newsletter']);
 /** The external Newsletter token reaches only subscription Codex models; in-account bindings stay unrestricted. */
 function allowModel(app: string, provider: string): void {
   if (app === 'newsletter' && provider !== 'codex')

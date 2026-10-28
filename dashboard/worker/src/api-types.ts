@@ -229,7 +229,7 @@ export type CanaryState = Omit<CanaryView, 'id'>;
  * holds them equal). OpsStatus.app is open on the wire (any app may answer ops-v1), so its generated type is a string;
  * this dashboard knows exactly the apps it binds.
  */
-export type OpsApp = 'mail-hero' | 'todofy' | 'watch' | 'fleet' | 'newsletter' | 'codex-gateway' | 'notion-publish' | 'mailsort' | 'recall' | 'brief' | 'tasks' | 'personal-mcp' | 'model-router' | 'links';
+export type OpsApp = 'mail-hero' | 'todofy' | 'watch' | 'fleet' | 'newsletter' | 'codex-gateway' | 'notion-publish' | 'mailsort' | 'recall' | 'tasks' | 'personal-mcp' | 'model-router' | 'links';
 
 // ---- transport outside the service --------------------------------------------------------------------------
 

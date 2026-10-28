@@ -56,8 +56,6 @@ TEST_CONFIGS = {
     "mailsort/wrangler.test.toml",
     # recall's local development (no routes, no account).
     "recall/wrangler.test.toml",
-    # the brief's local development (no AI binding, no routes, no account).
-    "brief/wrangler.test.toml",
 }
 
 # Each app with a deploy-vars wrapper: the wrapper, how CI calls it, and its production configs.
@@ -76,7 +74,6 @@ WRAPPERS = {
     "fleet": ("fleet/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["fleet"]),
     "mailsort": ("mailsort/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["mailsort"]),
     "recall": ("recall/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["recall"]),
-    "brief": ("brief/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["brief"]),
     "personal-mcp": ("personal-mcp/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["personal-mcp"]),
 }
 # Worker vars that must never be committed: personal values (GitHub environment secrets) ...
@@ -107,15 +104,11 @@ PERSONAL_INPUTS = {
     "MAILSORT_ACCESS_OWNER_ALIASES",
     "RECALL_ACCESS_OWNER",
     "RECALL_ACCESS_OWNER_ALIASES",
-    "BRIEF_ACCESS_OWNER",
-    "BRIEF_ACCESS_OWNER_ALIASES",
-    "BRIEF_MAIL_FROM",
-    "BRIEF_MAIL_TO",
     "PERSONAL_MCP_ACCESS_OWNER",
     "PERSONAL_MCP_ACCESS_OWNER_ALIASES",
 }
-# Personal inputs a deploy job reads from another app's secret: the owner of the links app, the watch app, mailsort,
-# recall and the brief is the dashboard's owner (one person, the same Access identities), so their deploys read the
+# Personal inputs a deploy job reads from another app's secret: the owner of the links app, the watch app, mailsort
+# and recall is the dashboard's owner (one person, the same Access identities), so their deploys read the
 # dashboard's secrets (links/README.md "Deploy", watch/README.md "Deploy").
 SHARED_SECRETS = {
     "LINKS_ACCESS_OWNER": "DASHBOARD_ACCESS_OWNER",
@@ -126,8 +119,6 @@ SHARED_SECRETS = {
     "MAILSORT_ACCESS_OWNER_ALIASES": "DASHBOARD_ACCESS_OWNER_ALIASES",
     "RECALL_ACCESS_OWNER": "DASHBOARD_ACCESS_OWNER",
     "RECALL_ACCESS_OWNER_ALIASES": "DASHBOARD_ACCESS_OWNER_ALIASES",
-    "BRIEF_ACCESS_OWNER": "DASHBOARD_ACCESS_OWNER",
-    "BRIEF_ACCESS_OWNER_ALIASES": "DASHBOARD_ACCESS_OWNER_ALIASES",
     "PERSONAL_MCP_ACCESS_OWNER": "DASHBOARD_ACCESS_OWNER",
     "PERSONAL_MCP_ACCESS_OWNER_ALIASES": "DASHBOARD_ACCESS_OWNER_ALIASES",
 }
@@ -142,10 +133,8 @@ TOGGLES = {
     "DASHBOARD_CANARY_ENABLED",
     # mailsort's ceiling (live, shadow or off): the emergency switch of mailsort/docs/design.md section 10.
     "MAILSORT_MODE",
-    # the brief's ceiling (off, archive, shadow or live): the emergency switch of brief/docs/design.md section 15.
-    "BRIEF_MODE",
 }
-DEPLOY_JOBS = ("todofy-deploy", "mail-hero-deploy", "dashboard-deploy", "links-deploy", "watch-deploy", "fleet-deploy", "mailsort-deploy", "recall-deploy", "brief-deploy", "personal-mcp-deploy", "model-router-deploy")
+DEPLOY_JOBS = ("todofy-deploy", "mail-hero-deploy", "dashboard-deploy", "links-deploy", "watch-deploy", "fleet-deploy", "mailsort-deploy", "recall-deploy", "personal-mcp-deploy", "model-router-deploy")
 # The retired generators' required GitHub variables, still set in production: a revert of the committed-config
 # layout needs them (README "Rolling back the committed-config layout"), and nothing may read them now.
 LEGACY_VARIABLES = {
@@ -874,12 +863,7 @@ class Workflow(unittest.TestCase):
                                 value = release_job["env"][name]
                             self.assertEqual(
                                 value,
-                                "${{ (inputs.app == 'mailsort' || inputs.app == 'brief') && vars.MAILSORT_MODE || '' }}",
-                            )
-                        elif name == "BRIEF_MODE":
-                            self.assertEqual(
-                                environment[name],
-                                "${{ inputs.app == 'brief' && vars.BRIEF_MODE || '' }}",
+                                "${{ inputs.app == 'mailsort' && vars.MAILSORT_MODE || '' }}",
                             )
                         else:
                             self.assertEqual(environment[name], f"${{{{ vars.{name} }}}}")

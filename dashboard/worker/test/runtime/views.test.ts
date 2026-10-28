@@ -106,7 +106,7 @@ describe('GetRegistry', () => {
     const first = await h.view<Registry>('registry');
     expect(first).toMatchObject({ status: 200, etag: '"test"' });
     expect(first.bytes).toBeLessThanOrEqual(VIEW_BODY_BUDGET.registry);
-    expect(first.body?.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'links', 'watch', 'website', 'notion-publish', 'newsletter', 'home', 'fleet', 'platform-runtime', 'mailsort', 'recall', 'brief', 'tasks', 'personal-mcp', 'codex-gateway', 'model-router', 'self-hosted']);
+    expect(first.body?.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'links', 'watch', 'website', 'notion-publish', 'newsletter', 'home', 'fleet', 'platform-runtime', 'mailsort', 'recall', 'tasks', 'personal-mcp', 'codex-gateway', 'model-router', 'self-hosted']);
     expect(first.body?.entries.find((entry) => entry.id === 'personal-mcp')).toMatchObject({
       group: 'services', access: true, status_type: 'ops_v1', scripts: ['personal-mcp'],
     });
@@ -137,7 +137,6 @@ describe('GetHomeView and RefreshHomeView', () => {
       fleet: ['unknown', 'never_checked'],
       mailsort: ['unknown', 'never_checked'],
       recall: ['unknown', 'never_checked'],
-      brief: ['unknown', 'never_checked'],
       tasks: ['unknown', 'never_checked'],
       'personal-mcp': ['unknown', 'never_checked'],
       'model-router': ['unknown', 'never_checked'],
@@ -285,7 +284,7 @@ describe('GetCloudflareView and RefreshCloudflareView', () => {
     expect(cf.workers_truncated).toBe(false);
     expect(cf.resources.map((r) => r.kind)).toEqual(['d1', 'd1', 'do', 'do', 'do', 'r2', 'r2']);
     expect(cf.resources.find((r) => r.id === 'mail-hero-store')).toMatchObject({ resource: 'mail-hero-store', entry: 'mail-hero' });
-    expect(Object.keys(cf.guard.apps).sort()).toEqual(['brief', 'mail-hero', 'todofy', 'watch']);
+    expect(Object.keys(cf.guard.apps).sort()).toEqual(['mail-hero', 'todofy', 'watch']);
     if (count >= 5) {
       expect(cf.workers.find((w) => w.script === 'todofy-core')).toMatchObject({ entry: 'todofy', requests: 96, do_requests: 632, cpu_p99_us: 6207 });
       // Errors first, then requests.
@@ -425,7 +424,6 @@ describe('GetFlowsView, GetOpsView and the mutations', () => {
       ['fleet', true, 'fleet'],
       ['mailsort', true, 'mailsort'],
       ['recall', true, 'recall'],
-      ['brief', true, 'brief'],
       ['tasks', true, 'tasks'],
       ['personal-mcp', true, 'personal-mcp'],
       ['codex-gateway', true, 'codex-gateway'],

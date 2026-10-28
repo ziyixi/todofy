@@ -37,7 +37,7 @@ export type StatusSource =
    */
   | {
       readonly type: 'ops_v1';
-      readonly binding: 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'CODEX_GATEWAY' | 'NOTION_PUBLISH' | 'MAILSORT' | 'RECALL' | 'BRIEF' | 'TASKS' | 'PERSONAL_MCP' | 'MODEL_ROUTER' | 'LINKS';
+      readonly binding: 'MAIL_HERO' | 'TODOFY' | 'WATCH' | 'FLEET' | 'NEWSLETTER' | 'CODEX_GATEWAY' | 'NOTION_PUBLISH' | 'MAILSORT' | 'RECALL' | 'TASKS' | 'PERSONAL_MCP' | 'MODEL_ROUTER' | 'LINKS';
       readonly guard: boolean;
       readonly provider?: 'fleet';
       readonly probe?: PublicProbe;

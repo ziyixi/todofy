@@ -10,7 +10,7 @@ import ci_changes
 from workflow_sources import jobs, release_jobs, workflow_data
 
 ROOT = Path(__file__).resolve().parents[2]
-APPS = ("todofy", "mail-hero", "dashboard", "links", "watch", "fleet", "mailsort", "recall", "brief", "tasks", "personal-mcp", "model-router", "website-relay")
+APPS = ("todofy", "mail-hero", "dashboard", "links", "watch", "fleet", "mailsort", "recall", "tasks", "personal-mcp", "model-router", "website-relay")
 REQUIRED = "steps.preflight.outputs.required == 'true'"
 
 

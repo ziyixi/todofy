@@ -23,7 +23,6 @@ WORKERS = {
     "fleet": ["fleet/wrangler.toml"],
     "mailsort": ["mailsort/wrangler.toml"],
     "recall": ["recall/wrangler.toml"],
-    "brief": ["brief/wrangler.toml"],
     "personal-mcp": ["personal-mcp/wrangler.toml"],
     "website-relay": ["website/relay/wrangler.toml"],
 }
@@ -54,12 +53,14 @@ RETIRED_WEBSITE_BINDINGS = {
 # Todofy no longer writes Tasks through its TASKS service binding (2026-10-21).
 # Its direct Gemini URL and model-chain variables move to Model Router.
 # Mailsort replaces Workers AI with its native Claude API client (2026-10-24).
-# Model Router owns the migrated caller connections: Mailsort's direct executor URL and Brief's AI binding retire.
+# Model Router owns the migrated caller connections: Mailsort's direct executor URL retires.
+# Home's BRIEF service binding goes with the Brief Worker (2026-10-28); drop it once the Worker is deleted
+# (infra/README "Retiring an app").
 # Secrets never go here: deploy keeps unnamed secrets, so retire those separately before release.
 RETIRED_BINDINGS: dict[str, set[str]] = {
     "todofy": {"TASKS", "GEMINI_API_BASE", "GEMINI_EMAIL_MODELS", "GEMINI_MODELS"},
     "mailsort": {"AI", "CODEX_ENDPOINT_URL"},
-    "brief": {"AI"},
+    "dashboard": {"BRIEF"},
 }
 
 
@@ -100,12 +101,11 @@ def release_inputs(source, app):
                 "optional": name in spec["optional"],
             }
         # Only this retired secret may remain until owner deletion after the keyless rollout.
-        if config["name"] in {"home", "links", "watch", "mailsort", "recall", "brief", "tasks", "todofy", "model-router"}:
+        if config["name"] in {"home", "links", "watch", "mailsort", "recall", "tasks", "todofy", "model-router"}:
             bindings.setdefault("CSRF_SIGNING_KEY", {"name": "CSRF_SIGNING_KEY", "type": "secret_text", "optional": True})
         # Retained old model connections are tolerated only as live bindings through cutover.
         for name in {
             "todofy-core": ("GEMINI_API_KEY",),
-            "brief": ("ANTHROPIC_API_KEY",),
             "mailsort": ("ANTHROPIC_API_KEY", "CODEX_ENDPOINT_TOKEN", "CODEX_ACCESS_CLIENT_ID", "CODEX_ACCESS_CLIENT_SECRET"),
         }.get(config["name"], ()):
             bindings.setdefault(name, {"name": name, "type": "secret_text", "optional": True})

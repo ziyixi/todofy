@@ -36,7 +36,7 @@ jobs:
     timeout-minutes: ${{ inputs.app == 'website-relay' && 10 || 15 }}
     environment:
       name: production
-      url: ${{ steps.todofy.outputs.url || steps.mail_hero.outputs.url || steps.dashboard.outputs.url || steps.links.outputs.url || steps.watch.outputs.url || steps.mailsort.outputs.url || steps.recall.outputs.url || steps.brief.outputs.url || steps.fleet.outputs.url || steps.personal_mcp.outputs.url || steps.model_router.outputs.url }}
+      url: ${{ steps.todofy.outputs.url || steps.mail_hero.outputs.url || steps.dashboard.outputs.url || steps.links.outputs.url || steps.watch.outputs.url || steps.mailsort.outputs.url || steps.recall.outputs.url || steps.fleet.outputs.url || steps.personal_mcp.outputs.url || steps.model_router.outputs.url }}
     concurrency:
       group: ${{ inputs.app }}-production
       cancel-in-progress: false
@@ -47,8 +47,7 @@ jobs:
       MAIL_HERO_NATIVE_BACKUP_ENABLED: ${{ vars.MAIL_HERO_NATIVE_BACKUP_ENABLED }}
       TODOFY_MAINTENANCE_MODE: ${{ vars.TODOFY_MAINTENANCE_MODE }}
       TODOFY_PROCESSING_PAUSED: ${{ vars.TODOFY_PROCESSING_PAUSED }}
-      MAILSORT_MODE: ${{ (inputs.app == 'mailsort' || inputs.app == 'brief') && vars.MAILSORT_MODE || '' }}
-      BRIEF_MODE: ${{ inputs.app == 'brief' && vars.BRIEF_MODE || '' }}
+      MAILSORT_MODE: ${{ inputs.app == 'mailsort' && vars.MAILSORT_MODE || '' }}
       MODEL_ROUTER_MAINTENANCE_MODE: ${{ vars.MODEL_ROUTER_MAINTENANCE_MODE }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -169,19 +168,6 @@ jobs:
           dashboard-access-owner: ${{ secrets.DASHBOARD_ACCESS_OWNER }}
           dashboard-access-owner-aliases: ${{ secrets.DASHBOARD_ACCESS_OWNER_ALIASES }}
           recall-worker-secrets: ${{ secrets.RECALL_WORKER_SECRETS }}
-      - name: Release brief
-        id: brief
-        if: inputs.app == 'brief' && steps.preflight.outputs.required == 'true'
-        uses: ./.github/actions/release-brief
-        with:
-          required: ${{ steps.preflight.outputs.required }}
-          brief-feedback-signing-key: ${{ secrets.BRIEF_FEEDBACK_SIGNING_KEY }}
-          brief-mail-from: ${{ secrets.BRIEF_MAIL_FROM }}
-          brief-mail-to: ${{ secrets.BRIEF_MAIL_TO }}
-          brief-worker-secrets: ${{ secrets.BRIEF_WORKER_SECRETS }}
-          cf-api-token: ${{ secrets.CF_API_TOKEN }}
-          dashboard-access-owner: ${{ secrets.DASHBOARD_ACCESS_OWNER }}
-          dashboard-access-owner-aliases: ${{ secrets.DASHBOARD_ACCESS_OWNER_ALIASES }}
       - name: Release fleet
         id: fleet
         if: inputs.app == 'fleet' && steps.preflight.outputs.required == 'true'

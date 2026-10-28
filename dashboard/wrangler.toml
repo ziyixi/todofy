@@ -94,11 +94,6 @@ service = "recall"
 entrypoint = "Ops"
 
 [[services]]
-binding = "BRIEF"
-service = "brief"
-entrypoint = "Ops"
-
-[[services]]
 binding = "TASKS"
 service = "tasks"
 entrypoint = "Ops"

@@ -17,7 +17,6 @@ const EFFECTS: Readonly<Record<string, string>> = {
   'mail-hero': '延后原件对账、保留期清理和金丝雀清理；每项最多推迟 48 小时。收件、解析、投递与重试继续运行。',
   todofy: '延后新一轮每周备份、过期数据清理和趋势统计；清理与统计最多推迟 72 小时，备份过旧时仍会执行。真实邮件处理与进行中的备份继续运行。',
   watch: '将定时网页检查间隔延长到至少一天，并延后每日维护扫描。手动检查、变化确认与通知不受影响。',
-  brief: '延后候选条目的向量计算、每周学习和已暂停来源的探测。简报生成与发送继续遵守应用自己的模式和预算。',
 }
 
 export function GuardControls({ reg, guard, now }: { reg: Reg; guard: GuardView; now: Date }) {

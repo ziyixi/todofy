@@ -17,7 +17,7 @@ TABLES = {
 POLICY_KEYS = {
     "model-router-inference": "model_router_inference",
     "github-owner": "github_owner", "fleet-receipt": "fleet_receipt",
-    "brief-feedback": "brief_feedback", "recall-machine": "recall_machine",
+    "recall-machine": "recall_machine",
 }
 STANDALONE = {
     "model-router-inference": "cloudflare_zero_trust_access_application.model_router_inference",

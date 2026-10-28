@@ -402,9 +402,6 @@ test("the committed production configs: the hostnames each deploy guards", async
     // recall's one Custom Domain: the whole host behind the Access application "recall", its three machine routes
     // behind the Bypass application "recall machine routes" (recall/docs/design.md section 2.1).
     "recall/wrangler.toml": ["recall", ["recall.ziyixi.science"]],
-    // The brief's one Custom Domain: the whole host behind the Access application "brief", exactly /feedback behind
-    // the Bypass application "brief-feedback" (brief/docs/design.md section 10).
-    "brief/wrangler.toml": ["brief", ["brief.ziyixi.science"]],
   };
   for (const [file, [name, hosts]] of Object.entries(expected)) {
     const triggers = await readTriggers(path.join(REPO, file));

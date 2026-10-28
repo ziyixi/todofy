@@ -184,26 +184,6 @@ const SIGNALS: Readonly<Record<string, string>> = {
   upload_over_budget: '今日写入额度已用完，上传顺延',
   reads_over_budget: '今日读取额度已用完，变更 feed 已暂停',
   no_device: '尚无浏览器上传',
-  // Brief
-  anthropic_rejected: 'Claude 调用被拒绝',
-  anthropic_not_configured: 'Claude 密钥尚未配置',
-  mail_not_configured: '邮件发送尚未配置',
-  budget_spent: '简报月度预算已用完',
-  issue_failed: '简报生成失败',
-  send_unknown: '简报发送结果待核对',
-  send_rejected: '简报发送被拒绝',
-  issue_late: '简报生成延迟',
-  issue_missed: '简报未在截止时间前发送',
-  gate_refused_high: '候选条目筛选拒绝比例偏高',
-  ground_drop_high: '简报内容核对未通过比例偏高',
-  sources_stale: '有来源长期未更新',
-  section_thin: '简报候选条目明显减少',
-  pick_fallback: '简报选题使用了备用结果',
-  packet_refused: '有写作材料未通过检查',
-  issue_empty: '本期简报没有可用条目',
-  entail_skipped: '简报补充核验未完成',
-  sources_degraded: '多个来源已暂停',
-  brief_off: '简报已关闭',
   // dashboard digest items
   usage_unavailable: '用量数据获取失败',
   usage_not_configured: '未配置用量查询令牌',
@@ -370,7 +350,6 @@ const MODES: Readonly<Record<string, { label: string; normal: boolean }>> = {
   deployment_paused: { label: 'Newsletter 发布已排空或冻结', normal: false },
   // the watch app: its reminders go to Tasks (the TASKS binding, Tasks' TaskInbox)
   notifications: { label: '通知 Tasks', normal: true },
-  paused: { label: '已暂停', normal: false },
   mode_limited: { label: '未启用正式模式', normal: false },
 }
 
@@ -380,7 +359,7 @@ export function modeInfo(name: string, value: boolean): { label: string; usual: 
   return { label: known ? known.label : name, usual: known ? known.normal === value : !value }
 }
 
-type CounterKind = 'count' | 'seconds' | 'bytes' | 'tokens' | 'days' | 'percent' | 'usd' | 'usd_cents'
+type CounterKind = 'count' | 'seconds' | 'bytes' | 'tokens' | 'days' | 'percent' | 'usd'
 const COUNTERS: Readonly<Record<string, { label: string; kind: CounterKind }>> = {
   database_ready: { label: '数据库可用', kind: 'count' },
   change_sequence: { label: '最近变更序号', kind: 'count' },
@@ -464,17 +443,6 @@ const COUNTERS: Readonly<Record<string, { label: string; kind: CounterKind }>> =
   texts_today: { label: '今日正文', kind: 'count' },
   rows_written_today: { label: '今日写入行', kind: 'count' },
   rows_read_today: { label: '今日读取行', kind: 'count' },
-  // Brief
-  items_today: { label: '今日条目', kind: 'count' },
-  candidates_today: { label: '今日筛选候选', kind: 'count' },
-  gate_refused_today: { label: '今日筛选拒绝', kind: 'count' },
-  sources_failing: { label: '异常来源', kind: 'count' },
-  sources_stale: { label: '长期未更新来源', kind: 'count' },
-  issues_sent_7d: { label: '近 7 天已发送期数', kind: 'count' },
-  last_issue_age_hours: { label: '距上期简报（小时）', kind: 'count' },
-  cost_today_cents: { label: '今日费用', kind: 'usd_cents' },
-  cost_month_cents: { label: '本月费用', kind: 'usd_cents' },
-  budget_month_cents: { label: '月度预算', kind: 'usd_cents' },
 }
 
 export function counterInfo(name: string): { label: string; kind: CounterKind } {
@@ -489,7 +457,6 @@ export function counterValue(name: string, value: number): string {
   if (kind === 'days') return `${formatNumber(value)} 天`
   if (kind === 'percent') return `${formatNumber(value)}%`
   if (kind === 'usd') return `US$ ${value.toFixed(2)}`
-  if (kind === 'usd_cents') return `US$ ${(value / 100).toFixed(2)}`
   return formatNumber(value)
 }
 
@@ -527,9 +494,6 @@ export function deferredJobLabel(job: string): string {
       metrics_rollup: '指标汇总',
       scheduled_checks: '定时检查',
       daily_sweep: '每日整理',
-      embedding: '候选条目向量计算',
-      learning: '每周学习',
-      source_probe: '已暂停来源探测',
     },
     job,
   )

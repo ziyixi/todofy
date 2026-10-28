@@ -71,7 +71,9 @@ FROZEN = frozenset({"cloudflare_zero_trust_access_application.mail_hero_backup"}
 # resource block declares, as exact `from` -> `to` addresses. Such a move takes the object out of prevent_destroy's reach,
 # so the next plan deletes it, and "Infra apply" still refuses that unless confirm_destructive is given. Remove a pair
 # with its moved block after the apply that deleted the object. No pair moves an Access policy (ACCESS_POLICY).
-RETIRED: dict[str, str] = {}
+RETIRED: dict[str, str] = {
+    'cloudflare_zero_trust_access_application.owner["brief"]': "cloudflare_zero_trust_access_application.retired_brief",
+}
 # A reusable Access policy is never moved out of the configuration: OpenTofu does not rewrite the dependency an
 # application's state records on its policies, so the move would drop the order "application first, then policy".
 ACCESS_POLICY = "cloudflare_zero_trust_access_policy"

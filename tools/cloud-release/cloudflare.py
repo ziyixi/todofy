@@ -15,7 +15,6 @@ DO_KEYS = {
     "WatchState": "watch-state",
     "MailsortState": "mailsort-state",
     "RecallState": "recall-state",
-    "BriefState": "brief-state",
     "SubscriptionStore": "personal-mcp-subscriptions",
     "TaskJobs": "tasks-jobs",
     "LinksBackup": "links-backup",

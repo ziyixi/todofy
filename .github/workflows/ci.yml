@@ -1,5 +1,5 @@
 # One workflow for the apps (Todofy, Mail Hero, the home dashboard, the website, the links app, the watch app, Fleet,
-# Newsletter, Platform, Codex gateway, mailsort, recall, the brief and Tasks).
+# Newsletter, Platform, Codex gateway, mailsort, recall and Tasks).
 # "changes" decides what changed since a cumulative base (.github/scripts/ci_changes.py), each app's checks run
 # from its own directory, "Shared packages" checks packages/* (compiled into the apps), "Contracts" runs both
 # sides of mail.received.v1 and ops-v1 plus the dashboard's ops-v1 caller tests, "Proto checks"
@@ -22,7 +22,7 @@ on:
         description: App to check and (on main) deploy
         type: choice
         # both = Todofy and Mail Hero (as before the dashboard existed); all = every app.
-        options: [both, all, todofy, mail-hero, dashboard, website, links, watch, newsletter, fleet, platform, codex-gateway, mailsort, recall, brief, tasks, personal-mcp, model-router]
+        options: [both, all, todofy, mail-hero, dashboard, website, links, watch, newsletter, fleet, platform, codex-gateway, mailsort, recall, tasks, personal-mcp, model-router]
         default: both
       resume_vps_release:
         description: Explicitly resume a held VPS release after investigating its safe error
@@ -66,7 +66,6 @@ jobs:
       codex_gateway_check: ${{ steps.decide.outputs.codex_gateway_check }}
       mailsort_check: ${{ steps.decide.outputs.mailsort_check }}
       recall_check: ${{ steps.decide.outputs.recall_check }}
-      brief_check: ${{ steps.decide.outputs.brief_check }}
       tasks_check: ${{ steps.decide.outputs.tasks_check }}
       model_router_check: ${{ steps.decide.outputs.model_router_check }}
       model_router_deploy: ${{ steps.decide.outputs.model_router_deploy }}
@@ -92,7 +91,6 @@ jobs:
       mailsort_deploy: ${{ steps.decide.outputs.mailsort_deploy }}
       recall_deploy: ${{ steps.decide.outputs.recall_deploy }}
       recall_extension_publish: ${{ steps.decide.outputs.recall_extension_publish }}
-      brief_deploy: ${{ steps.decide.outputs.brief_deploy }}
       # A push to main that reuses a green branch run of the same commit (all check outputs above are false).
       checks_reused: ${{ steps.decide.outputs.checks_reused }}
       reused_run_url: ${{ steps.decide.outputs.reused_run_url }}
@@ -129,7 +127,7 @@ jobs:
         run: node --test tools/cf-guard/test/*.test.mjs tools/cloud-config/tests/worker-secrets.test.mjs
       # The shared test and build tools the apps' checks import by relative path (dependency-free, synthetic data):
       # the bundle-size budgets and the CPU meter of the workerd CPU tests, whose workerd side runs in the apps' own
-      # suites (Tasks, Todofy, Mail Hero, Home, links, watch, mailsort, recall and the brief).
+      # suites (Tasks, Todofy, Mail Hero, Home, links, watch, mailsort and recall).
       - name: Test the shared bundle-size and CPU test tools
         run: node --test tools/bundle-size/test/*.test.mjs tools/workerd-cpu/test/*.test.mts
       # On a push to main it reads this workflow's runs with the read-only token: the newest first-parent commit
@@ -456,22 +454,6 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  brief-checks:
-    name: Brief checks
-    needs: changes
-    if: needs.changes.outputs.brief_check == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: brief
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Run brief-checks steps
-        uses: ./.github/actions/check-brief
-
   fleet-checks:
     name: Fleet checks
     needs: changes
@@ -645,7 +627,7 @@ jobs:
 
   gate:
     name: CI gate
-    needs: [changes, shared-packages, todofy-static, todofy-runtime, todofy-checks, mail-hero-checks, dashboard-checks, website-checks, tasks-checks, links-checks, watch-checks, fleet-checks, mailsort-checks, recall-checks, brief-checks, newsletter-checks, newsletter-image, platform-checks, codex-gateway-checks, personal-mcp-checks, model-router-checks, contracts, infra-checks, proto-checks]
+    needs: [changes, shared-packages, todofy-static, todofy-runtime, todofy-checks, mail-hero-checks, dashboard-checks, website-checks, tasks-checks, links-checks, watch-checks, fleet-checks, mailsort-checks, recall-checks, newsletter-checks, newsletter-image, platform-checks, codex-gateway-checks, personal-mcp-checks, model-router-checks, contracts, infra-checks, proto-checks]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -668,7 +650,6 @@ jobs:
           PERSONAL_MCP: ${{ needs.personal-mcp-checks.result }}
           MAILSORT: ${{ needs.mailsort-checks.result }}
           RECALL: ${{ needs.recall-checks.result }}
-          BRIEF: ${{ needs.brief-checks.result }}
           NEWSLETTER: ${{ needs.newsletter-checks.result }}
           NEWSLETTER_IMAGE: ${{ needs.newsletter-image.result }}
           PLATFORM: ${{ needs.platform-checks.result }}
@@ -691,7 +672,7 @@ jobs:
           for pair in "Changes=$CHANGES" "Shared packages=$PACKAGES" "Todofy static checks=$TODOFY_STATIC" \
             "Todofy runtime=$TODOFY_RUNTIME" "Todofy checks=$TODOFY" "Mail Hero checks=$MAIL_HERO" \
             "Dashboard checks=$DASHBOARD" "Website checks=$WEBSITE" "Links checks=$LINKS" "Watch checks=$WATCH" "Fleet checks=$FLEET" "Mailsort checks=$MAILSORT" \
-            "Tasks checks=$TASKS" "Recall checks=$RECALL" "Brief checks=$BRIEF" "Personal MCP checks=$PERSONAL_MCP" "Model Router checks=$MODEL_ROUTER" \
+            "Tasks checks=$TASKS" "Recall checks=$RECALL" "Personal MCP checks=$PERSONAL_MCP" "Model Router checks=$MODEL_ROUTER" \
             "Newsletter checks=$NEWSLETTER" "Newsletter image checks=$NEWSLETTER_IMAGE" "Platform checks=$PLATFORM" "Codex gateway checks=$CODEX_GATEWAY" \
             "Contracts=$CONTRACTS" "Infra checks=$INFRA" "Proto checks=$PROTO"; do
             echo "$pair"
@@ -975,7 +956,7 @@ jobs:
     # After the app deploys: Home's service bindings (dashboard/wrangler.toml) name each app's "Ops" entrypoint, the
     # website relay's "WebsiteSync" and Tasks' "TaskInbox", which must be live first. An app deploy that did not run
     # (nothing of that app changed) is fine; one that failed or was cancelled stops this job.
-    needs: [changes, dashboard-checks, gate, todofy-deploy, mail-hero-deploy, links-deploy, watch-deploy, fleet-deploy, mailsort-deploy, recall-deploy, brief-deploy, tasks-deploy, website-relay-deploy, personal-mcp-deploy, model-router-deploy]
+    needs: [changes, dashboard-checks, gate, todofy-deploy, mail-hero-deploy, links-deploy, watch-deploy, fleet-deploy, mailsort-deploy, recall-deploy, tasks-deploy, website-relay-deploy, personal-mcp-deploy, model-router-deploy]
     # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
     if: >-
       ${{ !cancelled()
@@ -990,7 +971,6 @@ jobs:
       && (needs.fleet-deploy.result == 'success' || needs.fleet-deploy.result == 'skipped')
       && (needs.mailsort-deploy.result == 'success' || needs.mailsort-deploy.result == 'skipped')
       && (needs.recall-deploy.result == 'success' || needs.recall-deploy.result == 'skipped')
-      && (needs.brief-deploy.result == 'success' || needs.brief-deploy.result == 'skipped')
       && (needs.tasks-deploy.result == 'success' || needs.tasks-deploy.result == 'skipped')
       && (needs.personal-mcp-deploy.result == 'success' || needs.personal-mcp-deploy.result == 'skipped')
       && (needs.website-relay-deploy.result == 'success' || needs.website-relay-deploy.result == 'skipped')
@@ -1207,30 +1187,6 @@ jobs:
             --notes-file "$RUNNER_TEMP/release-notes.md"
           echo "Published $tag" >> "$GITHUB_STEP_SUMMARY"
 
-  # The brief, with its archive UI as static assets (brief/docs/design.md section 18). Home does not bind the brief
-  # yet, so Home's deploy does not wait for this job.
-  brief-deploy:
-    name: Brief deploy
-    needs: [changes, brief-checks, gate, model-router-deploy]
-    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
-    if: >-
-      ${{ !cancelled()
-      && needs.changes.result == 'success'
-      && (needs.brief-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.brief-checks.result == 'skipped'))
-      && (needs.model-router-deploy.result == 'success' || needs.changes.outputs.model_router_deploy != 'true')
-      && needs.gate.result == 'success'
-      && github.ref == 'refs/heads/main'
-      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-      && needs.changes.outputs.brief_deploy == 'true' }}
-    permissions:
-      contents: read
-      deployments: write
-    uses: ./.github/workflows/worker-release.yml
-    with:
-      app: brief
-      source_sha: ${{ github.sha }}
-    secrets: inherit
-
   fleet-deploy:
     name: Fleet deploy
     needs: [changes, fleet-checks, gate]
@@ -1256,7 +1212,7 @@ jobs:
     name: Model Router deploy
     needs: [changes, model-router-checks, gate, codex-gateway-deploy]
     # After its executor: a gateway release this run selected (with VPS releases enabled) must succeed, since a failed
-    # one leaves this job's need skipped. Its callers (Todofy, Mailsort, Brief, Home, VPS deploy) likewise accept a
+    # one leaves this job's need skipped. Its callers (Todofy, Mailsort, Home, VPS deploy) likewise accept a
     # skipped Router only when this run did not select it.
     if: >-
       ${{ !cancelled()

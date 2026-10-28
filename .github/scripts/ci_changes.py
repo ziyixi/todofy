@@ -3,7 +3,7 @@
 
 Outputs (GITHUB_OUTPUT, "true"/"false"):
   todofy_check, mail_hero_check, dashboard_check, website_check, links_check, watch_check, newsletter_check,
-  fleet_check, platform_check, mailsort_check, recall_check, brief_check, tasks_check
+  fleet_check, platform_check, mailsort_check, recall_check, tasks_check
                     run that app's full checks
   contracts         run the contract tests: both sides of mail.received.v1 and ops-v1, and the dashboard's
                     ops-v1 caller tests (also on a proto/ change: they read every contract with the generated
@@ -18,7 +18,7 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
   base              not a flag: the commit the diff started from (empty when everything runs), which
                     "Proto checks" compares the IDL with.
   todofy_deploy, mail_hero_deploy, dashboard_deploy, website_deploy, links_deploy, watch_deploy,
-  newsletter_deploy, fleet_deploy, platform_publish, platform_deploy, mailsort_deploy, recall_deploy, brief_deploy,
+  newsletter_deploy, fleet_deploy, platform_publish, platform_deploy, mailsort_deploy, recall_deploy,
   tasks_deploy
                     the app, a shared package it compiles in, or a contract file it bundles changed
                     (deploy jobs also require refs/heads/main)
@@ -49,11 +49,7 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
   (recall/, the browsing record on recall.ziyixi.science, recall/docs/design.md) is checked and deployed since "Infra
   apply" created its Access applications and its bucket (2026-10-10, design section 11): it answers ops-v1 (Contracts
   runs its tests; Home binds its Ops entrypoint, HOME_BOUND) and compiles in packages/edge-auth and the TypeScript
-  proto runtime with proto/recall/ui/, proto/recall/ingest/, proto/recall/archive/ and proto/ops/. The brief (brief/,
-  the daily briefing on brief.ziyixi.science, brief/docs/design.md) is checked and deployed since "Infra apply" created
-  its Access applications (2026-10-11, design section 18): it answers ops-v1 (Home binds its Ops entrypoint,
-  HOME_BOUND) and compiles in packages/edge-auth and the TypeScript proto runtime with proto/brief/ui/ and
-  proto/ops/.
+  proto runtime with proto/recall/ui/, proto/recall/ingest/, proto/recall/archive/ and proto/ops/.
 
 proto/ (the protobuf IDL, proto/README.md) checks every app in PROTO_USERS (an app that depends on @ziyixi/proto or
 ziyixi-proto) and deploys only the apps whose bundle the changed path reaches (proto_deploys): PROTO_USERS[app] names
@@ -146,7 +142,7 @@ PREFIX = {app: app.replace("-", "_") for app in APPS}
 CHECK_ONLY: set[str] = set()
 # Apps whose Ops entrypoint Home binds (dashboard/wrangler.toml): while one of them is CHECK_ONLY its Worker does not
 # exist yet, so Home's deploy (whose binding would name a missing service) waits too.
-HOME_BOUND = {"fleet", "mailsort", "recall", "brief", "tasks", "personal-mcp", "model-router", "links"}
+HOME_BOUND = {"fleet", "mailsort", "recall", "tasks", "personal-mcp", "model-router", "links"}
 KEYS = (
     "todofy_check",
     "mail_hero_check",
@@ -160,7 +156,6 @@ KEYS = (
     "platform_check",
     "mailsort_check",
     "recall_check",
-    "brief_check",
     "tasks_check",
     "personal_mcp_check",
     "model_router_check",
@@ -183,7 +178,6 @@ KEYS = (
     "mailsort_deploy",
     "recall_deploy",
     "recall_extension_publish",
-    "brief_deploy",
     "tasks_deploy",
     "personal_mcp_deploy",
     "model_router_deploy",
@@ -203,7 +197,6 @@ DISPATCH = {
     "platform": ("platform",),
     "mailsort": ("mailsort",),
     "recall": ("recall",),
-    "brief": ("brief",),
     "tasks": ("tasks",),
     "personal-mcp": ("personal-mcp",),
     "model-router": ("model-router",),
@@ -252,7 +245,6 @@ APP_TEST_DIRECTORIES = (
     "mailsort/worker/test/",
     "mailsort/tools/test/",
     "recall/worker/test/",
-    "brief/worker/test/",
     "tasks/worker/test/",
     "tasks/web/test/",
     "tasks/tools/test/",
@@ -268,8 +260,6 @@ DOC_FOLDERS = ("docs", "doc")
 # Markdown that a build ships, an input of its app like its code (checked and deployed). Keep this list in step with
 # the guard in test_ci_changes.py, which scans what the builds read.
 RUNTIME_MARKDOWN = (
-    # The brief's Worker imports policy.md and profile.md as Text modules (wrangler.toml [[rules]]).
-    "brief/content-config/",
     # The mailsort Worker imports its prompts as Text modules (*.txt today; a Markdown prompt would ship the same way).
     "mailsort/prompts/",
     # The newsletter wheel's package-data (instructions/, policy/), installed into its image.
@@ -289,7 +279,7 @@ TESTED_DOCUMENTS: dict[str, tuple[str, ...]] = {
     "newsletter/content-config/": ("newsletter",),
 }
 # packages/<name>/ -> the apps whose Workers compile its workspace dependency in.
-PACKAGE_USERS = {"model-router-client": ("mailsort", "brief", "newsletter", "todofy"), "edge-auth": ("todofy", "mail-hero", "dashboard", "links", "watch", "fleet", "mailsort", "recall", "brief", "tasks", "personal-mcp", "model-router"), "planning-ui": ("tasks",), "task-dates": ("tasks",)}
+PACKAGE_USERS = {"model-router-client": ("mailsort", "newsletter", "todofy"), "edge-auth": ("todofy", "mail-hero", "dashboard", "links", "watch", "fleet", "mailsort", "recall", "tasks", "personal-mcp", "model-router"), "planning-ui": ("tasks",), "task-dates": ("tasks",)}
 # The protobuf IDL (proto/README.md): app -> the languages ("ts", "python") whose generated code and runtime
 # its production bundles compile in; () for a user whose bundles take nothing from it (types only, tests
 # only). test_proto.py derives this map from the apps' manifests and sources.
@@ -306,7 +296,6 @@ PROTO_USERS: dict[str, tuple[str, ...]] = {
     "website": ("ts",),
     "mailsort": ("ts",),
     "recall": ("ts",),
-    "brief": ("ts",),
     "tasks": ("ts",),
     "personal-mcp": ("ts",),
     "model-router": ("ts",),
@@ -328,7 +317,7 @@ PROTO_RUNTIMES: dict[str, tuple[str, ...]] = {
 # value imports, Python imports; test_proto.py checks this against the sources). A package missing here
 # reaches every user (fail safe; test_proto.py fails until it is listed).
 PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
-    "proto/modelrouter/inference/": ("model-router", "mailsort", "todofy", "brief", "newsletter", "codex-gateway"),
+    "proto/modelrouter/inference/": ("model-router", "mailsort", "todofy", "newsletter", "codex-gateway"),
     # recommendation-v1 and summary-v1 (todofy/api/*.schema.json are generated from it): todofy-core builds them.
     "proto/todofy/report/": ("todofy",),
     # Todofy's owner API (todofy.ui.v1): todofy-core writes every answer with it, the gateway serves it through the
@@ -356,7 +345,7 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     # CommonReason: Platform bundles Python error aliases.
     "proto/common/errors/": ("platform",),
     # ops-v1 (contracts/ops-v1): every app's Ops entrypoint and the dashboard that calls them.
-    "proto/ops/": ("mail-hero", "todofy", "dashboard", "links", "watch", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp", "model-router"),
+    "proto/ops/": ("mail-hero", "todofy", "dashboard", "links", "watch", "website", "mailsort", "recall", "tasks", "personal-mcp", "model-router"),
     # website.sync.v1: the relay serves its WebsiteSync entrypoint, Home calls it and shows the evidence (dashboard.ui.v1,
     # which the Personal MCP reads).
     "proto/website/sync/": ("website", "dashboard", "personal-mcp"),
@@ -370,8 +359,6 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     "proto/recall/ui/": ("recall", "personal-mcp"),
     "proto/recall/ingest/": ("recall", "personal-mcp"),
     "proto/recall/archive/": ("recall",),
-    # The brief (brief/docs/design.md): its owner API (brief.ui.v1), served by its Worker.
-    "proto/brief/ui/": ("brief",),
 }
 # The contracts whose fixtures and schemas proto/'s own tests read (proto/test/ops.test.ts and test_ops.py round-trip
 # every ops-v1 fixture byte for byte through both codecs, mail-received.test.ts and test_mail_received.py every
@@ -413,7 +400,7 @@ PROTO_NOT_BUNDLED = (
 # (PROTO_PACKAGES).
 # test_ci_changes.py checks this map against the Workers' imports.
 BUNDLED_BY = {
-    "contracts/ops-v1/ops-v1.ts": ("mail-hero", "dashboard", "watch", "brief"),
+    "contracts/ops-v1/ops-v1.ts": ("mail-hero", "dashboard", "watch"),
 }
 
 # Outputs that describe a reused branch run (strings, one line each).
@@ -436,7 +423,6 @@ CHECK_JOBS = {
     "platform_check": ("Platform checks",),
     "mailsort_check": ("Mailsort checks",),
     "recall_check": ("Recall checks",),
-    "brief_check": ("Brief checks",),
     "tasks_check": ("Tasks checks",),
     "personal_mcp_check": ("Personal MCP checks",),
     "model_router_check": ("Model Router checks",),
@@ -563,21 +549,80 @@ def pnpm_workspace(text: str) -> tuple[dict[str, str], list[str], str]:
     return catalog, members, "\n".join(rest)
 
 
+def pnpm_lock_sections(text: str) -> dict[str, dict[str, str]]:
+    """pnpm-lock.yaml by top-level key, each as {entry: its block}: the two-space keys of `importers`, `packages` and
+    `snapshots` are entries, the text of any other section is its one entry "". Standard library only, no YAML parser."""
+    sections: dict[str, dict[str, str]] = {}
+    section, entry = "", ""
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        if not line[0].isspace():
+            section, entry = line.split(":", 1)[0], ""
+            sections[section] = {"": line + "\n"}
+            continue
+        if section in {"importers", "packages", "snapshots"} and line.startswith("  ") and not line[2].isspace():
+            # The entry's key without its colon and value: "some/app:" and ".: {}" are "some/app" and ".".
+            entry = re.match(r"""('[^']*'|"[^"]*"|[^:]*)""", line.strip()).group(1).strip("'\"")
+            sections[section][entry] = ""
+        sections[section][entry] += line + "\n"
+    return sections
+
+
+def retired_members(changed: set[str], read: Reader, old_members: list[str], members: list[str], old_rest: str,
+                    new_rest: str) -> bool:
+    """True when the only workspace change removes members whose directories this diff deletes (an app's retirement):
+    pnpm-workspace.yaml differs by exactly their entries, and pnpm-lock.yaml only drops their importers and the
+    packages nobody else uses, so every remaining member resolves exactly as before. Anything else is False."""
+    removed = [member for member in old_members if member not in members]
+    if not removed or not set(members) <= set(old_members) or "pnpm-lock.yaml" not in changed:
+        return False
+    for member in removed:
+        if f"{member}/package.json" not in changed:
+            return False
+        try:
+            read(f"{member}/package.json")
+        except ValueError:
+            continue  # gone after the diff (it was a member before it)
+        return False
+
+    def entry(line: str) -> str:
+        match = re.fullmatch(r"""  - (["']?)([^"'\s]+)\1\s*""", line)
+        return match.group(2) if match else ""
+
+    if "\n".join(line for line in old_rest.splitlines() if entry(line) not in removed) != new_rest:
+        return False
+    before, after = (pnpm_lock_sections(text) for text in read("pnpm-lock.yaml"))
+    if before.keys() != after.keys() or not set(removed) <= before.get("importers", {}).keys():
+        return False
+    for section, entries_after in after.items():
+        kept = {key: block for key, block in before[section].items() if not (section == "importers" and key in removed)}
+        if section == "importers" and entries_after != kept:
+            return False
+        if any(kept.get(key) != block for key, block in entries_after.items()):
+            return False
+    return True
+
+
 def catalog_reach(changed: set[str], read: Reader) -> list[str] | None:
     """The member package.json files a root Node change reaches, or None for every member."""
     if "package.json" in changed:
         return None
     try:
-        (old, _, old_rest), (new, members, new_rest) = (pnpm_workspace(text) for text in read("pnpm-workspace.yaml"))
+        (old, old_members, old_rest), (new, members, new_rest) = (pnpm_workspace(text) for text in read("pnpm-workspace.yaml"))
         listed = {}
         for member in members:
             manifest = json.loads(read(f"{member}/package.json")[1])
             # The proto toolchain's devDependencies only run its own checks; its dependencies generate every app's code.
             groups = ("dependencies",) if member == "proto" else NODE_DEPENDENCY_GROUPS
             listed[f"{member}/package.json"] = {name for group in groups for name in manifest.get(group, {})}
-    except (ValueError, AttributeError):
+        retired = old_rest != new_rest and retired_members(changed, read, old_members, members, old_rest, new_rest)
+    except (ValueError, AttributeError, IndexError):
         return None
     bumped = {name for name in old.keys() | new.keys() if old.get(name) != new.get(name)}
+    if retired:
+        # A retired app's members left; the others' resolution is unchanged, so only a catalog bump reaches anyone.
+        return [manifest for manifest, names in listed.items() if names & bumped]
     if old_rest != new_rest or ("pnpm-lock.yaml" in changed and not bumped and not changed & listed.keys()):
         return None
     return [manifest for manifest, names in listed.items() if names & bumped]

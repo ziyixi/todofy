@@ -74,7 +74,6 @@ PRODUCTION = {
     "personal-mcp": "personal-mcp/wrangler.toml",
     "mailsort": "mailsort/wrangler.toml",
     "recall": "recall/wrangler.toml",
-    "brief": "brief/wrangler.toml",
     "tasks": "tasks/wrangler.toml",
     "model-router": "model-router/wrangler.toml",
 }
@@ -272,7 +271,7 @@ class MatchesTheApps(unittest.TestCase):
             + re.findall(r'"([^"]+)"', re.search(r"more\s*=\s*\[(.*?)\]", value).group(1))
             for key, value in owner.items()
         }
-        self.assertEqual(set(owner), {"mail-hero", "todofy", "home", "links", "watch", "fleet", "mailsort", "recall", "brief", "tasks", "personal-mcp", "model-router"})
+        self.assertEqual(set(owner), {"mail-hero", "todofy", "home", "links", "watch", "fleet", "mailsort", "recall", "tasks", "personal-mcp", "model-router"})
         for worker, uris in destinations.items():
             if worker in AHEAD_OF_DEPLOY:
                 hosts = {AHEAD_OF_DEPLOY[worker]}  # no Custom Domain before the first deploy
@@ -329,7 +328,7 @@ class MatchesTheApps(unittest.TestCase):
                 self.assertEqual("outside_access: true" in body, on_access_host)
 
     def test_ahead_of_deploy_is_exact(self):
-        """A first-phase app (Fleet, mailsort, recall and the brief before; none now) has no fake AUD and cannot deploy
+        """A first-phase app (Fleet, mailsort and recall before; none now) has no fake AUD and cannot deploy
         before the gated Access creation, and neither can Home while it binds the app."""
         owner = hcl_map((INFRA / "access.tf").read_text(), "owner_apps")
         self.assertEqual(set(AHEAD_OF_DEPLOY), set(test_wrangler_configs.ci_changes.CHECK_ONLY))
@@ -370,30 +369,6 @@ class MatchesTheApps(unittest.TestCase):
         for route in ("batches", "changes", "blobs/"):
             self.assertIn(f"${{V1}}{route}", machine)
         self.assertIn('domain = "recall.ziyixi.science", more = []', hcl_map(code, "owner_apps")["recall"])
-
-    def test_brief_feedback_bypasses_only_its_exact_path(self):
-        """The Bypass of the brief's feedback links (brief/docs/design.md section 10): its own everyone-bypass policy and
-        exactly /feedback, never a wildcard, the owner API, the archive or the whole host."""
-        code = (INFRA / "access.tf").read_text()
-        application = re.search(r'resource "cloudflare_zero_trust_access_application" "brief_feedback" \{(.*?)^\}',
-                                code, re.S | re.M).group(1)
-        policy = re.search(r'resource "cloudflare_zero_trust_access_policy" "brief_feedback" \{(.*?)^\}',
-                           code, re.S | re.M).group(1)
-        self.assertEqual(re.findall(r'uri = "([^"]+)"', application), ["brief.ziyixi.science/feedback"])
-        self.assertIn('domain     = "brief.ziyixi.science/feedback"', application)
-        self.assertIn('name       = "brief-feedback"', application)
-        self.assertNotIn("*", application)
-        self.assertEqual(re.findall(r"policy\.(\w+)\.id", application), ["brief_feedback"])
-        self.assertIn('decision   = "bypass"', policy)
-        self.assertIn("include    = [{ everyone = {} }]", policy)
-        self.assertIn("app_launcher_visible        = false", application)
-        # The policy is attached to this application only.
-        self.assertEqual(code.count("cloudflare_zero_trust_access_policy.brief_feedback.id"), 1)
-        # The route is the Worker's (brief/worker/src/http.ts): the token first, every other path below it a 404.
-        http = (REPO / "brief" / "worker" / "src" / "http.ts").read_text()
-        self.assertIn("url.pathname === '/feedback'", http)
-        self.assertIn("url.pathname.startsWith('/feedback/')", http)
-        self.assertIn('domain = "brief.ziyixi.science", more = []', hcl_map(code, "owner_apps")["brief"])
 
     def test_fleet_receipt_bypasses_only_the_exact_signed_machine_path(self):
         code = (INFRA / "access.tf").read_text()

@@ -49,7 +49,6 @@ const SERVICES = {
   'notion-publish': [ops.OpsService, WebsiteSyncService],
   mailsort: [ops.OpsService],
   recall: [ops.OpsService],
-  brief: [ops.OpsService],
   tasks: [ops.OpsService],
   'personal-mcp': [ops.OpsService],
   'model-router': [ops.OpsService],
