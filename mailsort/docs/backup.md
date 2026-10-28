@@ -102,17 +102,20 @@ The files written there hold the owner's mail metadata; delete them afterwards.
    ```
    It prints `backup backups/<job start>/` and a `PASS` line per table. `sqlite --in "$PRIV/restore" --out
    "$PRIV/mailsort.sqlite"` loads the same data into a local SQLite file to read without Cloudflare.
-2. Only when `mailsort-backups` lacks that backup (a new account, a deleted bucket): put the download back,
-   ```sh
-   node tools/backup-restore.ts upload --in "$PRIV/restore" --bucket mailsort-backups --remote
-   ```
-3. Get an empty store. Change `MAILSORT_OBJECT` in `worker/src/env.ts` from `mailsort-v1` to a new name
+2. Get an empty store. Change `MAILSORT_OBJECT` in `worker/src/env.ts` from `mailsort-v1` to a new name
    (`mailsort-v2`), commit, and release it through the main Actions workflow as usual. The Worker now routes the owner
    API and Ops to the new, empty object. The former object's alarm ends at its next run without a pass, so it never
    writes to Gmail again; its data stays as it was, readable by switching the name back. After losing the Worker or
    its namespace, a fresh deploy already gives an empty `mailsort-v1`. Until the restore starts, the new object only
    registers Gmail history: classification waits for the priority labels the backup holds. Do not run the priority
    setup in the new object: its labels would make the store non-empty.
+3. Only when `mailsort-backups` lacks that backup (a new account, a deleted bucket, or a copy older than the newest
+   30): put the download back,
+   ```sh
+   node tools/backup-restore.ts upload --in "$PRIV/restore" --bucket mailsort-backups --remote
+   ```
+   Do it after step 2: from then on no object runs a backup job, so no retention can delete the copy before the restore
+   has read it (the former object's next daily job would delete a copy older than the newest 30).
 4. Start the restore. On `https://sort.ziyixi.science/`, signed in through Access, open the browser console and run
    ```js
    await (await fetch('/api/v2/backupRestore:start', {
@@ -127,7 +130,9 @@ The files written there hold the owner's mail metadata; delete them afterwards.
 5. Watch it with `await (await fetch('/api/v2/backupRestore')).json()`. The object drops the new store's tables,
    creates the backup's schema, then loads the parts in steps a second apart, checking each part's SHA-256 and row
    count before inserting it. It writes at most 50,000 SQLite rows (indexes included) per UTC day, half the account's
-   free allowance, which every Durable Object shares: a larger store continues at `resume_time`. Until it succeeds
+   free allowance, which every Durable Object shares: a larger store continues at `resume_time`. A decision or ledger
+   row costs about five of them (its indexes), so a store with 30,000 decisions and as many ledger rows takes about six
+   days; the manifest's row counts give the estimate before step 4. Until it succeeds
    every other mutation answers `RESTORE_ACTIVE`, and neither the pipeline nor the backup runs.
 6. When `state` is `succeeded`, `tables` is the verification: every table's rows counted in the store against the
    manifest. The store is migrated from the backup's schema version, then a new backup of it runs at once and Home
@@ -135,7 +140,7 @@ The files written there hold the owner's mail metadata; delete them afterwards.
 
 A failed restore shows `state: "failed"` and an `error_code` (`part_checksum`, `part_missing`, `part_rows`,
 `manifest_missing`, `manifest_invalid`, `count_mismatch`, `storage_error`); mutations stay refused. Fix the cause (step
-2 puts back a damaged backup) and run step 4 again: it starts over from an empty schema.
+3 puts back a damaged backup) and run step 4 again: it starts over from an empty schema.
 
 ### What the restored state does, and does not
 
