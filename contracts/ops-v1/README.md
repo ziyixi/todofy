@@ -22,6 +22,7 @@ contract this replaced (each app's golden test, below).
 | `legacy/ops-v1.schema.json` | The hand-written schema the dashboards deployed before the move validate answers with, frozen: the golden tests prove every answer still passes it (rollout) |
 | `validate.mjs` | Dependency-free validator for the JSON Schema keywords the contracts use; the golden tests check answers against the legacy schema with it |
 | `fixtures/<Def>/*.json` | Valid examples of each input/output; `fixtures/invalid/<Def>/*.json` must fail |
+| `deployment-modes.json` | The modes each app writes even on a `status_unavailable` status (its deployment variables, "modes" below); `proto/test/ops.test.ts` checks every `OpsStatus` fixture against it, and each app's own tests check only its own |
 | `IMPLEMENTATION.md` | Per app: files, migrations, guard keep/defer table, canary state machine, digest, query budgets, tests |
 
 Checks (the `Contracts` CI job, `Proto checks`, and each app's own tests):
@@ -166,9 +167,8 @@ lost alarm; `IMPLEMENTATION.md` §3c). Poll it no more often than every 10 minut
   `maintenance` (always false: it has no maintenance switch). The brief: `maintenance` (always false), `paused` (the
   owner's switch, read from storage), `mode_limited` (the deployment variable BRIEF_MODE is below live; a
   `status_unavailable` status has only `maintenance` and `mode_limited`). A
-  `status_unavailable` status has only the deployment variables (Mail Hero `maintenance`,
-  `force_send_paused`; Todofy `maintenance`, `processing_paused`, `force_pause_todoist`,
-  `reminder_enabled`); the keys read from storage (Mail Hero `send_paused`, `forwarding`,
+  `status_unavailable` status has only the deployment variables (`deployment-modes.json` lists them per app); the
+  keys read from storage (Mail Hero `send_paused`, `forwarding`,
   `backup_active`; Todofy `backup_active`) are then simply absent from the map: `modes` is a
   `map<string, bool>` whose only required key is `maintenance` (`required_keys` in the IDL).
 - `guard`: the effective `GuardState` (below).

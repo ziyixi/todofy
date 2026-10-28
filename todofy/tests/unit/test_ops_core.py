@@ -325,31 +325,15 @@ def test_unavailable_status_matches_the_contract_fixture():
     assert status == expected | {"generated_at": "2026-09-29T15:00:00Z"}
 
 
-# The modes each app writes even on a status_unavailable status: its deployment variables (contracts/ops-v1 README
-# "modes"); a mode read from storage is left out then, never guessed.
-DEPLOYMENT_MODES = {
-    "mail-hero": ["maintenance", "force_send_paused"],
-    "todofy": ["maintenance", "processing_paused"],
-    "watch": ["maintenance", "notifications"],
-    "fleet": ["maintenance"],
-    "newsletter": ["maintenance"],
-    "codex-gateway": ["maintenance"],
-    "notion-publish": ["maintenance"],
-    "mailsort": ["maintenance", "mode_limited"],
-    "recall": ["maintenance"],
-    "brief": ["maintenance", "mode_limited"],
-    "tasks": ["maintenance"],
-}
+# Todofy's deployment variables: in `modes` even on a status_unavailable status (contracts/ops-v1
+# deployment-modes.json); a mode read from storage is left out then, never guessed.
+DEPLOYMENT_MODES = ["maintenance", "processing_paused"]
 
 
 def test_every_deployment_mode_is_a_boolean_also_when_unavailable():
-    required = DEPLOYMENT_MODES["todofy"]
     switches = ops.Switches(True, True)
     for status in (ops.status(FACTS), ops.unavailable_status(NOW, switches, ops.NORMAL, "todofy.example.com")):
-        assert all(isinstance(status["modes"][key], bool) for key in required), status["modes"]
-    for path in sorted((CONTRACT / "fixtures" / "OpsStatus").glob("*.json")):
-        doc = json.loads(path.read_text())
-        assert all(isinstance(doc["modes"].get(key), bool) for key in DEPLOYMENT_MODES[doc["app"]]), path.name
+        assert all(isinstance(status["modes"][key], bool) for key in DEPLOYMENT_MODES), status["modes"]
 
 
 @pytest.mark.parametrize(

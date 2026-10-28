@@ -8,7 +8,7 @@
 import { create, getOption, type DescMessage } from '@bufbuild/protobuf';
 import { closed } from '../ts/common/wire/v1/wire_pb.ts';
 import { field_behavior, FieldBehavior } from '../ts/google/api/field_behavior_pb.ts';
-import { readdirSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, expectTypeOf, test } from 'vitest';
 import * as ops from '../ts/ops/v1/ops_pb.ts';
@@ -89,6 +89,17 @@ describe('the rules give the contract’s verdicts', () => {
         continue;
       }
       expect(fromWire(schema, value).unrecognized, key).toEqual(tolerated);
+    }
+  });
+
+  test('every status fixture writes its app’s deployment-variable modes, also when unavailable (deployment-modes.json)', () => {
+    // An app's deployment variables are always in `modes`; a switch read from storage is left out of a
+    // status_unavailable status, never guessed (README "modes"). Each app's own tests check its own modes.
+    const modes = JSON.parse(readFileSync(join(OPS_CONTRACT, 'deployment-modes.json'), 'utf8')) as Record<string, string[]>;
+    for (const { name, value } of fixtures('OpsStatus', false, OPS_CONTRACT)) {
+      const status = value as { app: string; modes: Record<string, unknown> };
+      expect(Object.hasOwn(modes, status.app), `${name}: deployment-modes.json lists ${status.app}`).toBe(true);
+      for (const key of modes[status.app] ?? []) expect(typeof status.modes[key], `${name}: ${key}`).toBe('boolean');
     }
   });
 
