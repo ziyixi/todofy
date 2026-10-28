@@ -1,7 +1,9 @@
 # Host boundary / 宿主边界
 
 Only standard K3s and the dedicated `cloudflared-platform.service` run as new host
-systemd services. Bootstrap renders their public units. It leaves the existing
+systemd services. The one-shot `personal-cloud-node-address.service` only creates K3s's
+[fixed node address](../../tools/vps-bootstrap/README.md#fixed-node-address-and-dns) before K3s starts
+and leaves no process. Bootstrap renders their public units. It leaves the existing
 SSH Tunnel and other host units untouched. Daemon and observer both run from the
 same versioned platform image inside K3s; no host observer executable, Python
 runtime installation, account, long-lived Kubernetes token or timer is created.

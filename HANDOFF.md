@@ -15,7 +15,45 @@ features, the FlowDay retirement), [October 20](docs/history/handoff-2026-10-20.
 
 ## Current work
 
-### Review cleanup wave (on `main`, release not yet recorded)
+### Fixed K3s node address and DNS (on `main` since c3ce7478; host migrated 2026-10-28)
+
+On 2026-10-27 the host's DHCP lease changed. K3s kept the Node InternalIP and the `default/kubernetes` endpoint on
+the old address, so every in-cluster API client (the release and status daemons) failed and VPS releases are held at
+`UNAVAILABLE`; host-local kubectl and the business Pods kept working. The owner ruled this an architecture bug, not
+something for a restart hook, and ruled that the cluster must not depend on anything DHCP hands out. The branch
+makes both the node address and cluster DNS independent of DHCP
+([design and runbook](docs/rebuild.md#主机地址变化), [bootstrap](tools/vps-bootstrap/README.md#fixed-node-address-and-dns)):
+
+- A one-shot `personal-cloud-node-address.service`, which `k3s.service` requires, creates or keeps the dummy
+  interface `pcloud0` with `10.254.0.42/32`. K3s sets `node-ip` and `advertise-address` to it and `flannel-iface` to
+  `pcloud0`; `node-external-ip` stays unset. A NetworkManager drop-in marks only `pcloud0` unmanaged.
+- `PCLOUD-K3S` admits cni0 Pod traffic to 6443/10250 only at that address; LAN and Internet stay dropped.
+- CoreDNS (`dnsPolicy: Default`) used to forward to the DHCP-provided DNS servers its Pod copied at creation. K3s now
+  sets `resolv-conf` to a root-owned `/etc/rancher/k3s/resolv.conf` with `1.1.1.1`, `1.0.0.1` and `8.8.8.8` (IPv4,
+  unfiltered, two operators). After K3s runs with it, the pod-template annotation `personal-cloud/upstream-dns` makes
+  the CoreDNS Deployment replace its Pod once (a few seconds of cluster DNS pause); an equal value replaces nothing.
+  The daemon's own Pod then resolves the Fleet host. Lookups are forwarded Pod traffic; the firewall is unchanged.
+  Before any write the migration also queries each resolver directly from that Pod and stops with
+  `CLUSTER_DNS_UPSTREAM_UNREACHABLE` if one never replies (`unchecked` while the Pod is unreachable).
+- Fresh install, `recover.py` and the new `installer/node_address.py` apply both. Recovery accepts an installed bundle
+  that predates the address or the observer AppArmor profile (the original install bundle has neither, so recovery
+  could not read it before) and still refuses any other host difference.
+- Synthetic tests cover the rendered files, firewall verdicts, migration, interrupted retry, conflicts, rollback and
+  recovery, including the CoreDNS replacement, its rerun, a blocked public DNS stopped before any write and one
+  undone by rollback. The CI k3s
+  fixture is API-only (`--disable-agent`, no CoreDNS), so it cannot exercise node-ip, flannel, CoreDNS or the Pod
+  path; the K3s behaviour (node-ip and advertise-address in the serving SANs, advertise-address defaulting to
+  node-ip, flannel-iface by name, resolv-conf passed unchanged to the kubelet, which reads it for each new Pod, and
+  CoreDNS's `forward . /etc/resolv.conf` read once at startup) was checked against the pinned K3s, Kubernetes and
+  CoreDNS sources.
+
+Done 2026-10-28: the owner ran `installer/node_address.py` once from a bundle of c3ce7478. It ended `"status":
+"stable"` with one K3s restart and one CoreDNS replacement; `pcloud0` holds only the fixed address, the daemon's node
+status returned to ready with real workload observations, and the business Pods kept their UIDs and zero restarts. The
+held gateway release was then resumed through the CI resume, and the rerun of main c3ce7478 released every Worker, the
+gateway and the paired VPS release. Move this section to a dated archive with the next HANDOFF cleanup.
+
+### Review cleanup wave (released on `main` c3ce7478, 2026-10-28)
 
 The owner approved fixing the October 25-27 review findings within these limits: backups stay as complete and
 recoverable as before (Model Router request bodies stay in its backups), no backup scope, retention or restore tool

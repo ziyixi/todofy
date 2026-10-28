@@ -121,8 +121,8 @@ its source, creates root-reviewed host directories owned by UID 10001, installs
 the pinned K3s binary, and applies foundation/Secrets/held runtime. All apply uses
 server-side apply with `field-manager=personal-cloud`, matching normal releases,
 without force takeover. Its own `PCLOUD-K3S` INPUT chain allows Kubernetes ports
-6443/10250 and VXLAN 8472 only on loopback or local cni0 Pod CIDR traffic. It does
-not flush other chains or change SSH. Its rules reload before K3s starts.
+6443/10250 and VXLAN 8472 only on loopback, or from the cni0 Pod CIDR to the fixed node
+address below. It does not flush other chains or change SSH. Its rules reload before K3s starts.
 
 Bootstrap downloads the official Linux amd64 cloudflared **2026.8.2**, pinned by SHA256 in
 [`platform/versions.json`](../../platform/versions.json), into
@@ -149,6 +149,64 @@ Actions operation to activate the release, check actual SHA/digest/UUID, healthy
 worker and accepting admission, verify Fleet's fresh report. Compose services are already retired by this one-time
 bootstrap; they are not automatically restarted as a fallback. System-bus permissions also require the non-mutating
 polkit check described in [the observer boundary](../../platform/systemd/README.md).
+
+## Fixed node address and DNS
+
+Neither the node address nor cluster DNS depends on DHCP.
+
+K3s never uses the DHCP address. Without `node-ip` it would take the default route's address
+once at startup and keep advertising it after a lease change, breaking every in-cluster API
+client. The one-shot `personal-cloud-node-address.service` runs before `k3s.service` (which
+`Requires=` it): it creates or keeps the dummy interface `pcloud0`, sets exactly `10.254.0.42/32`
+and brings it up, leaving no process and having no stop action. The K3s configuration sets
+`node-ip` and `advertise-address` to that address and `flannel-iface` to `pcloud0`;
+`node-external-ip` stays unset. K3s adds both addresses to its serving certificate, and the host
+kubeconfig keeps using `127.0.0.1`. Where NetworkManager is installed, a drop-in marks only
+`pcloud0` unmanaged. Pod egress still masquerades through the current default route.
+
+The address is RFC 1918, outside the K3s Pod/Service CIDRs, Docker's default pools, CGNAT and
+Tailscale's 100.64/10 and the networks home routers usually assign. Install, migration and
+recovery stop before writing if any existing host network contains it, if `pcloud0` exists for
+another purpose, or if K3s uses embedded etcd. See [host address recovery](../../docs/rebuild.md#主机地址变化).
+
+CoreDNS never uses the DHCP DNS servers. Without `resolv-conf`, K3s gives the kubelet the host's
+`/run/systemd/resolve/resolv.conf`, the servers DHCP supplied. CoreDNS runs with `dnsPolicy: Default`
+and `forward . /etc/resolv.conf`: its Pod gets a copy of that list when it is created and reads it
+once, so new DHCP DNS servers would break Pod DNS until CoreDNS was recreated. Bootstrap writes the
+root-owned `/etc/rancher/k3s/resolv.conf` with `1.1.1.1`, `1.0.0.1` (Cloudflare) and `8.8.8.8`
+(Google, another operator), all unfiltered and IPv4 like the Pod network, and points `resolv-conf`
+at it. The kubelet reads that file for every new Pod, so it must always exist; rollback keeps it.
+`ClusterFirst` Pods still resolve through CoreDNS and no longer inherit the DHCP search domain.
+Once K3s runs with it, bootstrap, migration and recovery set `personal-cloud/upstream-dns` on
+CoreDNS's pod template: that Deployment's own rolling update replaces its Pod once (cluster DNS pauses
+for a few seconds, as when a K3s upgrade replaces CoreDNS), and an equal value replaces nothing. The
+daemon's own Pod then resolves the Fleet host through CoreDNS. Queries to the resolvers are forwarded
+Pod traffic, the same path as other Pod egress; the INPUT-only `PCLOUD-K3S` neither sees nor opens them.
+
+A host installed before this change migrates once, from a bundle that contains it:
+
+```sh
+sudo /usr/bin/python3 -E -s <bundle>/installer/node_address.py --bundle <bundle>
+```
+
+It accepts only host K3s files equal to this bundle's or to their rendering before the fixed
+address and DNS. Before writing, the daemon's own Pod sends one DNS query straight to each fixed
+resolver over the forwarded Pod egress CoreDNS will use; a resolver that never replies stops it with
+`CLUSTER_DNS_UPSTREAM_UNREACHABLE`. While that Pod cannot be reached (for example through the stale
+Node address this fixes) the `upstreams` event says `unchecked` and the final lookup decides. It then
+writes the unit, address and resolver file, writes the new K3s configuration and
+firewall, restarts K3s once (`KillMode=process` keeps containers running), then waits until the Node
+InternalIP and the `default/kubernetes` EndpointSlice show only the fixed address (K3s's cloud
+controller syncs Node addresses every minute; each wait allows 5 minutes). It then replaces CoreDNS
+once as above, and the daemon's own Pod reads the API through `kubernetes.default.svc` and resolves
+the Fleet host. The last line is `"status": "stable"`. It restarts K3s only when a file changes or
+the running K3s was started with another node-ip (the Node's `k3s.io/internal-ip` annotation; the
+same configuration file sets the DNS), and replaces CoreDNS only when its marker differs, so a repeat
+run only verifies and a rerun after a timeout keeps waiting instead of restarting again.
+`--rollback` restores the previous K3s files, restarts K3s once and removes the marker, so CoreDNS
+returns to the DHCP-provided servers. It also undoes a migration whose lookup failed
+(`CLUSTER_DNS_LOOKUP_FAILED`, for example on a network that blocks public DNS when the check
+before writing could not run).
 
 ## Failures and retries
 
@@ -199,6 +257,8 @@ retry uses its separate repair checkpoint. The original bootstrap marker remains
 `complete_held` still requires a normal **CreateRelease** from Actions for the new
 source SHA. There is no old API release to resume. Keep VPS deployment disabled
 until the new daemon can read Kubernetes and the frozen admission is verified.
+Bundles that carry the fixed node address change host configuration, so this repair
+path refuses them; migrate such a host with `node_address.py` instead.
 
 ## Diagnosis without sudo
 

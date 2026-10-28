@@ -141,6 +141,18 @@ class CurrentRecovery(unittest.TestCase):
         self.assertFalse(
             any("secret" in argv and "apply" in argv for argv, _ in commands)
         )
+        # The restored daemon's own Pod reads the API and resolves a public name through CoreDNS.
+        probes = [argv[-2:] for argv, _ in commands if "exec" in argv]
+        self.assertEqual(
+            probes,
+            [
+                [recover.node_address.PROBE, self.public["profile"]["namespace"]],
+                [
+                    recover.node_address.LOOKUP,
+                    self.public["profile"]["fleet_host"] + ".",
+                ],
+            ],
+        )
 
     def test_current_bundle_identity_is_checked_before_host_changes(self):
         foreign = {**self.public, "source_sha": "e" * 40}

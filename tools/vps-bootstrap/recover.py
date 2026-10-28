@@ -12,6 +12,7 @@ from pathlib import Path
 import binaries
 import cluster
 import host
+import node_address
 import observer_policy
 from runner import command
 
@@ -26,6 +27,13 @@ PROFILE_FIELDS = {
     "repository",
 }
 RUNTIME_NAMES = {"platform-runtime", "platform-runtime-config", "platform-release"}
+# Host files added after a host's original install; its installed bundle has no copy to compare.
+LATER_HOST_FILES = {
+    "personal-cloud-systemd-observer-v1",
+    node_address.UNIT,
+    node_address.NETWORK_MANAGER,
+    node_address.RESOLV_CONF,
+}
 UUID = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
 )
@@ -155,17 +163,24 @@ def host_services(installed, bundle):
         == read_json(Path(bundle) / "versions.json"),
         "RECOVERY_HOST_VERSION_REVIEW_REQUIRED",
     )
+    listed = read_json(Path(installed) / "manifest.json")["files"]
     for name in (
         "k3s-config.yaml",
         "firewall.v4",
         "firewall.v6",
         "k3s.service",
         "cloudflared-platform.service",
-        "personal-cloud-systemd-observer-v1",
+        *sorted(LATER_HOST_FILES),
     ):
+        if name in LATER_HOST_FILES and "units/" + name not in listed:
+            continue
+        # The fixed node address and DNS are the one reviewed change to a host's K3s files.
         require(
-            (Path(installed) / "units" / name).read_bytes()
-            == (Path(bundle) / "units" / name).read_bytes(),
+            node_address.accepted(
+                name,
+                (Path(installed) / "units" / name).read_bytes(),
+                (Path(bundle) / "units" / name).read_bytes(),
+            ),
             "RECOVERY_HOST_CONFIGURATION_REVIEW_REQUIRED",
         )
     versions = read_json(Path(bundle) / "versions.json")
@@ -181,6 +196,8 @@ def host_services(installed, bundle):
         and token.stat().st_mode & 0o077 == 0,
         "RECOVERY_TRANSPORT_CREDENTIAL_MISSING",
     )
+    node_address.preflight(bundle, restore=True)
+    node_address.install(bundle, restore=True)
     for name in ("k3s.service", "cloudflared-platform.service"):
         content = (
             (Path(bundle) / "units" / name)
@@ -214,6 +231,8 @@ def host_services(installed, bundle):
         time.sleep(2)
     else:
         raise BootstrapError("RECOVERY_CLUSTER_UNAVAILABLE")
+    node_address.wait_cluster(load_bundle(bundle)["profile"]["observer_node_key"])
+    node_address.upstream_dns()
     command(["systemctl", "enable", "cloudflared-platform.service"], timeout=30)
     command(["systemctl", "restart", "cloudflared-platform.service"], timeout=45)
 
@@ -336,6 +355,8 @@ def recover(installed, bundle):
         ],
         timeout=330,
     )
+    node_address.in_cluster_read(namespace)
+    node_address.public_lookup(namespace, public["profile"]["fleet_host"])
     return {
         "event": "vps_owner_recovery",
         "status": "runtime_restored",

@@ -223,24 +223,68 @@ gh workflow run ci.yml --ref main -R "$cloud_repo" \
 
 ### 主机地址变化
 
-如果业务 Pod 仍然 Ready，但 daemon 的运行观测变成 unknown，发布在 `suspend` 阶段报
-`UNAVAILABLE`，先核对主机网卡地址、Node InternalIP 和 `default/kubernetes` 的 EndpointSlice。
-Node 和 API 端点仍指向已不属于主机的地址时，正确的 Service/NAT 规则也会把请求送往旧地址。
-这类问题先恢复节点网络，再继续原发布；重复创建发布不会解除 `RELEASE_HELD`。
+集群的节点地址和 DNS 都不依赖 DHCP。K3s 不设置 `node-ip` 时，只在启动那一刻从默认路由取地址，之后不再更新；
+租约一变，Node InternalIP 和 `default/kubernetes` 的 EndpointSlice 就指向主机已经没有的地址。
+宿主上经 `127.0.0.1` 的 kubectl 仍然正常，但所有集群内客户端（发布 daemon、状态观测）经 Service NAT 都连不上 API，
+发布停在 `suspend / UNAVAILABLE`。这是架构问题，不靠重启或地址变化钩子补救。
 
-确认实际 k3s 配置没有固定旧的 `node-ip`、`node-external-ip` 或 `advertise-address` 后，在宿主运行：
+bootstrap 给 K3s 一个只属于本机、永不变化的节点地址：
+
+- oneshot 单元 `personal-cloud-node-address.service` 在 `k3s.service` 之前运行（K3s 以 `Requires=`/`After=` 依赖它），
+  创建或保留 dummy 网卡 `pcloud0`，设置唯一地址 `10.254.0.42/32` 并启用；它不留下进程，也没有停止动作。
+- K3s 配置的 `node-ip`、`advertise-address` 为该地址，`flannel-iface` 为 `pcloud0`；不设置 `node-external-ip`。
+  K3s 自动把 node-ip 和 advertise-address 加进 API 证书；宿主 kubeconfig 仍连 `127.0.0.1`。
+- `PCLOUD-K3S` 只允许本机回环，以及 Pod 网段经 `cni0` 访问该地址的 6443/10250；局域网与公网照旧丢弃。
+- 有 NetworkManager 时，另写一个只匹配 `pcloud0` 的 unmanaged 配置，下次 NetworkManager 启动时生效；迁移不重启或重载它。
+
+该地址属于 RFC 1918 的 10.254/16，不在 K3s 的 10.42/16、10.43/16，不在 Docker 默认地址池、CGNAT/Tailscale 的 100.64/10，
+也不在家用路由器常用的 192.168/16 和 10.0–10.10 网段。安装、迁移和恢复都会先检查主机现有网段，任何网段包含它就在写入前停止
+（`NODE_ADDRESS_CONFLICT`）。Pod 出网仍按当时的默认路由做地址转换，公网入口仍是 Tunnel 到 `127.0.0.1` 的 hostPort，
+所以局域网地址变化或网络重连都不改变 Node 与 API 端点的地址。没有 DHCP 钩子、定时器或常驻进程。
+
+#### 集群 DNS
+
+CoreDNS 同样不使用 DHCP 下发的 DNS 服务器。K3s 不设置 `resolv-conf` 时，把宿主 systemd-resolved 的
+`/run/systemd/resolve/resolv.conf`（即 DHCP 给的服务器）交给 kubelet。CoreDNS 以 `dnsPolicy: Default` 运行，
+`forward . /etc/resolv.conf` 只在启动时读取 Pod 创建那一刻得到的副本；DHCP 换了 DNS 服务器后，Pod 的 DNS 会一直坏到 CoreDNS 重建。
+
+- bootstrap 写入 root 所有的 `/etc/rancher/k3s/resolv.conf`，只有 `1.1.1.1`、`1.0.0.1`（Cloudflare）和 `8.8.8.8`（Google，另一家运营方），
+  K3s 配置的 `resolv-conf` 指向它。三者都不过滤结果，CoreDNS 随机选用哪个都不会拦截域名（按地域调度的答案可能不同）；只用 IPv4，与 Pod 网络一致；kubelet 最多传三个。
+- kubelet 每创建一个 Pod 都读取该文件，所以它必须一直存在，回退也不删除。`ClusterFirst` 的 Pod 照旧经 CoreDNS 解析，不再继承 DHCP 的 search 域。
+- K3s 以该文件启动后，在 CoreDNS 的 Pod 模板上设置注解 `personal-cloud/upstream-dns`，由该 Deployment 自己滚动替换一次 Pod：
+  集群 DNS 中断几秒，与 K3s 升级替换 CoreDNS 相同；注解已相同时不替换。随后在 daemon 自己的 Pod 里经 CoreDNS 解析 Fleet 主机名。
+- Pod 到上游 53/udp、53/tcp 的请求和其他 Pod 出网一样是转发流量，不经过 INPUT；`PCLOUD-K3S` 不变，不新开端口。
+
+#### 已安装主机的一次性迁移
+
+在此之前安装的主机仍是旧配置。把包含 `installer/node_address.py` 的 bundle 放到主机后执行一次：
 
 ```sh
-sudo systemctl restart k3s
+sudo /usr/bin/python3 -E -s <bundle>/installer/node_address.py --bundle <bundle>
 ```
 
-控制面会短暂不可用。项目的 unit 使用 `KillMode=process`；[K3s 停止规则](https://docs.k3s.io/upgrades/killall)
-保留现有容器运行，不需要 `k3s-killall.sh`、重启整机或手改 EndpointSlice。
-重启后核对 API Service 可访问、daemon 能读到真实运行状态，以及原业务 Pod 的 UID、重启次数和健康状态。
-这些检查通过后，使用上节的 CI resume 命令继续原 SHA 的发布；正式发布仍按正常流程排空和替换其目标容器。
+它先核对 bundle 校验和与安装完成标记，并要求主机上的 `k3s.service`、`config.yaml`、`firewall.v4`、`firewall.v6`
+恰好是该 bundle 的版本或其加入固定地址与 DNS 之前的版本；其他改动、`pcloud0` 或 `/etc/rancher/k3s/resolv.conf` 已有别的内容、
+地址冲突或使用内嵌 etcd 时，在任何写入前停止。daemon 的 Pod 可达时，它还先从该 Pod 直接向三个上游各发 DNS 查询（与 CoreDNS 相同的转发出网路径），
+任一不回应就以 `CLUSTER_DNS_UPSTREAM_UNREACHABLE` 在写入前停止；Pod 暂不可达（例如 Node 仍停在过期地址）时记为 `unchecked`，交给最后的解析核对。然后写入单元、创建地址、写入上游 DNS 文件，写入新的 K3s 配置与防火墙，只重启一次 K3s，
+等待 API 就绪、Node InternalIP 和 `default/kubernetes` EndpointSlice 都只剩固定地址（K3s 的 cloud controller 每分钟同步一次 Node 地址，
+每项最多等 5 分钟）。接着按上节替换一次 CoreDNS，最后在 daemon 自己的 Pod 里经 `https://kubernetes.default.svc` 读取一次
+`platform-release`，并经 CoreDNS 解析 Fleet 主机名。成功的最后一行为 `"status": "stable"`。是否重启 K3s 只看文件是否改变，
+以及正在运行的 K3s 启动时用的 node-ip（Node 注解 `k3s.io/internal-ip`；DNS 设置在同一配置文件里）；是否替换 CoreDNS 只看注解。
+已迁移的主机重复运行只做核对；中途失败时直接重跑同一命令，K3s 已按固定地址启动时只继续等待，不再重启。
 
-节点地址可能变化；不要将当前 DHCP 地址写进应用或依赖路由器固定租约。
-本次验证的是地址变化后的恢复；当前部署没有自动刷新节点地址的钩子，不能将上述步骤当作已经实现的自动修复。
+控制面中断通常不到一分钟：`KillMode=process` 让现有容器继续运行（[K3s 停止规则](https://docs.k3s.io/upgrades/killall)），
+业务 Pod 不重启，Tunnel 入口不中断；只有 CoreDNS 的 Pod 被替换，集群 DNS 中断几秒。完成后用[检查与修复](#检查与修复)中的 CI resume 命令继续原 SHA 的发布；
+重复创建发布不会解除 `RELEASE_HELD`。
+
+核对：`ip -4 address show dev pcloud0` 只有固定地址；Node InternalIP 与 `default/kubernetes` EndpointSlice 为该地址；
+CoreDNS 的 Pod 模板注解为三个上游，且只有迁移后创建的一个 Pod；daemon 读到真实运行状态，Fleet/Home 恢复新鲜观测；
+原业务 Pod 的 UID 和重启次数不变（只有 CoreDNS 换成新 Pod）。
+
+回退：同一命令加 `--rollback`，写回迁移前的 K3s 配置与防火墙并重启一次 K3s，再删除 CoreDNS 的注解，让 CoreDNS 回到 DHCP 给的服务器；
+单元、`pcloud0` 和上游 DNS 文件保留但不再被 K3s 使用。迁移前未能检查、之后因网络拦截公共 DNS 而以 `CLUSTER_DNS_LOOKUP_FAILED` 失败时，也用它恢复。
+回退后节点地址和 DNS 重新跟随 DHCP，原问题随之回来。迁移后的恢复只使用包含 `node_address.py` 的 bundle；
+更早的 bundle 会写回旧配置，遇到时重新运行上面的迁移命令。
 
 ### 宿主入口或运行资源损坏
 
@@ -253,6 +297,8 @@ sudo /usr/bin/python3 -E -s <新 bundle>/installer/recover.py \
 
 成功结果：`runtime_restored`。入口恢复保留 Secrets、PVC 和账本，再从 Actions 继续原发布。
 它核对原安装身份和账本接受版本；缺失磁盘数据、错误 bundle 或未知归属会停止。
+它同时写入[固定节点地址与 DNS](#主机地址变化)，并在 K3s 重启后按需替换一次 CoreDNS、在恢复的 daemon Pod 里核对 API 与 DNS；
+原安装 bundle 早于固定地址时，只接受这一处已审核的 K3s 文件差异。
 宿主服务故障需要管理员操作，日常部署和运行资源修复通过 daemon HTTP API 完成。
 即使其他 job 失败，成功生成的同 SHA bundle 仍可用于该发布。Actions artifact 保留 30 天；下载后自行保留。
 过期时用原接受 SHA 和账本中的两个 digest，按 [固定 bundle 生成命令](../tools/vps-bootstrap/README.md#prepare-locally)重新生成。

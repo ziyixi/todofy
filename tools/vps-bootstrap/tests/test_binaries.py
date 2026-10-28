@@ -321,6 +321,7 @@ class BinaryTests(unittest.TestCase):
             ),
             patch.object(install.shutil, "which", side_effect=which),
             patch.object(install.observer_policy, "preflight"),
+            patch.object(install.node_address, "preflight"),
             patch.object(host, "real_path", side_effect=real_path),
         ):
             self.assertEqual(install.preflight(bundle), str(self.connector))

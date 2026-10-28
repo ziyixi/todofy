@@ -13,19 +13,32 @@ from config import BootstrapError, read_json, require
 COMPLETION_MARKER = Path("/etc/rancher/k3s/personal-cloud-bootstrap.json")
 
 
-def bootstrap_completed(bundle_sha256):
+def completion_marker():
+    """The root-owned record of a finished install, or None on a host never installed."""
     marker = real_path(COMPLETION_MARKER)
     if not marker.exists():
-        return False
+        return None
     require(
         marker.is_file()
         and marker.stat().st_uid == 0
         and marker.stat().st_mode & 0o777 == 0o600,
         "BOOTSTRAP_COMPLETION_MARKER_INVALID",
     )
+    value = read_json(marker, private=True)
     require(
-        read_json(marker, private=True)
-        == {"schema_version": 1, "bundle_sha256": bundle_sha256},
+        set(value) == {"schema_version", "bundle_sha256"}
+        and value["schema_version"] == 1,
+        "BOOTSTRAP_COMPLETION_MARKER_INVALID",
+    )
+    return value
+
+
+def bootstrap_completed(bundle_sha256):
+    value = completion_marker()
+    if value is None:
+        return False
+    require(
+        value == {"schema_version": 1, "bundle_sha256": bundle_sha256},
         "BOOTSTRAP_ALREADY_INITIALIZED_DIFFERENT_BUNDLE",
     )
     return True
