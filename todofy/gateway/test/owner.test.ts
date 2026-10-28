@@ -228,7 +228,7 @@ describe('todofy.ui.v1 through the transcoder', () => {
 });
 
 describe('the owner API before todofy.ui.v1', () => {
-  it('answers 410 reload_required in its old envelope, for one release', async () => {
+  it('answers 410 reload_required in its old envelope until its removal date', async () => {
     const { env, core: calls } = fakes({}, core);
     for (const [path, method] of [
       ['/api/v1/overview', 'GET'],
@@ -293,7 +293,7 @@ describe('GetIntegration', () => {
   const coreSetup = {
     mail_source_id: 'mail-hero-personal',
     // A core before 2026-10-21 also answered todoist_project; Todofy files no task any more, so it is never shown.
-    configured: { gemini_api_key: true, todoist_project: true },
+    configured: { model_router: true, todoist_project: true },
   };
 
   it('merges the gateway facts with the core facts', async () => {
@@ -312,7 +312,7 @@ describe('GetIntegration', () => {
       webhook_path: '/hooks/mail',
       mail_source_id: 'mail-hero-personal',
       access_owner: OWNER,
-      configured: { mail_webhook_token: true, gemini_api_key: true },
+      configured: { mail_webhook_token: true, model_router: true },
     });
     expect(calls).toEqual([{ instance: 'inbox-v1', method: 'setup', args: [] }]);
   });
@@ -328,14 +328,11 @@ describe('GetIntegration', () => {
 });
 
 describe('same-origin JSON mutations', () => {
-  it('returns a static compatibility header without setting a cookie or requiring a key', async () => {
+  it('accepts the fixed header without a token read, cookie or key', async () => {
     const { env, core: calls } = fakes({}, core);
-    const response = await owner(env, '/api/csrf');
+    const response = await reconcile(env, csrfHeaders('1'));
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ token: '1' });
     expect(response.headers.get('set-cookie')).toBeNull();
-    expectPrivate(response);
-    expect((await reconcile(env, csrfHeaders('1'))).status).toBe(200);
     expect(calls).toHaveLength(1);
   });
   it('checks exact Origin, custom header and JSON media type before malformed JSON or core calls', async () => {
@@ -361,8 +358,6 @@ describe('same-origin JSON mutations', () => {
     const { env, core: calls } = fakes({}, core);
     expect((await reconcile(env, csrfHeaders('legacy.cached.header'))).status).toBe(200);
     expect(calls[0]?.args[0]).toBe(OWNER);
-    const post = await owner(env, '/api/csrf', { method: 'POST' });
-    expect(post.status).toBe(405);
   });
 });
 
@@ -380,7 +375,6 @@ describe('maintenance', () => {
     expect(calls).toHaveLength(0);
 
     expect((await owner(env, '/api/v1/serviceStatus')).status).toBe(200);
-    expect((await owner(env, '/api/csrf')).status).toBe(200);
     expect(calls).toHaveLength(1);
   });
 });

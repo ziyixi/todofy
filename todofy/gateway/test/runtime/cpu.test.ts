@@ -110,10 +110,6 @@ async function expectOk(h: Harness, path: string, init: RequestInit = {}): Promi
 /** One isolate's session: its first API request alone, then each heaviest request. */
 async function session({ h, meter }: GatewayIsolate): Promise<Measurement[]> {
   const init = await meter.measure(API_INIT, () => expectOk(h, '/api/v1/serviceStatus'), 1);
-  // The CSRF token for the reconcile, outside the measurements.
-  const csrf = await h.fetch('/api/csrf', { headers: { 'cf-access-jwt-assertion': token } });
-  const csrfToken = (await csrf.json<{ token: string }>()).token;
-  const cookie = (csrf.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
   // A real next page: the token the first page answered.
   const first = await h.fetch('/api/v1/mailEvents?page_size=100', { headers: { 'cf-access-jwt-assertion': token } });
   const pageToken = (await first.json<{ next_page_token: string }>()).next_page_token;
@@ -131,7 +127,7 @@ async function session({ h, meter }: GatewayIsolate): Promise<Measurement[]> {
       `/api/v1/${event}:reconcile`,
       {
         method: 'POST',
-        headers: { 'content-type': 'application/json', origin: ORIGIN, 'x-csrf-token': csrfToken, cookie },
+        headers: { 'content-type': 'application/json', origin: ORIGIN, 'x-csrf-token': '1' },
         body: JSON.stringify({ action: 'dismiss', etag: '101', request_id: crypto.randomUUID() }),
       },
     ],

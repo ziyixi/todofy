@@ -87,11 +87,10 @@ async function runtime(t) {
     assert.equal(response.status, 200, await response.clone().text())
     return response.json()
   }
-  const csrf = await mf.dispatchFetch('http://localhost/api/csrf'), token = (await csrf.json()).token, cookie = (csrf.headers.get('set-cookie') ?? '').split(';')[0]
   /** mailhero.ui.v2 through the Worker: {status, data} in the wire JSON. */
   const api = async (path, method = 'GET', input) => {
     const response = await mf.dispatchFetch('http://localhost/api/v2' + path, { method, body: input === undefined ? undefined : JSON.stringify(input),
-      headers: { Origin: 'http://localhost', Cookie: cookie, 'X-CSRF-Token': token, 'Content-Type': 'application/json' } })
+      headers: { Origin: 'http://localhost', 'X-CSRF-Token': '1', 'Content-Type': 'application/json' } })
     return { status: response.status, data: await response.json() }
   }
   const PERIODS = ['raw_retention_days', 'content_retention_days', 'ledger_retention_days', 'resolved_retention_days']

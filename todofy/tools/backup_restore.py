@@ -22,7 +22,8 @@
   npx wrangler d1 execute DB --remote --config <outside the repo>/todofy-restore.toml --file restore/restore.sql
   python3 tools/backup_restore.py verify --in restore/ --db DB --remote --config <outside the repo>/todofy-restore.toml
 
-A table a later migration drops (RETIRED_TABLES) is left out of an older backup's restore, and said so.
+A table a later migration drops (RETIRED_TABLES) is left out of an older backup's restore, and said so; a later
+migration that rewrites stored values (ROW_REWRITES) is replayed after an older backup's rows.
 
 Local dev and tests use `--local --persist-to <dir>` in place of `--remote`. Every statement is an
 ``INSERT ... ON CONFLICT DO NOTHING`` below D1's 100 KB statement limit; longer values are appended
@@ -87,6 +88,9 @@ RETIRED_TABLES = (
     "plan_settings",
     "plan_categories",
 )
+# Migrations that rewrite stored values: 0017 stores native model IDs in model_settings. A backup made before one
+# holds the old values, so once this checkout has it, the restore SQL ends with it (idempotent) after the rows.
+ROW_REWRITES = ("0017_native_model_ids.sql",)
 # The statements that create, rename into or drop a table. A table's last one, in migration order, says whether this
 # checkout's schema has it: 0011 drops plan_task_state and renames its rebuilt copy back.
 TABLE_DDL = re.compile(
@@ -376,6 +380,10 @@ def write_sql(root: Path, out: Path, *, legacy_text: bool) -> list[str]:
                         sql.write(statement + "\n")
                         statements += 1
             lines.append(f"PASS {table['name']} rows={table['rows']} statements={statements}")
+        for name in ROW_REWRITES:
+            if manifest["schema_version"] < name and (MIGRATIONS_DIR / name).is_file():
+                sql.write((MIGRATIONS_DIR / name).read_text())
+                lines.append(f"PASS replay {name}")
     return lines
 
 

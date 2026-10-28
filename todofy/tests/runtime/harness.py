@@ -267,7 +267,6 @@ class Worker:
         self.variables = variables
         self.base_url = ""
         self._process: subprocess.Popen[bytes] | None = None
-        self._csrf: dict[str, str] | None = None
         self.hooks = self.owner = httpx.Client()  # host-bound clients replace it in start()
 
     def client(self, host: str) -> httpx.Client:
@@ -434,13 +433,8 @@ class Worker:
             pytest.fail(f"event {event_id} never reached {until}: {last[0]}")
 
     def csrf_headers(self) -> dict[str, str]:
-        """What a same-origin browser POST carries (cookie set by hand: it is Secure)."""
-        if self._csrf is None:
-            response = self.owner.get("/api/csrf")
-            assert response.status_code == 200, response.text
-            token = response.json()["token"]
-            self._csrf = {"origin": ORIGIN, "x-csrf-token": token, "cookie": f"todofy_csrf={token}"}
-        return self._csrf
+        """What a same-origin browser POST carries."""
+        return {"origin": ORIGIN, "x-csrf-token": "1"}
 
     def post_owner(self, path: str, body: dict[str, Any], headers: dict[str, str] | None = None) -> httpx.Response:
         return self.owner.post(path, json=body, headers=self.csrf_headers() | (headers or {}))

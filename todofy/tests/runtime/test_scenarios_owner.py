@@ -51,7 +51,6 @@ def test_every_read_matches_the_idl_after_traffic(worker: Worker) -> None:
     # The pipeline files mail in Tasks' Inbox: no default project is configured.
     configured = {"mail_webhook_token": True, "report_basic_auth": True, "model_router": True}
     assert integration["configured"] == configured and integration["access_owner"] == OWNER
-    assert worker.owner.get("/api/csrf").status_code == 200
     assert_message(worker.owner.get("/api/v1/latestReports"), reports_pb.LatestReports)
     assert_message(worker.owner.get("/api/v1/metricDays"), pb.ListMetricDaysResponse)
 
@@ -61,12 +60,11 @@ def test_an_alias_login_acts_as_the_owner(auth_worker: Worker, access: AccessIss
     owner = {"cf-access-jwt-assertion": access.token()}
     assert auth_worker.owner.get("/api/v1/serviceStatus", headers=alias).status_code == 200
 
-    token = auth_worker.owner.get("/api/csrf", headers=alias).json()["token"]
-    csrf = {"origin": "http://todofy.localhost", "x-csrf-token": token, "cookie": f"todofy_csrf={token}"}
+    csrf = {"origin": "http://todofy.localhost", "x-csrf-token": "1"}
     body = {"action": "dismiss", "etag": "1", "request_id": str(uuid.uuid4())}
     response = auth_worker.owner.post(f"/api/v1/mailEvents/{uuid.uuid4()}:reconcile", json=body, headers=owner | csrf)
 
-    # Past Access and CSRF: the token issued to the alias belongs to ACCESS_OWNER.
+    # Past Access and CSRF as ACCESS_OWNER after an alias login.
     assert_status(response, 404, "NOT_FOUND")
     intruder = {"cf-access-jwt-assertion": access.token(email="intruder@example.com")}
     assert auth_worker.owner.get("/api/v1/serviceStatus", headers=intruder).status_code == 401

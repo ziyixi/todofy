@@ -20,8 +20,8 @@ from tests.runtime.owner_support import (
     assert_message,
     assert_private,
     assert_status,
+    csrf_headers,
     event_row,
-    issue_csrf,
     seed,
 )
 
@@ -297,7 +297,7 @@ def test_unknown_or_malformed_event_names_are_not_found(api_worker: Worker) -> N
     ],
 )
 def test_invalid_reconcile_bodies_get_bad_request(api_worker: Worker, body: bytes) -> None:
-    headers = issue_csrf(api_worker.owner) | {"content-type": "application/json"}
+    headers = csrf_headers() | {"content-type": "application/json"}
     response = api_worker.owner.post(f"/api/v1/mailEvents/{UNKNOWN}:reconcile", headers=headers, content=body)
     assert_status(response, 400, "BAD_REQUEST")
 
@@ -314,7 +314,7 @@ def test_invalid_reconcile_bodies_get_bad_request(api_worker: Worker, body: byte
     ],
 )
 def test_invalid_recompute_bodies_get_bad_request(api_worker: Worker, body: bytes) -> None:
-    headers = issue_csrf(api_worker.owner) | {"content-type": "application/json"}
+    headers = csrf_headers() | {"content-type": "application/json"}
     response = api_worker.owner.post("/api/v1/latestReports:recompute", headers=headers, content=body)
     assert_status(response, 400, "BAD_REQUEST")
 
@@ -322,7 +322,7 @@ def test_invalid_recompute_bodies_get_bad_request(api_worker: Worker, body: byte
 # Keep last: the Worker answers before reading the body, which can upset the
 # local proxy's next POST on this dev server (docs/dev-notes.md §3).
 def test_oversized_owner_bodies_are_rejected(api_worker: Worker) -> None:
-    headers = issue_csrf(api_worker.owner) | {"content-type": "application/json"}
+    headers = csrf_headers() | {"content-type": "application/json"}
     body = b'{"name": "latestReports", "kind": "summary", "request_id": "' + b"x" * (17 << 10) + b'"}'
     response = api_worker.owner.post("/api/v1/latestReports:recompute", headers=headers, content=body)
     assert_status(response, 400, "BAD_REQUEST")

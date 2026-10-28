@@ -46,7 +46,8 @@ function Choices({ data }: { data: GetModelSettingsResponse }) {
         </select>
       </label>
       <p className="muted small">
-        只影响之后的新计算；已完成的邮件和日报保留。用量计入现有的每日 token 预算。
+        只影响之后的新计算；已完成的邮件和日报保留。用量计入现有的每日 token 预算；Claude 和 Gemini 按 API
+        计费，与其他应用共用 Router 的工作区上限。选 Sol 时，家中主机离线不会改用 Gemini。
       </p>
       {save.isError && <ErrorPanel error={save.error} />}
       <Button

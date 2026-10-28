@@ -250,7 +250,7 @@ message ConfiguredSecrets {
   bool mail_webhook_token = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
   // REPORT_BASIC_AUTH_SHA256 (the gateway).
   bool report_basic_auth = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // GEMINI_API_KEY (todofy-core).
+  // Retired on 2026-10-26: provider keys live in the Model Router, so this is always false.
   bool gemini_api_key = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Retired: TODOIST_API_KEY is no longer read, so this is always false.
   bool todoist_api_key = 4 [(google.api.field_behavior) = OUTPUT_ONLY];

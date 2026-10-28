@@ -188,7 +188,7 @@ def fake_router(
 def live_editor(
     tmp_path: pathlib.Path,
     *,
-    model: str = "gpt-6.1-sol",
+    model: str = settings.DEFAULT_MODEL,
     timeout_seconds: float = 840,
 ) -> editor.ModelEditor:
     """Build the production editor with an injected remote model client."""

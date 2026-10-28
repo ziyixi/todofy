@@ -6,11 +6,10 @@
  * - /api/v1/*: the owner API, TodofyUiService (proto/todofy/ui/v1, ui.ts), served by the shared transcoder; for
  *   every method but GET its `authorize` hook checks the same-origin Origin and the custom CSRF header and JSON media type,
  *   then MAINTENANCE_MODE, before the body is read;
- * - GET /api/csrf: static compatibility token `1`, without a cookie (transport, not part of the service);
  * - GET /task/<id>: a 302 to that task in Tasks (TASKS_PUBLIC_URL), the link the UI shows for a task;
  * - the routes of the owner API before todofy.ui.v1 (api/owner-api-v1.openapi.yaml until 2026-10-02:
  *   /api/v1/overview, /api/v1/events/..., ...): 410 `reload_required` in their old error envelope, so a tab still
- *   running the old UI tells the owner to reload (for one release, then NOT_FOUND like any other path);
+ *   running the old UI tells the owner to reload (until 2026-11-02, then NOT_FOUND like any other path);
  * - everything else: the UI's static assets.
  *
  * Errors of the API are google.rpc.Status bodies (proto/todofy/ui/v1/errors.proto, common/errors/v1), logged as
@@ -19,21 +18,20 @@
 import type { RouteInfo } from '@ziyixi/proto/http-transcoder';
 import { RpcError } from '@ziyixi/proto/rpc-status';
 import { authenticate } from './access.ts';
-import { issueCsrf, verifyCsrf } from './csrf.ts';
+import { verifyCsrf } from './csrf.ts';
 import { variable } from './env.ts';
 import { errorEnvelope, HttpError, MESSAGES, withPrivateHeaders, type Context } from './http.ts';
 import { maintenance, REASONS, transcoder, uiError, type Reason, type UiContext } from './ui.ts';
 import { warmCodec } from './warm.ts';
 
 const API_PREFIX = '/api/v1/';
-const CSRF_PATH = '/api/csrf';
 const TASK_PREFIX = '/task/';
 /** A Tasks task ID (its imported Todoist IDs included). */
 const TASK_ID = /^[A-Za-z0-9_-]{1,128}$/;
 /** The message of the 410 an old UI tab gets (its error panel shows it). */
 export const RELOAD_MESSAGE = 'Todofy 已更新，请刷新页面';
 
-/** The paths of the owner API before todofy.ui.v1, which answer 410 for one release. */
+/** The paths of the owner API before todofy.ui.v1, which answer 410 until 2026-11-02 (docs/history.md). */
 const LEGACY_PATHS: ReadonlySet<string> = new Set([
   '/api/v1/csrf',
   '/api/v1/setup',
@@ -51,7 +49,7 @@ export function legacyPath(path: string): boolean {
   return LEGACY_PATHS.has(path) || LEGACY_PATTERNS.some((pattern) => pattern.test(path));
 }
 
-/** The transcoder's authorize hook: a mutation needs Origin and the owner's CSRF token, and no maintenance. */
+/** The transcoder's authorize hook: a mutation needs Origin and the CSRF header, and no maintenance. */
 async function authorize(request: Request, route: RouteInfo, ctx: UiContext): Promise<void> {
   if (route.safe) return;
   await verifyCsrf(request, ctx.env);
@@ -94,10 +92,6 @@ async function route(ctx: Context): Promise<Response> {
     return statusResponse(ctx, uiError(ACCESS_REASONS[error.code] ?? 'UNAUTHORIZED'));
   }
   if (legacyPath(path)) return errorEnvelope(ctx.requestId, 410, 'reload_required', RELOAD_MESSAGE);
-  if (path === CSRF_PATH) {
-    if (ctx.request.method !== 'GET') return statusResponse(ctx, methodNotAllowed('GET'));
-    return issueCsrf();
-  }
   if (path.startsWith(TASK_PREFIX)) {
     if (ctx.request.method !== 'GET' && ctx.request.method !== 'HEAD') return statusResponse(ctx, methodNotAllowed('GET, HEAD'));
     const id = path.slice(TASK_PREFIX.length);

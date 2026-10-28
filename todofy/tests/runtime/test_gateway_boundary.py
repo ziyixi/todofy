@@ -154,7 +154,7 @@ def test_fetch_changes_nothing_and_rpc_answers_results(core: Worker) -> None:
     assert _rpc(core, "newsletter", "weekly", "") == _error(404, ApiError.NOT_FOUND)
     setup = _rpc(core, "setup")
     assert set(setup) == {"mail_source_id", "configured"}
-    assert set(setup["configured"]) == {"gemini_api_key", "model_router"}
+    assert set(setup["configured"]) == {"model_router"}
 
     # todofy.ui.v1: the response message as wire JSON text, and the next page's cursor.
     page = _rpc(core, "owner_ui", OWNER, "ListMailEvents", '{"page_size":1}', None)

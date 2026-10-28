@@ -96,5 +96,3 @@ export const todofy = withApiErrors(createHttpClient(TodofyUiService, send))
 export function newRequestId(): string {
   return crypto.randomUUID()
 }
-
-/** Test hook: forget the cached CSRF token. */

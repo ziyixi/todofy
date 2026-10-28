@@ -4,7 +4,7 @@
  * in production, so a request the Worker would refuse (an unknown field or query parameter, a missing request_id, a
  * malformed name) fails here too. The answers come from `state`, which a test sets up with the fixtures
  * (test/fixtures.ts); `answer` overrides one method, `fail` makes one throw a google.rpc.Status, and `calls` lists every
- * decoded request in order; an error's localized copy is `服务端拒绝：<reason>`. Mutations need the CSRF header the UI's transport sends (GET /api/csrf issues it).
+ * decoded request in order; an error's localized copy is `服务端拒绝：<reason>`. Mutations need the fixed CSRF header the UI's transport sends.
  */
 import { vi } from 'vitest'
 import { create, type Message as ProtoMessage } from '@ziyixi/proto/protobuf'
@@ -134,7 +134,6 @@ export function installFakeServer(initial: Partial<FakeState> = {}): FakeServer 
 
   vi.stubGlobal('fetch', async (input: string, init: RequestInit = {}) => {
     const url = new URL(input, 'https://mail-hero.example.test')
-    if (url.pathname === '/api/csrf') return Response.json({ token: 'synthetic-csrf' })
     const result = await transcoder.handle(new Request(url, init), undefined)
     return result?.response ?? transcoder.errorResponse(rpcError(Code.NOT_FOUND, 'NOT_FOUND'))
   })

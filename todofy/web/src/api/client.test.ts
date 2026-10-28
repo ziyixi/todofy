@@ -18,7 +18,6 @@ describe('todofy.ui.v1 client', () => {
     const { calls } = mockApi({ [RECONCILE]: eventDetail() })
     await todofy.reconcileMailEvent(request)
     await todofy.reconcileMailEvent(request)
-    expect(calls.filter((call) => call.path === '/api/csrf')).toHaveLength(0)
     const posts = calls.filter((call) => call.method === 'POST')
     expect(posts).toHaveLength(2)
     for (const post of posts) {

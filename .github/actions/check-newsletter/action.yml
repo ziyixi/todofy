@@ -27,4 +27,4 @@ runs:
         make smoke-codex
         make smoke
         make build
-        uv run --locked --package personal-newsletter --extra codex python scripts/smoke_wheel.py
+        uv run --locked --package personal-newsletter python scripts/smoke_wheel.py

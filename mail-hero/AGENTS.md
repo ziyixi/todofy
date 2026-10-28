@@ -86,9 +86,9 @@ React页面保持收件箱、邮件详情、交付/尝试、目标、设置和�
 
 详情必须以纯文本显示 `parse_error`、`needs_review` 与 `warnings`，不能把尚未展开的嵌套/TNEF附件猜成完整正文。聚合overview前台每五分钟刷新并共享缓存，提供人工刷新；不要用高频全表聚合耗尽D1每日读限额。
 
-UI与API验证Access JWT的签名、issuer、audience、过期和唯一owner。JWT、CSRF和私有响应头由单仓库共享的 `packages/edge-auth` 实现（编译进本Worker，不是独立Worker，无运行时依赖），`cloudflare/src/native/security.ts` 只传入Mail Hero的参数（精确邮箱匹配、nbf 0秒、首个 `CF_Authorization` cookie、仅loopback http的开发绕过、本应用CSP）并保留自己的状态码、错误码和文案；只接受RS256且必须有kid，JWKS拒绝重定向并要求≥2048位RSA。浏览器写操作在读取正文前要求精确同源 Origin、非空 `X-CSRF-Token` 和 `application/json`；新客户端直接发送固定头值 `1`。`/api/csrf` 兼容旧页面返回静态 `1`，不设置 cookie；`CREDENTIAL_KEY` 继续用于原有加密、预览和动作签名。不同登录提供商可通过 `ACCESS_OWNER_ALIASES` 明确列出同一人的已核实邮箱，均映射到 `ACCESS_OWNER`，不增加其他管理员；Cloudflare 策略也必须按精确邮箱和相应提供商限制。浏览器mutation还需Origin+CSRF。邮件下载no-store、nosniff；R2保持私有。任何替代域名/预览路径不得绕过鉴权。
+UI与API验证Access JWT的签名、issuer、audience、过期和唯一owner。JWT、CSRF和私有响应头由单仓库共享的 `packages/edge-auth` 实现（编译进本Worker，不是独立Worker，无运行时依赖），`cloudflare/src/native/security.ts` 只传入Mail Hero的参数（精确邮箱匹配、nbf 0秒、首个 `CF_Authorization` cookie、仅loopback http的开发绕过、本应用CSP）并保留自己的状态码、错误码和文案；只接受RS256且必须有kid，JWKS拒绝重定向并要求≥2048位RSA。浏览器写操作在读取正文前要求精确同源 Origin、非空 `X-CSRF-Token` 和 `application/json`；客户端直接发送固定头值 `1`，没有取令牌接口、cookie 或签名密钥；`CREDENTIAL_KEY` 继续用于原有加密、预览和动作签名。不同登录提供商可通过 `ACCESS_OWNER_ALIASES` 明确列出同一人的已核实邮箱，均映射到 `ACCESS_OWNER`，不增加其他管理员；Cloudflare 策略也必须按精确邮箱和相应提供商限制。浏览器mutation还需Origin+CSRF。邮件下载no-store、nosniff；R2保持私有。任何替代域名/预览路径不得绕过鉴权。
 
-管理API是 `mailhero.ui.v2`（`../proto/mailhero/ui/v2/`，路径 `/api/v2/`）：IDL是路由、字段与错误原因的唯一描述，Worker经共享转码器提供（`cloudflare/src/native/api.ts`、`api-v2.ts`），UI经生成的类型化客户端调用，不另写重复类型；鉴权（Access JWT、Origin、mutation的CSRF）始终在转码器之前；原件/附件下载是字节流，留在转码器之外并保持no-store、nosniff与Content-Disposition；最大解析正文与按时区统计两项重读取转交协调者DO运行同一转码器。旧 `/api/v1` 路径只在一个版本内以旧错误格式回答410 `reload_required`。模块与pipeline抛出的每个错误码都须在 `api-v2.ts` 映射到明确的原因（`native-api-v2.test.mjs` 扫描源码），未映射的码一律 `INTERNAL`，不按HTTP状态猜测；过期etag的 `ETAG_MISMATCH` 附带资源的当前值；列表过滤器解析器 `api-filter.ts` 须通过 `../proto/testdata/filter-cases.json` 语料。Webhook事件与 `/api/internal/backup/*` 不属于管理API。通用事件以 `../contracts/mail-received-v1/` 的说明、IDL `../proto/mailhero/webhook/v1/` 及由它生成的JSON Schema为准。
+管理API是 `mailhero.ui.v2`（`../proto/mailhero/ui/v2/`，路径 `/api/v2/`）：IDL是路由、字段与错误原因的唯一描述，Worker经共享转码器提供（`cloudflare/src/native/api.ts`、`api-v2.ts`），UI经生成的类型化客户端调用，不另写重复类型；鉴权（Access JWT、Origin、mutation的CSRF）始终在转码器之前；原件/附件下载是字节流，留在转码器之外并保持no-store、nosniff与Content-Disposition；最大解析正文与按时区统计两项重读取转交协调者DO运行同一转码器。旧 `/api/v1` 路径在 2026-11-01 前（`../docs/history.md`）以旧错误格式回答410 `reload_required`。模块与pipeline抛出的每个错误码都须在 `api-v2.ts` 映射到明确的原因（`native-api-v2.test.mjs` 扫描源码），未映射的码一律 `INTERNAL`，不按HTTP状态猜测；过期etag的 `ETAG_MISMATCH` 附带资源的当前值；列表过滤器解析器 `api-filter.ts` 须通过 `../proto/testdata/filter-cases.json` 语料。Webhook事件与 `/api/internal/backup/*` 不属于管理API。通用事件以 `../contracts/mail-received-v1/` 的说明、IDL `../proto/mailhero/webhook/v1/` 及由它生成的JSON Schema为准。
 
 ## 5. 验证与上线记录
 
@@ -128,11 +128,11 @@ D1 Time Travel Free7天只恢复D1，不恢复R2、DO或secrets。完整备份�
 
 ## 8. 仓库与发布边界
 
-- 保留 `cloudflare/` 原生Worker/D1迁移与测试、`web/`、静态构建输出位置 `uiassets/dist/`、通用事件合同和部署/备份工具。不要恢复已经移除的Go服务、PostgreSQL schema、SMTP服务器或中转Worker。`deploy/backup/` 保留旧 v1 恢复兼容和 v2 离线下载/恢复工具；原生备份不依赖这里的 Dockerfile。
+- 保留 `cloudflare/` 原生Worker/D1迁移与测试、`web/`、静态构建输出位置 `uiassets/dist/`、通用事件合同和部署/备份工具。不要恢复已经移除的Go服务、PostgreSQL schema、SMTP服务器或中转Worker。`deploy/backup/` 只保留旧 v1 恢复兼容和 v2 离线下载/恢复工具；不再有收集器镜像，Worker 也不再提供 v1 采集接口。
 - 正式发布从GitHub Actions的同一已验证提交构建UI、应用向后兼容的D1 migration并发布Worker。PR不使用生产密钥。`production` environment只用于授权的main发布；暂停和维护配置需同步GitHub variables，避免下次发布覆盖运维状态。其余静态配置只在 `mail-hero/wrangler.toml` 修改（公开提交）；不得手动 `wrangler deploy`（会删除注入的vars），应急手动发布只用 `deploy/deploy-vars.mjs exec`；不得添加 `[env.*]` 或 `keep_vars`。
 - Todofy在同一仓库的 `todofy/`，由根工作流的 `Todofy checks`/`Todofy deploy` 独立检查和发布。Mail Hero不构建、不部署Todofy，也不因Todofy改动而发布。
 - 应用之间互不导入；共享代码只在根目录 `contracts/` 与 `packages/`。`cloudflare/package.json` 以 `file:../../packages/edge-auth` 依赖共享鉴权包并由打包器编译进Worker；`packages/edge-auth/` 改动会重新检查并发布Mail Hero（及其他使用它的应用）。`jose` 仅作为测试签发合成JWT的devDependency。
-- 原生备份随 Mail Hero Worker 的同一 green SHA 检查与发布；离线恢复测试只用合成数据。旧备份镜像和 retained ciphertext 不自动删除、不再作为运行依赖。
+- 原生备份随 Mail Hero Worker 的同一 green SHA 检查与发布；离线恢复测试只用合成数据。GHCR 中的旧收集器镜像和 retained ciphertext 不自动删除、不再作为运行依赖。
 - 仓库清理不删除任何生产数据库、桶、邮件、源邮箱转发设置或其他项目资源；不自动导入真实邮件。部署成功、HTTP接管和完整Todofy/Tasks业务验收分别记录。
 
 ## 9. ops-v1 运维入口

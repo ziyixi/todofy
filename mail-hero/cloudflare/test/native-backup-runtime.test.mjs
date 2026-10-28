@@ -15,7 +15,7 @@ const token='synthetic-backup-machine-token-32-characters',receiptKey='b'.repeat
 const key='raw/11111111-1111-4111-8111-111111111111.eml';
 const hash=value=>createHash('sha256').update(value).digest('hex');
 
-test('workerd snapshot cut preserves intake and verifies complete authenticated export before resuming',{timeout:90000},async()=>{
+test('workerd snapshot cut preserves intake and verifies complete export before resuming',{timeout:90000},async()=>{
   const temp=await mkdtemp(join(tmpdir(),'mail-hero-backup-test-'));
   const bundle=await build({stdin:{contents:`
     import app from './src/native/index';
@@ -42,8 +42,10 @@ test('workerd snapshot cut preserves intake and verifies complete authenticated 
     }
     async function call(path,input,authenticated=true){return mf.dispatchFetch('http://localhost'+path,{method:input===undefined?'GET':'POST',headers:{'Content-Type':'application/json',...(authenticated?{Authorization:'Bearer '+token}:{})},body:input===undefined?undefined:JSON.stringify(input)});}
     async function json(path,input){const response=await call(path,input);const value=await response.json();assert.ok(response.ok,`${response.status} ${JSON.stringify(value)}`);return value;}
-    const base='/api/internal/backup';
-    assert.equal((await call(base+'/status',undefined,false)).status,401);
+    // The coordinator's snapshot handlers directly: the machine API no longer serves the v1 collector's actions.
+    assert.equal((await call('/api/internal/backup/native/status',undefined,false)).status,401);
+    assert.equal((await call('/api/internal/backup/begin',{lease_seconds:300})).status,404);
+    const base='/__test/coordinator/backup';
     const pre=await json('/__test/coordinator/reserve-ingest',{key,size:Buffer.byteLength(fixture)});
     const begun=await json(base+'/begin',{lease_seconds:300});assert.equal(begun.state,'settling');assert.equal(begun.cut_seq,pre.ingest_seq);
     const id=begun.backup_id,q='?backup_id='+id;

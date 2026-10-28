@@ -117,7 +117,7 @@ def seed(worker: Worker, now: int) -> None:
         " ('legacy:big', 1, replace(hex(zeroblob(50000)), '00', '旧文' || char(0) || 'x')),"
         " ('legacy:a', 2, 'a'), ('legacy:b', 3, 'b'), ('legacy:c', 4, 'c');"
         "INSERT INTO model_settings (id, email_model, report_model, version) "
-        "VALUES (1, 'models/sol-6-1', 'models/gemini-report', 7)"
+        "VALUES (1, 'gpt-6.1-sol', 'gemini-3.8-flash', 7)"
     )
 
 
@@ -238,7 +238,7 @@ def test_weekly_backup_restores_into_an_empty_database(backup_worker: Worker, tm
     assert verified.stdout.splitlines()[-1] == "verify PASS"
     source = dump(worker, worker.persist_to)
     assert dump(worker, target) == source
-    assert source["model_settings"][0]["email_model"] == "models/sol-6-1"
+    assert source["model_settings"][0]["email_model"] == "gpt-6.1-sol"
     assert source["model_settings"][0]["version"] == 7
     assert len(source["legacy_mail_text"]) == LEGACY_TEXTS
 

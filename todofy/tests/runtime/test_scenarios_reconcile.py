@@ -158,7 +158,6 @@ def test_mutations_need_the_same_origin_and_the_csrf_token(worker: Worker) -> No
         {},
         good | {"origin": "https://evil.example"},
         {k: v for k, v in good.items() if k != "x-csrf-token"},
-        good | {"cookie": "todofy_csrf=other"},
     ):
         response = worker.owner.post(f"/api/v1/mailEvents/{event_id}:reconcile", headers=headers)
         assert (response.status_code, reason(response)) == (403, "CSRF_FAILED"), headers

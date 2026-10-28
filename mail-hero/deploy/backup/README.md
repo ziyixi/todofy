@@ -55,7 +55,7 @@ python3 mailhero_backup.py deletions --origin "$MAIL_HERO_ORIGIN" \
 
 ## 旧 v1 加密包
 
-仅旧 `.tar.gz.gpg` 包仍需原恢复私钥和 GnuPG。旧工具、格式和已有备份不改动，也无需重启旧收集器：
+仅旧 `.tar.gz.gpg` 包仍需原恢复私钥和 GnuPG。旧收集器已停用，它的镜像打包和 Worker 上的 v1 采集接口已删除；恢复工具、格式和已有备份不改动：
 
 ```sh
 python3 mailhero_backup.py restore \

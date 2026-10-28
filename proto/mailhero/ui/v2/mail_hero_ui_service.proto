@@ -30,9 +30,8 @@
 // Authentication, in front of the transcoder (packages/edge-auth, Mail Hero's parameters in its SPEC §5.4): every route
 // needs the owner's Cloudflare Access JWT (header Cf-Access-Jwt-Assertion, or the first cookie CF_Authorization),
 // verified by signature, issuer, audience, expiry and the one owner (with its configured aliases). Every method other
-// than GET also needs the same-origin Origin header and the signed double-submit CSRF token (header X-CSRF-Token,
-// cookie mail_hero_csrf), issued by GET /api/csrf, which is transport, not part of this service; and while the
-// deployment's MAINTENANCE_MODE is on, it is MAINTENANCE before the token is checked. A mutation runs under the
+// than GET also needs the same-origin Origin header, a nonempty X-CSRF-Token header (the UI sends `1`) and JSON; and
+// while the deployment's MAINTENANCE_MODE is on, it is MAINTENANCE before the header is checked. A mutation runs under the
 // coordinator's write lease, so it waits for no backup snapshot (BACKUP_IN_PROGRESS while one holds it).
 //
 // Idempotency (AIP-155). The mutations with side effects beyond D1 (a delivery, a parse, a deletion, a new target)

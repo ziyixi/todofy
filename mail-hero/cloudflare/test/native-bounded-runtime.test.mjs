@@ -14,7 +14,6 @@ import { lifecycleDueSQL, terminalAnchorSQL } from '../src/native/lifecycle.ts'
 // Production runs on Workers Free: D1 and DO SQLite each allow 5M rows read
 // per day. These tests measure real workerd rows_read, not a JS model.
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
-const token = 'synthetic-backup-machine-token-32-characters'
 const uuid = `lower(hex(randomblob(4)))||'-'||lower(hex(randomblob(2)))||'-4'||substr(lower(hex(randomblob(2))),2)||'-8'||substr(lower(hex(randomblob(2))),2)||'-'||lower(hex(randomblob(6)))`
 let bundled
 async function script() {
@@ -77,6 +76,7 @@ async function script() {
     export default { async fetch(request, env, ctx) {
       const url = new URL(request.url)
       if (url.pathname.startsWith('/__probe/')) return coordinator(env).fetch(new Request('https://coordinator' + url.pathname, request))
+      if (url.pathname.startsWith('/__test/coordinator/')) return coordinator(env).fetch(new Request('https://coordinator/' + url.pathname.slice('/__test/coordinator/'.length) + url.search, request))
       if (url.pathname === '/__test/email') {
         await emailHandler({ from: 'sender@example.org', to: env.RECEIVE_ADDRESS, raw: request.body, rawSize: Number(request.headers.get('x-raw-size')),
           setReject() { throw new Error('unexpected_reject') } }, env, ctx)
@@ -305,7 +305,7 @@ test('workerd DO capacity snapshot reads O(1) rows and reconcile never walks raw
 })
 
 test('workerd backup database export pages by rowid keyset, byte-identical to OFFSET pages', { timeout: 90000 }, async t => {
-  const { db, call, json } = await runtime(t, { BACKUP_TOKEN: token })
+  const { db, call, json } = await runtime(t)
   await db.prepare(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<260)
     INSERT INTO messages(id,received_at,last_received_at,envelope_from,envelope_recipient,size_bytes,receive_mode,subject)
     SELECT ${uuid},'2026-09-01T00:00:00.000Z','2026-09-01T00:00:00.000Z','sender@example.org','inbox@mail.example.org',i,'archive','合成 '||i FROM n`).run()
@@ -315,17 +315,17 @@ test('workerd backup database export pages by rowid keyset, byte-identical to OF
     INSERT INTO ingest_uploads(key,seq,status,policy,created,settled) SELECT 'raw/history-'||i||'.eml',i,'saved','{}',0,0 FROM n` })
   await json('/__probe/sql', { sql: 'UPDATE intake_control SET value=2000' })
   await json('/__probe/sql', { sql: 'INSERT INTO jobs(id,payload,due,created) VALUES(?,?,?,0)', values: ['parse:raw/history-7.eml', JSON.stringify({ type: 'parse', key: 'raw/history-7.eml' }), Date.now() + 86400000] })
-  const auth = { Authorization: 'Bearer ' + token }, base = '/api/internal/backup'
-  const begun = await json(base + '/begin', { lease_seconds: 300 }, auth)
+  const base = '/__test/coordinator/backup'
+  const begun = await json(base + '/begin', { lease_seconds: 300 })
   assert.equal(begun.state, 'ready')
   const q = '?backup_id=' + begun.backup_id
   await json('/__probe/stats')
-  const control = await json(base + '/control' + q, undefined, auth), controlStats = await json('/__probe/stats')
+  const control = await json(base + '/control' + q), controlStats = await json('/__probe/stats')
   assert.deepEqual(control.uploads.map(row => row.key), ['raw/history-7.eml'])
   assert.ok(controlStats.do_rows_read < 100, `control export read ${JSON.stringify(controlStats)}`)
-  await call(base + '/database-schema' + q, undefined, auth)
+  await call(base + '/database-schema' + q)
   await json('/__probe/stats')
-  const page = offset => call(`${base}/database${q}&table=messages&offset=${offset}`, undefined, auth)
+  const page = offset => call(`${base}/database${q}&table=messages&offset=${offset}`)
   const pages = []
   for (let offset = 0; offset !== null;) {
     const text = await page(offset), stats = await json('/__probe/stats')
@@ -343,7 +343,7 @@ test('workerd backup database export pages by rowid keyset, byte-identical to OF
   // A previous page exported before this change has no cursor: OFFSET continues it.
   await json('/__probe/sql', { sql: 'DELETE FROM backup_table_cursors WHERE name=?', values: ['database/messages/100.json'] })
   assert.equal(await page(200), pages[2].text)
-  await json(base + '/cancel', { backup_id: begun.backup_id }, auth)
-  await json(base + '/begin', {}, auth)
+  await json(base + '/cancel', { backup_id: begun.backup_id })
+  await json(base + '/begin', {})
   assert.deepEqual(await json('/__probe/sql', { sql: 'SELECT count(*) n FROM backup_table_cursors' }), [{ n: 0 }])
 })

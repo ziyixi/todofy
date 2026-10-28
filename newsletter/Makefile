@@ -1,11 +1,11 @@
 UV ?= uv
-RUN := $(UV) run --locked --package personal-newsletter --extra codex
+RUN := $(UV) run --locked --package personal-newsletter
 ARTIFACT_DIR ?= .artifacts
 
 .PHONY: setup lock-check test lint format typecheck check build smoke smoke-codex demo serve proto-check
 
 setup:
-	$(UV) sync --locked --package personal-newsletter --extra codex
+	$(UV) sync --locked --package personal-newsletter
 
 lock-check:
 	$(UV) lock --check

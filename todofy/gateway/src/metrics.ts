@@ -25,14 +25,13 @@ export interface RequestMetric {
 const METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']);
 const HOOKS_ROUTES: ReadonlySet<string> = new Set(['/hooks/mail', '/api/summary', '/api/recommendation', '/health']);
 const OWNER_API_ROUTES: ReadonlySet<string> = new Set([
-  '/api/csrf',
   '/api/v1/serviceStatus',
   '/api/v1/mailEvents',
   '/api/v1/latestReports',
   '/api/v1/latestReports:recompute',
   '/api/v1/metricDays',
   '/api/v1/integration',
-  // The owner API before todofy.ui.v1: 410 reload_required for one release (owner.ts).
+  // The owner API before todofy.ui.v1: 410 reload_required until 2026-11-02 (owner.ts).
   '/api/v1/csrf',
   '/api/v1/setup',
   '/api/v1/overview',

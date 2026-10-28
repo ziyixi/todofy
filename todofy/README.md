@@ -43,10 +43,11 @@ Provider credentials and fallback policy belong to the Router. The core has no p
 configurable HTTP model endpoint.
 
 The owner UI saves separate mail and daily-report choices in D1 `model_settings`, using the Router's
-configured catalog. Before an owner choice is saved, `models/gemini-email` and `models/gemini-report`
-preserve the initial mail/report routes. Choose `models/sol-6-1` from the catalog when switching to Sol.
-Changes apply to future model calls; completed mail keeps its frozen summary and model. Results retain
-the provider-reported model when available, otherwise the public route.
+configured catalog. Before an owner choice is saved, mail uses `gemini-3.5-flash-lite` and reports use
+`gemini-3.8-flash`. Only these two fall back to each other: with `gpt-6.1-sol` (Sol) selected, no call moves
+to Gemini while the home mini-PC is down. Claude and Gemini are billed per API call against the Router's
+workspace limits that every app shares. Changes apply to future model calls; completed mail keeps its frozen
+summary and model. Results retain the provider-reported model when available, otherwise the selected model ID.
 
 The physical budget setting remains `GEMINI_DAILY_TOKEN_BUDGET` (3,000,000 tokens/day); this legacy name
 also remains in existing metric fields. Model selection does not reset its usage or change business retries.

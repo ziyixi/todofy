@@ -18,9 +18,8 @@
 //
 // Authentication, in front of the transcoder (packages/edge-auth, Todofy's parameters in its SPEC §5.4): every
 // route needs the Cloudflare Access JWT of the owner (header Cf-Access-Jwt-Assertion or cookie CF_Authorization);
-// every method other than GET also needs the same-origin Origin header and the signed double-submit CSRF token
-// (header X-CSRF-Token, cookie todofy_csrf), issued by GET /api/csrf, which is transport, not part of this
-// service. With MAINTENANCE_MODE on, every method other than GET is MAINTENANCE.
+// every method other than GET also needs the same-origin Origin header, a nonempty X-CSRF-Token header (the UI
+// sends `1`) and JSON. With MAINTENANCE_MODE on, every method other than GET is MAINTENANCE.
 //
 // Every mutation takes a `request_id` (AIP-155, a UUID4 the browser makes once per distinct request): repeating a
 // request with the same ID applies it once (ReconcileMailEvent answers the event as it is now, RecomputeReport the

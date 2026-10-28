@@ -82,11 +82,9 @@ Gate order for every request, assets included (`gateway/src/owner.ts`):
    `/api/v1/csrf`, `/api/v1/setup`, `/api/v1/reminders`, `/api/v1/reports/{latest,recompute}`,
    `/api/v1/metrics/daily`, `/api/v1/gtd/daily`, `/api/v1/legacy_text/{id}`) → 410 `reload_required` in the old
    envelope (`{"error":{"code","message","request_id"}}`, "Todofy 已更新，请刷新页面"), any method, so a tab still
-   running the previous UI tells the owner to reload. For this release only; the next one answers them 404 like
-   any other path.
-3. `/api/csrf`: `GET` → the gateway issues (§2.5); any other method → 405 `METHOD_NOT_ALLOWED` with `allow: GET`.
-   It is the API's transport, not a method of the service.
-   `/task/<id>` (`GET`/`HEAD`, the id `^[A-Za-z0-9_-]{1,128}$`) → 302 to `${TASKS_PUBLIC_URL}/?task=<id>`, the
+   running the previous UI tells the owner to reload. After 2026-11-02
+   ([history](../../docs/history.md#owner-api-compatibility)) they may answer 404 like any other path.
+3. `/task/<id>` (`GET`/`HEAD`, the id `^[A-Za-z0-9_-]{1,128}$`) → 302 to `${TASKS_PUBLIC_URL}/?task=<id>`, the
    task's link in the UI; another id → 404 `NOT_FOUND`, another method → 405 (`allow: GET, HEAD`), no
    `TASKS_PUBLIC_URL` → 503 `NOT_CONFIGURED`. No DO call.
 4. `/api/v1/*`: the owner API, TodofyUiService (`proto/todofy/ui/v1`, `gateway/src/ui.ts`), served by the shared
@@ -193,9 +191,9 @@ After Access authentication, every owner mutation requires an exact allowed `Ori
 `X-CSRF-Token` (at most 1024 characters), and media type `application/json`, before reading the body.
 Missing, `null` and foreign origins fail with 403 `CSRF_FAILED`.
 
-Clients send `X-CSRF-Token: 1` directly, including for bodyless mutations. `GET /api/csrf` returns
-`{"token":"1"}` for cached clients without a cookie or signing key. Their bounded opaque headers remain
-accepted under the same origin and JSON checks. A refused mutation is not automatically repeated.
+Clients send `X-CSRF-Token: 1` directly, including for bodyless mutations; there is no token endpoint,
+cookie or signing key. Cached clients' bounded opaque headers remain accepted under the same origin and
+JSON checks. A refused mutation is not automatically repeated.
 
 ## 3. The DO's RPC methods
 
@@ -305,8 +303,8 @@ The daily reminders and the GTD history (`ListDailyReminders`, `ListGtdDays`, `L
 (`proto/retired.json`): Home sends the reminder and Tasks keeps GTD. Their paths are 404 like any other unknown path.
 
 ### 3.5.1 `owner_api(owner, method, path, query, content_length, body) -> CoreResult` (previous gateway only)
-The owner API before todofy.ui.v1, kept for one release so that the previous gateway keeps working while CI
-deploys this core before the new gateway (§6.4); the next release removes it with `runtime/api.py`'s routes.
+The owner API before todofy.ui.v1, kept so that the previous gateway keeps working while CI deploys this core
+before the new gateway (§6.4); it goes with `runtime/api.py`'s routes after the gateway's window (2026-11-02).
 `owner` is the canonical owner after Access (not an address: `@` missing or over 254 characters → 401
 `unauthorized`); `method` and `path` as received (`HEAD` included); `query` without `?`;
 `content_length` the declared header or null (`api._json_body` checks it before reading); `body` the
@@ -323,7 +321,7 @@ unread stream of a write, null for `GET`/`HEAD`. The DO serves exactly today's `
 | `GET /api/v1/legacy_text/{id}` | LegacyText; 404 |
 | anything else, incl. `/api/v1/csrf`, `/api/v1/setup`, `HEAD` | 404 `not_found` |
 
-### 3.6 `setup() -> {"mail_source_id": str, "configured": {"gemini_api_key": bool}}`
+### 3.6 `setup() -> {"mail_source_id": str, "configured": {"model_router": bool}}`
 Core-side facts, never values; a plain object, not a `CoreResult`. Not blocked by maintenance. The
 gateway answers `GetIntegration` (`GET /api/v1/integration`) with the `Integration` message (fields named the same): `build` (gateway `BUILD_SHA` or
 `unknown`), `public_host` (lowercased), `hooks_hosts` (csv lowercased), `webhook_path: "/hooks/mail"`,

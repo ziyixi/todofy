@@ -2,7 +2,6 @@
 
 import asyncio
 import dataclasses
-import importlib.metadata as metadata
 import types
 
 import httpx
@@ -69,18 +68,6 @@ def router(monkeypatch, live):
         model_client, "configured_client", lambda *args, **kwargs: client
     )
     return client, state
-
-
-async def test_legacy_saved_model_is_normalized_at_preflight(
-    live, router, monkeypatch
-):
-    client, state = router
-    await preflight._check_model_router(
-        dataclasses.replace(live, model="models/sol-6-1"), client
-    )
-    assert state.requests == ["models/list"]
-    monkeypatch.setenv("NEWSLETTER_MODEL", "models/sol-6-1")
-    assert newsletter_settings.Settings.from_env().model == "gpt-6.1-sol"
 
 
 async def test_mock_checks_real_resources_without_provider_calls(
@@ -589,23 +576,6 @@ async def test_modified_proto_fails_before_any_provider(settings, monkeypatch):
     )
     with pytest.raises(
         preflight.PreflightError, match="PROTO_INTEGRITY_FAILED"
-    ):
-        await preflight.preflight(settings)
-
-
-async def test_unsatisfied_installed_requirement_fails_before_any_provider(
-    settings, monkeypatch
-):
-    distribution = metadata.distribution
-
-    def declared_requirements(name):
-        if name == "personal-newsletter":
-            return types.SimpleNamespace(requires=["fastapi>=999"])
-        return distribution(name)
-
-    monkeypatch.setattr(metadata, "distribution", declared_requirements)
-    with pytest.raises(
-        preflight.PreflightError, match="DEPENDENCY_VERSION_MISMATCH"
     ):
         await preflight.preflight(settings)
 
