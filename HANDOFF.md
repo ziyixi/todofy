@@ -35,6 +35,8 @@ built in rather than a host monitoring service. Backend and UI done on the branc
   and arrow keys for exact values, a table per chart) and per-workload small multiples. No chart library; light only.
 - After deploy: the next observer report carries `metrics`; the second one gives CPU and network rates.
   Live acceptance still has to show the PID 1 `net/dev` mount reports the host's interfaces from inside the Pod.
+  A hostPath that cannot be mounted stops the whole observer Pod, so check that the first run after the platform
+  deploy still lands a heartbeat (Fleet shows `missing` otherwise); any other telemetry failure only drops `metrics`.
 
 ### Fixed K3s node address and DNS (`claude/stable-node-address`, not yet pushed)
 
