@@ -56,7 +56,10 @@ export const FAILED_RETRY_MS = 6 * HOUR;
 export const MAX_FAILED_JOBS = 3;
 /** backup_stale: no complete backup for this long, or since the first step when there is none. */
 export const BACKUP_STALE_MS = 3 * DAY;
-/** Rows (as NDJSON) a part holds at most, and a step reads at most. */
+/**
+ * Rows (as NDJSON, counted in JavaScript string units) a part holds at most, and a step reads at most: CJK text takes up
+ * to three times as many UTF-8 bytes, still far inside an invocation's 128 MB.
+ */
 export const PART_BYTES = 4 * 1024 * 1024;
 export const STEP_BYTES = 16 * 1024 * 1024;
 /** Rows per query of a table page. */
@@ -321,8 +324,18 @@ export async function runBackup(deps: BackupDeps, now: number): Promise<{ ran: b
       log({ skipped: 'empty_store' });
       return { ran: false, next: state.next_run };
     }
+    let tables: Cursor[];
+    try {
+      tables = backupTables(store).map((table) => ({ table: table.name, columns: table.columns, last: 0, done: false, parts: [] }));
+    } catch (error) {
+      // A table this code cannot name (a bug): the job fails and the scheduler goes on, never starved by the backup.
+      log({ failed: failureCode(error) });
+      state.failed_jobs += 1;
+      Object.assign(state, { status: 'failed', error_code: failureCode(error), next_run: state.failed_jobs < MAX_FAILED_JOBS ? now + FAILED_RETRY_MS : nextRun(now) });
+      saveState(store, state);
+      return { ran: false, next: state.next_run };
+    }
     const second = timestamp(now).replaceAll(':', '');
-    const tables = backupTables(store).map((table) => ({ table: table.name, columns: table.columns, last: 0, done: false, parts: [] }));
     state.job = { prefix: `${BACKUP_ROOT}${second}/`, started_at: now, phase: 'tables', errors: 0, tables, evidence_after: '', missing: [] };
     // Saved before anything is read: from here on the scheduler and every write wait (state.ts).
     saveState(store, state);
@@ -416,6 +429,9 @@ async function storePart(bucket: R2Bucket, key: string, lines: string[]): Promis
 async function evidenceStep({ store, bucket, evidence }: BackupDeps, job: Job): Promise<void> {
   let reads = 0;
   let bytes = 0;
+  // A bucket without latest.json is new or was emptied (made again after its loss): none of the copies
+  // `backup_evidence` records is in it, so every referenced object is copied again.
+  if (job.evidence_after === '' && (await bucket.head(LATEST)) === null) store.run(`DELETE FROM backup_evidence`);
   const keys = referencedEvidence(store, job.evidence_after, EVIDENCE_SCAN);
   for (const key of keys) {
     if (store.one(`SELECT 1 AS found FROM backup_evidence WHERE key = ?`, key) === undefined) {

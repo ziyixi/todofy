@@ -562,4 +562,27 @@ describe('the R2 calls of a step, a repeated last step and a newer backup', () =
     expect(await backups.head(`${newer}manifest.json`)).not.toBeNull();
     await backups.delete([`${newer}manifest.json`, `evidence/${key}`]);
   });
+
+  it('a backup bucket made again after its loss gets every evidence copy again', async () => {
+    for (let listed = await backups.list(); listed.objects.length > 0; listed = await backups.list())
+      await backups.delete(listed.objects.map((object) => object.key));
+    await call('m', 'calls');
+    await backupAll('m', (await state('m')).backup?.next_run ?? 0);
+    expect((await state('m')).backup?.status).toBe('ok');
+    const manifest = await json<Manifest>(`${(await json<{ key: string }>(LATEST)).key}manifest.json`);
+    expect(manifest.evidence.objects.length).toBeGreaterThan(200);
+    for (const object of manifest.evidence.objects) expect((await backups.head(`evidence/${object.key}`))?.size, object.key).toBe(object.bytes);
+    const parts = manifest.tables.reduce((sum, table) => sum + table.parts.length, 0);
+    expect((await call<{ put: number }>('m', 'calls')).put).toBe(parts + manifest.evidence.objects.length + 2);
+  });
+
+  it('a table the backup cannot name fails the job, never the scheduler', async () => {
+    await sql('m', `CREATE TABLE "Unnamed" (x)`);
+    const due = (await state('m')).backup?.next_run ?? 0;
+    expect(await call('m', 'backup', due)).toEqual({ ran: false, next: due + FAILED_RETRY_MS });
+    const { backup } = await state('m');
+    expect(backup?.status).toBe('failed');
+    expect(backup?.job).toBeNull();
+    await sql('m', `DROP TABLE "Unnamed"`);
+  });
 });

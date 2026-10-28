@@ -44,7 +44,8 @@ A job runs one bounded step per alarm, a second apart (Workers Free: 30 s of CPU
 2. the evidence: each object a ready snapshot names and no earlier backup copied is read from `watch-evidence` and
    written once to `evidence/<its key>` with its SHA-256 in its metadata (at most 40 reads or 24 MiB a step, an
    object the bucket lost counted too, so a step stays far inside an invocation's 1,000 calls to Cloudflare
-   services); an object copied before costs no R2 call (`backup_evidence` records it);
+   services); an object copied before costs no R2 call (`backup_evidence` records it), unless the bucket has no
+   `latest.json` (new, or made again after its loss): then every object is copied again;
 3. the manifest, `latest.json`, then retention. A repeated last step writes only `latest.json`: a stored manifest is
    never written again.
 
@@ -125,7 +126,8 @@ request or evidence index; otherwise `STORE_NOT_EMPTY`). It runs in bounded alar
    feed's sequence moves 2^32 ahead and its floor with it: a reader's saved position (Personal MCP's Dots) gets
    `CURSOR_EXPIRED` once, reports the gap and takes a new baseline, and no new event repeats a sequence it saw, so no
    old Work report is made again. The next alarm backs the restored store up (the evidence copies are already in the
-   bucket, so it writes only its parts).
+   bucket, so it writes only its parts; after an `upload` into a new bucket, which has no `latest.json`, it copies
+   the evidence once more).
 
 The evidence goes first, so no restored row names an object that is not back yet. While the restore runs, or after it
 failed, every other write is refused (`RESTORE_RUNNING`; Home's `setGuard` answers `unavailable`), the scheduler and
@@ -210,7 +212,9 @@ parts first and the manifest last, never `latest.json`: name the backup when res
   a restore with lost evidence equal row for row and byte for byte, with its verification; a changed part failing a
   restore that a repeated restore then completes; Home's view; the R2 calls of a step (210 evidence objects and 45
   lost ones: at most 40 GETs a backup step, at most 200 HEADs a restore step); the restored store's own backup at its
-  next alarm; a repeated last step that never rewrites the manifest; a newer prefix and its evidence kept.
+  next alarm; a repeated last step that never rewrites the manifest; a newer prefix and its evidence kept; a backup
+  bucket emptied and made again getting every evidence copy again; a table the backup cannot name failing the job
+  while the scheduler goes on.
 - `worker/test/runtime/restore.test.ts` (the real `WatchState`): a day of watches, changes, a screenshot, tasks and an
   unsent task request backed up from the alarm with writes refused meanwhile; `download`, `verify` and `upload` with
   wrangler into a new namespace's bucket; the owner's restore there (the private binding refused, writes and Home's
