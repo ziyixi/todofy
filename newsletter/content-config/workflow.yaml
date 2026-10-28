@@ -7,7 +7,7 @@ nodes:
   - id: feeds
     type: api_feed
     on_error: continue
-    params: {timeout_seconds: 45}
+    params: {timeout_seconds: 180}
   - id: discovery
     type: discovery
     on_error: continue

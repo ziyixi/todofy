@@ -1,0 +1,236 @@
+# Researcher registry: public feeds the `feeds` (api_feed) node reads once per run.
+# Every item becomes a metadata-only lead (仅线索) for its discovery direction; the discovery
+# model decides what to open. Code owns request parameters (arXiv window, Crossref filter,
+# Hugging Face date), pacing, size caps and network checks; this file only names sources.
+#
+# Ported from the retired Brief app's registry at b55b29b1. Entries dropped here (headline news,
+# signal-only feeds, the Anthropic sitemap, PyTorch, USGS, disabled entries and the Crossref
+# alternates) stay recoverable:  git show b55b29b1:brief/content-config/sources.yaml
+#
+# Fields (the engine refuses unknown fields, anchors and tags):
+#   id                 [a-z0-9-], unique; diagnostics name it
+#   name               venue shown in 来源选择依据 and 刊会／发布方; distinct names count as
+#                      independent sources when the same work arrives twice
+#   direction          an existing discovery/<id>.md direction
+#   kind               feed (RSS, RDF or Atom; read from the content) | arxiv (API; needs query)
+#                      | crossref (journal works) | hf_daily (Hugging Face daily papers)
+#   url                https, no port; only a feed URL may carry a query
+#   query              arxiv only; code adds the submittedDate window
+#   keywords           optional prefilter on title or summary: whole words or phrases; a trailing *
+#                      matches the start of a word; a keyword written with capitals matches
+#                      case-sensitively
+#   requires_abstract  skip items whose summary or abstract is under 80 characters
+#   max_seeds          leads per run from this source, 1-20 (default 5); each direction gets 20
+#   max_bytes          read cap, 65536-4194304 (default 1048576); a feed is parsed as far as it got
+#   max_age_days       freshness window, 1-30 (default 4 for arxiv, 7 otherwise); undated items drop
+#   enabled            false keeps an entry without fetching it
+
+version: 1
+
+sources:
+  # ---------- AI / LLM ----------
+  - id: arxiv-llm-architecture
+    name: arXiv
+    direction: 08-llm-architectures
+    kind: arxiv
+    url: "https://export.arxiv.org/api/query"
+    # ti:transformer and ti:attention alone pull in vision, graph and time-series models.
+    query: '(cat:cs.CL OR cat:cs.LG) AND (ti:"mixture of experts" OR ti:"state space" OR ti:"long context" OR ti:tokenizer OR ti:tokenization OR ti:"language model" OR ((ti:transformer OR ti:transformers OR ti:attention) AND (abs:"language model" OR abs:"language models" OR abs:LLM OR abs:LLMs OR ti:LLM OR ti:LLMs)))'
+  - id: arxiv-training-inference
+    name: arXiv
+    direction: 08-llm-architectures
+    kind: arxiv
+    url: "https://export.arxiv.org/api/query"
+    # ti:inference alone is mostly Bayesian and causal inference, ti:kernel kernel methods.
+    query: '(cat:cs.LG OR cat:cs.CL OR cat:cs.DC) AND (ti:"speculative decoding" OR ti:quantization OR ti:"KV cache" OR ti:pretraining OR ti:"scaling law" OR ti:"scaling laws" OR ti:GPU OR ti:GPUs OR ((ti:inference OR ti:serving OR ti:distillation) AND (abs:"language model" OR abs:"language models" OR abs:LLM OR abs:LLMs OR ti:LLM OR ti:LLMs)) OR (ti:kernel AND (abs:GPU OR abs:CUDA OR abs:Triton)))'
+  - id: arxiv-llm-agents
+    name: arXiv
+    direction: 01-ai-ml
+    kind: arxiv
+    url: "https://export.arxiv.org/api/query"
+    query: '(cat:cs.CL OR cat:cs.AI) AND (ti:agent OR ti:agents OR ti:agentic) AND (abs:"language model" OR abs:LLM OR abs:LLMs)'
+  - id: arxiv-search-recsys-ads
+    name: arXiv
+    direction: 07-search-ads-recs
+    kind: arxiv
+    url: "https://export.arxiv.org/api/query"
+    # ti:retrieval and ti:search only within cs.IR: in cs.LG they are mostly architecture and tree search.
+    query: '(cat:cs.IR AND (ti:recommendation OR ti:recommender OR ti:ranking OR ti:reranking OR ti:"click-through" OR ti:advertising OR ti:retrieval OR ti:search)) OR (cat:cs.LG AND (ti:recommendation OR ti:recommender OR ti:"click-through" OR ti:advertising))'
+  # After the arXiv queries on purpose: a paper both list keeps its arXiv direction, and the upvote
+  # only raises its rank there.
+  - id: hf-daily-papers
+    name: Hugging Face Daily Papers
+    direction: 01-ai-ml
+    kind: hf_daily
+    url: "https://huggingface.co/api/daily_papers"
+    max_bytes: 4194304
+  - id: openai-news
+    name: OpenAI
+    direction: 01-ai-ml
+    kind: feed
+    url: "https://openai.com/news/rss.xml" # a long feed back to 2015, newest first
+  - id: google-deepmind-blog
+    name: Google DeepMind
+    direction: 01-ai-ml
+    kind: feed
+    url: "https://deepmind.google/blog/rss.xml"
+  - id: google-research-blog
+    name: Google Research
+    direction: 01-ai-ml
+    kind: feed
+    url: "https://research.google/blog/rss/"
+  - id: microsoft-research-blog
+    name: Microsoft Research
+    direction: 01-ai-ml
+    kind: feed
+    url: "https://www.microsoft.com/en-us/research/feed/"
+  - id: interconnects
+    name: Interconnects
+    direction: 01-ai-ml
+    kind: feed
+    url: "https://www.interconnects.ai/feed"
+  - id: import-ai
+    name: Import AI
+    direction: 01-ai-ml
+    kind: feed
+    url: "https://importai.substack.com/feed" # weekly
+  - id: huggingface-blog
+    name: Hugging Face
+    direction: 01-ai-ml
+    kind: feed
+    url: "https://huggingface.co/blog/feed.xml"
+  - id: nature-machine-intelligence
+    name: Nature Machine Intelligence
+    direction: 01-ai-ml
+    kind: feed
+    url: "https://www.nature.com/natmachintell.rss"
+  - id: ahead-of-ai
+    name: Ahead of AI
+    direction: 08-llm-architectures
+    kind: feed
+    url: "https://magazine.sebastianraschka.com/feed" # about 2.7 MB with full posts
+    max_bytes: 4194304
+  - id: thinking-machines
+    name: Thinking Machines
+    direction: 08-llm-architectures
+    kind: feed
+    url: "https://thinkingmachines.ai/blog/index.xml"
+  - id: vllm-blog
+    name: vLLM
+    direction: 08-llm-architectures
+    kind: feed
+    url: "https://vllm.ai/blog/rss.xml"
+
+  # ---------- Science and AI for science ----------
+  - id: nature
+    name: Nature
+    direction: 02-science
+    kind: feed
+    url: "https://www.nature.com/nature.rss"
+  - id: science
+    name: Science
+    direction: 02-science
+    kind: crossref
+    url: "https://api.crossref.org/journals/1095-9203/works"
+    requires_abstract: true # Crossref lists news and editorials as journal articles
+  - id: nature-computational-science
+    name: Nature Computational Science
+    direction: 02-science
+    kind: feed
+    url: "https://www.nature.com/natcomputsci.rss"
+  - id: arxiv-ai-for-science
+    name: arXiv
+    direction: 02-science
+    kind: arxiv
+    url: "https://export.arxiv.org/api/query"
+    query: '(cat:cs.LG OR cat:physics.comp-ph) AND (ti:"neural operator" OR ti:"physics-informed" OR ti:"scientific discovery" OR ti:"AI for science" OR ti:emulator OR ti:"foundation model for")'
+
+  # ---------- Geophysics and seismology (leads for 02-science) ----------
+  - id: arxiv-geophysics-seismology
+    name: arXiv
+    direction: 02-science
+    kind: arxiv
+    url: "https://export.arxiv.org/api/query"
+    # Not abs:tomography: it pulls in medical CT.
+    query: 'cat:physics.geo-ph OR abs:seismic OR abs:seismology OR abs:earthquake OR abs:earthquakes OR abs:seismogram OR abs:"waveform inversion"'
+  - id: nature-geoscience
+    name: Nature Geoscience
+    direction: 02-science
+    kind: feed
+    url: "https://www.nature.com/ngeo.rss" # holds only the latest items
+  - id: nature-subject-seismology
+    name: Nature Portfolio
+    direction: 02-science
+    kind: feed
+    url: "https://www.nature.com/subjects/seismology.rss" # titles only
+  - id: jgr-solid-earth
+    name: JGR Solid Earth
+    direction: 02-science
+    kind: feed
+    url: "https://agupubs.onlinelibrary.wiley.com/feed/21699356/most-recent"
+  - id: grl
+    name: Geophysical Research Letters
+    direction: 02-science
+    kind: feed
+    url: "https://agupubs.onlinelibrary.wiley.com/feed/19448007/most-recent"
+    keywords: [seism*, earthquake*, fault*, mantle, crust*, tomograph*, waveform*, "machine learning",
+               "deep learning", "neural network*"]
+  - id: jgr-machine-learning-computation
+    name: JGR Machine Learning and Computation
+    direction: 02-science
+    kind: feed
+    url: "https://agupubs.onlinelibrary.wiley.com/feed/29935210/most-recent"
+  - id: gji
+    name: Geophysical Journal International
+    direction: 02-science
+    kind: crossref
+    url: "https://api.crossref.org/journals/1365-246X/works"
+    requires_abstract: true
+  - id: srl
+    name: Seismological Research Letters
+    direction: 02-science
+    kind: crossref
+    url: "https://api.crossref.org/journals/1938-2057/works"
+    requires_abstract: true
+  - id: bssa
+    name: BSSA
+    direction: 02-science
+    kind: crossref
+    url: "https://api.crossref.org/journals/1943-3573/works"
+    requires_abstract: true
+  - id: the-seismic-record
+    name: The Seismic Record
+    direction: 02-science
+    kind: crossref
+    url: "https://api.crossref.org/journals/2694-4006/works"
+    requires_abstract: true
+  - id: seg-geophysics
+    name: Geophysics (SEG)
+    direction: 02-science
+    kind: crossref
+    url: "https://api.crossref.org/journals/1942-2156/works"
+    requires_abstract: true
+  - id: seismica
+    name: Seismica
+    direction: 02-science
+    kind: feed
+    url: "https://seismica.library.mcgill.ca/gateway/plugin/WebFeedGatewayPlugin/atom" # served as text/html
+  - id: egu-solid-earth
+    name: Solid Earth (EGU)
+    direction: 02-science
+    kind: feed
+    url: "https://se.copernicus.org/xml/rss2_0.xml"
+  - id: eartharxiv
+    name: EarthArXiv
+    direction: 02-science
+    kind: feed
+    url: "https://eartharxiv.org/rss/preprints/" # not eartharxiv.org/feed/ (another feed)
+    keywords: [seism*, earthquake*, fault*, mantle, crust*, tomograph*, waveform*, "machine learning",
+               "deep learning", "neural network*"]
+
+  # ---------- World and economy ----------
+  - id: fed-press
+    name: Federal Reserve
+    direction: 04-economy
+    kind: feed
+    url: "https://www.federalreserve.gov/feeds/press_all.xml"

@@ -2,6 +2,7 @@
 
 import copy
 import json
+import pathlib
 
 import pytest
 
@@ -344,3 +345,14 @@ def test_invalid_or_misplaced_registry_fails_before_activation(
     baseline["files"][name] = value
     with pytest.raises(content_config.ContentConfigError):
         content_config.validate_snapshot(resign(baseline))
+
+
+def test_authored_bundle_carries_registry_and_a_bounded_feed_budget():
+    source = pathlib.Path(__file__).resolve().parents[1] / "content-config"
+    snapshot = content_config.build_directory(source, "a" * 40)
+    assert researcher.REGISTRY_FILE in snapshot["files"]
+    definition = content_config.config_definition(snapshot)
+    (feeds,) = [node for node in definition.nodes if node.type == "api_feed"]
+    assert feeds.on_error == "continue"
+    assert feeds.params == {"timeout_seconds": 180}
+    assert len(snapshot["files"]) < content_config.MAX_FILES

@@ -6,6 +6,7 @@ resolver and sleep, so no DNS, socket or real feed is touched.
 
 import asyncio
 import json
+import pathlib
 
 import httpx
 import pytest
@@ -33,6 +34,28 @@ def run(network, registry, *, budget=60.0, history=()):
 
 
 # Registry validation.
+
+
+def test_authored_registry_is_valid_and_bounded():
+    path = pathlib.Path(__file__).resolve().parents[1] / "content-config"
+    text = (path / "researcher.yaml").read_text(encoding="utf-8")
+    directions = [item.stem for item in (path / "discovery").glob("*.md")]
+    registry = researcher.validate_registry(text, directions)
+    assert 30 <= len(registry) <= researcher.MAX_SOURCES
+    assert len(text.encode()) <= 100_000
+    assert "b55b29b1" in text.split("version:", 1)[0]
+    assert {source.kind for source in registry} == researcher.KINDS
+    by_id = {source.id: source for source in registry}
+    # The upvote list follows the arXiv queries so a shared paper keeps its
+    # arXiv direction.
+    assert all(
+        by_id["hf-daily-papers"].index > source.index
+        for source in registry
+        if source.kind == "arxiv" and source.direction != "02-science"
+    )
+    assert by_id["ahead-of-ai"].max_bytes == researcher.MAX_SOURCE_BYTES
+    assert not by_id["nature"].keywords and not by_id["science"].keywords
+    assert by_id["science"].requires_abstract
 
 
 @pytest.mark.parametrize(
