@@ -64,7 +64,7 @@ setting without printing its value (a deploy without a var deletes it, so a miss
 | `DASHBOARD_ACCESS_OWNER` | secret | printable-ASCII e-mail | Worker secret `ACCESS_OWNER`; `Links deploy` and `Watch deploy` read it too (same owner, `links/README.md` "Deploy", `watch/README.md` "Deploy") |
 | `DASHBOARD_ACCESS_OWNER_ALIASES` | secret, may be empty | ≤ 8 unique printable-ASCII e-mails, ≤ 2048 chars | Worker secret `ACCESS_OWNER_ALIASES` (a single space when empty, so an emptied list replaces the old one); `Links deploy` and `Watch deploy` read it too |
 | `DASHBOARD_CF_ANALYTICS_TOKEN` | secret | `[A-Za-z0-9_-]{20,200}` | Worker secret `CF_ANALYTICS_TOKEN` (§4) |
-| `CF_API_TOKEN` | secret (existing, Todofy's deploy token) | – | `CLOUDFLARE_API_TOKEN` for the read-only hostname guard (`tools/cf-guard`) and `wrangler deploy` only; the secrets step also receives it, only to warn when `DASHBOARD_CF_ANALYTICS_TOKEN` equals it (never written anywhere) |
+| `CF_API_TOKEN` | secret (existing deploy token) | – | `CLOUDFLARE_API_TOKEN` for the read-only hostname guard (`tools/cf-guard`) and `wrangler deploy` only; the secrets step also receives it, only to warn when `DASHBOARD_CF_ANALYTICS_TOKEN` equals it (never written anywhere) |
 
 The secrets go to `$RUNNER_TEMP` (mode 0600) for `wrangler deploy --secrets-file` and are removed at the
 end. `GITHUB_SHA` becomes `--var BUILD_SHA` (shown by `/health`). Changing a variable or secret takes
@@ -81,23 +81,18 @@ two read-only purposes (both URLs are constants, not configuration):
 - the usage query: `POST .../graphql` (`worker/src/usage.ts`), at most once per tick and once per
   minute on an owner refresh;
 - the daily configuration drift check (`worker/src/drift.ts`, [`design-v2.md`](design-v2.md) §10):
-  `GET` on the account's Worker scripts, Custom Domains and audit log (writes since the previous check
-  not made with an API token), the zone's Worker routes, and each Worker's schedules, settings and
-  subdomain flags, at most 12 calls per tick on about four ticks a day. Only binding names and types are
-  kept from the settings, and only the way in, resource and action from the audit log; values, addresses
-  and ids are dropped while parsing. Audit writes appear under 最近账户操作 as history and do not count
+  `GET` on the account's Worker scripts, Custom Domains and audit log (writes not made with an API token
+  since the previous check, at least over the last day), the zone's Worker routes, and each Worker's
+  schedules, settings and subdomain flags, at most 12 calls per tick on about four ticks a day. Only
+  binding names and types are kept from the settings, and only the way in, resource and action from the
+  audit log; values, addresses and ids are dropped while parsing. Audit writes appear under 最近账户操作 as history and do not count
   as configuration differences. Read-only query resources are excluded even if the audit action says `create`.
 
 It is never logged, stored, echoed to the page or sent anywhere else, and unit tests check that it
 appears only in the authorization header of those requests.
 
-**Today a broader token is reused.** A token for this secret becomes a Worker secret of an
-internet-facing Worker, so it must be able to do no more than read analytics: any future bug in the
-Worker would otherwise expose account write access. The owner allowed reusing the deploy token until a
-read-only token is saved (2026-09-30), so when `DASHBOARD_CF_ANALYTICS_TOKEN` equals the deploy token
-`CF_API_TOKEN` `deploy-vars.mjs` only adds a "Broad analytics token" warning to the run (by name, without a
-value); it cannot check the scope of any other token. Replace it with a token that can only read
-analytics:
+A token for this secret becomes a Worker secret of an internet-facing Worker, so it must be able to do no
+more than read: any bug in the Worker would otherwise expose account write access. Create it as follows:
 
 1. Cloudflare dashboard → My Profile → API Tokens → Create Token → Custom token.
 2. Permissions: **Account → Account Analytics → Read** (the permission the GraphQL API needs for
@@ -114,8 +109,7 @@ analytics:
    shows fresh data (no "用量数据获取失败" item). The next day after 02:00 UTC, check that 配置漂移 on
    the Cloudflare view shows a completed check (not 检查失败 with HTTP 403). Record the dates in
    `verification.md`.
-7. Only then stop using the broader token for this purpose. Do not revoke it if it is still used
-   elsewhere (for example as a deploy token).
+7. Only then revoke a token it replaces, unless something else still uses that token.
 
 If the token lacks a Workers permission, 配置漂移 shows 检查失败 and the digest reports
 `drift_unavailable` after two failed days; usage is unaffected. Without Account Settings Read only the
@@ -127,10 +121,10 @@ procedure with a new token.
 ## 5. Local development
 
 ```sh
-cd dashboard/worker && npm ci
-cd ../web && npm ci && npm run build            # web/dist, served by the Worker
-cp ../.dev.vars.example ../.dev.vars           # synthetic local values, gitignored
-cd ../worker && npm run dev                      # http://127.0.0.1:8787, local bindings only, never --remote
+pnpm install --frozen-lockfile                       # from the repository root, the shared lock
+pnpm --dir dashboard/web run build                   # web/dist, served by the Worker
+cp dashboard/.dev.vars.example dashboard/.dev.vars   # synthetic local values, gitignored
+pnpm --dir dashboard/worker run dev                  # http://127.0.0.1:8787, local bindings only, never --remote
 ```
 
 `dashboard/wrangler.toml` is production, so local work always uses local bindings, and the local values
@@ -138,7 +132,7 @@ come from the untracked `dashboard/.dev.vars` next to it (wrangler reads the `.d
 config), with synthetic values only: the local `PUBLIC_HOST`, `BUILD_SHA`, `CANARY_ENABLED`,
 `DEV_AUTH_BYPASS=true` and `ACCESS_OWNER=owner@example.com` ([`.dev.vars.example`](../.dev.vars.example)). The bypass works only for
 `http://localhost`, `127.0.0.1` or `[::1]` requests without `cf-ray`; anywhere else an enabled bypass
-answers 503. `npm run dev` (`worker/package.json`) pins the local origin with `--ip 127.0.0.1 --port 8787
+answers 503. The worker's `dev` script (`worker/package.json`) pins the local origin with `--ip 127.0.0.1 --port 8787
 --local-upstream 127.0.0.1:8787`: wrangler dev otherwise takes the config's first route as every local
 request's URL, so the Worker would see `https://home.ziyixi.science` and refuse the bypass (503
 `access_not_configured`). Change `--port` and `--local-upstream` together, and never run a bare

@@ -37,7 +37,8 @@ Besides the page it runs four jobs:
   every personal value is a secret) are compared with the desired state generated from every committed
   `wrangler.toml` and deploy wrapper (`worker/src/drift-desired.json`, by
   [`.github/scripts/drift_desired.py`](../.github/scripts/drift_desired.py)), and the account audit log is
-  read for writes since the previous check not made with an API token (a dashboard edit, a laptop deploy).
+  read for writes not made with an API token (a dashboard edit, a laptop deploy) since the previous check, and
+  at least over the last day.
   The seven configuration categories determine the drift status and digest warning; a clean comparison says
   无配置差异. Account writes appear separately as 最近账户操作, with their read time, resource and action counts.
   They remain historical information even after a later check fails. Queries are excluded, including Durable

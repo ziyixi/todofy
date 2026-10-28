@@ -76,7 +76,7 @@ route `home.ziyixi.science` with `custom_domain = true`. One cron
 | `CANARY_ENABLED` | var | `true` or `false` (§5.4 "Switch"); unset or empty → `true`; any other value → `false` (the switch exists to stop canaries, so an unreadable value never starts one; `deploy-vars.mjs` sends only `true`/`false`) |
 | `BUILD_SHA` | var | the deployed commit (`dev` locally) |
 | `ACCESS_OWNER`, `ACCESS_OWNER_ALIASES` | secret | printable-ASCII emails, ≤ 8 aliases, ≤ 2048 chars; empty aliases uploaded as `" "` |
-| `CF_ANALYTICS_TOKEN` | secret | API token used **only** as `Authorization: Bearer` on `POST https://api.cloudflare.com/client/v4/graphql` and on the drift check's read-only `GET`s under `https://api.cloudflare.com/client/v4` (design-v2.md §10; URLs are constants, not config). Never logged, stored, echoed or sent elsewhere. Today a broader token is reused; replace it with an "Account Analytics: Read" token (setup.md) |
+| `CF_ANALYTICS_TOKEN` | secret | API token used **only** as `Authorization: Bearer` on `POST https://api.cloudflare.com/client/v4/graphql` and on the drift check's read-only `GET`s under `https://api.cloudflare.com/client/v4` (design-v2.md §10; URLs are constants, not config). Never logged, stored, echoed or sent elsewhere. A read-only token (setup.md §4) |
 | `DEV_AUTH_BYPASS` | local only | `true` enables the loopback bypass; never in the production config (tests check it) |
 | `DEV_NOW` | local only | an RFC 3339 UTC instant that a request the loopback bypass signed in takes as now (views, refreshes, manual canary, guard override); unset or anything else → the object's clock. Requests Access verified and cron ticks never read it; never in the production config, the deploy's `--var`s or its secrets (tests check it) |
 
@@ -408,7 +408,8 @@ The shapes are `worker/src/api-types.ts`. Details:
 - **Owner JSON mutations**: after Access authentication and before reading the body, `verifyCsrf` requires
   an exact origin from `['https://' + PUBLIC_HOST]` (plus the request origin only when bypassed), a nonempty
   `X-CSRF-Token` header and `application/json`. Failure is 403 `csrf_failed`. Clients send header `1`
-  directly. Compatibility `GET /api/csrf` returns static `1` without a cookie or signing key.
+  directly. Compatibility `GET /api/csrf` returns static `1` without a cookie or signing key, for tabs still
+  running a UI that fetched a token first, until 2026-11-02 (with the retired `/api/v2` paths).
 - **Headers**: every response through `withPrivateHeaders` with `STRICT_CSP` (no remote fonts, scripts
   or connections); API and errors `cache-control: no-store`; `/assets/*` 200 non-HTML may use
   `private, max-age=31536000, immutable` like Todofy. JSON is `application/json; charset=utf-8`.
@@ -610,7 +611,7 @@ The production config is the committed `dashboard/wrangler.toml` (top level = pr
 no `keep_vars`): account, route and `PUBLIC_HOST`, Access issuer and AUD, `ACCOUNT_ID`, `CANARY_UTC_HOUR`,
 entry `worker/src/index.ts`, assets `web/dist`, the Durable Object, its migration, the service bindings and
 the cron. `deploy/test/wrangler-config.test.mjs` reads it with the pinned wrangler's own
-`experimental_readRawConfig` (from `worker/node_modules`, so `npm ci` in `worker/` comes first) and checks
+`experimental_readRawConfig` (from `worker/node_modules`, so the root `pnpm install` comes first) and checks
 the known keys, formats and bounds; `.github/scripts/test_wrangler_configs.py` checks that its host differs
 from the registered apps' hosts and that the registry's app links match them. What is never committed is added at
 deploy by `deploy/deploy-vars.mjs` (Mail Hero's style; messages name settings, never print values):
@@ -645,8 +646,8 @@ Action SHAs and job names must be read from the current workflow.
   and stays the default). A dashboard change also runs `Contracts`, which gained a host-only step in
   `dashboard/worker` (`test/ops-client.test.ts`, `guard`, `canary`, `digest`): the caller side of ops-v1
   next to both apps' sides.
-- **Dashboard checks** (`needs: changes`, `if: dashboard_check`, working directory `dashboard`): `npm ci`
-  in `worker` and `web`; `node --test deploy/test/*.test.mjs`; worker `lint`, `typecheck`, `test`,
+- **Dashboard checks** (`needs: changes`, `if: dashboard_check`, working directory `dashboard`): the root
+  workspace install of `worker` and `web`; `node --test deploy/test/*.test.mjs`; worker `lint`, `typecheck`, `test`,
   `test:runtime`; web `lint`, `typecheck`, `test`, `build`; a guard that no file under `worker/src` or
   `web/src` imports from `mail-hero/` or `todofy/`; from `worker/`, `deploy-vars.mjs secrets` with
   placeholder values, then `deploy-vars.mjs exec -- wrangler deploy --dry-run --config ../wrangler.toml
@@ -666,6 +667,6 @@ Action SHAs and job names must be read from the current workflow.
 
 ## 11. Open items
 
-- Production checks (verification.md): real Access login and alias; GraphQL with the replacement
-  "Account Analytics: Read" token; the first real canary; whether `Ops` calls count in the apps'
+- Production checks (verification.md): real Access login and alias; GraphQL with a read-only token
+  (setup.md §4); the first real canary; whether `Ops` calls count in the apps'
   Worker request totals; the deploy probe.
