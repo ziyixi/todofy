@@ -1,6 +1,7 @@
 /** The existing Watch feed produces facts; relevance decisions stay in each work record. */
 import { RpcStatusError } from '@ziyixi/proto/http-client';
 import { toWire } from '@ziyixi/proto/wire-json';
+import { RESTORED } from './events.ts';
 import { WatchEventSchema, WatchEvent_Kind } from '@ziyixi/proto/watch/ui/v1/watch_ui_service_pb';
 import { createWatchClient, type WatchToolEnv } from './watch.ts';
 import type { WorkStorage, WorkStore } from './work-store.ts';
@@ -13,8 +14,8 @@ const HEALTH_SUMMARIES: Partial<Record<WatchEvent_Kind, string>> = {
   [WatchEvent_Kind.WATCH_BROKEN]: 'Watch checks are failing. Read its health before relying on this watch.',
   [WatchEvent_Kind.WATCH_PAUSED]: 'Watch was paused after prolonged failures. Review its health and decide whether to resume.',
 };
-const GAP_SUMMARY = 'Watch events expired before they were read, so changes in that period were not reported here. '
-  + 'Read watch_changes for the linked Watches before relying on this work.';
+const GAP_SUMMARY = 'Watch events could not be read from where this work left off (they expired, or Watch was restored), '
+  + 'so changes in that period were not reported here. Read watch_changes for the linked Watches before relying on this work.';
 type SourceRow = { state: string; checked_at: number; error_code: string | null };
 
 export class WorkWatchSource {
@@ -66,9 +67,10 @@ export class WorkWatchSource {
   }
 
   /**
-   * The feed's retention outran the cursor: each open Work with a Watch gets one blocked report about the gap, then the
-   * cursor starts again from now. The report ID comes from the expired cursor, and a Work that already has it is
-   * skipped, so a retry after a failed baseline neither repeats nor conflicts with a report (its links may have changed).
+   * The feed's retention outran the cursor (or a Watch restored behind it refuses a restored one): each open Work with
+   * a Watch gets one blocked report about the gap, then the cursor starts again from now. The report ID comes from the
+   * expired cursor, and a Work that already has it is skipped, so a retry after a failed baseline neither repeats nor
+   * conflicts with a report (its links may have changed).
    */
   private async recoverGap(expired: string): Promise<void> {
     const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(expired)));
@@ -93,7 +95,10 @@ export class WorkWatchSource {
       try {
         page = await this.client.pollWatchEvents({ cursor: row.state, baseline: false, pageSize: PAGE_SIZE });
       } catch (error) {
-        if (!(error instanceof RpcStatusError && error.status.reason === 'CURSOR_EXPIRED')) throw error;
+        // The feed's retention outran the cursor, or a restored cursor is ahead of a Watch restored behind it.
+        const gap = error instanceof RpcStatusError && (error.status.reason === 'CURSOR_EXPIRED'
+          || row.error_code === RESTORED && error.status.status === 'INVALID_ARGUMENT');
+        if (!gap) throw error;
         await this.recoverGap(row.state);
         return;
       }
@@ -115,8 +120,10 @@ export class WorkWatchSource {
       this.storage.sql.exec('UPDATE event_sources SET state=?,checked_at=?,error_code=NULL WHERE name=? AND state=?',
         page.cursor, Date.now() - (page.hasMore ? WATCH_POLL_INTERVAL_MS - 1000 : 0), WATCH_SOURCE_NAME, row.state);
     } catch {
+      // A restored cursor keeps its mark until Watch answers it.
       this.storage.sql.exec(`INSERT INTO event_sources VALUES (?,'',?,?) ON CONFLICT(name)
-        DO UPDATE SET checked_at=excluded.checked_at,error_code=excluded.error_code`, WATCH_SOURCE_NAME, Date.now(), 'watch_source_unavailable');
+        DO UPDATE SET checked_at=excluded.checked_at,error_code=iif(error_code=?,error_code,excluded.error_code)`,
+      WATCH_SOURCE_NAME, Date.now(), 'watch_source_unavailable', RESTORED);
       // Reading work remains possible. The caller also receives this source status, never a false no-change result.
     }
   }

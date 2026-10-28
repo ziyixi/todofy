@@ -3,13 +3,15 @@ import { createMcpHandler, ProtocolError } from '@modelcontextprotocol/server';
 import { asciiLowerCase, withPrivateHeaders } from '@ziyixi/edge-auth';
 import { authenticate } from './auth.ts';
 import { createServer, EVENT_NAMES, TEST_EVENT_NAME, WORK_EVENT_NAME, type EventName, type GateApi, type SubscribeParams, type UnsubscribeParams } from './server.ts';
-import { baselineSource, pollSource, SOURCE_NAMES, type SourceEvent, type SourceName, type SourceState } from './events.ts';
-import type { Env } from './env.ts';
+import { baselineSource, pollSource, rebaselineSource, RESTORED, SOURCE_NAMES, type SourceEvent, type SourceName, type SourceState } from './events.ts';
+import { STORE_OBJECT, type Env } from './env.ts';
 import { postSigned, validateCallback, verifyCallback } from './webhook.ts';
 import { buildOpsStatus } from './ops.ts';
 import { RpcStatusError } from '@ziyixi/proto/http-client';
 import { WorkStore, type WorkAttention } from './work-store.ts';
 import { WorkWatchSource } from './watch-events.ts';
+import { backupStatus, CONTINUE_MS, runBackup } from './backup.ts';
+import { restoreState, restoreStep, restoreUnfinished, restoreView, startRestore } from './restore.ts';
 
 type Subscription = {
   id: string; owner: string; name: EventName; arguments: string; url: string; secret: string; expires_at: number | null; verified_at: number;
@@ -28,6 +30,7 @@ type SubscriptionRequest = {
   reason?: string;
 };
 const DEFAULT_LIFETIME_MS = 30 * 24 * 60 * 60_000;
+const OWNER_RESTORE_PATH = '/owner/restore';
 const RETRY_MS = [60_000, 300_000];
 const SOURCE_INTERVAL_MS = 60_000;
 
@@ -87,6 +90,10 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
     if (!auth.ok) return withPrivateHeaders(Response.json({ error: auth.failure }, {
       status: ['not_configured', 'keys_unavailable'].includes(auth.failure) ? 503 : 401,
     }));
+    if (new URL(request.url).pathname === OWNER_RESTORE_PATH) return withPrivateHeaders(await this.ownerRestore(request));
+    // Until a restore is done the store answers nothing else: no write, and no read of half a store.
+    if (restoreUnfinished(this.ctx.storage)) return withPrivateHeaders(Response.json({ error: 'restore_unfinished' },
+      { status: 503, headers: { 'retry-after': '60' } }));
     const attempt = request.headers.get('Mcp-Method') === 'events/subscribe'
       ? await this.recordSubscriptionRequest(request) : undefined;
     if (request.headers.get('Mcp-Method') === 'tools/call'
@@ -108,6 +115,29 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
       throw error;
     }
     finally { await handler.close(); }
+  }
+
+  /**
+   * The owner's restore call (docs/backup.md), behind Access and the same assertion and Origin checks as /mcp: GET
+   * answers the backup's and the restore's state; POST {"backup": "backups/<job start>/"} starts a restore into this
+   * store when it is empty, or resumes an unfinished one of the same backup.
+   */
+  private async ownerRestore(request: Request): Promise<Response> {
+    if (request.method === 'GET') return Response.json(this.backupView());
+    if (request.method !== 'POST') return Response.json({ error: 'method_not_allowed' }, { status: 405, headers: { allow: 'GET, POST' } });
+    // A JSON body cannot come from a cross-site form; a cross-site script's Origin was refused above.
+    if (!request.headers.get('content-type')?.toLowerCase().startsWith('application/json'))
+      return Response.json({ error: 'json_required' }, { status: 415 });
+    let body: unknown;
+    try { body = await request.json(); } catch { return Response.json({ error: 'invalid_json' }, { status: 400 }); }
+    const backup = typeof body === 'object' && body !== null && 'backup' in body ? body.backup : undefined;
+    const { status, ...answer } = await startRestore(this.ctx.storage, this.env.BACKUPS, backup, Date.now());
+    if (status === 202) await this.ctx.storage.setAlarm(Date.now());
+    return Response.json(answer, { status });
+  }
+
+  private backupView() {
+    return { backup: backupStatus(this.ctx.storage, this.env.BACKUPS).facts, restore: restoreView(restoreState(this.ctx.storage)) };
   }
 
   private async recordSubscriptionRequest(request: Request): Promise<SubscriptionRequest> {
@@ -256,10 +286,29 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
       last_tool_at: await this.ctx.storage.get<number>('last_tool_at') ?? null,
       last_subscription_at: await this.ctx.storage.get<number>('last_subscription_at') ?? null,
       last_subscription_request: await this.ctx.storage.get<SubscriptionRequest>('last_subscription_request') ?? null,
+      ...this.backupView(),
       meaning: 'accepted means ChatGPT received the webhook; it does not prove the Dot finished its work.' };
   }
 
-  async getOpsStatus() { return buildOpsStatus(await this.status()); }
+  /**
+   * Also the one write ops-v1 allows: Home's tick re-arms a lost Alarm, or brings it forward (never later) to a due
+   * backup; the first one after the release that bound the bucket starts this way.
+   */
+  async getOpsStatus() {
+    const status = await this.status();
+    if (this.serving()) {
+      const alarm = await this.ctx.storage.getAlarm();
+      const backupAt = restoreUnfinished(this.ctx.storage) ? Infinity : backupStatus(this.ctx.storage, this.env.BACKUPS).due;
+      if (alarm === null) await this.schedulePending();
+      else if (backupAt < alarm) await this.ctx.storage.setAlarm(Math.max(backupAt, Date.now()));
+    }
+    return buildOpsStatus(status);
+  }
+
+  /** Whether this is the object the Worker routes to; one a release moved away from (docs/backup.md) stays quiet. */
+  private serving(): boolean {
+    return this.ctx.id.equals(this.env.SUBSCRIPTIONS.idFromName(STORE_OBJECT));
+  }
 
   initializeWorkSources(): Promise<void> { return this.workWatches.initialize(); }
 
@@ -294,6 +343,17 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
   }
 
   override async alarm(): Promise<void> {
+    if (!this.serving()) {
+      await this.ctx.storage.deleteAlarm();
+      return;
+    }
+    if (restoreUnfinished(this.ctx.storage)) {
+      // Only the restore runs; a failed one waits for the owner to resume it.
+      const next = await restoreStep(this.ctx.storage, this.env.BACKUPS, Date.now());
+      if (next !== null) await this.ctx.storage.setAlarm(next);
+      else await this.schedulePending();
+      return;
+    }
     await this.pollSources();
     if (this.hasWorkSubscription()) await this.workWatches.refresh();
     const pending = this.ctx.storage.sql.exec<Delivery>(
@@ -325,6 +385,7 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
         WHERE subscription_id=? AND event_id=?`, state, attempts, Date.now() + (delay ?? 0), accepted ? Date.now() : null,
       code || null, sub.id, delivery.event_id);
     }
+    await runBackup(this.ctx.storage, this.env.BACKUPS, Date.now());
     await this.schedulePending();
   }
 
@@ -345,10 +406,13 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
       const row = this.source(name);
       if (!row || Date.now() - row.checked_at < SOURCE_INTERVAL_MS) continue;
       try {
-        const result = await pollSource(name, JSON.parse(row.state) as SourceState, this.env,
-          () => new Map(this.ctx.storage.sql.exec<{ task_id: string; etag: string }>(
-            'SELECT task_id, etag FROM own_changes ORDER BY rowid DESC LIMIT 2000',
-          ).toArray().map(task => [task.task_id, task.etag])));
+        const state = JSON.parse(row.state) as SourceState;
+        const result = row.error_code === RESTORED
+          ? { state: await rebaselineSource(name, state, this.env, Date.now()), events: [] }
+          : await pollSource(name, state, this.env,
+            () => new Map(this.ctx.storage.sql.exec<{ task_id: string; etag: string }>(
+              'SELECT task_id, etag FROM own_changes ORDER BY rowid DESC LIMIT 2000',
+            ).toArray().map(task => [task.task_id, task.etag])));
         const now = Date.now();
         this.ctx.storage.transactionSync(() => {
           const current = this.source(name);
@@ -360,8 +424,9 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
       } catch (error) {
         const code = error instanceof RpcStatusError && error.status.reason === 'CURSOR_RESET_REQUIRED'
           ? 'cursor_reset_required' : 'source_unavailable';
-        this.ctx.storage.sql.exec('UPDATE event_sources SET checked_at=?, error_code=? WHERE name=? AND state=? AND checked_at=?',
-          Date.now(), code, name, row.state, row.checked_at);
+        // A restored source keeps its mark until its new baseline succeeds.
+        this.ctx.storage.sql.exec(`UPDATE event_sources SET checked_at=?, error_code=iif(error_code=?,error_code,?)
+          WHERE name=? AND state=? AND checked_at=?`, Date.now(), RESTORED, code, name, row.state, row.checked_at);
       }
     }
   }
@@ -409,11 +474,15 @@ export class SubscriptionStore extends DurableObject<Env> implements GateApi {
   }
 
   private async schedulePending(): Promise<void> {
+    const restore = restoreState(this.ctx.storage);
+    if (restore?.phase === 'running') return this.ctx.storage.setAlarm(Date.now() + CONTINUE_MS);
+    if (restore?.phase === 'failed') return this.ctx.storage.deleteAlarm();
     const row = this.ctx.storage.sql.exec<{ next_at: number | null }>("SELECT min(next_at) AS next_at FROM deliveries WHERE state = 'pending'").one();
     const checks = this.activeSources().map(name => this.source(name)?.checked_at ?? Date.now());
     if (this.hasWorkSubscription() && this.workWatches.hasLinks()) checks.push(this.workWatches.status().checked_at ?? Date.now());
     const sourceAt = checks.length ? Math.min(...checks) + SOURCE_INTERVAL_MS : null;
-    const next = [row.next_at, sourceAt].filter((value): value is number => value !== null);
+    const backupAt = backupStatus(this.ctx.storage, this.env.BACKUPS).due;
+    const next = [row.next_at, sourceAt, Number.isFinite(backupAt) ? backupAt : null].filter((value): value is number => value !== null);
     if (!next.length) await this.ctx.storage.deleteAlarm();
     else await this.ctx.storage.setAlarm(Math.max(Date.now() + 1000, Math.min(...next)));
   }
