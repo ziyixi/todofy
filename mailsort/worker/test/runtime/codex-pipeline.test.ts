@@ -4,7 +4,7 @@ import { create } from '@ziyixi/proto/protobuf';
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt';
 import { MailFlow_Stage } from '@ziyixi/proto/mailsort/ui/v2/flow_pb';
 import { ClassificationPromptSchema } from '@ziyixi/proto/mailsort/ui/v2/prompt_pb';
-import { ClassificationProvider, Mode, SettingsSchema, UnreadClassification_State } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
+import { ClassificationProvider, Mode, SettingsSchema } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
 import { PRIORITY_LABELS } from '../../src/priority.ts';
 import { MAILS, type SyntheticMail } from '../fakes/fixtures.ts';
 import { MODEL_ENDPOINT } from '../fakes/upstream.ts';
@@ -80,7 +80,7 @@ describe('Codex priority pipeline', () => {
     expect(h.up.codex.calls.flat().map(email => email.id)).toEqual([mail(91).id, mail(92).id]);
   });
 
-  it('applies all four priorities, records Codex flow and counts unchanged explicit rechecks correctly', async () => {
+  it('applies all four priorities and records Codex flow', async () => {
     await initialize();
     await select(ClassificationProvider.CODEX);
     const owner = h.up.gmail.createUserLabel('Synthetic owner tag');
@@ -96,20 +96,14 @@ describe('Codex priority pipeline', () => {
     expect(h.up.codex.calls).toHaveLength(4);
     expect(h.up.codex.requests.every(request => request.model === 'gpt-6.1-sol')).toBe(true);
     expect(h.up.claude.calls).toEqual([]);
-    expect(h.up.ai.calls).toEqual([]);
     expect(await h.sql(`SELECT requests FROM claude_usage`)).toEqual([]);
     const flow = await h.api.getMailFlow({ name: 'mailFlows/today' });
     expect(flow.counts.filter(row => row.stage === MailFlow_Stage.CODEX).reduce((sum, row) => sum + row.mailCount, 0)).toBe(4);
     expect(flow.counts.some(row => row.stage === MailFlow_Stage.CLAUDE)).toBe(false);
     const status = await h.api.getServiceStatus({ name: 'serviceStatus' });
     expect(status.classifier).toMatchObject({ provider: ClassificationProvider.CODEX, model: 'gpt-6.1-sol', effort: 'medium', configured: true, lastErrorCode: '', lastSuccessTime: timestampFromMs(T0 + 3 * HOUR + 2 * MINUTE) });
-    expect(status.codexUsage).toMatchObject({ month: '2026-10', requestCount: 4, successCount: 4, failureCount: 0, usageReportedCount: 4, inputTokens: 4800, outputTokens: 480, lastRequestTime: timestampFromMs(T0 + 3 * HOUR + 2 * MINUTE) });
-    await h.clock(T0 + 3 * HOUR + 3 * MINUTE);
-    await h.api.startUnreadClassification({ name: 'unreadClassification', recheckInitial100: true, requestId: op() });
-    await h.step(T0 + 3 * HOUR + 4 * MINUTE);
-    expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).unreadClassification).toMatchObject({
-      state: UnreadClassification_State.COMPLETED, totalCount: 4, appliedCount: 3, unchangedCount: 1, skippedCount: 0, failedCount: 0,
-    });
+    expect(status.codexUsage).toBeUndefined();
+    expect(await h.sql(`SELECT count(*) AS n FROM codex_usage`)).toEqual([{ n: 0 }]);
     expect(h.up.claude.calls).toEqual([]);
   });
 
@@ -152,8 +146,6 @@ describe('Codex priority pipeline', () => {
     expect(await h.step(T0 + 3 * MINUTE)).toMatchObject({ decided: 1, applied: 1 });
     expect(await decision(h, mail(21).id)).toMatchObject({ decider: 'codex', model: 'gpt-6.1-sol' });
     expect(await h.sql(`SELECT * FROM claude_usage`)).toEqual(usage);
-    const codexUsage = (await h.api.getServiceStatus({ name: 'serviceStatus' })).codexUsage;
-    expect(codexUsage).toMatchObject({ requestCount: 1, successCount: 1, usageReportedCount: 1, inputTokens: 1200, outputTokens: 120 });
     const flow = await h.api.getMailFlow({ name: 'mailFlows/today' });
     expect(flow.counts.filter(row => row.stage === MailFlow_Stage.DEFERRED).reduce((sum, row) => sum + row.mailCount, 0)).toBe(0);
     expect(flow.counts.filter(row => row.stage === MailFlow_Stage.CODEX).reduce((sum, row) => sum + row.mailCount, 0)).toBe(1);
@@ -165,7 +157,6 @@ describe('Codex priority pipeline', () => {
     expect(h.up.claude.calls).toEqual([]);
     expect(await h.sql(`SELECT * FROM claude_usage`)).toEqual(usage);
     expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).claudeBudget).toMatchObject({ spentUsd: 20, providerLimitReached: true });
-    expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).codexUsage).toEqual(codexUsage);
     expect(await decision(h, mail(22).id)).toBeUndefined();
     expect(modifies(h)).toHaveLength(1);
   });
@@ -182,11 +173,9 @@ describe('Codex priority pipeline', () => {
     expect(h.up.claude.calls).toEqual([]);
     expect(await h.sql(`SELECT requests FROM claude_usage`)).toEqual([]);
     expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).classifier?.lastErrorCode).toBe('codex_bad_answer');
-    expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).codexUsage).toMatchObject({ requestCount: 1, successCount: 0, failureCount: 1, usageReportedCount: 1, inputTokens: 1200, outputTokens: 120 });
     h.up.codex.badItems = false;
     expect(await h.step(T0 + 7 * MINUTE)).toMatchObject({ decided: 1, applied: 1 });
     expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).classifier?.lastErrorCode).toBe('');
-    expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).codexUsage).toMatchObject({ requestCount: 2, successCount: 1, failureCount: 1, usageReportedCount: 2, inputTokens: 2400, outputTokens: 240 });
     expect(h.up.claude.calls).toEqual([]);
   });
 
@@ -201,45 +190,18 @@ describe('Codex priority pipeline', () => {
     expect(h.up.claude.calls).toEqual([]);
     expect(modifies(h)).toEqual([]);
     expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).classifier).toMatchObject({ provider: ClassificationProvider.CODEX, configured: false, lastErrorCode: 'codex_not_configured' });
-    expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).codexUsage).toMatchObject({ requestCount: 0, failureCount: 0 });
   });
 
-  it('records an HTTP failure as one attempted request without inventing token usage', async () => {
+  it('switches only the model and its deferred work while retaining write limits and Gmail retry times', async () => {
     await initialize();
-    await select(ClassificationProvider.CODEX);
-    h.up.codex.errorReason = 'MODEL_UNAVAILABLE';
-    h.up.codex.errorCode = 14;
-    deliver(h, mail(42), T0 + MINUTE);
-    expect(await h.step(T0 + 2 * MINUTE)).toMatchObject({ code: 'codex_unavailable', decided: 0, applied: 0 });
-    expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).codexUsage).toMatchObject({ requestCount: 1, successCount: 0, failureCount: 1, usageReportedCount: 0, inputTokens: 0, outputTokens: 0, lastRequestTime: timestampFromMs(T0 + 2 * MINUTE) });
-    expect(modifies(h)).toEqual([]);
-  });
-
-  it('keeps a valid classification with unavailable legacy token usage separate from reported zero tokens', async () => {
-    await initialize();
-    await select(ClassificationProvider.CODEX);
-    h.up.codex.inputTokens = 0;
-    h.up.codex.outputTokens = 0;
-    h.up.codex.usageAvailable = false;
-    deliver(h, mail(43), T0 + MINUTE);
-    await h.step(T0 + 2 * MINUTE);
-    expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).codexUsage).toMatchObject({ requestCount: 1, successCount: 1, usageReportedCount: 0 });
-    h.up.codex.usageAvailable = true;
-    deliver(h, mail(44), T0 + HOUR + MINUTE);
-    await h.step(T0 + HOUR + 2 * MINUTE);
-    expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).codexUsage).toMatchObject({ requestCount: 2, successCount: 2, usageReportedCount: 1, inputTokens: 0, outputTokens: 0 });
-  });
-
-  it('switches only the model and its deferred work while retaining breaker, write limits and Gmail retry times', async () => {
-    await initialize();
-    await h.sql(`UPDATE meta SET value = json_set(value, '$.breaker', 'label_share', '$.runWriteLimit', 2, '$.dailyWriteLimit', 7) WHERE key = 'settings'`);
+    await h.sql(`UPDATE meta SET value = json_set(value, '$.runWriteLimit', 2, '$.dailyWriteLimit', 7) WHERE key = 'settings'`);
     await h.sql(`INSERT INTO pending (message_id, added_at, not_before, attempts, deferred) VALUES ('model-held', ?, ?, 0, ?), ('gmail-retry', ?, ?, 2, 0)`, T0, T0 + HOUR, T0, T0, T0 + HOUR);
     await h.sql(`INSERT INTO meta (key, value) VALUES ('next_model_at', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, String(T0 + HOUR));
     const before = await h.api.getSettings({ name: 'settings' });
     const googleCalls = h.up.gmail.calls.length;
     await h.clock(T0 + 3 * MINUTE);
     const saved = await select(ClassificationProvider.CODEX);
-    expect(saved).toMatchObject({ classificationProvider: ClassificationProvider.CODEX, mode: before.mode, effectiveMode: before.effectiveMode, breakerTripped: true, breakerReason: 'label_share', runWriteLimit: 2, dailyWriteLimit: 7 });
+    expect(saved).toMatchObject({ classificationProvider: ClassificationProvider.CODEX, mode: before.mode, effectiveMode: before.effectiveMode, runWriteLimit: 2, dailyWriteLimit: 7 });
     expect(await h.sql(`SELECT value FROM meta WHERE key = 'next_model_at'`)).toEqual([{ value: String(T0 + 3 * MINUTE) }]);
     expect(await h.sql(`SELECT message_id, not_before, attempts, deferred FROM pending ORDER BY message_id`)).toEqual([
       { message_id: 'gmail-retry', not_before: T0 + HOUR, attempts: 2, deferred: 0 },

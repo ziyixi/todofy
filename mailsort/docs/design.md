@@ -40,8 +40,8 @@ no request or response content. The Router and gateway receive no Gmail authoriz
 | Legacy review content | 14 days after arrival |
 | Non-content decisions and write ledger; sender as salted hash | 180 days |
 | Historical replay metadata | 7 days |
-| Daily aggregate counters, Codex request outcomes/reported tokens and returned Claude usage | 400 days |
-| Historical masked examples and embeddings | Owner deletion, maximum 2,000 |
+| Daily aggregate counters, returned Claude usage and historical Codex usage rows | 400 days |
+| Historical masked examples and embeddings | Owner deletion, maximum 2,000; a withdrawn verdict or a "none" choice deletes its mail's example |
 | Fixed labels and Gmail identities | Until explicit app-data removal |
 | Saved base prompt and personal rules | Until replaced or app-data removal |
 | Owner request receipts | 1 day |
@@ -60,7 +60,7 @@ body or credentials. The website `/privacy/mailsort` must match these operations
 | p4 / P4 | Notifications and promotions kept for reference | Archive |
 
 Personal rules take precedence over the base guidance. Initial preferences: ordinary USPS Informed Delivery P2,
-same-day action P1; Daily Briefing P1; actual shopping receipts/order confirmations (including Weee/Yami) P2.
+same-day action P1; Daily Briefing P1; actual shopping receipts/order confirmations (any shopping platform) P2.
 Brand promotions do not become purchase receipts. These rules are editable text, with no sender-specific code
 branches, scam score, probability threshold or forced category balance. A provider error cannot become a priority.
 
@@ -76,13 +76,14 @@ one snapshot. Saving affects the next call, preserves in-flight/historical decis
 There is no prompt history, reset service or automatic reclassification.
 
 Off stops Gmail/model work; shadow records model decisions without Gmail changes; live applies them. The existing
-deployment ceiling and breaker can lower the owner mode. Setup or deployment does not raise it or replay old mail.
+deployment ceiling can lower the owner mode. Setup or deployment does not raise it or replay old mail. The former
+breaker is removed: a stored breaker is ignored, and `Settings.breaker_tripped` and Ops `modes.breaker` stay false.
 
 `Settings.classification_provider` persists one of two choices: Claude API (`claude-opus-5-5`, medium) or VPS Codex
-(`gpt-6.1-sol`, medium). A missing legacy field means Claude until the owner chooses otherwise. Both use the same
+(`gpt-6.1-sol`, medium). A missing field means Codex, the provider in use (a fresh install or rebuilt state). Both use the same
 saved prompt snapshot. The existing mask, etag and request-ID handling protects a switch; it preserves mode,
-breaker, write limits, prompt and Claude accounting history. The existing Alarm can resume pending work with the
-chosen provider. A switch does not start an unread/recheck batch, rewrite classified history or enable automatic fallback.
+write limits, prompt and Claude accounting history. The existing Alarm can resume pending work with the
+chosen provider. A switch does not start an unread batch, rewrite classified history or enable automatic fallback.
 
 ## 4. Automatic batch interval
 
@@ -97,13 +98,14 @@ settings save adopts a missing legacy interval once, converting an ordinary 60-m
 persisting the field. Later reads and Alarms do not repeatedly move it. No new scheduler or table is introduced.
 The pass stays within 40 external requests and existing run/day Gmail write caps. Message eligibility and existing
 P1-P4 labels are checked before a reached write cap can defer it, so skip-only work can finish without a model or
-Gmail write. Eligible mail waits through the normal queue; a routine cap is not a breaker fault.
+Gmail write. Eligible mail waits through the normal queue; a reached cap only waits.
 
 History registers messages independently by Gmail message ID. Normal processing retains its Inbox and receipt
 scope: Inbox mail received within 48 hours of first enqueue, with a known receipt date and no P1-P4 label.
 Read and unread mail are both eligible. Valid prior decisions remain frozen. Each recent new reply can be judged independently of other
 messages in its thread. The explicit unread action retains its separate unread requirement and includes older/archived mail, retaining its existing scan and
-progress table. Older recheck options remain explicit owner operations and never start on deployment.
+progress table. The one-time recheck options (fallback P1, the first 100) finished and are retired: the deprecated
+request fields answer RELOAD_REQUIRED, and a stored recheck batch keeps reporting its unchanged results.
 
 Model calls use the shared `MODEL_ROUTER` binding (`Inference`, `props.app=mailsort`). Mailsort sends the prompt,
 masked mail snapshot, selected model/effort and output schema through the common typed API. Router owns the native
@@ -111,8 +113,20 @@ provider payloads and the Access-authenticated VPS executor connection. Results 
 once, with P1-P4 and a short reason. Existing caller deadlines remain bounded. There is no automatic provider/model
 fallback, second vote, embeddings or automatic learning.
 
-Provider/network failures use the existing pending backoff. Invalid results are not partially applied. Exhausted
-retries become visible failures without new Gmail labels. Historical probabilities, examples and ledger entries
+Failures follow the shared Model Router error contract (`classification-model.ts`, `limits.ts`), by reason and,
+for a reason this build does not know, by google.rpc.Code:
+
+| Kind | Reasons (code) | Handling |
+| --- | --- | --- |
+| Configuration | `MODEL_AUTH` (16), `MODEL_NOT_CONFIGURED` (9), `MODEL_NOT_ALLOWED` (7), `MODEL_SPEND_LIMIT` | No attempts; the next model pass waits an hour, and after an auth or configuration failure any settings save retries at once. Claude's spend limit waits for the next UTC month. |
+| Content | `MODEL_INVALID_REQUEST` (3), `MODEL_INVALID_ANSWER`, `MODEL_REFUSED`, `MODEL_OUTPUT_LIMIT`, `MODEL_UNSUPPORTED_TOOL` | Per-mail attempts, at most three, with the per-mail backoff. |
+| Timeout | `MODEL_TIMEOUT` (4) | Per-mail attempts, at most seven (about five hours). |
+| Infrastructure | `MODEL_QUOTA`, `MODEL_RATE_LIMIT`, `MODEL_UNAVAILABLE`, `MODEL_BUSY`, `MODEL_MAINTENANCE`, `MODEL_STORAGE_UNAVAILABLE`, `MODEL_INTERNAL`, any other code, a transport failure | No attempts; the whole pass is deferred 5 minutes, doubling per consecutive deferred pass up to an hour, or longer for the Router's Retry-After; a quota at least an hour. Success resets the backoff. |
+
+A Router refusal over HTTP (its own auth or maintenance) is read by the same table; an unreadable answer or a network
+failure is infrastructure. A mail with attempts is retried alone, so one mail the model cannot answer never fails
+the mail beside it. Invalid results are not partially applied. Exhausted retries become visible failures without new
+Gmail labels. Ops keeps the selected provider's configuration, Codex capacity and availability signals apart. Historical probabilities, examples and ledger entries
 keep their original meanings; none are rewritten as judgments from the selected provider.
 
 ## 5. Cost and credentials
@@ -126,28 +140,21 @@ at most one month's rows. Pricing and native token normalization belong to Route
 unavailable usage or cost stays unknown. Even an invalid result counts when returned usage reports consumption.
 
 Stable instruction blocks remain base first, then nonempty personal rules; message-specific email/time data follows
-them. Mailsort sends generic cache hints when more prepared work follows, or when actual cache activity began within
-its existing five-minute reuse window. That timestamp remains in existing metadata. Router owns native cache
-breakpoints, provider minimums and pricing. Prefix edits invalidate the affected cache naturally; a rules edit can
-still reuse the base. No padding, prewarming or keepalive calls are used. Reported cache counts distinguish an
-actual hit from a hint. See [Router design](../../model-router/docs/design.md).
+them. Mailsort never sends a cache hint: a five-minute cache write costs about a quarter more than the prefix, and
+batches at the configured interval rarely reuse it. Cache reads/writes the provider reports anyway are still recorded
+and priced. See [Router design](../../model-router/docs/design.md).
 
 At recorded Claude cost >= $20, new Claude calls wait until the next UTC month. A provider spend refusal does the same even if
 local accounting is lower. Network responses lost before usage is read and out-of-app calls may be absent locally;
 Anthropic's console is the billing authority. Config/auth failures stay visible and do not assign fallback P1.
-Claude's monthly cap and explicit cache policy do not apply to Codex. Selecting Codex preserves those records as
+Claude's monthly cap does not apply to Codex. Selecting Codex preserves those records as
 history. Codex uses the existing ChatGPT subscription, subject to its account/model availability and usage limits;
 the app does not convert Codex tokens into Claude API fees. A saved login or a healthy process cannot establish
 successful model access. Verify a real synthetic inference separately.
 
-The existing SQLite store also keeps one Codex usage row per UTC day, with HTTP classification attempts, valid responses,
-failures, responses that reported usage and input/output token totals. The owner API sums only the current month's rows;
-daily cleanup removes rows after 400 days. An attempt starts when the HTTP fetch to the VPS is made, so missing local
-configuration is excluded. Each completed attempt is recorded once before Gmail writes. A bad classification still counts
-its reported tokens; network/HTTP failures without usage increment failures without inventing tokens. The gateway's
-`usage_available` distinguishes a reported zero from missing usage; a legacy positive token total also confirms a report.
-Older all-zero responses remain unknown. Historical calls before this accounting release are not reconstructed from mail
-decisions or retry counts. These are this app's observations, without subscription-price conversion or account balance.
+Model Router records Codex usage and its console is the only Codex usage view. Mailsort no longer writes its daily
+`codex_usage` rows or reports `ServiceStatus.codex_usage`; existing rows stay until daily cleanup removes them after
+400 days.
 
 Mailsort's owner-machine secrets are its Gmail OAuth credentials: `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET` and `GMAIL_REFRESH_TOKEN`,
 put from the owner's machine and excluded from GitHub maps. Model Router alone holds shared provider keys and the
@@ -162,17 +169,18 @@ Retries of existing intents precede new decisions. Undo uses the existing eligib
 The model does not perform a new post-call manual-edit concurrency check; this personal app retains its ordinary
 initial checks and established retry behavior.
 
-Gmail corrections can still update historical answer records. No active embedding/weak-learning/replay process
-uses them. Old replay start calls return a clear retired-feature error; GET history remains readable. The prior
-initializer and consolidation state keep their original identity and resume behavior, with no new migration system.
+Gmail corrections update verdicts, the label report and flow counts. They create no example; a historical example
+stays until the owner deletes it (or withdraws the verdict it came from). The Workers AI embedding, weak-learning and replay code is removed. Old replay start calls return a
+clear retired-feature error; GET history remains readable. The prior initializer keeps its original identity and
+resume behavior. The label consolidation finished on 2026-10-11 and its code and Gmail operations are removed; its
+three RPCs answer RELOAD_REQUIRED and its tables stay as history. A state restored from its run (an unfinished job)
+refuses every owner mutation but settings with CONSOLIDATION_ACTIVE, so no priority setup or write starts over it.
 
 ## 7. UI and Ops
 
 概览 shows Gmail freshness separately from the configured classification interval and next-batch time, the current model/effort, recorded monthly
 Claude cost/tokens, actual Claude cache reads/writes and the selected provider/config error. While Codex is selected,
-Claude figures are labelled history. A separate Codex card shows the UTC month's attempts, successes/failures, reported
-input/output tokens, missing-usage count and most recent request. It stays visible as history when Claude is selected;
-an older server response with no Codex record says usage is unavailable. `ServiceStatus.classifier` reports the selected provider, fixed model/effort,
+Claude figures are labelled history and the card points to the Model Router console for Codex usage. `ServiceStatus.classifier` reports the selected provider, fixed model/effort,
 local configuration, next batch time, safe error and last successful response; configuration presence does not check
 network reachability or authentication. 分级 shows the four queues and explicit unread-batch progress. 设置 shows
 the persistent provider and 5/15/30/60-minute interval selectors, the fresh next-batch time and editable personal rules with a collapsed base-prompt field, alongside mode/write
@@ -184,8 +192,9 @@ warnings apply only while Claude is selected. It no longer declares the account 
 shedding unrelated free-model usage cannot switch or stop Mailsort's model. The manual batch card consumes the fresh status after Start and reads status every 30 seconds only while
 its batch is active and visible. It cancels on hide/leave/completion and refreshes once on visible return.
 `ServiceStatus.gmail_write_resume_time` reports the next UTC midnight only when the effective daily write cap is
-full. The UI uses that timestamp for a specific local-time explanation. No new owner API endpoint or scheduler is added. Recheck progress derives `unchanged_count` from existing batch/decision
-metadata and excludes it from `skipped_count`; a successful same-grade judgment is not an unprocessed exclusion.
+full. The UI uses that timestamp for a specific local-time explanation. No new owner API endpoint or scheduler is added. A retired
+recheck batch's progress derives `unchanged_count` from existing batch/decision metadata and excludes it from
+`skipped_count`; a successful same-grade judgment is not an unprocessed exclusion.
 Labels refreshes its existing report after status updates and patches count spans in place, preserving focus and
 expanded details. Home owns its existing warning dismissal behavior.
 
@@ -195,7 +204,7 @@ Use synthetic Gmail/Claude/Codex endpoints, the independent Gmail operation tabl
 owner API and the existing local Wrangler smoke. Cover batch ID validation, all four Gmail outcomes, preserved
 read/star/other labels, already-classified skips, default and configured cadence, retry/quota schedule preservation, actual usage, monthly reset/wait, auth/provider
 failure and ordinary write-cap waits. Cover provider persistence, legacy defaults, selected-provider errors, no fallback
-and preserved mode/breaker/prompt/budget history. CPU tests must reach the active batched model path. Gateway checks
+and preserved mode/prompt/budget history. CPU tests must reach the active batched model path. Gateway checks
 use the shared Python wire codec, a fake SDK and offline pinned-feature inspection. Frozen contract fixtures
 remain unchanged and readable.
 
@@ -213,9 +222,10 @@ the old installation-time receipt boundary for automatic intake. Pending rows ke
 attempts and not_before, so accepted work remains eligible through quota/retry waits.
 
 At a normal batch's due time, reuse the bounded Gmail messages.list operation with INBOX, newer_than:2d,
-P1-P4 exclusions and maxResults 100. This returns IDs only and never follows an all-mailbox/backfill path.
+P1-P4 and sent-mail (`-in:sent`) exclusions and maxResults 100, so an Inbox copy of the owner's own message is skipped
+once instead of re-listed on every pass. This returns IDs only and never follows an all-mailbox/backfill path.
 The ordinary message preparation independently checks the same receipt boundary because history arrivals
-do not come through that list query. Active manual unread/recheck batches keep their fixed scope; automatic
+do not come through that list query. An active manual unread batch keeps its fixed scope; automatic
 reconciliation waits until their pending work finishes.
 
 Only old non-model skip records for not_inbox or before_install can be recovered in this bounded scope.

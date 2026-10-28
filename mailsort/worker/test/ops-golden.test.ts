@@ -63,12 +63,9 @@ function usage(target: Store, decided: number, applied: number, unsure: number, 
   target.run(`INSERT INTO usage (day, gmail_calls, ai_calls, neurons, decided, applied, unsure) VALUES ('2026-10-06', 120, ?, ?, ?, ?, ?)`, decided, neurons, decided, applied, unsure);
 }
 
-/** The synthetic states' settings: the defaults with the budget the contract's fixtures were written with. */
-const SYNTHETIC = { ...DEFAULTS, dailyNeuronBudget: 7000 };
-
 function cases(): Record<string, unknown> {
   const ok = store();
-  writeSettings(ok, { ...SYNTHETIC, mode: 'live' }, NOW - HOUR);
+  writeSettings(ok, { ...DEFAULTS, mode: 'live' }, NOW - HOUR);
   usage(ok, 34, 21, 6, 1520.4);
   ok.addClaudeUsage('2026-10-06', { inputTokens: 139_914, outputTokens: 5_476, cacheWriteTokens: 0, cacheReadTokens: 0, thinkingTokens: 1_303, costMicros: 669_176 });
   ok.addClaudeUsage('2026-09-30', { inputTokens: 10, outputTokens: 5, cacheWriteTokens: 0, cacheReadTokens: 0, thinkingTokens: 0, costMicros: 140 });
@@ -78,7 +75,8 @@ function cases(): Record<string, unknown> {
   ok.run(`INSERT INTO review (id, message_id, kind, state, decider, subject, sender, receive_time, create_time) VALUES ('r1', 'a2', 'unsure', 'pending', 'clef', '合成主题', 'Sender <example.org>', ?, ?)`, NOW, NOW);
 
   const degraded = store();
-  writeSettings(degraded, { ...SYNTHETIC, mode: 'live', breaker: 'daily_limit' }, NOW - HOUR);
+  // A breaker stored by an older release is neither a signal nor a mode any more.
+  degraded.setMeta('settings', JSON.stringify({ ...DEFAULTS, mode: 'live', classificationProvider: 'claude', breaker: 'daily_limit', etag: 'legacy' }));
   usage(degraded, 160, 150, 3, 8100);
   degraded.run(`UPDATE usage SET quota_exhausted = 1`);
   degraded.setMeta('auth_state', 'failed');
@@ -171,18 +169,25 @@ test('the auth failure is critical (it reaches Home attention and the digest); t
   expect(degraded.health).toBe('degraded');
   expect(degraded.signals.map((s) => [s.code, s.severity])).toEqual([
     ['gmail_auth_failed', 'critical'],
-    ['breaker_tripped', 'warning'],
     ['claude_spend_limit', 'warning'],
   ]);
-  expect(degraded.modes).toMatchObject({ live: false, breaker: true });
+  expect(degraded.modes).toMatchObject({ live: true, breaker: false });
 });
 
-test('Claude errors become safe owner-action or availability signals', () => {
+test('model errors become safe configuration, capacity or availability signals for the selected provider', () => {
   const target = store();
   target.setMeta('auth_state', 'ok');
   target.setMeta('last_sync_at', String(NOW));
-  for (const [code, expected] of [['claude_not_configured', 'claude_not_configured'], ['claude_auth', 'claude_auth'], ['claude_http_429', 'claude_unavailable'], ['claude_bad_items', 'claude_unavailable']]) {
+  writeSettings(target, { ...DEFAULTS, classificationProvider: 'claude' }, NOW);
+  for (const [code, expected] of [['claude_not_configured', 'claude_not_configured'], ['claude_auth', 'claude_auth'], ['claude_not_allowed', 'claude_auth'], ['claude_quota', 'claude_unavailable'],
+    ['claude_http_429', 'claude_unavailable'], ['claude_bad_items', 'claude_unavailable']]) {
     target.setMeta('claude_error', code ?? '');
+    expect(sortStatus(target, env, NOW).signals).toMatchObject([{ code: expected, severity: 'warning' }]);
+  }
+  writeSettings(target, { ...DEFAULTS, classificationProvider: 'codex' }, NOW);
+  for (const [code, expected] of [['codex_not_configured', 'codex_not_configured'], ['codex_not_allowed', 'codex_auth'], ['codex_quota', 'codex_quota'], ['codex_rate_limit', 'codex_quota'],
+    ['codex_unavailable', 'codex_unavailable'], ['codex_timeout', 'codex_unavailable']]) {
+    target.setMeta('codex_error', code ?? '');
     expect(sortStatus(target, env, NOW).signals).toMatchObject([{ code: expected, severity: 'warning' }]);
   }
   expect(sortStatus(target, { ...env, MODE: 'off' }, NOW).signals).toEqual([]);

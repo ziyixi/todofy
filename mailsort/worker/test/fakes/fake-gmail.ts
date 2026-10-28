@@ -197,11 +197,10 @@ export class FakeGmail {
     if (method === 'GET' && path === 'messages') {
       const since = this.clock() - 2 * 86_400_000;
       const label = url.searchParams.get('labelIds') ?? 'INBOX';
-      const migration = url.searchParams.has('fields');
-      const includeSpamTrash = url.searchParams.get('includeSpamTrash') === 'true';
       const excluded = new Set(url.searchParams.get('q')?.includes('-label:P1')
         ? [...this.labels.values()].filter((value) => /^P[1-4]$/.test(value.name)).map((value) => value.id) : []);
-      const ids = [...this.messages.values()].filter((m) => m.labelIds.has(label) && (migration || label === 'UNREAD' || m.internalDate >= since) && ![...m.labelIds].some((id) => excluded.has(id)) && (includeSpamTrash || (!m.labelIds.has('SPAM') && !m.labelIds.has('TRASH')))).map((m) => ({ id: m.id, ...(migration ? {} : { threadId: m.threadId }) }));
+      if (url.searchParams.get('q')?.includes('-in:sent') === true) excluded.add('SENT');
+      const ids = [...this.messages.values()].filter((m) => m.labelIds.has(label) && (label === 'UNREAD' || m.internalDate >= since) && ![...m.labelIds].some((id) => excluded.has(id)) && !m.labelIds.has('SPAM') && !m.labelIds.has('TRASH')).map((m) => ({ id: m.id, threadId: m.threadId }));
       const offset = Number(url.searchParams.get('pageToken') ?? '0');
       const max = Number(url.searchParams.get('maxResults') ?? '100');
       return json({ messages: ids.slice(offset, offset + max), resultSizeEstimate: ids.length, ...(offset + max < ids.length ? { nextPageToken: String(offset + max) } : {}) });
@@ -210,7 +209,6 @@ export class FakeGmail {
       const message = this.messages.get(parts[1] ?? '');
       if (message === undefined) return gmailError(404, 'notFound');
       const format = url.searchParams.get('format');
-      if (format === 'minimal') return json({ id: message.id, labelIds: [...message.labelIds], historyId: String(this.historyId) });
       const payload = format === 'metadata' ? { mimeType: (message.payload as { mimeType?: string }).mimeType, headers: (message.payload as { headers?: unknown }).headers } : message.payload;
       return json({ id: message.id, threadId: message.threadId, labelIds: [...message.labelIds], snippet: message.snippet, internalDate: String(message.internalDate), payload });
     }
@@ -237,9 +235,7 @@ export class FakeGmail {
       if (!writable) return gmailError(403, 'insufficientPermissions');
       const label = this.labels.get(parts[1] ?? '');
       if (label === undefined || label.type !== 'user') return gmailError(404, 'notFound');
-      const patch = JSON.parse(body) as { name?: string; labelListVisibility?: string; messageListVisibility?: string };
-      if (patch.name === undefined) { Object.assign(label, patch); return json(label); }
-      const name = patch.name;
+      const { name } = JSON.parse(body) as { name: string };
       if ([...this.labels.values()].some((other) => other.id !== label.id && other.name === name)) return gmailError(409, 'duplicate');
       label.name = name;
       return json(label);

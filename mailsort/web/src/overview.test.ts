@@ -8,7 +8,7 @@ import { mountApp, type Host } from './app.ts'
 import { clamp, flowGraph, sankeyChart, skeletonGraph } from './flowchart.ts'
 import { FakeServer, flowCount, label, NOW, settle } from './test/fakeServer.ts'
 import { MailFlow_Outcome, MailFlow_Stage } from '@ziyixi/proto/mailsort/ui/v2/flow_pb'
-import { ClassificationProvider, ClassifierStatusSchema, ClaudeBudgetSchema, CodexUsageSchema, LabelCountSchema, Mode } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
+import { ClassificationProvider, ClassifierStatusSchema, ClaudeBudgetSchema, LabelCountSchema, Mode } from '@ziyixi/proto/mailsort/ui/v2/status_pb'
 import { create } from '@ziyixi/proto/protobuf'
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt'
 
@@ -295,7 +295,7 @@ describe('概览', () => {
     expect(root.textContent).toContain('本月费用 US$ 3.51 / 配置月上限 US$ 20.00')
     expect(root.textContent).toContain('本应用记录的 API 用量：输入总计（含缓存）125000 token · 输出（含思考）16000 token · 思考明细 5000 token')
     expect(root.textContent).toContain('缓存读取 100000 token · 缓存写入 5000 token，均已计入输入总计')
-    expect(root.textContent).toContain('缓存有效期为 5 分钟，连续批次可能命中')
+    expect(root.textContent).toContain('本应用不请求提示缓存')
     expect(root.textContent).toContain('不含赠金、折扣或本应用以外的调用')
     expect(root.textContent).toContain('下批判断最早在 1 小时后')
     expect(root.querySelector('.status-line')?.textContent).toContain('下次 Gmail 维护 5 分钟后')
@@ -331,39 +331,18 @@ describe('概览', () => {
     const root = await open(new FakeServer(), '/overview')
     expect(root.textContent).toContain('输入总计（含缓存）24000 token')
     expect(root.textContent).toContain('缓存读取 0 token · 缓存写入 0 token')
-    expect(root.textContent).toContain('间隔超过 5 分钟的单批通常不会命中')
+    expect(root.textContent).toContain('本应用不请求提示缓存')
     expect(root.textContent).not.toContain('节省')
   })
 
-  it('shows Codex attempts and reported tokens while retaining Claude history', async () => {
+  it('keeps Claude history while Codex is selected and shows no Codex ledger of its own', async () => {
     const s = server()
-    s.status = {
-      classifier: create(ClassifierStatusSchema, { provider: ClassificationProvider.CODEX, model: 'gpt-6.1-sol', effort: 'medium' }),
-      codexUsage: create(CodexUsageSchema, { model: 'gpt-6.1-sol', effort: 'medium', month: '2026-10', requestCount: 5, successCount: 3, failureCount: 2, usageReportedCount: 4, inputTokens: 12000, outputTokens: 450, lastRequestTime: timestampFromMs(NOW - 600_000) }),
-    }
+    s.status = { classifier: create(ClassifierStatusSchema, { provider: ClassificationProvider.CODEX, model: 'gpt-6.1-sol', effort: 'medium' }) }
     const root = await open(s, '/overview')
-    const card = [...root.querySelectorAll('.card')].find(node => node.querySelector('h2')?.textContent === 'Codex 用量')
-    expect(card?.textContent).toContain('本月请求 5 次 · 成功 3 次 · 失败 2 次')
-    expect(card?.textContent).toContain('已报告输入（含缓存）12000 token · 输出 450 token')
-    expect(card?.textContent).toContain('有用量报告 4 次；1 次请求未返回用量，未计入 token 总计')
-    expect(card?.textContent).toContain('最近请求')
-    expect(card?.textContent).toContain('不代表 ChatGPT 账户剩余额度')
-    expect(card?.textContent).not.toContain('US$')
-    expect(card?.querySelector('[role="meter"]')).toBeNull()
     expect(root.textContent).toContain('Claude 历史用量（当前未使用）')
+    expect(root.textContent).toContain('其用量见 Model Router 控制台')
+    expect(root.textContent).not.toContain('Codex 用量')
     expect(s.calls.filter(call => call.path === '/api/v2/serviceStatus')).toHaveLength(1)
-  })
-
-  it('retains Codex usage when Claude is selected and handles a response without new fields', async () => {
-    const s = server()
-    s.status = { codexUsage: create(CodexUsageSchema, { month: '2026-10', requestCount: 1, successCount: 1, usageReportedCount: 1, inputTokens: 1200, outputTokens: 120 }) }
-    const root = await open(s, '/overview')
-    expect(root.textContent).toContain('Codex 历史用量（当前未使用）')
-    expect(root.textContent).toContain('本月请求 1 次 · 成功 1 次 · 失败 0 次')
-    s.status = { codexUsage: undefined }
-    const old = await open(s, '/overview')
-    expect(old.textContent).toContain('Codex 用量未提供，请刷新或等待服务更新')
-    expect(old.textContent).not.toContain('本月请求 0 次')
   })
 
   it('routes current Claude results through the model while retaining historic Clef counts', () => {

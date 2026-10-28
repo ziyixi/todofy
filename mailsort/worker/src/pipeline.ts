@@ -4,28 +4,30 @@
  * The selected engine classifies a bounded batch in one request. Historical learning and replay remain readable.
  * Existing write gates and Gmail request limits apply to every step.
  */
-import { PROMPT_REUSE_WINDOW_MS, ClassificationError, classifyEmails, type ClassificationBatchResult } from './classification-model.ts';
+import { ClassificationError, classifyEmails, type ClassificationBatchResult } from './classification-model.ts';
 import type { ClassificationEmail as ClaudeEmail, ClassificationItem as ClaudeItem } from './classification-result.ts';
 import { readClassificationPrompt } from './classification-prompt.ts';
 import { modelRouterBinding, modeCeiling, type Env, type ModeName } from './env.ts';
-import { applyFeedback, setCurrentLabels } from './feedback.ts';
+import { applyFeedback } from './feedback.ts';
 import { countFlow, skipOutcome, stageOf } from './flow.ts';
 import { GmailRefused, GoogleError, isMessageId, type AccessToken, type GmailClient, type HistoryPage } from './gmail.ts';
-import { labelMergeStep, mergeWritesToday, migrationActive } from './label-merge.ts';
 import { features, mask, senderHash, summaryOf, type Features } from './mask.ts';
 import {
   ALARM_BACKLOG_MS,
   ALARM_IDLE_MS,
   ALARM_SUBREQUESTS,
   BAD_ANSWER_ATTEMPTS_MAX,
+  CONFIGURATION_RETRY_MS,
   DAY,
   DRAIN_MAX,
-  HOUR,
   HISTORY_PAGE_SIZE,
   HISTORY_PAGES_MAX,
   MINUTE,
   MAIL_ATTEMPTS_MAX,
   MAIL_SUBREQUESTS,
+  MODEL_DEFER_BASE_MS,
+  MODEL_DEFER_MAX_MS,
+  QUOTA_WAIT_MS,
   RECENT_CLASSIFICATION_AGE_MS,
   RESYNC_MAX,
   RETRY_BASE_MS,
@@ -37,7 +39,7 @@ import { P1_ID, PRIORITY_IDS, priorityGmailIds, priorityStartedAt } from './prio
 import { Budget, noteGoogleError, noteTokenOk, openSession, writeScope } from './session.ts';
 import { adoptClassificationInterval, effectiveMode, readSettings } from './settings.ts';
 import { CLAUDE_MONTHLY_LIMIT_MICROS, utcDay, type Store } from './store.ts';
-import { decisionForRecheck, fallbackP1, finishUnread, isUnreadPending, scanUnread, unreadRechecksFallback, unreadRechecksInitial100 } from './unread.ts';
+import { finishUnread, isUnreadPending, scanUnread } from './unread.ts';
 import { executeWrites, intend, type WriteContext, type WriteGate } from './writes.ts';
 
 /** Labels Gmail puts on mail that is not the owner's incoming mail: never decided. */
@@ -209,7 +211,7 @@ function postpone(store: Store, messageId: string, attempts: number, now: number
   store.run(`UPDATE pending SET attempts = ?, not_before = ? WHERE message_id = ?`, attempts + 1, now + retryDelay(attempts + 1), messageId);
 }
 
-/** Auto writes may go out now: live in force (the owner's mode under the ceiling and the breaker) and a write grant. */
+/** Auto writes may go out now: live in force (the owner's mode under the ceiling) and a write grant. */
 export function writesLive(store: Store, ceiling: ModeName): boolean {
   return effectiveMode(readSettings(store), ceiling) === 'live' && writeScope(store);
 }
@@ -221,11 +223,11 @@ export function writesLive(store: Store, ceiling: ModeName): boolean {
  * reaching the daily or run cap keeps its intent waiting for a later eligible pass. An owner's row (a review choice whose first try failed) is not capped.
  */
 export function alarmGate(store: Store, ceiling: ModeName, counter: { runWrites: number }, now: () => number): WriteGate {
-  return (row, label) => {
+  return (row, label, peek = false) => {
     const unread = store.one(`SELECT 1 AS x FROM unread_batch WHERE ledger_id = ?`, row.id) !== undefined;
     if (unread) {
       const settings = readSettings(store);
-      const full = store.usage(utcDay(now())).applied + mergeWritesToday(store, utcDay(now())) >= settings.dailyWriteLimit;
+      const full = store.usage(utcDay(now())).applied >= settings.dailyWriteLimit;
       if (!writesLive(store, ceiling) || full || counter.runWrites >= settings.runWriteLimit) return 'wait';
     }
     if (!writesLive(store, ceiling)) return 'mode_changed';
@@ -233,8 +235,8 @@ export function alarmGate(store: Store, ceiling: ModeName, counter: { runWrites:
     if (label.enabled !== 1) return 'label_disabled';
     const settings = readSettings(store);
     const at = now();
-    if (store.usage(utcDay(at)).applied + mergeWritesToday(store, utcDay(at)) >= settings.dailyWriteLimit || counter.runWrites >= settings.runWriteLimit) return 'wait';
-    counter.runWrites++;
+    if (store.usage(utcDay(at)).applied >= settings.dailyWriteLimit || counter.runWrites >= settings.runWriteLimit) return 'wait';
+    if (!peek) counter.runWrites++;
     return null;
   };
 }
@@ -302,13 +304,11 @@ function retryDelay(attempts: number): number {
   return Math.min(RETRY_BASE_MS * 2 ** Math.max(0, attempts - 1), RETRY_MAX_MS);
 }
 
-interface PreparedMail { readonly read: ReadMessage; readonly gathered: Awaited<ReturnType<typeof gather>>; readonly priorPriority: string | null; readonly recheck: boolean; readonly unread: boolean; readonly attempts: number; }
+interface PreparedMail { readonly read: ReadMessage; readonly gathered: Awaited<ReturnType<typeof gather>>; readonly unread: boolean; readonly attempts: number; }
 
 async function prepareMail(ctx: MailContext, messageId: string, attempts: number, addedAt: number): Promise<PreparedMail | MailOutcome> {
   const { store, gmail } = ctx;
   const unread = isUnreadPending(store, messageId);
-  const recheckFallback = unread && unreadRechecksFallback(store);
-  const recheckInitial100 = unread && unreadRechecksInitial100(store);
   if (unread && !writesLive(store, ctx.ceiling)) {
     // A paused explicit batch must retain its members without reading their contents.
     ctx.transact(() => store.run(`UPDATE pending SET not_before = ? WHERE message_id = ?`, ctx.now() + ALARM_IDLE_MS, messageId));
@@ -326,22 +326,12 @@ async function prepareMail(ctx: MailContext, messageId: string, attempts: number
     ctx.transact(() => { recordSkip(store, messageId, messageId, 0, now, 'unreadable'); });
     return 'skipped';
   }
-  if ((!recheckInitial100 && (unread ? !read.labelIds.includes('UNREAD') : !read.labelIds.includes('INBOX'))) || read.labelIds.some((label) => SKIP_LABELS.has(label))) {
+  if ((unread ? !read.labelIds.includes('UNREAD') : !read.labelIds.includes('INBOX')) || read.labelIds.some((label) => SKIP_LABELS.has(label))) {
     ctx.transact(() => { recordSkip(store, read.id, read.threadId, read.receivedAt, now, 'not_inbox'); });
     return 'skipped';
   }
   const priorityIds = priorityGmailIds(store);
-  const currentPriorities = read.labelIds.filter(id => priorityIds.has(id));
-  const priorPriority = recheckInitial100 ? decisionForRecheck(store, messageId)?.label_id : recheckFallback ? P1_ID : null;
-  if (recheckInitial100 && (priorPriority == null || currentPriorities.length !== 1 || currentPriorities[0] !== store.label(priorPriority)?.gmail_id)) {
-    ctx.transact(() => { finishPending(store, messageId); });
-    return 'skipped';
-  }
-  if (recheckFallback && (!fallbackP1(store, messageId) || currentPriorities.length !== 1 || currentPriorities[0] !== store.label(P1_ID)?.gmail_id)) {
-    ctx.transact(() => { finishPending(store, messageId); });
-    return 'skipped';
-  }
-  if (!recheckFallback && !recheckInitial100 && currentPriorities.length > 0) {
+  if (read.labelIds.some(id => priorityIds.has(id))) {
     ctx.transact(() => { finishPending(store, messageId); });
     return 'skipped';
   }
@@ -358,41 +348,38 @@ async function prepareMail(ctx: MailContext, messageId: string, attempts: number
   if (unread || writesLive(store, ctx.ceiling)) {
     const at = ctx.now();
     const settings = readSettings(store);
-    const dayFull = store.usage(utcDay(at)).applied + mergeWritesToday(store, utcDay(at)) >= settings.dailyWriteLimit;
+    const dayFull = store.usage(utcDay(at)).applied >= settings.dailyWriteLimit;
     if (dayFull || ctx.counter.runWrites >= settings.runWriteLimit) {
       ctx.transact(() => store.run(`UPDATE pending SET not_before = ? WHERE message_id = ?`, dayFull ? nextUtcMidnight(at) : at + ALARM_IDLE_MS, messageId));
       return 'later';
     }
   }
 
-  return { read, gathered: await gather(read), priorPriority: priorPriority ?? null, recheck: recheckFallback || recheckInitial100, unread, attempts };
+  return { read, gathered: await gather(read), unread, attempts };
 }
 
 async function applyClassification(ctx: MailContext, prepared: PreparedMail, result: ClaudeItem, provider: 'claude' | 'codex', model: string, writeNow = true): Promise<MailOutcome> {
   const { store } = ctx;
-  const { read, gathered: g, priorPriority, recheck, unread } = prepared;
+  const { read, gathered: g, unread } = prepared;
   const now = ctx.now();
   const labelId = result.bucket.toLowerCase();
   // The outcome: a confident label is written to Gmail while live is in force with a write grant (the caps are the
   // gate's, right before the write: a write it refuses stays recorded, like any failed write), else only recorded.
   const labels = store.labels();
   const label = labels.find((item) => item.id === labelId);
-  const unchangedPriority = recheck && label !== undefined && label.id === priorPriority;
   // A label missing from Gmail, or whose path names a Gmail label not its own, writes nothing until the owner acts.
-  const apply = !unchangedPriority && label !== undefined && label.gmail_state !== 'missing' && label.gmail_name_taken !== 1 && writesLive(store, ctx.ceiling);
+  const apply = label !== undefined && label.gmail_state !== 'missing' && label.gmail_name_taken !== 1 && writesLive(store, ctx.ceiling);
   // Fixed cadence: P1 remains visible in Inbox, P2-P4 are archived.
   const archive = label?.id !== P1_ID;
   const intent: { id: string | null } = { id: null };
   ctx.transact(() => {
     // Only a validated P1-P4 result reaches a recorded decision.
-    const outcome = apply || unchangedPriority ? 'applied' : 'suggested';
-    recordDecision(store, read, g, now, { outcome, label: labelId, decider: provider, model, reason: '', modelReason: mask(result.reason, 300) });
+    recordDecision(store, read, g, now, { outcome: apply ? 'applied' : 'suggested', label: labelId, decider: provider, model, reason: '', modelReason: mask(result.reason, 300) });
     store.addUsage(utcDay(now), 'decided', 1);
-    if (unchangedPriority) setCurrentLabels(store, read.id, [label.id]);
-    else countFlow(store, now, stageOf(provider), apply ? (archive ? 'archived' : 'kept_in_inbox') : 'suggested', labelId);
+    countFlow(store, now, stageOf(provider), apply ? (archive ? 'archived' : 'kept_in_inbox') : 'suggested', labelId);
     if (apply) intent.id = intend(store, read.id, label, archive, 'auto', now, read.labelIds);
     if (unread && intent.id !== null) store.run(`UPDATE unread_batch SET ledger_id = ? WHERE message_id = ?`, intent.id, read.id);
-    finishPending(store, read.id, unchangedPriority ? 'skipped' : 'failed');
+    finishPending(store, read.id, 'failed');
   });
   const ledgerId = intent.id;
   if (ledgerId !== null && writeNow) {
@@ -477,16 +464,9 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
     const read = await sync(store, gmail, budget, deps.now, transact);
     synced = read.queued;
     backlog ||= read.more;
-    if (migrationActive(store)) {
-      await labelMergeStep({ store, gmail, budget, now: deps.now, transact, canWrite: () => {
-        const current = readSettings(store);
-        return effectiveMode(current, modeCeiling(deps.env)) !== 'off' && current.breaker === '' && store.getMeta('write_scope') === '1';
-      } });
-      return { next: deps.now() + ALARM_BACKLOG_MS, mode, synced, decided: 0, applied: 0, deferred: 0, code: 'label_consolidation' };
-    }
-
-    // Keep history registration and any accepted legacy consolidation running while the owner sets up priorities.
-    // Classification, learning and ordinary writes begin only after the four priority identities are ready.
+    // Keep history registration running while the owner sets up priorities. Classification, feedback and ordinary
+    // writes begin only after the four priority identities are ready (a state restored from before them, even one
+    // holding an unfinished label consolidation, stops here: api.ts refuses that setup until the owner resolves it).
     if (priorityStartedAt(store) === 0 || [...PRIORITY_IDS].some((id) => store.label(id) === undefined)) {
       return { next: read.more ? deps.now() + ALARM_BACKLOG_MS : idle, mode, synced, decided: 0, applied: 0, deferred: 0, code: 'priority_setup_required' };
     }
@@ -509,6 +489,7 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
 
     const ctx: MailContext = { store, gmail, budget, now: deps.now, transact, ceiling, gate, counter };
     const nextModelAt = Number(store.getMeta('next_model_at') ?? '0');
+    let hold: number | null = null;
     const month = utcDay(deps.now()).slice(0, 7);
     const providerLimited = store.getMeta('claude_limited_month') === month;
     if (provider === 'claude' && (providerLimited || store.claudeUsage(month).cost_micros >= CLAUDE_MONTHLY_LIMIT_MICROS)) {
@@ -522,7 +503,10 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
         transact(() => { enqueueRecent(store, recent, deps.now()); });
       }
       const prepared: PreparedMail[] = [];
-      for (const item of store.due(deps.now(), DRAIN_MAX)) {
+      const due = store.due(deps.now(), DRAIN_MAX);
+      // A mail that already failed goes alone, so one mail the model cannot answer never fails the mail beside it.
+      const retry = due.find(item => item.attempts > 0);
+      for (const item of retry === undefined ? due : [retry]) {
         if (!budget.has(MAIL_SUBREQUESTS + 1)) break;
         const result = await prepareMail(ctx, item.message_id, item.attempts, item.added_at);
         if (typeof result !== 'string') prepared.push(result);
@@ -530,8 +514,6 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
       if (prepared.length > 0) {
         const at = deps.now();
         const prompt = readClassificationPrompt(store);
-        const recentCache = Number(store.getMeta('claude_prompt_cache_at') ?? 0) > at - PROMPT_REUSE_WINDOW_MS;
-        const cachePrompt = store.count(`SELECT count(*) AS n FROM pending WHERE not_before <= ?`, at) > prepared.length || recentCache;
         let answer: ClassificationBatchResult | null = null;
         try {
           budget.left--;
@@ -541,58 +523,51 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
             time_zone: 'America/Los_Angeles', body: Array.from(g.features.body).slice(0, 12000).join(''),
             body_truncated: read.bodyTruncated === true || Array.from(read.body).length > 12000,
           }));
-          const recorded = await classifyEmails(modelRouterBinding(deps.env), provider, emails, { basePrompt: prompt.baseText, personalRules: prompt.personalRules, cachePrompt });
+          const recorded = await classifyEmails(modelRouterBinding(deps.env), provider, emails, { basePrompt: prompt.baseText, personalRules: prompt.personalRules });
           answer = recorded;
-          if (provider === 'codex') {
-            transact(() => {
-              store.addCodexUsage(utcDay(at), true, recorded.usageAvailable ? recorded : undefined);
-              store.setMeta('codex_last_request_at', String(at));
-              store.setMeta('codex_usage_last_request_at', String(at));
-              store.setMeta('codex_last_success_at', String(at));
-              store.deleteMeta('codex_error');
-            });
-          } else {
-            transact(() => {
-              store.addClaudeUsage(utcDay(at), recorded);
-              if (recorded.cacheWriteTokens + recorded.cacheReadTokens > 0) store.setMeta('claude_prompt_cache_at', String(at));
-              store.setMeta('claude_last_request_at', String(at));
-              store.setMeta('claude_last_success_at', String(at));
-              store.deleteMeta('claude_error');
-            });
-          }
-        } catch (error) {
-          const errorCode = error instanceof ClassificationError ? error.code : `${provider}_unexpected`;
           transact(() => {
-            if (provider === 'codex' && error instanceof ClassificationError && error.attempted) {
-              store.addCodexUsage(utcDay(at), false, error.usage);
-              store.setMeta('codex_last_request_at', String(at));
-              store.setMeta('codex_usage_last_request_at', String(at));
+            if (provider === 'claude') {
+              store.addClaudeUsage(utcDay(at), recorded);
+              store.setMeta('claude_last_request_at', String(at));
             }
-            if (provider === 'claude' && error instanceof ClassificationError && error.usage !== undefined) {
-              store.addClaudeUsage(utcDay(at), error.usage);
-              if (error.usage.cacheWriteTokens + error.usage.cacheReadTokens > 0) store.setMeta('claude_prompt_cache_at', String(at));
+            store.setMeta(`${provider}_last_success_at`, String(at));
+            store.deleteMeta(`${provider}_error`, 'model_deferrals');
+          });
+        } catch (error) {
+          const failure = error instanceof ClassificationError ? error : null;
+          const errorCode = failure?.code ?? `${provider}_unexpected`;
+          transact(() => {
+            if (provider === 'claude' && failure?.usage !== undefined) {
+              store.addClaudeUsage(utcDay(at), failure.usage);
               store.setMeta('claude_last_request_at', String(at));
             }
             store.pushError(errorCode);
             store.setMeta(`${provider}_error`, errorCode);
-            if (provider === 'claude' && error instanceof ClassificationError && error.spendLimited) store.setMeta('claude_limited_month', month);
-            if (!(error instanceof ClassificationError && (error.spendLimited || error.configuration)) && errorCode !== 'codex_quota') {
+            if (provider === 'claude' && failure?.spendLimited === true) store.setMeta('claude_limited_month', month);
+            // Content and timeouts are charged to each mail; an unexpected local error too, with the ordinary cap.
+            if (failure === null || failure.kind === 'content' || failure.kind === 'timeout') {
               for (const item of prepared) {
-                if (item.attempts + 1 >= (/^(claude|codex)_bad_/.test(errorCode) || errorCode === 'claude_incomplete' || errorCode === 'codex_response_too_large' ? BAD_ANSWER_ATTEMPTS_MAX : MAIL_ATTEMPTS_MAX)) {
-                  if (!item.recheck || store.decision(item.read.id) === undefined) {
-                    recordDecision(store, item.read, item.gathered, at, { outcome: 'unsure', label: null, decider: 'none', model: '', reason: 'model_unavailable' });
-                    store.addUsage(utcDay(at), 'decided', 1);
-                    store.addUsage(utcDay(at), 'unsure', 1);
-                    countFlow(store, at, 'no_model', 'unsure', null);
-                  }
+                if (item.attempts + 1 >= (failure?.kind === 'content' ? BAD_ANSWER_ATTEMPTS_MAX : MAIL_ATTEMPTS_MAX)) {
+                  recordDecision(store, item.read, item.gathered, at, { outcome: 'unsure', label: null, decider: 'none', model: '', reason: 'model_unavailable' });
+                  store.addUsage(utcDay(at), 'decided', 1);
+                  store.addUsage(utcDay(at), 'unsure', 1);
+                  countFlow(store, at, 'no_model', 'unsure', null);
                   finishPending(store, item.read.id, 'failed');
                 }
                 else postpone(store, item.read.id, item.attempts, at);
               }
             }
           });
-          if (provider === 'claude' && error instanceof ClassificationError && error.spendLimited) deferred = deferModel(store, nextUtcMonth(at), at, transact);
-          else if (errorCode === 'codex_quota') deferred = deferModel(store, at + HOUR, at, transact);
+          if (provider === 'claude' && failure?.spendLimited === true) deferred = deferModel(store, nextUtcMonth(at), at, transact);
+          // A configuration fix comes from the owner: try hourly, or at once after a settings save (api.ts).
+          else if (failure?.kind === 'configuration') hold = at + CONFIGURATION_RETRY_MS;
+          else if (failure?.kind === 'infrastructure') {
+            // An outage or capacity limit is nobody's mail: the whole pass waits, 5 minutes doubling to an hour.
+            const deferrals = Number(store.getMeta('model_deferrals') ?? 0) + 1;
+            const backoff = Math.min(MODEL_DEFER_BASE_MS * 2 ** (deferrals - 1), MODEL_DEFER_MAX_MS);
+            transact(() => { store.setMeta('model_deferrals', String(deferrals)); });
+            deferred = deferModel(store, at + Math.max(failure.retryAfterMs, backoff, failure.quota ? QUOTA_WAIT_MS : 0), at, transact);
+          }
           code = errorCode;
         }
         let stopped = false;
@@ -608,9 +583,9 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
       const pending = store.count(`SELECT count(*) AS n FROM pending`);
       transact(() => {
         const at = deps.now();
-        const nextAt = pending > 0
+        const nextAt = hold ?? (pending > 0
           ? Math.max(at, store.one<{ at: number }>('SELECT min(not_before) AS at FROM pending')?.at ?? at)
-          : at + readSettings(store).classificationIntervalMinutes * MINUTE;
+          : at + readSettings(store).classificationIntervalMinutes * MINUTE);
         store.setMeta('next_model_at', String(nextAt));
       });
       if (pending > 0 && store.due(deps.now(), 1).length > 0 && code === 'ok') backlog = true;
@@ -619,7 +594,7 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
 
     if (store.count(`SELECT count(*) AS n FROM ledger WHERE state IN ('intended', 'undo_intended')`) > 0) {
       const current = readSettings(store);
-      const canWrite = writesLive(store, ceiling) && store.usage(utcDay(deps.now())).applied + mergeWritesToday(store, utcDay(deps.now())) < current.dailyWriteLimit;
+      const canWrite = writesLive(store, ceiling) && store.usage(utcDay(deps.now())).applied < current.dailyWriteLimit;
       // Paused/capped batch intents remain persistent without making an idle Alarm busy every 30 seconds.
       if (canWrite || store.count(`SELECT count(*) AS n FROM ledger WHERE state = 'undo_intended'`) > 0) backlog = true;
     }

@@ -3,7 +3,7 @@
  * built only from MailsortState's own SQLite, with counts and codes only: never a subject, sender, address or label
  * name.
  *
- * Signals cover Gmail auth/freshness, retained breaker state and native Claude configuration/spend failures.
+ * Signals cover Gmail auth/freshness and the selected provider's configuration, availability and spend failures.
  * Claude has no Cloudflare guard capability; old shed requests are refused and legacy normal requests clear state.
  */
 import { create } from '@ziyixi/proto/protobuf';
@@ -68,6 +68,19 @@ export function uiUrl(host: string | null): string | undefined {
   return formatMatches(file_ops_v1_ops, 'HttpsUrl', url) ? url : undefined;
 }
 
+/**
+ * The selected provider's last safe error as one of Home's signals: configuration (not configured; auth, including a
+ * caller the Router does not allow), Codex capacity (quota, rate limit) and everything else unavailable. Claude's
+ * spend limit has its own signal.
+ */
+function modelSignal(provider: 'claude' | 'codex', code: string): string {
+  const failure = code.slice(provider.length + 1);
+  if (failure === 'not_configured') return `${provider}_not_configured`;
+  if (['auth', 'not_allowed', '401', '403'].includes(failure)) return `${provider}_auth`;
+  if (provider === 'codex' && (failure === 'quota' || failure === 'rate_limit')) return 'codex_quota';
+  return `${provider}_unavailable`;
+}
+
 type StatusEnv = Pick<Env, 'PUBLIC_HOST' | 'MODE' | 'GMAIL_CLIENT_ID' | 'GMAIL_CLIENT_SECRET' | 'GMAIL_REFRESH_TOKEN' | 'MODEL_ROUTER'>;
 
 /** status(): a few indexed counts and meta rows. */
@@ -96,14 +109,13 @@ export function sortStatus(store: Store, env: StatusEnv, now: number): wire.OpsS
         signals.push(signal('sync_stale', Severity.WARNING, synced === null ? {} : { minutes: Math.floor((now - synced) / MINUTE) }, synced ?? undefined));
       }
     }
-    if (settings.breaker !== '' && settings.mode === 'live') signals.push(signal('breaker_tripped', Severity.WARNING, { applied_today: usage.applied }));
     if (mode !== 'off' && settings.classificationProvider === 'claude') {
       const modelError = store.getMeta('claude_error') ?? (env.MODEL_ROUTER === undefined ? 'claude_not_configured' : '');
       if (store.getMeta('claude_limited_month') === month || claude.cost_micros >= CLAUDE_MONTHLY_LIMIT_MICROS) signals.push(signal('claude_spend_limit', Severity.WARNING, {}));
-      else if (modelError !== '' && modelError !== 'claude_spend_limit') signals.push(signal(modelError === 'claude_not_configured' ? modelError : modelError === 'claude_auth' || modelError === 'claude_401' || modelError === 'claude_403' ? 'claude_auth' : 'claude_unavailable', Severity.WARNING, {}));
+      else if (modelError !== '' && modelError !== 'claude_spend_limit') signals.push(signal(modelSignal('claude', modelError), Severity.WARNING, {}));
     } else if (mode !== 'off') {
       const modelError = store.getMeta('codex_error') ?? (env.MODEL_ROUTER === undefined ? 'codex_not_configured' : '');
-      if (modelError !== '') signals.push(signal(['codex_not_configured', 'codex_auth', 'codex_quota'].includes(modelError) ? modelError : 'codex_unavailable', Severity.WARNING, {}));
+      if (modelError !== '') signals.push(signal(modelSignal('codex', modelError), Severity.WARNING, {}));
     }
     signals.sort((a, b) => rank(a.severity) - rank(b.severity) || (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
 
@@ -128,7 +140,7 @@ export function sortStatus(store: Store, env: StatusEnv, now: number): wire.OpsS
       create(OpsStatusSchema, {
         ...base,
         health: signals.some((s) => s.severity !== Severity.INFO) ? Health.DEGRADED : Health.OK,
-        modes: { maintenance: false, live: mode === 'live', sorting_off: mode === 'off', mode_limited: ceiling !== 'live', breaker: settings.breaker !== '' },
+        modes: { maintenance: false, live: mode === 'live', sorting_off: mode === 'off', mode_limited: ceiling !== 'live', breaker: false },
         guard,
         signals: signals.slice(0, MAX_SIGNALS),
         counters,

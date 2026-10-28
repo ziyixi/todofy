@@ -93,8 +93,7 @@ service MailsortUiService {
     option (google.api.method_signature) = "";
   }
 
-  // Starts an owner-requested classification batch with the existing budget and write limits.
-  // The default selects unread messages; recheck options are explicit bounded exceptions.
+  // Starts an owner-requested classification batch of unread messages with the existing budget and write limits.
   // Repeating a request or starting while a batch is active returns the existing batch.
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
@@ -154,7 +153,7 @@ service MailsortUiService {
     };
   }
 
-  // The latest frozen label consolidation; NOT_FOUND before the first plan.
+  // Retired with the label consolidation (finished 2026-10-11): always RELOAD_REQUIRED.
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc GetLabelConsolidation(GetLabelConsolidationRequest) returns (LabelConsolidation) {
@@ -162,8 +161,7 @@ service MailsortUiService {
     option (google.api.method_signature) = "name";
   }
 
-  // Freezes a complete private plan and starts its durable alarm work. Refused while another plan or replay
-  // is running. Sources are existing owned labels; the first source in each group remains the target.
+  // Retired with the label consolidation (finished 2026-10-11): always RELOAD_REQUIRED.
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc StartLabelConsolidation(StartLabelConsolidationRequest) returns (LabelConsolidation) {
@@ -174,8 +172,7 @@ service MailsortUiService {
     option (google.api.method_signature) = "name,groups";
   }
 
-  // Continues the current blocked plan from its durable phase; it never starts a new plan or replays a
-  // confirmed membership write. A current etag is required.
+  // Retired with the label consolidation (finished 2026-10-11): always RELOAD_REQUIRED.
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc ResumeLabelConsolidation(ResumeLabelConsolidationRequest) returns (LabelConsolidation) {
@@ -428,13 +425,17 @@ message StartUnreadClassificationRequest {
     (google.api.field_behavior) = OPTIONAL,
     (google.api.field_info).format = UUID4
   ];
-  // Rejudge only existing unread fallback-P1 decisions, excluding explicit owner verdicts.
-  // With neither recheck option, already graded messages are skipped.
-  bool recheck_fallback = 3 [(google.api.field_behavior) = OPTIONAL];
-  // Rejudge the first 100 distinct messages successfully auto-graded in the current priority era,
-  // including read or archived mail. Later owner label changes are skipped.
-  // Mutually exclusive with recheck_fallback; the selected IDs are frozen before processing.
-  bool recheck_initial100 = 4 [(google.api.field_behavior) = OPTIONAL];
+  // Deprecated: the one-time recheck of fallback-P1 decisions is retired; true answers RELOAD_REQUIRED.
+  // Already graded messages are always skipped.
+  bool recheck_fallback = 3 [
+    deprecated = true,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+  // Deprecated: the one-time recheck of the first 100 graded messages is retired; true answers RELOAD_REQUIRED.
+  bool recheck_initial100 = 4 [
+    deprecated = true,
+    (google.api.field_behavior) = OPTIONAL
+  ];
 }
 
 // Input of GetLabel.

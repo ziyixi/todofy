@@ -1,14 +1,13 @@
 /**
  * The one fake behind every outbound request of the Worker in the workerd tests and the local smoke run: Google (the
- * fake Gmail and token endpoint) and Workers AI (`POST /ai/run/<model>`, the shape of env.ts aiRunner's development
- * runner). The Worker's development fetch (env.ts upstreamFetch) sends each Google request to this loopback origin with
- * the real Google URL in `x-mailsort-original-url`; anything else is a 502 and is recorded as a stray request.
+ * fake Gmail and token endpoint) and Model Router (the common inference API, for both providers). The Worker's
+ * development fetch (env.ts upstreamFetch) sends each Google request to this loopback origin with the real Google URL in
+ * `x-mailsort-original-url`; anything else is a 502 and is recorded as a stray request.
  */
 import type { ClassificationEmail as ClaudeEmail } from '../../src/classification-result.ts';
 import { create } from '@ziyixi/proto/protobuf';
 import { fromWire, toWire } from '@ziyixi/proto/wire-json';
 import { GenerateRequestSchema, GenerationSchema, ListModelsResponseSchema, type GenerateRequest } from '@ziyixi/proto/modelrouter/inference/v1/inference_pb';
-import { FakeAi } from './fake-ai.ts';
 import { FakeGmail, type RecordedLedger } from './fake-gmail.ts';
 
 export const ORIGINAL_URL_HEADER = 'x-mailsort-original-url';
@@ -16,7 +15,6 @@ export const MODEL_ENDPOINT = 'https://model-router.internal/api/model/v1/genera
 
 export class FakeUpstream {
   readonly gmail = new FakeGmail();
-  readonly ai = new FakeAi();
   readonly claude = {
     calls: [] as ClaudeEmail[][],
     systems: [] as { text: string; cache: boolean }[][],
@@ -24,7 +22,10 @@ export class FakeUpstream {
     configured: true,
     errorReason: '',
     errorCode: 0,
+    retryAfterSeconds: 0,
     badItems: false,
+    /** A message ID whose presence makes the whole batch answer invalid (one mail the model cannot answer). */
+    poison: '',
     spendLimit: false,
     cacheWriteTokens: 0,
     cacheReadTokens: 0,
@@ -42,9 +43,8 @@ export class FakeUpstream {
     badItems: false,
     inputTokens: 1200,
     outputTokens: 120,
-    usageAvailable: true,
   };
-  /** Requests that were neither Google nor Workers AI. */
+  /** Requests that were neither Google nor Model Router. */
   readonly strays: string[] = [];
   /**
    * Reads the store's label paths (the workerd harness and the smoke run set it). Called when a label create or rename
@@ -59,7 +59,6 @@ export class FakeUpstream {
 
   reset(): void {
     this.gmail.reset();
-    this.ai.reset();
     this.claude.calls.length = 0;
     this.claude.systems.length = 0;
     this.claude.cacheWriteTokens = 0;
@@ -67,6 +66,8 @@ export class FakeUpstream {
     this.claude.configured = true;
     this.claude.errorReason = '';
     this.claude.errorCode = 0;
+    this.claude.retryAfterSeconds = 0;
+    this.claude.poison = '';
     this.claude.spendLimit = false;
     this.claude.badItems = false;
     this.codex.calls.length = 0;
@@ -79,7 +80,6 @@ export class FakeUpstream {
     this.codex.badItems = false;
     this.codex.inputTokens = 1200;
     this.codex.outputTokens = 120;
-    this.codex.usageAvailable = true;
     this.strays.length = 0;
   }
 
@@ -101,25 +101,19 @@ export class FakeUpstream {
       else this.codex.requests.push(input);
       const reason = !engine.configured ? 'MODEL_NOT_CONFIGURED' : isClaude && this.claude.spendLimit ? 'MODEL_SPEND_LIMIT' : engine.errorReason;
       const code = !engine.configured ? 9 : isClaude && this.claude.spendLimit ? 8 : engine.errorCode;
-      const items = engine.badItems ? [] : emails.map(email => ({ id: email.id, bucket: engine.bucket, reason: 'Synthetic reading priority.' }));
+      const poisoned = isClaude && this.claude.poison !== '' && emails.some(email => email.id === this.claude.poison);
+      const items = engine.badItems || poisoned ? [] : emails.map(email => ({ id: email.id, bucket: engine.bucket, reason: 'Synthetic reading priority.' }));
       const cacheWrite = isClaude ? this.claude.cacheWriteTokens : 0;
       const cacheRead = isClaude ? this.claude.cacheReadTokens : 0;
       const inputTokens = engine.inputTokens + cacheWrite + cacheRead;
       const cost = Math.ceil(engine.inputTokens * 4 + cacheWrite * 5 + cacheRead * 0.2 + engine.outputTokens * 20);
       return Response.json(toWire(GenerationSchema, create(GenerationSchema, {
         name: `requests/${crypto.randomUUID()}`, model: isClaude ? 'claude-opus-5-5' : 'gpt-6.1-sol', output: reason ? '' : JSON.stringify({ items }),
-        ...(reason ? { error: { code, reason, message: 'Synthetic model failure.' } } : {}),
-        usage: { available: !reason && (isClaude || this.codex.usageAvailable), billingKind: isClaude ? 'api' : 'subscription', inputTokens: reason ? 0 : inputTokens, outputTokens: reason ? 0 : engine.outputTokens,
+        ...(reason ? { error: { code, reason, message: 'Synthetic model failure.', retryAfterSeconds: isClaude ? this.claude.retryAfterSeconds : 0 } } : {}),
+        usage: { available: !reason, billingKind: isClaude ? 'api' : 'subscription', inputTokens: reason ? 0 : inputTokens, outputTokens: reason ? 0 : engine.outputTokens,
           cacheWriteTokens: cacheWrite, cachedInputTokens: cacheRead,
           ...(isClaude ? { estimatedCostMicrousd: cost } : {}) },
       })));
-    }
-    if (request.method === 'POST' && url.pathname.startsWith('/ai/run/')) {
-      try {
-        return Response.json(this.ai.run(decodeURIComponent(url.pathname.slice('/ai/run/'.length)), JSON.parse(body) as Record<string, unknown>));
-      } catch (error) {
-        return Response.json({ error: error instanceof Error ? error.message : 'ai_error' }, { status: 500 });
-      }
     }
     // The development fetch sends the real URL in a header; without the bypass (the CPU test) the URL is Google's itself.
     const original = request.headers.get(ORIGINAL_URL_HEADER) ?? (/^https:\/\/(gmail|oauth2)\.googleapis\.com\//.test(request.url) ? request.url : null);

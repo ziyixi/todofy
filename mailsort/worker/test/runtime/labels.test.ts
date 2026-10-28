@@ -3,7 +3,6 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { create } from '@ziyixi/proto/protobuf';
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt';
 import { Label_GmailState, LabelSchema } from '@ziyixi/proto/mailsort/ui/v2/label_pb';
-import { Example_Origin } from '@ziyixi/proto/mailsort/ui/v2/review_pb';
 import { MailFlow_Outcome, MailFlow_Stage } from '@ziyixi/proto/mailsort/ui/v2/flow_pb';
 import { Mode } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
 import { MAILS } from '../fakes/fixtures.ts';
@@ -99,23 +98,25 @@ describe('fixed priority labels and owner corrections', () => {
     expect((await h.api.listLedgerEntries({})).ledgerEntries.some(row => row.messageId === id)).toBe(false);
   });
 
-  it('learns a current Gmail priority correction, with flow counters and bounded examples', async () => {
+  it('records a current Gmail priority correction with flow counters, without a learning example', async () => {
     const id = 'abc0000000000204';
     await classified(id, 'p2');
+    // A historical example of the same mail is neither moved nor deleted by the new verdict; withdrawing it deletes it.
+    await h.sql(`INSERT INTO examples (id, label_id, summary, origin, message_id, create_time) VALUES ('ex-historical', 'p2', 'Synthetic summary', 'confirmation', ?, ?)`, id, now);
     const p2 = h.up.gmail.labelIdByName('P2') ?? '';
     const p3 = h.up.gmail.labelIdByName('P3') ?? '';
     h.up.gmail.ownerModify(id, [p3], [p2]);
     now += HOUR;
     await h.step(now);
     expect(await decision(h, id)).toMatchObject({ verdict: 'corrected', verdict_label: 'p3', verdict_source: 'gmail' });
-    expect(await h.sql(`SELECT label_id, origin FROM examples WHERE message_id = ?`, id)).toEqual([{ label_id: 'p3', origin: 'correction' }]);
-    expect((await h.api.listExamples({ label: 'labels/p3' })).examples).toEqual(expect.arrayContaining([expect.objectContaining({ label: 'labels/p3', origin: Example_Origin.CORRECTION })]));
+    expect(await h.sql(`SELECT id, label_id FROM examples WHERE message_id = ?`, id)).toEqual([{ id: 'ex-historical', label_id: 'p2' }]);
+    expect((await h.api.listExamples({ label: 'labels/p3' })).examples).toEqual([]);
     expect((await h.api.getLabel({ name: 'labels/p3' })).trustedDomains).toEqual([]);
     const flow = await h.api.getMailFlow({ name: 'mailFlows/today' });
     expect(flow.counts.find((row) => row.stage === MailFlow_Stage.CLAUDE && row.outcome === MailFlow_Outcome.CORRECTED && row.label === 'labels/p2')?.mailCount).toBeGreaterThan(0);
     const report = await h.api.getLabelReport({ name: 'labelReport' });
     expect(report.labels.find((row) => row.label === 'labels/p2')?.gmailCorrectionCount).toBeGreaterThan(0);
-    // Returning to the applied label withdraws this correction and its example.
+    // Returning to the applied label withdraws this correction and the mail's historical example.
     h.up.gmail.ownerModify(id, [p2], [p3]);
     now += HOUR;
     await h.step(now);

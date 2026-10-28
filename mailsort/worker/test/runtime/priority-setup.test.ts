@@ -45,7 +45,6 @@ it('removes all managed topic identities while preserving mail, status, unrelate
   expect(await h.sql(`SELECT message_id, label_id FROM decisions`)).toEqual([{ message_id: 'aa000002', label_id: 'finance' }]);
   expect(await h.sql(`SELECT count(*) AS n FROM examples`)).toEqual([{ n: 0 }]);
   expect(await h.sql(`SELECT count(*) AS n FROM label_aliases`)).toEqual([{ n: 0 }]);
-  expect(h.up.ai.calls).toEqual([]);
   const calls = h.up.gmail.calls.length;
   expect(await h.api.initializePriorities({ requestId })).toEqual(result);
   expect(await h.api.initializePriorities({ requestId: op() })).toEqual(result);

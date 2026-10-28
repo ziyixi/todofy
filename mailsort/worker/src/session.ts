@@ -9,12 +9,11 @@
  */
 import type { Env } from './env.ts';
 import { GmailClient, GoogleError, type AccessToken, type Ownership } from './gmail.ts';
-import { mergeOwnership } from './label-merge.ts';
 import { AUTH_FAILURES_STOP } from './limits.ts';
 import { priorityDeleteIds, priorityGmailIds } from './priority.ts';
 import { utcDay, type Store } from './store.ts';
 
-/** Subrequests left in this invocation (Google and Workers AI together). */
+/** Subrequests left in this invocation (Google and Model Router together). */
 export class Budget {
   left: number;
 
@@ -78,7 +77,6 @@ export async function openSession(options: SessionOptions): Promise<{ client: Gm
   }
   if (store.getMeta('auth_state') === 'failed') return { reason: 'stopped' };
   const ownership: Ownership = {
-    ...mergeOwnership(store),
     ownedLabelIds: () => store.ownedGmailIds(),
     plannedPaths: () => new Set(store.labelPaths()),
     plannedPath: (labelId) => store.labelByGmailId(labelId)?.display_name ?? null,

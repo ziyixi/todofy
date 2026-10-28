@@ -44,15 +44,17 @@ enum ErrorReason {
   // UNAVAILABLE (503): Gmail or Workers AI did not answer; repeat the request with the same request_id.
   ERROR_REASON_DEPENDENCY_UNAVAILABLE = 10;
   // FAILED_PRECONDITION, sent with HTTP 410 Gone: a path of the API before this version (`/api/v1/...`), which
-  // only a page loaded before the update calls. Reload the page. Answered for one release.
+  // only a page loaded before the update calls. Reload the page. Answered for one release. Also (HTTP 400) a
+  // retired method or option of this version: the label consolidation and the one-time rechecks.
   ERROR_REASON_RELOAD_REQUIRED = 11;
-  // FAILED_PRECONDITION (400): a label consolidation is running or blocked; conflicting mutations wait.
+  // FAILED_PRECONDITION (400): a state restored from the retired label consolidation holds an unfinished job;
+  // every mutation but UpdateSettings waits until the owner resolves it.
   ERROR_REASON_CONSOLIDATION_ACTIVE = 12;
   // FAILED_PRECONDITION (400): only a blocked consolidation can be resumed.
   ERROR_REASON_CONSOLIDATION_NOT_BLOCKED = 13;
   // FAILED_PRECONDITION (400): a replay evaluation is running; another start cannot replace it.
   ERROR_REASON_REPLAY_ACTIVE = 14;
-  // FAILED_PRECONDITION (400): existing mail processing and Gmail writes must finish before freezing a label plan.
+  // FAILED_PRECONDITION (400): existing mail processing and Gmail writes must finish before the priority setup.
   ERROR_REASON_CONSOLIDATION_PENDING_WRITES = 15;
   // FAILED_PRECONDITION (400): this former model feature is retired; historical results remain readable.
   ERROR_REASON_MODEL_FEATURE_RETIRED = 16;

@@ -11,10 +11,6 @@
  */
 import { FieldMaskError, updatePaths } from '@ziyixi/proto/field-mask';
 import type { ServiceHandlers, ShapeOf } from '@ziyixi/proto/http-transcoder';
-import {
-  LabelConsolidation_Group_State, LabelConsolidation_GroupSchema, LabelConsolidation_Phase, LabelConsolidation_State,
-  LabelConsolidationSchema, type LabelConsolidation, type LabelConsolidationGroup,
-} from '@ziyixi/proto/mailsort/ui/v2/consolidation_pb';
 import { LabelSchema, type Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb';
 import {
   ListExamplesResponseSchema,
@@ -38,12 +34,12 @@ import { ClassificationPromptSchema } from '@ziyixi/proto/mailsort/ui/v2/prompt_
 import { classificationPromptMessage, readClassificationPrompt, saveClassificationPrompt, validClassificationPrompt } from './classification-prompt.ts';
 import { CLASSIFICATION_EFFORT, CODEX_MODEL, CLAUDE_MODEL, CLASSIFIER_MODELS } from './classifier-config.ts';
 import { createModelClient, type ModelBinding } from '@ziyixi/model-router-client';
+import { configurationCode } from './classification-model.ts';
 import { deleteExample, deleteExamplesOfLabel } from './examples.ts';
 import { setVerdict } from './feedback.ts';
 import { FLOW_RANGES, readFlow } from './flow.ts';
 import { GoogleError, type GmailClient } from './gmail.ts';
 import { newEtag, shortId } from './ids.ts';
-import { createLabelMerge, labelMergeSummary, mergeWritesToday, migrationActive, MergeError, resumeLabelMerge, type MergePlanItem, type MergeSummary } from './label-merge.ts';
 import { canonicalDecision, canonicalReview, effectiveLedgerRow } from './label-identity.ts';
 import {
   DAILY_WRITE_LIMIT_MAX,
@@ -52,8 +48,6 @@ import {
   ID_PATTERN,
   LABEL_ID_PATTERN,
   LABELS_MAX,
-  NEURON_BUDGET_MAX,
-  NEURON_BUDGET_MIN,
   NONE,
   PAGE,
   RUN_WRITE_LIMIT_MAX,
@@ -91,8 +85,8 @@ export interface ApiContext {
   /** A Gmail client for this request, or why there is none. */
   readonly gmail: () => Promise<GmailClient | 'not_configured' | 'stopped'>;
   readonly budget: Budget;
-  /** Existing alarm or owner mutation must finish before accepting a consolidation. */
-  readonly consolidationBusy: () => boolean;
+  /** An alarm pass or another owner mutation is running (an unread batch or the priority setup waits for it). */
+  readonly busy: () => boolean;
 }
 
 function bad(message = REASONS.BAD_REQUEST.message): never {
@@ -147,7 +141,7 @@ function once<Desc extends DescMessage>(ctx: ApiContext, requestId: string, rpc:
   return ctx.transact(() => {
     const logged = replay(ctx, requestId, rpc, resource, schema);
     if (logged !== undefined) return logged;
-    checkConsolidationMutation(ctx, rpc);
+    checkMutation(ctx, rpc);
     const answer = run();
     if (requestId !== '') ctx.store.putRequest(requestId, rpc, resource, JSON.stringify(toWire(schema, answer)), ctx.now);
     return answer;
@@ -158,27 +152,23 @@ function once<Desc extends DescMessage>(ctx: ApiContext, requestId: string, rpc:
 async function onceAsync<Desc extends DescMessage>(ctx: ApiContext, requestId: string, rpc: string, resource: string, schema: Desc, run: () => Promise<MessageShape<Desc>>): Promise<MessageShape<Desc>> {
   const logged = ctx.transact(() => replay(ctx, requestId, rpc, resource, schema));
   if (logged !== undefined) return logged;
-  checkConsolidationMutation(ctx, rpc);
+  checkMutation(ctx, rpc);
   const answer = await run();
   if (requestId !== '') ctx.transact(() => { ctx.store.putRequest(requestId, rpc, resource, JSON.stringify(toWire(schema, answer)), ctx.now); });
   return answer;
 }
 
-/** A frozen consolidation owns label/decision writes until it succeeds; settings still allow an emergency off. */
-function checkConsolidationMutation(ctx: ApiContext, rpc: string): void {
-  if (rpc === 'InitializePriorities') {
-    if (migrationActive(ctx.store)) throw sortError('CONSOLIDATION_ACTIVE');
-    return;
-  }
-  if (rpc !== 'UpdateSettings' && prioritySetup(ctx.store) !== null && priorityStartedAt(ctx.store) === 0) {
+/** Mutations wait for an unfinished priority setup and leave the fixed P1-P4 labels alone; settings stay available. */
+function checkMutation(ctx: ApiContext, rpc: string): void {
+  if (rpc === 'UpdateSettings') return;
+  // The label consolidation code is retired (2026-10-11); a state restored from its run must not be written over.
+  if (ctx.store.one(`SELECT 1 AS x FROM label_merge_jobs WHERE state != 'succeeded' LIMIT 1`) !== undefined) throw sortError('CONSOLIDATION_ACTIVE');
+  if (rpc !== 'InitializePriorities' && prioritySetup(ctx.store) !== null && priorityStartedAt(ctx.store) === 0) {
     bad('P1–P4 分级正在设置，请先完成设置。');
   }
-  if (priorityStartedAt(ctx.store) > 0 && ['CreateLabel', 'UpdateLabel', 'DeleteLabel', 'SyncLabels',
-    'StartLabelConsolidation', 'ResumeLabelConsolidation', 'RemoveTrustedDomain'].includes(rpc)) {
+  if (priorityStartedAt(ctx.store) > 0 && ['CreateLabel', 'UpdateLabel', 'DeleteLabel', 'SyncLabels', 'RemoveTrustedDomain'].includes(rpc)) {
     bad('当前使用固定的 P1–P4 分级，请刷新页面。');
   }
-  if (rpc === 'UpdateSettings' || rpc === 'StartLabelConsolidation' || rpc === 'ResumeLabelConsolidation') return;
-  if (migrationActive(ctx.store)) throw sortError('CONSOLIDATION_ACTIVE');
 }
 
 // ---- Gmail from a request --------------------------------------------------------------------------------------------
@@ -249,59 +239,6 @@ function checkDisplayName(ctx: ApiContext, name: string, exceptId = ''): string 
   if (value === null) throw sortError('INVALID_LABEL');
   if (treeConflict(value, ctx.store.labelPaths(exceptId)) !== null) throw sortError('INVALID_LABEL');
   return value;
-}
-
-// ---- label consolidation ----------------------------------------------------------------------------------------------
-
-function consolidationMessage(summary: MergeSummary): LabelConsolidation {
-  const states = { running: LabelConsolidation_State.RUNNING, blocked: LabelConsolidation_State.BLOCKED, succeeded: LabelConsolidation_State.SUCCEEDED } as const;
-  const phases = { preflight: LabelConsolidation_Phase.PREFLIGHT, rename: LabelConsolidation_Phase.RENAME, move: LabelConsolidation_Phase.MOVE,
-    verify: LabelConsolidation_Phase.VERIFY, hide: LabelConsolidation_Phase.HIDE, complete: LabelConsolidation_Phase.COMPLETE } as const;
-  const groups = { pending: LabelConsolidation_Group_State.PENDING, running: LabelConsolidation_Group_State.RUNNING, succeeded: LabelConsolidation_Group_State.SUCCEEDED } as const;
-  return create(LabelConsolidationSchema, {
-    name: 'labelConsolidation', jobId: summary.id, state: states[summary.state], phase: phases[summary.phase], errorCode: summary.errorCode,
-    nextAction: summary.state === 'blocked' ? 'resume' : summary.state === 'succeeded' ? 'none' : 'wait',
-    createTime: timestampFromMs(summary.createdAt), updateTime: timestampFromMs(summary.updatedAt), etag: summary.etag,
-    processedCount: summary.processedCount,
-    groups: summary.groups.map((group) => create(LabelConsolidation_GroupSchema, {
-      targetLabel: labelName(group.targetLabelId), sourceLabels: group.sourceLabelIds.map(labelName), displayName: group.displayName,
-      state: groups[group.state], processedCount: group.processedCount,
-    })),
-  });
-}
-
-function consolidationPlan(ctx: ApiContext, groups: readonly LabelConsolidationGroup[]): MergePlanItem[] {
-  if (groups.length === 0 || groups.length > LABELS_MAX) throw sortError('INVALID_LABEL');
-  const seen = new Set<string>();
-  return groups.map((group) => {
-    if (group.sources.length === 0) throw sortError('INVALID_LABEL');
-    const sources = group.sources.map((source) => {
-      const labelId = idOf(source.label, 'labels');
-      if (seen.has(labelId) || seen.size >= LABELS_MAX) throw sortError('INVALID_LABEL');
-      seen.add(labelId);
-      const label = existingLabel(ctx, labelId);
-      if (source.etag === '') bad('every consolidation source needs its current etag');
-      labelEtag(ctx, label, source.etag);
-      return { labelId, etag: source.etag };
-    });
-    const targetLabelId = idOf(group.targetLabel, 'labels');
-    if (targetLabelId !== sources[0]?.labelId) throw sortError('INVALID_LABEL');
-    const displayName = ownerPath(group.displayName);
-    if (displayName === null) throw sortError('INVALID_LABEL');
-    return { sources, targetLabelId, displayName, ...(group.description === undefined ? {} : { description: checkDescription(group.description) }) };
-  });
-}
-
-function consolidationError(error: unknown): never {
-  if (!(error instanceof MergeError)) throw error;
-  switch (error.code) {
-    case 'MERGE_BUSY': throw sortError('CONSOLIDATION_ACTIVE');
-    case 'MERGE_PENDING_WRITES': throw sortError('CONSOLIDATION_PENDING_WRITES');
-    case 'MERGE_ETAG_MISMATCH': throw sortError('ETAG_MISMATCH');
-    case 'MERGE_NOT_FOUND': throw sortError('NOT_FOUND');
-    case 'MERGE_NOT_BLOCKED': throw sortError('CONSOLIDATION_NOT_BLOCKED');
-    case 'MERGE_INVALID_PLAN': throw sortError('INVALID_LABEL');
-  }
 }
 
 function checkDescription(text: string): string {
@@ -420,9 +357,6 @@ function settingsMessage(ctx: ApiContext, value: SettingsValue): Settings {
     effectiveMode: MODES[effectiveMode(value, ctx.ceiling)],
     runWriteLimit: value.runWriteLimit,
     dailyWriteLimit: value.dailyWriteLimit,
-    dailyNeuronBudget: value.dailyNeuronBudget,
-    breakerTripped: value.breaker !== '',
-    breakerReason: value.breaker,
     etag: value.etag,
   });
 }
@@ -514,15 +448,14 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
 
   async startUnreadClassification(request, ctx) {
     if (request.name !== 'unreadClassification') notFound();
-    if (request.recheckFallback && request.recheckInitial100) bad('请选择一种重判范围。');
-    let scope = request.name;
-    if (request.recheckInitial100) scope += ':initial100';
-    else if (request.recheckFallback) scope += ':fallback';
-    const answer = once(ctx, request.requestId, 'StartUnreadClassification', scope, UnreadClassificationSchema, () => {
+    // The one-time recheck options are retired; an older page still offering them must reload.
+    // eslint-disable-next-line @typescript-eslint/no-deprecated -- refusing the retired fields is their only use
+    if (request.recheckFallback || request.recheckInitial100) throw sortError('RELOAD_REQUIRED');
+    const answer = once(ctx, request.requestId, 'StartUnreadClassification', request.name, UnreadClassificationSchema, () => {
       if (priorityStartedAt(ctx.store) === 0) bad('请先完成 P1–P4 分级设置。');
       if (!ownerWritesAllowed(ctx)) bad('请先恢复正式模式及 Gmail 写入授权。');
-      if (ctx.consolidationBusy()) bad('邮件正在处理，请稍后再开始整理。');
-      startUnread(ctx.store, ctx.now, request.recheckFallback, request.recheckInitial100);
+      if (ctx.busy()) bad('邮件正在处理，请稍后再开始整理。');
+      startUnread(ctx.store, ctx.now);
       ctx.store.setMeta('next_model_at', String(ctx.now));
       return unreadProgress(ctx.store, ctx.now) ?? notFound();
     });
@@ -581,7 +514,6 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
     // In live mode with a write grant the label is created in Gmail at once; otherwise before its first write. Never
     // over a Gmail label of its path: it then stays pending, its name taken (writes.ts ensureGmailLabel).
     const row = ctx.store.label(id);
-    if (migrationActive(ctx.store)) return created;
     if (row !== undefined && row.gmail_state === 'pending' && ownerWritesAllowed(ctx)) {
       const client = await ctx.gmail();
       if (client !== 'not_configured' && client !== 'stopped') {
@@ -635,8 +567,8 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
           (has('sensitive') ? label.sensitive : before.sensitive === 1) ? 1 : 0,
           id,
         );
-        // A label turned sensitive keeps no example (examples.ts putExample): the ones it has go now, embeddings and
-        // all, so their summaries neither outlive the 14 days of content nor reach the model as neighbours.
+        // A label turned sensitive keeps no historical example: the ones it has go now, embeddings and all, so their
+        // summaries do not outlive the 14 days of content.
         if (has('sensitive') && label.sensitive && before.sensitive === 0) deleteExamplesOfLabel(store, id);
         return labelOut(ctx, existingLabel(ctx, id));
       });
@@ -727,41 +659,18 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
     });
   },
 
-  getLabelConsolidation(request, ctx) {
-    if (request.name !== 'labelConsolidation') notFound();
-    return Promise.resolve(consolidationMessage(labelMergeSummary(ctx.store) ?? notFound()));
+  // The label consolidation finished on 2026-10-11 and its code is retired; an older page must reload.
+
+  getLabelConsolidation() {
+    return Promise.reject(sortError('RELOAD_REQUIRED'));
   },
 
-  async startLabelConsolidation(request, ctx) {
-    if (request.name !== 'labelConsolidation') notFound();
-    const answer = once(ctx, request.requestId, 'StartLabelConsolidation', request.name, LabelConsolidationSchema, () => {
-      if (migrationActive(ctx.store)) throw sortError('CONSOLIDATION_ACTIVE');
-      if (ctx.consolidationBusy()) throw sortError('CONSOLIDATION_PENDING_WRITES');
-      if (replaySummary(ctx.store)?.state === 'running') throw sortError('REPLAY_ACTIVE');
-      const plan = consolidationPlan(ctx, request.groups);
-      try {
-        return consolidationMessage(createLabelMerge(ctx.store, plan, ctx.now, request.requestId || crypto.randomUUID()));
-      } catch (error) {
-        return consolidationError(error);
-      }
-    });
-    await ctx.wake();
-    return answer;
+  startLabelConsolidation() {
+    return Promise.reject(sortError('RELOAD_REQUIRED'));
   },
 
-  async resumeLabelConsolidation(request, ctx) {
-    if (request.name !== 'labelConsolidation') notFound();
-    const answer = once(ctx, request.requestId, 'ResumeLabelConsolidation', request.name, LabelConsolidationSchema, () => {
-      const summary = labelMergeSummary(ctx.store) ?? notFound();
-      if (request.etag !== summary.etag) throw sortError('ETAG_MISMATCH', [{ schema: LabelConsolidationSchema, message: consolidationMessage(summary) }]);
-      try {
-        return consolidationMessage(resumeLabelMerge(ctx.store, summary.id, ctx.now));
-      } catch (error) {
-        return consolidationError(error);
-      }
-    });
-    await ctx.wake();
-    return answer;
+  resumeLabelConsolidation() {
+    return Promise.reject(sortError('RELOAD_REQUIRED'));
   },
 
   removeTrustedDomain(request, ctx) {
@@ -987,7 +896,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
     const settings = readSettings(store);
     const day = utcDay(ctx.now);
     const usage = store.usage(day);
-    const gmailWriteCapFull = usage.applied + mergeWritesToday(store, day) >= settings.dailyWriteLimit;
+    const gmailWriteCapFull = usage.applied >= settings.dailyWriteLimit;
     const auth = authState(store, ctx.env);
     const lastSync = Number(store.getMeta('last_sync_at') ?? '');
     const alarm = await ctx.alarmAt();
@@ -995,8 +904,6 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
     const deferred = store.count(`SELECT count(*) AS n FROM pending WHERE not_before > ?`, ctx.now);
     const month = utcDay(ctx.now).slice(0, 7);
     const claude = store.claudeUsage(month);
-    const codex = store.codexUsage(month);
-    const codexLastRequest = Number(store.getMeta('codex_usage_last_request_at') ?? 0);
     const lastRequest = Number(store.getMeta('claude_last_request_at') ?? 0);
     const nextBatch = Number(store.getMeta('next_model_at') ?? 0);
     const provider = settings.classificationProvider;
@@ -1021,9 +928,6 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
       ...(gmailWriteCapFull ? { gmailWriteResumeTime: timestampFromMs(Math.floor(ctx.now / DAY) * DAY + DAY) } : {}),
       unsureTodayCount: usage.unsure,
       gmailCallTodayCount: usage.gmail_calls,
-      aiCallTodayCount: usage.ai_calls,
-      neuronsToday: Math.round(usage.neurons * 10) / 10,
-      dailyNeuronBudget: settings.dailyNeuronBudget,
       decisionModel: model,
       classifier: {
         provider: CLASSIFICATION_PROVIDERS[provider], model, effort: CLASSIFICATION_EFFORT, configured,
@@ -1043,15 +947,6 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
         lastErrorCode: store.getMeta('claude_error') ?? (connections.has(CLAUDE_MODEL) ? '' : 'claude_not_configured'),
         providerLimitReached: store.getMeta('claude_limited_month') === month,
       },
-      codexUsage: {
-        model: CODEX_MODEL, effort: CLASSIFICATION_EFFORT, month,
-        inputTokens: codex.input_tokens, outputTokens: codex.output_tokens,
-        requestCount: codex.requests, successCount: codex.successes, failureCount: codex.failures,
-        usageReportedCount: codex.usage_reported,
-        ...(Number.isFinite(codexLastRequest) && codexLastRequest > 0 ? { lastRequestTime: timestampFromMs(codexLastRequest) } : {}),
-      },
-      aiQuotaExhausted: usage.quota_exhausted === 1,
-      unembeddedExampleCount: store.count(`SELECT count(*) AS n FROM examples WHERE embedding IS NULL`),
       recentErrorCodes: store.errors(),
       build: ctx.build,
     });
@@ -1108,8 +1003,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
         if (path === 'mode') {
           const mode = modeName(input.mode);
           if (mode === null) throw sortError('INVALID_SETTINGS');
-          // Choosing a mode is the owner's reset of the breaker.
-          next = { ...next, mode, breaker: '' };
+          next = { ...next, mode };
         } else if (path === 'classification_provider') {
           const provider = input.classificationProvider === ClassificationProvider.CLAUDE ? 'claude'
             : input.classificationProvider === ClassificationProvider.CODEX ? 'codex' : null;
@@ -1120,14 +1014,19 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
           if (!CLASSIFICATION_INTERVAL_MINUTES.includes(input.classificationIntervalMinutes)) throw sortError('INVALID_SETTINGS');
           next = { ...next, classificationIntervalMinutes: input.classificationIntervalMinutes };
         } else if (path === 'daily_write_limit') next = { ...next, dailyWriteLimit: integer(input.dailyWriteLimit, 1, DAILY_WRITE_LIMIT_MAX) };
-        else if (path === 'daily_neuron_budget') next = { ...next, dailyNeuronBudget: integer(input.dailyNeuronBudget, NEURON_BUDGET_MIN, NEURON_BUDGET_MAX) };
-        else if (!['name', 'etag', 'effective_mode', 'breaker_tripped', 'breaker_reason'].includes(path)) bad('update_mask names an unknown field');
+        // A retired field an older UI may still name is accepted and ignored.
+        else if (!['name', 'etag', 'effective_mode', 'breaker_tripped', 'breaker_reason', 'daily_neuron_budget'].includes(path)) bad('update_mask names an unknown field');
       }
       if (next.classificationProvider !== current.classificationProvider) {
         ctx.store.setMeta('next_model_at', String(ctx.now));
         ctx.store.run('UPDATE pending SET not_before = ? WHERE deferred > 0', ctx.now);
+        // The other provider's outages say nothing about this one's: its deferral backoff starts over.
+        ctx.store.deleteMeta('model_deferrals');
       }
-      return settingsMessage(ctx, writeSettings(ctx.store, next, ctx.now));
+      const saved = writeSettings(ctx.store, next, ctx.now);
+      // A configuration failure waits an hour; any save may be its fix, so the next pass tries again at once.
+      if (configurationCode(ctx.store.getMeta(`${saved.classificationProvider}_error`) ?? '')) ctx.store.setMeta('next_model_at', String(ctx.now));
+      return settingsMessage(ctx, saved);
     });
     await ctx.wake();
     return answer;

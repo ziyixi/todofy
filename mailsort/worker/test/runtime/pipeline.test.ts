@@ -32,7 +32,6 @@ describe('Claude priority pipeline', () => {
     expect(gmailLabels(h, input.id)).toEqual(['UNREAD', 'STARRED', own, h.up.gmail.labelIdByName(bucket), ...(bucket === 'P1' ? ['INBOX'] : [])].sort());
     expect(await decision(h, input.id)).toMatchObject({ outcome: 'applied', label_id: bucket.toLowerCase(), decider: 'claude', model: 'claude-opus-5-5', confidence: null, probabilities: '{}', probabilities2: '{}' });
     expect(h.up.claude.calls).toHaveLength(1);
-    expect(h.up.ai.calls).toEqual([]);
     expect(await h.sql(`SELECT id FROM review`)).toEqual([]);
   });
 
@@ -44,7 +43,7 @@ describe('Claude priority pipeline', () => {
     expect(await h.step(T0 + 3 * MINUTE)).toMatchObject({ decided: 10, applied: 10 });
     expect(await h.step(T0 + 4 * MINUTE)).toMatchObject({ decided: 1, applied: 1 });
     expect(h.up.claude.calls.map(call => call.length)).toEqual([10, 10, 1]);
-    expect((await h.api.getSettings({ name: 'settings' })).breakerTripped).toBe(false);
+    expect((await h.api.getSettings({ name: 'settings' })).effectiveMode).toBe(Mode.LIVE);
     deliver(h, mail(22), T0 + 5 * MINUTE);
     await h.step(T0 + 9 * MINUTE);
     expect(h.up.claude.calls).toHaveLength(3);
@@ -181,7 +180,6 @@ describe('Claude priority pipeline', () => {
     expect(modifies(h)).toEqual([]);
     await setMode(h, Mode.OFF);
     await h.step(T0 + 4 * DAY);
-    expect(h.up.ai.calls).toEqual([]);
     expect(await h.sql(`SELECT embedding FROM examples`)).toEqual([{ embedding: null }]);
     expect(await h.sql(`SELECT verdict FROM decisions WHERE message_id = ?`, mail(1).id)).toEqual([{ verdict: null }]);
   });

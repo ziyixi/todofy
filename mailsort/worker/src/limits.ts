@@ -1,7 +1,7 @@
 /**
  * Every bound of the Worker "mailsort" in one place (../../docs/design.md §8). Workers Free: 10 ms of CPU per Worker
- * request, 30 s of CPU per Durable Object invocation (an alarm, a request), 50 subrequests per invocation, and Workers
- * Claude is called once per bounded batch. The legacy AI constants below decode historical evidence only.
+ * request, 30 s of CPU per Durable Object invocation (an alarm, a request) and 50 subrequests per invocation. The
+ * selected model is called through Model Router once per bounded batch.
  */
 
 export const SECOND = 1000;
@@ -13,7 +13,7 @@ export const DAY = 24 * HOUR;
 
 /** The alarm's period when nothing is waiting. */
 export const ALARM_IDLE_MS = 5 * MINUTE;
-/** The next alarm while a backlog waits (pending mails, unembedded examples, intended writes). */
+/** The next alarm while a backlog waits (pending mails, intended writes). */
 export const ALARM_BACKLOG_MS = 30 * SECOND;
 /**
  * Mail received this long before the install-time cursor was stored is never decided (no backfill), even when a lost
@@ -45,11 +45,12 @@ export const HISTORY_PAGE_SIZE = 100;
 /** After a lost history cursor (404): the inbox's mails of the last two days, at most this many. */
 export const RESYNC_MAX = 100;
 export const RESYNC_QUERY = 'newer_than:2d';
-/** Automatic catch-up stays in the same two-day Inbox window and excludes existing priorities. */
+/**
+ * Automatic catch-up stays in the same two-day Inbox window and excludes existing priorities and the owner's own sent
+ * mail (an Inbox copy of a self-sent message is skipped once, never listed again on every pass).
+ */
 export const RECENT_CLASSIFICATION_AGE_MS = 2 * DAY;
-export const RECENT_CLASSIFICATION_QUERY = `${RESYNC_QUERY} -label:P1 -label:P2 -label:P3 -label:P4`;
-/** Examples embedded per alarm (one batched call). */
-export const EMBED_BATCH = 8;
+export const RECENT_CLASSIFICATION_QUERY = `${RESYNC_QUERY} -label:P1 -label:P2 -label:P3 -label:P4 -in:sent`;
 
 // ---- Gmail reads -----------------------------------------------------------------------------------------------------
 
@@ -75,95 +76,47 @@ export const BODY_BASE64_MAX = 128 * 1024;
 /** MIME parts visited at most, and the deepest nesting. */
 export const MIME_PARTS_MAX = 60;
 export const MIME_DEPTH_MAX = 6;
-/** An example's summary, and the share of it one neighbour may put into the model's state. */
+/** A decision's masked summary, kept with its content for CONTENT_KEPT_MS. */
 export const EXAMPLE_SUMMARY_CHARS = 200;
-export const NEIGHBOUR_TOKENS_MAX = 120;
-/** Neighbours retrieved and shown to the model. */
-export const NEIGHBOURS = 3;
 
-// ---- decisions (../../docs/design.md §4) ----------------------------------------------------------------------------
+// ---- the retired replay evaluation's stored results -------------------------------------------------------------------
 
-/** Combined probability required after both views agree, calibrated on public synthetic reading-cadence captures. */
-export const AUTO_THRESHOLD = 0.55;
-/** The second view runs only when the first view's top option is a label at least this likely. */
-export const SECOND_VIEW_MIN = 0.4;
-/** The second view's options: the first view's most likely labels, this many (plus none). */
-export const SECOND_VIEW_LABELS = 3;
-/** "No label fits" is confident when the first view's top option is none with at least this probability. */
-export const NONE_CONFIDENT = 0.6;
-/** Sender history: the labels of the sender's earlier mail this far back, the most frequent this many. */
-export const SENDER_HISTORY_MS = 180 * DAY;
-export const SENDER_HISTORY_TOP = 3;
-/** ... read from at most this many of the sender's newest decisions. */
-export const SENDER_HISTORY_ROWS = 200;
-/** Trusted domains per label at most (a review choice adds one; the oldest goes first past it). */
-export const TRUSTED_DOMAINS_PER_LABEL_MAX = 50;
-/** An applied label untouched this long is a weak accept. */
-export const WEAK_ACCEPT_MS = 3 * DAY;
-/** Weak-accept examples are added only while the label has fewer examples than this. */
-export const WEAK_EXAMPLES_BELOW = 50;
-
-// ---- the review queue (../../docs/design.md §5) ---------------------------------------------------------------------
-
-/**
- * The daily quota of uncertain mails shown in the review queue: this share of the last 7 UTC days' average daily
- * mail, rounded up, within REVIEW_QUOTA_MIN and REVIEW_QUOTA_MAX.
- */
-export const REVIEW_SHARE = 0.05;
-export const REVIEW_QUOTA_MIN = 1;
-export const REVIEW_QUOTA_MAX = 5;
-/** The informative band: an uncertain mail whose top label's combined probability is in [this, AUTO_THRESHOLD). */
-export const INFORMATIVE_MIN = 0.35;
-
-// ---- the replay evaluation (../../docs/design.md §5.1) ---------------------------------------------------------------
-
-/** The review items it covers: resolved in this window before the start, at most this many. */
-export const REPLAY_WINDOW_MS = 14 * DAY;
-export const REPLAY_ITEMS_MAX = 200;
-/** Mails decided again per alarm at most, each needing this many of the pass's leftover subrequests. */
-export const REPLAY_BATCH = 6;
-export const REPLAY_SUBREQUESTS = 5;
 /** Its rows are pruned this long after it started. */
 export const REPLAY_KEPT_MS = 7 * DAY;
-/** GetReplayEvaluation answers at most this many cases (each evaluated mail's numbers): all of REPLAY_ITEMS_MAX. */
+/** GetReplayEvaluation answers at most this many cases (each evaluated mail's numbers). */
 export const REPLAY_CASES_MAX = 200;
 
-// ---- Workers AI ----------------------------------------------------------------------------------------------------------
+// ---- read and model failures (the shared Model Router error contract, ../../docs/design.md §4) -----------------------
 
-export const CLEF = '@cf/cloudflare/clef';
-export const CLEF_FLASH = '@cf/cloudflare/clef-flash';
-export const EMBEDDING_MODEL = '@cf/baai/bge-m3';
-/** Neurons per million input tokens (Workers AI pricing, 2026-10). */
-export const NEURONS_PER_M_TOKENS: Readonly<Record<string, number>> = { [CLEF]: 21_818, [CLEF_FLASH]: 8_182, [EMBEDDING_MODEL]: 1_075 };
-/** Past this share of the daily neuron budget the rest of the UTC day uses Clef-flash. */
-export const FLASH_SWITCH_SHARE = 0.7;
-/** 95 % of the account's free daily Workers AI allocation (10,000): nothing else in the account uses Workers AI. */
-export const DEFAULT_DAILY_NEURON_BUDGET = 9_500;
-export const NEURON_BUDGET_MIN = 500;
-export const NEURON_BUDGET_MAX = 10_000;
 /**
- * A mail whose read or model call failed (Gmail or Workers AI unavailable, not the quota) waits RETRY_BASE_MS, doubling
- * per failure up to RETRY_MAX_MS, and is given up after MAIL_ATTEMPTS_MAX tries: 5+10+20+40+80+160 minutes, about
- * five hours, so a short outage never turns waiting mail into unsure decisions. The backoff is per mail, so one mail
- * Gmail cannot answer for never holds up the mail behind it.
+ * A mail whose Gmail read failed (403, unavailable), or whose model call timed out, waits RETRY_BASE_MS, doubling per
+ * failure up to RETRY_MAX_MS, and is given up after MAIL_ATTEMPTS_MAX tries: 5+10+20+40+80+160 minutes, about five
+ * hours. The backoff is per mail, and a mail that already failed is retried alone (pipeline.ts runPass), so one mail
+ * never holds up or fails the mail behind it.
  */
 export const RETRY_BASE_MS = 5 * MINUTE;
 export const RETRY_MAX_MS = 6 * HOUR;
 export const MAIL_ATTEMPTS_MAX = 7;
-/** A Clef answer this code refused (clef_bad_*): a few tries only, it is the answer, not an outage. */
+/** A content-dependent refusal (an invalid request or answer, a refusal, the output limit): a few tries only. */
 export const BAD_ANSWER_ATTEMPTS_MAX = 3;
+/**
+ * An outage or capacity limit (unavailable, busy, maintenance, rate limit, quota, a transport failure) is nobody's
+ * mail: the whole model pass waits, without attempts, MODEL_DEFER_BASE_MS doubling per consecutive deferred pass up to
+ * MODEL_DEFER_MAX_MS, or the Router's Retry-After when longer; a quota at least QUOTA_WAIT_MS. Success resets it, and a
+ * long outage only delays mail.
+ */
+export const MODEL_DEFER_BASE_MS = 5 * MINUTE;
+export const MODEL_DEFER_MAX_MS = HOUR;
+export const QUOTA_WAIT_MS = HOUR;
+/** A configuration failure (auth, not configured, not allowed) is retried this often until a settings save. */
+export const CONFIGURATION_RETRY_MS = HOUR;
 
-// ---- writes and the breaker -----------------------------------------------------------------------------------------------
+// ---- writes ----------------------------------------------------------------------------------------------------------------
 
 export const DEFAULT_RUN_WRITE_LIMIT = 10;
 export const RUN_WRITE_LIMIT_MAX = 10;
 export const DEFAULT_DAILY_WRITE_LIMIT = 150;
 export const DAILY_WRITE_LIMIT_MAX = 500;
-/** The breaker's label-share rule: at least this many writes today, and one label's share above both bounds. */
-export const SHARE_MIN_WRITES = 15;
-export const SHARE_MAX = 0.6;
-/** ... and more than this many times its share of the last 7 days. */
-export const SHARE_JUMP = 2;
 /** A Gmail write is retried by this many alarms before its ledger entry fails. */
 export const WRITE_ATTEMPTS_MAX = 5;
 /** UndoLedgerEntries undoes at most this many entries per call. */
@@ -173,8 +126,6 @@ export const UNDO_RANGE_MAX_MS = 31 * DAY;
 // ---- stores and retention -----------------------------------------------------------------------------------------------------
 
 export const LABELS_MAX = 24;
-export const EXAMPLES_MAX = 2000;
-export const EXAMPLES_PER_LABEL_MAX = 200;
 /** Subjects, senders and summaries of decided mails (and the review queue) are kept this long. */
 export const CONTENT_KEPT_MS = 14 * DAY;
 /** Decisions and the ledger (IDs, labels, probabilities) are kept this long. */
@@ -184,12 +135,12 @@ export const ERRORS_KEPT = 8;
 
 // ---- the owner API -----------------------------------------------------------------------------------------------------
 
-/** Maximum owner request body, including a bounded private consolidation plan. */
+/** Maximum owner request body (a saved prompt of up to 12 KiB of UTF-8 included). */
 export const MAX_BODY_BYTES = 32 * 1024;
 export const PAGE = 50;
 export const LABEL_ID_PATTERN = /^[a-z][a-z0-9-]{0,39}$/;
 export const ID_PATTERN = /^[a-z0-9-]{1,40}$/;
-/** New labels use a single English name. Older paths remain readable during label consolidation. */
+/** New labels use a single English name. Older paths remain readable. */
 export const LABEL_NAME_MAX = 40;
 /** Legacy path limits; never used to accept a new owner-supplied label name. */
 export const LABEL_DEPTH_MAX = 3;

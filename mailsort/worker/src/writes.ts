@@ -5,9 +5,9 @@
  * label that is already there, or removing one that is gone, changes nothing in Gmail.
  *
  * An `intended` row is written only if the caller's gate allows it at that moment: the row may be from an earlier
- * pass, and since then the owner may have chosen shadow, the breaker may have tripped or the label may have been
- * disabled. A refused row fails (`mode_changed`, ...) and its decision stays only recorded (`suggested`); the mail is
- * left as it is. Undo rows are never gated: they restore the original priority labels and Inbox position.
+ * pass, and since then the owner may have chosen shadow or the label may have been disabled. A refused row fails
+ * (`mode_changed`, ...) and its decision stays only recorded (`suggested`); the mail is left as it is. Undo rows are
+ * never gated: they restore the original priority labels and Inbox position.
  *
  * An automatic row left by an earlier pass (a 503, a pass cut short) is also checked against the mail as it is now,
  * one metadata read before the write: if the owner has meanwhile changed its Inbox position or added another user
@@ -29,7 +29,6 @@
  * keeps its mail by the time it goes out (keepIfLabelKeeps).
  */
 import { effectiveLedgerRow } from './label-identity.ts';
-import { migrationActive } from './label-merge.ts';
 import { priorityGmailIds, PRIORITY_IDS } from './priority.ts';
 import { setCurrentLabels } from './feedback.ts';
 import { countFlow, stageOf } from './flow.ts';
@@ -38,15 +37,14 @@ import { WRITE_ATTEMPTS_MAX } from './limits.ts';
 import { ownerPath } from './paths.ts';
 import { noteGoogleError } from './session.ts';
 import { timeId } from './ids.ts';
-import { unreadRechecksFallback, unreadRechecksInitial100 } from './unread.ts';
 import { utcDay, type LabelRow, type LedgerRow, type Store } from './store.ts';
 import type { Budget } from './session.ts';
 
 /**
  * Asked right before an `intended` row is written: null to write, `wait` to keep queued, or a failure code. It reads the mode,
- * the label and the limits as they are now, and may count the write (the alarm's caps).
+ * the label and the limits as they are now, and may count the write (the alarm's caps); a `peek` counts nothing.
  */
-export type WriteGate = (row: LedgerRow, label: LabelRow) => string | null;
+export type WriteGate = (row: LedgerRow, label: LabelRow, peek?: boolean) => string | null;
 
 export interface WriteContext {
   readonly store: Store;
@@ -253,7 +251,6 @@ function keepIfLabelKeeps(store: Store, row: LedgerRow): LedgerRow {
  */
 export async function executeWrites(ctx: WriteContext, ids: readonly string[] | null, limit: number): Promise<WriteOutcome> {
   const { store } = ctx;
-  if (migrationActive(store)) return { applied: 0, undone: 0, failed: 0, stopped: true };
   const rows =
     ids === null
       ? store.all<LedgerRow>(`SELECT * FROM ledger WHERE state IN ('intended', 'undo_intended') ORDER BY id LIMIT ?`, limit)
@@ -281,6 +278,8 @@ export async function executeWrites(ctx: WriteContext, ids: readonly string[] | 
           failed++;
           continue;
         }
+        // A write the caps hold anyway needs no read of the mail first.
+        if ((recheck || adopted) && ctx.transact(() => ctx.gate(row, label, true)) === 'wait') continue;
         const labelsNow = recheck || adopted ? await ctx.gmail.labelIdsOf(row.message_id) : null;
         // Before the gate, so a mail that is not written does not use up a write of the run's cap.
         if (recheck && labelsNow !== null && mailChanged(row, labelsNow)) {
@@ -318,10 +317,6 @@ export async function executeWrites(ctx: WriteContext, ids: readonly string[] | 
         const now = ctx.now();
         ctx.transact(() => {
           store.run(`UPDATE ledger SET state = 'applied', apply_time = ?, last_code = NULL WHERE id = ?`, now, row.id);
-          if ((unreadRechecksInitial100(store) || unreadRechecksFallback(store)) && store.one(`SELECT 1 AS x FROM unread_batch WHERE message_id = ? AND ledger_id = ?`, row.message_id, row.id) !== undefined) {
-            // Only the successful replacement owns undo; the earlier priority's history remains read-only.
-            store.run(`UPDATE ledger SET superseded = 1 WHERE message_id = ? AND origin = 'auto' AND label_id IN ('p1', 'p2', 'p3', 'p4') AND state = 'applied' AND id != ?`, row.message_id, row.id);
-          }
           const decision = store.decision(row.message_id);
           if (decision !== undefined) setCurrentLabels(store, row.message_id, [
             ...(JSON.parse(decision.current_labels) as string[]).filter(id => !PRIORITY_IDS.has(id)), row.label_id,

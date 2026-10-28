@@ -11,13 +11,13 @@ describe('automatic classification interval', () => {
   afterEach(async () => { await h.dispose(); });
 
   it('adopts the former idle hour once, persists the choice and reports the adjusted next batch', async () => {
-    await h.sql(`INSERT INTO meta(key,value) VALUES('settings', ?),('next_model_at', ?)`,
-      JSON.stringify({ mode: 'off', classificationProvider: 'codex', dailyWriteLimit: 19, breaker: 'daily_limit', etag: 'old' }), String(T0 + HOUR));
+    await h.sql(`INSERT OR REPLACE INTO meta(key,value) VALUES('settings', ?),('next_model_at', ?)`,
+      JSON.stringify({ mode: 'off', classificationProvider: 'codex', dailyWriteLimit: 19, etag: 'old' }), String(T0 + HOUR));
     expect((await h.api.getSettings({ name: 'settings' })).classificationIntervalMinutes).toBe(15);
     expect(await h.sql(`SELECT value FROM meta WHERE key='next_model_at'`)).toEqual([{ value: String(T0 + HOUR) }]);
     expect(await h.step(T0 + MINUTE)).toMatchObject({ next: T0 + 6 * MINUTE, code: 'off' });
     const initial = await h.api.getSettings({ name: 'settings' });
-    expect(initial).toMatchObject({ mode: Mode.OFF, classificationProvider: ClassificationProvider.CODEX, classificationIntervalMinutes: 15, dailyWriteLimit: 19, breakerTripped: true });
+    expect(initial).toMatchObject({ mode: Mode.OFF, classificationProvider: ClassificationProvider.CODEX, classificationIntervalMinutes: 15, dailyWriteLimit: 19 });
     await h.step(T0 + 2 * MINUTE);
     expect(await h.api.getSettings({ name: 'settings' })).toEqual(initial);
     expect(await h.sql(`SELECT value FROM meta WHERE key='next_model_at'`)).toEqual([{ value: String(T0 + 15 * MINUTE) }]);
@@ -33,7 +33,7 @@ describe('automatic classification interval', () => {
       provider: ClassificationProvider.CODEX, classificationIntervalMinutes: 30, nextBatchTime: timestampFromMs(T0 + 30 * MINUTE),
     });
     const row = await h.sql<{ value: string }>(`SELECT value FROM meta WHERE key='settings'`);
-    expect(JSON.parse(row[0]?.value ?? '{}')).toMatchObject({ classificationIntervalMinutes: 30, mode: 'off', classificationProvider: 'codex', breaker: 'daily_limit' });
+    expect(JSON.parse(row[0]?.value ?? '{}')).toMatchObject({ classificationIntervalMinutes: 30, mode: 'off', classificationProvider: 'codex' });
     expect(h.up.gmail.calls).toEqual([]);
     expect(h.up.claude.calls).toEqual([]);
     expect(h.up.codex.calls).toEqual([]);
@@ -63,7 +63,7 @@ describe('automatic classification interval', () => {
   });
 
   it('keeps a pending retry deadline during default adoption and a later shorter interval save', async () => {
-    await h.sql(`INSERT INTO meta(key,value) VALUES('settings','{"mode":"off"}'),('next_model_at',?)`, String(T0 + 10 * MINUTE));
+    await h.sql(`INSERT OR REPLACE INTO meta(key,value) VALUES('settings','{"mode":"off"}'),('next_model_at',?)`, String(T0 + 10 * MINUTE));
     await h.sql(`INSERT INTO pending(message_id,added_at,attempts,not_before) VALUES('synthetic-retry',?,1,?)`, T0, T0 + 10 * MINUTE);
     await h.step(T0);
     const current = await h.api.getSettings({ name: 'settings' });

@@ -1,12 +1,11 @@
 /**
  * The smoke run (../../../docs/design.md §11): the real `wrangler dev` (the pinned wrangler, ../../../wrangler.test.toml,
- * local bindings only) against the fake Gmail and fake Workers AI of ../fakes, served on loopback by this process.
+ * local bindings only) against the fake Gmail and fake Model Router of ../fakes, served on loopback by this process.
  * Nothing reaches Google or Cloudflare: DEV_FAKE_UPSTREAM sends every Google request and every model call to the fake,
  * and every request the fake receives is checked against the independent table (../fakes/table.ts).
  *
  * It exercises fixed P1-P4 setup through the generated owner HTTP API, CSRF rejection, shadow/live sorting,
- * conservative P1 fallback, inherited-priority replacement, undo, Gmail corrections, read-only replay, neuron budget,
- * quota recovery and authentication stop. Every mail and credential is synthetic. Run after the UI build:
+ * undo, Gmail corrections, the retired replay's refusal, provider spend and quota holds and authentication stop. Every mail and credential is synthetic. Run after the UI build:
  *
  *   npm run test:smoke
  */
@@ -19,7 +18,7 @@ import { join } from 'node:path';
 import { createHttpClient, type HttpCall } from '@ziyixi/proto/http-client';
 import { MailsortUiService } from '@ziyixi/proto/mailsort/ui/v2/mailsort_ui_service_pb';
 import { MailFlow_Outcome, MailFlow_Stage } from '@ziyixi/proto/mailsort/ui/v2/flow_pb';
-import { Mode, SettingsSchema } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
+import { ClassificationProvider, Mode, SettingsSchema } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
 import { create } from '@ziyixi/proto/protobuf';
 import { MAILS, message, type SyntheticMail } from '../fakes/fixtures.ts';
 import type { RecordedLedger } from '../fakes/fake-gmail.ts';
@@ -187,7 +186,7 @@ async function run(origin: string, up: FakeUpstream, setClock: (now: number) => 
   check(page.ok && (await page.text()).includes('/assets/'), 'the local Worker serves the built UI');
   const csrfRefusal = await fetch(`${origin}/api/v2/labels:initializePriorities`, { method: 'POST', headers: { 'content-type': 'application/json', origin }, body: '{}' });
   check(csrfRefusal.status === 403, 'the owner mutation rejects a request without CSRF');
-  check((await step(0)).code === 'priority_setup_required' && up.ai.calls.length === 0 && modifies() === 0, 'sorting waits for explicit priority setup');
+  check((await step(0)).code === 'priority_setup_required' && up.claude.calls.length === 0 && modifies() === 0, 'sorting waits for explicit priority setup');
   const setupId = id();
   const setup = await api.initializePriorities({ requestId: setupId });
   const setupCalls = up.gmail.calls.length;
@@ -197,6 +196,9 @@ async function run(origin: string, up: FakeUpstream, setClock: (now: number) => 
   check((await step(0)).code === 'ok', 'the initialized pipeline starts from its setup cursor');
   const initialSettings = await api.getSettings({ name: 'settings' });
   check(initialSettings.mode === Mode.SHADOW && initialSettings.runWriteLimit === 10, 'setup preserves the shadow mode and existing write cap');
+  check(initialSettings.classificationProvider === ClassificationProvider.CODEX, 'a fresh store defaults to Codex, the provider in use');
+  // The rest exercises the owner's explicit Claude choice, with its usage and monthly cap.
+  await api.updateSettings({ settings: create(SettingsSchema, { name: 'settings', classificationProvider: ClassificationProvider.CLAUDE }), updateMask: { paths: ['classification_provider'] }, requestId: id() });
   force('p2');
   deliver(MAILS.newsletterEn);
   await step();
@@ -214,7 +216,7 @@ async function run(origin: string, up: FakeUpstream, setClock: (now: number) => 
   check(labelsOf('a00000000000f001').includes('INBOX') && labelsOf('a00000000000f001').includes('UNREAD'), 'undo restores Inbox while preserving unread');
   let refused = false;
   try { await api.startReplayEvaluation({ name: 'replayEvaluation', requestId: id() }); } catch { refused = true; }
-  check(refused && up.ai.calls.length === 0, 'retired model replay is refused and no Workers AI calls execute');
+  check(refused, 'retired model replay is refused');
   const budget = (await api.getServiceStatus({ name: 'serviceStatus' })).claudeBudget;
   check(budget?.model === 'claude-opus-5-5' && budget.effort === 'medium' && budget.limitUsd === 20 && budget.spentUsd > 0 && budget.inputTokens > 0, 'owner status exposes recorded Claude usage and the monthly cap');
   const flow = await api.getMailFlow({ name: 'mailFlows/today' });

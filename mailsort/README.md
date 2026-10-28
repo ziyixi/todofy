@@ -27,32 +27,35 @@ Choose either provider in **设置 → 分类引擎**:
 | VPS Codex | `models/sol-6-1`, medium | Model Router, existing VPS subscription executor |
 
 The Codex model and effort were checked against the production VPS catalog; inference requires separate verification.
-The choice is saved in the existing settings row and survives reload and deployment. Legacy settings use Claude
-until the owner switches. Both providers use the same saved prompt; switching preserves mode, breaker, write limits
-and Claude usage history. It affects the next batch without starting an unread batch or reclassifying labelled mail.
+The choice is saved in the existing settings row and survives reload and deployment. A settings row without a choice
+(a fresh install or rebuilt state) uses Codex, the provider in use. Both providers use the same saved prompt; switching preserves mode, write limits and Claude
+usage history. It affects the next batch without starting an unread batch or reclassifying labelled mail.
 There is no automatic provider or model fallback.
 
 The interval is persisted for both providers. Saving adjusts a future ordinary wait; retries, quota waits and
 accepted backlog keep their own schedules. Older settings adopt 15 minutes once without reclassifying old mail.
 Backlog continues over subsequent Alarm calls within existing request and write caps. History sync includes
-mail opened before a batch; each normal due batch also lists at most 100 recent, unclassified Inbox IDs to
-recover missed items. Classification checks the receipt window against the first enqueue time, so already
-accepted work survives quota/retry holds. Unknown receipt dates are skipped. Old installation cutoffs no longer
-exclude otherwise eligible mail inside the 48-hour window. The explicit unread action still has its own scope
+mail opened before a batch; each normal due batch also lists at most 100 recent, unclassified Inbox IDs (never the
+owner's own sent mail) to recover missed items. Classification checks the receipt window against the first enqueue
+time, so already accepted work survives quota/retry holds. Unknown receipt dates are skipped. Old installation cutoffs
+no longer exclude otherwise eligible mail inside the 48-hour window. The explicit unread action still has its own scope
 and can cover older and archived unread mail; it is never automatically started by a deployment.
 
 Classification uses a [base prompt](prompts/priority-classification.txt) and [personal rules](prompts/personal-rules.txt).
 Edit either in **设置 → 分类提示词** and save; the existing database keeps the saved text through deployments.
 It applies to the next model batch and does not rerun classified mail. The initial personal rules put ordinary
 USPS Informed Delivery in P2 (P1 when timely action is needed), Daily Briefing in P1, and actual shopping receipts
-and order confirmations, including Weee and Yami, in P2. Promotions from the same brands keep the general policy.
+and order confirmations from any shopping platform in P2. Promotions from the same brands keep the general policy.
 The base includes three input/JSON-response demonstrations with seven synthetic messages covering all four queues;
 they illustrate the default preferences, while current personal rules take precedence.
 Inputs include masked sender,
 subject, up to 12,000 body characters, receipt time and evaluation time. Each result is one P1-P4 choice and a short
 reason. Brand preferences live in editable prompt text; there are no sender-specific code branches,
-probability thresholds, second model vote or learned examples. An invalid
-result or unavailable provider leaves mail pending through existing backoff; it never fabricates P1.
+probability thresholds, second model vote or learned examples. A failed model call never fabricates P1. Failures
+follow the shared Model Router error contract: an outage, rate limit or quota defers the whole batch without counting
+against any mail (5 minutes doubling to an hour, or the Router's Retry-After), so a long outage only delays mail; a
+configuration or auth failure retries hourly, or at once after a settings save; an invalid request or answer gives
+a mail three tries and a timeout seven. A mail that already failed is retried alone.
 
 Claude API uses its own workspace with a **$20/calendar-month provider spend limit**, separate from Brief.
 Gift-credit usage counts toward provider limits. The app records returned input/output/thinking and cache tokens and
@@ -61,10 +64,9 @@ authority; out-of-app calls and calls with a lost response may not appear in the
 leaves Claude work pending for the next UTC month. These limits apply only while Claude is selected; its usage and
 cache records remain visible as history while Codex is selected.
 
-Consecutive batches can reuse five-minute Claude prompt caches. Only the stable base/rules prefix is marked;
-emails and evaluation times follow it. Ordinary scheduled single batches do not request a cache write. The usage card
-shows actual cache reads/writes, and cost uses their separate prices. There is no prewarming or extra API call.
-This explicit cache policy applies only to Claude.
+Mailsort never asks for a prompt cache: a cache write costs more than the occasional reuse between batches saves.
+The stable base/rules prefix still comes first. Cache reads/writes the API reports still appear on the usage card and
+cost uses their separate prices.
 
 Both choices use the private `MODEL_ROUTER` service binding and the shared `modelrouter.inference.v1` contract.
 Mailsort sends trusted instruction blocks, masked input and a standard JSON Schema through
@@ -72,15 +74,12 @@ Mailsort sends trusted instruction blocks, masked input and a standard JSON Sche
 VPS executor connection. Its authenticated caller identity attributes usage; all Claude callers share the Router's single key in the existing $80/month workspace. No model receives Gmail credentials or business tools. Model availability and successful real inference
 remain separate checks from a configured route.
 
-The app records Codex HTTP classification attempts, valid/failed responses and reported input/output tokens by UTC day,
-retains those counters for 400 days and shows the current UTC month's totals. A response with an invalid classification
-still contributes its reported tokens. Failed requests without returned usage count as attempts with unknown token use;
-the UI shows how many requests supplied usage. Input totals include cached input. These records start with this release,
-preserve both providers' history on a switch and do not estimate subscription cost or the ChatGPT account's remaining allowance.
+Model Router records Codex usage; its console is the only Codex usage view. Mailsort keeps no Codex ledger, and its
+older daily Codex rows only age out with their 400-day retention.
 
 ## UI and existing data
 
-- 概览: mode, Gmail status, selected classifier/configuration, next model batch, flow and separate Codex/Claude usage history.
+- 概览: mode, Gmail status, selected classifier/configuration, next model batch, flow and Claude usage history.
 - 分级: four fixed queues, counts and explicit unread-batch progress. A manual start queues immediately; existing
   P1-P4 mail is skipped. While an active batch is visible, progress updates every 30 seconds. It stops on completion
   or leaving the page, and a reached daily write cap shows its UTC-reset time in the browser timezone.
@@ -88,7 +87,8 @@ preserve both providers' history on a switch and do not estimate subscription co
 
 Off, shadow and live modes retain their existing meanings. Shadow records decisions without changing Gmail;
 live applies them. The deployment ceiling can lower the owner's mode. Existing labelled mail is not automatically
-reclassified after a deployment. Older recheck actions remain explicit owner operations.
+reclassified after a deployment. The one-time recheck actions and the label consolidation are retired: an older page
+that still calls them is asked to reload.
 
 The initial P1-P4 setup and historical label replacement are in [priority rollout](docs/priority-rollout.md).
 Provider selection does not repeat that setup or delete labels.
@@ -112,9 +112,8 @@ node --test ../deploy/test/*.test.mjs
 ```
 
 Runtime and smoke tests use workerd/SQLite and fake Gmail/Claude/Codex endpoints with synthetic data.
-Batch results separate confirmed Gmail changes, successful rechecks that kept the same grade, and messages
-excluded before judgment. Priority badges refresh with batch progress. “重判最初100封” means the original earliest
-successfully graded cohort, including read/archive mail, rather than the newest 100 unread messages.
+Batch results separate confirmed Gmail changes and messages excluded before judgment; a recheck batch an older
+release completed still shows its same-grade judgments apart. Priority badges refresh with batch progress.
 
 UI checks in `web/`: `npm run lint && npm run typecheck && npm test && npm run build`.
 See [design](docs/design.md) and [collaboration rules](AGENTS.md).
@@ -127,8 +126,8 @@ the wrapper. Provider keys and Codex executor credentials belong to Model Router
 `MODEL_ROUTER` binding with the Mailsort caller identity; it has no arbitrary endpoint setting or provider credential.
 Use Router's single Claude key in the shared $80/month workspace. Mailsort's existing local business budget and history stay intact; no separate provider key is configured here.
 
-The migration does not change the saved classifier choice, mode, prompt, pending work, write limits, breaker or
-usage history. Credential transfer, deployment and a real synthetic inference require separate release evidence.
+The migration does not change the saved classifier choice, mode, prompt, pending work, write limits or usage
+history. Credential transfer, deployment and a real synthetic inference require separate release evidence.
 Do not paste keys into chat, issues or GitHub.
 
 Gmail credentials still use `deploy/mint-token.mjs`. Full rebuild steps are in the root

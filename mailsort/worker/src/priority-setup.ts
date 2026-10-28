@@ -45,7 +45,7 @@ export async function initializePriorities(ctx: ApiContext): Promise<{ completed
   const saved = prioritySetup(ctx.store);
   let setup: PrioritySetup;
   if (priorityStartedAt(ctx.store) > 0) return { completed: true, removedLabelCount: saved?.removedLabelCount ?? 0 };
-  if (ctx.consolidationBusy()) {
+  if (ctx.busy()) {
     throw sortError('CONSOLIDATION_PENDING_WRITES');
   }
   const client = await ctx.gmail();
@@ -79,7 +79,7 @@ export async function initializePriorities(ctx: ApiContext): Promise<{ completed
     const remaining = [...new Set([...owned, ...parentIds])].filter(id => isUserLabelId(id) && byId.has(id));
     const cursor = ctx.store.getMeta('history_cursor') ?? await client.currentHistoryId();
     setup = ctx.transact(() => {
-      if (ctx.consolidationBusy() || ctx.store.count(`SELECT count(*) AS n FROM ledger WHERE state = 'undo_intended'`) > 0) {
+      if (ctx.busy() || ctx.store.count(`SELECT count(*) AS n FROM ledger WHERE state = 'undo_intended'`) > 0) {
         throw sortError('CONSOLIDATION_PENDING_WRITES');
       }
       if (!allowed()) throw sortError('GMAIL_WRITE_NOT_ALLOWED');

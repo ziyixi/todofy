@@ -143,7 +143,7 @@ export async function features(message: ReadMessage): Promise<Features> {
   };
 }
 
-/** The short summary an example keeps and the embedding model reads: subject, sender and snippet, masked. */
+/** The short summary a decision keeps for CONTENT_KEPT_MS: subject, sender and snippet, masked. */
 export function summaryOf(f: Pick<Features, 'subject' | 'sender' | 'snippet'>, max: number): string {
   return cut([f.subject, f.sender, f.snippet].filter((part) => part !== '').join(' · '), max);
 }

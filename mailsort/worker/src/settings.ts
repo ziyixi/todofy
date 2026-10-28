@@ -1,12 +1,12 @@
 /**
  * The owner's settings (Settings in proto/mailsort/ui/v2/status.proto), kept as one JSON row of MailsortState's meta
- * table, and the mode in force: the owner's mode lowered by the deployment's MAILSORT_MODE ceiling and by the breaker.
- * A row written before 2026-10-10 may still hold the owner's default threshold and precision target: they are ignored
- * (the decision's threshold is a constant, limits.ts AUTO_THRESHOLD) and dropped by the next save.
+ * table, and the mode in force: the owner's mode lowered by the deployment's MAILSORT_MODE ceiling.
+ * An older row may still hold a retired threshold, precision target, Workers AI neuron budget or breaker: they are
+ * ignored and dropped by the next save.
  */
 import type { ModeName } from './env.ts';
 import { newEtag } from './ids.ts';
-import { DEFAULT_DAILY_NEURON_BUDGET, DEFAULT_DAILY_WRITE_LIMIT, DEFAULT_RUN_WRITE_LIMIT, MINUTE } from './limits.ts';
+import { DEFAULT_DAILY_WRITE_LIMIT, DEFAULT_RUN_WRITE_LIMIT, MINUTE } from './limits.ts';
 import { CLAUDE_MONTHLY_LIMIT_MICROS, utcDay, type Store } from './store.ts';
 
 export type ClassificationProviderName = 'claude' | 'codex';
@@ -18,21 +18,16 @@ export interface SettingsValue {
   readonly classificationIntervalMinutes: number;
   readonly runWriteLimit: number;
   readonly dailyWriteLimit: number;
-  readonly dailyNeuronBudget: number;
-  /** Why the breaker tripped (`daily_limit`, `run_limit`, `label_share`), or '' when it did not. */
-  readonly breaker: string;
   readonly etag: string;
 }
 
-/** A fresh install starts in shadow: nothing is written to Gmail until the owner chooses live. */
+/** A fresh install starts in shadow: nothing is written to Gmail until the owner chooses live. Codex is in use. */
 export const DEFAULTS: Omit<SettingsValue, 'etag'> = {
   mode: 'shadow',
-  classificationProvider: 'claude',
+  classificationProvider: 'codex',
   classificationIntervalMinutes: 15,
   runWriteLimit: DEFAULT_RUN_WRITE_LIMIT,
   dailyWriteLimit: DEFAULT_DAILY_WRITE_LIMIT,
-  dailyNeuronBudget: DEFAULT_DAILY_NEURON_BUDGET,
-  breaker: '',
 };
 
 const RANK: Readonly<Record<ModeName, number>> = { off: 0, shadow: 1, live: 2 };
@@ -53,13 +48,11 @@ export function readSettings(store: Store): SettingsValue {
   const number = (value: unknown, fallback: number) => (typeof value === 'number' && Number.isFinite(value) ? value : fallback);
   return {
     mode,
-    classificationProvider: stored.classificationProvider === 'codex' ? 'codex' : 'claude',
+    classificationProvider: stored.classificationProvider === 'claude' ? 'claude' : 'codex',
     classificationIntervalMinutes: CLASSIFICATION_INTERVAL_MINUTES.includes(stored.classificationIntervalMinutes ?? 0)
       ? stored.classificationIntervalMinutes ?? DEFAULTS.classificationIntervalMinutes : DEFAULTS.classificationIntervalMinutes,
     runWriteLimit: number(stored.runWriteLimit, DEFAULTS.runWriteLimit),
     dailyWriteLimit: number(stored.dailyWriteLimit, DEFAULTS.dailyWriteLimit),
-    dailyNeuronBudget: number(stored.dailyNeuronBudget, DEFAULTS.dailyNeuronBudget),
-    breaker: typeof stored.breaker === 'string' ? stored.breaker : '',
     etag: typeof stored.etag === 'string' ? stored.etag : 'initial',
   };
 }
@@ -90,16 +83,7 @@ export function adoptClassificationInterval(store: Store, now: number): Settings
     ? value : writeSettings(store, value, now);
 }
 
-/** The mode in force: the lower of the owner's and the deployment's, and shadow at most while the breaker is tripped. */
-export function effectiveMode(settings: Pick<SettingsValue, 'mode' | 'breaker'>, ceiling: ModeName): ModeName {
-  const mode = RANK[settings.mode] <= RANK[ceiling] ? settings.mode : ceiling;
-  return mode === 'live' && settings.breaker !== '' ? 'shadow' : mode;
-}
-
-/** Trips the breaker (once: the first reason stays until the owner sets the mode again). */
-export function tripBreaker(store: Store, reason: string, now: number): void {
-  const settings = readSettings(store);
-  if (settings.breaker !== '') return;
-  writeSettings(store, { ...settings, breaker: reason }, now);
-  store.pushError(`breaker_${reason}`);
+/** The mode in force: the lower of the owner's and the deployment's. */
+export function effectiveMode(settings: Pick<SettingsValue, 'mode'>, ceiling: ModeName): ModeName {
+  return RANK[settings.mode] <= RANK[ceiling] ? settings.mode : ceiling;
 }

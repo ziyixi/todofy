@@ -62,7 +62,7 @@ async function forward(request: Request, env: Env, requestId: string): Promise<R
 /**
  * Local development and the smoke test only (`wrangler dev` with DEV_AUTH_BYPASS and DEV_MANUAL_ALARMS, a loopback
  * request): moves MailsortState's clock and runs one alarm pass, so the pipeline can be tried against the fake Gmail and
- * fake Workers AI without waiting. POST /__dev/clock?now=<ms> and POST /__dev/step?now=<ms>. Production never sets
+ * fake Model Router without waiting. POST /__dev/clock?now=<ms> and POST /__dev/step?now=<ms>. Production never sets
  * either variable, so these paths are the UI's (the single-page fallback) there.
  */
 async function devControl(request: Request, env: Env, url: URL): Promise<Response> {

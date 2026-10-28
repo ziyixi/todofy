@@ -26,24 +26,22 @@ message Settings {
   string name = 1 [(google.api.field_behavior) = IDENTIFIER];
   // The owner's mode.
   Mode mode = 2 [(google.api.field_behavior) = OPTIONAL];
-  // The mode in force: the owner's, lowered by the deployment's MAILSORT_MODE switch (off or shadow) or by the
-  // breaker (shadow).
+  // The mode in force: the owner's, lowered by the deployment's MAILSORT_MODE switch (off or shadow).
   Mode effective_mode = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
   // At most this many Gmail writes per alarm run (retries included), 1 to 10. Reached limits wait.
   int32 run_write_limit = 4 [(google.api.field_behavior) = OPTIONAL];
   // At most this many Gmail writes per UTC day, 1 to 500. Reached limits wait.
   int32 daily_write_limit = 5 [(google.api.field_behavior) = OPTIONAL];
-  // Historical Workers AI daily budget, retained for compatibility. Claude does not use this field.
+  // Retired Workers AI daily budget: never stored or answered. An update that names it is accepted and ignored.
   int32 daily_neuron_budget = 6 [(google.api.field_behavior) = OPTIONAL];
-  // A breaker retained from an older release: the effective mode stays shadow until
-  // an UpdateSettings whose mask names `mode` (the owner choosing a mode again). Any other update keeps it.
+  // Retired with the breaker, which no longer exists: always false.
   bool breaker_tripped = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Historical breaker reason: `daily_limit`, `run_limit`, `label_share`; empty when it did not trip.
+  // Retired with the breaker: always empty.
   string breaker_reason = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
   // AIP-154: changes with every change. UpdateSettings that carries an etag is refused with ETAG_MISMATCH when
   // the settings changed since.
   string etag = 9 [(google.api.field_behavior) = OPTIONAL];
-  // The fixed classification provider. Legacy settings use Claude; changing this affects the next model batch.
+  // The fixed classification provider. Settings without a choice use Codex; changing this affects the next model batch.
   ClassificationProvider classification_provider = 10 [(google.api.field_behavior) = OPTIONAL];
   // Normal automatic classification interval in minutes: 5, 15, 30 or 60. Defaults to 15.
   // Gmail maintenance and pending-work retries keep their separate schedules.
@@ -149,17 +147,17 @@ message ServiceStatus {
   int32 unsure_today_count = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Requests to Google today.
   int32 gmail_call_today_count = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Historical Workers AI calls today; Claude usage is in claude_budget.
+  // Retired Workers AI call count: no longer reported.
   int32 ai_call_today_count = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Historical Workers AI neuron estimate; inactive for Claude.
+  // Retired Workers AI neuron estimate: no longer reported.
   double neurons_today = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Historical Workers AI daily budget (Settings.daily_neuron_budget); inactive for Claude.
+  // Retired Workers AI daily budget: no longer reported.
   int32 daily_neuron_budget = 16 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The selected classification provider's model ID.
   string decision_model = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Historical Workers AI quota state; inactive for Claude.
+  // Retired Workers AI quota state: no longer reported.
   bool ai_quota_exhausted = 18 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Historical examples without an embedding. Embedding execution is retired.
+  // Retired embedding backlog: no longer reported.
   int32 unembedded_example_count = 19 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The last few error codes (newest first, at most 8), e.g. `gmail_429`, `ai_unavailable`.
   repeated string recent_error_codes = 20 [(google.api.field_behavior) = OUTPUT_ONLY];
@@ -174,16 +172,16 @@ message ServiceStatus {
   UnreadClassification unread_classification = 23 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Native Claude API usage for the current UTC calendar month. List-price cost from reported tokens.
   ClaudeBudget claude_budget = 24 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The next UTC midnight while today's automatic and consolidation writes have reached the daily Gmail cap.
+  // The next UTC midnight while today's automatic writes have reached the daily Gmail cap.
   // Absent while the current day's write allowance remains available.
   google.protobuf.Timestamp gmail_write_resume_time = 25 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The selected classification provider's readiness, errors and batch schedule.
   ClassifierStatus classifier = 26 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Persisted Codex classification request and reported-token totals for the current UTC month.
+  // Retired: Model Router records Codex usage, so this is no longer reported.
   CodexUsage codex_usage = 27 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
-// Application-observed Codex usage, retained independently of the selected provider. No price or account quota.
+// Retired application-observed Codex usage (ServiceStatus.codex_usage, no longer reported).
 message CodexUsage {
   // Configured model for new classification requests.
   string model = 1 [(google.api.field_behavior) = OUTPUT_ONLY];

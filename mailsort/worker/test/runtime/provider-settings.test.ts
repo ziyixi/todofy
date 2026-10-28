@@ -9,24 +9,24 @@ describe('classification provider settings and status', () => {
   beforeEach(async () => { h = await startHarness(); });
   afterEach(async () => { await h.dispose(); });
 
-  it('defaults legacy settings to Claude and preserves mode, limits, breaker and existing work when switching', async () => {
-    await h.sql(`INSERT INTO meta (key, value) VALUES ('settings', ?), ('next_model_at', ?), ('claude_limited_month', '2026-10'), ('claude_error', 'claude_spend_limit')`,
-      JSON.stringify({ mode: 'live', runWriteLimit: 3, dailyWriteLimit: 19, dailyNeuronBudget: 7000, breaker: 'daily_limit', etag: 'legacy' }), String(T0 + HOUR));
+  it('defaults legacy settings to Codex and preserves mode, limits and existing work when switching', async () => {
+    await h.sql(`INSERT OR REPLACE INTO meta (key, value) VALUES ('settings', ?), ('next_model_at', ?), ('claude_limited_month', '2026-10'), ('claude_error', 'claude_spend_limit')`,
+      JSON.stringify({ mode: 'live', runWriteLimit: 3, dailyWriteLimit: 19, etag: 'legacy' }), String(T0 + HOUR));
     const before = await h.api.getSettings({ name: 'settings' });
-    expect(before.classificationProvider).toBe(ClassificationProvider.CLAUDE);
+    expect(before.classificationProvider).toBe(ClassificationProvider.CODEX);
     const requestId = op();
     const request = {
-      settings: create(SettingsSchema, { name: 'settings', classificationProvider: ClassificationProvider.CODEX, mode: Mode.OFF, etag: before.etag }),
+      settings: create(SettingsSchema, { name: 'settings', classificationProvider: ClassificationProvider.CLAUDE, mode: Mode.OFF, etag: before.etag }),
       updateMask: { paths: ['classification_provider', 'etag'] }, requestId,
     };
     const saved = await h.api.updateSettings(request);
-    expect(saved).toEqual({ ...before, classificationProvider: ClassificationProvider.CODEX, etag: saved.etag });
+    expect(saved).toEqual({ ...before, classificationProvider: ClassificationProvider.CLAUDE, etag: saved.etag });
     expect(saved.etag).not.toBe(before.etag);
     expect(await h.api.getSettings({ name: 'settings' })).toEqual(saved);
     expect(await h.api.updateSettings(request)).toEqual(saved);
     expect(reasonOf(await rejection(h.api.updateSettings({ ...request, requestId: op() })))).toBe('ETAG_MISMATCH');
     const stored = await h.sql<{ value: string }>(`SELECT value FROM meta WHERE key = 'settings'`);
-    expect(JSON.parse(stored[0]?.value ?? '{}')).toMatchObject({ classificationProvider: 'codex', mode: 'live', breaker: 'daily_limit' });
+    expect(JSON.parse(stored[0]?.value ?? '{}')).toMatchObject({ classificationProvider: 'claude', mode: 'live', runWriteLimit: 3, dailyWriteLimit: 19 });
     expect(await h.sql(`SELECT value FROM meta WHERE key = 'next_model_at'`)).toEqual([{ value: String(T0) }]);
     expect(await h.sql(`SELECT key FROM meta WHERE key IN ('claude_limited_month', 'claude_error') ORDER BY key`)).toEqual([{ key: 'claude_error' }, { key: 'claude_limited_month' }]);
     expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).unreadClassification).toBeUndefined();
@@ -35,7 +35,7 @@ describe('classification provider settings and status', () => {
   });
 
   it('preserves a future schedule and deferred work when the selected provider stays the same', async () => {
-    await h.sql(`INSERT INTO meta (key, value) VALUES ('settings', '{"classificationProvider":"codex","classificationIntervalMinutes":60}'), ('next_model_at', ?)`, String(T0 + HOUR));
+    await h.sql(`INSERT OR REPLACE INTO meta (key, value) VALUES ('settings', '{"classificationProvider":"codex","classificationIntervalMinutes":60}'), ('next_model_at', ?)`, String(T0 + HOUR));
     await h.sql(`INSERT INTO pending (message_id, added_at, not_before, deferred) VALUES ('synthetic-held', ?, ?, ?)`, T0, T0 + HOUR, T0);
     const current = await h.api.getSettings({ name: 'settings' });
     await h.api.updateSettings({
@@ -65,7 +65,7 @@ describe('classification provider settings and status', () => {
   });
 
   it('reports selected Codex configuration and success separately from preserved Claude usage and refusal', async () => {
-    await h.sql(`INSERT INTO meta (key, value) VALUES ('settings', ?), ('claude_error', 'claude_spend_limit'), ('claude_limited_month', '2026-10'),
+    await h.sql(`INSERT OR REPLACE INTO meta (key, value) VALUES ('settings', ?), ('claude_error', 'claude_spend_limit'), ('claude_limited_month', '2026-10'),
       ('codex_error', 'codex_503'), ('codex_last_request_at', ?), ('codex_last_success_at', ?), ('next_model_at', ?)`,
     JSON.stringify({ classificationProvider: 'codex' }), String(T0), String(T0 - HOUR), String(T0 + HOUR));
     await h.sql(`INSERT INTO claude_usage (day, requests, input_tokens, output_tokens, cost_micros) VALUES ('2026-10-01', 1, 500, 100, 20000000)`);
@@ -81,8 +81,8 @@ describe('classification provider settings and status', () => {
     });
     expect(status.classifier?.lastErrorCode).not.toBe('claude_spend_limit');
     expect(status.claudeBudget?.nextBatchTime).toBeUndefined();
-    expect(status.codexUsage).toMatchObject({ requestCount: 0, successCount: 0, failureCount: 0, usageReportedCount: 0 });
-    expect(status.codexUsage?.lastRequestTime).toBeUndefined();
+    // Model Router records Codex usage; Mailsort keeps no ledger of its own.
+    expect(status.codexUsage).toBeUndefined();
   });
 
   it('does not interpret a historical request timestamp as a successful answer', async () => {
@@ -98,7 +98,7 @@ it.each([true, false])('reports Router catalog configuration (%s) without a mode
   const h = await startHarness();
   try {
     h.up.codex.configured = configured;
-    await h.sql(`INSERT INTO meta (key, value) VALUES ('settings', '{"classificationProvider":"codex"}')`);
+    await h.sql(`INSERT OR REPLACE INTO meta (key, value) VALUES ('settings', '{"classificationProvider":"codex"}')`);
     const status = await h.api.getServiceStatus({ name: 'serviceStatus' });
     expect(status.classifier).toMatchObject({ provider: ClassificationProvider.CODEX, configured, lastErrorCode: configured ? '' : 'codex_not_configured' });
     expect(h.up.gmail.calls).toHaveLength(0);

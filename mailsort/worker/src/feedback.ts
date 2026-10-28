@@ -1,5 +1,5 @@
 /**
- * Learning from the owner (../../docs/design.md §6), without fine-tuning: verdicts on decisions and examples.
+ * The owner's verdicts on decisions (../../docs/design.md §6): the report's corrections and the flow counters.
  *
  * Verdicts come from two places. The review queue's choices; and Gmail itself, read from the history's
  * labelAdded/labelRemoved records on mails mailsort decided: the owned labels a mail carries now are compared with what
@@ -9,11 +9,11 @@
  * decided label) or a correction (another). Mailsort's own writes change `current_labels` when they are made, so
  * their history records change nothing.
  *
- * A verdict with a label makes an example of the mail's summary (while its content is kept); a withdrawn verdict
- * deletes it. The verdicts also feed the sender history the model reads (judge.ts senderHistory).
+ * Verdicts no longer make learning examples: nothing reads them. A historical example stays until the owner deletes it;
+ * a withdrawn verdict, or the choice that no label fits, still deletes the mail's own.
  */
 import { canonicalDecision, effectiveLedgerRow, isMergeFeedback } from './label-identity.ts';
-import { deleteExampleOf, putExample } from './examples.ts';
+import { deleteExampleOf } from './examples.ts';
 import { countFlow, stageOf } from './flow.ts';
 import type { DecisionRow, Store } from './store.ts';
 import { PRIORITY_IDS, priorityStartedAt } from './priority.ts';
@@ -34,8 +34,8 @@ export function setCurrentLabels(store: Store, messageId: string, labels: readon
 }
 
 /**
- * Records the owner's choice for a decided mail: `chosen` is a label ID or null ("none of them"). Updates the example
- * and a pending review item of the mail.
+ * Records the owner's choice for a decided mail: `chosen` is a label ID or null ("none of them", which also deletes the
+ * mail's historical example). Resolves a pending review item of the mail.
  */
 export function setVerdict(store: Store, row: DecisionRow, chosen: string | null, source: VerdictSource, now: number): void {
   if (priorityStartedAt(store) === 0 || row.decided_at < priorityStartedAt(store) || (row.label_id !== null && !PRIORITY_IDS.has(row.label_id)) || (chosen !== null && !PRIORITY_IDS.has(chosen))) return;
@@ -44,11 +44,7 @@ export function setVerdict(store: Store, row: DecisionRow, chosen: string | null
   // The flow's corrections count decisions whose label the owner changed, once each, on the day it was decided.
   countCorrection(store, row, (verdict === 'corrected' ? 1 : 0) - (row.verdict === 'corrected' ? 1 : 0));
   store.run(`UPDATE decisions SET verdict = ?, verdict_label = ?, verdict_source = ?, verdict_at = ? WHERE message_id = ?`, verdict, chosen, source, now, row.message_id);
-  if (chosen !== null && row.summary !== null && row.summary !== '') {
-    putExample(store, row.message_id, chosen, row.summary, verdict === 'confirmed' ? 'confirmation' : 'correction', now);
-  } else {
-    deleteExampleOf(store, row.message_id);
-  }
+  if (chosen === null) deleteExampleOf(store, row.message_id);
   const review = store.pendingReviewOf(row.message_id);
   if (review !== undefined) {
     // `confirmed` when the owner chose the model's most likely label, else `corrected`: both are resolved.
@@ -63,7 +59,7 @@ function countCorrection(store: Store, row: DecisionRow, delta: number): void {
   if (original.label_id !== null && original.outcome !== 'skipped') countFlow(store, original.decided_at, stageOf(original.decider), 'corrected', original.label_id, delta);
 }
 
-/** Withdraws a verdict (the owner undid their own change in Gmail): no verdict, no example. */
+/** Withdraws a verdict (the owner undid their own change in Gmail): no verdict, no historical example. */
 export function withdrawVerdict(store: Store, row: DecisionRow): void {
   if (row.verdict === 'corrected') countCorrection(store, row, -1);
   store.run(`UPDATE decisions SET verdict = NULL, verdict_label = NULL, verdict_source = NULL, verdict_at = NULL WHERE message_id = ?`, row.message_id);

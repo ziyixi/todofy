@@ -38,8 +38,6 @@ const MESSAGES: Readonly<Partial<Record<Reason, string>>> = {
   ETAG_MISMATCH: '这一项已在别处修改，请刷新后重试',
   CSRF_FAILED: '请求来源或格式无效，请刷新页面后重试',
   INVALID_LABEL: '分级标签状态无效，请刷新后继续设置',
-  CONSOLIDATION_ACTIVE: '分级设置尚未完成，请到分级页继续设置',
-  CONSOLIDATION_NOT_BLOCKED: '该整理任务无需继续，请刷新状态',
   CONSOLIDATION_PENDING_WRITES: '等待已有 Gmail 写入完成后再开始整理',
   REPLAY_ACTIVE: '已有回放正在运行，请等待完成',
 }

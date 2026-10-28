@@ -12,21 +12,24 @@ function store(): Store {
 }
 
 describe('classification provider settings', () => {
-  it('defaults new and legacy settings to Claude', () => {
+  it('defaults new and legacy settings to Codex, the provider in use', () => {
     const value = store();
-    expect(readSettings(value).classificationProvider).toBe('claude');
+    expect(readSettings(value).classificationProvider).toBe('codex');
     value.setMeta('settings', JSON.stringify({ mode: 'live', breaker: 'daily_limit', etag: 'legacy' }));
-    expect(readSettings(value)).toMatchObject({ classificationProvider: 'claude', mode: 'live', breaker: 'daily_limit', etag: 'legacy' });
+    expect(readSettings(value)).toEqual({ ...DEFAULTS, classificationProvider: 'codex', mode: 'live', etag: 'legacy' });
+    // A breaker an older release stored no longer lowers the mode.
+    expect(effectiveMode(readSettings(value), 'live')).toBe('live');
   });
 
-  it('reads a persisted fixed provider choice and preserves mode and breaker', () => {
+  it('reads a persisted fixed provider choice and preserves mode', () => {
     const sql = memorySql();
     const value = new Store(sql);
     value.migrate();
-    const saved = writeSettings(value, { ...DEFAULTS, mode: 'live', breaker: 'daily_limit', classificationProvider: 'codex' }, NOW);
+    const saved = writeSettings(value, { ...DEFAULTS, mode: 'live', classificationProvider: 'codex' }, NOW);
     expect(readSettings(new Store(sql))).toEqual(saved);
-    expect(effectiveMode(saved, 'live')).toBe('shadow');
-    expect(writeSettings(value, { ...saved, classificationProvider: 'claude' }, NOW + 1)).toMatchObject({ mode: 'live', breaker: 'daily_limit', classificationProvider: 'claude' });
+    expect(effectiveMode(saved, 'live')).toBe('live');
+    expect(effectiveMode(saved, 'shadow')).toBe('shadow');
+    expect(writeSettings(value, { ...saved, classificationProvider: 'claude' }, NOW + 1)).toMatchObject({ mode: 'live', classificationProvider: 'claude' });
   });
 });
 
@@ -39,7 +42,8 @@ describe('automatic classification interval', () => {
     value.setMeta('next_model_at', String(NOW + 50 * 60_000));
     expect(readSettings(value).classificationIntervalMinutes).toBe(15);
     const saved = adoptClassificationInterval(value, NOW);
-    expect(saved).toMatchObject({ classificationIntervalMinutes: 15, mode: 'live', classificationProvider: 'codex', breaker: 'daily_limit', dailyWriteLimit: 19 });
+    expect(saved).toMatchObject({ classificationIntervalMinutes: 15, mode: 'live', classificationProvider: 'codex', dailyWriteLimit: 19 });
+    expect(JSON.parse(value.getMeta('settings') ?? '{}')).not.toHaveProperty('breaker');
     expect(value.getMeta('next_model_at')).toBe(String(NOW + 5 * 60_000));
     expect(adoptClassificationInterval(value, NOW + 60_000)).toEqual(saved);
     expect(value.getMeta('next_model_at')).toBe(String(NOW + 5 * 60_000));

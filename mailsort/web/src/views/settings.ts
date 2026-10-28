@@ -6,7 +6,7 @@ import { ClassificationProvider, Mode, ServiceStatus_AuthState, SettingsSchema, 
 import { api, errorMessage, newRequestId, withRetry } from '../api.ts'
 import { card, segmented } from '../components.ts'
 import { button, el, toast } from '../dom.ts'
-import { BREAKER_REASONS, classificationProvider, classificationProviderName, labelText, MODE_HINTS, MODE_NAMES, ms, relative, when } from '../format.ts'
+import { classificationProvider, classificationProviderName, labelText, MODE_HINTS, MODE_NAMES, ms, relative, when } from '../format.ts'
 import type { Host, ViewContext } from '../app.ts'
 import { replayCard } from './replay.ts'
 import { promptCard } from './prompt.ts'
@@ -65,25 +65,18 @@ function modeCard(settings: Settings, status: ServiceStatus | null, ctx: ViewCon
     if (mode === Mode.LIVE && !ctx.host.confirm('切到正式？新邮件会打上 P1、P2、P3、P4 标签。P1 留在收件箱，P2、P3、P4 自动归档，未读状态保持不变。')) return
     void act((requestId) => setMode(settings, mode, requestId), `已切到${MODE_NAMES[mode] ?? ''}`, after)
   }
-  const resetBreaker = () => {
-    if (!ctx.host.confirm(`解除熔断，恢复“${MODE_NAMES[settings.mode] ?? ''}”？`)) return
-    void act((requestId) => setMode(settings, settings.mode, requestId), '已解除熔断', after)
-  }
   const effective = MODE_NAMES[settings.effectiveMode] ?? '—'
-  const line = settings.breakerTripped
-    ? `已熔断（${BREAKER_REASONS[settings.breakerReason] ?? settings.breakerReason}），暂按影子运行`
-    : settings.effectiveMode !== settings.mode
-      ? `受部署上限限制，按${effective}运行`
-      : readOnly(settings, status)
-        ? 'Gmail 只读授权，还不会写入：在本机运行 mint-token.mjs --scope modify'
-        : (MODE_HINTS[settings.mode] ?? '')
-  const warn = settings.breakerTripped || (settings.effectiveMode === settings.mode && readOnly(settings, status))
+  const line = settings.effectiveMode !== settings.mode
+    ? `受部署上限限制，按${effective}运行`
+    : readOnly(settings, status)
+      ? 'Gmail 只读授权，还不会写入：在本机运行 mint-token.mjs --scope modify'
+      : (MODE_HINTS[settings.mode] ?? '')
+  const warn = settings.effectiveMode === settings.mode && readOnly(settings, status)
   return card(
     '模式',
     '',
     segmented('模式', MODES, settings.mode, choose),
     el('p', { class: warn ? 'hint warn' : 'hint' }, line),
-    settings.breakerTripped ? el('div', { class: 'actions' }, button('解除熔断', resetBreaker)) : null,
   )
 }
 

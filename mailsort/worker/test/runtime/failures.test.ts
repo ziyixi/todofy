@@ -44,18 +44,29 @@ describe('write gates and retries', () => {
     expect(await h.sql(`SELECT count(*) AS n FROM ledger WHERE message_id = ?`, id)).toEqual([{ n: 1 }]);
   });
 
-  it.each(['shadow', 'breaker'])('refuses a retry after %s stops live writes', async (reason) => {
+  it('refuses a retry after shadow stops live writes', async () => {
     await setup();
     const id = 'abc0000000000102';
     await intended(id);
-    if (reason === 'shadow') await setMode(h, Mode.SHADOW);
-    else await h.sql(`UPDATE meta SET value = json_set(value, '$.breaker', 'label_share') WHERE key = 'settings'`);
+    await setMode(h, Mode.SHADOW);
     const count = modifies(h).length;
     await step();
     expect(modifies(h)).toHaveLength(count);
     expect(await ledger(id)).toEqual([{ state: 'failed', last_code: 'mode_changed' }]);
     expect(await decision(h, id)).toMatchObject({ outcome: 'suggested', label_id: 'p2' });
     expect(gmailLabels(h, id)).toContain('INBOX');
+  });
+
+  it('holds an intended retry at the daily cap without reading the mail first', async () => {
+    await setup();
+    const id = 'abc0000000000109';
+    await intended(id);
+    const settings = await h.api.getSettings({ name: 'settings' });
+    await h.sql(`INSERT INTO usage (day, applied) VALUES ('2026-10-01', ?) ON CONFLICT (day) DO UPDATE SET applied = excluded.applied`, settings.dailyWriteLimit);
+    const before = h.up.gmail.calls.length;
+    await step();
+    expect(h.up.gmail.calls.slice(before).filter((call) => call.url.includes(`/messages/${id}`))).toEqual([]);
+    expect(await ledger(id)).toEqual([{ state: 'intended', last_code: 'message_modify_503' }]);
   });
 
   it('checks label enablement again before retry', async () => {
@@ -106,7 +117,7 @@ describe('write gates and retries', () => {
     await step();
     expect(modifies(h).length - count).toBe(1);
     expect(await h.sql(`SELECT state, count(*) AS n FROM ledger WHERE message_id IN (?, ?) GROUP BY state ORDER BY state`, first, second)).toEqual([{ state: 'applied', n: 1 }, { state: 'intended', n: 1 }]);
-    expect(await h.api.getSettings({ name: 'settings' })).toMatchObject({ breakerTripped: false, breakerReason: '', effectiveMode: Mode.LIVE });
+    expect(await h.api.getSettings({ name: 'settings' })).toMatchObject({ effectiveMode: Mode.LIVE });
     await step();
     expect(await ledger(first)).toEqual([{ state: 'applied', last_code: null }]);
     expect(await ledger(second)).toEqual([{ state: 'applied', last_code: null }]);
@@ -121,7 +132,7 @@ describe('write gates and retries', () => {
     expect(await ledger('abc0000000000108')).toEqual([]);
     expect(modifies(h)).toEqual([]);
     expect(await h.sql(`SELECT not_before FROM pending`)).toEqual([{ not_before: T0 + DAY }]);
-    expect(await h.api.getSettings({ name: 'settings' })).toMatchObject({ breakerTripped: false, effectiveMode: Mode.LIVE });
+    expect(await h.api.getSettings({ name: 'settings' })).toMatchObject({ effectiveMode: Mode.LIVE });
     await h.step(T0 + DAY);
     expect(await ledger('abc0000000000108')).toEqual([{ state: 'applied', last_code: null }]);
   });
@@ -192,7 +203,6 @@ describe('read and model recovery', () => {
     h.up.claude.spendLimit = false;
     await step();
     expect(h.up.claude.calls).toHaveLength(1);
-    expect(h.up.ai.calls).toEqual([]);
     expect(modifies(h)).toEqual([]);
     await h.step(november);
     expect(await decision(h, 'abc0000000000115')).toMatchObject({ outcome: 'applied', label_id: 'p2' });
