@@ -243,20 +243,26 @@ async def test_discovery_gets_only_its_direction_and_untrusted_notes(
     assert content._RESEARCHER_NOTES not in rules
 
 
-async def test_old_feed_artifacts_without_notes_still_route(nodes, tmp_path):
+async def test_old_feed_artifacts_without_notes_keep_their_routing(
+    nodes, tmp_path
+):
+    # The fixed pre-researcher feed tagged every seed 02-science and offered
+    # all of them to every direction; a resumed frozen run keeps that prompt.
     lead = seed("02-science", 1)
     nodes.content.engine = workflow_content.Engine(
         (workflow_content.discovered(), set(), True),
+        (workflow_content.discovered(), set(), True),
     )
-    await nodes.execute(
-        "discovery",
-        discovery_context("02-science", feeds_artifact(lead, notes=False)),
-        tmp_path.resolve() / "old",
-    )
-    ((prompt, _, rules, _),) = nodes.content.engine.calls
-    assert [s["id"] for s in prompt["metadata_seeds"]] == [lead["id"]]
-    assert "metadata_seed_notes_untrusted" not in prompt
-    assert content._RESEARCHER_NOTES not in rules
+    for direction in ("02-science", "04-economy"):
+        await nodes.execute(
+            "discovery",
+            discovery_context(direction, feeds_artifact(lead, notes=False)),
+            tmp_path.resolve() / direction,
+        )
+    for prompt, _, rules, _ in nodes.content.engine.calls:
+        assert [s["id"] for s in prompt["metadata_seeds"]] == [lead["id"]]
+        assert "metadata_seed_notes_untrusted" not in prompt
+        assert content._RESEARCHER_NOTES not in rules
 
 
 async def test_malformed_notes_are_dropped_not_fatal(nodes, tmp_path):

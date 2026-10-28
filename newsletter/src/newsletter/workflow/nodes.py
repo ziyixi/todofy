@@ -204,7 +204,9 @@ class EditorialNodes:
             item
             for value in feeds
             for item in value["candidates"]
-            if item["direction"] == direction["id"]
+            # A frozen artifact from before the researcher has no notes; its
+            # run offered every seed to every direction, so it still does.
+            if "notes" not in value or item["direction"] == direction["id"]
         ]
         # Older artifacts have no notes; notes never leave this prompt.
         notes = {
