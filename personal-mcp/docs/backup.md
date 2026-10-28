@@ -17,7 +17,7 @@ secret, service or binding to another app; "Infra apply" created the bucket (`in
   and every KV key (`last_tool_at`, `last_subscription_at`, `last_subscription_request`). A table added later is
   backed up without a change to the backup. Left out, because a restore rebuilds them or they are not the app's data:
   `delivery_totals` (counts of deliveries by state, rebuilt by the deliveries triggers as rows go in),
-  `sqlite_sequence` (SQLite's own; the restored `work_entries` sequence numbers move it), Cloudflare's `_cf_*`
+  `sqlite_sequence` (SQLite's own; the restore sets the `work_entries` sequence, see below), Cloudflare's `_cf_*`
   tables, and the KV keys `backup` and `restore` (this job's and a restore's own state). The Alarm is not data: a
   restored store sets its own.
 - **Layout.** Each job writes under its own prefix, named after the second it started:
@@ -27,15 +27,17 @@ secret, service or binding to another app; "Infra apply" created the bucket (`in
   statement, columns and planned max rowid, and each part's rows, bytes and SHA-256), then `latest.json`, which
   names the new backup. A prefix without a manifest is incomplete.
 - **Bounded steps.** One step per Alarm, a second apart. The first step fixes every table's max rowid; each step reads
-  the KV keys and the tables, smallest first, up to 4 MiB of rows, without awaiting in between, and then stores one
+  the KV keys and the tables, fewest rows first, up to 4 MiB of rows, without awaiting in between, and then stores one
   part per table it read. A store that fits one step is one consistent snapshot. A larger one adds the rest of its
-  biggest tables in later steps: rows added after the first step are left out, and a row changed between steps is
-  saved as it is when its step reads it. A cursor moves only after its part is stored, so a failed step repeats from
+  biggest tables (`deliveries`, `work_entries`) in later steps: rows added after the first step are left out, and a row
+  changed between steps is saved as it is when its step reads it. The small tables that move a row to a new rowid when
+  they replace it (`own_changes`, `work_links`, `event_sources`) come first, so they are read whole in the first step. A cursor moves only after its part is stored, so a failed step repeats from
   there. Three failed steps in a row fail the job, which starts again an hour later (three times), then at the next
   05:23.
 - **Retention in code.** After each new backup, the newest 30 complete backups stay; older ones, and every incomplete
   prefix older than the new one, are deleted. A job never rewrites a complete backup and never touches another
-  backup's objects. A store without rows (a new object waiting for its restore) writes no backup, so `latest.json`
+  backup's objects. One listing of `backups/` finds the complete and incomplete prefixes, so the cleanup costs a few R2
+  calls however many backups there are. A store without rows (a new object waiting for its restore) writes no backup, so `latest.json`
   keeps naming real data. There is no R2 lifecycle rule: a stopped job never ages out the last good copies.
 - **Ops.** Home's Personal MCP tile shows `backup_age_seconds` and `last_backup_at`, and raises `backup_stale`
   (critical: no complete backup for 3 days, counted from the first job while there is none) and `backup_failed`
@@ -56,7 +58,7 @@ old object keeps its data for comparison.
 
 A restore runs inside the object (`worker/src/restore.ts`), from its own `BACKUPS` bucket, and only into an empty
 store. The owner starts it with one call; the object then loads the backup in steps a second apart, each up to 4 MiB of
-rows. Every part is read, checked against the manifest's SHA-256 and row count, inserted with its rowids, read back and
+rows from at most 20 parts. Every part is read, checked against the manifest's SHA-256 and row count, inserted with its rowids, read back and
 compared byte for byte, and the cursor moves, in one transaction: a failed step repeats the part without duplicates.
 Three failed steps in a row fail the restore; the same call resumes it. Until it is done the store answers every
 `/mcp` request with 503 `restore_unfinished`, runs neither its event sources, deliveries nor backup, and Home shows
@@ -127,13 +129,15 @@ delete them afterwards.
   (`watch:<sequence>`) the lost store made; report IDs the restored store already holds are not repeated. If Watch no
   longer has those events, or refuses the cursor because Watch itself was restored behind it, each open Work with a
   Watch gets one `blocked` gap report and the cursor starts again from now, as after an expired cursor.
+- New Work entries are numbered a million past the backup's last one. A Work notice's event ID holds its entry's
+  number, and the lost store went on numbering after the backup, so a report the restored store makes never reuses an
+  event ID a Dot already received for another report.
 - Pending deliveries in the backup are sent again with their frozen event IDs and bodies; accepted ones are not.
 
 ### What a restore does not cover
 
-- Anything after the backup: Work records, reports and checkpoints written since are gone, and Work sequence numbers
-  and etags after the backup point can be issued again. A Dot must read the Work again before it checkpoints; a stale
-  etag is refused.
+- Anything after the backup: Work records, reports and checkpoints written since are gone, and Work etags after the
+  backup point can be issued again. A Dot must read the Work again before it checkpoints; a stale etag is refused.
 - Business notifications between the backup and the restore (see above); Dots read current facts through the tools.
 - Business data, which stays in Tasks, Todofy, Recall, Watch and Home and their own backups.
 - The ChatGPT connection, Access OAuth and secrets: Access and ChatGPT hold the connection; a new account needs the

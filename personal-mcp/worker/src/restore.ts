@@ -9,7 +9,8 @@
  * part without duplicates. RESTORE_MAX_ERRORS failed steps in a row fail the restore; the owner resumes it with the same call.
  *
  * The last step verifies every table's rows and the KV keys against the manifest, and that delivery_totals (rebuilt by
- * the deliveries triggers) matches the deliveries, and writes that to the status. It marks every event source
+ * the deliveries triggers) matches the deliveries, and writes that to the status. It moves the Work entry numbers past
+ * WORK_SEQ_GAP, so no new Work notice reuses an event ID the lost store sent, and marks every event source
  * `restored` (events.ts): the business sources take a new baseline at their next check, and the Work Watch source
  * replays from its cursor unless Watch no longer accepts it (watch-events.ts). Then the store backs itself up at once.
  */
@@ -19,8 +20,14 @@ import {
 } from './backup.ts';
 import { RESTORED } from './events.ts';
 
-/** Row JSON a step loads (at least one part). */
+/** Row JSON a step loads (at least one part), from at most RESTORE_STEP_PARTS parts: R2 reads count as subrequests. */
 export const RESTORE_STEP_BYTES = 4 << 20;
+export const RESTORE_STEP_PARTS = 20;
+/**
+ * Work entry numbers a restored store skips. A Work notice's event ID holds its entry's number, and the lost store went on
+ * numbering after the backup: new entries start this far past the backup's, more than the store writes in years.
+ */
+export const WORK_SEQ_GAP = 1_000_000;
 export const RESTORE_RETRY_MS = 30_000;
 export const RESTORE_MAX_ERRORS = 3;
 const PREFIX = /^backups\/\d{4}-\d{2}-\d{2}T\d{6}Z\/$/;
@@ -96,6 +103,15 @@ function refused(status: number, error: string, message: string): Started {
   return { status, error, message };
 }
 
+/** An unfinished restore: resumed for the same backup (a failed one runs again), refused for another. */
+function resume(storage: BackupStorage, backup: string): Started | null {
+  const current = restoreState(storage);
+  if (!current || current.phase === 'done') return null;
+  if (current.backup !== backup) return refused(409, 'restore_unfinished', `A restore of ${current.backup} is unfinished; resume it with the same backup.`);
+  if (current.phase === 'failed') storage.kv.put(RESTORE_KEY, { ...current, phase: 'running', errors: 0, error_code: '' });
+  return { status: 202, restore: restoreView(restoreState(storage)) };
+}
+
 /**
  * Starts (or resumes) the restore of `backup`, a prefix like `backups/2026-10-28T052300Z/`: only into an empty store,
  * from a complete backup whose tables and columns this release has. The caller arms the Alarm on 202.
@@ -104,12 +120,8 @@ export async function startRestore(storage: BackupStorage, bucket: R2Bucket | un
   if (!bucket) return refused(503, 'backups_not_bound', 'This deployment has no BACKUPS bucket.');
   if (typeof backup !== 'string' || !PREFIX.test(backup))
     return refused(400, 'invalid_backup', 'Name a backup as backups/<job start>/, for example backups/2026-10-28T052300Z/.');
-  const current = restoreState(storage);
-  if (current && current.phase !== 'done') {
-    if (current.backup !== backup) return refused(409, 'restore_unfinished', `A restore of ${current.backup} is unfinished; resume it with the same backup.`);
-    if (current.phase === 'failed') storage.kv.put(RESTORE_KEY, { ...current, phase: 'running', errors: 0, error_code: '' });
-    return { status: 202, restore: restoreView(restoreState(storage)) };
-  }
+  const resumed = resume(storage, backup);
+  if (resumed) return resumed;
   if (!storeIsEmpty(storage.sql))
     return refused(409, 'store_not_empty', 'A restore only fills an empty store: point the app at a new object first (docs/backup.md).');
   const object = await bucket.get(backup + MANIFEST);
@@ -133,6 +145,11 @@ export async function startRestore(storage: BackupStorage, bucket: R2Bucket | un
   ];
   if (families.some(family => family.parts.some(part => !part.key.startsWith(backup))))
     return refused(422, 'backup_unreadable', 'A part of the manifest lies outside its backup.');
+  // Other requests ran while the manifest was read: check again, with nothing awaited until the state is stored.
+  const raced = resume(storage, backup);
+  if (raced) return raced;
+  if (!storeIsEmpty(storage.sql))
+    return refused(409, 'store_not_empty', 'A restore only fills an empty store: point the app at a new object first (docs/backup.md).');
   const state: RestoreState = { backup, phase: 'running', started_at: now, finished_at: null,
     backup_created_at: String(manifest.created_at), schema_version: manifest.schema_version, families,
     next: { family: 0, part: 0 }, loaded: {}, errors: 0, error_code: '', verification: null };
@@ -197,13 +214,15 @@ export async function restoreStep(storage: BackupStorage, bucket: R2Bucket | und
   try {
     if (!bucket) throw new RestoreFailure('backups_not_bound');
     let budget = RESTORE_STEP_BYTES;
-    while (budget > 0 && state.next.family < state.families.length) {
+    let reads = 0;
+    while (budget > 0 && reads < RESTORE_STEP_PARTS && state.next.family < state.families.length) {
       const family = state.families[state.next.family];
       const part = family?.parts[state.next.part];
       if (!family || !part) {
         state.next = { family: state.next.family + 1, part: 0 };
         continue;
       }
+      reads += 1;
       const lines = await readPart(bucket, part);
       const next = { family: state.next.family, part: state.next.part + 1 };
       const loaded = { ...state.loaded, [family.name]: (state.loaded[family.name] ?? 0) + lines.length };
@@ -255,6 +274,10 @@ function finish(storage: BackupStorage, state: RestoreState, now: number): void 
   storage.transactionSync(() => {
     // Checked at once: the business sources take their new baselines, the Watch source reads on from its cursor.
     if (tables.has('event_sources')) storage.sql.exec('UPDATE event_sources SET error_code=?, checked_at=0', RESTORED);
+    if (tables.has('work_entries')) {
+      storage.sql.exec("DELETE FROM sqlite_sequence WHERE name='work_entries'");
+      storage.sql.exec("INSERT INTO sqlite_sequence VALUES ('work_entries', (SELECT coalesce(max(seq), 0) FROM work_entries) + ?)", WORK_SEQ_GAP);
+    }
     storage.kv.delete(BACKUP_KEY);
     storage.kv.put(RESTORE_KEY, { ...state, phase: ok ? 'done' : 'failed', finished_at: now, verification,
       error_code: ok ? '' : 'verification_failed' });

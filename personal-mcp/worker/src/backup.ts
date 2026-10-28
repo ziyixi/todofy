@@ -18,12 +18,12 @@
  * A job starts daily at 05:23 UTC, and at once when the object has no backup state yet (the first job after the release
  * that bound the bucket, or after a restore). A store without rows (a new object waiting for its restore) writes no
  * backup, so latest.json keeps naming real data. The first step fixes each table's max rowid and, like every step,
- * reads synchronously, smallest tables first, until STEP_BYTES: a store that fits is one consistent snapshot, and a
- * larger one adds rows of its biggest tables up to the planned rowid in later steps. A cursor moves only after its part
- * is stored, so a failed step repeats from there and overwrites the same keys. MAX_ERRORS failed steps in a row fail the
- * job, which starts again FAILED_RETRY_MS later, or at the next 05:23 after MAX_FAILED_JOBS failed jobs in a row. A job
- * never touches another backup; after its manifest, all but the newest KEEP complete backups are deleted with every
- * incomplete prefix older than it.
+ * reads synchronously, the tables with the fewest rows first, until STEP_BYTES: a store that fits is one consistent
+ * snapshot, and a larger one adds rows of its biggest tables up to the planned rowid in later steps. A cursor moves
+ * only after its part is stored, so a failed step repeats from there and overwrites the same keys. MAX_ERRORS failed
+ * steps in a row fail the job, which starts again FAILED_RETRY_MS later, or at the next 05:23 after MAX_FAILED_JOBS
+ * failed jobs in a row. A job never touches another backup; after its manifest, all but the newest KEEP complete
+ * backups are deleted with every incomplete prefix older than it.
  */
 import { Severity } from '@ziyixi/proto/ops/v1/ops_pb';
 
@@ -238,14 +238,19 @@ export async function runBackup(storage: BackupStorage, bucket: R2Bucket | undef
   storage.kv.put(BACKUP_KEY, state);
 }
 
-/** Fixes every table's max rowid, smallest table first, so the small ones share the first step's read. */
+/**
+ * Fixes every table's max rowid, fewest rows first, so the small ones share the first step's read. Those include the
+ * tables that move a row to a new rowid when they replace it (own_changes, work_links, event_sources): read in a later
+ * step, such a row could move past the planned rowid and miss the backup.
+ */
 function plan(sql: SqlStorage): Cursor[] {
   return storeTables(sql)
     .map(table => {
-      const max = sql.exec<{ n: number }>(`SELECT coalesce(max(rowid), 0) AS n FROM "${table.name}"`).one().n;
-      return { ...table, max_rowid: max, last: 0, done: max === 0, parts: [] };
+      const { n, max } = sql.exec<{ n: number; max: number }>(`SELECT count(*) AS n, coalesce(max(rowid), 0) AS max FROM "${table.name}"`).one();
+      return { table: { ...table, max_rowid: max, last: 0, done: max === 0, parts: [] }, rows: n };
     })
-    .sort((a, b) => a.max_rowid - b.max_rowid || (a.name < b.name ? -1 : 1));
+    .sort((a, b) => a.rows - b.rows || (a.table.name < b.table.name ? -1 : 1))
+    .map(({ table }) => table);
 }
 
 /**
@@ -336,27 +341,29 @@ async function finish(bucket: R2Bucket, state: BackupState, job: Job, now: numbe
   }
 }
 
-/** Every complete backup but the newest KEEP (`current` counts) and every incomplete one older than `current`. */
+/**
+ * Every complete backup but the newest KEEP (`current` counts) and every incomplete one older than `current`. One listing
+ * of the backups finds both, so the cleanup costs a few R2 calls (subrequests) however many backups there are.
+ */
 async function applyRetention(bucket: R2Bucket, current: string): Promise<void> {
-  const listed = await bucket.list({ prefix: BACKUP_ROOT, delimiter: '/' });
-  const older = listed.delimitedPrefixes.filter(prefix => prefix < current).sort().reverse();
-  const kept: string[] = [];
-  for (const prefix of older)
-    if (kept.length < KEEP - 1 && (await bucket.head(prefix + MANIFEST)) !== null) kept.push(prefix);
-  for (const prefix of older) {
-    if (kept.includes(prefix)) continue;
-    await deletePrefix(bucket, prefix);
-    log({ deleted: prefix });
+  const keys = new Map<string, string[]>();
+  const complete = new Set<string>();
+  let cursor: string | undefined;
+  for (let page = 0; ; page++) {
+    if (page === MAX_LIST_PAGES) throw new Error('Too many objects under the backups');
+    const listed = await bucket.list({ prefix: BACKUP_ROOT, limit: 1000, ...(cursor ? { cursor } : {}) });
+    for (const { key } of listed.objects) {
+      const prefix = key.slice(0, key.indexOf('/', BACKUP_ROOT.length) + 1);
+      if (!prefix || prefix >= current) continue;
+      keys.set(prefix, [...keys.get(prefix) ?? [], key]);
+      if (key === prefix + MANIFEST) complete.add(prefix);
+    }
+    if (!listed.truncated) break;
+    cursor = listed.cursor;
   }
-}
-
-/** Every object under `prefix` (a backup has a few dozen; bounded anyway). */
-async function deletePrefix(bucket: R2Bucket, prefix: string): Promise<void> {
-  for (let page = 0; page < MAX_LIST_PAGES; page++) {
-    const listed = await bucket.list({ prefix, limit: 1000 });
-    const keys = listed.objects.map(object => object.key);
-    if (keys.length) await bucket.delete(keys);
-    if (!listed.truncated) return;
-  }
-  throw new Error('Too many objects under a backup prefix');
+  const kept = new Set([...complete].sort().reverse().slice(0, KEEP - 1));
+  const doomed = [...keys].filter(([prefix]) => !kept.has(prefix));
+  const deleted = doomed.flatMap(([, objects]) => objects);
+  for (let index = 0; index < deleted.length; index += 1000) await bucket.delete(deleted.slice(index, index + 1000));
+  for (const [prefix] of doomed) log({ deleted: prefix });
 }

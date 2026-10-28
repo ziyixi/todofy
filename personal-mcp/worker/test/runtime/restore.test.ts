@@ -17,6 +17,7 @@ import { create } from '@ziyixi/proto/protobuf';
 import { toWire } from '@ziyixi/proto/wire-json';
 import type { ReadHomeResponse } from '@ziyixi/proto/dashboard/mcp/v1/home_service_wire';
 import { TaskSchema } from '@ziyixi/proto/tasks/ui/v1/task_pb';
+import { WORK_SEQ_GAP } from '../../src/restore.ts';
 import { ListChangesResponseSchema, TaskChangeSchema, type TaskChange } from '@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb';
 
 const TOOL = join(import.meta.dirname, '../../../tools/backup-restore.ts');
@@ -247,7 +248,9 @@ it('backs a filled store up, restores it through the owner call into a new envir
 
   // The same Work, plus the Watch change replayed once from the restored cursor; the task feed takes a new baseline.
   await expect.poll(() => received.length, { timeout: 15_000 }).toBe(restoredAt + 1);
-  expect(received.at(-1)).toMatchObject({ name: 'work.attention', data: { work_id: workId, source: { type: 'watch', ref: watched } } });
+  // Its entry is numbered past the gap (three entries before the backup), so its event ID is new to the receiver.
+  expect(received.at(-1)).toMatchObject({ eventId: `work_${workId}_${String(3 + WORK_SEQ_GAP + 1)}`, name: 'work.attention',
+    data: { work_id: workId, source: { type: 'watch', ref: watched } } });
   const after = await tool<{ work: Record<string, unknown>; entries: unknown[]; pending_reports: { report_id: string }[] }>(target, 'work_get', { work_id: workId });
   const earlier = before as { work: Record<string, unknown>; entries: unknown[]; pending_reports: { report_id: string }[] };
   expect(after.entries.slice(1)).toEqual(earlier.entries);

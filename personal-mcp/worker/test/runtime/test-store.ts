@@ -9,9 +9,14 @@ import { restoreState, restoreStep, startRestore } from '../../src/restore.ts';
 
 /** R2 calls to let through, then to fail, by method: a stand-in for a flaky bucket. */
 const failures = { put: 0, putAfter: 0, get: 0, getAfter: 0 };
+/** R2 calls made, each a subrequest of its invocation. */
+let calls = 0;
 
-function flaky(bucket: R2Bucket): R2Bucket {
+function flaky(bucket: R2Bucket, onGet?: () => void): R2Bucket {
+  const counted = <T extends unknown[], R>(call: (...args: T) => R) => (...args: T): R => { calls++; return call(...args); };
   const wrap = (method: 'put' | 'get') => (...args: unknown[]) => {
+    calls++;
+    if (method === 'get') onGet?.();
     const after = method === 'put' ? 'putAfter' : 'getAfter';
     if (failures[method] > 0 && failures[after]-- <= 0) {
       failures[method]--;
@@ -19,8 +24,8 @@ function flaky(bucket: R2Bucket): R2Bucket {
     }
     return (bucket[method] as (...values: unknown[]) => Promise<unknown>)(...args);
   };
-  return { put: wrap('put'), get: wrap('get'), head: bucket.head.bind(bucket), list: bucket.list.bind(bucket),
-    delete: bucket.delete.bind(bucket) } as unknown as R2Bucket;
+  return { put: wrap('put'), get: wrap('get'), head: counted(bucket.head.bind(bucket)), list: counted(bucket.list.bind(bucket)),
+    delete: counted(bucket.delete.bind(bucket)) } as unknown as R2Bucket;
 }
 
 /** Every value as JSON can hold it, a blob as its bytes. */
@@ -44,6 +49,9 @@ export class TestStore extends SubscriptionStore {
       return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
     }
   }
+
+  /** The R2 calls since the last time this was asked. */
+  r2Calls(): number { const made = calls; calls = 0; return made; }
 
   fail(counts: Partial<typeof failures>): void { Object.assign(failures, { put: 0, putAfter: 0, get: 0, getAfter: 0 }, counts); }
 
@@ -126,7 +134,11 @@ export class TestStore extends SubscriptionStore {
     return { state: this.ctx.storage.kv.get(BACKUP_KEY) ?? null, due: backupStatus(this.ctx.storage, this.env.BACKUPS).due };
   }
 
-  beginRestore(backup: unknown, now: number) { return startRestore(this.ctx.storage, flaky(this.env.BACKUPS as R2Bucket), backup, now); }
+  /** With `racing`, another request writes to the store while the manifest is read. */
+  beginRestore(backup: unknown, now: number, racing = false) {
+    const write = () => { this.ctx.storage.sql.exec("INSERT OR IGNORE INTO test_events VALUES ('racing')"); };
+    return startRestore(this.ctx.storage, flaky(this.env.BACKUPS as R2Bucket, racing ? write : undefined), backup, now);
+  }
 
   async restoreStep(now: number) {
     const next = await restoreStep(this.ctx.storage, flaky(this.env.BACKUPS as R2Bucket), now);

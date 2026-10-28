@@ -13,7 +13,7 @@ import {
   BACKUP_FORMAT, CONTINUE_MS, ERROR_RETRY_MS, FAILED_RETRY_MS, KEEP, LATEST, MANIFEST, nextRun, SCHEMA_VERSION, STEP_BYTES,
   type BackupPart, type BackupState,
 } from '../../src/backup.ts';
-import { RESTORE_RETRY_MS, RESTORE_STEP_BYTES, type RestoreState } from '../../src/restore.ts';
+import { RESTORE_RETRY_MS, RESTORE_STEP_BYTES, WORK_SEQ_GAP, type RestoreState } from '../../src/restore.ts';
 
 const DAY = 86_400_000;
 /** The last 05:23 UTC slot before the run, so Ops sees a backup less than a day old. */
@@ -182,6 +182,9 @@ it('backs up every table and KV key in bounded steps, then restores them row for
     await rt.bucket.put(`backups/${at}/${MANIFEST}`, JSON.stringify({ ...manifest, ...changed }));
     expect(await refused('target', `backups/${at}/`)).toMatchObject({ status: 422, error: 'backup_schema_unsupported' });
   }
+  // Another request that writes while the manifest is read wins: the store is no longer empty, and nothing starts.
+  expect(await rt.call('racer', 'beginRestore', prefix, SLOT, true)).toMatchObject({ status: 409, error: 'store_not_empty' });
+  expect(await rt.call('racer', 'restoreStep', SLOT)).toEqual({ next: null, state: null });
 
   // The restore: bounded steps, each part checked and read back, then its verification.
   const started = await rt.call<{ status: number; restore: { phase: string; parts: { total: number } } }>('target', 'beginRestore', prefix, SLOT);
@@ -211,7 +214,10 @@ it('backs up every table and KV key in bounded steps, then restores them row for
   const restored = await rt.call<Dump>('target', 'dump');
   // Every event source is marked to be checked at once; everything else is the source, rowids and blob included.
   expect(restored.event_sources?.map(row => (row as unknown[]).slice(3))).toEqual([[0, 'restored'], [0, 'restored'], [0, 'restored']]);
-  const expected = { ...source, event_sources: source.event_sources?.map(row => [...(row as unknown[]).slice(0, 3), 0, 'restored']) };
+  // New Work entries are numbered past the gap, so no Work notice reuses an event ID the lost store may have sent.
+  const expected = { ...source, event_sources: source.event_sources?.map(row => [...(row as unknown[]).slice(0, 3), 0, 'restored']),
+    sqlite_sequence: source.sqlite_sequence?.map(row => (row as unknown[])[1] === 'work_entries'
+      ? [(row as unknown[])[0], 'work_entries', 1200 + WORK_SEQ_GAP] : row) };
   expect(restored).toEqual(expected);
   // The restored store backs itself up at once; a second restore finds it filled.
   expect((await rt.call<Step>('target', 'backupStep', SLOT + 1000)).state?.job?.tables).not.toBeNull();
@@ -298,8 +304,12 @@ it('keeps the newest complete backups and deletes older ones and incomplete left
   const incomplete = 'backups/2020-01-05T120000Z/';
   await rt.bucket.put(`${incomplete}tables/work/00001.ndjson.gz`, 'x');
   await rt.call('owner', 'seed', 5, 5);
+  await rt.call('owner', 'r2Calls');
   const steps = await backupJob(rt, 'owner', SLOT);
   const current = steps.at(-1)?.state?.last_key ?? '';
+  // The first step's ten parts, the manifest and latest.json, then one listing and one delete: well inside Free's 50
+  // subrequests, however many backups the bucket keeps.
+  expect(await rt.call('owner', 'r2Calls')).toBe(10 + 2 + 2);
   const listed = await rt.bucket.list({ prefix: 'backups/', delimiter: '/' });
   expect(listed.delimitedPrefixes).toEqual([...older.slice(-(KEEP - 1)), current]);
   expect((await rt.bucket.list({ prefix: incomplete })).objects).toEqual([]);
