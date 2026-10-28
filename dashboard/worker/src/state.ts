@@ -78,8 +78,8 @@ import type { Attention, AttentionItem, Badges } from './api-types.ts';
 import { OPS_APPS, createInboxTask, opsCanaryDelivery, opsCanaryResult, opsSetGuard, opsStartCanary, opsStatus } from './ops-client.ts';
 import { callWebsiteRequest, callWebsiteSyncStatus, unconfirmedWebsiteRequest } from './website-sync.ts';
 import type { WebsiteSyncRequestResult } from './api-types.ts';
-import { nextProbeDoc, probeDue, probeUrl, type ProbeTarget } from './probe.ts';
-import { REGISTRY } from './registry.ts';
+import { PROBE_ERRORS, nextProbeDoc, probeDue, probeUrl, type ProbeTarget } from './probe.ts';
+import { REGISTRY, entryProbe } from './registry.ts';
 import { HOUR_MS, MINUTE_MS, iso, isoOrNull, utcDay, utcMonthStart } from './time.ts';
 import { fetchUsage, type UsageErrorCode } from './usage.ts';
 import type { ViewBody } from './view-body.ts';
@@ -152,11 +152,11 @@ const PROBE_MIN_MS = PROBE_MIN_INTERVAL_SECONDS * 1000;
 const CLOUDFLARE_REFRESH_MIN_MS = CLOUDFLARE_REFRESH_MIN_SECONDS * 1000;
 const DESIRED_HASH = fnv1a(JSON.stringify(DESIRED));
 
-/** The public_http entries the tick probes (at most one GET each per tick). */
+/** The entries the tick probes (entryProbe: at most one GET each per tick). */
 const PROBED: readonly (ProbeTarget & { readonly id: string })[] = REGISTRY.entries.flatMap((entry) => {
-  const status = entry.status;
-  if (status.type !== 'public_http' || !status.enabled) return [];
-  const { url, expect, content_type } = status;
+  const probe = entryProbe(entry);
+  if (probe === null) return [];
+  const { url, expect, content_type } = probe;
   return [content_type === undefined ? { id: entry.id, url, expect } : { id: entry.id, url, expect, content_type }];
 });
 
@@ -803,7 +803,7 @@ export class HomeState extends DurableObject<Env> {
   }
 
   /**
-   * The public_http probes that are due (design-v2.md §3), in parallel: one GET each at most, never
+   * The probes that are due (design-v2.md §3), in parallel: one GET each at most, never
    * more often than PROBE_MIN_INTERVAL_SECONDS (a refresh's probe stands in for the tick's).
    */
   private async pollProbes(now: number): Promise<Record<string, string>> {
@@ -921,6 +921,12 @@ export class HomeState extends DurableObject<Env> {
       return scriptsFresh && workerRows(evaluation.scripts, now).some((row) => row.script === condition.target.script && row.level === 'ok');
     }
     if (active.has(`${condition.source}:${code}`)) return false;
+    const probe = evaluation.probes[condition.source];
+    // A probe's failure (a public_http entry's, or the one beside an app's status) resolves only with a passing probe.
+    const probeFailed = PROBE_ERRORS.includes(condition.code);
+    if (probeFailed && probe !== undefined) return probe.ok && now - probe.checked_at <= 60 * MINUTE_MS;
+    // A probed tile's error rate (an app's too) resolves only with fresh analytics, never with its Ops answer.
+    if (condition.code === 'error_rate') return scriptsFresh;
     if (OPS_APPS.includes(condition.source as OpsApp)) {
       const app = condition.source as OpsApp, doc = evaluation.statuses[app], status = freshStatus(doc, now);
       if (doc?.ok !== true || status === null) return false;
@@ -930,7 +936,6 @@ export class HomeState extends DurableObject<Env> {
       if (status.health === 'down' || status.signals.some((signal) => signal.code.endsWith('_unavailable') || ['host_never_seen', 'host_stale', 'host_missing'].includes(signal.code))) return false;
       return true;
     }
-    if (condition.code === 'error_rate') return scriptsFresh;
     if (condition.code.startsWith('drift_') || condition.code === 'config_drift') {
       const drift = storedDrift(this.doc<DriftDoc>('drift'));
       const fresh = drift.checked_at !== null && now - drift.checked_at <= 48 * HOUR_MS && drift.last_error === null;
@@ -941,7 +946,6 @@ export class HomeState extends DurableObject<Env> {
       return usage.consecutive_failures === 0 && usageFresh(usage, now);
     }
     if (condition.source === 'dashboard') return tickAt !== null && now - tickAt <= 75 * MINUTE_MS;
-    const probe = evaluation.probes[condition.source];
     return probe?.ok === true && now - probe.checked_at <= 60 * MINUTE_MS;
   }
 

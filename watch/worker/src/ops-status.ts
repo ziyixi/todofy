@@ -33,6 +33,7 @@ import {
 import type * as wire from '@ziyixi/proto/ops/v1/ops_wire';
 import { fieldRules, formatMatches, fromWireArguments, toWire, WireJsonError } from '@ziyixi/proto/wire-json';
 import { OPS_LIMITS } from '../../../contracts/ops-v1/ops-v1.ts';
+import { backupFacts, backupOps } from './backup.ts';
 import { publicHost, type Env } from './env.ts';
 import { utcDay } from './etiquette.ts';
 import { ALARM_IDLE_MS, DAY, HOUR } from './limits.ts';
@@ -159,7 +160,7 @@ function watchCounts(store: Store): WatchCounts {
   return out;
 }
 
-export function watchStatus(store: Store, env: Pick<Env, 'PUBLIC_HOST'> & { readonly TASKS?: unknown }, now: number): wire.OpsStatus {
+export function watchStatus(store: Store, env: Pick<Env, 'PUBLIC_HOST'> & { readonly TASKS?: unknown; readonly BACKUPS?: unknown }, now: number): wire.OpsStatus {
   const url = uiUrl(publicHost(env));
   const base = {
     version: 'ops-v1',
@@ -206,6 +207,9 @@ export function watchStatus(store: Store, env: Pick<Env, 'PUBLIC_HOST'> & { read
     if (guard.level === GuardLevel.SHED && guard.until !== undefined) {
       signals.push(signal('guard_shed', Severity.INFO, { seconds_left: Math.max(0, Math.round((Date.parse(guard.until) - now) / 1000)) }));
     }
+    // The daily backup (backup.ts): backup_stale (critical) and backup_failed (warning), its age as a counter.
+    const backup = backupOps(env.BACKUPS === undefined ? null : backupFacts(store), now);
+    for (const item of backup.signals) signals.push(signal(item.code, item.severity, item.metrics));
     signals.sort((a, b) => rank(a.severity) - rank(b.severity) || (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
 
     const counters = {
@@ -220,6 +224,7 @@ export function watchStatus(store: Store, env: Pick<Env, 'PUBLIC_HOST'> & { read
       intents_open: intents?.unsettled ?? 0,
       // Created in Tasks this UTC day (INTENTS_PER_DAY's count).
       intents_sent_today: sent,
+      ...backup.counters,
     };
     return toWire(
       OpsStatusSchema,
@@ -230,6 +235,7 @@ export function watchStatus(store: Store, env: Pick<Env, 'PUBLIC_HOST'> & { read
         guard,
         signals: signals.slice(0, MAX_SIGNALS),
         counters,
+        ...(backup.lastBackupAt === null ? {} : { lastBackupAt: backup.lastBackupAt }),
       }),
     );
   } catch {

@@ -1,4 +1,3 @@
-import { cleanEvidence } from './evidence.ts';
 /**
  * WatchState (../../docs/design.md §6): the single SQLite-backed Durable Object "watch-v1". It holds every watch,
  * snapshot and change, schedules itself with setAlarm (no cron trigger), makes every request to a watched site, and
@@ -9,6 +8,12 @@ import { cleanEvidence } from './evidence.ts';
  * code and re-armed after ALARM_ERROR_RETRY_MS. Every API call arms an alarm when none is set (a fallback for a lost
  * one), and writes that need a check soon bring it forward.
  *
+ * Backup and restore (../../docs/backup.md): while a restore runs (restore.ts) or a backup job copies the store
+ * (backup.ts), each alarm runs one of its steps instead of a pass, and every owner write is refused (RESTORE_RUNNING,
+ * BACKUP_RUNNING), so the copy is one consistent point and a restore's rows are never mixed with new ones. An object
+ * the Worker no longer addresses (WATCH_OBJECT moved to a new, empty object for a restore) keeps its data and stops:
+ * its alarm is not armed again.
+ *
  * Tests and local development: with DEV_MANUAL_ALARMS=true the object never arms an alarm and reads a clock the tests
  * set (`setClock`). A pass of `step(now)` reads its own clock, starting at `now`; a `setClock` during the pass moves
  * it too (a test's fake site may, while a request is out). The workerd suite calls `step(now)`, `sqlForTests` and
@@ -18,14 +23,17 @@ import { DurableObject } from 'cloudflare:workers';
 import { HttpTranscoder } from '@ziyixi/proto/http-transcoder';
 import { WatchUiService } from '@ziyixi/proto/watch/ui/v1/watch_ui_service_pb';
 import { handlers, type ApiContext } from './api.ts';
+import { backupDue, backupRunning, runBackup } from './backup.ts';
 import { puppeteerRenderer, type BrowserRenderer } from './browser.ts';
-import { buildSha, devFetch, publicHost, PRIVATE_API_HEADER, REQUEST_ID_HEADER, type Env } from './env.ts';
+import { buildSha, devFetch, publicHost, PRIVATE_API_HEADER, REQUEST_ID_HEADER, WATCH_OBJECT, type Env } from './env.ts';
+import { cleanEvidence } from './evidence.ts';
 import { supportedSelector } from './extract/html.ts';
 import type { FetchFn } from './fetcher.ts';
 import { NO_JUDGE } from './judge.ts';
-import { ALARM_ERROR_RETRY_MS, FETCH_MAX_BYTES, FETCH_TIMEOUT_MS, MAX_BODY_BYTES, WAKE_MS } from './limits.ts';
+import { ALARM_ERROR_RETRY_MS, ALARM_IDLE_MS, FETCH_MAX_BYTES, FETCH_TIMEOUT_MS, MAX_BODY_BYTES, WAKE_MS } from './limits.ts';
 import { PreviewCache, preview } from './preview.ts';
-import { API_DOMAIN, localize, REASONS } from './reasons.ts';
+import { API_DOMAIN, localize, REASONS, watchError } from './reasons.ts';
+import { restoreBlocking, runRestore, startRestore, type RestoreDeps } from './restore.ts';
 import { errorCode, runAlarm, type AlarmResult } from './scheduler.ts';
 import { HostLocks } from './host-locks.ts';
 import { Store, type RowMeter } from './store.ts';
@@ -36,12 +44,21 @@ import type * as opsWire from '@ziyixi/proto/ops/v1/ops_wire';
 import { Code, RpcError } from '@ziyixi/proto/rpc-status';
 
 
-/** Public requests were authenticated by http.ts; the private feed additionally requires WatchApi. */
+/**
+ * Public requests were authenticated by http.ts; the private feed additionally requires WatchApi, and a restore is the
+ * owner's alone (never the private binding's).
+ */
 function authorize(_request: Request, route: { method: { localName: string } }, ctx: ApiContext): void {
   if (route.method.localName === 'pollWatchEvents' && !ctx.privateApi) {
     throw new RpcError(Code.PERMISSION_DENIED, 'FORBIDDEN', 'The Watch event feed requires a private service binding');
   }
+  if (route.method.localName === 'restoreBackup' && ctx.privateApi === true) {
+    throw new RpcError(Code.PERMISSION_DENIED, 'FORBIDDEN', 'A restore is the owner\'s alone');
+  }
 }
+
+/** What a step of the alarm did: a scheduler pass, a backup's or a restore's step, or a caught failure. */
+export type StepResult = AlarmResult | { next: number; error: string } | { next: number; job: 'backup' | 'restore' };
 
 const api = new HttpTranscoder(WatchUiService, handlers, {
   domain: API_DOMAIN,
@@ -95,6 +112,25 @@ export class WatchState extends DurableObject<Env> {
 
   private transact = <T>(fn: () => T): T => this.ctx.storage.transactionSync(fn);
 
+  /** Why an owner write must wait now (a restore not finished, a backup copying the store), or null. */
+  private writeBlock(): 'RESTORE_RUNNING' | 'BACKUP_RUNNING' | null {
+    if (restoreBlocking(this.store)) return 'RESTORE_RUNNING';
+    return backupRunning(this.store) ? 'BACKUP_RUNNING' : null;
+  }
+
+  private restoreDeps(): RestoreDeps {
+    return { store: this.store, backups: this.env.BACKUPS, evidence: this.env.EVIDENCE_STORE, transact: this.transact };
+  }
+
+  /**
+   * An object the Worker no longer addresses (its id is not WATCH_OBJECT's): it keeps its data and stops. Compared
+   * by id, as Mailsort and Personal MCP do, never by `ctx.id.name`, which an invocation may not carry: an old object
+   * read as current would go on checking and notifying next to the restored one.
+   */
+  private retired(): boolean {
+    return !this.ctx.id.equals(this.env.WATCH.idFromName(WATCH_OBJECT));
+  }
+
   /**
    * The notification sink: Tasks over the TASKS binding (its TaskInbox), with links to this app's host. Without either
    * (local development, most tests) the outbox only fills.
@@ -107,10 +143,17 @@ export class WatchState extends DurableObject<Env> {
 
   // ---- scheduling -------------------------------------------------------------------------------------------------
 
-  /** Arms the alarm when none is set (every API call: the fallback for a lost alarm). */
+  /**
+   * Arms the alarm when none is set (every API call: the fallback for a lost alarm), and brings it forward to a backup
+   * due sooner (the first one after the release that bound the bucket starts at once).
+   */
   private async ensureAlarm(): Promise<void> {
     if (this.manual()) return;
-    if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(Date.now() + WAKE_MS);
+    const now = Date.now();
+    const at = await this.ctx.storage.getAlarm();
+    const backup = this.env.BACKUPS === undefined ? Infinity : Math.max(backupDue(this.store, now), now + WAKE_MS);
+    if (at === null) await this.ctx.storage.setAlarm(now + WAKE_MS);
+    else if (at > backup) await this.ctx.storage.setAlarm(backup);
   }
 
   /** Brings the alarm forward to a second from now. */
@@ -122,40 +165,32 @@ export class WatchState extends DurableObject<Env> {
   }
 
   override async alarm(): Promise<void> {
+    if (this.retired()) {
+      // Not armed again: an old object never checks, notifies or backs up next to the one the Worker addresses.
+      console.log(JSON.stringify({ event: 'retired' }));
+      return;
+    }
     await this.step(Date.now());
   }
 
-  /** One scheduler pass at `now`, then the next alarm (one pass at a time). */
-  async step(now: number): Promise<AlarmResult | { next: number; error: string }> {
+  /**
+   * One step at `now`, then the next alarm (one at a time): a restore's step while one runs (nothing else while one
+   * failed), else a backup's step while a job runs or is due, else a scheduler pass.
+   */
+  async step(now: number): Promise<StepResult> {
     const run = this.chain.then(async () => {
-      let result: AlarmResult | { next: number; error: string };
+      let result: StepResult;
       if (this.manual()) this.passClock = now;
       try {
-        if (this.env.EVIDENCE_STORE) {
-          try { await cleanEvidence(this.store, this.env.EVIDENCE_STORE); }
-          catch { console.warn(JSON.stringify({ event: 'evidence_cleanup', error_code: 'UNAVAILABLE' })); }
-        }
-        result = await runAlarm(
-          {
-            store: this.store,
-            fetch: this.fetchFn(),
-            browser: this.browser(),
-            timeoutMs: this.timeoutMs(),
-            now: () => (this.manual() ? (this.passClock ?? now) : Date.now()),
-            hosts: this.hosts,
-            transact: this.transact,
-            judge: NO_JUDGE,
-            evidenceStore: this.env.EVIDENCE_STORE,
-            sink: this.sink(),
-            elapsed: () => performance.now(),
-          },
-          now,
-        );
-        const outcomes = result.outcomes;
-        // Counts only: never a watch's URL, its text or a diff.
-        console.log(
-          JSON.stringify({ event: 'alarm', checks: Object.values(outcomes).reduce((a, b) => a + b, 0), changed: outcomes.changed ?? 0, failed: outcomes.failed ?? 0, errors: outcomes.error ?? 0, requests: result.requests, left: result.left }),
-        );
+        const restoring = await runRestore(this.restoreDeps(), now);
+        const backup = restoring === null && !restoreBlocking(this.store) && this.env.BACKUPS !== undefined
+          ? await runBackup({ store: this.store, bucket: this.env.BACKUPS, evidence: this.env.EVIDENCE_STORE }, now)
+          : null;
+        if (restoring !== null) result = { next: restoring, job: 'restore' };
+        // A failed restore: writes, checks and backups wait for a repeated RestoreBackup.
+        else if (restoreBlocking(this.store)) result = { next: now + ALARM_IDLE_MS, job: 'restore' };
+        else if (backup?.ran === true) result = { next: backup.next, job: 'backup' };
+        else result = await this.pass(now, backup?.next ?? Infinity);
       } catch (error) {
         const code = errorCode(error);
         console.log(JSON.stringify({ event: 'alarm_failed', code }));
@@ -167,6 +202,36 @@ export class WatchState extends DurableObject<Env> {
     });
     this.chain = run.catch(() => undefined);
     return run;
+  }
+
+  /** A scheduler pass at `now` (scheduler.ts); its next alarm no later than `backupAt`, when the backup is due. */
+  private async pass(now: number, backupAt: number): Promise<AlarmResult> {
+    if (this.env.EVIDENCE_STORE) {
+      try { await cleanEvidence(this.store, this.env.EVIDENCE_STORE); }
+      catch { console.warn(JSON.stringify({ event: 'evidence_cleanup', error_code: 'UNAVAILABLE' })); }
+    }
+    const result = await runAlarm(
+      {
+        store: this.store,
+        fetch: this.fetchFn(),
+        browser: this.browser(),
+        timeoutMs: this.timeoutMs(),
+        now: () => (this.manual() ? (this.passClock ?? now) : Date.now()),
+        hosts: this.hosts,
+        transact: this.transact,
+        judge: NO_JUDGE,
+        evidenceStore: this.env.EVIDENCE_STORE,
+        sink: this.sink(),
+        elapsed: () => performance.now(),
+      },
+      now,
+    );
+    const outcomes = result.outcomes;
+    // Counts only: never a watch's URL, its text or a diff.
+    console.log(
+      JSON.stringify({ event: 'alarm', checks: Object.values(outcomes).reduce((a, b) => a + b, 0), changed: outcomes.changed ?? 0, failed: outcomes.failed ?? 0, errors: outcomes.error ?? 0, requests: result.requests, left: result.left }),
+    );
+    return { ...result, next: Math.min(result.next, Math.max(backupAt, now + WAKE_MS)) };
   }
 
   /** Test hook: the clock API calls read (DEV_MANUAL_ALARMS only). */
@@ -210,6 +275,8 @@ export class WatchState extends DurableObject<Env> {
 
   /** setGuard(): shed or normal (ops-status.ts); the next alarm pass applies it. */
   opsSetGuard(input: unknown): GuardOutcome {
+    // A restore counts its rows against the manifest, the guard's meta row too: Home's write waits (Ops: unavailable).
+    if (restoreBlocking(this.store)) throw new Error('unavailable');
     return this.transact(() => setGuard(this.store, input, this.now()));
   }
 
@@ -219,6 +286,10 @@ export class WatchState extends DurableObject<Env> {
     await this.ensureAlarm();
     const requestId = request.headers.get(REQUEST_ID_HEADER) ?? '';
     const now = this.now();
+    const writable = () => {
+      const block = this.writeBlock();
+      if (block !== null) throw watchError(block);
+    };
     const ctx: ApiContext = {
       privateApi: request.headers.get(PRIVATE_API_HEADER) === 'true',
       evidenceStore: this.env.EVIDENCE_STORE,
@@ -226,7 +297,14 @@ export class WatchState extends DurableObject<Env> {
       now,
       configEnv: { selectorOk: supportedSelector, browserEnabled: this.env.BROWSER !== undefined },
       build: buildSha(this.env),
-      transact: this.transact,
+      // Every owner write: refused while a restore is not finished or a backup copies the store.
+      transact: (fn) => this.transact(() => {
+        writable();
+        return fn();
+      }),
+      writable,
+      backups: this.env.BACKUPS !== undefined,
+      restore: (backup) => startRestore(this.restoreDeps(), backup, now),
       wake: () => this.wake(),
       alarmAt: () => this.ctx.storage.getAlarm(),
       preview: (config, refresh, comparison) =>

@@ -219,6 +219,25 @@ service WatchUiService {
     option (google.api.http) = {get: "/api/v1/{name=serviceStatus}"};
     option (google.api.method_signature) = "name";
   }
+
+  // Restores a daily backup (watch/docs/backup.md) into this store, which must be empty: no watch, snapshot,
+  // change, event, task request or evidence index (otherwise STORE_NOT_EMPTY). WatchState reads the backup from
+  // its own bucket and checks every part's SHA-256 before it inserts a row, in bounded alarm steps: the evidence
+  // first, then the rows. Until it succeeds every other write is refused (RESTORE_RUNNING) and the daily backup
+  // waits. Answers the status with `restore` running; `restore` holds the verification when it ends. Repeating
+  // the call while it runs answers its progress; after a failed restore it starts again from the beginning.
+  // The private service binding may not call it.
+  // (-- api-linter: core::0136::response-message-name=disabled
+  //     aip.dev/not-precedent: a state method of the singleton answers the singleton. --)
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc RestoreBackup(RestoreBackupRequest) returns (ServiceStatus) {
+    option (google.api.http) = {
+      post: "/api/v1/{name=serviceStatus}:restoreBackup"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name,backup";
+  }
 }
 
 // Input of GetWatch.
@@ -565,6 +584,74 @@ message ServiceStatus {
   int32 fetch_count_today = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The deployed commit.
   string build = 16 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the newest complete daily backup finished; unset before the first one, or without a backup bucket.
+  google.protobuf.Timestamp last_backup_time = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The newest complete backup's name, `backups/<job start>/`; empty before the first one.
+  string last_backup = 18 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The last daily backup job failed; it starts again later.
+  bool backup_failed = 19 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The last restore into this store (RestoreBackup); unset when there was none.
+  BackupRestore restore = 20 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// A restore from a daily backup (RestoreBackup) and, once it ends, its own verification: the rows of every table
+// against the backup's manifest, and the evidence objects. Codes and counts only.
+message BackupRestore {
+  // Where the restore is.
+  enum State {
+    // Never sent.
+    STATE_UNSPECIFIED = 0;
+    // Copying the evidence and the rows; every other write is refused.
+    STATE_RUNNING = 1;
+    // Every part checked and loaded, every table's rows equal to the manifest's; writes are open again.
+    STATE_SUCCEEDED = 2;
+    // Stopped after repeated failures (`error_code`); writes stay refused until a repeated RestoreBackup
+    // succeeds.
+    STATE_FAILED = 3;
+  }
+
+  // The rows of one table: restored, and what the backup's manifest says.
+  message TableCount {
+    // The table's name in WatchState's SQLite.
+    string table = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+    // Rows in the store after the restore.
+    int32 restored_row_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+    // Rows the manifest lists.
+    int32 expected_row_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  }
+
+  // The backup restored, `backups/<job start>/`.
+  string backup = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Where the restore is.
+  State state = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When it started.
+  google.protobuf.Timestamp start_time = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When it succeeded or failed.
+  google.protobuf.Timestamp end_time = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // FAILED: why, as a code (part_missing, part_mismatch, count_mismatch, manifest_changed, storage_error).
+  string error_code = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Every table of the manifest, once the restore ended.
+  repeated TableCount tables = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Evidence objects copied back into the evidence bucket.
+  int32 evidence_restored_count = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Evidence objects the evidence bucket already held (the same size), left as they were.
+  int32 evidence_present_count = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Evidence objects the backup could not copy or no longer holds: their snapshots say unavailable.
+  int32 evidence_missing_count = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Evidence copies whose SHA-256 differs from the manifest: never written back.
+  int32 evidence_mismatched_count = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of RestoreBackup.
+message RestoreBackupRequest {
+  // Always `serviceStatus`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "watch.ziyixi.science/ServiceStatus"
+  ];
+  // The backup to restore, `backups/<job start>/` (for example `backups/2026-10-28T112300Z/`); empty restores
+  // the newest complete one (the bucket's latest.json).
+  string backup = 2 [(google.api.field_behavior) = OPTIONAL];
 }
 
 // Input of PollWatchEvents. Only the private WatchApi binding may call this method.

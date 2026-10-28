@@ -64,15 +64,7 @@ def test_the_committed_vars_are_exactly_the_static_ones() -> None:
     for worker, config in (("core", CORE), ("gateway", GATEWAY)):
         assert not set(config["vars"]) & {item.name for item in (*INJECTED[worker], *SECRETS[worker])}, worker
     # Test-only timing knobs keep their code defaults; the build is the deploy's commit.
-    never = (
-        "GEMINI_TIMEOUT_MS",
-        "BUILD_SHA",
-        "ACCESS_OWNER",
-        "ACCESS_OWNER_ALIASES",
-        "TODOIST_DEFAULT_PROJECT_ID",
-        "TODOIST_OPS_PROJECT_ID",
-        "TODOIST_REVIEW_PROJECT_ID",
-    )
+    never = ("GEMINI_TIMEOUT_MS", "BUILD_SHA", "ACCESS_OWNER", "ACCESS_OWNER_ALIASES")
     for name in never:
         assert name not in CORE["vars"] and name not in GATEWAY["vars"], name
 

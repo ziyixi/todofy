@@ -297,13 +297,14 @@ class MatchesTheApps(unittest.TestCase):
         return {**owner, "mail-hero-backup": [backup.group(1)]}
 
     def test_the_dashboard_probes_only_paths_outside_access(self):
-        """Each public_http probe of dashboard/worker/src/registry.ts is anonymous, so Access must not govern its path: no
-        destination matches it (the links app's /robots.txt is outside its application's /_ paths). A probe on a host
-        with any Access application declares `outside_access: true`."""
+        """Each probe of dashboard/worker/src/registry.ts (a public_http status, or the `probe` beside an ops_v1 one) is
+        anonymous, so Access must not govern its path: no destination matches it (the links app's /robots.txt is
+        outside its application's /_ paths). A probe on a host with any Access application declares
+        `outside_access: true`."""
         code = (INFRA / "access.tf").read_text()
         destinations = self.access_destinations(code)
         registry = (REPO / "dashboard" / "worker" / "src" / "registry.ts").read_text()
-        probes = re.findall(r"type: 'public_http',(.*?)\}", registry, re.DOTALL)
+        probes = re.findall(r"type: 'public_http',(.*?)\}", registry, re.DOTALL) + re.findall(r"probe: \{(.*?)\}", registry)
         self.assertGreaterEqual(len(probes), 2)
 
         def governs(destination: str, host: str, path: str) -> bool:
@@ -433,11 +434,6 @@ class MatchesTheApps(unittest.TestCase):
                 with self.subTest(worker=worker):
                     self.assertIn(config(worker)["name"], keys)
 
-    # Buckets declared before any production config binds them: an "Infra apply" creates them between the release
-    # that declares them and the one that binds them, whose preflight stops on a missing bucket. The own backups of
-    # Mailsort, Personal MCP, Watch and Links.
-    AHEAD_OF_BINDING = {"mailsort-backups", "personal-mcp-backups", "watch-backups", "links-backups"}
-
     def test_d1_databases_and_buckets_are_the_ones_the_production_configs_bind(self):
         storage = (INFRA / "storage.tf").read_text()
         imports = (INFRA / "ids.tf").read_text()
@@ -452,9 +448,7 @@ class MatchesTheApps(unittest.TestCase):
             bound_r2.update(bucket["bucket_name"] for bucket in data.get("r2_buckets", []))
         self.assertEqual(d1_names, set(bound_d1))
         self.assertEqual(ids, bound_d1)
-        self.assertEqual(buckets - self.AHEAD_OF_BINDING, bound_r2)
-        self.assertLessEqual(self.AHEAD_OF_BINDING, buckets)
-        self.assertFalse(self.AHEAD_OF_BINDING & bound_r2, "a bound bucket is no longer ahead of its binding")
+        self.assertEqual(buckets, bound_r2)
 
 
 if __name__ == "__main__":

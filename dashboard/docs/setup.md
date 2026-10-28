@@ -12,9 +12,9 @@ log: secrets are entered only in GitHub's or Cloudflare's own settings pages.
 | Worker | `home` (`dashboard/wrangler.toml`, the committed production config), `workers_dev = false`, `preview_urls = false` | the `Dashboard deploy` job |
 | Custom Domain | `home.ziyixi.science` (`routes = [{pattern, custom_domain: true}]`) | the deploy (DNS record and certificate) |
 | Durable Object | class `HomeState`, SQLite-backed (migration `v1`, `new_sqlite_classes`), one instance named `home-v1` | the deploy |
-| Service bindings | `MAIL_HERO` → `mail-hero`; `TODOFY` → `todofy`; `WATCH` → `watch`; `FLEET` → `fleet`; `MAILSORT` → `mailsort`; `RECALL` → `recall`; `BRIEF` → `brief`; `TASKS` → `tasks`; `PERSONAL_MCP` → `personal-mcp`; `MODEL_ROUTER` → `model-router`; `NOTION_PUBLISH` → `ziyixi-notion-publish` (all entrypoint `Ops`); `WEBSITE_SYNC` → `ziyixi-notion-publish`, entrypoint `WebsiteSync`; `NEWSLETTER` → `fleet`, entrypoint `NewsletterOps`; `CODEX_GATEWAY` → `fleet`, entrypoint `CodexGatewayOps`; `TASK_INBOX` → `tasks`, entrypoint `TaskInbox` | the deploy; each target Worker must already export the named entrypoint (contracts/ops-v1) |
+| Service bindings | `MAIL_HERO` → `mail-hero`; `TODOFY` → `todofy`; `WATCH` → `watch`; `FLEET` → `fleet`; `MAILSORT` → `mailsort`; `RECALL` → `recall`; `BRIEF` → `brief`; `TASKS` → `tasks`; `PERSONAL_MCP` → `personal-mcp`; `MODEL_ROUTER` → `model-router`; `LINKS` → `links`; `NOTION_PUBLISH` → `ziyixi-notion-publish` (all entrypoint `Ops`); `WEBSITE_SYNC` → `ziyixi-notion-publish`, entrypoint `WebsiteSync`; `NEWSLETTER` → `fleet`, entrypoint `NewsletterOps`; `CODEX_GATEWAY` → `fleet`, entrypoint `CodexGatewayOps`; `TASK_INBOX` → `tasks`, entrypoint `TaskInbox` | the deploy; each target Worker must already export the named entrypoint (contracts/ops-v1) |
 | Static assets | `web/dist`, binding `ASSETS`, `run_worker_first = true` | built in the job |
-| Cron Trigger | `*/30 * * * *` (the account's second of 5 Free triggers) | the deploy |
+| Cron Trigger | `*/30 * * * *` (one of the account's 5 Free triggers, 4 in use; [limits](limits.md)) | the deploy |
 | Access application | "Home", self-hosted, `home.ziyixi.science` | the owner, once (§2); already exists |
 
 There is no D1 database, R2 bucket, KV namespace or queue. The dashboard's state (latest statuses,
@@ -139,15 +139,14 @@ request's URL, so the Worker would see `https://home.ziyixi.science` and refuse 
 `wrangler dev` of this config; `web/`'s Vite proxy sends that origin as `Origin`. The production config never holds `DEV_AUTH_BYPASS` (tests check it). An optional `DEV_NOW` (an RFC 3339 UTC instant, e.g. `2026-10-01T16:30:00Z`) makes the bypassed requests show the views as of that instant, to match ticks run locally at chosen times; the deploy never sets it either. Without the two app Workers running locally, their tiles show ◆ 未知 · 无法连接
 after the first poll and ■ 故障 from the second, and without a `CF_ANALYTICS_TOKEN` the Cloudflare view
 has no usage and no Worker rows; both are the expected state. The registry's two probes are the only
-public requests a tick makes (`GET https://www.ziyixi.science/build-info.json` and
-`https://s.ziyixi.science/robots.txt`; status,
-media type and latency only); set those entries' `enabled: false` in `worker/src/registry.ts` (uncommitted) to
-avoid them. Use synthetic data only; never point a local run at production resources.
+public requests a tick makes (`GET https://www.ziyixi.science/build-info.json` and `GET https://s.ziyixi.science/robots.txt`;
+status, media type and latency only); set the website entry's `enabled: false` and drop the links entry's `probe` in
+`worker/src/registry.ts` (uncommitted) to avoid them. Use synthetic data only; never point a local run at production resources.
 
 For an end-to-end check of the UI against the real Worker without any account, run the Worker in
 Miniflare the way `worker/test/runtime/harness.ts` does (bundle `src/index.ts`, stub `mail-hero` and
 `todofy` Workers from `test/stubs/ops-stub.js` with the contract fixtures, an `outboundService` that
-answers the GraphQL endpoint with `test/graphql-fixture.ts` and the probe URL with a 200) but with
+answers the GraphQL endpoint with `test/graphql-fixture.ts` and the probe URLs with a 200) but with
 `ASSETS` serving `web/dist` and `DEV_AUTH_BYPASS=true`, then open `http://127.0.0.1:<port>/` in a
 browser. [`verification.md`](verification.md) §1d records such a run.
 

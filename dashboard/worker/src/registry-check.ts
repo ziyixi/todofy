@@ -4,7 +4,7 @@
  * contract's own `Code` format (the IDL through ops-client.ts), and the UI has no business importing that.
  */
 import { MAX_OUTBOUND_PER_REFRESH, MAX_OUTBOUND_PER_TICK } from './api-types.ts';
-import type { RegistryDef } from './registry-types.ts';
+import type { EntryDef, PublicProbe, RegistryDef } from './registry-types.ts';
 import { ACCENTS, FLOW_STAGES_MAX, ICON_KEYS } from './idl.ts';
 import { isOpsCode } from './ops-client.ts';
 import { OWNER_ZONE, PLATFORM_SIGNALS, outboundPerRefresh, outboundPerTick, stageScripts } from './registry.ts';
@@ -65,6 +65,31 @@ function sameHost(a: string, b: string): boolean {
   return host !== null && host === hostOf(b);
 }
 
+/** A probe's problems (a public_http status, or an ops_v1 one's `probe`); `scripts`: the entry's Workers. */
+function probeProblems(where: string, entry: EntryDef, probe: PublicProbe, scripts: number): string[] {
+  const problems = httpsProblems(`${where} probe`, probe.url, 'path');
+  const add = (condition: boolean, problem: string): void => {
+    if (!condition) problems.push(problem);
+  };
+  add(probe.expect.length > 0 && probe.expect.every((code) => Number.isInteger(code) && code >= 200 && code <= 399), `${where}: expect`);
+  if (probe.content_type !== undefined) add(MEDIA_TYPE.test(probe.content_type), `${where}: content_type is not a lowercase media type`);
+  if (entry.access) {
+    // An anonymous probe of an Access path sees only Access. A path outside Access is allowed when declared,
+    // and only in a form where Access's login redirect (3xx, an HTML page) can never look healthy.
+    add(probe.outside_access === true, `${where}: an Access-protected host cannot be probed publicly`);
+    if (probe.outside_access === true) {
+      add(probe.content_type !== undefined, `${where}: a probe outside Access needs content_type`);
+      add(probe.expect.every((code) => code >= 200 && code <= 299), `${where}: a probe outside Access expects 2xx only`);
+      add(entry.url !== null && sameHost(probe.url, entry.url), `${where}: a probe outside Access is on the entry's own host`);
+      add(entry.url === null || pathOf(probe.url) !== pathOf(entry.url), `${where}: a probe outside Access cannot be the Access-protected url`);
+    }
+  } else {
+    add(probe.outside_access === undefined, `${where}: outside_access is only for an Access-protected host`);
+  }
+  if (probe.error_rate === true) add(scripts > 0, `${where}: error_rate needs a worker`);
+  return problems;
+}
+
 function duplicates(values: readonly string[]): string[] {
   const seen = new Set<string>();
   const dup = new Set<string>();
@@ -122,25 +147,14 @@ export function validateRegistry(registry: RegistryDef, options: ValidationOptio
         add(scripts.length > 0 || (status.provider === 'fleet' && !status.guard
           && ((entry.id === 'newsletter' && status.binding === 'NEWSLETTER')
             || (entry.id === 'codex-gateway' && status.binding === 'CODEX_GATEWAY'))), `${where}: ops_v1 needs a worker or explicit fleet provider`);
+        // The probe beside the status reaches the app's own Worker, never a fleet-provided one.
+        if (status.probe !== undefined) {
+          add(scripts.length > 0, `${where}: a probe beside ops_v1 needs a worker`);
+          problems.push(...probeProblems(where, entry, status.probe, scripts.length));
+        }
         break;
       case 'public_http':
-        problems.push(...httpsProblems(`${where} probe`, status.url, 'path'));
-        add(status.expect.length > 0 && status.expect.every((code) => Number.isInteger(code) && code >= 200 && code <= 399), `${where}: expect`);
-        if (status.content_type !== undefined) add(MEDIA_TYPE.test(status.content_type), `${where}: content_type is not a lowercase media type`);
-        if (entry.access) {
-          // An anonymous probe of an Access path sees only Access. A path outside Access is allowed when declared,
-          // and only in a form where Access's login redirect (3xx, an HTML page) can never look healthy.
-          add(status.outside_access === true, `${where}: an Access-protected host cannot be probed publicly`);
-          if (status.outside_access === true) {
-            add(status.content_type !== undefined, `${where}: a probe outside Access needs content_type`);
-            add(status.expect.every((code) => code >= 200 && code <= 299), `${where}: a probe outside Access expects 2xx only`);
-            add(entry.url !== null && sameHost(status.url, entry.url), `${where}: a probe outside Access is on the entry's own host`);
-            add(entry.url === null || pathOf(status.url) !== pathOf(entry.url), `${where}: a probe outside Access cannot be the Access-protected url`);
-          }
-        } else {
-          add(status.outside_access === undefined, `${where}: outside_access is only for an Access-protected host`);
-        }
-        if (status.error_rate === true) add(scripts.length > 0, `${where}: error_rate needs a worker`);
+        problems.push(...probeProblems(where, entry, status, scripts.length));
         break;
       case 'analytics':
         add(scripts.length > 0, `${where}: analytics needs a worker`);
@@ -160,7 +174,7 @@ export function validateRegistry(registry: RegistryDef, options: ValidationOptio
     if (metric !== null) {
       const fits =
         (metric.kind === 'counter' && status.type === 'ops_v1' && isOpsCode(metric.name)) ||
-        (metric.kind === 'latency' && status.type === 'public_http') ||
+        (metric.kind === 'latency' && (status.type === 'public_http' || (status.type === 'ops_v1' && status.probe !== undefined))) ||
         (metric.kind === 'last_active' && scripts.length > 0);
       add(fits, `${where}: tile_metric ${metric.kind} does not fit status ${status.type}`);
     }

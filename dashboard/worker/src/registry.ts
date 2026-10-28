@@ -18,12 +18,14 @@
  * Adding an app's tile (docs/design-v2.md §3): one `entries` row in `apps`, its `workers` rows and its resources.
  * Its status source is `ops_v1` when the app has an Ops entrypoint the dashboard binds (a binding in env.ts and
  * wrangler.toml), else a `public_http` probe of a path its own Worker answers outside Access (`outside_access`,
- * `content_type`). `.github/scripts/test_wrangler_configs.py` fails until every production Worker and D1 database
- * is registered here, and until every production Worker with a Custom Domain maps to an `apps` or `sites` entry
- * whose url is on one of its hosts (only `home` is exempt), so a newly deployed app cannot stay off the dashboard.
+ * `content_type`). An `ops_v1` status may add such a probe (`probe`) when only an anonymous request shows that the
+ * app's host and route work, as for the links app. `.github/scripts/test_wrangler_configs.py` fails until every
+ * production Worker and D1 database is registered here, and until every production Worker with a Custom Domain maps
+ * to an `apps` or `sites` entry whose url is on one of its hosts (only `home` is exempt), so a newly deployed app
+ * cannot stay off the dashboard.
  */
 import { DRIFT_CALLS_PER_TICK, type EntryGroup, type FlowGroup, type Registry, type RegistryEntry, type Stage, type TileMetricDef } from './api-types.ts';
-import type { EntryDef, FlowDef, RegistryDef, ResourceDef, WorkerDef } from './registry-types.ts';
+import type { EntryDef, FlowDef, PublicProbe, RegistryDef, ResourceDef, WorkerDef } from './registry-types.ts';
 import { OWNER_ZONE, RESOURCE_IDENTITIES } from './resource-identities.ts';
 
 /** Every registry host is this zone or one of its subdomains. */
@@ -82,16 +84,13 @@ const ENTRIES: readonly EntryDef[] = [
     url: 'https://s.ziyixi.science/_/',
     access: true,
     status: {
-      type: 'public_http',
-      expect: [200],
-      content_type: 'text/plain',
-      outside_access: true,
-      error_rate: true,
-      enabled: true,
-      url: 'https://s.ziyixi.science/robots.txt',
+      type: 'ops_v1',
+      binding: 'LINKS',
+      guard: false,
+      probe: { url: 'https://s.ziyixi.science/robots.txt', expect: [200], content_type: 'text/plain', outside_access: true, error_rate: true },
     },
     tile_metric: { kind: 'latency' },
-    app_only_signals: [],
+    app_only_signals: ['backup_stale', 'backup_failed'],
     order: 6,
   },
   {
@@ -105,7 +104,7 @@ const ENTRIES: readonly EntryDef[] = [
     access: true,
     status: { type: 'ops_v1', binding: 'WATCH', guard: true },
     tile_metric: { kind: 'counter', name: 'changes_new' },
-    app_only_signals: ['maintenance_mode'],
+    app_only_signals: ['maintenance_mode', 'backup_stale', 'backup_failed'],
     order: 7,
   },
   {
@@ -208,7 +207,7 @@ const ENTRIES: readonly EntryDef[] = [
     access: true,
     status: { type: 'ops_v1', binding: 'MAILSORT', guard: false },
     tile_metric: { kind: 'counter', name: 'pending' },
-    app_only_signals: [],
+    app_only_signals: ['backup_stale', 'backup_failed'],
     order: 9,
   },
   {
@@ -264,7 +263,7 @@ const ENTRIES: readonly EntryDef[] = [
     access: true,
     status: { type: 'ops_v1', binding: 'PERSONAL_MCP', guard: false },
     tile_metric: { kind: 'counter', name: 'active_subscriptions' },
-    app_only_signals: [],
+    app_only_signals: ['backup_stale', 'backup_failed', 'maintenance_mode'],
     order: 4,
   },
   {
@@ -367,8 +366,16 @@ const RESOURCES: readonly ResourceDef[] = [
   { id: 'recall-store', kind: 'r2', name: 'recall 正文存储', entry: 'recall', match: 'recall-store' },
   // Tasks' own weekly backups (tasks/wrangler.toml BACKUPS), created by "Infra apply" before Tasks bound it.
   { id: 'tasks-backups', kind: 'r2', name: 'Tasks 备份', entry: 'tasks', match: 'tasks-backups' },
+  // Mailsort's own daily backups (mailsort/wrangler.toml BACKUPS), created by "Infra apply" before mailsort bound it.
+  { id: 'mailsort-backups', kind: 'r2', name: 'mailsort 备份', entry: 'mailsort', match: 'mailsort-backups' },
+  // The Personal MCP store's own daily backups (personal-mcp/wrangler.toml BACKUPS), created by "Infra apply" before it bound it.
+  { id: 'personal-mcp-backups', kind: 'r2', name: 'Personal MCP 备份', entry: 'personal-mcp', match: 'personal-mcp-backups' },
+  // The links app's own daily backups (links/wrangler.toml BACKUPS), created by "Infra apply" before links bound it.
+  { id: 'links-backups', kind: 'r2', name: 'links 备份', entry: 'links', match: 'links-backups' },
   // Watch's private captured page text and screenshots (watch/wrangler.toml EVIDENCE_STORE).
   { id: 'watch-evidence', kind: 'r2', name: 'Watch 页面证据与截图', entry: 'watch', match: 'watch-evidence' },
+  // Watch's own daily backups (watch/wrangler.toml BACKUPS), created by "Infra apply" before Watch bound it.
+  { id: 'watch-backups', kind: 'r2', name: 'Watch 备份', entry: 'watch', match: 'watch-backups' },
   // The self-hosted servers' backups (~790 MB on 2026-09-30), outside this repository.
   { id: 'vps-backup', kind: 'r2', name: 'VPS 备份', entry: 'self-hosted', match: 'vultr-backup' },
 ];
@@ -570,6 +577,13 @@ export function flowsOfScript(script: string, registry: RegistryDef = REGISTRY):
     .map((flow) => flow.id);
 }
 
+/** The probe an entry runs each tick: its enabled `public_http` status, or its `ops_v1` status's `probe`; else null. */
+export function entryProbe(entry: EntryDef): PublicProbe | null {
+  const status = entry.status;
+  if (status.type === 'public_http') return status.enabled ? status : null;
+  return status.type === 'ops_v1' ? (status.probe ?? null) : null;
+}
+
 /** A GraphQL identifier (databaseId, namespaceId, bucketName) → its registry resource, if mapped. */
 export function resourceByMatch(kind: ResourceDef['kind'], id: string, registry: RegistryDef = REGISTRY): ResourceDef | undefined {
   return registry.resources.find((resource) => resource.kind === kind && resource.match !== null && resource.match === id);
@@ -577,7 +591,7 @@ export function resourceByMatch(kind: ResourceDef['kind'], id: string, registry:
 
 /**
  * Outbound calls of one tick computed from the registry (design-v2.md §5): status() per ops_v1 entry (and the
- * website relay's getSyncStatus with notion-publish's), one GET per enabled public_http probe, the GraphQL query,
+ * website relay's getSyncStatus with notion-publish's), one GET per probe (entryProbe), the GraphQL query,
  * setGuard per guarded entry, two canary calls per canary, one createInboxTask (the digest's daily task) and the
  * drift check's read-only calls (at most DRIFT_CALLS_PER_TICK).
  */
@@ -600,7 +614,7 @@ function statusCalls(registry: RegistryDef): number {
 }
 
 function probeCount(registry: RegistryDef): number {
-  return registry.entries.filter((entry) => entry.status.type === 'public_http' && entry.status.enabled).length;
+  return registry.entries.filter((entry) => entryProbe(entry) !== null).length;
 }
 
 // ---- the public view --------------------------------------------------------------------------------

@@ -96,7 +96,7 @@ GetRegistry (`GET /api/v1/registry`; no binding names or probe URLs), so no host
 | --- | --- | --- | --- |
 | Mail Hero | 应用 | `ops_v1` (MAIL_HERO, guard) | 今日收件 |
 | Todofy (`todofy`, `todofy-core`) | 应用 | `ops_v1` (TODOFY, guard) | 24 小时收到 |
-| 短链接 (`links`, D1 `links`) | 应用 | `public_http` outside Access: one GET per tick to `s…/robots.txt`, expecting 200 and `text/plain` (the Worker's constant, before any D1 read); plus the Worker's error rate. The tile opens the launcher `https://s.ziyixi.science/_/` behind the path-scoped Access app "links". No Ops entrypoint, and a short link may go unused for days, so no idle rule | latency |
+| 短链接 (`links`, D1 `links`, R2 `links-backups`) | 应用 | `ops_v1` (`LINKS`, no guard): one D1 row and the daily backup's state; the app-only signals `backup_stale` and `backup_failed`. Beside it a `probe` of its `/robots.txt` outside Access (`text/plain`, 2xx only, with the Worker's error rate): a service binding still answers when the Custom Domain or the route is broken, only an anonymous GET sees that. The tile opens the launcher `https://s.ziyixi.science/_/` behind the path-scoped Access app "links". A short link may go unused for days, so no idle rule | latency |
 | 网页监视 (`watch`, DO `WatchState`) | 应用 | `ops_v1` (WATCH, guard): counts and codes only, never a watch's name, URL or page text; its `status()` re-arms a missing alarm, so each tick restarts a lost scheduler | 新变化 |
 | 个人网站 (`ziyixi-website`, assets only) | 站点 | `public_http`: one GET per tick to `www…/build-info.json` (www is canonical; the apex serves the same site), status + latency only, `redirect: 'manual'`, body unread, `enabled` flag. The site's Worker (`website/`) serves static assets only, which are not Worker invocations, so analytics cannot judge it; the file is part of its static export, so the probe survives the cutover | latency |
 | Notion 发布 (`ziyixi-notion-publish`) | 后台服务 | `analytics`: error rate + 26 h idle rule | last request hour |
@@ -139,8 +139,9 @@ URL and Access lock, plus its Workers and resources. The status source is `ops_v
 entrypoint (a service binding in `env.ts` and `wrangler.toml`, the binding type in `StatusSource`, its signal
 codes placed by stages or `app_only_signals`; the watch app's W3 is that case), else a `public_http` probe of a
 path its own Worker answers anonymously (`outside_access` + `content_type` when the host is behind Access, and
-`error_rate` to add the Worker's error rate). Each such entry adds one outbound call per tick and one row to
-every view (`VIEW_ROWS_READ`).
+`error_rate` to add the Worker's error rate). An `ops_v1` status may add the same probe as `probe` when a service
+binding cannot show that the app's host and route work (the links app). Each probe adds one outbound call per tick
+and one row to every view (`VIEW_ROWS_READ`).
 
 ## 4. Evaluation (`worker/src/evaluate.ts`; page requests only read)
 
@@ -153,7 +154,9 @@ time (a stale status, stopped ticks) is right at every read.
     (e.g. an app never read successfully) else `stale`; health `down` → critical (its critical
     signal, e.g. `status_unavailable`); then the worst signal, a stage hold code of that app giving
     `held` (any severity) and other info signals nothing; `degraded` without any shown signal →
-    warning `app_degraded`. Tile metric: the counter named by `tile_metric`.
+    warning `app_degraded`. With a `probe`, the tile is the worse of this and the probe's level (the
+    public_http rule below; a tie keeps the app's reason). Tile metric: the counter named by `tile_metric`, or
+    the probe's latency.
   - public_http: not yet probed → unknown; last probe older than 75 min → unknown `stale`; ok; one
     failure → warning, ≥ 2 → critical, reason `http_status`/`timeout`/`network_error`, or `content_type`
     when the status was right but the media type was not the registry's `content_type` (another answerer
@@ -230,10 +233,10 @@ lost `version`.
 | --- | --- | --- |
 | `GET /api/v1/registry` (GetRegistry) | Worker, serialized once per isolate; `ETag: "<build>"` → 304 | 0 DO; ≤ 20 KiB |
 | `GET /api/csrf` | Worker (static compatibility token `1`, no cookie, until 2026-11-02 with the old paths below; design.md §6) | — |
-| `GET /api/v1/homeView` (GetHomeView) | DO `view('home')` | 1 DO call; ordinary fixture ≤ 40 rows read; ≤ 10 KiB |
-| `GET /api/v1/flowsView` (GetFlowsView) | DO | ordinary fixture ≤ 40 rows read; ≤ 20 KiB |
-| `GET /api/v1/cloudflareView` (GetCloudflareView) | DO | ordinary fixture ≤ 40 rows read; ≤ 24 KiB |
-| `GET /api/v1/opsView` (GetOpsView) | DO | ordinary fixture ≤ 40 rows read; ≤ 24 KiB |
+| `GET /api/v1/homeView` (GetHomeView) | DO `view('home')` | 1 DO call; ordinary fixture ≤ 44 rows read; ≤ 10 KiB |
+| `GET /api/v1/flowsView` (GetFlowsView) | DO | ordinary fixture ≤ 44 rows read; ≤ 20 KiB |
+| `GET /api/v1/cloudflareView` (GetCloudflareView) | DO | ordinary fixture ≤ 44 rows read; ≤ 24 KiB |
+| `GET /api/v1/opsView` (GetOpsView) | DO | ordinary fixture ≤ 44 rows read; ≤ 24 KiB |
 | `POST /api/v1/homeView:refresh`, `POST /api/v1/cloudflareView:refresh` (RefreshHomeView, RefreshCloudflareView; were `?refresh=1`) | DO `view(..., refresh)` | Origin + CSRF; each scope fetches at most once a minute |
 | `POST /api/v1/guard:override {app, level, request_id}` (OverrideGuard), `POST /api/v1/canaries/mail-todofy:run {request_id}` (RunCanary) | DO (`setGuardOverride`, `startCanary`) | Origin + CSRF; ≤ 1 KiB body |
 | `POST /api/v1/attentionItems/{id}:dismiss`, `:restore` | DO reminder disposition | Access + Origin + CSRF; occurrence etag + UUID request_id; ≤ 1 KiB body |
@@ -285,10 +288,10 @@ Regression budgets (bytes and actual cursor reads in unit/workerd tests; ordinar
 
 | View | Mockup day | Representative bad day | Ordinary rows read |
 | --- | --- | --- | --- |
-| home | ≤ 10 KiB | ≤ 64 KiB | 36 (≤ 40) |
-| flows | ≤ 20 KiB | ≤ 64 KiB | 37 (≤ 40) |
-| cloudflare | ≤ 16 KiB, also with 20 Workers | ≤ 64 KiB | 36 (≤ 40) |
-| ops | ≤ 24 KiB | ≤ 64 KiB | 37 (≤ 40) |
+| home | ≤ 10 KiB | ≤ 64 KiB | 40 (≤ 44) |
+| flows | ≤ 20 KiB | ≤ 64 KiB | 41 (≤ 44) |
+| cloudflare | ≤ 16 KiB, also with 20 Workers | ≤ 64 KiB | 40 (≤ 44) |
+| ops | ≤ 24 KiB | ≤ 64 KiB | 41 (≤ 44) |
 
 `VIEW_BODY_BUDGET` holds for the ordinary fixtures. Complete reminders now include `name` and `etag`;
 they cannot be cut to the outbound report's 20 entries before applying dismissals. A synthetic case with
@@ -310,8 +313,8 @@ Per tick: at most `outboundPerTick()` outbound calls, computed from the registry
 the website relay's `getSyncStatus` with notion-publish's), one GET per enabled probe, 1 GraphQL, ≤ 1 `setGuard` per
 guarded entry, ≤ 2 canary calls, ≤ 1 `createInboxTask` and ≤ `DRIFT_CALLS_PER_TICK` read-only drift calls (§10). It is tested ≤ `MAX_OUTBOUND_PER_TICK`, a fixed margin under
 Free's 50, and asserted per tick in workerd, so a new app changes neither constant. Mailsort's Claude budget is
-independent of account Workers AI shedding. The probes run in parallel with the status polls. GraphQL stays one query per tick (48/day) plus refreshes ≤ 1/min. DO rows written grow by ~3 per tick
-(`cf_scripts` and one `probe:<entry>` per probe). The links probe is one request of its Worker per tick (≤ 144 a day with refreshes, no D1 query); the website's is a static asset. Everything else as in
+independent of account Workers AI shedding. The probes run in parallel with the status polls. GraphQL stays one query per tick (48/day) plus refreshes ≤ 1/min. DO rows written grow by ~2 per tick
+(`cf_scripts` and one `probe:<entry>` per probe). The website's probe is a static asset. Everything else as in
 [`limits.md`](limits.md).
 
 **v1 removal (done 2026-09-29):** the hand-written v1 API (`/api/v1/overview`, `OverviewResponse`, `AppCard`) was
@@ -363,7 +366,7 @@ notion-publish idle limit 26 h.
 ## 9. Still to verify in production (read-only)
 
 Whether `durableObjectsInvocationsAdaptiveGroups.scriptName` is the defining or the calling script;
-whether `cpuTimeP99` includes DO time; the website and links probes from a same-zone Worker; notion-publish's
+whether `cpuTimeP99` includes DO time; the website probe from a same-zone Worker; notion-publish's
 real schedule; the TODO resource identifiers of §3. The full list of pending production checks is in
 [`verification.md`](verification.md) §2.
 

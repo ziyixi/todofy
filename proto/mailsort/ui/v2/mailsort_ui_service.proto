@@ -5,8 +5,8 @@
 // mails a day, and a label writes in live mode whenever it is enabled. It replaced mailsort.ui.v1 (/api/v1), whose
 // paths answer 410 RELOAD_REQUIRED for one release.
 //
-// Callers. Only the mailsort UI calls it (same origin, sort.ziyixi.science). The dashboard gets counts through
-// ops-v1, never this API.
+// Callers. Only the mailsort UI calls it (same origin, sort.ziyixi.science); the owner starts a backup restore
+// from that page's console (mailsort/docs/backup.md). The dashboard gets counts through ops-v1, never this API.
 //
 // Transport. google.api.http bindings under /api/v2, served by the shared transcoder
 // (proto/ts/http-transcoder.ts) and called through the shared client (proto/ts/http-client.ts). Bodies, query
@@ -48,6 +48,7 @@ import "google/api/resource.proto";
 import "google/protobuf/empty.proto";
 import "google/protobuf/field_mask.proto";
 import "google/protobuf/timestamp.proto";
+import "mailsort/ui/v2/backup.proto";
 import "mailsort/ui/v2/consolidation.proto";
 import "mailsort/ui/v2/flow.proto";
 import "mailsort/ui/v2/label.proto";
@@ -343,6 +344,32 @@ service MailsortUiService {
       body: "*"
     };
     option (google.api.method_signature) = "name";
+  }
+
+  // The restore of this store from a daily backup (mailsort/docs/backup.md): its progress and, once it ended, its
+  // verification (rows per table against the backup's manifest). NOT_FOUND before the first.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetBackupRestore(GetBackupRestoreRequest) returns (BackupRestore) {
+    option (google.api.http) = {get: "/api/v2/{name=backupRestore}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // Restores the named backup from the Worker's own private bucket into this store, in bounded alarm steps; each
+  // part's SHA-256 is checked before it is loaded. Only into an empty store (a new object: no labels, decisions,
+  // ledger or other records; RESTORE_TARGET_NOT_EMPTY otherwise) or one whose restore failed, which it starts
+  // again; RESTORE_ACTIVE while one runs; BACKUP_NOT_RESTORABLE for a missing, unreadable or newer backup. Until
+  // it succeeds every other mutation is refused (RESTORE_ACTIVE) and the pipeline and the daily backup wait. It
+  // writes nothing to Gmail: restored ledger intents become history, and intake resumes from the mailbox's
+  // current state.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc StartBackupRestore(StartBackupRestoreRequest) returns (BackupRestore) {
+    option (google.api.http) = {
+      post: "/api/v2/{name=backupRestore}:start"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name,backup";
   }
 
   // The service status.
@@ -820,6 +847,32 @@ message StartReplayEvaluationRequest {
   ];
   // The idempotency key (AIP-155); see MailsortUiService. A repeat answers the evaluation it started.
   string request_id = 2 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of GetBackupRestore.
+message GetBackupRestoreRequest {
+  // Always `backupRestore`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "sort.ziyixi.science/BackupRestore"
+  ];
+}
+
+// Input of StartBackupRestore.
+message StartBackupRestoreRequest {
+  // Always `backupRestore`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "sort.ziyixi.science/BackupRestore"
+  ];
+  // The backup's prefix in the bucket, `backups/<job start>/` (latest.json names the newest).
+  string backup = 2 [(google.api.field_behavior) = REQUIRED];
+  // The idempotency key (AIP-155); see MailsortUiService. A repeat answers the restore it started until the
+  // restore replaces the request log with the backup's.
+  string request_id = 3 [
     (google.api.field_info).format = UUID4,
     (google.api.field_behavior) = OPTIONAL
   ];

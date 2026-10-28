@@ -215,7 +215,8 @@ not memory.
 
 `worker/src/store.ts`; regular history is pruned, while an undelivered outbox row stays until Tasks accepts it.
 Schema v3 adds the sink's `intents` and a partial index of undelivered events; v4 adds frozen change context;
-v5 adds private reading-evidence indexes. After an alarm the watches whose checks may have added rows are pruned
+v5 adds private reading-evidence indexes; v6 adds `backup_evidence`, the daily backup's record of its evidence copies
+([backup.md](backup.md): every table but `previews` and that record is backed up). After an alarm the watches whose checks may have added rows are pruned
 (`pruneWatches`, through the `(watch_id, state, id)` index: only that watch's rows are read); the global tables at
 most once an hour and every watch once per UTC day (`pruneGlobal`).
 
@@ -233,6 +234,7 @@ most once an hour and every watch once per UTC day (`pruneGlobal`).
 | `evidence_snapshots` | private R2 capture addresses and hashes | 20 recent captures per watch, plus current rule references |
 | `evidence_deletions` | private object keys awaiting cleanup | drained in batches of 20 by the existing Alarm |
 | `intents` | the sink's inbox (§7): each row's ID, kind, day, state, attempts, code; its frozen request until Tasks created it | 30 days (at most 10 a day) |
+| `backup_evidence` | the evidence objects the daily backup copied into `watch-backups`, with their SHA-256 ([backup.md](backup.md)) | the copies the 30 kept backups name |
 
 A check that finds nothing new writes a few rows (the watch, its host, the URL's fetch time); the day's request count
 is written once per alarm. The schema has a version in `meta`; a change adds a migration step (v2: the
@@ -241,6 +243,7 @@ is written once per alarm. The schema has a version in `meta`; a change adds a m
 ## 7. Bindings, notifications
 
 Bindings (`wrangler.toml`, `worker/src/env.ts`): `WATCH` (the object), `ASSETS`, `EVIDENCE_STORE` (private R2),
+`BACKUPS` (private R2, the daily backups: [backup.md](backup.md)),
 `TASKS` (Tasks' `TaskInbox`
 entrypoint with `props = { source = "watch" }`: it creates tasks of this source only, and never reads, changes or
 deletes one; the notification sink); vars `PUBLIC_HOST`
@@ -300,7 +303,9 @@ inbox is always how the owner sees what changed.
 entrypoint `Ops` answers the dashboard's service binding `WATCH` (no public route). `status()` holds counts and codes
 only, from WatchState's SQLite: `watches_active`, `watches_paused`, `watches_broken`, `watches_failing`,
 `changes_new` (counted up to 1,000 through `changes_state`), `fetches_today`, `notifications_pending`, `intents_open`
-(frozen, the task not created yet), `intents_sent_today` (created in Tasks this UTC day); signals `watches_broken`,
+(frozen, the task not created yet), `intents_sent_today` (created in Tasks this UTC day), `backup_age_seconds` and
+`last_backup_at` (the daily backup, [backup.md](backup.md)); signals `backup_stale` (critical: no complete backup for 3
+days), `backup_failed`, `watches_broken`,
 `scheduler_stale` (no pass for 12 hours while a watch is to be checked), `notify_unsettled` (a task still not created a
 day after it was frozen, or one given up or refused this week) and `guard_shed`; modes `maintenance` (always false) and
 `notifications` (the TASKS binding is configured). Never a
@@ -381,7 +386,8 @@ its bound (50 watches, 200 changes and 22 snapshots each) and holds each path to
 
 | Path | Rows read | Rows written |
 | --- | --- | --- |
-| an idle alarm pass | 5 | 1 |
+| an idle alarm pass | 5 (6 with the backup bucket: its state's meta row) | 1 |
+| the daily backup (every row once; [backup.md](backup.md)) | a few thousand, ~15,000 at every bound | 1 a step, 1 per new evidence copy |
 | an idle alarm pass with the sink (`notify.test.ts`; Todofy's then, Tasks' since 2026-10-21, one meta row more) | 11 | 1 |
 | a check that finds nothing new | ~30 | ~7 |
 | a check that records a change (its own watch's prune included) | ~330 | ~22 |

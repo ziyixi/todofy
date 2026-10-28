@@ -91,16 +91,15 @@ class DesiredState(unittest.TestCase):
     def test_todofy_personal_values_are_deploy_secrets(self):
         """Todofy writes the gateway's owner addresses with --secrets-file; an empty alias list is uploaded too (as
         unset), while the manifest and CI comparison permit the alias binding to be absent. The core has no personal value since 2026-10-21: its
-        retired Tasks projects are optional manual secrets until the owner deletes them. The vars it adds are the
-        switches and BUILD_SHA."""
+        Todoist key and Tasks projects are retired, so it has no secret at all. The vars it adds are the switches and
+        BUILD_SHA."""
         workers = {"todofy-core": (), "todofy": ("ACCESS_OWNER", "ACCESS_OWNER_ALIASES")}
         switches = {
             "todofy-core": ("BUILD_SHA", "MAINTENANCE_MODE", "PROCESSING_PAUSED"),
             "todofy": ("BUILD_SHA", "MAINTENANCE_MODE"),
         }
         core = {b["name"]: b for b in self.state["workers"]["todofy-core"]["bindings"]}
-        for name in ("TODOIST_DEFAULT_PROJECT_ID", "TODOIST_OPS_PROJECT_ID", "TODOIST_REVIEW_PROJECT_ID"):
-            self.assertEqual(core[name], {"name": name, "type": "secret_text", "source": "manual", "optional": True})
+        self.assertFalse([name for name, binding in core.items() if binding["type"] == "secret_text"])
         for name in ("REMINDER_ENABLED", "FORCE_PAUSE_TODOIST", "GTD_REVIEW_ENABLED"):
             self.assertNotIn(name, core)
         for worker, names in workers.items():
@@ -149,15 +148,25 @@ class DesiredState(unittest.TestCase):
                 ("ACCESS_AUDIENCE", "plain_text"),
                 ("ACCESS_ISSUER", "plain_text"),
                 ("ASSETS", "assets"),
+                ("BACKUPS", "r2_bucket"),
+                ("BACKUP_ALARM", "durable_object_namespace"),
                 ("DB", "d1"),
                 ("PUBLIC_HOST", "plain_text"),
             },
         )
         self.assertNotIn("CSRF_SIGNING_KEY", bindings)
         self.assertNotIn("links", drift_desired.MANUAL_SECRETS)
+        # No cron trigger: the daily backup runs on a Durable Object's Alarm (links/docs/backup.md).
         self.assertEqual((worker["workers_dev"], worker["preview_urls"], worker["crons"]), (False, False, []))
         self.assertEqual(worker["custom_domains"], ["s.ziyixi.science"])
         self.assertEqual((worker["routes"], worker["personal"]), ([], []))
+
+    def test_the_account_keeps_a_free_cron_trigger(self):
+        """Workers Free allows 5 cron triggers per account. Four Workers use one each; the links app's backup runs on a
+        Durable Object Alarm instead, so a fifth stays free."""
+        crons = {name: worker["crons"] for name, worker in self.state["workers"].items() if worker["crons"]}
+        self.assertEqual(sum(len(schedule) for schedule in crons.values()), 4)
+        self.assertNotIn("links", crons)
 
     def test_tasks_enrolls_its_complete_owner_secret_map_and_verified_build(self):
         bindings = {binding["name"]: binding for binding in self.state["workers"]["tasks"]["bindings"]}

@@ -58,4 +58,12 @@ enum ErrorReason {
   ERROR_REASON_CONSOLIDATION_PENDING_WRITES = 15;
   // FAILED_PRECONDITION (400): this former model feature is retired; historical results remain readable.
   ERROR_REASON_MODEL_FEATURE_RETIRED = 16;
+  // FAILED_PRECONDITION (400): a backup restore is running or did not finish; every other mutation waits until
+  // it succeeds (GetBackupRestore).
+  ERROR_REASON_RESTORE_ACTIVE = 17;
+  // FAILED_PRECONDITION (400): a restore only loads into an empty store; this one holds the owner's records.
+  ERROR_REASON_RESTORE_TARGET_NOT_EMPTY = 18;
+  // FAILED_PRECONDITION (400): the named backup is missing, incomplete or unreadable, newer than this release,
+  // or the deployment has no backup bucket.
+  ERROR_REASON_BACKUP_NOT_RESTORABLE = 19;
 }

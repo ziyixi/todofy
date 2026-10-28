@@ -7,7 +7,7 @@
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { BREAKDOWN_UNCLASSIFIED } from '../../src/api-types.ts';
 import { VIEW_BODY_BUDGET, VIEW_ROWS_READ, type AttentionItem, type CloudflareView, type FlowsView, type HomeView, type OpsView, type Registry, type ViewId } from '../../src/api-types.ts';
-import { REGISTRY, outboundPerTick } from '../../src/registry.ts';
+import { REGISTRY, entryProbe, outboundPerTick } from '../../src/registry.ts';
 import { REALISTIC_USAGE, SYNTHETIC_D1, SYNTHETIC_NS, usageWithScripts } from '../graphql-fixture.ts';
 import { accessClaims, testIssuer, type TestIssuer } from '../jwt.ts';
 import { GRAPHQL, NOW, PATHS, PROBES, SYNTHETIC_BINDINGS, WEBSITE_PROBE, answerProbes, startFlows, status, type FlowHarness } from './flows.ts';
@@ -162,7 +162,7 @@ describe('GetHomeView and RefreshHomeView', () => {
     expect(tiles.todofy).toMatchObject({ level: 'ok', metric: { kind: 'counter', name: 'received_24h', value: 63 } });
     expect(tiles.website?.level).toBe('ok');
     expect(tiles.website?.metric?.kind).toBe('latency');
-    // The links app's robots.txt, answered by its own Worker.
+    // The links app: a recent backup through its Ops entrypoint, and its robots.txt answered by its own Worker.
     expect(tiles.links).toMatchObject({ level: 'ok', reason: null, metric: { kind: 'latency' } });
     // Content sync is evaluated from its check evidence, with no activity metric.
     expect(tiles['notion-publish']).toMatchObject({ level: 'ok', metric: null });
@@ -199,7 +199,7 @@ describe('GetHomeView and RefreshHomeView', () => {
     const second = await refreshedView<HomeView>(h, 'home');
     expect(second.refresh.refreshed).toBe(false);
     expect(await h.called()).toEqual([]);
-    expect(h.outboundLog).toHaveLength(2);
+    expect(h.outboundLog).toHaveLength(Object.keys(PROBES).length);
     // The next status poll is 10 minutes after the last one.
     expect(Date.parse(second.refresh.next_refresh_at) - Date.parse(refreshed.refresh.last_refresh_at ?? '')).toBeGreaterThanOrEqual(10 * MIN - MIN);
   });
@@ -225,20 +225,23 @@ describe('GetHomeView and RefreshHomeView', () => {
   });
 });
 
-describe('the links tile', () => {
-  it('probes exactly the public_http URLs of the registry', () => {
-    const urls = REGISTRY.entries.flatMap((e) => (e.status.type === 'public_http' && e.status.enabled ? [[e.id, e.status.url]] : []));
+describe('the probes and the links tile', () => {
+  it('probes exactly the probe URLs of the registry', () => {
+    const urls = REGISTRY.entries.flatMap((e) => {
+      const probe = entryProbe(e);
+      return probe === null ? [] : [[e.id, probe.url]];
+    });
     expect(Object.fromEntries(urls)).toEqual(PROBES);
   });
 
-  it('shows a wrong type from links on the tile and as one observed item', async () => {
+  it('shows a broken links host on its tile while its Ops entrypoint still answers, and as one observed item', async () => {
     h = await mockupDay();
-    // Something other than the links Worker answers 200 with HTML.
+    // Something other than the links Worker answers 200 with HTML (a Custom Domain or a route gone astray).
     h.routes.set(PROBES.links, () => new Response('<html></html>', { headers: { 'content-type': 'text/html; charset=utf-8' } }));
     await h.tick(NOW - 31 * MIN);
     await h.tick(NOW - MIN);
     const home = await view<HomeView>(h, 'home');
-    expect(home.entries.find((e) => e.id === 'links')).toMatchObject({ level: 'critical', reason: 'content_type', consecutive_failures: 2, metric: null });
+    expect(home.entries.find((e) => e.id === 'links')).toMatchObject({ level: 'critical', reason: 'content_type', consecutive_failures: 2, metric: null, top_signals: [] });
     expect(attentionFacts(home.attention.items)).toEqual([
       { source: 'links', code: 'content_type', severity: 'critical', since: null, metrics: {}, target: { view: 'home', entry: 'links' }, observed: 'critical' },
     ]);
@@ -246,6 +249,23 @@ describe('the links tile', () => {
     // No flow names the app, and the digest to Todofy keeps v1's item set.
     expect(home.flows.every((f) => f.level === 'ok')).toBe(true);
     expect((await view<OpsView>(h, 'ops')).digest.items).toEqual([]);
+  });
+
+  it('shows a stale, failed links backup on its tile and in the strip, and no flow repeats it', async () => {
+    h = await mockupDay();
+    const failed = await status('links', { health: 'degraded', signals: [
+      { code: 'backup_stale', severity: 'critical', metrics: { age_seconds: 345_600, has_backup: 1 } },
+      { code: 'backup_failed', severity: 'warning', metrics: {} },
+    ] });
+    await h.answer('links', 'status', { value: failed });
+    await h.tick(NOW - MIN);
+    const home = await view<HomeView>(h, 'home');
+    expect(home.entries.find((e) => e.id === 'links')).toMatchObject({ level: 'critical', reason: 'backup_stale', metric: null });
+    expect(home.attention.items.filter((item) => item.source === 'links').map((item) => [item.code, item.severity])).toEqual([
+      ['backup_stale', 'critical'],
+      ['backup_failed', 'warning'],
+    ]);
+    expect(home.flows.every((f) => f.level === 'ok')).toBe(true);
   });
 });
 
@@ -398,6 +418,7 @@ describe('GetFlowsView, GetOpsView and the mutations', () => {
     expect(ops.apps.map((a) => [a.entry, a.reachable, a.status?.app])).toEqual([
       ['mail-hero', true, 'mail-hero'],
       ['todofy', true, 'todofy'],
+      ['links', true, 'links'],
       ['watch', true, 'watch'],
       ['notion-publish', true, 'notion-publish'],
       ['newsletter', true, 'newsletter'],

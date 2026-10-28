@@ -1,0 +1,24 @@
+{
+  "version": "ops-v1",
+  "app": "links",
+  "generated_at": "2026-10-28T06:00:00.000Z",
+  "health": "ok",
+  "modes": {
+    "maintenance": false
+  },
+  "guard": {
+    "level": "normal",
+    "reason": null,
+    "until": null,
+    "set_at": null,
+    "deferred": []
+  },
+  "signals": [],
+  "counters": {
+    "database_ready": 1,
+    "backup_age_seconds": 1800
+  },
+  "last_backup_at": "2026-10-28T05:30:00.000Z",
+  "ui_url": "https://s.example.org/_/",
+  "capabilities": []
+}

@@ -22,20 +22,24 @@ icon = "link"
 # Rose is also the danger color; slate keeps a healthy tile unambiguous.
 accent = "slate"
 access = true
-app_only_signals = []
+app_only_signals = ["backup_stale", "backup_failed"]
 order = 6
 worker = "links"
 url_path = "/_/"
 position = 5
 [entries.status]
+# The Ops entrypoint: the database answers, and the daily backup's age and failures (worker/src/ops.ts).
+type = "ops_v1"
+binding = "LINKS"
+guard = false
+[entries.status.probe]
+# Beside it, what only an anonymous request sees: the Custom Domain and the route reach the Worker outside Access.
 # Constant public text before any D1 read; unused links do not imply idle failure.
-type = "public_http"
+path = "/robots.txt"
 expect = [200]
 content_type = "text/plain"
 outside_access = true
 error_rate = true
-enabled = true
-path = "/robots.txt"
 [entries.tile_metric]
 kind = "latency"
 

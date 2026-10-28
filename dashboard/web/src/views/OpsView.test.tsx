@@ -85,8 +85,8 @@ describe('操作与记录', () => {
       '平台运行时',
     ])
     expect(rows[1]).toHaveTextContent('ops-v1 状态接口')
-    // The links app: a probe of a path its own Worker answers outside Access.
-    expect(rows[2]).toHaveTextContent('公开地址探测')
+    // The links app: its Ops entrypoint (the database and the daily backup).
+    expect(rows[2]).toHaveTextContent('ops-v1 状态接口')
     expect(within(rows[2] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('links')
     // The watch app: its Ops entrypoint, as Mail Hero and Todofy.
     expect(rows[3]).toHaveTextContent('ops-v1 状态接口')

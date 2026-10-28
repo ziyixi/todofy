@@ -1,6 +1,6 @@
 import type { ReadHomeRequest, ReadHomeResponse } from '@ziyixi/proto/dashboard/mcp/v1/home_service_wire';
 import { expect, it } from 'vitest';
-import { baselineSource, pollSource, type SourceEnv, type SourceState } from '../src/events.ts';
+import { baselineSource, pollSource, rebaselineSource, type SourceEnv, type SourceState } from '../src/events.ts';
 
 const AT = '2026-10-20T12:00:00Z';
 const NO_OWN_CHANGES = () => new Map<string, string>();
@@ -210,4 +210,22 @@ it('does not alert on dismissal or restore, and alerts on a new recurrence seque
   expect(restored.events).toEqual([]);
   current = snapshot({ head_seq: 10, attention: [{ occurrence_seq: 10, item }] });
   expect((await pollSource('service.attention', restored.state, env, NO_OWN_CHANGES)).events[0]?.id).toBe('attention_10');
+});
+
+it('re-baselines a restored source at the current head, and moves must-start revisions past any the lost store used', async () => {
+  let head = 41;
+  const env = sourceEnv({ tasks: query => query.get('baseline') === 'true' ? { next_page_token: String(head) }
+    : query.has('view') ? { tasks: [{ id: 'due', etag: '1', must_start: true }] } : { next_page_token: String(head) } });
+  // The backup's cursor (12) is behind the feed, or ahead of a Tasks restored behind it: neither is read.
+  expect(await rebaselineSource('task.changed', { name: 'task.changed', cursor: '12' }, env, Date.parse(AT)))
+    .toEqual({ name: 'task.changed', cursor: '41' });
+  head = 3;
+  expect(await rebaselineSource('task.changed', { name: 'task.changed', cursor: '12' }, env, Date.parse(AT)))
+    .toEqual({ name: 'task.changed', cursor: '3' });
+  const minutes = Math.floor(Date.parse(AT) / 60_000);
+  const restored = await rebaselineSource('task.must_start', { name: 'task.must_start', ids: [], revision: 7 }, env, Date.parse(AT));
+  expect(restored).toEqual({ name: 'task.must_start', ids: ['due'], revision: minutes });
+  // The lost store reached at most one revision a minute past the backup's 7, far below the minutes since the epoch.
+  expect((await pollSource('task.must_start', { name: 'task.must_start', ids: [], revision: minutes }, env, NO_OWN_CHANGES)).events[0]?.id)
+    .toBe(`must_start_${String(minutes + 1)}`);
 });

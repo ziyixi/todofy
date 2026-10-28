@@ -308,4 +308,9 @@ sudo /usr/bin/python3 -E -s <新 bundle>/installer/recover.py \
 空环境 bootstrap 创建空业务状态。恢复历史时先停旧写入，保留原事件、密钥、SQL/R2/DO、Codex gateway 登录、Newsletter 状态和 daemon 账本，
 按各应用恢复说明核对后激活。Mail Hero 每日副本在私有 R2，见 [原生备份](../mail-hero/docs/native-backup.md)。
 Tasks 用自己的每周备份（私有 R2 `tasks-backups`，由其 `TaskJobs` 的 Alarm 写入）或 7 天内的 Time Travel 恢复自己的 D1，见 [Tasks 备份与恢复](../tasks/docs/backup.md)；核对任务 ID、完成次数以及 Todofy 邮件引用后，再恢复任务写入。从 Todoist 重新导入只能重建 10-17 切换时的状态，不是恢复路径。
-Watch/Home 等 DO 完整跨账户数据恢复、真实空账户与干净 VPS 演练留待后续。PVC Retain 和镜像 artifact 都不能替代业务备份。
+Mailsort 用自己的每日备份（私有 R2 `mailsort-backups`，由 `MailsortState` 的 Alarm 每天写入，保留最近 30 份完整备份）恢复：把 `MAILSORT_OBJECT` 换成新对象名发布得到空存储，再由 owner 调用 `StartBackupRestore` 在对象内加载并核对；在途写入转为历史、不重放 Gmail 写入，Gmail 授权 secret 须保持不变或用 `mint-token` 重新写入，见 [Mailsort 备份与恢复](../mailsort/docs/backup.md)。
+Personal MCP 用自己的每日备份（私有 R2 `personal-mcp-backups`，由 `SubscriptionStore` 的 Alarm 每天写入，保留最近 30 份完整备份）恢复 Work 记忆、订阅、游标与投递记录：先让应用指向空的 store（同账户改 `STORE_OBJECT` 后发布；新账户用新 namespace，并把下载的备份 upload 进新桶），再由 owner 经 Access 调用 `POST /owner/restore`，对象内分步载入并核对，见 [Personal MCP 备份与恢复](../personal-mcp/docs/backup.md)；业务订阅从当前状态重新开始，不重放备份之后的事件，Watch 从备份游标续读。
+Watch 用自己的每日备份（私有 R2 `watch-backups`，由 `WatchState` 的 Alarm 每天写入全部表和快照引用的页面证据，保留最近 30 份完整备份）恢复到一个空对象：新账户的 `watch-v1` 或改 `WATCH_OBJECT` 得到的新对象，由 owner 在健康页“从备份恢复”，对象内校验 SHA-256、先恢复证据再恢复行并核对行数；旧通知不重发、事件游标过期一次，见 [Watch 备份与恢复](../watch/docs/backup.md)。
+短链接用自己的每日备份（私有 R2 `links-backups`，由其唯一的 cron 触发器每天分步写入，保留最近 30 份完整备份）或 7 天内的 Time Travel 恢复自己的 D1 `links`，见 [短链接备份与恢复](../links/docs/backup.md)；`verify` 逐表逐行核对新库后再切换 Worker 并恢复编辑。导出的 JSONL 只含未删除的链接，不是完整恢复路径。
+这四个备份桶与 `tasks-backups` 一样由 `infra/` 声明并经 "Infra apply" 创建；桶本身丢失时先经 Infra apply 重建，再把 owner 下载的备份按各应用文档 upload 回去。从备份的完整恢复只写入空对象或新数据库（短链接的 Time Travel 是原地恢复）；四者的恢复都只在本地 workerd 验证过，尚未在生产演练。
+Home 等 DO 完整跨账户数据恢复、真实空账户与干净 VPS 演练留待后续。PVC Retain 和镜像 artifact 都不能替代业务备份。

@@ -38,14 +38,18 @@
   ],
   "r2": [
     "infra-state",
+    "links-backups",
     "mail-hero-backups",
     "mail-hero-store",
+    "mailsort-backups",
     "model-router-backups",
     "model-router-request-bodies",
+    "personal-mcp-backups",
     "recall-store",
     "tasks-backups",
     "todofy-backups",
     "vultr-backup",
+    "watch-backups",
     "watch-evidence"
   ]
 }

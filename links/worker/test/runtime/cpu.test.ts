@@ -10,12 +10,19 @@
  * page of LIST_PAGE or EXPORT_PAGE, an import of IMPORT_LINES_MAX lines). No dev bypass: Access is verified as in
  * production.
  *
+ * The daily backup's Alarm runs (the LinksBackup object, in the same isolates after the requests) on LINKS_MAX links
+ * with three revisions each: the plan, export steps of STEP_BYTES of rows (D1's JSON, gzip and SHA-256), the last step
+ * (the parts checked, the manifest, retention) and an idle run that only reads state.json. An Alarm may use 30 s of CPU
+ * on Workers Free; each run is still held to the owner API's bounds, so the steps keep the size they had under a cron
+ * trigger's 10 ms.
+ *
  * The whole session runs in COLD_ISOLATES fresh isolates (a new harness each, measureInIsolates): every number is
  * divided by its own isolate's speed (never below 1), and the bounds hold each number's median across the isolates,
  * so one first run on a busy moment cannot fail the test alone. A median speed above MAX_SPEED fails it.
  */
 import { beforeAll, describe, expect, it } from 'vitest';
 import { COLD_ISOLATES, connectCpuMeter, CPU_TEST_TIMEOUT_MS, FREE_CPU_MS, measureInIsolates, type Isolate, type Measurement } from '../../../../tools/workerd-cpu/workerd-cpu.mts';
+import { STATE, type BackupState } from '../../src/backup-runner.ts';
 import { EXPORT_PAGE, IMPORT_LINES_MAX, LINKS_MAX, LIST_PAGE } from '../../src/limits.ts';
 import { accessClaims, testIssuer } from '../jwt.ts';
 import { op, startHarness, SYNTHETIC_BINDINGS, type Harness } from './harness.ts';
@@ -68,6 +75,7 @@ async function startIsolate(): Promise<LinksIsolate> {
   // Port 0: the OS picks a free port, which the meter reads back from Miniflare.
   const h = await startHarness({
     inspectorPort: 0,
+    backups: true,
     bindings: { DEV_AUTH_BYPASS: 'false' },
     routes: new Map([[`${ISSUER}/cdn-cgi/access/certs`, () => Response.json(issuerJwks)]]),
   });
@@ -89,6 +97,14 @@ async function startIsolate(): Promise<LinksIsolate> {
       now,
       JSON.stringify(rows),
     );
+    // Three kept revisions per link, each about as long as its link: what the backup's export steps read.
+    await h.sql(
+      `INSERT INTO link_revisions (key, revision, create_time, target, path_mode, visibility, description, tags, expire_time)
+       SELECT l.key, r.value, l.create_time, l.target, l.path_mode, l.visibility, l.description, l.tags, l.expire_time
+       FROM links l, json_each('[1,2,3]') r`,
+    );
+    // A backup state with nothing due, so the Alarm the owner's first request arms only reads it.
+    await putState(h, { next_run: Date.parse('2099-01-01T00:00:00Z') });
     const meter = await connectCpuMeter(h.mf, 'links');
     return {
       h,
@@ -102,6 +118,12 @@ async function startIsolate(): Promise<LinksIsolate> {
     await h.dispose();
     throw error;
   }
+}
+
+/** Writes state.json with no job, `fields` over a never-run backup. */
+async function putState(h: Harness, fields: Partial<BackupState>): Promise<void> {
+  const state: BackupState = { since: Date.now(), next_run: 0, failed_jobs: 0, status: 'never', last_backup_at: null, last_key: '', error_code: '', job: null, ...fields };
+  await (await h.mf.getR2Bucket('BACKUPS', 'links')).put(STATE, JSON.stringify(state));
 }
 
 async function expectStatus(h: Harness, path: string, status: number, init: RequestInit = {}): Promise<void> {
@@ -150,8 +172,36 @@ async function session({ h, meter }: LinksIsolate): Promise<Measurement[]> {
       });
     }, RUNS),
   ];
-  return [cold, ...redirects, apiInit, ...api];
+  // The owner's first request armed the Alarm, whose run found nothing due. Then a job is due at once, and each run is
+  // brought forward to now (arm(true)) instead of waiting STEP_MS.
+  await h.alarmRun(1);
+  let runs = 1;
+  await putState(h, { next_run: 0 });
+  const tick = async () => {
+    await h.arm(true);
+    await h.alarmRun(++runs);
+  };
+  const step = async () => {
+    const object = await h.mf.getR2Bucket('BACKUPS', 'links').then((bucket) => bucket.get(STATE));
+    const state = (await object?.json()) as { job: { planned: boolean; cursors: { done: boolean }[] } | null } | undefined;
+    return !state?.job ? 'idle' : !state.job.planned ? 'plan' : state.job.cursors.some((cursor) => !cursor.done) ? 'export' : 'finish';
+  };
+  const backup: Measurement[] = [await meter.measure(BACKUP_PLAN, tick, 1)];
+  if ((await step()) !== 'export') throw new Error('the plan did not open the export');
+  backup.push(await meter.measure(BACKUP_EXPORT, tick, EXPORT_STEPS));
+  while ((await step()) === 'export') await tick();
+  backup.push(await meter.measure(BACKUP_FINISH, tick, 1));
+  if ((await step()) !== 'idle') throw new Error('the backup did not finish');
+  backup.push(await meter.measure(BACKUP_IDLE, tick, RUNS));
+  return [cold, ...redirects, apiInit, ...api, ...backup];
 }
+
+const BACKUP_PLAN = 'Alarm: the backup plan';
+/** LINKS_MAX links and their revisions fill more export steps than this, so every measured one reads STEP_BYTES. */
+const EXPORT_STEPS = 3;
+const BACKUP_EXPORT = 'Alarm: a backup export step';
+const BACKUP_FINISH = 'Alarm: the backup check, manifest and retention';
+const BACKUP_IDLE = 'Alarm: idle (reads state.json)';
 
 /** The redirects measured after the isolate's first request (each is bounded by the redirect bounds). */
 const REDIRECTS = new Set([
@@ -182,6 +232,6 @@ describe('CPU per request (Workers Free: 10 ms)', () => {
         expect(median, `${label}: warm median`).toBeLessThan(API_BOUND_MS);
       }
     }
-    expect(reference.size).toBe(2 + REDIRECTS.size + 4);
+    expect(reference.size).toBe(2 + REDIRECTS.size + 4 + 4);
   });
 });

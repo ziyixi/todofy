@@ -247,6 +247,11 @@
           "source": "config"
         },
         {
+          "name": "LINKS",
+          "type": "service",
+          "source": "config"
+        },
+        {
           "name": "MAILSORT",
           "type": "service",
           "source": "config"
@@ -348,6 +353,16 @@
         {
           "name": "ASSETS",
           "type": "assets",
+          "source": "config"
+        },
+        {
+          "name": "BACKUPS",
+          "type": "r2_bucket",
+          "source": "config"
+        },
+        {
+          "name": "BACKUP_ALARM",
+          "type": "durable_object_namespace",
           "source": "config"
         },
         {
@@ -546,6 +561,11 @@
           "source": "config"
         },
         {
+          "name": "BACKUPS",
+          "type": "r2_bucket",
+          "source": "config"
+        },
+        {
           "name": "BUILD_SHA",
           "type": "plain_text",
           "source": "deploy"
@@ -737,6 +757,11 @@
           "type": "secret_text",
           "source": "deploy",
           "optional": true
+        },
+        {
+          "name": "BACKUPS",
+          "type": "r2_bucket",
+          "source": "config"
         },
         {
           "name": "BUILD_SHA",
@@ -1114,30 +1139,6 @@
           "name": "TODOFY_PUBLIC_HOST",
           "type": "plain_text",
           "source": "config"
-        },
-        {
-          "name": "TODOIST_API_KEY",
-          "type": "secret_text",
-          "source": "manual",
-          "optional": true
-        },
-        {
-          "name": "TODOIST_DEFAULT_PROJECT_ID",
-          "type": "secret_text",
-          "source": "manual",
-          "optional": true
-        },
-        {
-          "name": "TODOIST_OPS_PROJECT_ID",
-          "type": "secret_text",
-          "source": "manual",
-          "optional": true
-        },
-        {
-          "name": "TODOIST_REVIEW_PROJECT_ID",
-          "type": "secret_text",
-          "source": "manual",
-          "optional": true
         }
       ],
       "personal": []
@@ -1176,6 +1177,11 @@
         {
           "name": "ASSETS",
           "type": "assets",
+          "source": "config"
+        },
+        {
+          "name": "BACKUPS",
+          "type": "r2_bucket",
           "source": "config"
         },
         {

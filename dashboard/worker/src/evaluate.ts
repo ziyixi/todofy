@@ -7,14 +7,14 @@
 import { CANARY_DISABLED_ITEM, type OpsSignal, type OpsStatus } from './api-types.ts';
 import { LEVEL_RANK, type AttentionItem, type Attention, type Badges, type CanaryBadge, type EntryState, type FlowState, type FlowSummary, type Freshness, type HeldItem, type Level, type RollupLevel, type StageState, type Target, type TileMetric, type ViewId } from './api-types.ts';
 import { TOP_SIGNALS_MAX } from './idl.ts';
-import type { EntryDef, FlowDef, RegistryDef, StageDef } from './registry-types.ts';
+import type { EntryDef, FlowDef, PublicProbe, RegistryDef, StageDef } from './registry-types.ts';
 import type { CanaryRecord } from './canary.ts';
 import { rollupAttention, sortAttention } from './attention-rollup.ts';
 import { TICK_STALE_MS } from './digest.ts';
 import { errorLevel, errorPercent, todayOf, workerRows, type CfScriptsDoc } from './discovery.ts';
 import type { DigestDoc, ProbeDoc, StatusDoc } from './docs.ts';
 import { usageFresh, type DesiredGuard } from './guard.ts';
-import { PLATFORM_SIGNALS, REGISTRY, stageScripts } from './registry.ts';
+import { PLATFORM_SIGNALS, REGISTRY, entryProbe, stageScripts } from './registry.ts';
 import { HOUR_MS, MINUTE_MS, isoOrNull } from './time.ts';
 
 /** A status or probe older than this (two and a half ticks) no longer says anything: 未知. */
@@ -161,6 +161,25 @@ function entryScripts(entry: string, registry: RegistryDef): string[] {
 // ---- entries ------------------------------------------------------------------------------------------
 
 /**
+ * A probe's verdict (a public_http status, or the probe beside an ops_v1 one): not yet probed → unknown; older than
+ * OBSERVATION_STALE_MS → unknown `stale`; ok, or its failure (critical from the second in a row). With `error_rate`,
+ * the Workers' error rate adds to it (fresh data only; stale analytics never make the tile unknown).
+ */
+function probeVerdict(entry: EntryDef, probe: PublicProbe, input: EvalInput, registry: RegistryDef): Verdict {
+  const { now } = input;
+  const doc = input.probes[entry.id];
+  if (doc === undefined) return { level: 'unknown', reason: 'never_checked' };
+  if (!recent(doc.checked_at, now)) return { level: 'unknown', reason: 'stale' };
+  let verdict: Verdict = doc.ok ? OK : { level: doc.consecutive_failures >= 2 ? 'critical' : 'warning', reason: doc.error ?? 'http_status' };
+  if (probe.error_rate === true && scriptsFresh(input.scripts, now)) {
+    const activity = activityOf(entryScripts(entry.id, registry), input.scripts, now);
+    const errors = errorLevel(activity.requests, activity.errors);
+    if (errors !== 'ok') verdict = worse(verdict, { level: errors, reason: 'error_rate' });
+  }
+  return verdict;
+}
+
+/**
  * The entry's own level and reason (the tile; design-v2 §4, Q2: never the worst of its flows). For
  * link_only `link`, for none and a disabled probe `unmonitored`: never a made-up ok.
  */
@@ -176,20 +195,8 @@ function entryVerdict(entry: EntryDef, input: EvalInput, registry: RegistryDef):
       if (input.lastTickAt === null) return { level: 'unknown', reason: 'never_checked' };
       return now - input.lastTickAt > TICK_STALE_MS ? { level: 'critical', reason: 'tick_stale' } : OK;
     }
-    case 'public_http': {
-      if (!status.enabled) return { level: 'unmonitored', reason: null };
-      const probe = input.probes[entry.id];
-      if (probe === undefined) return { level: 'unknown', reason: 'never_checked' };
-      if (!recent(probe.checked_at, now)) return { level: 'unknown', reason: 'stale' };
-      let verdict: Verdict = probe.ok ? OK : { level: probe.consecutive_failures >= 2 ? 'critical' : 'warning', reason: probe.error ?? 'http_status' };
-      // The Workers' error rate adds to the probe (fresh data only; stale analytics never make the tile unknown).
-      if (status.error_rate === true && scriptsFresh(input.scripts, now)) {
-        const activity = activityOf(entryScripts(entry.id, registry), input.scripts, now);
-        const errors = errorLevel(activity.requests, activity.errors);
-        if (errors !== 'ok') verdict = worse(verdict, { level: errors, reason: 'error_rate' });
-      }
-      return verdict;
-    }
+    case 'public_http':
+      return status.enabled ? probeVerdict(entry, status, input, registry) : { level: 'unmonitored', reason: null };
     case 'analytics': {
       const doc = input.scripts;
       if (!input.analyticsConfigured || doc === null) return { level: 'unknown', reason: 'never_checked' };
@@ -225,7 +232,8 @@ function entryVerdict(entry: EntryDef, input: EvalInput, registry: RegistryDef):
         // `degraded` without a signal to show (or only holds): the app still says something is off.
         if (fresh.health === 'degraded' && !alarm && !held) verdict = worse(verdict, { level: 'warning', reason: 'app_degraded' });
       }
-      return verdict;
+      // The probe beside the status: what only an anonymous request sees (the app's host and route).
+      return status.probe === undefined ? verdict : worse(verdict, probeVerdict(entry, status.probe, input, registry));
     }
   }
 }
@@ -261,7 +269,7 @@ export function entryState(entry: EntryDef, input: EvalInput, registry: Registry
     case 'ops_v1': {
       const doc = input.statuses[entry.id];
       checkedAt = doc?.checked_at ?? null;
-      failures = doc?.consecutive_failures ?? 0;
+      failures = Math.max(doc?.consecutive_failures ?? 0, entry.status.probe === undefined ? 0 : (input.probes[entry.id]?.consecutive_failures ?? 0));
       const holds = holdCodes(entry.id, registry);
       topSignals = (freshStatus(doc, input.now)?.signals ?? [])
         .filter((signal) => signal.severity !== 'info' || holds.has(signal.code))
@@ -397,7 +405,7 @@ function stageState(stage: StageDef, input: EvalInput, marks: Map<string, Canary
   }
 
   let probe: StageState['probe'] = null;
-  if (entry.status.type === 'public_http') {
+  if (entryProbe(entry) !== null) {
     const doc = input.probes[entry.id];
     probe = { checked_at: isoOrNull(doc?.checked_at), ok: doc?.ok ?? null, http_status: doc?.http_status ?? null, latency_ms: doc?.latency_ms ?? null };
   }
@@ -579,7 +587,7 @@ function observedItem(source: string, code: string, level: ObservedLevel, target
  * 2. a flow stage at those levels whose cause is not already listed (same entry and code, or an item
  *    targeting that stage, such as a canary failure); target: the stage;
  * 3. a Worker whose error rate is warning/critical, unless its entry already has an error_rate item;
- *    target: its row on the Cloudflare view. A public_http tile with `error_rate` owns that item only while
+ *    target: its row on the Cloudflare view. A probed tile with `error_rate` owns that item only while
  *    the error rate decides it; a probe failure at least as severe keeps the tile, and the row lists the rate.
  * This dashboard's own entry is left out: `tick_stale` (digest) already says the ticks stopped.
  */

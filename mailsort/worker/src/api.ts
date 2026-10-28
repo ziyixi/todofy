@@ -11,6 +11,7 @@
  */
 import { FieldMaskError, updatePaths } from '@ziyixi/proto/field-mask';
 import type { ServiceHandlers, ShapeOf } from '@ziyixi/proto/http-transcoder';
+import { BackupRestoreSchema } from '@ziyixi/proto/mailsort/ui/v2/backup_pb';
 import { LabelSchema, type Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb';
 import {
   ListExamplesResponseSchema,
@@ -29,6 +30,7 @@ import { create, type DescMessage, type JsonValue, type MessageShape } from '@zi
 import { EmptySchema, timestampFromMs, timestampMs } from '@ziyixi/proto/protobuf/wkt';
 import { RpcError } from '@ziyixi/proto/rpc-status';
 import { fromWire, toWire } from '@ziyixi/proto/wire-json';
+import type { Kv } from './backup.ts';
 import { modelRouterBinding, type ModeName } from './env.ts';
 import { ClassificationPromptSchema } from '@ziyixi/proto/mailsort/ui/v2/prompt_pb';
 import { classificationPromptMessage, readClassificationPrompt, saveClassificationPrompt, validClassificationPrompt } from './classification-prompt.ts';
@@ -58,6 +60,7 @@ import { exampleMessage, flowMessage, labelMessage, labelName, ledgerMessage, MO
 import { labelIdFor, ownerPath, pathOfGmailName, treeConflict } from './paths.ts';
 import { REASONS, sortError } from './reasons.ts';
 import { replaySummary } from './replay.ts';
+import { restoreMessage, restoreState, restoreUnfinished, startRestore } from './restore.ts';
 import { initializePriorities } from './priority-setup.ts';
 import { prioritySetup, priorityStartedAt } from './priority.ts';
 import { authState, type Budget, writeScope } from './session.ts';
@@ -87,6 +90,10 @@ export interface ApiContext {
   readonly budget: Budget;
   /** An alarm pass or another owner mutation is running (an unread batch or the priority setup waits for it). */
   readonly busy: () => boolean;
+  /** The object's key-value storage: the restore's state (restore.ts). */
+  readonly kv: Kv;
+  /** The private bucket of the daily backups (BACKUPS), when bound. */
+  readonly backups: R2Bucket | undefined;
 }
 
 function bad(message = REASONS.BAD_REQUEST.message): never {
@@ -158,8 +165,13 @@ async function onceAsync<Desc extends DescMessage>(ctx: ApiContext, requestId: s
   return answer;
 }
 
-/** Mutations wait for an unfinished priority setup and leave the fixed P1-P4 labels alone; settings stay available. */
+/**
+ * Mutations wait for a restore until it succeeds and for an unfinished priority setup, and leave the fixed P1-P4 labels
+ * alone; settings stay available, except during a restore. A restore checks its own target (restore.ts).
+ */
 function checkMutation(ctx: ApiContext, rpc: string): void {
+  if (rpc === 'StartBackupRestore') return;
+  if (restoreUnfinished(ctx.kv)) throw sortError('RESTORE_ACTIVE');
   if (rpc === 'UpdateSettings') return;
   // The label consolidation code is retired (2026-10-11); a state restored from its run must not be written over.
   if (ctx.store.one(`SELECT 1 AS x FROM label_merge_jobs WHERE state != 'succeeded' LIMIT 1`) !== undefined) throw sortError('CONSOLIDATION_ACTIVE');
@@ -888,6 +900,21 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
   startReplayEvaluation(request) {
     if (request.name !== 'replayEvaluation') notFound();
     return Promise.reject(sortError('MODEL_FEATURE_RETIRED'));
+  },
+
+  getBackupRestore(request, ctx) {
+    if (request.name !== 'backupRestore') notFound();
+    const state = restoreState(ctx.kv);
+    return Promise.resolve(restoreMessage(state ?? notFound(), ctx.now));
+  },
+
+  async startBackupRestore(request, ctx) {
+    if (request.name !== 'backupRestore') notFound();
+    return onceAsync(ctx, request.requestId, 'StartBackupRestore', 'backupRestore', BackupRestoreSchema, async () => {
+      const state = await startRestore({ store: ctx.store, kv: ctx.kv, bucket: ctx.backups, transact: ctx.transact }, request.backup, ctx.now);
+      await ctx.wake();
+      return restoreMessage(state, ctx.now);
+    });
   },
 
   async getServiceStatus(request, ctx) {

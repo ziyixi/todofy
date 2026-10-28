@@ -18,6 +18,7 @@ DO_KEYS = {
     "BriefState": "brief-state",
     "SubscriptionStore": "personal-mcp-subscriptions",
     "TaskJobs": "tasks-jobs",
+    "LinksBackup": "links-backup",
 }
 
 

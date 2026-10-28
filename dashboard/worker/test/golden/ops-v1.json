@@ -293,6 +293,68 @@
     "ui_url": "https://fleet.example.com/",
     "capabilities": []
   },
+  "read/OpsStatus/links-degraded.json": {
+    "version": "ops-v1",
+    "app": "links",
+    "generated_at": "2026-10-28T06:00:00.000Z",
+    "health": "degraded",
+    "modes": {
+      "maintenance": false
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [
+      {
+        "code": "backup_stale",
+        "severity": "critical",
+        "metrics": {
+          "age_seconds": 345600,
+          "has_backup": 1
+        }
+      },
+      {
+        "code": "backup_failed",
+        "severity": "warning",
+        "metrics": {}
+      }
+    ],
+    "counters": {
+      "database_ready": 1,
+      "backup_age_seconds": 345600
+    },
+    "last_backup_at": "2026-10-24T06:00:00.000Z",
+    "ui_url": "https://s.example.org/_/",
+    "capabilities": []
+  },
+  "read/OpsStatus/links-ok.json": {
+    "version": "ops-v1",
+    "app": "links",
+    "generated_at": "2026-10-28T06:00:00.000Z",
+    "health": "ok",
+    "modes": {
+      "maintenance": false
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [],
+    "counters": {
+      "database_ready": 1,
+      "backup_age_seconds": 1800
+    },
+    "last_backup_at": "2026-10-28T05:30:00.000Z",
+    "ui_url": "https://s.example.org/_/",
+    "capabilities": []
+  },
   "read/OpsStatus/mail-hero-degraded.json": {
     "version": "ops-v1",
     "app": "mail-hero",
@@ -452,6 +514,61 @@
       "guard"
     ]
   },
+  "read/OpsStatus/mailsort-backup-stale.json": {
+    "version": "ops-v1",
+    "app": "mailsort",
+    "generated_at": "2026-10-06T14:00:00Z",
+    "health": "degraded",
+    "modes": {
+      "maintenance": false,
+      "live": true,
+      "sorting_off": false,
+      "mode_limited": false,
+      "breaker": false
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [
+      {
+        "code": "backup_stale",
+        "severity": "critical",
+        "metrics": {
+          "age_seconds": 345660,
+          "has_backup": 1
+        }
+      },
+      {
+        "code": "backup_failed",
+        "severity": "warning",
+        "metrics": {}
+      }
+    ],
+    "counters": {
+      "decided_today": 0,
+      "applied_today": 0,
+      "unsure_today": 0,
+      "review_pending": 0,
+      "pending": 0,
+      "gmail_calls_today": 0,
+      "claude_spent_usd": 0,
+      "claude_monthly_limit_usd": 20,
+      "claude_input_tokens": 0,
+      "claude_cache_write_tokens": 0,
+      "claude_cache_read_tokens": 0,
+      "claude_output_tokens": 0,
+      "claude_thinking_tokens": 0,
+      "backup_age_seconds": 345660,
+      "last_sync_minutes": 4
+    },
+    "last_backup_at": "2026-10-02T13:59:00Z",
+    "ui_url": "https://sort.example.com/",
+    "capabilities": []
+  },
   "read/OpsStatus/mailsort-degraded.json": {
     "version": "ops-v1",
     "app": "mailsort",
@@ -602,6 +719,36 @@
     "counters": {},
     "last_backup_at": null,
     "ui_url": "https://home.example.com/",
+    "capabilities": []
+  },
+  "read/OpsStatus/personal-mcp-ok.json": {
+    "version": "ops-v1",
+    "app": "personal-mcp",
+    "generated_at": "2026-10-28T06:00:00Z",
+    "health": "ok",
+    "modes": {
+      "maintenance": false
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [],
+    "counters": {
+      "active_subscriptions": 3,
+      "pending_deliveries": 0,
+      "accepted_deliveries": 41,
+      "failed_deliveries": 0,
+      "open_work": 2,
+      "waiting_work": 1,
+      "unhandled_work_reports": 0,
+      "backup_age_seconds": 2215
+    },
+    "last_backup_at": "2026-10-28T05:23:05Z",
+    "ui_url": null,
     "capabilities": []
   },
   "read/OpsStatus/recall-degraded.json": {
@@ -902,6 +1049,19 @@
     },
     "signals": [
       {
+        "code": "backup_stale",
+        "severity": "critical",
+        "metrics": {
+          "age_seconds": 345600,
+          "has_backup": 1
+        }
+      },
+      {
+        "code": "backup_failed",
+        "severity": "warning",
+        "metrics": {}
+      },
+      {
         "code": "notify_unsettled",
         "severity": "warning",
         "metrics": {
@@ -943,9 +1103,10 @@
       "fetches_today": 0,
       "notifications_pending": 1,
       "intents_open": 1,
-      "intents_sent_today": 0
+      "intents_sent_today": 0,
+      "backup_age_seconds": 345600
     },
-    "last_backup_at": null,
+    "last_backup_at": "2026-09-27T14:00:00Z",
     "ui_url": "https://watch.example.com/",
     "capabilities": [
       "guard"
@@ -977,9 +1138,10 @@
       "fetches_today": 37,
       "notifications_pending": 1,
       "intents_open": 0,
-      "intents_sent_today": 1
+      "intents_sent_today": 1,
+      "backup_age_seconds": 9416
     },
-    "last_backup_at": null,
+    "last_backup_at": "2026-10-01T11:23:04Z",
     "ui_url": "https://watch.example.com/",
     "capabilities": [
       "guard"

@@ -38,7 +38,9 @@ class PersonalMcpIntegration(unittest.TestCase):
             {"binding": "HOME", "service": "home", "entrypoint": "HomeApi"},
             {"binding": "WATCH", "service": "watch", "entrypoint": "WatchApi", "props": {"access": "read-write"}},
         ])
-        for key in ("d1_databases", "r2_buckets", "assets", "triggers"):
+        # The one bucket is the store's own daily backup (personal-mcp/docs/backup.md); no D1, assets or cron.
+        self.assertEqual(config["r2_buckets"], [{"binding": "BACKUPS", "bucket_name": "personal-mcp-backups"}])
+        for key in ("d1_databases", "assets", "triggers"):
             self.assertNotIn(key, config)
 
     def test_managed_oauth_applies_only_to_the_private_mcp_and_exact_callback(self):

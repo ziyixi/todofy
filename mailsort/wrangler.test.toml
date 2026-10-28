@@ -27,6 +27,11 @@ class_name = "MailsortState"
 tag = "v1"
 new_sqlite_classes = ["MailsortState"]
 
+# A local bucket in .wrangler/ (wrangler dev never reaches the real one).
+[[r2_buckets]]
+binding = "BACKUPS"
+bucket_name = "mailsort-backups"
+
 [vars]
 PUBLIC_HOST = "sort.localhost"
 ACCESS_ISSUER = "https://synthetic.cloudflareaccess.com"

@@ -7,7 +7,8 @@ Gmail remains the mailbox. The app never sends mail, marks it read, deletes it o
 
 One TypeScript Worker serves private, framework-free UI assets, verifies Access/Origin/CSRF and forwards the generated owner
 API to SQLite DO `MailsortState`, stable object `mailsort-v1`. Its Alarm handles Gmail history, pending messages,
-model requests, the existing write ledger and daily retention. Model Router selects and executes the configured
+model requests, the existing write ledger, daily retention and the daily backup of every table into the private
+bucket `mailsort-backups`, which a restore loads into an empty object ([backup and restore](backup.md)). Model Router selects and executes the configured
 native model; its VPS Codex executor has no Gmail credentials, saved jobs or autonomous scheduler.
 
 `state.ts` owns API dispatch and Alarm lifecycle. `pipeline.ts` owns a bounded pass. `gmail.ts` owns Google access;
@@ -46,6 +47,7 @@ no request or response content. The Router and gateway receive no Gmail authoriz
 | Saved base prompt and personal rules | Until replaced or app-data removal |
 | Owner request receipts | 1 day |
 | Latest unread batch IDs, state and scan progress, without content | Until next batch or app-data removal |
+| Daily backups of every table above (private R2 `mailsort-backups`) | The newest 30 complete; a row deleted or cleared in the store stays in older backups until they rotate out |
 
 Off mode still prunes. Logs and Ops contain counts, timestamps and safe codes, never subjects, addresses, labels,
 body or credentials. The website `/privacy/mailsort` must match these operations and bounds.
@@ -188,7 +190,8 @@ controls and undo. Saving updates that card in place; a prompt-load failure leav
 Old examples, model stages and replay results are labelled history.
 
 Home's private Ops binding exposes fresh mode/auth/pending counts and selected-provider warnings; Claude budget
-warnings apply only while Claude is selected. It no longer declares the account Workers AI guard capability:
+warnings apply only while Claude is selected. It also reports the last backup's age and time, `backup_stale` (critical,
+3 days) and `backup_failed` (warning), app-only signals. It no longer declares the account Workers AI guard capability:
 shedding unrelated free-model usage cannot switch or stop Mailsort's model. The manual batch card consumes the fresh status after Start and reads status every 30 seconds only while
 its batch is active and visible. It cancels on hide/leave/completion and refreshes once on visible return.
 `ServiceStatus.gmail_write_resume_time` reports the next UTC midnight only when the effective daily write cap is

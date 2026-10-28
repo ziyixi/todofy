@@ -2,7 +2,7 @@ import { create } from '@ziyixi/proto/protobuf'
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt'
 import { Change_State, Change_SuppressionReason } from '@ziyixi/proto/watch/ui/v1/change_pb'
 import { FailureReason, Watch_State, WatchHealthSchema, WatchHealth_Outcome } from '@ziyixi/proto/watch/ui/v1/watch_pb'
-import { PreviewWatchResponseSchema } from '@ziyixi/proto/watch/ui/v1/watch_ui_service_pb'
+import { BackupRestore_State, BackupRestoreSchema, PreviewWatchResponseSchema } from '@ziyixi/proto/watch/ui/v1/watch_ui_service_pb'
 import { mountApp } from './app.ts'
 import { change, FakeServer, NOW, watch } from './test/fakeServer.ts'
 
@@ -141,6 +141,39 @@ describe('watches and health', () => {
     expect(text(root)).toContain('被拦截（1）')
     expect(text(root)).toContain('今日 JS 配额已用完（1）')
     expect(root.querySelectorAll('section.group article.watch')).toHaveLength(3)
+  })
+
+  it('shows the last backup; an empty store restores one and shows the restore and its verification', async () => {
+    const server = new FakeServer([])
+    server.backup = { last: NOW - 3_600_000 }
+    const root = await mount(server, '/status')
+    await until(() => text(root).includes('1 小时前'))
+    expect([...root.querySelectorAll('.facts dt')].map((node) => node.textContent)).toContain('备份')
+    const input = root.querySelector<HTMLInputElement>('input[name="backup"]')
+    if (input === null) throw new Error('no backup input')
+    input.value = 'backups/2026-09-29T112300Z/'
+    button(root, '从备份恢复').click()
+    await until(() => text(root).includes('正在从 backups/2026-09-29T112300Z/ 恢复'))
+    expect(server.mutations(':restoreBackup')[0]?.body).toMatchObject({ backup: 'backups/2026-09-29T112300Z/' })
+    expect(root.querySelector('input[name="backup"]')).toBeNull()
+    // The restore ended: its verification, table by table, and the evidence.
+    server.restore = create(BackupRestoreSchema, {
+      backup: 'backups/2026-09-29T112300Z/', state: BackupRestore_State.SUCCEEDED, endTime: timestampFromMs(NOW),
+      tables: [{ table: 'watches', restoredRowCount: 3, expectedRowCount: 3 }], evidenceRestoredCount: 4,
+    })
+    root.querySelector<HTMLAnchorElement>('nav a[href="/watches"]')?.click()
+    root.querySelector<HTMLAnchorElement>('nav a[href="/status"]')?.click()
+    await until(() => text(root).includes('已从 backups/2026-09-29T112300Z/ 恢复'))
+    expect(text(root)).toContain('watches 3 / 3 行')
+    expect(text(root)).toContain('页面证据：恢复 4')
+  })
+
+  it('offers no restore while the store holds watches, and says when the backup failed', async () => {
+    const server = new FakeServer([watch('kettle')])
+    server.backup = { failed: true }
+    const root = await mount(server, '/status')
+    await until(() => text(root).includes('上次失败，稍后自动重试'))
+    expect(root.querySelector('section.restore')).toBeNull()
   })
 
   it('a watch\'s page pauses with its etag and refuses a stale save by loading the latest', async () => {

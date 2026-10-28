@@ -246,3 +246,61 @@ it('rebases when new Watch work starts after the old work closed, and keeps the 
   expect(f.store.get({ work_id: current.id }).pending_reports).toEqual([]);
   expect(f.attention).toEqual([]);
 });
+
+function rejected() {
+  return Response.json({ error: { code: 400, status: 'INVALID_ARGUMENT', message: 'Synthetic cursor ahead of the source',
+    details: [{ '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: 'BAD_REQUEST', domain: 'watch.ziyixi.science' }],
+  } }, { status: 400 });
+}
+
+it('replays a restored cursor once, with the report IDs the store already holds, and clears its mark', async () => {
+  const f = fixture(query => query.get('baseline') === 'true' ? { cursor: '40' } : { cursor: '42', events: [event(41), event(42)] });
+  const work = f.create(70);
+  await f.source.refresh();
+  advance();
+  await f.source.refresh();
+  expect(f.store.get({ work_id: work.id }).pending_reports.map(report => report.report_id)).toEqual(['watch:41', 'watch:42']);
+  // The backup was made at cursor 40 with report 41 already in it; the restore marks the source (restore.ts).
+  f.storage.sql.exec("DELETE FROM work_entries WHERE report_id='watch:42'");
+  f.storage.sql.exec("UPDATE event_sources SET state='40', checked_at=0, error_code='restored' WHERE name=?", WATCH_SOURCE_NAME);
+  await f.source.refresh();
+  expect(f.calls.at(-1)).toMatchObject({ baseline: false, cursor: '40' });
+  expect(f.store.get({ work_id: work.id }).pending_reports.map(report => report.report_id)).toEqual(['watch:41', 'watch:42']);
+  expect(f.cursor()).toEqual({ state: '42', error_code: null });
+  expect(f.calls.filter(call => call.baseline)).toHaveLength(1);
+});
+
+it('treats a restored cursor that Watch refuses as a gap, keeps the mark while Watch is down, and leaves other refusals alone', async () => {
+  let answer: 'refuse' | 'down' | 'ok' = 'down';
+  let generation = 0;
+  const f = fixture(query => query.get('baseline') === 'true' ? { cursor: `head-${String(++generation)}` }
+    : answer === 'refuse' ? rejected() : answer === 'down'
+      ? Response.json({ error: { code: 503, status: 'UNAVAILABLE', message: 'Synthetic source outage' } }, { status: 503 })
+      : { cursor: query.get('cursor') ?? '' });
+  const work = f.create(80);
+  await f.source.initialize();
+  // A cursor Watch refuses outside a restore stays a visible source error, without a gap report.
+  answer = 'refuse';
+  advance();
+  await f.source.refresh();
+  expect(f.cursor()).toEqual({ state: 'head-1', error_code: 'watch_source_unavailable' });
+  expect(f.store.get({ work_id: work.id }).pending_reports).toEqual([]);
+  // A restored one: Watch down first, then refusing it (Watch was restored behind the backup).
+  f.storage.sql.exec("UPDATE event_sources SET checked_at=0, error_code='restored' WHERE name=?", WATCH_SOURCE_NAME);
+  answer = 'down';
+  await f.source.refresh();
+  expect(f.cursor()).toEqual({ state: 'head-1', error_code: 'restored' });
+  answer = 'refuse';
+  advance();
+  await f.source.refresh();
+  expect(f.cursor()).toEqual({ state: 'head-2', error_code: null });
+  const reports = f.store.get({ work_id: work.id }).pending_reports;
+  expect(reports).toHaveLength(1);
+  expect(reports[0]).toMatchObject({ kind: 'blocked', source: { type: 'watch', ref: WATCH } });
+  expect(reports[0]?.summary).toContain('Watch was restored');
+  answer = 'ok';
+  advance();
+  await f.source.refresh();
+  expect(f.calls.at(-1)).toMatchObject({ baseline: false, cursor: 'head-2' });
+  expect(f.attention).toHaveLength(1);
+});

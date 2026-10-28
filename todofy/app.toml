@@ -15,10 +15,8 @@ position = 2
 
 [[workers]]
 config = "todofy/wrangler.toml"
-# Retired, nothing reads them: TODOIST_API_KEY, and the three Tasks projects of the reminder, the weekly review and
-# the mail tasks (2026-10-21). They stay optional only until the owner deletes the live secrets.
-manual_secrets = ["TODOIST_API_KEY", "TODOIST_DEFAULT_PROJECT_ID", "TODOIST_OPS_PROJECT_ID", "TODOIST_REVIEW_PROJECT_ID"]
-optional_secrets = ["TODOIST_API_KEY", "TODOIST_DEFAULT_PROJECT_ID", "TODOIST_OPS_PROJECT_ID", "TODOIST_REVIEW_PROJECT_ID"]
+manual_secrets = []
+optional_secrets = []
 hosts = []
 entry = "todofy"
 role = "处理核心（TodofyCore）"

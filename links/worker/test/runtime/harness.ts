@@ -1,7 +1,10 @@
 /**
  * workerd harness (../../../docs/design.md §9): bundles src/index.ts with esbuild and runs it in Miniflare as the Worker
- * "links" with a real D1 database (../../../migrations applied), a fake ASSETS binding (the launcher's page at /_/)
- * and an outbound handler for extra routes (a synthetic Access issuer's keys). With the dev bypass (the default) the
+ * "links" with a real D1 database (../../../migrations applied and recorded in d1_migrations, as wrangler does), a fake
+ * ASSETS binding (the launcher's page at /_/), the backup's LinksBackup object (BACKUP_ALARM, as in production) and on
+ * request the backup bucket BACKUPS, the Worker "links-ops" that calls the Ops entrypoint as Home's binding does, the
+ * Worker "links-alarm" that calls the object's arm(), and an outbound handler for extra routes (a synthetic Access
+ * issuer's keys). With the dev bypass (the default) the
  * owner is signed in over loopback http under /_/, and on a short link only a request carrying an Access token (any
  * CF_Authorization cookie: OWNER_COOKIE) is the owner. All data is synthetic; nothing leaves the process.
  */
@@ -50,6 +53,7 @@ function workerBundle(): Promise<string> {
     target: 'es2024',
     mainFields: ['module', 'main'],
     conditions: ['workerd', 'worker', 'import'],
+    external: ['cloudflare:*'],
     write: false,
     logLevel: 'silent',
   }).then((result) => {
@@ -60,12 +64,16 @@ function workerBundle(): Promise<string> {
   return bundle;
 }
 
+/** The D1 migration files, in the order wrangler applies them. */
+export async function migrationFiles(): Promise<string[]> {
+  return (await readdir(join(APP, 'migrations'))).filter((file) => file.endsWith('.sql')).sort();
+}
+
 /** The D1 migrations as single statements (comments removed). */
 export async function migrationStatements(): Promise<string[]> {
   const dir = join(APP, 'migrations');
-  const files = (await readdir(dir)).filter((file) => file.endsWith('.sql')).sort();
   const out: string[] = [];
-  for (const file of files) {
+  for (const file of await migrationFiles()) {
     const text = (await readFile(join(dir, file), 'utf8'))
       .split('\n')
       .map((line) => line.replace(/--.*$/, ''))
@@ -90,6 +98,12 @@ export interface Harness {
   readonly logs: string[];
   /** Requests the fake ASSETS binding received (path only). */
   readonly assetRequests: string[];
+  /** The directory `wrangler ... --local --persist-to` reads the same D1 and R2 from (tools/backup-restore.ts). */
+  readonly persistTo: string;
+  /** LinksBackup.arm(due) on the one object backup-v1: when its Alarm fires. */
+  arm(due?: boolean): Promise<number>;
+  /** Waits until the object's Alarm has run `count` times in all (its one log line each), then answers that line. */
+  alarmRun(count: number): Promise<{ step: string; next: number | null; error?: string }>;
   /** A request to "links" over loopback http. */
   fetch(path: string, init?: RequestInit): Promise<Response>;
   /** A JSON GET of the owner API, any status. */
@@ -110,6 +124,8 @@ export interface HarnessOptions {
   readonly routes?: Map<string, () => Response>;
   /** Opens workerd's DevTools inspector on this port (the CPU profile of ./cpu.test.ts). */
   readonly inspectorPort?: number;
+  /** Binds the daily backup's bucket (BACKUPS); unbound, so no backup runs, by default. */
+  readonly backups?: boolean;
 }
 
 export async function startHarness(options: HarnessOptions = {}): Promise<Harness> {
@@ -132,7 +148,8 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
       },
       host: '127.0.0.1',
       port: 0,
-      resourcePersistencePath: temp,
+      // wrangler's own layout, so `--local --persist-to <persistTo>` reads the same D1 and R2.
+      resourcePersistencePath: join(temp, 'v3'),
       ...(options.inspectorPort === undefined ? {} : { inspectorPort: options.inspectorPort }),
       workers: [
         {
@@ -141,27 +158,64 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
           script,
           compatibilityDate: '2026-09-08',
           d1Databases: { DB: 'links-test' },
+          durableObjects: { BACKUP_ALARM: { className: 'LinksBackup', useSQLite: true } },
+          ...(options.backups ? { r2Buckets: { BACKUPS: 'links-backups' } } : {}),
           serviceBindings: { ASSETS: (request: Request) => assets(request) },
           bindings: { ...SYNTHETIC_BINDINGS, ...options.bindings },
           outboundService: (request: Request) => outbound(request),
+        },
+        // Home's view: GET answers Ops.status(), POST /guard its setGuard (which refuses), through the entrypoint.
+        {
+          name: 'links-ops',
+          modules: true,
+          compatibilityDate: '2026-09-08',
+          script: `export default {async fetch(request,env){try{return Response.json(await (new URL(request.url).pathname==='/guard'?env.OPS.setGuard({level:'shed'}):env.OPS.status()));}catch(error){return Response.json({error:error.message},{status:400});}}}`,
+          serviceBindings: { OPS: { name: 'links', entrypoint: 'Ops' } },
+        },
+        // The backup's object, as the Worker reaches it: GET answers arm(), with ?due arm(true).
+        {
+          name: 'links-alarm',
+          modules: true,
+          compatibilityDate: '2026-09-08',
+          script: `export default {async fetch(request,env){const stub=env.BACKUP_ALARM.get(env.BACKUP_ALARM.idFromName('backup-v1'));return Response.json(await stub.arm(new URL(request.url).searchParams.has('due')));}}`,
+          durableObjects: { BACKUP_ALARM: { className: 'LinksBackup', scriptName: 'links', useSQLite: true } },
         },
       ],
     }),
   );
   await mf.ready;
   const db = await mf.getD1Database('DB', 'links');
+  // wrangler's own record of the applied migrations, which the backup's plan reads.
+  await db
+    .prepare('CREATE TABLE d1_migrations(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)')
+    .run();
   for (const statement of await migrationStatements()) await db.prepare(statement).run();
+  for (const file of await migrationFiles()) await db.prepare('INSERT INTO d1_migrations(name) VALUES(?)').bind(file).run();
 
   const fetchLinks = (path: string, init?: RequestInit) => mf.dispatchFetch(`${ORIGIN}${path}`, { redirect: 'manual', ...init } as never) as unknown as Promise<Response>;
   const json = async <T>(response: Response): Promise<Answer<T>> => {
     const text = await response.text();
     return { status: response.status, body: (text === '' ? null : JSON.parse(text)) as T, headers: response.headers };
   };
+  const alarmRuns = () => logs.flatMap((line) => (line.startsWith('{"backup":{"step"') ? [(JSON.parse(line) as { backup: { step: string; next: number | null; error?: string } }).backup] : []));
   return {
     mf,
     db,
     logs,
     assetRequests,
+    persistTo: temp,
+    async arm(due = false) {
+      const worker = await mf.getWorker('links-alarm');
+      return (await (await worker.fetch(`https://links-alarm.internal/${due ? '?due' : ''}`)).json()) as number;
+    },
+    async alarmRun(count: number) {
+      for (let waited = 0; waited < 20_000; waited += 20) {
+        const runs = alarmRuns();
+        if (runs.length >= count) return runs[count - 1] as { step: string; next: number | null; error?: string };
+        await new Promise((done) => setTimeout(done, 20));
+      }
+      throw new Error(`The backup's Alarm did not run ${String(count)} times`);
+    },
     fetch: fetchLinks,
     async get<T>(path: string) {
       return json<T>(await fetchLinks(path));
@@ -220,4 +274,29 @@ export async function createLink(h: Harness, key: string, link: WireLink): Promi
 export function reasonOf(body: unknown): string | undefined {
   const details = (body as { error?: { details?: { '@type': string; reason?: string }[] } }).error?.details ?? [];
   return details.find((detail) => detail['@type'] === 'type.googleapis.com/google.rpc.ErrorInfo')?.reason;
+}
+
+/** D1's own row metrics of every statement run through the returned binding, batches included. */
+export function measuredReads(binding: D1Database): { db: D1Database; metrics: { statements: number; rowsRead: number } } {
+  const metrics = { statements: 0, rowsRead: 0 };
+  const originals = new WeakMap<D1PreparedStatement, D1PreparedStatement>();
+  function record<T>(result: D1Result<T>): D1Result<T> {
+    metrics.statements++;
+    metrics.rowsRead += result.meta.rows_read;
+    return result;
+  }
+  function wrap(statement: D1PreparedStatement): D1PreparedStatement {
+    const counted = {
+      bind: (...values: unknown[]) => wrap(statement.bind(...values)),
+      all: async <T>() => record(await statement.all<T>()),
+    } as unknown as D1PreparedStatement;
+    originals.set(counted, statement);
+    return counted;
+  }
+  const db = {
+    prepare: (sql: string) => wrap(binding.prepare(sql)),
+    batch: async <T>(statements: D1PreparedStatement[]) =>
+      (await binding.batch<T>(statements.map((statement) => originals.get(statement) ?? statement))).map(record),
+  } as unknown as D1Database;
+  return { db, metrics };
 }

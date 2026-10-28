@@ -12,7 +12,7 @@ The committed production configs are wrangler.toml (todofy-core) and gateway/wra
   environment secrets: the gateway's owner Access emails ACCESS_OWNER and ACCESS_OWNER_ALIASES, and on each
   Worker the secrets of its <APP>_WORKER_SECRETS map (tools/cloud-config) when the release has one. The core
   has no personal value since 2026-10-21: its Tasks projects went with the reminder, the weekly review and the
-  mail tasks, and their live secrets stay declared (app.toml) until the owner deletes them.
+  mail tasks, and it declares no secret any more (RETIRED_CORE_SECRETS).
 
 Wrangler silently DELETES a var that a deploy does not send (no config has keep_vars), so this wrapper
 refuses to run unless every value is present and valid, and `exec` refuses a deploy without exactly one
@@ -51,6 +51,15 @@ ROOT = Path(__file__).resolve().parent.parent
 CONFIGS = {"core": ROOT / "wrangler.toml", "gateway": ROOT / "gateway" / "wrangler.toml"}
 WORKER_NAMES = {"core": "todofy-core", "gateway": "todofy"}
 SECRET_SPECS = json.loads((ROOT.parent / "tools/cloud-config/worker-secrets.json").read_text())
+# The core's retired secrets, which nothing reads: the provider key (now Model Router's), and Todoist's key and the
+# Tasks projects that went with the task writes (2026-10-21).
+RETIRED_CORE_SECRETS = {
+    "GEMINI_API_KEY",
+    "TODOIST_API_KEY",
+    "TODOIST_DEFAULT_PROJECT_ID",
+    "TODOIST_OPS_PROJECT_ID",
+    "TODOIST_REVIEW_PROJECT_ID",
+}
 
 # Printable ASCII only, as packages/edge-auth requires of the owner and aliases (SPEC.md #36).
 EMAIL = re.compile(r"(?=[\x21-\x7e]+\Z)[^\s@]+@[^\s@]+\.[^\s@]+")
@@ -188,8 +197,9 @@ def _merge_worker_secrets(worker: str, env: Mapping[str, str], personal: dict[st
         if worker == "gateway":
             parsed.pop("CSRF_SIGNING_KEY", None)
         elif worker == "core":
-            # Older encrypted GitHub maps may retain this retired provider key; never upload it.
-            parsed.pop("GEMINI_API_KEY", None)
+            # Older encrypted GitHub maps may retain these retired keys; never upload them.
+            for name in RETIRED_CORE_SECRETS:
+                parsed.pop(name, None)
     if not _valid_worker_secrets(worker, parsed, complete=False):
         raise SettingError(field)
     merged = {**parsed, **personal}

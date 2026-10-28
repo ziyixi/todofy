@@ -16,12 +16,16 @@ import { Change_State, ChangeSchema, type Change } from '@ziyixi/proto/watch/ui/
 import { SnapshotSchema, SnapshotImageSchema, type Snapshot, type SnapshotImage } from '@ziyixi/proto/watch/ui/v1/snapshot_pb'
 import { Watch_State, WatchHealthSchema, WatchSchema, type Watch } from '@ziyixi/proto/watch/ui/v1/watch_pb'
 import {
+  BackupRestore_State,
+  BackupRestoreSchema,
   ListChangesResponseSchema,
   ListWatchesResponseSchema,
   PreviewWatchResponseSchema,
   ServiceStatusSchema,
   WatchUiService,
+  type BackupRestore,
   type PreviewWatchResponse,
+  type ServiceStatus,
 } from '@ziyixi/proto/watch/ui/v1/watch_ui_service_pb'
 import { fromWire, toWire } from '@ziyixi/proto/wire-json'
 
@@ -178,18 +182,33 @@ export class FakeServer {
         found.state = Change_State.ACKNOWLEDGED
         return Promise.resolve(clone(ChangeSchema, found))
       },
-      getServiceStatus: () =>
-        Promise.resolve(
-          create(ServiceStatusSchema, {
-            name: 'serviceStatus',
-            activeWatchCount: [...server.watches.values()].filter((item) => item.state === Watch_State.ACTIVE).length,
-            brokenWatchCount: [...server.watches.values()].filter((item) => item.state === Watch_State.BROKEN).length,
-            suppressedChangeCount: server.changes.filter((item) => item.state === Change_State.SUPPRESSED).length,
-            browserLimitMs: 480_000,
-            build: 'test',
-          }),
-        ),
+      getServiceStatus: () => Promise.resolve(server.status()),
+      // As the Worker: only into an empty store; the restore then runs (here: at once) and the status shows it.
+      restoreBackup: (request) => {
+        if (server.watches.size > 0 || server.changes.length > 0) fail(Code.FAILED_PRECONDITION, 'STORE_NOT_EMPTY')
+        server.restore = create(BackupRestoreSchema, { backup: request.backup || 'backups/2026-09-30T112300Z/', state: BackupRestore_State.RUNNING, startTime: timestampFromMs(NOW) })
+        return Promise.resolve(server.status())
+      },
     }
+  }
+
+  /** The backup facts GetServiceStatus answers. */
+  backup: { last?: number; failed?: boolean } = {}
+  /** The last restore RestoreBackup started. */
+  restore: BackupRestore | undefined = undefined
+
+  status(): ServiceStatus {
+    return create(ServiceStatusSchema, {
+      name: 'serviceStatus',
+      activeWatchCount: [...this.watches.values()].filter((item) => item.state === Watch_State.ACTIVE).length,
+      brokenWatchCount: [...this.watches.values()].filter((item) => item.state === Watch_State.BROKEN).length,
+      suppressedChangeCount: this.changes.filter((item) => item.state === Change_State.SUPPRESSED).length,
+      browserLimitMs: 480_000,
+      build: 'test',
+      ...(this.backup.last === undefined ? {} : { lastBackupTime: timestampFromMs(this.backup.last), lastBackup: 'backups/2026-09-30T112300Z/' }),
+      backupFailed: this.backup.failed === true,
+      ...(this.restore === undefined ? {} : { restore: this.restore }),
+    })
   }
 
   /** Replaces fetch with this server. */

@@ -9,10 +9,11 @@ runs:
         root: .
         filters: 'links-worker... links-web...'
     # The config test reads wrangler.toml with the pinned wrangler (worker/node_modules), hence after the workspace install.
-    - name: Test the production config and deploy values
+    # The restore tool's tests run on node:sqlite with stand-ins for wrangler (docs/backup.md).
+    - name: Test the production config, deploy values and the backup restore tool
       working-directory: links
       shell: bash -e {0}
-      run: node --test deploy/test/*.test.mjs
+      run: node --test deploy/test/*.test.mjs tools/test/*.test.mjs
     - name: Lint, typecheck and test the Worker
       working-directory: links/worker
       shell: bash -e {0}
@@ -21,9 +22,10 @@ runs:
         npm run typecheck
         npm test
     # Real D1 with the migrations and a synthetic Access issuer: redirects, visibility and the enumeration rule,
-    # passthrough and open-redirect attempts, the owner API, the D1 writes per action and the CPU of the redirect
-    # and the heaviest owner requests against bounds scaled by the machine's measured speed (tools/workerd-cpu).
-    - name: Runtime tests (workerd with real D1)
+    # passthrough and open-redirect attempts, the owner API, the D1 writes per action, the daily backup on real R2 and
+    # its restore with wrangler into a new local D1, and the CPU of the redirect, the heaviest owner requests and the
+    # backup's Alarm runs against bounds scaled by the machine's measured speed (tools/workerd-cpu).
+    - name: Runtime tests (workerd with real D1 and R2)
       working-directory: links/worker
       shell: bash -e {0}
       run: npm run test:runtime

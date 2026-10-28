@@ -553,7 +553,7 @@ Example (attention 0, one critical item):
   after `setGuard(normal)`; `test_scenarios_webhook.py` keeps posting every fixture (the canary one now
   ends `complete` without a task).
 
-## 3c. The watch app (added 2026-10-01, additive)
+## 3c. The watch app (added 2026-10-01, its own daily backup on 2026-10-28; additive)
 
 The watch app (`watch/`, Worker `watch`, `watch/docs/design.md` §7) joined after Mail Hero and Todofy. `OpsStatus.app` became an open
 list first (its own change, so this one is compatible: `proto/tools/profile_breaking.py` refuses a new name in a closed
@@ -568,8 +568,12 @@ list), then gained `watch`; fixtures `OpsStatus/watch-ok.json`, `OpsStatus/watch
   (`STATUS_ROWS_MAX`, `watch/worker/test/runtime/ops.test.ts`), so 48 calls a day read at most 84,000. Its one write:
   when WatchState has no alarm set it arms one, so the dashboard's tick restarts a lost scheduler.
 - Counters: `watches_active`, `watches_paused`, `watches_broken`, `watches_failing`, `changes_new`, `fetches_today`,
-  `notifications_pending`, `intents_open`, `intents_sent_today`. Signals: `watches_broken`, `scheduler_stale`,
-  `notify_unsettled` (warning), `guard_shed` (info). Never a watch's name, URL, page text or a diff.
+  `notifications_pending`, `intents_open`, `intents_sent_today`, and `backup_age_seconds` once a daily backup is
+  complete. Signals: `backup_stale` (critical, `age_seconds` and `has_backup`: 3 days, counted from the first backup
+  step while there is no complete one), `backup_failed`, `watches_broken`, `scheduler_stale`, `notify_unsettled`
+  (warning), `guard_shed` (info); `last_backup_at` is the newest complete backup (`watch/docs/backup.md`). Both backup
+  signals are app-only (`watch/app.toml`); one more meta row is read per `status()`. Never a watch's name, URL, page
+  text or a diff.
 - Guard: a shed defers `scheduled_checks` (a scheduled check waits until the watch's last check is a day old, so
   every watch is still checked daily) and `daily_sweep` (the sweep of every watch's bounds waits for the shed's end).
   An owner's check, a pending change's confirmation, previews, the owner API and the notifications to Tasks are never
@@ -591,6 +595,12 @@ mailsort (`mailsort/`, Worker `mailsort`, `mailsort/docs/design.md` §10) joined
 - Guard: a shed defers `full_model` (Clef-flash only), `replay` (the owner's replay evaluation; `audit`, the daily
   audit sample, until 2026-10-10) and `embedding_rebuild`. New mail is still read, decided and sorted; the owner API is
   never deferred.
+- Its own daily backup (added 2026-10-28, additive; `mailsort/docs/backup.md`): `status()` also reads the backup's
+  facts from the object's key-value storage and brings the alarm forward to a backup due sooner. Counter
+  `backup_age_seconds` once a backup is complete, `last_backup_at` the newest complete backup; signals `backup_stale`
+  (critical, `age_seconds` and `has_backup`) and `backup_failed` (warning), both app-only (`mailsort/app.toml`).
+  Fixture `OpsStatus/mailsort-backup-stale.json` is the status `ops-status.ts` writes for a failed job and a 4-day-old
+  backup, byte for byte (`mailsort/worker/test/ops-golden.test.ts`); the Clef-era fixtures above stay frozen.
 
 ## 3e. recall (added 2026-10-10, additive)
 
@@ -648,6 +658,38 @@ no complete one), `gtd_stale` (warning, `age_hours`), `backup_failed` (warning: 
 `review_overdue` (info, `days`); `last_backup_at` is the newest complete backup. Both backup signals are app-only
 (`tasks/app.toml`). No capability, guard or mode besides `maintenance` (always false). Tests:
 `tasks/worker/test/runtime/ops.test.ts`, `jobs.test.ts` and `backup-runner.test.ts`.
+
+## 3h. Personal MCP (its own backup and restore, 2026-10-28; additive)
+
+`personal-mcp/worker/src/ops.ts`. `status()` reads the SubscriptionStore object's `getOpsStatus()`: its subscription,
+delivery, source and Work counts (bounded SQL in the object), and the daily backup's and a restore's state from its
+storage. Reading it also re-arms the object's Alarm when none is set, or brings it forward to a backup due sooner
+(the one write ops-v1 allows); that starts the first backup after the release that bound the bucket. Counters:
+`active_subscriptions`, `pending_deliveries`, `accepted_deliveries`, `failed_deliveries`, `open_work`,
+`waiting_work`, `unhandled_work_reports`, the `last_*_ms` times, and `backup_age_seconds` once a backup is complete.
+Signals: `backup_stale` (critical, `age_seconds` and `has_backup`: 3 days, counted from the first backup job while
+there is no complete one), `maintenance_mode` (critical: a restore is unfinished and the app refuses every request),
+`backup_failed` (warning: the last job failed), `delivery_failed` (warning, `count`), `source_unavailable` (warning,
+`count`) and `subscription_rejected` (warning, `rpc_code`), critical first; `last_backup_at` is the newest complete
+backup. `backup_stale`, `backup_failed` and `maintenance_mode` are app-only (`personal-mcp/app.toml`). The only mode
+is `maintenance`, true while a restore is unfinished (health `down`); no capability or guard. Tests:
+`personal-mcp/worker/test/runtime/backup.test.ts`, `restore.test.ts` and `gate.test.ts`.
+
+## 3i. the links app (added 2026-10-28 with its daily backup, additive)
+
+The links app (`links/`, Worker `links`) joined `OpsStatus.app` as `links` when it began backing itself up
+(`links/docs/backup.md`); Home still probes its `/robots.txt` beside it (the Custom Domain and the route).
+`links/worker/src/ops.ts` is the entrypoint; `links/worker/src/ops-status.ts` builds the answer. `status()` reads one
+D1 row (`SELECT key FROM links LIMIT 1`: the database answers) and the backup's `state.json` from its private bucket,
+and arms the backup's Durable Object Alarm (at once while there is no state); the bucket not answering is
+`backup_failed`, D1 not answering is `status_unavailable`. Counters: `database_ready`, and `backup_age_seconds`
+once a backup is complete. Signals: `backup_stale` (critical, `age_seconds` and `has_backup`: no complete daily
+backup for 3 days, counted from the first backup step while there is none) and `backup_failed` (warning: the last
+job failed); `last_backup_at` is the newest complete backup; both are app-only (`links/app.toml`). `ui_url` is the
+launcher (`https://<host>/_/`). No key, target or count of links, no capability, guard or mode besides
+`maintenance` (always false): `setGuard` rejects with `invalid_input`. `OpsStatus/links-ok.json` and
+`OpsStatus/links-degraded.json` are fixed byte for byte by `links/worker/test/ops-status.test.ts`; the workerd suite
+(`links/worker/test/runtime/backup.test.ts`) calls the entrypoint through a service binding as Home does.
 
 ## 3b. The move onto proto/ (2026-10-01, no wire change)
 

@@ -53,4 +53,17 @@ enum ErrorReason {
   ERROR_REASON_BROWSER_NOT_AVAILABLE = 11;
   // OUT_OF_RANGE (400): events after the cursor have expired; explicitly resynchronize before baselining.
   ERROR_REASON_CURSOR_EXPIRED = 12;
+  // UNAVAILABLE (503): the daily backup is copying the store (seconds, a few minutes the first time); writes
+  // wait for it. Repeat the request.
+  ERROR_REASON_BACKUP_RUNNING = 13;
+  // FAILED_PRECONDITION (400): a restore from a backup is running or did not finish; every write waits until
+  // a restore succeeds (RestoreBackup may be repeated).
+  ERROR_REASON_RESTORE_RUNNING = 14;
+  // FAILED_PRECONDITION (400): RestoreBackup into a store that holds watches or anything they made.
+  ERROR_REASON_STORE_NOT_EMPTY = 15;
+  // NOT_FOUND (404): no complete backup by that name, or no backup bucket is bound.
+  ERROR_REASON_BACKUP_NOT_FOUND = 16;
+  // FAILED_PRECONDITION (400): the backup's format, schema version or tables are not ones this release can
+  // restore.
+  ERROR_REASON_BACKUP_UNSUPPORTED = 17;
 }

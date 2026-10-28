@@ -116,6 +116,8 @@ and owner verification. Its private bindings reuse generated Tasks/Mail/Recall/W
 The existing SQLite subscription DO checks only subscribed event sources each minute and stores metadata,
 cursor progress and frozen deliveries. It does not own business content or call a model. Home observes its
 private Ops status, while MCP's cached Home event reader excludes its own issues to avoid a notification loop.
+The same object backs its tables and keys up daily into its own private bucket and restores a backup only into an
+empty store, through the owner's `/owner/restore` behind Access ([backup](../personal-mcp/docs/backup.md)).
 Tools, GTD rules and event payloads are in [Personal MCP](../personal-mcp/README.md).
 
 Schemas generated from IDL are consumer artifacts, not competing handwritten sources. Golden payloads pin
@@ -155,10 +157,10 @@ and [verification](../tasks/docs/verification.md).
 ## Home
 
 Home is the owner launcher and operations console, not a second administrator of each application's storage.
-Besides its own `HOME` object and `ASSETS`, its bindings in `dashboard/wrangler.toml` are thirteen Ops services, the
+Besides its own `HOME` object and `ASSETS`, its bindings in `dashboard/wrangler.toml` are fourteen Ops services, the
 website relay's sync entrypoint and one task inbox. It calls only generated Ops methods through `MAIL_HERO`, `TODOFY`,
-`TASKS`, `WATCH`, `MAILSORT`, `RECALL`, `BRIEF`, `MODEL_ROUTER`, `PERSONAL_MCP`, `NOTION_PUBLISH`, `FLEET`, `NEWSLETTER`
-and `CODEX_GATEWAY`. `NOTION_PUBLISH` targets the website relay's `Ops`; `WEBSITE_SYNC` targets the relay's own
+`TASKS`, `WATCH`, `MAILSORT`, `RECALL`, `BRIEF`, `MODEL_ROUTER`, `PERSONAL_MCP`, `LINKS`, `NOTION_PUBLISH`, `FLEET`,
+`NEWSLETTER` and `CODEX_GATEWAY`. `NOTION_PUBLISH` targets the website relay's `Ops`; `WEBSITE_SYNC` targets the relay's own
 `WebsiteSync` entrypoint for the sync evidence and requests (`website.sync.v1`). The last three Ops bindings all target
 Fleet: its `Ops`, and the `NewsletterOps` and `CodexGatewayOps` projections of the latest bounded host report.
 `TASK_INBOX` is Tasks' create-only `TaskInbox` for the daily digest task. Home does not call the VPS directly or read an
@@ -216,7 +218,9 @@ accepted report nor a ready deployment receipt proves successful Newsletter deli
   [design](../tasks/docs/design.md), [backup](../tasks/docs/backup.md) and [migration runbook](../tasks/docs/import.md).
 - **Links:** public short links and an owner launcher under `/_/`. A redirect does one primary-key D1 read,
   zero writes/logs, and uses 302 only. A private key and a nonexistent key give anonymous callers the same
-  response. Only `/_` and `/_/*` are behind Access. See [AGENTS](../links/AGENTS.md).
+  response. Only `/_` and `/_/*` are behind Access. The Alarm of one Durable Object (no cron trigger) runs a daily
+  backup of every D1 table into its own private bucket in bounded steps; a restore goes into a new database (or Time
+  Travel within 7 days). Home reads its Ops entrypoint and probes its `/robots.txt` anonymously. See [AGENTS](../links/AGENTS.md) and [backup](../links/docs/backup.md).
 - **Watch:** one SQLite DO, private R2 for bounded reading captures and screenshots, no D1 and no cron.
   The optional Browser Run binding captures rendered pages within its existing daily ledger. Dots reads stored
   before/after evidence through MCP and judges relevance; Watch does not call a model. Its exact fetch/redirect/robots/size/time budgets and URL
@@ -224,16 +228,19 @@ accepted report nor a ready deployment receipt proves successful Newsletter deli
   include only owner-created names, trigger types/counts and app links, and never include page text or watched
   URLs. One digest after 14:00 UTC plus at most nine urgent tasks keep to its own budget of ten a day (TaskInbox
   refuses a source's 21st).
-  BROKEN and automatic pauses enter the digest; status/guard reach Home through Ops.
+  BROKEN and automatic pauses enter the digest; status/guard reach Home through Ops. The object backs up every table
+  and the evidence its snapshots name daily into its own private bucket, and restores one only into an empty object
+  ([backup](../watch/docs/backup.md)).
 - **Model Router:** one Cloudflare Worker/SQLite DO, D1 request metadata and private R2 bodies. All model clients
   use `modelrouter.inference.v1`; only Router knows provider protocols, credentials, cache, fallback and rates.
   Its private console shows requests and usage. The VPS executor runs the official Codex SDK and returns actual
   research observations; applications own their workflows and budgets. See [design](../model-router/docs/design.md).
-- **Mailsort:** one SQLite DO/Alarm, no D1/R2 or cron. Configurable 5/15/30/60-minute batches process unclassified
+- **Mailsort:** one SQLite DO/Alarm and a private backup bucket, no D1 or cron. Configurable 5/15/30/60-minute batches process unclassified
   Inbox mail from the last 48 hours, including read mail, through Model Router and one maintained prompt. Provider keys are Router secrets and spending is capped at the provider; the application's own local budget ledger remains. It
   reads the owner's Gmail with the owner's own OAuth grant and only ever adds or removes its own labels (created by it
   or adopted, owned by ID) and INBOX, through the closed operation table of `gmail.ts`; it never marks mail read, deletes, sends or changes
-  settings. Every write is a ledger row first and can be undone. Shadow mode (the default) only records; the
+  settings. Every write is a ledger row first and can be undone. Its Alarm backs every table up daily into the
+  bucket; a restore loads one into an empty object and never replays a Gmail write ([backup](../mailsort/docs/backup.md)). Shadow mode (the default) only records; the
   deployment variable `MODE` can only lower the mode. Gmail credentials stay in Mailsort; model credentials are owner-written Router secrets. Neither passes through GitHub. Account Workers AI shedding does not affect its model.
   See [AGENTS](../mailsort/AGENTS.md) and [design](../mailsort/docs/design.md).
 - **recall:** one SQLite DO (records, the bigram FTS5 index, the compacted change feed) and one private R2 bucket (the
