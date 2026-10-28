@@ -90,9 +90,10 @@ Documentation (is_documentation: Markdown anywhere, and any file in a docs/ fold
   or the website's doc/) is read by people, not by a build or a check: a change to it alone selects no check, no
   deploy and no VPS release; Changes (whose tests check the documents' links and references) and the gate still run.
   The exceptions are the Markdown a build ships (RUNTIME_MARKDOWN: the app's input like its code), reviewed test
-  directories (fixtures), and the documents an app's tests read (TESTED_DOCUMENTS: that app is checked, nothing is
-  deployed). test_ci_changes.py scans Worker Text imports, ?raw imports, file reads, wheel package-data, image
-  COPY sources and public/ folders, and fails when any of them reaches a path classified as documentation.
+  directories (fixtures), and the documents an app's checks read (TESTED_DOCUMENTS, the website's prettier among
+  them: that app is checked, nothing is deployed). test_ci_changes.py scans Worker Text imports, ?raw imports, file
+  reads, wheel package-data, image COPY sources, public/ folders and prettier checks, and fails when any of them
+  reaches a path classified as documentation without selecting its reader.
 Newsletter remains an independent VPS image. newsletter_deploy publishes its tested image to GHCR; it does
 not upgrade the server. It still uses its locked external ziyixi-protos dependency, not the root proto runtime.
 platform/ checks and publishes its own independently tested daemon image; platform_deploy upgrades the VPS.
@@ -274,10 +275,12 @@ RUNTIME_MARKDOWN = (
     # The newsletter wheel's package-data (instructions/, policy/), installed into its image.
     "newsletter/src/",
 )
-# Documents an app's tests read (?raw imports, file reads), or its image check validates: a change checks that app
-# and deploys nothing. newsletter/content-config/ is published by its own workflow (content-config.yml) and validated
-# against the candidate image in "Newsletter image checks".
+# Documents an app's checks read (?raw imports, file reads, a formatter), or its image check validates: a change checks
+# that app and deploys nothing. newsletter/content-config/ is published by its own workflow (content-config.yml) and
+# validated against the candidate image in "Newsletter image checks"; "Website checks" runs `prettier --check .`, which
+# formats the website's Markdown too.
 TESTED_DOCUMENTS: dict[str, tuple[str, ...]] = {
+    "website/": ("website",),
     "contracts/ops-v1/README.md": ("dashboard",),
     "dashboard/docs/design.md": ("dashboard",),
     "dashboard/docs/design-v2.md": ("dashboard",),

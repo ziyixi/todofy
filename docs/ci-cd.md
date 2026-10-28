@@ -149,9 +149,10 @@ SPEC, a contract's notes) and any file in a `docs/` folder (the website's `doc/`
 check the documents' links and references, and the gate; beside code, the code's own selection applies. The
 exceptions in [ci_changes.py](../.github/scripts/ci_changes.py) are the Markdown a build ships (`RUNTIME_MARKDOWN`:
 the brief's Text-module `content-config/`, Mailsort's `prompts/`, the Newsletter wheel's package-data), which
-releases its app like code, and the documents an app's tests read (`TESTED_DOCUMENTS`), which check that app only.
-A guard scans Worker Text and `?raw` imports, file reads, wheel package-data, image `COPY` sources and `public/`
-folders, and fails when one of them reaches a path classified as documentation.
+releases its app like code, and the documents an app's checks read (`TESTED_DOCUMENTS`: test reads, and the
+website's Markdown, which its `prettier --check .` formats), which check that app only. A guard scans Worker Text and
+`?raw` imports, file reads, wheel package-data, image `COPY` sources, `public/` folders and prettier checks, and fails
+when one of them reaches a path classified as documentation without selecting its reader.
 
 Production job conditions retain `!cancelled()` and explicit successful dependency results. A reused check
 can be skipped only with `checks_reused=true`; Home's upstream deploys may succeed or be skipped. Relying

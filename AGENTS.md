@@ -36,7 +36,7 @@
   `edge-auth` 保持零运行时依赖，不在应用里复制 JWT、CSRF 或私有响应头实现。
 - Cookie、token 来源、邮箱匹配、nbf、开发绕过、密钥派生和错误映射属于应用行为；改前核对
   [edge-auth SPEC §4、§5.4](packages/edge-auth/SPEC.md)。
-- 包代码变更检查并发布每个使用者。Markdown 与 docs 文件夹是文档，不选中任何应用检查或发布（构建打包或测试读取的例外见 CI/CD）。新增包/使用者同步 `PACKAGE_USERS`，守卫核对实际依赖。
+- 包代码变更检查并发布每个使用者。Markdown 与 docs 文件夹是文档，不选中任何应用检查或发布（构建打包或检查读取的例外见 CI/CD）。新增包/使用者同步 `PACKAGE_USERS`，守卫核对实际依赖。
   详细映射由 [ci_changes.py](.github/scripts/ci_changes.py) 管理，说明见 [CI/CD](docs/ci-cd.md)。
 
 ## IDL 与合同

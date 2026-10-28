@@ -932,10 +932,11 @@ class Classify(unittest.TestCase):
         for path in ("website/src/app/page.tsx", "website/wrangler.toml", "website/content/profile.json", "website/public/fonts/Source-Sans-3-OFL.txt"):
             with self.subTest(path=path):
                 self.assertEqual(push([path]), expect(F, F, T, F, F, website_check=T, website_deploy=T))
-        # Its design notes, release runbook and their images are documentation.
+        # Its design notes, release runbook and their images are documentation that its `prettier --check .` formats:
+        # checked, never released.
         for path in ("website/docs/release.md", "website/doc/plan.md", "website/doc/assets/homepage-concept.prompt.txt", "website/design-qa.md", "website/relay/README.md"):
             with self.subTest(path=path):
-                self.assertEqual(push([path]), expect(F, F, F, F, F))
+                self.assertEqual(push([path]), expect(F, F, T, F, F, website_check=T))
 
     def test_the_relay_deploys_without_releasing_the_site(self):
         """website/relay/ is the Notion relay Worker: its change deploys the relay only."""
@@ -1035,7 +1036,15 @@ class BuildInputs:
         self.scan_python()
         self.scan_package_data()
         self.scan_images()
+        self.scan_formatters()
         self.shipped |= {(path, path) for path in self.files if "/public/" in path and document_shaped(path)}
+
+    def scan_formatters(self) -> None:
+        """A package whose scripts run `prettier --check` formats the Markdown below its folder."""
+        for manifest in self.files:
+            if manifest.endswith("/package.json") and "prettier --check" in (REPO / manifest).read_text():
+                folder = posixpath.dirname(manifest) + "/"
+                self.read.update((manifest, path) for path in self.files if path.startswith(folder) and path.endswith(".md"))
 
     def resolve(self, reader: str, literal: str) -> set[str]:
         folder = posixpath.dirname(reader)
@@ -1173,7 +1182,8 @@ class Documentation(unittest.TestCase):
                      "newsletter/src/newsletter/instructions/discovery/_sources/ai-ml.md"):
             self.assertIn(path, shipped)
         read = {path for _, path in self.inputs.read}
-        for path in ("dashboard/docs/limits.md", "contracts/ops-v1/README.md", "mailsort/docs/backup.md", "newsletter/content-config/policy/editorial.md"):
+        for path in ("dashboard/docs/limits.md", "contracts/ops-v1/README.md", "mailsort/docs/backup.md", "newsletter/content-config/policy/editorial.md",
+                     "website/docs/release.md"):
             self.assertIn(path, read)
         # Every listed test-read document is still read (a stale entry would keep checking for nothing).
         for prefix in ci_changes.TESTED_DOCUMENTS:
