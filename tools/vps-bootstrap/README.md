@@ -190,7 +190,11 @@ sudo /usr/bin/python3 -E -s <bundle>/installer/node_address.py --bundle <bundle>
 ```
 
 It accepts only host K3s files equal to this bundle's or to their rendering before the fixed
-address and DNS, writes the unit, address and resolver file, writes the new K3s configuration and
+address and DNS. Before writing, the daemon's own Pod sends one DNS query straight to each fixed
+resolver over the forwarded Pod egress CoreDNS will use; a resolver that never replies stops it with
+`CLUSTER_DNS_UPSTREAM_UNREACHABLE`. While that Pod cannot be reached (for example through the stale
+Node address this fixes) the `upstreams` event says `unchecked` and the final lookup decides. It then
+writes the unit, address and resolver file, writes the new K3s configuration and
 firewall, restarts K3s once (`KillMode=process` keeps containers running), then waits until the Node
 InternalIP and the `default/kubernetes` EndpointSlice show only the fixed address (K3s's cloud
 controller syncs Node addresses every minute; each wait allows 5 minutes). It then replaces CoreDNS
@@ -201,7 +205,8 @@ same configuration file sets the DNS), and replaces CoreDNS only when its marker
 run only verifies and a rerun after a timeout keeps waiting instead of restarting again.
 `--rollback` restores the previous K3s files, restarts K3s once and removes the marker, so CoreDNS
 returns to the DHCP-provided servers. It also undoes a migration whose lookup failed
-(`CLUSTER_DNS_LOOKUP_FAILED`, for example on a network that blocks public DNS).
+(`CLUSTER_DNS_LOOKUP_FAILED`, for example on a network that blocks public DNS when the check
+before writing could not run).
 
 ## Failures and retries
 

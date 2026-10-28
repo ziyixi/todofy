@@ -249,7 +249,7 @@ CoreDNS 同样不使用 DHCP 下发的 DNS 服务器。K3s 不设置 `resolv-con
 `forward . /etc/resolv.conf` 只在启动时读取 Pod 创建那一刻得到的副本；DHCP 换了 DNS 服务器后，Pod 的 DNS 会一直坏到 CoreDNS 重建。
 
 - bootstrap 写入 root 所有的 `/etc/rancher/k3s/resolv.conf`，只有 `1.1.1.1`、`1.0.0.1`（Cloudflare）和 `8.8.8.8`（Google，另一家运营方），
-  K3s 配置的 `resolv-conf` 指向它。三者都不过滤，CoreDNS 随机选用也得到相同答案；只用 IPv4，与 Pod 网络一致；kubelet 最多传三个。
+  K3s 配置的 `resolv-conf` 指向它。三者都不过滤结果，CoreDNS 随机选用哪个都不会拦截域名（按地域调度的答案可能不同）；只用 IPv4，与 Pod 网络一致；kubelet 最多传三个。
 - kubelet 每创建一个 Pod 都读取该文件，所以它必须一直存在，回退也不删除。`ClusterFirst` 的 Pod 照旧经 CoreDNS 解析，不再继承 DHCP 的 search 域。
 - K3s 以该文件启动后，在 CoreDNS 的 Pod 模板上设置注解 `personal-cloud/upstream-dns`，由该 Deployment 自己滚动替换一次 Pod：
   集群 DNS 中断几秒，与 K3s 升级替换 CoreDNS 相同；注解已相同时不替换。随后在 daemon 自己的 Pod 里经 CoreDNS 解析 Fleet 主机名。
@@ -265,7 +265,8 @@ sudo /usr/bin/python3 -E -s <bundle>/installer/node_address.py --bundle <bundle>
 
 它先核对 bundle 校验和与安装完成标记，并要求主机上的 `k3s.service`、`config.yaml`、`firewall.v4`、`firewall.v6`
 恰好是该 bundle 的版本或其加入固定地址与 DNS 之前的版本；其他改动、`pcloud0` 或 `/etc/rancher/k3s/resolv.conf` 已有别的内容、
-地址冲突或使用内嵌 etcd 时，在任何写入前停止。然后写入单元、创建地址、写入上游 DNS 文件，写入新的 K3s 配置与防火墙，只重启一次 K3s，
+地址冲突或使用内嵌 etcd 时，在任何写入前停止。daemon 的 Pod 可达时，它还先从该 Pod 直接向三个上游各发 DNS 查询（与 CoreDNS 相同的转发出网路径），
+任一不回应就以 `CLUSTER_DNS_UPSTREAM_UNREACHABLE` 在写入前停止；Pod 暂不可达（例如 Node 仍停在过期地址）时记为 `unchecked`，交给最后的解析核对。然后写入单元、创建地址、写入上游 DNS 文件，写入新的 K3s 配置与防火墙，只重启一次 K3s，
 等待 API 就绪、Node InternalIP 和 `default/kubernetes` EndpointSlice 都只剩固定地址（K3s 的 cloud controller 每分钟同步一次 Node 地址，
 每项最多等 5 分钟）。接着按上节替换一次 CoreDNS，最后在 daemon 自己的 Pod 里经 `https://kubernetes.default.svc` 读取一次
 `platform-release`，并经 CoreDNS 解析 Fleet 主机名。成功的最后一行为 `"status": "stable"`。是否重启 K3s 只看文件是否改变，
@@ -281,7 +282,7 @@ CoreDNS 的 Pod 模板注解为三个上游，且只有迁移后创建的一个 
 原业务 Pod 的 UID 和重启次数不变（只有 CoreDNS 换成新 Pod）。
 
 回退：同一命令加 `--rollback`，写回迁移前的 K3s 配置与防火墙并重启一次 K3s，再删除 CoreDNS 的注解，让 CoreDNS 回到 DHCP 给的服务器；
-单元、`pcloud0` 和上游 DNS 文件保留但不再被 K3s 使用。迁移因网络拦截公共 DNS 而以 `CLUSTER_DNS_LOOKUP_FAILED` 失败时，也用它恢复。
+单元、`pcloud0` 和上游 DNS 文件保留但不再被 K3s 使用。迁移前未能检查、之后因网络拦截公共 DNS 而以 `CLUSTER_DNS_LOOKUP_FAILED` 失败时，也用它恢复。
 回退后节点地址和 DNS 重新跟随 DHCP，原问题随之回来。迁移后的恢复只使用包含 `node_address.py` 的 bundle；
 更早的 bundle 会写回旧配置，遇到时重新运行上面的迁移命令。
 

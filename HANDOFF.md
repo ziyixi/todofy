@@ -33,11 +33,14 @@ makes both the node address and cluster DNS independent of DHCP
   unfiltered, two operators). After K3s runs with it, the pod-template annotation `personal-cloud/upstream-dns` makes
   the CoreDNS Deployment replace its Pod once (a few seconds of cluster DNS pause); an equal value replaces nothing.
   The daemon's own Pod then resolves the Fleet host. Lookups are forwarded Pod traffic; the firewall is unchanged.
+  Before any write the migration also queries each resolver directly from that Pod and stops with
+  `CLUSTER_DNS_UPSTREAM_UNREACHABLE` if one never replies (`unchecked` while the Pod is unreachable).
 - Fresh install, `recover.py` and the new `installer/node_address.py` apply both. Recovery accepts an installed bundle
   that predates the address or the observer AppArmor profile (the original install bundle has neither, so recovery
   could not read it before) and still refuses any other host difference.
 - Synthetic tests cover the rendered files, firewall verdicts, migration, interrupted retry, conflicts, rollback and
-  recovery, including the CoreDNS replacement, its rerun and a blocked public DNS undone by rollback. The CI k3s
+  recovery, including the CoreDNS replacement, its rerun, a blocked public DNS stopped before any write and one
+  undone by rollback. The CI k3s
   fixture is API-only (`--disable-agent`, no CoreDNS), so it cannot exercise node-ip, flannel, CoreDNS or the Pod
   path; the K3s behaviour (node-ip and advertise-address in the serving SANs, advertise-address defaulting to
   node-ip, flannel-iface by name, resolv-conf passed unchanged to the kubelet, which reads it for each new Pod, and
@@ -58,7 +61,8 @@ Remaining, in order:
    restarts K3s only if a file changed or the running K3s was started with another node-ip, and replaces CoreDNS
    only if its annotation differs, so a rerun after a timeout keeps waiting. `--rollback` on the same command
    restores the previous K3s files and CoreDNS's DHCP-provided servers; use it if the run ends with
-   `CLUSTER_DNS_LOOKUP_FAILED`.
+   `CLUSTER_DNS_LOOKUP_FAILED`. `CLUSTER_DNS_UPSTREAM_UNREACHABLE` changed nothing: Pods cannot reach public DNS,
+   so fix that network path first.
 4. Resume the held release with the CI resume command for its original SHA ([rebuild](docs/rebuild.md#检查与修复)).
 
 Verify after: `pcloud0` holds only the fixed address; Node InternalIP and the `default/kubernetes` EndpointSlice show

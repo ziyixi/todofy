@@ -35,8 +35,9 @@ ADDRESS = "10.254.0.42"
 UNIT = "personal-cloud-node-address.service"
 NETWORK_MANAGER = "networkmanager-node-address.conf"
 # Fixed CoreDNS upstreams: Cloudflare's two addresses, then Google's from another operator in case
-# one operator fails. Both answer unfiltered, so CoreDNS's random choice among them never changes
-# an answer. IPv4 only, like the Pod network; the kubelet passes at most three nameservers.
+# one operator fails. Neither filters answers, so CoreDNS's random choice among them never blocks a
+# name (geo-dependent answers may differ). IPv4 only, like the Pod network; the kubelet passes at
+# most three nameservers.
 RESOLVERS = ("1.1.1.1", "1.0.0.1", "8.8.8.8")
 RESOLV_CONF = "k3s-resolv.conf"
 RESOLV_CONF_TEXT = (
@@ -103,6 +104,30 @@ LOOKUP = """
 import socket, sys
 socket.getaddrinfo(sys.argv[1], 443, socket.AF_INET, socket.SOCK_STREAM)
 """
+# Before any change, the same container asks each fixed resolver directly over UDP, the forwarded
+# Pod egress CoreDNS will use: a reply with the query's ID, from three tries, proves the path. Exit
+# 3 means one never replied; any other failure means the check could not run. It prints nothing.
+UPSTREAM_PROBE = r"""
+import os, socket, sys
+labels = sys.argv[1].rstrip(".").encode("ascii").split(b".")
+question = b"".join(bytes([len(label)]) + label for label in labels) + b"\0\0\1\0\1"
+for server in sys.argv[2:]:
+    for attempt in range(3):
+        ident = os.urandom(2)
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp:
+                udp.settimeout(2)
+                udp.connect((server, 53))
+                udp.send(ident + b"\1\0\0\1\0\0\0\0\0\0" + question)
+                reply = udp.recv(512)
+        except OSError:
+            continue
+        if len(reply) >= 12 and reply[:2] == ident and reply[2] & 0x80:
+            break
+    else:
+        sys.exit(3)
+"""
+UPSTREAM_UNREACHABLE = 3
 
 
 def event(phase, status):
@@ -405,9 +430,9 @@ def upstream_dns(*, fixed=True):
     return current != desired
 
 
-def daemon_python(namespace, script, argument):
-    """Run a short stdlib script in the daemon's own container; its output is never read."""
-    result = cluster.kubectl(
+def daemon_python(namespace, script, *arguments):
+    """Run a short stdlib script in the daemon's own container; returns its exit code, never output."""
+    return cluster.kubectl(
         [
             "-n",
             namespace,
@@ -421,18 +446,17 @@ def daemon_python(namespace, script, argument):
             "-B",
             "-c",
             script,
-            argument,
+            *arguments,
         ],
         check=False,
         timeout=30,
-    )
-    return result.returncode == 0
+    ).returncode
 
 
 def in_cluster_read(namespace):
     """The daemon reaches https://kubernetes.default.svc from its own Pod, as in normal releases."""
     until(
-        lambda: daemon_python(namespace, PROBE, namespace),
+        lambda: daemon_python(namespace, PROBE, namespace) == 0,
         "NODE_ADDRESS_IN_CLUSTER_READ_FAILED",
     )
 
@@ -440,9 +464,23 @@ def in_cluster_read(namespace):
 def public_lookup(namespace, name):
     """The daemon's Pod resolves a public name it needs through CoreDNS and its upstreams."""
     until(
-        lambda: daemon_python(namespace, LOOKUP, name + "."),
+        lambda: daemon_python(namespace, LOOKUP, name + ".") == 0,
         "CLUSTER_DNS_LOOKUP_FAILED",
     )
+
+
+def upstreams_reachable(namespace, name):
+    """No writes: stop when the Pod network definitely cannot reach a fixed resolver.
+
+    Returns whether the check ran. It cannot while the daemon's Pod is unreachable, for example
+    through the stale Node address this migration fixes; the lookup after the change still decides.
+    """
+    try:
+        code = daemon_python(namespace, UPSTREAM_PROBE, name + ".", *RESOLVERS)
+    except BootstrapError:
+        return False
+    require(code != UPSTREAM_UNREACHABLE, "CLUSTER_DNS_UPSTREAM_UNREACHABLE")
+    return code == 0
 
 
 def supported():
@@ -492,9 +530,13 @@ def migrate(bundle):
     public, files = reviewed(bundle)
     preflight(bundle)
     event("inputs", "verified")
+    profile = public["profile"]
+    # A network that blocks public DNS from Pods stops here, before K3s or CoreDNS changes.
+    checked = upstreams_reachable(profile["namespace"], profile["fleet_host"])
+    event("upstreams", "reachable" if checked else "unchecked")
     install(bundle)
     event("interface", "ready")
-    node_name = public["profile"]["observer_node_key"]
+    node_name = profile["observer_node_key"]
     planned = [(path, desired, mode) for _, path, desired, mode in files]
     # Written files with K3s still started on the old address (an interrupted run) also restart.
     # K3s already started on the fixed address only waits: a run that timed out while the Node
@@ -508,7 +550,6 @@ def migrate(bundle):
     event("cluster", "advertised")
     recreated = upstream_dns()
     event("dns", "fixed")
-    profile = public["profile"]
     in_cluster_read(profile["namespace"])
     public_lookup(profile["namespace"], profile["fleet_host"])
     return {

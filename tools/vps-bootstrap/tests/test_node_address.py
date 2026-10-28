@@ -123,6 +123,7 @@ class FakeHost:
     `config`. With `lag`, the Node addresses follow it after that many reads, as the cloud
     controller's periodic sync does. `kubelet` is the DNS the running kubelet hands new Pods and
     `coredns` the DNS the current CoreDNS Pod got when it was created; `blocked` drops public DNS.
+    `pod_exec` lets exec reach the daemon's Pod even while the Node still advertises the LAN.
     """
 
     def __init__(
@@ -138,6 +139,7 @@ class FakeHost:
         coredns=None,
         marker=None,
         blocked=False,
+        pod_exec=False,
     ):
         self.node = node
         self.interface = interface
@@ -150,6 +152,7 @@ class FakeHost:
         self.coredns = coredns or self.kubelet
         self.marker = marker
         self.blocked = blocked
+        self.pod_exec = pod_exec
         self.calls = []
         self.kubectl_calls = []
         self.log = []
@@ -235,6 +238,11 @@ class FakeHost:
                 self.marker, self.coredns = marker, self.kubelet
                 self.recreations += 1
             return CompletedProcess(args, 0, b"", b"")
+        if "exec" in args and node_address.UPSTREAM_PROBE in args:
+            # Direct UDP from the Pod network: 3 is the script's definite "no reply".
+            if not (self.pod_exec or self.advertised == node_address.ADDRESS):
+                return CompletedProcess(args, 1, b"", b"")
+            return CompletedProcess(args, 3 if self.blocked else 0, b"", b"")
         if "exec" in args and node_address.LOOKUP in args:
             healthy = not (self.blocked and self.coredns == "fixed")
             return CompletedProcess(args, 0 if healthy else 1, b"", b"")
@@ -503,7 +511,7 @@ class NodeAddressTests(unittest.TestCase):
 
     def test_existing_host_moves_with_one_k3s_restart_and_repeats_as_a_noop(self):
         self.install_host()
-        fake = self.fake()
+        fake = self.fake(pod_exec=True)
         self.assertEqual((fake.kubelet, fake.coredns), ("dhcp", "dhcp"))
         with self.synthetic_host(fake) as output:
             result = node_address.migrate(self.bundle)
@@ -585,13 +593,24 @@ class NodeAddressTests(unittest.TestCase):
                 ["systemctl", "restart", "k3s.service"],
             ],
         )
-        # Both checks run in the daemon's own Pod, after CoreDNS is replaced.
-        read, lookup = [
+        # The upstream probe runs before any write; both checks run after CoreDNS is replaced.
+        upstreams, read, lookup = [
             (index, argv) for index, argv in enumerate(fake.log) if "exec" in argv
-        ]
+        ][:3]
+        self.assertLess(upstreams[0], fake.log.index(["systemctl", "daemon-reload"]))
+        self.assertEqual(
+            upstreams[1][-5:],
+            [
+                node_address.UPSTREAM_PROBE,
+                self.public["profile"]["fleet_host"] + ".",
+                "1.1.1.1",
+                "1.0.0.1",
+                "8.8.8.8",
+            ],
+        )
         self.assertGreater(read[0], rollout)
         namespace = self.public["profile"]["namespace"]
-        for _, probe in (read, lookup):
+        for _, probe in (upstreams, read, lookup):
             self.assertEqual(
                 probe[:6],
                 [
@@ -611,8 +630,9 @@ class NodeAddressTests(unittest.TestCase):
         events = [json.loads(line) for line in output.getvalue().splitlines()]
         self.assertEqual(
             [event["phase"] for event in events],
-            ["inputs", "interface", "k3s", "cluster", "dns"],
+            ["inputs", "upstreams", "interface", "k3s", "cluster", "dns"],
         )
+        self.assertEqual(events[1]["status"], "reachable")
         with self.synthetic_host(fake):
             again = node_address.migrate(self.bundle)
         self.assertFalse(again["restarted"])
@@ -714,6 +734,35 @@ class NodeAddressTests(unittest.TestCase):
         ]
         self.assertEqual(len(removal), 1)
         self.assertGreater(removal[0], restarts[-1])
+
+    def test_pods_without_public_dns_stop_the_migration_before_any_change(self):
+        self.install_host()
+        before = {path: path.read_bytes() for _, path, _ in self.paths()}
+        fake = self.fake(blocked=True, pod_exec=True)
+        with (
+            self.synthetic_host(fake),
+            self.assertRaisesRegex(
+                config.BootstrapError, "CLUSTER_DNS_UPSTREAM_UNREACHABLE"
+            ),
+        ):
+            node_address.migrate(self.bundle)
+        self.assertEqual({path: path.read_bytes() for path in before}, before)
+        self.assertFalse((self.k3s / "resolv.conf").exists())
+        self.assertFalse((self.systemd / UNIT).exists())
+        self.assertFalse([argv for argv in fake.calls if argv[0] == "systemctl"])
+        self.assertFalse([argv for argv in fake.log if "patch" in argv])
+        self.assertEqual((fake.restarts, fake.recreations), (0, 0))
+
+    def test_an_unavailable_pod_leaves_the_upstream_check_to_the_lookup(self):
+        for failure in (
+            CompletedProcess([], 1, b"", b""),
+            config.BootstrapError("SYSTEM_COMMAND_UNAVAILABLE"),
+        ):
+            with (
+                self.subTest(failure=type(failure).__name__),
+                patch.object(node_address.cluster, "kubectl", side_effect=[failure]),
+            ):
+                self.assertFalse(node_address.upstreams_reachable("platform", "x.test"))
 
     def test_unreviewed_host_configuration_is_refused_before_any_change(self):
         for name, change in (
