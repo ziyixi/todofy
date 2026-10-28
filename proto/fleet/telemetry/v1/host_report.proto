@@ -220,7 +220,7 @@ message LoadAverage {
     }
   ];
 }
-// Host memory from /proc/meminfo.
+// Host memory from /proc/meminfo and, on ZFS, the ARC kstat.
 message MemoryUsage {
   // MemTotal.
   double total_bytes = 1 [
@@ -230,7 +230,8 @@ message MemoryUsage {
       maximum: 9007199254740991
     }
   ];
-  // MemAvailable: what new work can use without swapping; used is total minus available.
+  // What new work can use without swapping: MemAvailable plus the ZFS ARC above its floor c_min when the host
+  // reports it, at most total_bytes; used is total minus available.
   double available_bytes = 2 [
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field) = {

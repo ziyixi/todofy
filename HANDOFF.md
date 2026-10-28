@@ -15,6 +15,21 @@ features, the FlowDay retirement), [October 20](docs/history/handoff-2026-10-20.
 
 ## Current work
 
+### ZFS ARC in Fleet memory (`claude/observer-zfs-arc`, not merged)
+
+On a ZFS host Fleet overstated memory pressure: used was total minus MemAvailable, and MemAvailable leaves out the
+ARC although the kernel shrinks it under pressure. The observer now adds the ARC above `c_min` (the htop/btop rule)
+to available memory, at most the total, read from the kernel-wide, world-readable `/proc/spl/kstat/zfs/arcstats`
+with no new mount (it is not among the runtime's default masked paths).
+A missing, unreadable or malformed table keeps MemAvailable alone. The heartbeat's `memory_used_percent` (Fleet's
+`memory_high`) uses the same reading. Wire shape unchanged; only the `available_bytes` description in the IDL and
+generated schema says so ([observer](fleet/observer/README.md)).
+
+- Done: synthetic tests (present, absent, malformed, `c_min` above size, capped at total; node metrics and heartbeat),
+  platform pytest/ruff, observer unittest, proto lint/breaking/tests, Fleet worker typecheck/tests.
+- Release: Fleet (IDL comment only) and the platform image, in the usual order. After deploy, the next observer
+  report on the ZFS host shows lower memory used than before; an unchanged value means arcstats was unreadable there.
+
 ### Fleet node telemetry (`claude/fleet-telemetry`, released with this merge)
 
 Owner request 2026-10-28: per-node CPU, memory, load, disk, network and per-workload usage with history in Fleet,

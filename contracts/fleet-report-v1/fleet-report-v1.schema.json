@@ -732,7 +732,7 @@
               "maximum": 9007199254740991.0
             },
             "available_bytes": {
-              "description": "MemAvailable: what new work can use without swapping; used is total minus available.",
+              "description": "What new work can use without swapping: MemAvailable plus the ZFS ARC above its floor c_min when the host reports it, at most total_bytes; used is total minus available.",
               "type": "number",
               "minimum": 0.0,
               "maximum": 9007199254740991.0

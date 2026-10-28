@@ -20,7 +20,8 @@ The main container's host metadata mounts are all read-only: `/proc/meminfo` and
 interfaces), and the statvfs targets for the root and K3s filesystems, never read or listed: the public
 `/usr/lib/os-release` File (a file has no subtree or nested mounts) and the `/var/lib/rancher/k3s` Directory
 (K3s's agent and server state are root-only).
-Kernel-wide `/proc/stat`, `/proc/loadavg`, `/proc/uptime` and the boot ID are the host's inside any Pod and need no mount.
+Kernel-wide `/proc/stat`, `/proc/loadavg`, `/proc/uptime`, the boot ID and, on ZFS, the world-readable
+`/proc/spl/kstat/zfs/arcstats` are the host's inside any Pod and need no mount.
 A standard init container from the same immutable image uses the host's existing UID65534 (`nobody`)
 and GID10001 to read `/run/dbus/system_bus_socket` (Socket, read-only). D-Bus authenticates the Unix
 identity on the host; a UID present only inside an image is insufficient for the host's user policy.

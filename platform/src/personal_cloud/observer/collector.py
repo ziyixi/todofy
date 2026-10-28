@@ -8,14 +8,13 @@ import os
 import re
 import urllib.parse
 import uuid
-from pathlib import Path
 
 from ziyixi_proto.fleet.telemetry.v1.host_report_pb import HostReport, NodeMetrics
 from ziyixi_proto.platform.runtime.v1.runtime_pb import NodeStatus
 from ziyixi_proto.wire_json import from_wire, to_wire
 
 from ..deployment.kubernetes import Client, DependencyUnavailable
-from .metrics import node_metrics
+from .metrics import host_memory, node_metrics
 from .newsletter_outcomes import outcomes
 from .provenance import source_sha
 from .systemd_snapshot import configured_daemons, legacy_daemons
@@ -217,16 +216,11 @@ def resource_percentages() -> tuple[float | None, float | None]:
         )
     except OSError:
         pass
-    try:
-        data = Path("/host-meminfo").read_text()
-        if len(data) > 65_536:
-            return disk, None
-        fields = dict(line.split(":", 1) for line in data.splitlines() if ":" in line)
-        total = int(fields["MemTotal"].split()[0])
-        available = int(fields["MemAvailable"].split()[0])
-        memory = round((1 - available / total) * 100, 1) if total else None
-    except (KeyError, OSError, ValueError):
-        pass
+    # The same reading as the node metrics, so Fleet's memory_high agrees with its memory chart.
+    if (reading := host_memory()) is not None:
+        memory = round(
+            (1 - reading["available_bytes"] / reading["total_bytes"]) * 100, 1
+        )
     return disk, memory
 
 
