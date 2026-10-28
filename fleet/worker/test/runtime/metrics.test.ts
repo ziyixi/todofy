@@ -1,6 +1,7 @@
 /** Node metrics in real workerd SQLite: ingest of old and new reports, owner API, rollups, pruning and row budgets. */
 import { build } from 'esbuild';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
+import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import legacy from '../../../../contracts/fleet-report-v1/fixtures/healthy.json';
@@ -251,5 +252,54 @@ describe('metric store rollups, pruning and budgets in workerd SQLite', () => {
     const halfYear = await call<Measured<Summary>>('summarize', 'budget', 'half_year', now + DAY, ['memory_used_bytes']);
     expect(halfYear.read).toBeLessThanOrEqual(181 + 1);
     expect(halfYear.result.series[0]?.points).toHaveLength(180);
+  });
+});
+
+/** FleetState whose metric store writes a row and then fails, as a full or broken SQLite would. */
+const BROKEN = `
+import { FleetState } from './src/state.ts';
+export class Broken extends FleetState {
+  constructor(ctx, env) {
+    super(ctx, env);
+    this.metrics = { ingest() {
+      ctx.storage.sql.exec("INSERT INTO metric_nodes VALUES ('vps','partial',0,0,0,0,'{}','{}')");
+      throw new Error('synthetic');
+    }, prune() {} };
+  }
+  nodeRows() { return this.ctx.storage.sql.exec('SELECT COUNT(*) AS n FROM metric_nodes').one().n; }
+}
+export default {
+  async fetch(request, env) {
+    const stub = env.BROKEN.get(env.BROKEN.idFromName('fleet-v1'));
+    const { text, hash, now } = await request.json();
+    const accepted = await stub.accept(text, hash, now);
+    return Response.json({ accepted, rows: await stub.nodeRows() });
+  },
+};`;
+
+describe('a failed sample in workerd SQLite', () => {
+  it('rolls back alone and the report still lands', async () => {
+    const result = await build({
+      stdin: { contents: BROKEN, resolveDir: resolve('.'), loader: 'ts' },
+      bundle: true, format: 'esm', platform: 'neutral', external: ['cloudflare:workers'], write: false,
+    });
+    const script = result.outputFiles[0]?.text;
+    if (!script) throw new Error('esbuild produced no probe');
+    const mf = new Miniflare(convertV4MiniflareOptions({
+      modules: true, script, compatibilityDate: '2026-09-29',
+      durableObjects: { BROKEN: { className: 'Broken', useSQLite: true } },
+      bindings: { HOST_KEY: 'vps', HOST_EPOCH: '1' },
+    }));
+    try {
+      const text = JSON.stringify(report(1, AT, fixture.metrics));
+      const response = await mf.dispatchFetch('http://probe/', {
+        method: 'POST', body: JSON.stringify({ text, hash: createHash('sha256').update(text).digest('hex'), now: AT }),
+      });
+      const body = await response.json() as { accepted: unknown; rows: number };
+      expect(body.accepted).toEqual({ accepted: true, sequence: 1 });
+      expect(body.rows).toBe(0);
+    } finally {
+      await mf.dispose();
+    }
   });
 });

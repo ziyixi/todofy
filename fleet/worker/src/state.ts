@@ -58,10 +58,13 @@ export class FleetState extends DurableObject<Env> {
       JSON.stringify(report),
       JSON.stringify(reportCodes(report)));
       this.ctx.storage.sql.exec('DELETE FROM changes WHERE id <= (SELECT MAX(id)-256 FROM changes)');
-      // Telemetry history never blocks the heartbeat: a failed sample is skipped and the report still lands.
+      // Telemetry history never blocks the heartbeat: a failed sample rolls back alone (a nested transaction is a
+      // savepoint) and the report still lands.
       try {
-        if (report.metrics) this.metrics.ingest(report.host_key, report.metrics, Date.parse(report.observation_time), now);
-        else this.metrics.prune(now);
+        this.ctx.storage.transactionSync(() => {
+          if (report.metrics) this.metrics.ingest(report.host_key, report.metrics, Date.parse(report.observation_time), now);
+          else this.metrics.prune(now);
+        });
       } catch {
         console.error(JSON.stringify({ event: 'fleet_metrics', status: 'skipped' }));
       }

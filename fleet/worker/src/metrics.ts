@@ -100,11 +100,11 @@ export function derive(metrics: NodeMetrics, previous: { boot_id: string; uptime
   const before = seconds > 0 && seconds <= MAX_RATE_GAP_SECONDS ? previous?.counters : undefined;
   if (counters.cpu && before?.cpu && before.cpu.count === counters.cpu.count) {
     const total = counters.cpu.total - before.cpu.total;
-    const idle = counters.cpu.idle - before.cpu.idle;
-    const iowait = counters.cpu.iowait - before.cpu.iowait;
-    if (total > 0 && idle >= 0 && iowait >= 0 && idle + iowait <= total) {
-      put('cpu_percent', (100 * (total - idle - iowait)) / total);
-      put('cpu_iowait_percent', (100 * iowait) / total);
+    // The kernel may move an idle CPU's time between idle and iowait, so iowait alone can step back; their sum cannot.
+    const quiet = counters.cpu.idle + counters.cpu.iowait - before.cpu.idle - before.cpu.iowait;
+    if (total > 0 && quiet >= 0 && quiet <= total) {
+      put('cpu_percent', (100 * (total - quiet)) / total);
+      put('cpu_iowait_percent', (100 * Math.min(Math.max(counters.cpu.iowait - before.cpu.iowait, 0), quiet)) / total);
     }
   }
   if (counters.network && before?.network && before.network.interfaces === counters.network.interfaces) {
@@ -178,8 +178,8 @@ export class MetricStore {
   }
 
   /**
-   * Runs inside the receipt transaction. Every read and parse happens before the first write, so a failure the
-   * caller skips leaves no half-written sample behind.
+   * Runs in its own savepoint inside the receipt transaction, so a failure the caller skips leaves no half-written
+   * sample behind.
    */
   ingest(node: string, metrics: NodeMetrics, observedAt: number, receivedAt: number): void {
     const previous = this.nodeRow(node);

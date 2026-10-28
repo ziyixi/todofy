@@ -110,6 +110,17 @@ describe('samples derived from counters', () => {
     expect(sample).not.toHaveProperty('network_receive_bytes_per_second');
     expect(sample).not.toHaveProperty('network_transmit_bytes_per_second');
   });
+  it('keeps CPU utilisation when the kernel moves time from iowait back to idle', () => {
+    // Five minutes on 4 CPUs: 75% quiet in all, but iowait reads 1 s below the previous report.
+    const cpu = must(base.cpu);
+    const moved = later(300, (m) => ({
+      ...m,
+      cpu: { ...must(m.cpu), idle_milliseconds: cpu.idle_milliseconds + 901_000, iowait_milliseconds: cpu.iowait_milliseconds - 1_000 },
+    }));
+    const { sample } = derive(moved, previous());
+    expect(sample).toHaveProperty('cpu_percent', 25);
+    expect(sample).toHaveProperty('cpu_iowait_percent', 0);
+  });
   it('orders series by metric, then label', () => {
     expect(orderKeys(['workload_cpu_cores:b', 'load_1m', 'filesystem_used_bytes:root', 'cpu_percent', 'workload_cpu_cores:a']))
       .toEqual(['cpu_percent', 'load_1m', 'filesystem_used_bytes:root', 'workload_cpu_cores:a', 'workload_cpu_cores:b']);
