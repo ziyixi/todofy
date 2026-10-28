@@ -113,8 +113,8 @@ Each entry has one status kind:
 
 Optional `tile_metric` is `counter` plus a counter `name`, `latency`, or `last_active`. `app_only_signals`
 lists existing public counter names that stay in the detail view. This metadata does not add a new
-signal or collector. In particular, the links app's probe reads its public `robots.txt`, checks its
-content type, and keeps the Worker error-rate signal. It does not probe the authenticated owner launcher.
+signal or collector. The one probe left is the website's `build-info.json`; the links app answers `ops_v1`
+(`LINKS`) with its daily backup's age and failures, and its Worker's error rate stays on the Cloudflare view.
 
 Newsletter uses `target = "vps"`, its image repository and no `workers` or `access`. Its Home entry uses
 `ops_v1` through the exact Fleet provider/binding above, with `guard = false`. This reports the latest

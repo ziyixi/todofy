@@ -16,7 +16,8 @@
 #
 # Run wrangler from worker/ (the pinned wrangler lives in worker/node_modules) with --config ../wrangler.toml.
 # Local dev: local bindings only (D1 commands always --local, never --remote), local values in links/.dev.vars (see
-# .dev.vars.example). No cron trigger, no Durable Object, no KV: a redirect is one D1 read.
+# .dev.vars.example). No Durable Object, no KV: a redirect is one D1 read. The one cron trigger runs the daily backup
+# into the private bucket links-backups (docs/backup.md).
 name = "links"
 account_id = "f57937bd1d93bf59e737b6d8445fb7a3"
 main = "worker/src/index.ts"
@@ -57,6 +58,17 @@ binding = "DB"
 database_name = "links"
 database_id = "2f8c5331-06ce-4347-8c0a-90fe51c82260"
 migrations_dir = "migrations"
+
+# The daily backup of every D1 table (worker/src/backup-runner.ts, docs/backup.md), created by "Infra apply"
+# (infra/storage.tf) before the release that bound it. Private: it holds every link.
+[[r2_buckets]]
+binding = "BACKUPS"
+bucket_name = "links-backups"
+
+# Every five minutes a tick reads the backup's state.json and, while a job is due or running, runs one bounded step
+# of it (a job starts daily at 05:25 UTC). This account's fifth cron trigger, Workers Free's limit.
+[triggers]
+crons = ["*/5 * * * *"]
 
 [vars]
 # The links host: the only origin a mutation may come from (CSRF), and the one host no target may name.

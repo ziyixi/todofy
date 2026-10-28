@@ -81,17 +81,9 @@ const ENTRIES: readonly EntryDef[] = [
     accent: 'slate',
     url: 'https://s.ziyixi.science/_/',
     access: true,
-    status: {
-      type: 'public_http',
-      expect: [200],
-      content_type: 'text/plain',
-      outside_access: true,
-      error_rate: true,
-      enabled: true,
-      url: 'https://s.ziyixi.science/robots.txt',
-    },
-    tile_metric: { kind: 'latency' },
-    app_only_signals: [],
+    status: { type: 'ops_v1', binding: 'LINKS', guard: false },
+    tile_metric: null,
+    app_only_signals: ['backup_stale', 'backup_failed'],
     order: 6,
   },
   {
@@ -371,6 +363,8 @@ const RESOURCES: readonly ResourceDef[] = [
   { id: 'mailsort-backups', kind: 'r2', name: 'mailsort 备份', entry: 'mailsort', match: 'mailsort-backups' },
   // The Personal MCP store's own daily backups (personal-mcp/wrangler.toml BACKUPS), created by "Infra apply" before it bound it.
   { id: 'personal-mcp-backups', kind: 'r2', name: 'Personal MCP 备份', entry: 'personal-mcp', match: 'personal-mcp-backups' },
+  // The links app's own daily backups (links/wrangler.toml BACKUPS), created by "Infra apply" before links bound it.
+  { id: 'links-backups', kind: 'r2', name: 'links 备份', entry: 'links', match: 'links-backups' },
   // Watch's private captured page text and screenshots (watch/wrangler.toml EVIDENCE_STORE).
   { id: 'watch-evidence', kind: 'r2', name: 'Watch 页面证据与截图', entry: 'watch', match: 'watch-evidence' },
   // Watch's own daily backups (watch/wrangler.toml BACKUPS), created by "Infra apply" before Watch bound it.

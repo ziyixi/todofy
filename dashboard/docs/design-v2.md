@@ -96,7 +96,7 @@ GetRegistry (`GET /api/v1/registry`; no binding names or probe URLs), so no host
 | --- | --- | --- | --- |
 | Mail Hero | 应用 | `ops_v1` (MAIL_HERO, guard) | 今日收件 |
 | Todofy (`todofy`, `todofy-core`) | 应用 | `ops_v1` (TODOFY, guard) | 24 小时收到 |
-| 短链接 (`links`, D1 `links`) | 应用 | `public_http` outside Access: one GET per tick to `s…/robots.txt`, expecting 200 and `text/plain` (the Worker's constant, before any D1 read); plus the Worker's error rate. The tile opens the launcher `https://s.ziyixi.science/_/` behind the path-scoped Access app "links". No Ops entrypoint, and a short link may go unused for days, so no idle rule | latency |
+| 短链接 (`links`, D1 `links`, R2 `links-backups`) | 应用 | `ops_v1` (`LINKS`, no guard): one D1 row and the daily backup's state; the app-only signals `backup_stale` and `backup_failed`. Until its backup (2026-10-28) a `public_http` probe of its `/robots.txt` outside Access. The tile opens the launcher `https://s.ziyixi.science/_/` behind the path-scoped Access app "links". A short link may go unused for days, so no idle rule | — |
 | 网页监视 (`watch`, DO `WatchState`) | 应用 | `ops_v1` (WATCH, guard): counts and codes only, never a watch's name, URL or page text; its `status()` re-arms a missing alarm, so each tick restarts a lost scheduler | 新变化 |
 | 个人网站 (`ziyixi-website`, assets only) | 站点 | `public_http`: one GET per tick to `www…/build-info.json` (www is canonical; the apex serves the same site), status + latency only, `redirect: 'manual'`, body unread, `enabled` flag. The site's Worker (`website/`) serves static assets only, which are not Worker invocations, so analytics cannot judge it; the file is part of its static export, so the probe survives the cutover | latency |
 | Notion 发布 (`ziyixi-notion-publish`) | 后台服务 | `analytics`: error rate + 26 h idle rule | last request hour |
@@ -310,8 +310,8 @@ Per tick: at most `outboundPerTick()` outbound calls, computed from the registry
 the website relay's `getSyncStatus` with notion-publish's), one GET per enabled probe, 1 GraphQL, ≤ 1 `setGuard` per
 guarded entry, ≤ 2 canary calls, ≤ 1 `createInboxTask` and ≤ `DRIFT_CALLS_PER_TICK` read-only drift calls (§10). It is tested ≤ `MAX_OUTBOUND_PER_TICK`, a fixed margin under
 Free's 50, and asserted per tick in workerd, so a new app changes neither constant. Mailsort's Claude budget is
-independent of account Workers AI shedding. The probes run in parallel with the status polls. GraphQL stays one query per tick (48/day) plus refreshes ≤ 1/min. DO rows written grow by ~3 per tick
-(`cf_scripts` and one `probe:<entry>` per probe). The links probe is one request of its Worker per tick (≤ 144 a day with refreshes, no D1 query); the website's is a static asset. Everything else as in
+independent of account Workers AI shedding. The probes run in parallel with the status polls. GraphQL stays one query per tick (48/day) plus refreshes ≤ 1/min. DO rows written grow by ~2 per tick
+(`cf_scripts` and one `probe:<entry>` per probe). The website's probe is a static asset. Everything else as in
 [`limits.md`](limits.md).
 
 **v1 removal (done 2026-09-29):** the hand-written v1 API (`/api/v1/overview`, `OverviewResponse`, `AppCard`) was
@@ -363,7 +363,7 @@ notion-publish idle limit 26 h.
 ## 9. Still to verify in production (read-only)
 
 Whether `durableObjectsInvocationsAdaptiveGroups.scriptName` is the defining or the calling script;
-whether `cpuTimeP99` includes DO time; the website and links probes from a same-zone Worker; notion-publish's
+whether `cpuTimeP99` includes DO time; the website probe from a same-zone Worker; notion-publish's
 real schedule; the TODO resource identifiers of §3. The full list of pending production checks is in
 [`verification.md`](verification.md) §2.
 

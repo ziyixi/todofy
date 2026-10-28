@@ -53,6 +53,7 @@ const SERVICES = {
   tasks: [ops.OpsService],
   'personal-mcp': [ops.OpsService],
   'model-router': [ops.OpsService],
+  links: [ops.OpsService],
 } as const;
 
 /** The methods of `app`'s Ops entrypoint, sorted: the dashboard calls only these, the stubs expose exactly these. */

@@ -38,6 +38,8 @@ export interface Env {
   readonly PERSONAL_MCP: Service<WatchOpsEntrypoint>;
   /** Unified inference health; no prompts, results or guard capability. */
   readonly MODEL_ROUTER?: Service<WatchOpsEntrypoint>;
+  /** The links app's Ops entrypoint: its database and its daily backup; no link content and no guard. */
+  readonly LINKS: Service<WatchOpsEntrypoint>;
   /**
    * Tasks' TaskInbox with `props.source = "home"`: it creates tasks only (no read, update or delete). The digest's one
    * task a UTC day (digest.ts); absent in a local config without it, which then creates none.

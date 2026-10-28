@@ -247,6 +247,11 @@
           "source": "config"
         },
         {
+          "name": "LINKS",
+          "type": "service",
+          "source": "config"
+        },
+        {
           "name": "MAILSORT",
           "type": "service",
           "source": "config"
@@ -322,7 +327,9 @@
         "s.ziyixi.science"
       ],
       "routes": [],
-      "crons": [],
+      "crons": [
+        "*/5 * * * *"
+      ],
       "bindings": [
         {
           "name": "ACCESS_AUDIENCE",
@@ -348,6 +355,11 @@
         {
           "name": "ASSETS",
           "type": "assets",
+          "source": "config"
+        },
+        {
+          "name": "BACKUPS",
+          "type": "r2_bucket",
           "source": "config"
         },
         {

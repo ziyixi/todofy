@@ -16,7 +16,7 @@ import {
   resourceByMatch,
 } from '../src/registry.ts';
 import { validateRegistry } from '../src/registry-check.ts';
-import { LINK_ONLY_ENTRY, withLinkOnly } from './v2-fixtures.ts';
+import { LINK_ONLY_ENTRY, withLinkOnly, withProbedLinks } from './v2-fixtures.ts';
 import { expectWire, VIEW_SCHEMAS } from './wire-conformance.ts';
 
 /**
@@ -48,6 +48,11 @@ type Mutable<T> = { -readonly [K in keyof T]: T[K] extends readonly (infer U)[] 
 /** A mutable copy of the registry plus the synthetic link-only entry `link-demo`. */
 function copy(): Mutable<RegistryDef> {
   return structuredClone(withLinkOnly()) as Mutable<RegistryDef>;
+}
+
+/** copy() with the links tile probed outside Access (withProbedLinks). */
+function probedCopy(): Mutable<RegistryDef> {
+  return structuredClone(withProbedLinks(withLinkOnly())) as Mutable<RegistryDef>;
 }
 
 function entry(registry: Mutable<RegistryDef>, id: string): Mutable<EntryDef> {
@@ -86,7 +91,7 @@ describe('the registry', () => {
     expect(status).toEqual({
       'mail-hero': 'ops_v1',
       todofy: 'ops_v1',
-      links: 'public_http',
+      links: 'ops_v1',
       watch: 'ops_v1',
       website: 'public_http',
       'notion-publish': 'ops_v1',
@@ -181,11 +186,16 @@ describe('the registry', () => {
     expectWire(VIEW_SCHEMAS.registry, registryView('abc123', withLinkOnly()));
     expect(new TextEncoder().encode(body).byteLength).toBeLessThanOrEqual(VIEW_BODY_BUDGET.registry);
     expect(body).not.toContain('MAIL_HERO');
-    for (const probe of ['build-info', 'manifest.webmanifest', 'robots.txt', 'content_type', 'outside_access']) expect(body).not.toContain(probe);
+    // A probe outside Access (withProbedLinks) is not served either.
+    const probed = JSON.stringify(registryView('abc123', withProbedLinks()));
+    for (const probe of ['build-info', 'manifest.webmanifest', 'robots.txt', 'content_type', 'outside_access']) {
+      expect(body).not.toContain(probe);
+      expect(probed).not.toContain(probe);
+    }
     expect(body).not.toContain('GitHub');
     const view = registryView('abc123');
     expect(view.entries.find((e) => e.id === 'links')).toMatchObject({
-      status_type: 'public_http', url: 'https://s.ziyixi.science/_/', host: 's.ziyixi.science', access: true, scripts: ['links'],
+      status_type: 'ops_v1', url: 'https://s.ziyixi.science/_/', host: 's.ziyixi.science', access: true, scripts: ['links'],
     });
     const linkOnly = registryView('abc123', withLinkOnly()).entries.find((e) => e.id === LINK_ONLY_ENTRY.id);
     expect(linkOnly).toMatchObject({ status_type: 'link_only', host: 'link-demo.ziyixi.science', scripts: [] });
@@ -294,8 +304,9 @@ describe('validateRegistry', () => {
       [(p) => delete p.outside_access, 'entry links: an Access-protected host cannot be probed publicly'],
       [(p) => (p.content_type = 'Application/JSON; charset=utf-8'), 'entry links: content_type is not a lowercase media type'],
     ];
+    expect(problems(probedCopy())).toEqual([]);
     for (const [change, problem] of cases) {
-      const r = copy();
+      const r = probedCopy();
       const probe = { ...(entry(r, 'links').status as Probe) };
       change(probe);
       entry(r, 'links').status = probe;
