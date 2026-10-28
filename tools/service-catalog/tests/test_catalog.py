@@ -80,7 +80,9 @@ class CatalogTests(unittest.TestCase):
         existing = [entry | {"description": renamed.get(entry["id"], entry["description"])} for entry in existing]
         # The links app answers ops-v1 with its daily backup's age and failures instead of a public probe (2026-10-28).
         monitored = {"links": {"status": {"type": "ops_v1", "binding": "LINKS", "guard": False}, "tile_metric": None,
-                               "app_only_signals": ["backup_stale", "backup_failed"]}}
+                               "app_only_signals": ["backup_stale", "backup_failed"]},
+                     # Watch's own daily backup adds its two signals to the app-only list (2026-10-28).
+                     "watch": {"app_only_signals": ["maintenance_mode", "backup_stale", "backup_failed"]}}
         existing = [entry | monitored.get(entry["id"], {}) for entry in existing]
         existing_ids = {entry["id"] for entry in existing}
         entries = [{key: entry[key] for key in keys} for entry in loaded.entries if entry["id"] in existing_ids]
