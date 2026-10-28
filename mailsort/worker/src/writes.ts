@@ -226,6 +226,17 @@ function fail(store: Store, row: LedgerRow, code: string): void {
 }
 
 /**
+ * A restored store's writes in flight (restore.ts): the backup cannot tell whether they reached Gmail, and the old
+ * object may have made them since, so none is sent again. An `intended` row fails with `code` like any write not made
+ * (its decision only recorded); an undo not yet made leaves its write applied. Run inside the caller's transaction.
+ */
+export function abandonInFlight(store: Store, code: string): number {
+  const rows = store.all<LedgerRow>(`SELECT * FROM ledger WHERE state = 'intended' ORDER BY id`);
+  for (const row of rows) fail(store, row, code);
+  return rows.length + store.run(`UPDATE ledger SET state = 'applied', last_code = ? WHERE state = 'undo_intended'`, code);
+}
+
+/**
  * Lowers an `intended` row from archive to keep when its label keeps its mail in the inbox now (归档 turned off since
  * the intent, for a write a 429 or 5xx left for a retry): keeping is the direction the owner just chose, and the safe
  * one, so the retry only adds the label. Never the other way: a row that keeps (a label that kept then, or before

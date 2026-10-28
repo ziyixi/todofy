@@ -1,0 +1,66 @@
+// The restore of one of mailsort's daily backups (mailsort/docs/backup.md) into an empty store: MailsortState
+// reads the named backup from its own private bucket, checks every part's SHA-256 before loading it, and loads it
+// in bounded alarm steps. Table names and row counts only: no mail content.
+
+syntax = "proto3";
+
+package mailsort.ui.v2;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "BackupProto";
+option java_package = "science.ziyixi.mailsort.ui.v2";
+
+// The restore of this store from a backup. A singleton: a restart after a failure replaces it.
+message BackupRestore {
+  option (google.api.resource) = {
+    type: "sort.ziyixi.science/BackupRestore"
+    pattern: "backupRestore"
+    singular: "backupRestore"
+    plural: "backupRestores"
+  };
+
+  // The restore's lifecycle.
+  enum State {
+    // Never written.
+    STATE_UNSPECIFIED = 0;
+    // Loading: every other mutation is refused (RESTORE_ACTIVE), and the pipeline and the daily backup wait.
+    STATE_RUNNING = 1;
+    // Every table holds the manifest's rows; the pipeline resumed from the mailbox's current state.
+    STATE_SUCCEEDED = 2;
+    // Stopped with `error_code`; mutations stay refused until a restart succeeds.
+    STATE_FAILED = 3;
+  }
+
+  // One table of the backup.
+  message Table {
+    // The SQLite table's name.
+    string table = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+    // Its rows in the backup's manifest.
+    int32 backup_rows = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+    // Its rows loaded so far; once the restore succeeded, counted in the store.
+    int32 restored_rows = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  }
+
+  // Always `backupRestore`.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // Current progress.
+  State state = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The backup's prefix in the bucket, `backups/<job start>/`.
+  string backup = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The schema version the backup was made with; the store is migrated from it once loaded.
+  int32 schema_version = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The owner's request.
+  google.protobuf.Timestamp start_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When it succeeded or failed.
+  google.protobuf.Timestamp end_time = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Set while it waits for the next UTC day's share of the account's free SQLite writes.
+  google.protobuf.Timestamp resume_time = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // A safe code when it failed (`part_checksum`, `part_missing`, `count_mismatch`, `storage_error`, ...).
+  string error_code = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Every table of the backup, in its manifest's order: the verification once it ended.
+  repeated Table tables = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

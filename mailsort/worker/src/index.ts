@@ -1,7 +1,8 @@
 /**
  * Worker "mailsort" (../../docs/design.md): the owner's Gmail sorting. The fetch handler authenticates the owner and
  * hands the owner API to MailsortState, the one SQLite Durable Object that holds everything, schedules itself with
- * setAlarm and makes every Gmail and Model Router call. No cron trigger, no D1, no R2. The named entrypoint Ops answers
+ * setAlarm and makes every Gmail and Model Router call; its daily backup goes to the private bucket BACKUPS
+ * (backup.ts). No cron trigger, no D1. The named entrypoint Ops answers
  * the dashboard (ops-v1).
  */
 import type { Env } from './env.ts';

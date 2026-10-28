@@ -100,8 +100,9 @@ async function sync(store: Store, gmail: GmailClient, budget: Budget, now: () =>
     transact(() => {
       store.setMeta('history_cursor', id);
       store.setMeta('last_sync_at', String(now()));
-      // Retained legacy install metadata; automatic intake uses the recent-mail window.
-      store.setMeta('installed_at', String(now()));
+      // Retained legacy install metadata; automatic intake uses the recent-mail window. A restored store (restore.ts)
+      // starts history again here and keeps its own.
+      if (store.getMeta('installed_at') === null) store.setMeta('installed_at', String(now()));
     });
     return { queued: 0, more: false };
   }

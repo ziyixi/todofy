@@ -14,6 +14,8 @@ export interface Env {
   readonly MAILSORT: DurableObjectNamespace<MailsortState>;
   /** The UI's static files (web/dist). */
   readonly ASSETS: Fetcher;
+  /** The private bucket `mailsort-backups`: the daily backups (backup.ts) a restore reads (restore.ts). */
+  readonly BACKUPS?: R2Bucket;
 
   // vars (committed in ../../wrangler.toml; BUILD_SHA and MODE added at deploy by deploy/deploy-vars.mjs)
   /** The app's host, sort.ziyixi.science: the CSRF Origin. */

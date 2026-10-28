@@ -9,11 +9,14 @@ runs:
         root: .
         filters: 'mailsort-worker... mailsort-web...'
     # The config test reads wrangler.toml with the pinned wrangler (worker/node_modules), hence after the workspace install; the
-    # secrets test pins how that wrangler keeps the owner's Gmail grant and Claude key on a deploy.
-    - name: Test the production config, the deploy values and the token script
+    # secrets test pins how that wrangler keeps the owner's Gmail grant and Claude key on a deploy. The backup tool's tests
+    # use synthetic backups and a stand-in for wrangler's R2 commands.
+    - name: Test the production config, the deploy values, the token script and the backup tool
       working-directory: mailsort
       shell: bash -e {0}
-      run: node --test deploy/test/*.test.mjs
+      run: |
+        node --test deploy/test/*.test.mjs
+        node --test tools/test/*.test.mjs
     # The closed Gmail operation table, masks, strict Claude JSON and usage, and historical schema/golden reads.
     - name: Lint, typecheck and test the Worker
       working-directory: mailsort/worker

@@ -133,6 +133,39 @@ export const DECISIONS_KEPT_MS = 180 * DAY;
 export const REQUEST_ID_TTL_MS = DAY;
 export const ERRORS_KEPT = 8;
 
+// ---- the daily backup and its restore (backup.ts, restore.ts, ../../docs/backup.md) ---------------------------------------
+
+/** The daily job's start, minutes after 00:00 UTC (11:41: apart from Home's half hours and the other apps' jobs). */
+export const BACKUP_RUN_AT_MINUTES = 11 * 60 + 41;
+/** Complete backups kept, the new one included. */
+export const BACKUP_KEEP = 30;
+/** A part holds at most this many rows and about this many bytes of NDJSON; a step stores at most STEP_PARTS parts and STEP_BYTES. */
+export const BACKUP_PART_ROWS = 5000;
+export const BACKUP_PART_BYTES = 1 << 20;
+export const BACKUP_STEP_PARTS = 32;
+export const BACKUP_STEP_BYTES = 8 << 20;
+/** While a job (or a restore) runs, its next step comes this soon; after a failed step, STEP_RETRY_MS. */
+export const BACKUP_CONTINUE_MS = SECOND;
+export const BACKUP_STEP_RETRY_MS = MINUTE;
+/** Failed steps in a row that fail a job (or a restore); a job running longer than MAX_JOB_MS fails too. */
+export const BACKUP_MAX_ERRORS = 3;
+export const BACKUP_MAX_JOB_MS = 30 * MINUTE;
+/** A failed job starts again this much later, MAX_FAILED_JOBS times in a row, then at the next daily start. */
+export const BACKUP_FAILED_RETRY_MS = 6 * HOUR;
+export const BACKUP_MAX_FAILED_JOBS = 3;
+/** A store without the owner's records is not backed up; it is looked at again this much later. */
+export const BACKUP_EMPTY_RECHECK_MS = HOUR;
+/** Ops `backup_stale` (critical): no complete backup for this long, or since the first job when there is none. */
+export const BACKUP_STALE_MS = 3 * DAY;
+/** A restore step loads at most this many parts and this many of their gzip bytes. */
+export const RESTORE_STEP_PARTS = 8;
+export const RESTORE_STEP_BYTES = 8 << 20;
+/**
+ * The SQLite rows (indexes included) a restore writes per UTC day: half of the account's 100,000 free rows, shared
+ * with every other Durable Object. A larger store restores over several days.
+ */
+export const RESTORE_ROWS_PER_DAY = 50_000;
+
 // ---- the owner API -----------------------------------------------------------------------------------------------------
 
 /** Maximum owner request body (a saved prompt of up to 12 KiB of UTF-8 included). */
