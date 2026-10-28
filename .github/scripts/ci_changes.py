@@ -321,7 +321,7 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     # CommonReason: Platform bundles Python error aliases.
     "proto/common/errors/": ("platform",),
     # ops-v1 (contracts/ops-v1): every app's Ops entrypoint and the dashboard that calls them.
-    "proto/ops/": ("mail-hero", "todofy", "dashboard", "watch", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp", "model-router"),
+    "proto/ops/": ("mail-hero", "todofy", "dashboard", "links", "watch", "website", "mailsort", "recall", "brief", "tasks", "personal-mcp", "model-router"),
     # website.sync.v1: the relay serves its WebsiteSync entrypoint, Home calls it and shows the evidence (dashboard.ui.v1,
     # which the Personal MCP reads).
     "proto/website/sync/": ("website", "dashboard", "personal-mcp"),

@@ -149,13 +149,15 @@ class DesiredState(unittest.TestCase):
                 ("ACCESS_AUDIENCE", "plain_text"),
                 ("ACCESS_ISSUER", "plain_text"),
                 ("ASSETS", "assets"),
+                ("BACKUPS", "r2_bucket"),
                 ("DB", "d1"),
                 ("PUBLIC_HOST", "plain_text"),
             },
         )
         self.assertNotIn("CSRF_SIGNING_KEY", bindings)
         self.assertNotIn("links", drift_desired.MANUAL_SECRETS)
-        self.assertEqual((worker["workers_dev"], worker["preview_urls"], worker["crons"]), (False, False, []))
+        # The daily backup's one cron trigger (links/docs/backup.md).
+        self.assertEqual((worker["workers_dev"], worker["preview_urls"], worker["crons"]), (False, False, ["*/5 * * * *"]))
         self.assertEqual(worker["custom_domains"], ["s.ziyixi.science"])
         self.assertEqual((worker["routes"], worker["personal"]), ([], []))
 

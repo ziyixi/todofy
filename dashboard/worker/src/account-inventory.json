@@ -38,6 +38,7 @@
   ],
   "r2": [
     "infra-state",
+    "links-backups",
     "mail-hero-backups",
     "mail-hero-store",
     "model-router-backups",

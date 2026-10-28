@@ -5,6 +5,8 @@ export interface Env {
   readonly DB: D1Database;
   /** The launcher's static files (web/dist); the Worker serves its index for /_/ and /_/k/... itself. */
   readonly ASSETS: Fetcher;
+  /** The private bucket links-backups: the daily backup (backup-runner.ts); none runs without it (local dev). */
+  readonly BACKUPS?: R2Bucket;
 
   // vars (committed in ../../wrangler.toml; BUILD_SHA added at deploy by deploy/deploy-vars.mjs)
   /** The links host, e.g. s.ziyixi.science: the CSRF Origin, and the one host no target may name. */

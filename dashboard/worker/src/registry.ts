@@ -367,6 +367,8 @@ const RESOURCES: readonly ResourceDef[] = [
   { id: 'recall-store', kind: 'r2', name: 'recall 正文存储', entry: 'recall', match: 'recall-store' },
   // Tasks' own weekly backups (tasks/wrangler.toml BACKUPS), created by "Infra apply" before Tasks bound it.
   { id: 'tasks-backups', kind: 'r2', name: 'Tasks 备份', entry: 'tasks', match: 'tasks-backups' },
+  // The links app's own daily backups (links/wrangler.toml BACKUPS), created by "Infra apply" before links bound it.
+  { id: 'links-backups', kind: 'r2', name: 'links 备份', entry: 'links', match: 'links-backups' },
   // Watch's private captured page text and screenshots (watch/wrangler.toml EVIDENCE_STORE).
   { id: 'watch-evidence', kind: 'r2', name: 'Watch 页面证据与截图', entry: 'watch', match: 'watch-evidence' },
   // The self-hosted servers' backups (~790 MB on 2026-09-30), outside this repository.

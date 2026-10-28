@@ -2,7 +2,7 @@
 // (worker/node_modules): the shape the Worker "links" needs, nothing personal or injected, and, since L2 (the first
 // deploy), the real D1 id and Access AUD and exactly one hostname, the Custom Domain s.ziyixi.science. The assets
 // settings are what keeps every short link reaching the Worker: run_worker_first for everything but the launcher's
-// hashed files, and no single-page fallback.
+// hashed files, and no single-page fallback. The daily backup has its private bucket and the Worker's one cron trigger.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
@@ -19,14 +19,13 @@ const values = readFileSync(CONFIG, 'utf8').split('\n').filter((line) => !line.t
 const HOST = 's.ziyixi.science'
 
 // Every key the Worker "links" uses; a new one must be added here on purpose (and checked below).
-const KEYS = ['name', 'account_id', 'main', 'compatibility_date', 'workers_dev', 'preview_urls', 'routes', 'observability', 'assets', 'd1_databases', 'vars']
+const KEYS = ['name', 'account_id', 'main', 'compatibility_date', 'workers_dev', 'preview_urls', 'routes', 'observability', 'assets', 'd1_databases', 'r2_buckets', 'triggers', 'vars']
 
-test('the top level is the production Worker: known keys only, no cron, no workers.dev or preview URL', () => {
+test('the top level is the production Worker: known keys only, no workers.dev or preview URL', () => {
   assert.deepEqual(Object.keys(config).sort(), [...KEYS].sort())
   assert.equal(config.name, 'links')
   assert.equal(config.workers_dev, false)
   assert.equal(config.preview_urls, false)
-  assert.equal(config.triggers, undefined)
   // The account every Worker shares (.github/scripts/test_wrangler_configs.py compares it across the apps).
   assert.match(config.account_id, /^[a-f0-9]{32}$/)
 })
@@ -54,6 +53,12 @@ test('exactly one hostname since L2, the Custom Domain s.ziyixi.science, and PUB
 test('D1 with the real database id (L2), and its migrations', () => {
   assert.deepEqual(config.d1_databases, [{ binding: 'DB', database_name: 'links', database_id: '2f8c5331-06ce-4347-8c0a-90fe51c82260', migrations_dir: 'migrations' }])
   assert.ok(existsSync(new URL('migrations/0001_init.sql', APP)))
+})
+
+test('the daily backup: the private bucket links-backups and one cron trigger every five minutes', () => {
+  assert.deepEqual(config.r2_buckets, [{ binding: 'BACKUPS', bucket_name: 'links-backups' }])
+  assert.deepEqual(config.triggers, { crons: ['*/5 * * * *'] })
+  assert.equal(config.durable_objects, undefined)
 })
 
 test('vars: the public host, the Access issuer and the AUD of the Access app "links"; nothing injected, secret or for development', () => {
