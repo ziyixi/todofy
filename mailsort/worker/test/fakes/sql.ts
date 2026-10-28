@@ -13,7 +13,8 @@ export function memorySql(): SqlStorage {
     const reads = /^\s*(SELECT|WITH|PRAGMA)\b/i.test(query);
     let rows: Record<string, unknown>[] = [];
     let written = 0;
-    if (reads) rows = statement.all(...bound);
+    // Blobs come back as an ArrayBuffer, as from the Durable Object's SQL API.
+    if (reads) rows = statement.all(...bound).map((row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, value instanceof Uint8Array ? value.slice().buffer : value])));
     else written = Number(statement.run(...bound).changes);
     return { toArray: () => rows, rowsRead: rows.length, rowsWritten: written, columnNames: [], one: () => rows[0], raw: () => rows.values(), next: () => ({ done: true, value: undefined }), [Symbol.iterator]: () => rows.values() };
   };

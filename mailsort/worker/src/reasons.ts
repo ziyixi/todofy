@@ -43,6 +43,9 @@ export const REASONS: Readonly<Record<Reason, { readonly code: Code; readonly me
   CONSOLIDATION_NOT_BLOCKED: { code: Code.FAILED_PRECONDITION, message: 'only a blocked consolidation can resume', zh: '这次标签整理没有暂停，无需恢复' },
   REPLAY_ACTIVE: { code: Code.FAILED_PRECONDITION, message: 'a replay evaluation is already running', zh: '回放评估正在运行，请等待它完成' },
   CONSOLIDATION_PENDING_WRITES: { code: Code.FAILED_PRECONDITION, message: 'existing mail processing and Gmail writes must finish first', zh: '当前邮件处理或 Gmail 写入还未结束，请稍后重新开始整理' },
+  RESTORE_ACTIVE: { code: Code.FAILED_PRECONDITION, message: 'a backup restore is running or did not finish', zh: '正在从备份恢复（或恢复未完成），其他修改已暂停' },
+  RESTORE_TARGET_NOT_EMPTY: { code: Code.FAILED_PRECONDITION, message: 'a restore only loads into an empty store', zh: '只能恢复到空的存储；当前存储已有数据，未做任何修改' },
+  BACKUP_NOT_RESTORABLE: { code: Code.FAILED_PRECONDITION, message: 'the backup is missing, incomplete, unreadable or newer than this release', zh: '找不到这份备份，或它不完整、无法读取、比当前版本新' },
 };
 
 export function isReason(value: string): value is Reason {

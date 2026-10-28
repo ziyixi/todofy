@@ -86,3 +86,11 @@ export function isUnreadPending(store: Store, messageId: string): boolean {
 export function finishUnread(store: Store, messageId: string, state: 'skipped' | 'failed'): void {
   store.run(`UPDATE unread_batch SET state = ? WHERE message_id = ? AND ledger_id IS NULL`, state, messageId);
 }
+
+/** A restored batch ends (restore.ts): the mail it still waits for is skipped and nothing more is listed. Transactional. */
+export function endUnread(store: Store): void {
+  const scan = scanOf(store);
+  if (scan === null) return;
+  store.run(`UPDATE unread_batch SET state = 'skipped' WHERE state = 'pending' AND ledger_id IS NULL`);
+  if (!scan.listed) store.setMeta('unread_scan', JSON.stringify({ ...scan, listed: true, pageToken: undefined }));
+}

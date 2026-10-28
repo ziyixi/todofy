@@ -452,6 +452,61 @@
       "guard"
     ]
   },
+  "read/OpsStatus/mailsort-backup-stale.json": {
+    "version": "ops-v1",
+    "app": "mailsort",
+    "generated_at": "2026-10-06T14:00:00Z",
+    "health": "degraded",
+    "modes": {
+      "maintenance": false,
+      "live": true,
+      "sorting_off": false,
+      "mode_limited": false,
+      "breaker": false
+    },
+    "guard": {
+      "level": "normal",
+      "reason": null,
+      "until": null,
+      "set_at": null,
+      "deferred": []
+    },
+    "signals": [
+      {
+        "code": "backup_stale",
+        "severity": "critical",
+        "metrics": {
+          "age_seconds": 345660,
+          "has_backup": 1
+        }
+      },
+      {
+        "code": "backup_failed",
+        "severity": "warning",
+        "metrics": {}
+      }
+    ],
+    "counters": {
+      "decided_today": 0,
+      "applied_today": 0,
+      "unsure_today": 0,
+      "review_pending": 0,
+      "pending": 0,
+      "gmail_calls_today": 0,
+      "claude_spent_usd": 0,
+      "claude_monthly_limit_usd": 20,
+      "claude_input_tokens": 0,
+      "claude_cache_write_tokens": 0,
+      "claude_cache_read_tokens": 0,
+      "claude_output_tokens": 0,
+      "claude_thinking_tokens": 0,
+      "backup_age_seconds": 345660,
+      "last_sync_minutes": 4
+    },
+    "last_backup_at": "2026-10-02T13:59:00Z",
+    "ui_url": "https://sort.example.com/",
+    "capabilities": []
+  },
   "read/OpsStatus/mailsort-degraded.json": {
     "version": "ops-v1",
     "app": "mailsort",

@@ -1,8 +1,8 @@
 /**
  * workerd harness (../../../docs/design.md §11): bundles src/index.ts with esbuild and runs it in Miniflare as the Worker
  * "mailsort" with a real SQLite MailsortState, next to
- *   - "probe": calls MailsortState.step(now), setClock(now), alarmAt() and sqlForTests() over the object binding, and the
- *     named entrypoint Ops of "mailsort" over a service binding (ops-v1, as the dashboard does);
+ *   - "probe": calls MailsortState.step(now), tick(now), setClock(now), alarmAt(), sqlForTests() and kvForTests() over the
+ *     object binding, and the named entrypoint Ops of "mailsort" over a service binding (ops-v1, as the dashboard does);
  *   - the outbound service: every request the Worker makes goes to FakeUpstream (../fakes/upstream.ts), the fake Gmail
  *     and Google token endpoint, in this Node process; nothing leaves it. MODEL_ROUTER is bound to the same fake.
  * DEV_MANUAL_ALARMS=true: no alarm is ever armed and the tests drive the passes with explicit clocks; the owner is
@@ -17,6 +17,7 @@ import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { createHttpClient, type HttpCall, type HttpClient } from '@ziyixi/proto/http-client';
 import type { ShapeOf } from '@ziyixi/proto/http-transcoder';
 import { MailsortUiService } from '@ziyixi/proto/mailsort/ui/v2/mailsort_ui_service_pb';
+import { MAILSORT_OBJECT } from '../../src/env.ts';
 import { FakeUpstream } from '../fakes/upstream.ts';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -86,6 +87,8 @@ export interface HarnessOptions {
   readonly splitObject?: boolean;
   /** `none` leaves the settings row unwritten (the Codex default); otherwise the owner chose Claude. */
   readonly provider?: 'claude' | 'none';
+  /** Binds the daily backup's bucket (BACKUPS); unbound, so no backup runs, by default. */
+  readonly backups?: boolean;
 }
 
 export type StepResult = { next: number; mode?: string; synced?: number; decided?: number; applied?: number; deferred?: number; code: string };
@@ -101,6 +104,13 @@ export interface Harness {
   mutate(method: 'POST' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<Response>;
   clock(now: number): Promise<void>;
   step(now: number): Promise<StepResult>;
+  /** What an alarm at `now` does: a restore or backup step, or a pass when one is due. */
+  tick(now: number): Promise<StepResult>;
+  kv(key: string): Promise<unknown>;
+  /** What an alarm at `now` does in the object named `name`; and whether a pass ran there. */
+  tickOf(name: string, now: number): Promise<{ result: StepResult; passed: boolean }>;
+  /** wrangler's `--persist-to` for this Miniflare's local R2 (tools/backup-restore.ts). */
+  readonly persistTo: string;
   sql<T = Record<string, unknown>>(query: string, ...params: (string | number | null)[]): Promise<T[]>;
   rows(): Promise<{ read: number; written: number }>;
   dispose(): Promise<void>;
@@ -121,6 +131,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     script,
     compatibilityDate: '2026-09-08',
     durableObjects: { MAILSORT: { className: 'MailsortState', useSQLite: true, ...(split ? { scriptName: OBJECT_WORKER } : {}) } },
+    ...(options.backups === true ? { r2Buckets: { BACKUPS: 'mailsort-backups' } } : {}),
     serviceBindings: {
       ASSETS: () => new Response(TEST_PAGE, { headers: { 'content-type': 'text/html; charset=utf-8' } }),
       MODEL_ROUTER: (request: Request) => up.handle(request),
@@ -136,7 +147,8 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
       },
       host: '127.0.0.1',
       port: 0,
-      resourcePersistencePath: temp,
+      // wrangler's own layout, so `--local --persist-to <temp>` reads the same R2 (tools/backup-restore.ts).
+      resourcePersistencePath: join(temp, 'v3'),
       ...(options.inspectorPort === undefined ? {} : { inspectorPort: options.inspectorPort }),
       workers: [
         mailsort('mailsort', options.splitObject === true),
@@ -150,9 +162,16 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
           serviceBindings: { OPS: { name: 'mailsort', entrypoint: 'Ops' } },
           script: `export default { async fetch(request, env) {
             const { op, args } = await request.json()
-            const stub = env.MAILSORT.get(env.MAILSORT.idFromName('mailsort-v1'))
+            const stub = env.MAILSORT.get(env.MAILSORT.idFromName(${JSON.stringify(MAILSORT_OBJECT)}))
             try {
               if (op === 'step') return Response.json({ ok: await stub.step(args[0]) })
+              if (op === 'tick') return Response.json({ ok: await stub.tick(args[0]) })
+              if (op === 'kv') return Response.json({ ok: await stub.kvForTests(args[0]) })
+              if (op === 'tick_of') {
+                const other = env.MAILSORT.get(env.MAILSORT.idFromName(args[0]))
+                const result = await other.tick(args[1])
+                return Response.json({ ok: { result, rows: await other.sqlForTests("SELECT count(*) AS n FROM meta WHERE key = 'last_alarm_at'") } })
+              }
               if (op === 'clock') return Response.json({ ok: await stub.setClock(args[0]) ?? null })
               if (op === 'sql') return Response.json({ ok: await stub.sqlForTests(...args) })
               if (op === 'meter') return Response.json({ ok: await stub.takeRowMeter() })
@@ -215,6 +234,16 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
       up.gmail.clock = () => now;
       return (await probe('step', [now])) as StepResult;
     },
+    async tick(now) {
+      up.gmail.clock = () => now;
+      return (await probe('tick', [now])) as StepResult;
+    },
+    kv: (key) => probe('kv', [key]),
+    async tickOf(name, now) {
+      const answer = (await probe('tick_of', [name, now])) as { result: StepResult; rows: { n: number }[] };
+      return { result: answer.result, passed: answer.rows[0]?.n === 1 };
+    },
+    persistTo: temp,
     async sql<T>(query: string, ...params: (string | number | null)[]) {
       return (await probe('sql', [query, ...params])) as T[];
     },

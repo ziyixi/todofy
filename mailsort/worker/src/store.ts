@@ -1,7 +1,8 @@
 /**
  * MailsortState's SQLite storage (../../docs/design.md §6): labels and their trusted domains, the pending queue,
  * decisions, the review queue, historical examples, the ledger of Gmail writes, the daily usage, the feedback queue,
- * the replay results and the AIP-155 request log, in the Durable Object's own database. No D1, no R2, no KV.
+ * the replay results and the AIP-155 request log, in the Durable Object's own database (no D1, no KV); backup.ts
+ * copies every table to R2 daily.
  * Synchronous (the Durable Object's SQL API), so the writes of one `transactionSync` are atomic: the history cursor
  * advances in the same transaction that queues the mails it covers.
  *

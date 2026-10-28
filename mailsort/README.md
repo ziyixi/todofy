@@ -118,6 +118,14 @@ release completed still shows its same-grade judgments apart. Priority badges re
 UI checks in `web/`: `npm run lint && npm run typecheck && npm test && npm run build`.
 See [design](docs/design.md) and [collaboration rules](AGENTS.md).
 
+## Backup and restore
+
+The object backs itself up daily at 11:41 UTC into the private bucket `mailsort-backups`: every table, the newest 30
+complete copies, deleted by the app itself (no lifecycle rule). A backup is restored into an empty object by the owner's
+`StartBackupRestore` call, in bounded alarm steps that check every part's SHA-256; nothing is replayed to Gmail and
+intake resumes from the mailbox's current state. `tools/backup-restore.ts` downloads, verifies, loads into a local
+SQLite file and uploads backups. See [backup and restore](docs/backup.md).
+
 ## Release and credentials
 
 Pass the complete branch CI gate, then release the exact same SHA through main Actions. The deploy wrapper

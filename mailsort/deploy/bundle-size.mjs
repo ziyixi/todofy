@@ -18,6 +18,8 @@ import { checkWorkerBundle, isMain } from '../../tools/bundle-size/bundle-size.m
 // October 27: the retired Workers AI path, rechecks, label consolidation and Codex usage ledger, and the shared
 // inference monitor descriptor leaving ops-v1, bring the bundle to 135.8 KiB. Lowered to 138 KiB with the same modest
 // build headroom; platform, CPU, model and spending limits are unchanged.
-export const BUDGET_GZIP_BYTES = 138 * 1024
+// October 28: the object's own daily backup and its restore (backup.ts, restore.ts and the BackupRestore IDL) bring
+// the bundle to 144.3 KiB. 148 KiB keeps the same modest build headroom.
+export const BUDGET_GZIP_BYTES = 148 * 1024
 
 if (isMain(import.meta.url)) process.exitCode = checkWorkerBundle('The mailsort app', process.argv[2], BUDGET_GZIP_BYTES)

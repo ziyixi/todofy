@@ -1,6 +1,7 @@
 // The committed production config ../../wrangler.toml, read with the pinned wrangler's own raw-config reader
 // (worker/node_modules): the shape the Worker "mailsort" needs, nothing personal or injected, its one Custom Domain, one
-// SQLite Durable Object, a bundled prompt and its authenticated Model Router binding; no direct model connection.
+// SQLite Durable Object, its private backup bucket, a bundled prompt and its authenticated Model Router binding; no direct
+// model connection.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
@@ -16,7 +17,7 @@ const config = read(CONFIG)
 const values = readFileSync(CONFIG, 'utf8').split('\n').filter((line) => !line.trimStart().startsWith('#')).join('\n')
 
 // Every key the Worker "mailsort" uses; a new one must be added here on purpose (and checked below).
-const KEYS = ['name', 'account_id', 'main', 'compatibility_date', 'workers_dev', 'preview_urls', 'routes', 'rules', 'observability', 'assets', 'durable_objects', 'migrations', 'services', 'vars']
+const KEYS = ['name', 'account_id', 'main', 'compatibility_date', 'workers_dev', 'preview_urls', 'routes', 'rules', 'observability', 'assets', 'durable_objects', 'migrations', 'r2_buckets', 'services', 'vars']
 
 test('the top level is the production Worker: known keys only, no cron, no workers.dev or preview URL, one Custom Domain', () => {
   assert.deepEqual(Object.keys(config).sort(), [...KEYS].sort())
@@ -38,13 +39,14 @@ test('every request reaches the Worker first (Access, private headers)', () => {
   assert.deepEqual(config.assets, { directory: 'web/dist', binding: 'ASSETS', run_worker_first: true, not_found_handling: 'single-page-application' })
 })
 
-test('one SQLite Durable Object, bundled prompt and authenticated Model Router binding', () => {
+test('one SQLite Durable Object, its backup bucket, bundled prompt and authenticated Model Router binding', () => {
   assert.deepEqual(config.durable_objects, { bindings: [{ name: 'MAILSORT', class_name: 'MailsortState' }] })
   assert.deepEqual(config.migrations, [{ tag: 'v1', new_sqlite_classes: ['MailsortState'] }])
+  assert.deepEqual(config.r2_buckets, [{ binding: 'BACKUPS', bucket_name: 'mailsort-backups' }])
   assert.equal(config.ai, undefined)
   assert.deepEqual(config.services, [{ binding: 'MODEL_ROUTER', service: 'model-router', entrypoint: 'Inference', props: { app: 'mailsort' } }])
   assert.deepEqual(config.rules, [{ type: 'Text', globs: ['**/*.txt'], fallthrough: false }])
-  for (const key of ['d1_databases', 'r2_buckets', 'kv_namespaces', 'queues', 'browser']) assert.equal(config[key], undefined, key)
+  for (const key of ['d1_databases', 'kv_namespaces', 'queues', 'browser']) assert.equal(config[key], undefined, key)
 })
 
 test("no secret is declared required: a deploy before the owner's first mint-token run must work, and keeps the grant", () => {
@@ -77,6 +79,7 @@ test('the development config is the production one without AI, routes and secret
   assert.equal(dev.account_id, undefined)
   assert.deepEqual(dev.durable_objects, config.durable_objects)
   assert.deepEqual(dev.migrations, config.migrations)
+  assert.deepEqual(dev.r2_buckets, config.r2_buckets)
   assert.equal(dev.compatibility_date, config.compatibility_date)
   assert.ok(!readFileSync(new URL('wrangler.test.toml', APP), 'utf8').includes('ziyixi.science'))
 })

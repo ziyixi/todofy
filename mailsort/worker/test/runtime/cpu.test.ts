@@ -8,7 +8,8 @@
  *   items, a page of 50 ledger entries, the label report over 2,000 decisions, the status, 30 days of flow counters, the
  *   stored replay summary with REPLAY_CASES_MAX cases) and a settings update;
  * - MailsortState (30 s per invocation): those API calls, and the alarm path at its bounds: three history pages of 100
- *   records and DRAIN_MAX mails decided in one model request, with a live write each.
+ *   records and DRAIN_MAX mails decided in one model request, with a live write each; the heaviest step of the daily
+ *   backup of that store (2,000 examples with 4 KiB embeddings among it), and of its restore into the store emptied.
  *
  * No dev bypass: Access is verified as in production. Bounds are milliseconds of the reference machine.
  */
@@ -41,11 +42,15 @@ const WORKER_BOUND_MS = 0.25 * FREE_CPU_MS;
 /** MailsortState: its API calls, and an alarm pass at the bounds (a few hundred ms, not the 30 s of the limit). */
 const OBJECT_API_BOUND_MS = 0.01 * FREE_OBJECT_CPU_MS;
 const OBJECT_ALARM_BOUND_MS = 0.05 * FREE_OBJECT_CPU_MS;
+/** One step of the backup or the restore at its byte and part budgets. */
+const OBJECT_BACKUP_BOUND_MS = 0.1 * FREE_OBJECT_CPU_MS;
 const RUNS = 7;
 const HANDLER = 'fetch handler';
 const OBJECT = 'MailsortState';
 const ALARM = `alarm pass: 3 history pages, ${String(DRAIN_MAX)} mails with 12000-character bodies, one Claude request`;
 const COLD_LABEL = "GET /api/csrf as the fetch handler's very first request";
+const BACKUP = 'the heaviest step of the daily backup of that store';
+const RESTORE = 'the heaviest step of its restore into the store emptied';
 const ISSUER = SYNTHETIC_BINDINGS['ACCESS_ISSUER'] ?? '';
 const AUDIENCE = SYNTHETIC_BINDINGS['ACCESS_AUDIENCE'] ?? '';
 
@@ -66,6 +71,7 @@ async function startIsolate(): Promise<SortIsolate> {
   const h = await startHarness({
     inspectorPort: 0,
     splitObject: true,
+    backups: true,
     // No bypass: Access is verified, and Google and Model Router are reached as in production (through the fakes).
     bindings: { DEV_AUTH_BYPASS: undefined, DEV_FAKE_UPSTREAM: undefined },
     routes: new Map([[`${ISSUER}/cdn-cgi/access/certs`, () => Response.json(jwks)]]),
@@ -265,7 +271,32 @@ async function session({ h, meter: worker, object }: SortIsolate, index: number)
   // Measured at its bound (read after the measurements, so their first run stays the isolate's first).
   const answer = await (await h.fetch('/api/v2/replayEvaluation', { headers })).json<{ cases: unknown[] }>();
   expect(answer.cases).toHaveLength(REPLAY_CASES_MAX);
-  return [cold, alarm, ...api];
+
+  // The daily backup of the seeded store, step by step a second apart; then the store emptied, as a new object is,
+  // and the restore of that backup.
+  async function steps(what: 'backup' | 'restore'): Promise<number[]> {
+    const samples: number[] = [];
+    for (let i = 0; i < 100; i++) {
+      clock += 1000;
+      samples.push(await object.cpu(async () => {
+        await h.tick(clock);
+      }));
+      const state = (await h.kv(what)) as { job?: unknown; state?: string } | null;
+      if (what === 'backup' ? state?.job === null : state?.state !== 'running') return samples;
+    }
+    throw new Error(`the ${what} did not end`);
+  }
+  const backupSteps = await steps('backup');
+  expect(backupSteps.length).toBeGreaterThan(3);
+  const prefix = ((await h.kv('backup')) as { last_key: string }).last_key;
+  const tables = await h.sql<{ name: string }>(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite%' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\'`);
+  for (const { name } of tables) await h.sql(`DELETE FROM "${name}"`);
+  await expectOk(`/api/v2/backupRestore:start`, { method: 'POST', headers: mutationHeaders, body: JSON.stringify({ name: 'backupRestore', backup: prefix, request_id: op() }) });
+  const restoreSteps = await steps('restore');
+  expect(await h.kv('restore')).toMatchObject({ state: 'succeeded' });
+  expect(await h.sql(`SELECT count(*) AS n FROM examples`)).toEqual([{ n: EXAMPLES }]);
+  console.log(`cpu backup steps (ms): ${backupSteps.map((ms) => ms.toFixed(0)).join(' ')}; restore steps: ${restoreSteps.map((ms) => ms.toFixed(0)).join(' ')}`);
+  return [cold, alarm, ...api, summarize(BACKUP, [Math.max(...backupSteps)]), summarize(RESTORE, [Math.max(...restoreSteps)])];
 }
 
 describe('CPU (Workers Free: 10 ms per request, 30 s per Durable Object invocation)', () => {
@@ -287,6 +318,9 @@ describe('CPU (Workers Free: 10 ms per request, 30 s per Durable Object invocati
       }
     }
     expect(get(ALARM).first, ALARM).toBeLessThan(OBJECT_ALARM_BOUND_MS);
-    expect(reference.size).toBe(1 + 1 + 2 * 8);
+    console.log(`cpu backup (reference ms): step < ${OBJECT_BACKUP_BOUND_MS.toFixed(0)}`);
+    expect(get(BACKUP).first, BACKUP).toBeLessThan(OBJECT_BACKUP_BOUND_MS);
+    expect(get(RESTORE).first, RESTORE).toBeLessThan(OBJECT_BACKUP_BOUND_MS);
+    expect(reference.size).toBe(1 + 1 + 2 * 8 + 2);
   });
 });

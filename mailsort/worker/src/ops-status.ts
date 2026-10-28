@@ -1,7 +1,7 @@
 /**
  * ops-v1 for mailsort (../../docs/design.md §10, contracts/ops-v1, proto/ops/v1/ops.proto): status() and setGuard(),
- * built only from MailsortState's own SQLite, with counts and codes only: never a subject, sender, address or label
- * name.
+ * built only from MailsortState's own SQLite and the daily backup's facts (backup.ts), with counts and codes only: never
+ * a subject, sender, address or label name.
  *
  * Signals cover Gmail auth/freshness and the selected provider's configuration, availability and spend failures.
  * Claude has no Cloudflare guard capability; old shed requests are refused and legacy normal requests clear state.
@@ -10,6 +10,7 @@ import { create } from '@ziyixi/proto/protobuf';
 import { file_ops_v1_ops, GuardLevel, GuardStateSchema, Health, OpsService, OpsStatusSchema, Severity, SignalSchema, type GuardState, type Signal } from '@ziyixi/proto/ops/v1/ops_pb';
 import type * as wire from '@ziyixi/proto/ops/v1/ops_wire';
 import { fieldRules, formatMatches, fromWireArguments, toWire, WireJsonError } from '@ziyixi/proto/wire-json';
+import { backupOps, type BackupFacts } from './backup.ts';
 import { modeCeiling, publicHost, type Env } from './env.ts';
 import { ALARM_IDLE_MS, MINUTE } from './limits.ts';
 import { authState } from './session.ts';
@@ -42,8 +43,11 @@ export function guardState(): wire.GuardState {
 
 export type GuardOutcome = { readonly ok: wire.GuardState } | { readonly error: 'invalid_input' };
 
-/** Claude has no shed action. Normal clears a guard stored by an older release. */
-export function setGuard(store: Store, input: unknown): GuardOutcome {
+/**
+ * Claude has no shed action. Normal clears a guard stored by an older release, except while a restore loads the store
+ * (`write` false, restore.ts): it refuses every other write, and the restored rows keep any such guard until then.
+ */
+export function setGuard(store: Store, input: unknown, write = true): GuardOutcome {
   let value;
   try {
     value = fromWireArguments(OpsService.method.setGuard, [input]);
@@ -52,7 +56,7 @@ export function setGuard(store: Store, input: unknown): GuardOutcome {
     throw error;
   }
   if (value.level === GuardLevel.SHED) return { error: 'invalid_input' };
-  store.deleteMeta('guard_reason', 'guard_until', 'guard_set_at');
+  if (write) store.deleteMeta('guard_reason', 'guard_until', 'guard_set_at');
   return { ok: guardState() };
 }
 
@@ -83,8 +87,8 @@ function modelSignal(provider: 'claude' | 'codex', code: string): string {
 
 type StatusEnv = Pick<Env, 'PUBLIC_HOST' | 'MODE' | 'GMAIL_CLIENT_ID' | 'GMAIL_CLIENT_SECRET' | 'GMAIL_REFRESH_TOKEN' | 'MODEL_ROUTER'>;
 
-/** status(): a few indexed counts and meta rows. */
-export function sortStatus(store: Store, env: StatusEnv, now: number): wire.OpsStatus {
+/** status(): a few indexed counts and meta rows, and the daily backup's facts (null without its bucket). */
+export function sortStatus(store: Store, env: StatusEnv, now: number, backup: BackupFacts | null = null): wire.OpsStatus {
   const url = uiUrl(publicHost(env));
   const ceiling = modeCeiling(env);
   const base = { version: 'ops-v1', app: 'mailsort', generatedAt: iso(now), ...(url === undefined ? {} : { uiUrl: url }), capabilities: [] };
@@ -101,7 +105,8 @@ export function sortStatus(store: Store, env: StatusEnv, now: number): wire.OpsS
     const pending = store.count(`SELECT count(*) AS n FROM pending`);
     const review = store.count(`SELECT count(*) AS n FROM review WHERE state = 'pending'`);
 
-    const signals: Signal[] = [];
+    const backups = backupOps(backup, now);
+    const signals: Signal[] = backups.signals.map((item) => signal(item.code, item.severity, item.metrics));
     if (mode !== 'off') {
       if (auth === 'failed') signals.push(signal('gmail_auth_failed', Severity.CRITICAL, { failures: Number(store.getMeta('auth_failures') ?? '0') }));
       if (auth === 'not_configured') signals.push(signal('gmail_not_configured', Severity.WARNING, {}));
@@ -133,6 +138,7 @@ export function sortStatus(store: Store, env: StatusEnv, now: number): wire.OpsS
       claude_cache_read_tokens: claude.cache_read_tokens,
       claude_output_tokens: claude.output_tokens,
       ...(claude.thinking_tokens === null ? {} : { claude_thinking_tokens: claude.thinking_tokens }),
+      ...backups.counters,
     };
     if (synced !== null) counters['last_sync_minutes'] = Math.floor((now - synced) / MINUTE);
     return toWire(
@@ -144,6 +150,7 @@ export function sortStatus(store: Store, env: StatusEnv, now: number): wire.OpsS
         guard,
         signals: signals.slice(0, MAX_SIGNALS),
         counters,
+        ...(backups.lastBackupAt === null ? {} : { lastBackupAt: iso(backups.lastBackupAt) }),
       }),
     );
   } catch {

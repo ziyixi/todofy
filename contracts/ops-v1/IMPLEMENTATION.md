@@ -591,6 +591,12 @@ mailsort (`mailsort/`, Worker `mailsort`, `mailsort/docs/design.md` §10) joined
 - Guard: a shed defers `full_model` (Clef-flash only), `replay` (the owner's replay evaluation; `audit`, the daily
   audit sample, until 2026-10-10) and `embedding_rebuild`. New mail is still read, decided and sorted; the owner API is
   never deferred.
+- Its own daily backup (added 2026-10-28, additive; `mailsort/docs/backup.md`): `status()` also reads the backup's
+  facts from the object's key-value storage and brings the alarm forward to a backup due sooner. Counter
+  `backup_age_seconds` once a backup is complete, `last_backup_at` the newest complete backup; signals `backup_stale`
+  (critical, `age_seconds` and `has_backup`) and `backup_failed` (warning), both app-only (`mailsort/app.toml`).
+  Fixture `OpsStatus/mailsort-backup-stale.json` is the status `ops-status.ts` writes for a failed job and a 4-day-old
+  backup, byte for byte (`mailsort/worker/test/ops-golden.test.ts`); the Clef-era fixtures above stay frozen.
 
 ## 3e. recall (added 2026-10-10, additive)
 

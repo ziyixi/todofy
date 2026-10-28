@@ -208,7 +208,7 @@ const ENTRIES: readonly EntryDef[] = [
     access: true,
     status: { type: 'ops_v1', binding: 'MAILSORT', guard: false },
     tile_metric: { kind: 'counter', name: 'pending' },
-    app_only_signals: [],
+    app_only_signals: ['backup_stale', 'backup_failed'],
     order: 9,
   },
   {
@@ -367,6 +367,8 @@ const RESOURCES: readonly ResourceDef[] = [
   { id: 'recall-store', kind: 'r2', name: 'recall 正文存储', entry: 'recall', match: 'recall-store' },
   // Tasks' own weekly backups (tasks/wrangler.toml BACKUPS), created by "Infra apply" before Tasks bound it.
   { id: 'tasks-backups', kind: 'r2', name: 'Tasks 备份', entry: 'tasks', match: 'tasks-backups' },
+  // Mailsort's own daily backups (mailsort/wrangler.toml BACKUPS), created by "Infra apply" before mailsort bound it.
+  { id: 'mailsort-backups', kind: 'r2', name: 'mailsort 备份', entry: 'mailsort', match: 'mailsort-backups' },
   // Watch's private captured page text and screenshots (watch/wrangler.toml EVIDENCE_STORE).
   { id: 'watch-evidence', kind: 'r2', name: 'Watch 页面证据与截图', entry: 'watch', match: 'watch-evidence' },
   // The self-hosted servers' backups (~790 MB on 2026-09-30), outside this repository.

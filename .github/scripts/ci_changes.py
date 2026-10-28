@@ -243,6 +243,7 @@ APP_TEST_DIRECTORIES = (
     "watch/worker/test/",
     "fleet/worker/test/",
     "mailsort/worker/test/",
+    "mailsort/tools/test/",
     "recall/worker/test/",
     "brief/worker/test/",
     "tasks/worker/test/",
