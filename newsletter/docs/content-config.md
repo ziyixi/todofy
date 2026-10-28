@@ -27,6 +27,7 @@ Notion 或邮件。只有整体 CI 绿色或镜像 job 被跳过时，不把该�
 | `workflow.yaml` | 已注册节点、依赖和有界预算 |
 | `discovery/*.md` | 现有八个搜集方向的题材要求 |
 | `discovery/_sources/ai-ml.md` | AI/ML 公开信源入口，不是白名单或质量认证 |
+| `researcher.yaml` | 研究员每期抓取的公开订阅源登记表（可选），见下文 |
 | `prompts/discovery.md`、`prompts/selection.md` | 候选发现与全局取舍策略 |
 | `policy/*.md` | 编辑要求、显式读者偏好；不依赖聊天 memory |
 | `templates/edition.html.j2` | 受限邮件 HTML 模板 |
@@ -56,6 +57,41 @@ max_research_candidates: 10
 预算还必须满足 DAG 容量：公共话题不超过 selection.max_tasks，深读不超过 story_plan.max_deep，
 研究候选不超过候选池容量。引擎当前支持公共话题1–8、研究0–话题数、深读0–2、
 研究候选0–60；超范围在激活前拒绝，不到发信时才卡住。
+
+## 研究员订阅源
+
+`researcher.yaml` 登记约 35 个公开订阅源：arXiv 检索、Hugging Face Daily Papers、
+AI 机构与作者博客、Nature/Science 及地球物理、地震学期刊，以及美联储新闻稿。
+它取代原先代码里固定的三个元数据源，并从已退役的 Brief 移植而来；文件头写明 Brief 最后的提交，
+被删掉的条目（新闻标题源、仅作信号的源、站点地图、USGS 和停用条目）可从那里找回。
+字段说明写在文件头；未知字段、YAML 锚点和标签会被拒绝，`direction` 必须是现有的
+`discovery/<id>.md`，最多 80 个源，文件不超过 100 KB。
+
+每期 07:00 运行时，`feeds` 节点读取随运行冻结的这份登记表，每个源抓一次：
+
+- 只抓登记的 HTTPS 地址，不跟随跳转、不重试；同一主机串行并留间隔（arXiv、Crossref 3 秒，其他 1 秒），
+  最多同时访问 4 个主机。每次请求 15 秒、按源限制字节数；节点在自身时限前 15 秒停止，保留已完成的源。
+- arXiv 检索最近 4 天提交的论文，Crossref 取最近 7 天登记的期刊文章；其余源默认只保留 7 天内且有日期的条目。
+  关键词、`requires_abstract` 和历史去重在本地完成，不调用模型。
+- 同一作品来自多个源时按身份合并，`name` 不同才算独立来源。排序依次看独立来源数、Hugging Face 当天点赞分位、
+  日期和登记顺序；每个方向轮流取各源，最多 20 条，交给对应方向的搜集模型。
+- 线索只含元数据（已读范围“仅线索”），摘要和关注理由是固定说明；`venue` 是订阅源名称，
+  `source_basis` 由代码写成“研究员订阅源：…（仅元数据，未打开原文）”。
+  订阅源正文最多 300 字作为不可信摘录，只放在搜集提示的附注里，不进入候选、候选池或 Notion；
+  Crossref 摘要只用于本地筛选，不作为摘录。
+
+搜集模型自己决定打开哪条线索，打开后的候选按原有规则核验并写 `source_basis`；
+未打开的线索只能作为仅线索候选，在搜集结果和候选池剩余的研究名额里出现。不增加模型调用、节点类型、
+数据表或服务，`workflow.yaml` 中 `feeds` 的时限为 180 秒。
+
+任何源失败时 `feeds` 节点记为 `partial_failure`，其他源的线索照常使用；
+节点产物的 `diagnostics` 逐源记录 `<id>:<code>`，代码只有 `ok`、`http_error`、`too_large`、
+`parse_error`、`timeout`、`unavailable`、`unsafe_address`、`deadline`，另有 `truncated`、
+`undated:<n>`、`invalid_items:<n>` 计数，以及 `registry:absent`、`registry:invalid`、`artifact:trimmed:<n>`。
+日志只有一行来源、成功、失败和线索数量。地址失效时直接改这份配置。
+
+包内初始基线不含 `researcher.yaml`，离线 demo 和没有该文件的配置不抓取任何订阅源。
+旧引擎不认识这个文件：配置若先于新镜像到达，同步器只记录错误并保留上一版，新镜像上线后自动恢复。
 
 ## 写作风格
 
