@@ -41,7 +41,9 @@ kind of step, about 1 to 4 ms) and well under 50 D1 statements:
 
 Three failed steps in a row fail the job; it starts again an hour later, or at the next daily slot after the third
 failed job in a row. A backup of a few hundred links and their revisions takes a handful of ticks, under half an
-hour.
+hour. At the app's caps (1,000 links with 20 kept revisions each and every field at its longest, some 70-80 MB of
+rows) a job needs about 600 steps, about two days at one tick every five minutes; the next starts at the following
+slot, so `backup_stale` may then show between two complete backups.
 
 ### Layout
 
@@ -61,9 +63,9 @@ SHA-256. Each part also carries its SHA-256 as R2 custom metadata.
 ### Retention
 
 After each new backup the newest 30 complete ones are kept, and older complete ones and every incomplete prefix older
-than the new one are deleted. A job never rewrites a complete backup, never deletes a prefix newer than its own, and
-deletes nothing when the bucket lists more than 5,000 objects. Retention is in the code, not an R2 lifecycle rule: a
-stopped job never ages out the last good copies.
+than the new one are deleted. A job never rewrites a complete backup and never deletes a prefix newer than its own. It
+lists the bucket by prefix and checks each one's manifest, so its cost does not grow with the parts. Retention is in
+the code, not an R2 lifecycle rule: a stopped job never ages out the last good copies.
 
 ### What Home shows
 

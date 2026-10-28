@@ -344,22 +344,29 @@ async function finish(db: D1Database, bucket: R2Bucket, state: BackupState, job:
 
 /**
  * Deletes every complete backup but the newest KEEP (`current` counts) and every incomplete prefix older than
- * `current`. Nothing newer than `current` is touched, and nothing at all on a listing cut short.
+ * `current`. Nothing newer than `current` is touched. One listing of the prefixes and a manifest check each, so the
+ * cost does not grow with the parts the bucket holds.
  */
 async function applyRetention(bucket: R2Bucket, current: string): Promise<void> {
-  const objects = await listAll(bucket, BACKUP_ROOT);
-  if (!objects) {
-    log({ retention_skipped: 'too_many_objects' });
-    return;
+  const listed = await bucket.list({ prefix: BACKUP_ROOT, delimiter: '/' });
+  const older = listed.delimitedPrefixes.filter((prefix) => prefix < current).sort().reverse();
+  const kept = new Set<string>();
+  for (const prefix of older)
+    if (kept.size < KEEP - 1 && (await bucket.head(prefix + MANIFEST)) !== null) kept.add(prefix);
+  for (const prefix of older) {
+    if (kept.has(prefix)) continue;
+    await deletePrefix(bucket, prefix);
+    log({ deleted: prefix });
   }
-  const prefixes = new Map<string, string[]>();
-  for (const { key } of objects) {
-    const prefix = key.slice(0, key.indexOf('/', BACKUP_ROOT.length) + 1);
-    if (prefix) prefixes.set(prefix, [...(prefixes.get(prefix) ?? []), key]);
+}
+
+/** Every object under `prefix`, a page of at most 1000 keys at a time. */
+async function deletePrefix(bucket: R2Bucket, prefix: string): Promise<void> {
+  for (let page = 0; page < MAX_LIST_PAGES; page++) {
+    const listed = await bucket.list({ prefix, limit: 1000 });
+    const keys = listed.objects.map((object) => object.key);
+    if (keys.length) await bucket.delete(keys);
+    if (!listed.truncated) return;
   }
-  const complete = [...prefixes.keys()].filter((prefix) => prefix <= current && prefixes.get(prefix)?.includes(prefix + MANIFEST));
-  const kept = new Set(complete.sort().slice(-KEEP));
-  const keys = [...prefixes].filter(([prefix]) => prefix < current && !kept.has(prefix)).flatMap(([, list]) => list);
-  for (let start = 0; start < keys.length; start += 1000) await bucket.delete(keys.slice(start, start + 1000));
-  if (keys.length) log({ deleted_objects: keys.length });
+  throw new Error('Too many objects under a backup prefix');
 }

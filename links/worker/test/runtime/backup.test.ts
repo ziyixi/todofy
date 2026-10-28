@@ -318,6 +318,9 @@ describe('a daily job', () => {
       await bucket.put(`${prefix}${MANIFEST}`, '{}');
       await bucket.put(`${prefix}links/00001.ndjson.gz`, 'x');
     }
+    // The oldest holds more parts than one listing page: retention deletes it page by page.
+    for (let part = 2; part <= 1001; part++)
+      await bucket.put(`${older[0] ?? ''}link_revisions/${String(part).padStart(5, '0')}.ndjson.gz`, 'x');
     const incomplete = 'backups/2026-09-15T120000Z/';
     await bucket.put(`${incomplete}links/00001.ndjson.gz`, 'x');
     const newer = 'backups/2099-01-01T000000Z/';
@@ -326,6 +329,7 @@ describe('a daily job', () => {
     const prefixes = (await bucket.list({ prefix: 'backups/', delimiter: '/' })).delimitedPrefixes;
     // This job's and the newest KEEP - 1 seeded ones; the incomplete older one is gone; the newer one is untouched.
     expect(prefixes).toEqual([...older.slice(-(KEEP - 1)), 'backups/2026-10-28T052500Z/', newer]);
+    expect((await bucket.list({ prefix: older[0] ?? '' })).objects).toEqual([]);
     for (const prefix of older.slice(-(KEEP - 1)))
       expect((await bucket.list({ prefix })).objects.map((object) => object.key)).toEqual([
         `${prefix}links/00001.ndjson.gz`,
