@@ -4,7 +4,9 @@ Small SQLite tables hold public synthetic artifacts without booting a pipeline.
 Existing Store tables and the real importer and journal run as-is.
 """
 
+import importlib.resources as resources
 import json
+import pathlib
 import types
 
 import pytest
@@ -15,8 +17,14 @@ import newsletter.notion_content as newsletter_notion_content
 import newsletter.notion_intake as notion_intake
 import newsletter.notion_journal as notion_journal
 import newsletter.store as newsletter_store
+import newsletter.workflow.definition as newsletter_workflow_definition
+import newsletter.workflow.engine as engine
+import newsletter.workflow.researcher as researcher
 import newsletter.workflow.sources as sources
+import newsletter.workflow.story_nodes as story_nodes
 import tests.support.notion_content as notion_content
+import tests.support.researcher as researcher_fake
+import tests.support.workflow_content as workflow_content
 
 BOOTSTRAP = "2026-09-07T12:00:00+00:00"
 CURRENT = "2026-09-07T13:04:05.123456+00:00"
@@ -856,3 +864,362 @@ def test_a_journal_doi_on_an_arxiv_seed_would_quarantine_it(rig):
         == []
     )
     assert rig.journal.summary()["import_errors"]
+
+
+# End to end: synthetic feed bytes → researcher → pool node → Notion intake.
+
+ENGINE_DAY = researcher_fake.DAY
+JOURNAL_DOI = "10.1234/synthetic-journal-1"
+CROSSREF_DOI = "10.1234/synthetic-crossref"
+
+
+def researcher_registry():
+    return researcher_fake.registry(
+        researcher_fake.source(
+            id="synthetic-arxiv",
+            name="arXiv",
+            direction="08-llm-architectures",
+            kind="arxiv",
+            url="https://export.arxiv.org/api/query",
+            query="cat:cs.CL",
+        ),
+        researcher_fake.source(
+            id="synthetic-daily",
+            name="Hugging Face Daily Papers",
+            direction="01-ai-ml",
+            kind="hf_daily",
+            url="https://huggingface.co/api/daily_papers",
+        ),
+        researcher_fake.source(
+            id="synthetic-journal",
+            name="Synthetic Geophysics Journal",
+            direction="02-science",
+            url="https://journal.example.org/rss",
+        ),
+        researcher_fake.source(
+            id="synthetic-crossref",
+            name="Synthetic Crossref Journal",
+            direction="02-science",
+            kind="crossref",
+            url="https://api.crossref.org/journals/0000-0000/works",
+        ),
+        researcher_fake.source(
+            id="synthetic-blog",
+            name="Synthetic Lab Blog",
+            direction="01-ai-ml",
+            url="https://blog.example.org/feed",
+        ),
+    )
+
+
+def researcher_network():
+    return researcher_fake.Network(
+        {
+            # arXiv API entries may name the journal version's DOI. On the
+            # lead it would be disjoint from the material's 10.48550 DOI.
+            "export.arxiv.org": researcher_fake.atom(
+                researcher_fake.arxiv_entry(
+                    "2610.01234", "v3", title="Synthetic shared preprint"
+                ).replace("10.48550/arXiv.2610.01234", "10.5555/published-1")
+            ),
+            "huggingface.co": researcher_fake.hf_daily(
+                ("2610.01234", 40), ("2610.05678", 5)
+            ),
+            "journal.example.org": researcher_fake.rss(
+                researcher_fake.rss_item(
+                    title="Synthetic journal article on fault slip",
+                    link=(
+                        "http://journal.example.org/articles/synthetic-1"
+                        "?utm_source=rss&amp;af=R"
+                    ),
+                    doi=JOURNAL_DOI.upper(),
+                )
+            ),
+            "api.crossref.org": researcher_fake.crossref(
+                researcher_fake.crossref_item(
+                    DOI=CROSSREF_DOI,
+                    title=["Synthetic Crossref article on mantle flow"],
+                )
+            ),
+            "blog.example.org": researcher_fake.rss(
+                researcher_fake.rss_item(
+                    title="Synthetic lab post about evaluation",
+                    link=(
+                        "https://blog.example.org/posts/synthetic-post/"
+                        "?utm_medium=feed"
+                    ),
+                )
+            ),
+        }
+    )
+
+
+def researcher_config():
+    return {
+        "schema_version": 1,
+        "revision": "fixture-config",
+        "digest": "fixture-only",
+        "editorial": {
+            "max_public_items": 6,
+            "max_research_items": 1,
+            "max_deep": 1,
+            "max_research_candidates": 10,
+        },
+        "files": {"researcher.yaml": researcher_registry()},
+    }
+
+
+async def researcher_pool(tmp_path):
+    """Run the real feeds and pool nodes offline; return the pool artifact."""
+    definition = newsletter_workflow_definition.load_definition(
+        pathlib.Path(
+            str(resources.files("newsletter").joinpath("workflows/daily.yaml"))
+        )
+    )
+    store = newsletter_store.Store(tmp_path / "engine.sqlite3", "mock")
+    try:
+        nodes = story_nodes.StoryNodes(
+            store, definition, workflow_content.Engine(), tmp_path
+        )
+        network = researcher_network()
+        nodes.researcher = researcher.Researcher(
+            transport=network.transport(),
+            resolver=network.resolver,
+            sleep=network.sleep,
+        )
+        run_inputs = {
+            "issue_date": ENGINE_DAY,
+            "instructions": [
+                {"id": item, "text": "Synthetic", "digest": "a" * 64}
+                for item in researcher_fake.DIRECTIONS
+            ],
+            "history": [],
+            "content_config": researcher_config(),
+        }
+        feeds = await nodes.execute(
+            "api_feed",
+            engine.NodeContext(
+                run_id="researcher",
+                node_id="feeds",
+                item_id="",
+                params={"timeout_seconds": 180},
+                inputs={"history": {"candidates": [], "editions": []}},
+                run_inputs=run_inputs,
+            ),
+            tmp_path,
+        )
+        assert isinstance(feeds, dict), feeds
+        pool = await nodes.execute(
+            "deduplicate",
+            engine.NodeContext(
+                run_id="researcher",
+                node_id="candidates",
+                item_id="",
+                params={"max_candidates": 30},
+                inputs={
+                    "history": {
+                        "candidates": [],
+                        "editions": [],
+                        "watchlist": [],
+                    },
+                    "feeds": feeds,
+                    "discovery": [],
+                },
+                run_inputs=run_inputs,
+            ),
+            tmp_path,
+        )
+    finally:
+        store.close()
+    return feeds, pool
+
+
+def existing_materials():
+    """Earlier discoveries of the same works, recorded before the researcher."""
+    common = {"event_key": "", "evidence_urls": []}
+    return [
+        notion_content.candidate(
+            id="old-arxiv",
+            title="Synthetic shared preprint",
+            url="https://arxiv.org/abs/2610.01234v1",
+            doi="10.48550/arxiv.2610.01234",
+            version="v1",
+            **common,
+        ),
+        notion_content.candidate(
+            id="old-landing",
+            direction="02-science",
+            title="Synthetic journal article on fault slip",
+            url="https://journal.example.org/articles/synthetic-1",
+            doi="",
+            version="",
+            **common,
+        ),
+        notion_content.candidate(
+            id="old-crossref",
+            direction="02-science",
+            title="Synthetic Crossref article on mantle flow",
+            url="https://publisher.example.org/landing/mantle",
+            doi=CROSSREF_DOI,
+            version="",
+            **common,
+        ),
+        notion_content.candidate(
+            id="old-blog",
+            title="Synthetic lab post about evaluation",
+            url="https://blog.example.org/posts/synthetic-post",
+            doi="",
+            version="",
+            **common,
+        ),
+    ]
+
+
+async def test_researcher_leads_reach_existing_materials_end_to_end(
+    rig, tmp_path
+):
+    old = existing_materials()
+    add_artifact(rig, old, run_id="run-old", artifact_id="pool-old")
+    rig.intake.scan()
+    before = {row["key"]: row for row in entities(rig)}
+    assert len(before) == len(old)
+    old_keys = {
+        row["candidate_id"]: row["entity_key"]
+        for row in rig.journal.rows("SELECT * FROM notion_candidates")
+    }
+
+    feeds, pool = await researcher_pool(tmp_path)
+    leads = pool["candidates"]
+    by_url = {lead["url"]: lead for lead in leads}
+    # Researcher identity shaping: canonical arXiv abs URL, no arXiv DOI.
+    assert by_url["https://arxiv.org/abs/2610.01234"]["doi"] == ""
+    assert by_url["https://arxiv.org/abs/2610.01234"]["version"] == "v3"
+    assert (
+        by_url["https://journal.example.org/articles/synthetic-1"]["doi"]
+        == JOURNAL_DOI
+    )
+    assert set(by_url) == {
+        "https://arxiv.org/abs/2610.01234",
+        "https://arxiv.org/abs/2610.05678",
+        "https://journal.example.org/articles/synthetic-1",
+        "https://doi.org/" + CROSSREF_DOI,
+        "https://blog.example.org/posts/synthetic-post/",
+    }
+    assert {lead["provenance"] for lead in leads} == {
+        "rss_metadata",
+        "crossref_metadata",
+    }
+    assert {lead["access_scope"] for lead in leads} == {"metadata"}
+    # Excerpts and ranking notes stay in the raw feed artifact.
+    assert "notes" not in pool and feeds["notes"]
+    assert "synthetic abstract" not in json.dumps(pool).lower()
+
+    add_artifact(rig, leads, run_id="run-new", artifact_id="pool-new")
+    rig.intake.scan()
+
+    assert rig.journal.summary()["import_errors"] == []
+    keys = {
+        row["candidate_id"]: row["entity_key"]
+        for row in rig.journal.rows(
+            "SELECT * FROM notion_candidates WHERE run_id='run-new'"
+        )
+    }
+    assert set(keys) == {lead["id"] for lead in leads}
+    expected = {
+        "https://arxiv.org/abs/2610.01234": old_keys["old-arxiv"],
+        "https://journal.example.org/articles/synthetic-1": old_keys[
+            "old-landing"
+        ],
+        "https://doi.org/" + CROSSREF_DOI: old_keys["old-crossref"],
+        "https://blog.example.org/posts/synthetic-post/": old_keys["old-blog"],
+    }
+    for url, key in expected.items():
+        assert keys[by_url[url]["id"]] == key, url
+    # Only the genuinely new daily paper became a new material.
+    after = {row["key"]: row for row in entities(rig)}
+    (new_key,) = set(after) - set(before)
+    assert keys[by_url["https://arxiv.org/abs/2610.05678"]["id"]] == new_key
+    aliases = {
+        row["alias"]: row["entity_key"]
+        for row in rig.journal.rows("SELECT * FROM notion_aliases")
+    }
+    # The feed DOI only adds an alias to the URL-keyed material.
+    assert aliases["doi:" + JOURNAL_DOI] == old_keys["old-landing"]
+    # The arXiv lead brought no DOI: the only 10.48550 alias is the old one.
+    assert [a for a in aliases if a.startswith("doi:10.48550")] == [
+        "doi:10.48550/arxiv.2610.01234"
+    ]
+    assert aliases["arxiv:2610.01234"] == old_keys["old-arxiv"]
+    new = after[new_key]
+    assert prop_text(new, "venue") == "Hugging Face Daily Papers"
+    assert properties(new)["access_scope"] == {"select": {"name": "仅线索"}}
+    assert properties(new)["material_type"] == {"select": {"name": "预印本"}}
+    # A re-seen material keeps its research progress and gains the direction.
+    shared = after[old_keys["old-arxiv"]]
+    assert {
+        item["name"] for item in properties(shared)["direction"]["multi_select"]
+    } == {"01-ai-ml", "08-llm-architectures"}
+    # Intake still only queues local work for the drain.
+    for table, column in (
+        ("notion_entities", "create_state"),
+        ("notion_versions", "state"),
+    ):
+        assert (
+            rig.store.db.execute(
+                f"SELECT COUNT(*) FROM {table} WHERE {column} IN "
+                "('creating','appending','unknown')"
+            ).fetchone()[0]
+            == 0
+        )
+
+
+def test_journal_lead_bridging_split_materials_changes_neither(rig):
+    # The same work already recorded twice (by DOI and by landing page): a
+    # lead naming both is one import error, never a merge, and its siblings
+    # in the same pool artifact still import.
+    by_doi = notion_content.candidate(
+        id="by-doi",
+        url="https://doi.org/" + JOURNAL_DOI,
+        doi=JOURNAL_DOI,
+        event_key="",
+    )
+    by_landing = notion_content.candidate(
+        id="by-landing",
+        url="https://journal.example.org/articles/synthetic-1",
+        doi="",
+        version="",
+        event_key="",
+    )
+    add_artifact(rig, [by_doi, by_landing], artifact_id="pool-old")
+    rig.intake.scan()
+    before = {
+        row["key"]: (row["properties"], len(rig.journal.versions(row["key"])))
+        for row in entities(rig)
+    }
+    assert len(before) == 2
+    bridge = researcher_seed(
+        url="https://journal.example.org/articles/synthetic-1",
+        doi=JOURNAL_DOI,
+    )
+    sibling = researcher_seed(
+        title="Synthetic unrelated lead",
+        url="https://journal.example.org/articles/synthetic-2",
+        doi="",
+    )
+    add_artifact(rig, [bridge, sibling], run_id="run-two", artifact_id="new")
+    rig.intake.scan()
+    assert rig.journal.summary()["import_errors"] == [
+        {"error": "notion_candidate_import_failed", "count": 1}
+    ]
+    imported = {
+        row["candidate_id"]
+        for row in rig.journal.rows(
+            "SELECT * FROM notion_candidates WHERE run_id='run-two'"
+        )
+    }
+    assert imported == {sibling["id"]}
+    after = {row["key"]: row for row in entities(rig)}
+    for key, (props, versions) in before.items():
+        assert after[key]["properties"] == props
+        assert len(rig.journal.versions(key)) == versions
+    assert len(after) == 3

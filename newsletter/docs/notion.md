@@ -130,6 +130,9 @@ NEWSLETTER_NOTION_ARCHIVE_PRIVATE=true
   “领域”和“采集方向”仍只来自现有八个方向。
 - arXiv 线索使用规范的 `https://arxiv.org/abs/<id>` 且不带 DOI，与已有的同一论文材料合并，
   不会因为 DOI 不一致被判为身份冲突。
+- 期刊线索带 DOI 时，只给已有的同一落地页材料增加 DOI 别名。若材料库里同一作品早已分成两条
+  （一条按 DOI、一条按落地页），这条线索和其他候选一样因 `notion_material_identity_conflict`
+  记一次 `notion_candidate_import_failed` 导入错误，不合并、不改动已有材料，同一产物里的其他候选照常导入。
 
 ### 每日简报档案
 
