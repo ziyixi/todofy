@@ -128,7 +128,8 @@ test('without Todofy the day is counted with no mail count; the counts read a bo
   todofy.failures.set('GetMailInbox', 1);
   const { db, metrics } = measuredReads(harness.db);
   await collectDay(env(db), Date.parse('2026-10-22T14:00:00Z'));
-  expect(await day('2026-10-22')).toMatchObject({ open: 6, mail_open: null });
+  // On 2026-10-22 the second timed task is overdue too.
+  expect(await day('2026-10-22')).toMatchObject({ open: 6, overdue: 3, mail_open: null });
   expect(metrics.statements).toBe(1);
   // Every task and completion a few times over (the open set, the week's creations and the day's closures), not
   // once per task.

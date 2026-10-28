@@ -116,7 +116,7 @@ afterwards.
      to it ([import notes](../../infra/README.md#import-notes)). Keep the old database until then.
 6. Open Plan: the restored tasks carry their planning facts and dependencies. Mail links of tasks created after
    the backup point at tasks the restored database lacks; converting such a Mail item creates a new Inbox task.
-7. Open Mail and GTD: Mail lists the pending mail and the categories, and GTD the restored days.
+7. Open Mail and GTD: Mail lists the pending mail and the categories, and GTD the restored completions and time.
 8. Open Focus. The timer comes back as it was backed up: a session that was running then still runs, counting from
    then (at most 4 hours, or its pomodoro's length). Stop it, then fix the new record's minutes if needed.
 
