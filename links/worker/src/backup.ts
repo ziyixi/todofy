@@ -12,7 +12,8 @@ export interface BackupTable {
 }
 /**
  * Every table and column of migrations/, in restore order (test/runtime/backup.test.ts compares it with the migrated
- * schema): the links, their kept revisions and the request IDs of the last day. wrangler's d1_migrations is not a
+ * schema): the links, their kept revisions and the request IDs of the last day. A job reads them in this order, so
+ * a revision is never older than its link's row; the restore leaves out the ones newer than it (restoredRows). wrangler's d1_migrations is not a
  * table of the app: the manifest names the newest migration, which a restore applies.
  */
 // prettier-ignore

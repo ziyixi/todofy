@@ -230,6 +230,38 @@ test('the CLI writes the SQL owner-only, warns about a moving snapshot, and veri
     { mark: { start: 2399, end: 2400 } },
   ));
 
+test('a revision its link row does not reach (an edit during the backup) is left out, so the next edit applies', () => {
+  const root = mkdtempSync(join(tmpdir(), 'links-restore-test-'));
+  try {
+    const source = migrated();
+    seed(source);
+    // Read after the links table: an edit of k0002 (its revision 4) and a link created after its key was passed.
+    const revision = source.prepare(`INSERT INTO link_revisions (key, revision, create_time, target, path_mode,
+      visibility, description, tags, expire_time) VALUES (?, ?, 9000, 'https://example.com/new', 'exact', 'private', '', '[]', NULL)`);
+    revision.run('k0002', 4);
+    revision.run('k0400', 1);
+    backupOf(source, root, { mark: { start: 2401, end: 2402 } });
+    const out = join(root, 'restore.sql');
+    const written = execFileSync('node', [TOOL, 'sql', '--in', root, '--out', out], { encoding: 'utf8' });
+    assert.match(written, /^WARN the links changed while the backup ran.*\nWARN 2 revisions newer than their link \(edits during the backup\) are left out\n/);
+    assert.match(written, /statements=1601\nsql PASS\n$/);
+    const { file, verify } = loaded(root, out);
+    const passed = verify();
+    assert.equal(passed.status, 0, passed.stdout + passed.stderr);
+    assert.match(passed.stdout, /PASS link_revisions rows=1200\/1200\n/);
+    const target = new DatabaseSync(file);
+    source.exec("DELETE FROM link_revisions WHERE (key, revision) IN (VALUES ('k0002', 4), ('k0400', 1))");
+    assert.deepEqual(dump(target), dump(source));
+    // The app's next edit of k0002 and a create of k0400 write those revisions again without a collision.
+    for (const [key, number] of [['k0002', 4], ['k0400', 1]])
+      target.prepare(`INSERT INTO link_revisions (key, revision, create_time, target, path_mode, visibility, description,
+        tags, expire_time) VALUES (?, ?, 9100, 'https://example.com/next', 'exact', 'private', '', '[]', NULL)`).run(key, number);
+    target.close();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 /**
  * `download` against a stand-in for `wrangler r2 object get`: the bucket is a directory of objects by key, and the
  * stand-in records each call.

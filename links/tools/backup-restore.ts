@@ -9,7 +9,8 @@
  *           links/migrations. It refuses the production database's id or name, a path inside the repository and an
  *           existing file. It has no Worker, so nothing can be deployed with it.
  *   sql     check every part against the manifest again and write one SQL file of INSERTs, one per row, that a
- *           re-run leaves alone; it refuses a statement over D1's limit.
+ *           re-run leaves alone; it refuses a statement over D1's limit and leaves out a revision newer than its
+ *           link (an edit during the backup, restoredRows).
  *   verify  check that the restored database has the backup's migration applied and holds exactly the backup's rows:
  *           every table read back in key order, page by page, and compared row for row, value for value.
  *
@@ -143,8 +144,33 @@ function literal(value: Value): string {
   return `'${value.replaceAll("'", "''")}'`;
 }
 
-/** The restore SQL: every row once, as an INSERT that a re-run leaves alone. */
-export function restoreSql({ section, rows }: Backup): { sql: string; statements: number } {
+/**
+ * The rows a restore loads: the backup's, less the revisions its links rows do not reach. Owner edits continue while
+ * a job runs and the links table is read before link_revisions, so a link edited or created after its row was read
+ * can have a revision newer than that row, or no row at all. Loaded as they are, the next edit or create of that key
+ * would collide with them (a revision's key and number are its primary key). A consistent backup loses nothing.
+ */
+export function restoredRows({ section, rows }: Backup): { rows: Map<string, Value[][]>; dropped: number } {
+  const column = (table: string, name: string) => {
+    const index = section.tables.find((candidate) => candidate.name === table)?.columns.indexOf(name) ?? -1;
+    if (index < 0) throw new RestoreError(`${table}: no ${name} column`);
+    return index;
+  };
+  const [key, revision] = [column('links', 'key'), column('links', 'revision')];
+  const current = new Map((rows.get('links') ?? []).map((row) => [row[key], row[revision]]));
+  const [revisionKey, number] = [column('link_revisions', 'key'), column('link_revisions', 'revision')];
+  const revisions = rows.get('link_revisions') ?? [];
+  const kept = revisions.filter((row) => {
+    const [at, made] = [current.get(row[revisionKey]), row[number]];
+    return typeof at === 'number' && typeof made === 'number' && made <= at;
+  });
+  return { rows: new Map([...rows, ['link_revisions', kept]]), dropped: revisions.length - kept.length };
+}
+
+/** The restore SQL: every row restoredRows keeps once, as an INSERT that a re-run leaves alone. */
+export function restoreSql(backup: Backup): { sql: string; statements: number; dropped: number } {
+  const { section } = backup;
+  const { rows, dropped } = restoredRows(backup);
   const lines = [
     `-- links restore of schema ${section.schema_version}. Load it into a new D1 with that migration (or a later,` +
       ' additive one) applied and no rows.',
@@ -158,7 +184,7 @@ export function restoreSql({ section, rows }: Backup): { sql: string; statements
       lines.push(statement);
     }
   }
-  return { sql: `${lines.join('\n')}\n`, statements: lines.length - 1 };
+  return { sql: `${lines.join('\n')}\n`, statements: lines.length - 1, dropped };
 }
 
 /** The production database's account, name and id, from the committed config. */
@@ -234,11 +260,12 @@ function query(args: string[], sql: string): Record<string, unknown>[] {
  */
 export function verifyRestore(backup: Backup, read: (sql: string) => Record<string, unknown>[]): { ok: boolean; lines: string[] } {
   const { section } = backup;
+  const { rows } = restoredRows(backup);
   const applied = JSON.parse(String(read('SELECT json_group_array(name) AS m FROM d1_migrations')[0]?.m ?? '[]')) as string[];
   let ok = applied.includes(section.schema_version);
   const lines = [`${ok ? 'PASS' : 'FAIL'} schema_version ${section.schema_version}${ok ? '' : ' (not applied)'}`];
   for (const table of section.tables) {
-    const expected = backup.rows.get(table.name) ?? [];
+    const expected = rows.get(table.name) ?? [];
     const key = table.key.join(',');
     let found = 0;
     let differing = 0;
@@ -361,10 +388,12 @@ async function main(): Promise<boolean> {
     lines = [`wrote ${out}`];
   } else if (command === 'sql') {
     const backup = readBackup(required('--in'));
-    const { sql, statements } = restoreSql(backup);
+    const { sql, statements, dropped } = restoreSql(backup);
     await privateText(required('--out'), sql);
     lines = backup.section.tables.map((table) => `PASS ${table.name} rows=${String(table.rows)}`);
     lines.push(`statements=${String(statements)}`);
+    if (dropped)
+      lines.unshift(`WARN ${String(dropped)} revisions newer than their link (edits during the backup) are left out`);
     const { start, end } = backup.section.change_mark;
     if (JSON.stringify(start) !== JSON.stringify(end))
       lines.unshift('WARN the links changed while the backup ran: rows may mix both states');

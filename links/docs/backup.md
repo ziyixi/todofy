@@ -116,10 +116,12 @@ afterwards.
    by absolute path; it has no Worker. It refuses the production database's id or name, a path inside the repository
    and an existing file. Never copy `links/wrangler.toml` for this: its `database_id` is the live database. `sql`
    checks every part again and writes one `INSERT ... ON CONFLICT DO NOTHING` per row, so a re-run after a partial
-   load is safe; it starts with a `WARN` line when the links changed while the backup ran. `verify` checks that the
-   backup's migration is applied and reads every table back in key order, 500 rows per query, comparing each row
-   value for value with the backup; it prints `PASS` or `FAIL` per table (`differing=` counts rows that differ) and
-   ends with `verify PASS`.
+   load is safe; it starts with a `WARN` line when the links changed while the backup ran. It leaves out, with a
+   second `WARN` line, a revision newer than its link's row: an edit or a create made after the job read that row
+   (the links table is read first), which the next edit or create of that key would otherwise collide with.
+   `verify` checks that the backup's migration is applied and reads every table back in key order, 500 rows per
+   query, comparing each row value for value with what `sql` loads; it prints `PASS` or `FAIL` per table
+   (`differing=` counts rows that differ) and ends with `verify PASS`.
 5. Switch the Worker to the new database. This step is not rehearsed, and a push alone does not do it: the
    release's preflight finds the live `DB` binding on the old id and stops (`STATEFUL_BINDING_CHANGED` needs a
    manual change).
@@ -148,6 +150,8 @@ Keep the old database until the restored one has run for a while, then delete it
 
 ## What a restore does not bring back
 
+- An edit made while the job ran whose link row the job had already read: its revision is left out (`sql` says how
+  many), the link stays as the backup read it.
 - Edits made after the backup (at most a day of them): Time Travel covers the last 7 days of the old database while
   it exists, and the launcher's 导出 file is another copy of the live links.
 - `request_log` holds a day of request IDs at most: a restored one is answered again only within a day of its
