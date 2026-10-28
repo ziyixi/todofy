@@ -1,11 +1,13 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fromWire } from '@ziyixi/proto/wire-json';
-import { FleetStatusSchema } from '@ziyixi/proto/fleet/ui/v1/fleet_ui_service_pb';
+import { FleetStatusSchema, ListNodesResponseSchema, SummarizeNodeMetricsResponseSchema } from '@ziyixi/proto/fleet/ui/v1/fleet_ui_service_pb';
 import fixture from '../../../contracts/fleet-report-v1/fixtures/healthy.json';
 import { App } from './App.tsx';
 import { client } from './api.ts';
+import { daySummary, NODE } from './test/nodes.ts';
 
 const BASE = {
   name: 'fleetStatus',
@@ -17,9 +19,12 @@ const BASE = {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  window.location.hash = '';
 });
-function show(value: unknown): void {
+function show(value: unknown, nodes: unknown[] = []): void {
   vi.spyOn(client, 'getFleetStatus').mockResolvedValue(fromWire(FleetStatusSchema, value).message);
+  vi.spyOn(client, 'listNodes').mockResolvedValue(fromWire(ListNodesResponseSchema, nodes.length ? { nodes } : {}).message);
+  vi.spyOn(client, 'summarizeNodeMetrics').mockResolvedValue(fromWire(SummarizeNodeMetricsResponseSchema, daySummary()).message);
   const query = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(<QueryClientProvider client={query}><App /></QueryClientProvider>);
 }
@@ -40,8 +45,12 @@ describe('Fleet owner page', () => {
     expect(await screen.findByRole('heading', { name: '观测延迟' })).toBeVisible();
     expect(screen.getByText('以下是历史观测，不能代表当前服务健康。')).toBeVisible();
     expect(screen.getByText('2'.repeat(40))).toBeVisible();
-    expect(screen.getByText('目标提交：')).toBeVisible();
-    expect(screen.getByText('实际提交：')).toBeVisible();
+    const commit = screen.getByText('提交').closest('.compare-row') as HTMLElement;
+    expect(within(commit).getByText('目标').nextElementSibling).toHaveTextContent('1'.repeat(40));
+    expect(within(commit).getByText('实际').nextElementSibling).toHaveTextContent('2'.repeat(40));
+    expect(within(commit).getByText('不一致')).toBeVisible();
+    const image = screen.getByText('镜像').closest('.compare-row') as HTMLElement;
+    expect(within(image).queryByText('不一致')).toBeNull();
   });
   it('shows a held release independently of healthy workload observations', async () => {
     const report = {
@@ -103,7 +112,7 @@ describe('Fleet owner page', () => {
     show({ ...BASE, freshness: 'fresh', report, receive_time: '2026-10-03T00:00:00Z' });
     expect(await screen.findByRole('heading', { name: 'Newsletter' })).toBeVisible();
     expect(screen.getByText(/后台进程：健康/)).toBeVisible();
-    expect(screen.getByText(new RegExp(`最近投递记录：${outcome}`))).toHaveTextContent('2026-10-02T23:30:00Z');
+    expect(screen.getByText(new RegExp(`最近投递记录：${outcome}`)).querySelector('time')).toHaveAttribute('datetime', '2026-10-02T23:30:00Z');
     expect(screen.getByText('未确认完成记录').nextElementSibling).toHaveTextContent('4');
     expect(screen.getByText('运行中断').nextElementSibling).toHaveTextContent('2');
     expect(screen.getByText('邮件投递').nextElementSibling).toHaveTextContent('1');
@@ -113,5 +122,70 @@ describe('Fleet owner page', () => {
     show({ ...BASE, freshness: 'fresh', report: fixture, receive_time: '2026-10-03T00:00:00Z' });
     expect(await screen.findByText('最近投递记录：暂未取得')).toBeVisible();
     expect(screen.queryByText('运行中断')).toBeNull();
+  });
+  it('summarises each node from its latest sample', async () => {
+    show({ ...BASE, freshness: 'fresh', report: fixture, receive_time: '2026-10-03T00:05:02Z' }, [NODE]);
+    const node = await screen.findByRole('article', { name: '节点 vps' });
+    const tile = (name: string): HTMLElement => within(node).getByText(name).parentElement as HTMLElement;
+    expect(tile('CPU 使用率')).toHaveTextContent('12.5%');
+    expect(tile('CPU 使用率')).toHaveTextContent('4 核 · I/O 等待 0.4%');
+    expect(tile('内存')).toHaveTextContent('6.00 / 16.0 GiB');
+    expect(tile('内存')).toHaveTextContent('37.5%');
+    expect(tile('磁盘')).toHaveTextContent('k3s 数据9.0% · 45.0 / 500 GiB');
+    expect(tile('网络')).toHaveTextContent('↓ 1.50 MiB/s');
+    expect(tile('负载')).toHaveTextContent('0.42');
+    expect(within(node).getByText(/运行时间：/)).toHaveTextContent('开机于');
+  });
+  it('keeps an older observer\'s report visibly unknown apart from its two percentages', async () => {
+    show({ ...BASE, freshness: 'fresh', report: fixture, receive_time: '2026-10-03T00:00:00Z' });
+    const node = await screen.findByRole('article', { name: '节点 vps' });
+    const tile = (name: string): HTMLElement => within(node).getByText(name).parentElement as HTMLElement;
+    expect(within(node).getByText('未上报指标')).toBeVisible();
+    expect(tile('CPU 使用率')).toHaveTextContent('未知');
+    expect(tile('内存')).toHaveTextContent('30.0%');
+    expect(tile('磁盘')).toHaveTextContent('20.0%');
+    expect(tile('网络')).toHaveTextContent('未知');
+    expect(within(node).getByText(/运行时间：/)).toHaveTextContent('运行时间：未知');
+  });
+  it('keeps an older observer\'s percentages as current as the host report', async () => {
+    show({ ...BASE, freshness: 'fresh', report: fixture, receive_time: '2026-10-03T00:00:00Z' });
+    const node = await screen.findByRole('article', { name: '节点 vps' });
+    expect(node).not.toHaveClass('dated');
+    expect(screen.queryByText(/报告百分比/)).toBeNull();
+  });
+  it('waits for the node list before falling back to the report\'s percentages', async () => {
+    vi.spyOn(client, 'getFleetStatus').mockResolvedValue(
+      fromWire(FleetStatusSchema, { ...BASE, freshness: 'fresh', report: fixture, receive_time: '2026-10-03T00:00:00Z' }).message);
+    vi.spyOn(client, 'listNodes').mockReturnValue(new Promise(() => undefined));
+    const query = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={query}><App /></QueryClientProvider>);
+    expect(await screen.findByRole('heading', { name: '系统 daemon' })).toBeVisible();
+    expect(screen.queryByText('未上报指标')).toBeNull();
+  });
+  it('says node metrics are unreadable rather than unreported when the node list fails', async () => {
+    vi.spyOn(client, 'getFleetStatus').mockResolvedValue(
+      fromWire(FleetStatusSchema, { ...BASE, freshness: 'fresh', report: fixture, receive_time: '2026-10-03T00:00:00Z' }).message);
+    vi.spyOn(client, 'listNodes').mockRejectedValue(new Error('denied'));
+    const query = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={query}><App /></QueryClientProvider>);
+    const node = await screen.findByRole('article', { name: '节点 vps' });
+    expect(within(node).getByText('指标暂时无法读取')).toBeVisible();
+    expect(within(node).queryByText('未上报指标')).toBeNull();
+    expect(within(node).getByText('内存').parentElement).toHaveTextContent('30.0%');
+  });
+  it('states uptime only as far as a late sample proves it', async () => {
+    show({ ...BASE, freshness: 'stale', report: fixture, receive_time: '2026-10-03T00:05:02Z' },
+      [{ ...NODE, receive_time: '2026-10-02T00:05:02Z', sample_time: '2026-10-02T00:05:00Z' }]);
+    const node = await screen.findByRole('article', { name: '节点 vps' });
+    expect(within(node).getByText(/运行时间：/)).toHaveTextContent('截至最近样本已运行 1 天');
+  });
+  it('opens resources in its own tab', async () => {
+    const user = userEvent.setup();
+    show({ ...BASE, freshness: 'fresh', report: fixture, receive_time: '2026-10-03T00:00:00Z' }, [NODE]);
+    expect(await screen.findByRole('link', { name: '概览' })).toHaveAttribute('aria-current', 'page');
+    await user.click(screen.getByRole('link', { name: '资源' }));
+    expect(await screen.findByRole('radio', { name: '24 小时' })).toBeChecked();
+    expect(screen.getByRole('link', { name: '资源' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.queryByRole('heading', { name: 'Newsletter' })).toBeNull();
   });
 });

@@ -85,9 +85,19 @@ class BootstrapBoundaries(unittest.TestCase):
         )
         observed = set()
         for rule in observer["rules"]:
-            self.assertEqual(set(rule["verbs"]), {"get", "list"})
-            observed.update(rule["resources"])
-        self.assertEqual(observed, {"pods", "deployments"})
+            self.assertNotIn("nonResourceURLs", rule)
+            for group in rule["apiGroups"]:
+                for resource in rule["resources"]:
+                    observed.add((group, resource, tuple(rule["verbs"])))
+        # Pod metrics are listed for the namespace only; no node metrics, proxy or stats.
+        self.assertEqual(
+            observed,
+            {
+                ("apps", "deployments", ("get", "list")),
+                ("", "pods", ("get", "list")),
+                ("metrics.k8s.io", "pods", ("list",)),
+            },
+        )
         cluster = [item for item in resources if item["kind"] == "ClusterRole"]
         self.assertEqual(len(cluster), 1)
         self.assertEqual(
@@ -194,6 +204,24 @@ class BootstrapBoundaries(unittest.TestCase):
         self.assertEqual(
             volumes["meminfo"]["hostPath"], {"path": "/proc/meminfo", "type": "File"}
         )
+        self.assertEqual(
+            volumes["host-net-dev"]["hostPath"],
+            {"path": "/proc/1/net/dev", "type": "File"},
+        )
+        self.assertEqual(
+            volumes["root-fs"]["hostPath"],
+            {"path": "/usr/lib/os-release", "type": "File"},
+        )
+        self.assertEqual(
+            volumes["k3s-fs"]["hostPath"],
+            {"path": "/var/lib/rancher/k3s", "type": "Directory"},
+        )
+        host_paths = [
+            item["hostPath"]["path"] for item in volumes.values() if "hostPath" in item
+        ]
+        self.assertNotIn("/", host_paths)
+        self.assertNotIn("/proc", host_paths)
+        self.assertNotIn("/sys", host_paths)
         for mount in container["volumeMounts"]:
             if mount["name"] != "state":
                 self.assertTrue(mount["readOnly"])
@@ -298,5 +326,13 @@ class BootstrapBoundaries(unittest.TestCase):
             )
         self.assertEqual(
             {item["name"] for item in pod["containers"][0]["volumeMounts"]},
-            {"state", "systemd-snapshot", "kubernetes-api", "meminfo"},
+            {
+                "state",
+                "systemd-snapshot",
+                "kubernetes-api",
+                "meminfo",
+                "host-net-dev",
+                "root-fs",
+                "k3s-fs",
+            },
         )

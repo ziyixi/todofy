@@ -1,0 +1,66 @@
+// Node resource telemetry derived by Fleet from signed host reports. Read-only owner views.
+syntax = "proto3";
+package fleet.ui.v1;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "NodeProto";
+option java_package = "science.ziyixi.fleet.ui.v1";
+// One reporting node and its latest derived sample.
+message Node {
+  option (google.api.resource) = {
+    type: "fleet.ziyixi.science/Node"
+    pattern: "nodes/{node}"
+    singular: "node"
+    plural: "nodes"
+  };
+  // nodes/{host_key}: the observer's configured alias, never a hostname.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // Host observation time of the latest sample.
+  google.protobuf.Timestamp sample_time = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Server receipt time of the latest sample; the UI judges freshness from it.
+  google.protobuf.Timestamp receive_time = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Kernel boot time, derived from the uptime of the latest sample.
+  google.protobuf.Timestamp boot_time = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Logical CPUs; 0 when the latest sample had no CPU times.
+  int32 cpu_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The latest sample's values, in the order of `MetricSeries.metric`. CPU and network rates are absent
+  // for the first report of a boot or after a gap.
+  repeated MetricValue latest_values = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+// One value of a sample.
+message MetricValue {
+  // A metric name of `MetricSeries.metric`.
+  string metric = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // A filesystem role or workload key; empty for node-wide metrics.
+  string label = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The value in the unit its name ends with.
+  double value = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+// One metric over time.
+message MetricSeries {
+  // cpu_percent, cpu_iowait_percent (of all CPU time, 0-100); load_1m, load_5m, load_15m;
+  // memory_used_bytes, memory_total_bytes, swap_used_bytes, swap_total_bytes;
+  // network_receive_bytes_per_second, network_transmit_bytes_per_second;
+  // filesystem_used_bytes, filesystem_available_bytes (labelled by role);
+  // workload_cpu_cores, workload_memory_bytes (labelled by workload key).
+  string metric = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // A filesystem role or workload key; empty for node-wide metrics.
+  string label = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Steps with data, oldest first. A missing step is a gap, never a zero.
+  repeated MetricPoint points = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+// One step of a series.
+message MetricPoint {
+  // The step's start.
+  // (-- api-linter: core::0142::time-field-names=disabled
+  //     aip.dev/not-precedent: a chart point's time is the start of its step, not an event. --)
+  google.protobuf.Timestamp time = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Mean of the 5-minute samples within the step.
+  double mean = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Largest 5-minute sample within the step.
+  double max = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

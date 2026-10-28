@@ -9,9 +9,9 @@ Newsletter 的未确认数量是六类记录的合计，可能包含历史运行
 Fleet 保留只读；提醒的关闭与恢复在 Home 管理。导航地址由本应用 `wrangler.toml` 的公开 `HOME_URL` 声明，
 UI 构建时读取；迁移 Home 域名时同步更新这一项，不从观察报告或另一应用的配置推断地址。
 
-- `worker/src/`：独立 HMAC 机器入口、Access owner API、SQLite DO 状态与 Home service bindings。
-- `web/`：只读 owner UI；每分钟读取缓存观测，不探测服务器。
-- `platform/src/personal_cloud/observer/`：非 root k3s CronJob，使用平台镜像每五分钟发送状态；仅挂载系统 bus 和 meminfo 元数据。
+- `worker/src/`：独立 HMAC 机器入口、Access owner API、SQLite DO 状态与 Home service bindings；`metrics.ts` 是节点遥测历史。
+- `web/`：只读 owner UI，“概览”与“资源”两个标签；每分钟读取缓存观测，资源曲线每五分钟读取一次，不探测服务器。
+- `platform/src/personal_cloud/observer/`：非 root k3s CronJob，使用平台镜像每五分钟发送状态与节点数值；只读挂载见 `observer/README.md`。
 - `proto/fleet/` 与 `contracts/fleet-report-v1/`：owner API 与机器元数据合同。
 
 机器路径 `/api/internal/fleet/v1/receipt` 单独 Access Bypass，只接受独立密钥签名；其余路径必须 owner JWT。
@@ -20,6 +20,28 @@ UI 构建时读取；迁移 Home 域名时同步更新这一项，不从观察�
 Fresh ≤10分钟，stale ≤20分钟，之后 missing；k3s 或节点失联也会停止 observer，不能确定故障原因。固定 scope 为 k3s/cloudflared/ssh 和 Newsletter。
 `cloudflared_platform` 仅在 `FLEET_EXPECT_PLATFORM_TUNNEL=true` 时监督。只有真实部署 daemon 的当前 ACK 和 SHA、image、request ID
 匹配，且 Newsletter worker 健康、gate active 时，部署才就绪。Pod ready 不替代 provider 业务成功。
+
+## 节点遥测
+
+报告可选携带 `metrics`（`fleet.telemetry.v1.NodeMetrics`）：累计计数原样上报，Fleet 在接收时用同一 boot 的上一份报告算
+平均 CPU%（iowait 单列）与网络速率。重启（boot ID 变化）、计数回退、CPU 或网卡数量变化、间隔超过 15 分钟时只记仪表值，
+不算速率，图上是缺口而不是零。旧 observer 没有 `metrics` 的报告照常接收；Fleet 先于平台镜像发布。
+
+历史在 SQLite DO 的 `metric_points` 中按节点（`host_key`）分三层，每行存每个序列的和、计数与最大值：
+5 分钟点保留 14 天，小时汇总 180 天，日汇总 2 年；单节点约 9,100 行、约 10 MB。每份报告写节点行与三层各一行，
+到期行每层每次最多删 32 行且只经主键；workerd 实测稳定状态每份报告 6 行写、16 行读（每天约 1,700 写，Free 为 10 万）。
+
+| 范围 | 读取层 | 步长 | 最多点数 |
+| --- | --- | --- | --- |
+| `day` | 5 分钟 | 5 分钟 | 288 |
+| `week` | 小时 | 1 小时 | 168 |
+| `month` | 小时 | 3 小时 | 240 |
+| `half_year` | 日 | 1 天 | 180 |
+| `two_years` | 日 | 3 天 | 244 |
+
+Owner API（`proto/fleet/ui/v1`）：`GET /api/v1/nodes`、`GET /api/v1/nodes/{node}`（最新样本）和
+`GET /api/v1/nodes/{node}:summarizeMetrics?range=&end_time=&metrics=`（每点为步长内 5 分钟样本的均值与最大值，
+一次最多读 730 行）。任一上报文件系统用量 ≥90% 沿用现有 `disk_high`；ZFS 上按数据集计算。
 
 本地先在仓库根目录运行一次 `pnpm install --frozen-lockfile`，再分别在 `worker/`、`web/` 运行 lint/typecheck/test。Worker 另运行 `test:runtime`，web 另 build。
 Observer 随平台镜像包含共享 proto；在 platform 环境运行 `python -m unittest discover -s tests/observer`，全是合成数据。

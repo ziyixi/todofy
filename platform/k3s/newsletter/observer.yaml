@@ -118,6 +118,15 @@ spec:
                 - name: meminfo
                   mountPath: /host-meminfo
                   readOnly: true
+                - name: host-net-dev
+                  mountPath: /host-net-dev
+                  readOnly: true
+                - name: root-fs
+                  mountPath: /host-fs/root
+                  readOnly: true
+                - name: k3s-fs
+                  mountPath: /host-fs/k3s
+                  readOnly: true
           volumes:
             - name: state
               persistentVolumeClaim:
@@ -130,6 +139,22 @@ spec:
               hostPath:
                 path: /proc/meminfo
                 type: File
+            # PID 1's view is the host network namespace; the Pod's own /proc/net/dev is not.
+            - name: host-net-dev
+              hostPath:
+                path: /proc/1/net/dev
+                type: File
+            # statvfs targets only, never listed or read: one public distro file on the root filesystem
+            # (a file has no subtree or nested mounts) and the K3s data directory (its agent and server
+            # state are root-only).
+            - name: root-fs
+              hostPath:
+                path: /usr/lib/os-release
+                type: File
+            - name: k3s-fs
+              hostPath:
+                path: /var/lib/rancher/k3s
+                type: Directory
             - name: systemd-snapshot
               emptyDir:
                 medium: Memory

@@ -31,6 +31,14 @@ Exactly k3s/cloudflared/ssh aliases are required; cloudflared_platform is option
 configured. Kubernetes state, readiness, daemon state and Newsletter process/drain state are distinct. None proves
 Codex, Notion or email success. `unknown_count` means provider outcomes need reconciliation, not a retry permission.
 
+Optional `metrics` (2026-10-28) carries numbers only: cumulative CPU milliseconds from `/proc/stat`, load averages,
+memory and swap bytes, statvfs of fixed filesystem roles (`root`, `k3s`, `state`), summed byte counters of physical
+interfaces (never their names), the kernel boot ID with uptime, and up to 16 workloads' CPU cores and working-set bytes
+summed by `app` label or CronJob name (never Pod names). Counters are doubles because the wire profile has no 64-bit
+integers; values stay below 2^53. A report without `metrics`, or with only some groups, is valid; an unreadable group is
+absent, never zero. Fleet refuses impossible relations (idle above total, available above total, unsorted workloads)
+and derives rates only between two reports of one boot. `node_metrics.json` is the synthetic fixture.
+
 Normal state snapshots overwrite one row. Only state transitions enter history (256 retained, 32 returned).
 No billing hard cap, remote control surface, cron or public health telemetry is created.
 

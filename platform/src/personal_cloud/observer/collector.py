@@ -10,11 +10,12 @@ import urllib.parse
 import uuid
 from pathlib import Path
 
-from ziyixi_proto.fleet.telemetry.v1.host_report_pb import HostReport
+from ziyixi_proto.fleet.telemetry.v1.host_report_pb import HostReport, NodeMetrics
 from ziyixi_proto.platform.runtime.v1.runtime_pb import NodeStatus
 from ziyixi_proto.wire_json import from_wire, to_wire
 
 from ..deployment.kubernetes import Client, DependencyUnavailable
+from .metrics import node_metrics
 from .newsletter_outcomes import outcomes
 from .provenance import source_sha
 from .systemd_snapshot import configured_daemons, legacy_daemons
@@ -229,6 +230,17 @@ def resource_percentages() -> tuple[float | None, float | None]:
     return disk, memory
 
 
+def telemetry(namespace: str) -> dict[str, object] | None:
+    """Node metrics that already meet the strict contract; any failure leaves the heartbeat without them."""
+    try:
+        value = node_metrics(namespace)
+        if value is not None:
+            from_wire(NodeMetrics, value, strict=True)
+        return value
+    except Exception:  # noqa: BLE001 — telemetry never costs the heartbeat, and its errors are not logged.
+        return None
+
+
 def observe(env: dict[str, str], sequence: int) -> bytes:
     cluster = kube(env)
     disk, memory = resource_percentages()
@@ -256,18 +268,30 @@ def observe(env: dict[str, str], sequence: int) -> bytes:
         "memory_used_percent": memory,
         "runtime": runtime_status(env),
         "observer_source_sha": source_sha(),
+        "metrics": telemetry(env.get("FLEET_KUBE_NAMESPACE", "personal-cloud")),
     }
-    for key in ("disk_used_percent", "memory_used_percent"):
+    for key in ("disk_used_percent", "memory_used_percent", "metrics"):
         if value[key] is None:
             value.pop(key)
     for section in ("cluster", "newsletter"):
         value[section] = {
             key: item for key, item in value[section].items() if item is not None
         }
-    message = from_wire(HostReport, value, strict=True).message
-    data = json.dumps(
-        to_wire(message), separators=(",", ":"), ensure_ascii=True
-    ).encode()
+    data = _encode(value)
+    # Telemetry never costs the heartbeat its size budget: workloads go first, then all metrics.
+    if len(data) > 16_384 and "metrics" in value:
+        value["metrics"].pop("workloads", None)
+        data = _encode(value)
+        if len(data) > 16_384:
+            value.pop("metrics")
+            data = _encode(value)
     if len(data) > 16_384:
         raise ObserverError("report_too_large")
     return data
+
+
+def _encode(value: dict[str, object]) -> bytes:
+    message = from_wire(HostReport, value, strict=True).message
+    return json.dumps(
+        to_wire(message), separators=(",", ":"), ensure_ascii=True
+    ).encode()

@@ -1,0 +1,133 @@
+{
+  "version": "fleet-report-v1",
+  "host_key": "vps",
+  "epoch": 1,
+  "sequence": 2,
+  "receipt_id": "6d2f8a1e-4b3c-4e5d-9f60-718293a4b5c6",
+  "observation_time": "2026-10-03T00:05:00Z",
+  "daemons": {
+    "k3s": {
+      "state": "active"
+    },
+    "cloudflared": {
+      "state": "active"
+    },
+    "ssh": {
+      "state": "active"
+    }
+  },
+  "cluster": {
+    "state": "ready",
+    "ready_count": 1,
+    "desired_count": 1,
+    "restart_count": 0
+  },
+  "newsletter": {
+    "state": "healthy",
+    "worker_healthy": true,
+    "drain_state": "active",
+    "queued_count": 0,
+    "inflight_count": 0,
+    "unknown_count": 0
+  },
+  "disk_used_percent": 20,
+  "memory_used_percent": 30,
+  "runtime": {
+    "name": "nodeStatus",
+    "node_key": "vps",
+    "state": "ready",
+    "observed_at": "2026-10-03T00:05:00Z",
+    "workloads": [
+      {
+        "name": "workloads/newsletter",
+        "workload_key": "newsletter",
+        "process_state": "running",
+        "admission_state": "accepting",
+        "health_state": "healthy",
+        "release": {
+          "state": "ready",
+          "desired": {
+            "workload_key": "newsletter",
+            "source_sha": "1111111111111111111111111111111111111111",
+            "image_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            "request_id": "cfdd9a7b-3d46-4d2b-8983-6e99fb005a5a",
+            "generation": 1
+          },
+          "actual": {
+            "workload_key": "newsletter",
+            "source_sha": "1111111111111111111111111111111111111111",
+            "image_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            "request_id": "cfdd9a7b-3d46-4d2b-8983-6e99fb005a5a",
+            "generation": 1
+          },
+          "observed_at": "2026-10-03T00:05:00Z",
+          "observed_generation": 1
+        },
+        "observed_at": "2026-10-03T00:05:00Z",
+        "active_count": 0,
+        "unknown_count": 0
+      }
+    ]
+  },
+  "observer_source_sha": "1111111111111111111111111111111111111111",
+  "metrics": {
+    "boot_id": "5f0c8a52-7d1e-4b8a-9c3f-2a6b1d4e8f70",
+    "uptime_seconds": 86400.25,
+    "cpu": {
+      "cpu_count": 4,
+      "total_milliseconds": 345600000,
+      "idle_milliseconds": 300000000,
+      "iowait_milliseconds": 1200000
+    },
+    "load": {
+      "one_minute": 0.42,
+      "five_minutes": 0.5,
+      "fifteen_minutes": 0.48
+    },
+    "memory": {
+      "total_bytes": 16777216000,
+      "available_bytes": 10737418240,
+      "swap_total_bytes": 4294967296,
+      "swap_free_bytes": 4294967296
+    },
+    "filesystems": {
+      "k3s": {
+        "size_bytes": 500000000000,
+        "used_bytes": 45000000000,
+        "available_bytes": 455000000000
+      },
+      "root": {
+        "size_bytes": 460000000000,
+        "used_bytes": 5000000000,
+        "available_bytes": 455000000000
+      },
+      "state": {
+        "size_bytes": 455500000000,
+        "used_bytes": 500000000,
+        "available_bytes": 455000000000
+      }
+    },
+    "network": {
+      "interface_count": 1,
+      "receive_bytes": 52428800000,
+      "transmit_bytes": 10485760000
+    },
+    "workloads": [
+      {
+        "workload_key": "codex-gateway",
+        "cpu_cores": 0.0021,
+        "memory_bytes": 104857600
+      },
+      {
+        "workload_key": "newsletter",
+        "cpu_cores": 0.015,
+        "memory_bytes": 268435456
+      },
+      {
+        "workload_key": "platform-runtime",
+        "cpu_cores": 0.004,
+        "memory_bytes": 73400320
+      }
+    ]
+  }
+}

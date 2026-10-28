@@ -1,16 +1,20 @@
 /** Single-host durable receipt ledger; atomic sequence admission and bounded metadata history. */
 import { DurableObject } from 'cloudflare:workers';
-import { FleetStatusSchema } from '@ziyixi/proto/fleet/ui/v1/fleet_ui_service_pb';
+import { FleetStatusSchema, ListNodesResponseSchema, SummarizeNodeMetricsResponseSchema } from '@ziyixi/proto/fleet/ui/v1/fleet_ui_service_pb';
+import { NodeSchema } from '@ziyixi/proto/fleet/ui/v1/node_pb';
 import { fromWire, toWire } from '@ziyixi/proto/wire-json';
 import type * as ops from '@ziyixi/proto/ops/v1/ops_wire';
 import type { Env } from './env.ts';
 import { statusSnapshot } from './health.ts';
+import { MetricStore, type RangeName } from './metrics.ts';
 import { freshness, parseReport, reportCodes, ReceiptError, type Report } from './report.ts';
 export const OBJECT_NAME = 'fleet-v1';
 
 type Stored = { sequence: number; hash: string; received_at: number; report: string; codes: string };
 
 export class FleetState extends DurableObject<Env> {
+  private readonly metrics: MetricStore;
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS snapshot (
@@ -20,6 +24,7 @@ export class FleetState extends DurableObject<Env> {
     ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS changes (
       id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, code TEXT NOT NULL
     )`);
+    this.metrics = new MetricStore(ctx.storage.sql);
   }
 
   private latest(): Stored | null {
@@ -53,6 +58,16 @@ export class FleetState extends DurableObject<Env> {
       JSON.stringify(report),
       JSON.stringify(reportCodes(report)));
       this.ctx.storage.sql.exec('DELETE FROM changes WHERE id <= (SELECT MAX(id)-256 FROM changes)');
+      // Telemetry history never blocks the heartbeat: a failed sample rolls back alone (a nested transaction is a
+      // savepoint) and the report still lands.
+      try {
+        this.ctx.storage.transactionSync(() => {
+          if (report.metrics) this.metrics.ingest(report.host_key, report.metrics, Date.parse(report.observation_time), now);
+          else this.metrics.prune(now);
+        });
+      } catch {
+        console.error(JSON.stringify({ event: 'fleet_metrics', status: 'skipped' }));
+      }
       return { accepted: true, sequence: report.sequence };
     });
   }
@@ -98,6 +113,33 @@ export class FleetState extends DurableObject<Env> {
     };
     const snapshot = fromWire(FleetStatusSchema, value, { strict: true }).message;
     return JSON.stringify(toWire(FleetStatusSchema, snapshot));
+  }
+
+  /** Wire JSON of `nodes/{node}`, or null for a node without metrics. */
+  node(node: string): string | null {
+    const view = this.metrics.node(node);
+    return view && JSON.stringify(toWire(NodeSchema, fromWire(NodeSchema, view, { strict: true }).message));
+  }
+
+  nodes(): string {
+    const value = { nodes: this.metrics.nodes(), next_page_token: '' };
+    return JSON.stringify(toWire(ListNodesResponseSchema, fromWire(ListNodesResponseSchema, value, { strict: true }).message));
+  }
+
+  /** Wire JSON of a summary ending at `end`, or null for a node without metrics. */
+  summarize(node: string, range: RangeName, end: number, metrics: readonly string[]): string | null {
+    const summary = this.metrics.summarize(node, range, end, metrics);
+    if (!summary) return null;
+    const value = {
+      name: `nodes/${node}`,
+      range,
+      start_time: new Date(summary.start).toISOString(),
+      end_time: new Date(summary.end).toISOString(),
+      step_seconds: summary.step,
+      series: summary.series,
+    };
+    const message = fromWire(SummarizeNodeMetricsResponseSchema, value, { strict: true }).message;
+    return JSON.stringify(toWire(SummarizeNodeMetricsResponseSchema, message));
   }
 
   status(app: 'fleet' | 'newsletter' | 'codex-gateway', now: number): ops.OpsStatus {
