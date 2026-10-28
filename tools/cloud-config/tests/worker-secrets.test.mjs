@@ -49,15 +49,17 @@ for (const [app, worker] of Object.entries(applications)) {
   })
 }
 
-test('Mail Hero retains required keys while old Todofy maps lose only the retired provider field', () => {
+test('Mail Hero retains required keys while old Todofy maps lose only the retired core fields', () => {
   const mail = workerSecretSpec('mail-hero')
   assert.throws(() => mergeWorkerSecrets('mail-hero', { [mail.github_secret]: '{}' }, {}, SettingError),
     (error) => error.setting === mail.github_secret)
   const core = workerSecretSpec('todofy-core')
   assert.deepEqual(mergeWorkerSecrets('todofy-core', { [core.github_secret]: '{}' }, {}, SettingError), {})
-  assert.equal(validWorkerSecrets('todofy-core', { GEMINI_API_KEY: privateValue }, false), false)
+  const retired = ['GEMINI_API_KEY', 'TODOIST_API_KEY', 'TODOIST_DEFAULT_PROJECT_ID', 'TODOIST_OPS_PROJECT_ID',
+    'TODOIST_REVIEW_PROJECT_ID']
+  for (const name of retired) assert.equal(validWorkerSecrets('todofy-core', { [name]: privateValue }, false), false)
   for (const value of [privateValue, 7, '']) {
-    const legacy = { GEMINI_API_KEY: value }
+    const legacy = Object.fromEntries(retired.map((name) => [name, value]))
     assert.deepEqual(mergeWorkerSecrets('todofy-core', { [core.github_secret]: JSON.stringify(legacy) }, {}, SettingError), {})
   }
   for (const name of ['ANTHROPIC_API_KEY', 'GEMINI_API_KEY_EXTRA', 'gemini_api_key']) {
