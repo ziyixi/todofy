@@ -1,6 +1,6 @@
 # Handoff
 
-Updated 2026-10-27 UTC. Current work describes in-flight and unreleased work in detail; released work moves to a
+Updated 2026-10-28 UTC. Current work describes in-flight and unreleased work in detail; released work moves to a
 dated record under `docs/history/` and is linked here, without run-ID ledgers. Rules are in [AGENTS](AGENTS.md);
 entry points in [README](README.md). Never put private content, credentials or raw production output here.
 
@@ -15,7 +15,7 @@ features, the FlowDay retirement), [October 20](docs/history/handoff-2026-10-20.
 
 ## Current work
 
-### Review cleanup wave (integrated, not yet pushed)
+### Review cleanup wave (on `main`, release not yet recorded)
 
 The owner approved fixing the October 25-27 review findings within these limits: backups stay as complete and
 recoverable as before (Model Router request bodies stay in its backups), no backup scope, retention or restore tool
@@ -25,11 +25,11 @@ core RPCs stay until their recorded dates; legacy contract schemas, fixtures and
 
 Nine package branches started from `origin/main` `4ed50919` and were reviewed separately. `claude/wave-integrated`
 merges them in the order ci, telemetry, watchmcp, router, mailsort, tasks, home, apps, docs (one merge commit each),
-then adds the cross-package fixes below. Nothing is pushed or deployed. Landing: push the integrated branch, wait for
-the complete `CI gate`, promote the same green SHA to `main`, then wait for the matching Personal cloud reconcile and
-a current Home check before delivery. When it lands, record the release here and move this section to a dated archive.
+then adds the cross-package fixes below. It is on `main`; its release, the matching Personal cloud reconcile and a
+current Home check are not yet recorded here. Once they are verified, record the release below and move this section
+to a dated archive.
 
-Next, in order: a backups wave, then the owner's secret cleanup and its small code follow-up (both tracked in
+Next, in order: the backups wave below, then the owner's secret cleanup and its small code follow-up (both tracked in
 private notes).
 
 Results by branch:
@@ -126,6 +126,74 @@ Owner follow-ups after the release:
   after 2026-11-02: delete Home's `GET /api/csrf`, `CsrfResponse`, `PATHS.csrf` and the legacy-410 block, and
   Todofy's `GET /api/csrf` (`issueCsrf`), together with the other dated routes.
 
+### Backups wave (integrated, not yet pushed)
+
+Mailsort, Personal MCP, Watch and the links app now back themselves up daily into their own private R2 buckets, as
+Tasks and Model Router already do. The same limits as the cleanup wave apply: nothing reduces another backup's scope,
+retention or restore path, no stored production data is deleted, the privacy pages are not changed here and
+`platform/src/personal_cloud/deployment/` is untouched. No new secret, route to another app, Paid feature or VPS
+service is added.
+
+`claude/backups-infra` (`79edcd54`, on `main`) declares the four buckets in `infra/storage.tf`. Four reviewed
+branches started from it: `claude/backups-mailsort`, `claude/backups-mcp`, `claude/backups-watch` and
+`claude/backups-links`. `claude/backups-integrated` merges them in that order (one merge commit each). It then
+regenerates the shared files: the Home registry, the account inventory, drift-desired, the ops golden and the service
+catalog. It also removes the `AHEAD_OF_BINDING` allowance from `test_infra_config.py`, because every declared bucket
+is now bound. Finally it brings `infra/README.md`, [architecture](docs/architecture.md) and the
+[rebuild](docs/rebuild.md#data-recovery) data-recovery section in line with the merged code. Nothing is pushed or
+deployed. Local checks only.
+
+What each app backs up. Every app keeps the newest 30 complete backups. Retention is in code, with no R2 lifecycle
+rule:
+
+| App | Bucket | Schedule (UTC) | Holds | Restore entry point |
+| --- | --- | --- | --- | --- |
+| Mailsort | `mailsort-backups` | 11:41 daily, from `MailsortState`'s Alarm | every table of the object's SQLite, with schema and rowids | set a new `MAILSORT_OBJECT` and release, then the owner RPC `StartBackupRestore` / `GetBackupRestore` (`mailsort.ui.v2`); [backup](mailsort/docs/backup.md) |
+| Personal MCP | `personal-mcp-backups` | 05:23 daily, from `SubscriptionStore`'s Alarm | every table and KV key of the store (Work memory, subscriptions, cursors, deliveries) | set a new `STORE_OBJECT` and release, then `POST /owner/restore` through Access; [backup](personal-mcp/docs/backup.md) |
+| Watch | `watch-backups` | 11:23 daily, from `WatchState`'s Alarm | every table, plus one copy of each evidence object a ready snapshot names | set a new `WATCH_OBJECT` and release, then 从备份恢复 on the 健康 page (`RestoreBackup`, `watch.ui.v1`); [backup](watch/docs/backup.md) |
+| links | `links-backups` | 05:25 daily, run in steps by the Worker's one `*/5` cron | every D1 table (`links`, `link_revisions`, `request_log`) | D1 Time Travel within 7 days, or `links/tools/backup-restore.ts` into a new D1 database, then `verify` and switch; [backup](links/docs/backup.md) |
+
+Each app has its own Node restore tool (`<app>/tools/backup-restore.ts`). The tool downloads a backup and checks each
+part's SHA-256 and row count. It can also upload a backup into a new bucket: parts first, the manifest last. The three
+Durable Object restores load only into an empty store. Until they finish they pause the app's writes, schedulers and
+backups. Then they make the state safe: nothing is replayed to Gmail or Tasks, and in-flight intents end as
+`restored`. Watch moves its event sequence 2^32 ahead, so Personal MCP's Watch cursor expires once and reports the
+gap. An object the Worker no longer names stops its own Alarm. Each app reports `backup_age_seconds` and
+`last_backup_at` to Home, with the app-only signals `backup_stale` (critical after 3 days) and `backup_failed`
+(warning). Personal MCP also raises `maintenance_mode` while a restore is unfinished. Home now binds the links app's
+`Ops` entrypoint (`LINKS`, fourteen Ops bindings) instead of probing its `/robots.txt`. The links cron is the
+account's fifth and last Workers Free cron trigger. Mailsort's Worker bundle budget rose from 138 to 148 KiB.
+
+Landing, in two steps:
+
+1. The bucket declaration (`79edcd54`) is already on `main`. Before pushing this branch, run the gated **Infra apply**
+   and confirm that it created `mailsort-backups`, `personal-mcp-backups`, `watch-backups` and `links-backups`. Each
+   app's deploy preflight stops on a missing bucket.
+2. Push `claude/backups-integrated` and wait for the complete `CI gate`. Promote the same green SHA to `main`. Then
+   wait for the matching Personal cloud reconcile and a current Home check. Home deploys after the links app, whose
+   `Ops` it now binds. Refresh Home's Cloudflare check, because its desired config gained Home's `LINKS` binding, the four
+   `BACKUPS` bindings, the links cron and the four buckets in the account inventory.
+
+Blocking before or with this release, which this branch does not change:
+`website/src/app/privacy/mailsort/page.tsx` (the Gmail OAuth consent policy) must say that daily backups of
+Mailsort's records stay in a private bucket in the owner's account, and that a deleted record can remain in a backup
+for up to 30 more days. `mailsort/AGENTS.md` requires this change together with the retention table in
+[design](mailsort/docs/design.md).
+
+Verify after deploy (read-only):
+
+- Each app's first backup. It starts at the first Alarm or tick after the release, because no app has backup state
+  yet. Home's next status call brings the Durable Object alarms forward. Check that `latest.json` and one
+  `backups/<start>/manifest.json` exist in each of the four buckets (keys only, never the content).
+- Home's Mailsort, Personal MCP, Watch and 短链接 tiles show `backup_age_seconds` and `last_backup_at`, with no
+  `backup_stale` or `backup_failed`. The 短链接 tile now comes from its Ops answer, not a probe.
+- After a day: each app's next natural daily run, and Workers Free usage (the links cron's 288 ticks a day, Durable
+  Object rows written, R2 Class A operations).
+- Not exercised in production: any restore, the owner restore calls through Access (Personal MCP's through
+  cloudflared), the upload into a new bucket, and a restore's real Free-plan rows-written cost. Mailsort's restore
+  writes at most 50k SQLite rows a UTC day, so a large store takes several days. These are separate, owner-authorized
+  exercises.
+
 ## Latest verified release
 
 `129d5fe9`, Router cost visibility and recommendation array schemas:
@@ -201,7 +269,8 @@ Deployments.
 - Mail Hero backs up natively through its DO Alarm and private R2 ([native backup](mail-hero/docs/native-backup.md)).
   Tasks backs itself up weekly into `tasks-backups` ([Tasks backup](tasks/docs/backup.md)), and Todofy backs up only
   its own D1 (both from release 2 of Boundary B). Model Router backs up request metadata and retained bodies daily
-  into its private bucket ([backup](model-router/docs/backup.md)).
+  into its private bucket ([backup](model-router/docs/backup.md)). With the backups wave, Mailsort, Personal MCP, Watch
+  and the links app each back up daily into their own private bucket (see Current work).
 - Provider keys are Router secrets and never pass through GitHub; spending is capped at the provider. Brief's stored
   budget and the other application budgets stay as they are; Workers Free remains in force.
 - Keep Home's persistent alert dismissal. Historical unknown business outcomes are not automatic replay permission;
