@@ -54,7 +54,8 @@ interface Manifest {
   started_at: string;
   created_at: string;
   schema_version: number;
-  tables: { name: string; sql: string; columns: string[]; max_rowid: number; rows: number; bytes: number; parts: BackupPart[] }[];
+  tables: { name: string; sql: string; columns: string[]; max_rowid: number; sequence: number | null; rows: number; bytes: number;
+    parts: BackupPart[] }[];
   kv: { rows: number; bytes: number; parts: BackupPart[] };
   excluded: { tables: string[]; kv: string[] };
 }
@@ -122,6 +123,8 @@ it('pins the store tables a backup holds; bump SCHEMA_VERSION with any change he
 it('backs up every table and KV key in bounded steps, then restores them row for row into an empty object', async () => {
   const rt = await start();
   await rt.call('owner', 'seed', 2400, 1200);
+  // A store restored once and backed up before it numbered a new entry: its sequence is past its last entry.
+  await rt.call('owner', 'exec', "UPDATE sqlite_sequence SET seq = 1207 WHERE name = 'work_entries'");
   const source = await rt.call<Dump>('owner', 'dump');
   expect(source.work_entries?.length).toBe(1200);
 
@@ -163,6 +166,7 @@ it('backs up every table and KV key in bounded steps, then restores them row for
     for (const part of table.parts) rows.push(...(await partLines(rt.bucket, part)).map(line => JSON.parse(line) as unknown));
     expect(rows, table.name).toEqual(asBackupRows(source[table.name] ?? []));
     expect(table.rows).toBe(rows.length);
+    expect(table.sequence, table.name).toBe(table.name === 'work_entries' ? 1207 : null);
   }
   expect(manifest.tables.find(table => table.name === 'deliveries')?.parts.length).toBeGreaterThan(1);
   const kv: unknown[] = [];
@@ -214,10 +218,14 @@ it('backs up every table and KV key in bounded steps, then restores them row for
   const restored = await rt.call<Dump>('target', 'dump');
   // Every event source is marked to be checked at once; everything else is the source, rowids and blob included.
   expect(restored.event_sources?.map(row => (row as unknown[]).slice(3))).toEqual([[0, 'restored'], [0, 'restored'], [0, 'restored']]);
-  // New Work entries are numbered past the gap, so no Work notice reuses an event ID the lost store may have sent.
+  // New Work entries are numbered past the gap from the backup's sequence, not its last entry, so no Work notice reuses
+  // an event ID the lost store may have sent; every etag moves by the gap, so no etag a Dot holds from it matches.
+  const etag = manifest.tables.find(table => table.name === 'work')?.columns.indexOf('etag') ?? -1;
+  expect(etag).toBeGreaterThan(0);
   const expected = { ...source, event_sources: source.event_sources?.map(row => [...(row as unknown[]).slice(0, 3), 0, 'restored']),
+    work: source.work?.map(row => (row as unknown[]).map((value, index) => index === etag ? (value as number) + WORK_SEQ_GAP : value)),
     sqlite_sequence: source.sqlite_sequence?.map(row => (row as unknown[])[1] === 'work_entries'
-      ? [(row as unknown[])[0], 'work_entries', 1200 + WORK_SEQ_GAP] : row) };
+      ? [(row as unknown[])[0], 'work_entries', 1207 + WORK_SEQ_GAP] : row) };
   expect(restored).toEqual(expected);
   // The restored store backs itself up at once; a second restore finds it filled.
   expect((await rt.call<Step>('target', 'backupStep', SLOT + 1000)).state?.job?.tables).not.toBeNull();

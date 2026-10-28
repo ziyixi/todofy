@@ -9,8 +9,9 @@
  * part without duplicates. RESTORE_MAX_ERRORS failed steps in a row fail the restore; the owner resumes it with the same call.
  *
  * The last step verifies every table's rows and the KV keys against the manifest, and that delivery_totals (rebuilt by
- * the deliveries triggers) matches the deliveries, and writes that to the status. It moves the Work entry numbers past
- * WORK_SEQ_GAP, so no new Work notice reuses an event ID the lost store sent, and marks every event source
+ * the deliveries triggers) matches the deliveries, and writes that to the status. It moves the Work entry numbers and
+ * etags WORK_SEQ_GAP past the backup's, so no new Work notice reuses an event ID the lost store sent and no etag the lost
+ * store handed out matches a restored Work, and marks every event source
  * `restored` (events.ts): the business sources take a new baseline at their next check, and the Work Watch source
  * replays from its cursor unless Watch no longer accepts it (watch-events.ts). Then the store backs itself up at once.
  */
@@ -24,8 +25,9 @@ import { RESTORED } from './events.ts';
 export const RESTORE_STEP_BYTES = 4 << 20;
 export const RESTORE_STEP_PARTS = 20;
 /**
- * Work entry numbers a restored store skips. A Work notice's event ID holds its entry's number, and the lost store went on
- * numbering after the backup: new entries start this far past the backup's, more than the store writes in years.
+ * Work entry numbers and etags a restored store skips. A Work notice's event ID holds its entry's number, and a Dot may
+ * hold an etag of the lost store, which went on after the backup: new entries start this far past the backup's sequence,
+ * and every Work's etag moves this far, more than the store writes in years.
  */
 export const WORK_SEQ_GAP = 1_000_000;
 export const RESTORE_RETRY_MS = 30_000;
@@ -33,8 +35,8 @@ export const RESTORE_MAX_ERRORS = 3;
 const PREFIX = /^backups\/\d{4}-\d{2}-\d{2}T\d{6}Z\/$/;
 
 interface Part { key: string; rows: number; sha256: string }
-/** A table of the manifest, or the KV keys (`columns` null). */
-interface Family { name: string; columns: string[] | null; rows: number; parts: Part[] }
+/** A table of the manifest, or the KV keys (`columns` null); `sequence` is an AUTOINCREMENT table's at the backup. */
+interface Family { name: string; columns: string[] | null; rows: number; parts: Part[]; sequence?: number | null }
 export interface Verification { name: string; expected: number; restored: number; ok: boolean }
 export interface RestoreState {
   backup: string;
@@ -127,7 +129,8 @@ export async function startRestore(storage: BackupStorage, bucket: R2Bucket | un
   const object = await bucket.get(backup + MANIFEST);
   if (!object) return refused(404, 'backup_not_found', `${backup} has no manifest: it is not a complete backup.`);
   let manifest: { format?: unknown; schema_version?: unknown; created_at?: unknown;
-    tables?: { name: string; columns: string[]; rows: number; parts: Part[] }[]; kv?: { rows: number; parts: Part[] } };
+    tables?: { name: string; columns: string[]; rows: number; parts: Part[]; sequence?: number | null }[];
+    kv?: { rows: number; parts: Part[] } };
   try { manifest = await object.json(); } catch { return refused(422, 'backup_unreadable', `${backup}${MANIFEST} is not JSON.`); }
   if (manifest.format !== BACKUP_FORMAT || !Array.isArray(manifest.tables) || !manifest.kv)
     return refused(422, 'backup_unreadable', `${backup}${MANIFEST} is not ${BACKUP_FORMAT}.`);
@@ -140,7 +143,8 @@ export async function startRestore(storage: BackupStorage, bucket: R2Bucket | un
       return refused(422, 'backup_schema_unsupported', `This release has no table ${table.name} with the backup's columns.`);
   }
   const families: Family[] = [
-    ...manifest.tables.map(table => ({ name: table.name, columns: table.columns, rows: table.rows, parts: table.parts })),
+    ...manifest.tables.map(table => ({ name: table.name, columns: table.columns, rows: table.rows, parts: table.parts,
+      sequence: table.sequence ?? null })),
     { name: 'kv', columns: null, rows: manifest.kv.rows, parts: manifest.kv.parts },
   ];
   if (families.some(family => family.parts.some(part => !part.key.startsWith(backup))))
@@ -274,10 +278,14 @@ function finish(storage: BackupStorage, state: RestoreState, now: number): void 
   storage.transactionSync(() => {
     // Checked at once: the business sources take their new baselines, the Watch source reads on from its cursor.
     if (tables.has('event_sources')) storage.sql.exec('UPDATE event_sources SET error_code=?, checked_at=0', RESTORED);
+    // Never below the backup's sequence: entries after its last row may have been numbered (and sent) already.
+    const sequence = state.families.find(family => family.name === 'work_entries')?.sequence ?? 0;
     if (tables.has('work_entries')) {
       storage.sql.exec("DELETE FROM sqlite_sequence WHERE name='work_entries'");
-      storage.sql.exec("INSERT INTO sqlite_sequence VALUES ('work_entries', (SELECT coalesce(max(seq), 0) FROM work_entries) + ?)", WORK_SEQ_GAP);
+      storage.sql.exec("INSERT INTO sqlite_sequence VALUES ('work_entries', max((SELECT coalesce(max(seq), 0) FROM work_entries), ?) + ?)",
+        sequence, WORK_SEQ_GAP);
     }
+    if (tables.has('work')) storage.sql.exec('UPDATE work SET etag = etag + ?', WORK_SEQ_GAP);
     storage.kv.delete(BACKUP_KEY);
     storage.kv.put(RESTORE_KEY, { ...state, phase: ok ? 'done' : 'failed', finished_at: now, verification,
       error_code: ok ? '' : 'verification_failed' });

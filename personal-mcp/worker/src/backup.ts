@@ -9,7 +9,8 @@
  *   latest.json                                           {"key": "backups/<job start>/"}, after the manifest
  *
  * `<job start>` is the UTC second the job started (`2026-10-28T052300Z`). The manifest (personal-mcp-backup-v1) holds
- * the schema version, each table's CREATE statement and columns, and each part's rows, bytes and SHA-256.
+ * the schema version, each table's CREATE statement and columns (and an AUTOINCREMENT table's sequence), and each
+ * part's rows, bytes and SHA-256.
  *
  * Every table is included but SQLite's own, Cloudflare's (`_cf_*`) and DERIVED_TABLES, which a restore rebuilds; every
  * KV key but STATE_KEYS, which describe the backup and the restore themselves. A table added later is backed up
@@ -72,6 +73,8 @@ export interface StoreTable {
 }
 interface Cursor extends StoreTable {
   max_rowid: number;
+  /** An AUTOINCREMENT table's sqlite_sequence when the job planned (null otherwise): numbers it has handed out. */
+  sequence: number | null;
   last: number;
   done: boolean;
   parts: BackupPart[];
@@ -244,10 +247,13 @@ export async function runBackup(storage: BackupStorage, bucket: R2Bucket | undef
  * step, such a row could move past the planned rowid and miss the backup.
  */
 function plan(sql: SqlStorage): Cursor[] {
+  const sequences = new Map<string, number>();
+  if (sql.exec("SELECT 1 FROM sqlite_master WHERE name='sqlite_sequence'").toArray().length)
+    for (const row of sql.exec<{ name: string; seq: number }>('SELECT name, seq FROM sqlite_sequence')) sequences.set(row.name, row.seq);
   return storeTables(sql)
     .map(table => {
       const { n, max } = sql.exec<{ n: number; max: number }>(`SELECT count(*) AS n, coalesce(max(rowid), 0) AS max FROM "${table.name}"`).one();
-      return { table: { ...table, max_rowid: max, last: 0, done: max === 0, parts: [] }, rows: n };
+      return { table: { ...table, max_rowid: max, sequence: sequences.get(table.name) ?? null, last: 0, done: max === 0, parts: [] }, rows: n };
     })
     .sort((a, b) => a.rows - b.rows || (a.table.name < b.table.name ? -1 : 1))
     .map(({ table }) => table);
@@ -309,7 +315,7 @@ const total = (parts: BackupPart[], field: 'rows' | 'bytes') => parts.reduce((su
 /** Writes the manifest (it marks the backup complete) and latest.json, then applies retention. */
 async function finish(bucket: R2Bucket, state: BackupState, job: Job, now: number): Promise<void> {
   const tables = [...job.tables ?? []].sort((a, b) => (a.name < b.name ? -1 : 1)).map(table => ({
-    name: table.name, sql: table.sql, columns: table.columns, max_rowid: table.max_rowid,
+    name: table.name, sql: table.sql, columns: table.columns, max_rowid: table.max_rowid, sequence: table.sequence,
     rows: total(table.parts, 'rows'), bytes: total(table.parts, 'bytes'), parts: table.parts,
   }));
   const manifest = {
@@ -317,7 +323,8 @@ async function finish(bucket: R2Bucket, state: BackupState, job: Job, now: numbe
     started_at: timestamp(job.started_at),
     created_at: timestamp(now),
     schema_version: SCHEMA_VERSION,
-    // Rows with rowid <= max_rowid when the job planned; nothing newer.
+    // Rows with rowid <= max_rowid when the job planned; nothing newer. `sequence` is an AUTOINCREMENT table's
+    // sqlite_sequence then, which a restore does not go below.
     tables,
     kv: { rows: total(job.kv.parts, 'rows'), bytes: total(job.kv.parts, 'bytes'), parts: job.kv.parts },
     excluded: { tables: DERIVED_TABLES, kv: STATE_KEYS },

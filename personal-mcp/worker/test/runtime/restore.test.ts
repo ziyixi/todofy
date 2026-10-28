@@ -255,7 +255,12 @@ it('backs a filled store up, restores it through the owner call into a new envir
   const earlier = before as { work: Record<string, unknown>; entries: unknown[]; pending_reports: { report_id: string }[] };
   expect(after.entries.slice(1)).toEqual(earlier.entries);
   expect(after.pending_reports.map(report => report.report_id)).toEqual(['synthetic-report', 'watch:41']);
-  expect({ ...after.work, last_report_seq: 0, updated_at: '' }).toEqual({ ...earlier.work, last_report_seq: 0, updated_at: '' });
+  // Its etag moved by the gap: an etag the lost store handed out after the backup never matches it.
+  expect(after.work.etag).toBe(String(Number(earlier.work.etag) + WORK_SEQ_GAP));
+  expect({ ...after.work, last_report_seq: 0, updated_at: '', etag: '' }).toEqual({ ...earlier.work, last_report_seq: 0, updated_at: '', etag: '' });
+  const stale = await rpc(target, 'tools/call', { name: 'work_checkpoint', arguments: { work_id: workId, request_id: crypto.randomUUID(),
+    etag: earlier.work.etag, changes: { checkpoint: 'Synthetic stale checkpoint' } } });
+  expect(stale.result).toMatchObject({ isError: true });
   expect(fixture.reads.taskBaselines).toBe(baselines.taskBaselines + 1);
   expect(fixture.reads.taskCursors).toEqual(baselines.taskCursors);
   expect(fixture.reads.watchCursors).toEqual([...baselines.watchCursors, '40']);

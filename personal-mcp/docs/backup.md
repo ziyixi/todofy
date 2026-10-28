@@ -24,16 +24,17 @@ secret, service or binding to another app; "Infra apply" created the bucket (`in
   `backups/<job start>/tables/<table>/<n>.ndjson.gz` (one JSON array per row: rowid, then the columns; a blob as
   `{"blob": "<base64>"}`), `backups/<job start>/kv/<n>.ndjson.gz` (one `[key, value]` per line), then
   `backups/<job start>/manifest.json` (format `personal-mcp-backup-v1`: the schema version, each table's CREATE
-  statement, columns and planned max rowid, and each part's rows, bytes and SHA-256), then `latest.json`, which
-  names the new backup. A prefix without a manifest is incomplete.
+  statement, columns, planned max rowid and, for `work_entries`, its AUTOINCREMENT sequence, and each part's rows,
+  bytes and SHA-256), then `latest.json`, which names the new backup. A prefix without a manifest is incomplete.
 - **Bounded steps.** One step per Alarm, a second apart. The first step fixes every table's max rowid; each step reads
   the KV keys and the tables, fewest rows first, up to 4 MiB of rows, without awaiting in between, and then stores one
   part per table it read. A store that fits one step is one consistent snapshot. A larger one adds the rest of its
   biggest tables (`deliveries`, `work_entries`) in later steps: rows added after the first step are left out, and a row
   changed between steps is saved as it is when its step reads it. The small tables that move a row to a new rowid when
-  they replace it (`own_changes`, `work_links`, `event_sources`) come first, so they are read whole in the first step. A cursor moves only after its part is stored, so a failed step repeats from
-  there. Three failed steps in a row fail the job, which starts again an hour later (three times), then at the next
-  05:23.
+  they replace it (`own_changes`, `work_links`, `event_sources`) and `work` come first, so they are read whole in the
+  first step while they fit in it (thousands of Works). A cursor moves only after its part is stored, so a failed step
+  repeats from there. Three failed steps in a row fail the job, which starts again an hour later (three times), then
+  at the next 05:23.
 - **Retention in code.** After each new backup, the newest 30 complete backups stay; older ones, and every incomplete
   prefix older than the new one, are deleted. A job never rewrites a complete backup and never touches another
   backup's objects. One listing of `backups/` finds the complete and incomplete prefixes, so the cleanup costs a few R2
@@ -113,7 +114,10 @@ delete them afterwards.
    ```
    Every `verification` entry has `ok: true` and `restored` equal to `expected`. On `failed`, `error_code` says why
    (`part_missing`, `part_hash_mismatch`, `insert_failed`, ...); fix the cause and repeat step 3's POST to resume. A
-   failed `verification_failed` cannot resume: start again from step 2 with another new name.
+   failed `verification_failed` cannot resume: start again from step 2 with another new name. Workers Free allows
+   100,000 Durable Object rows written a day, and a delivery also writes index rows and its total: a store larger than
+   that stops at the limit (`insert_failed` or `storage_error`), and the same POST the next day resumes it where it
+   stopped.
 5. Afterwards, Dots call the same tools; their connection and Access OAuth are unchanged. Ask a Dot to read
    `work_context` and `work_get` again before it checkpoints, and check `connection_status` and Home: the event
    sources clear `restored` at their first check, and a new backup of the restored store appears within a minute.
@@ -129,15 +133,16 @@ delete them afterwards.
   (`watch:<sequence>`) the lost store made; report IDs the restored store already holds are not repeated. If Watch no
   longer has those events, or refuses the cursor because Watch itself was restored behind it, each open Work with a
   Watch gets one `blocked` gap report and the cursor starts again from now, as after an expired cursor.
-- New Work entries are numbered a million past the backup's last one. A Work notice's event ID holds its entry's
-  number, and the lost store went on numbering after the backup, so a report the restored store makes never reuses an
-  event ID a Dot already received for another report.
+- New Work entries are numbered a million past the backup's sequence, and every Work's etag moves a million up. A Work
+  notice's event ID holds its entry's number, and the lost store went on numbering after the backup, so a report the
+  restored store makes never reuses an event ID a Dot already received for another report; an etag a Dot kept from the
+  lost store never matches, so its checkpoint is refused until it reads the Work again.
 - Pending deliveries in the backup are sent again with their frozen event IDs and bodies; accepted ones are not.
 
 ### What a restore does not cover
 
-- Anything after the backup: Work records, reports and checkpoints written since are gone, and Work etags after the
-  backup point can be issued again. A Dot must read the Work again before it checkpoints; a stale etag is refused.
+- Anything after the backup: Work records, reports and checkpoints written since are gone. A Dot must read the Work
+  again before it checkpoints; a stale etag is refused.
 - Business notifications between the backup and the restore (see above); Dots read current facts through the tools.
 - Business data, which stays in Tasks, Todofy, Recall, Watch and Home and their own backups.
 - The ChatGPT connection, Access OAuth and secrets: Access and ChatGPT hold the connection; a new account needs the
