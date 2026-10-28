@@ -20,7 +20,7 @@
  * release that bound the bucket). An empty store (no watch and nothing a watch made) is never backed up: a new object
  * after a disaster must not push the good backups out. While a job runs the scheduler waits and so does every write
  * (state.ts: the API answers BACKUP_RUNNING), so the copy is one consistent point: the rows, and the evidence they
- * name. A step reads at most STEP_BYTES of rows (into parts of at most PART_BYTES) or copies at most EVIDENCE_COPIES objects
+ * name. A step reads at most STEP_BYTES of rows (into parts of at most PART_BYTES) or reads at most EVIDENCE_COPIES objects
  * (EVIDENCE_BYTES); a cursor moves only after its part or copy is stored, so a failed step repeats from there and
  * writes the same keys. MAX_ERRORS failed steps in a row fail the job; it starts again FAILED_RETRY_MS later, or at the
  * next daily slot after MAX_FAILED_JOBS failed jobs in a row.
@@ -61,7 +61,7 @@ export const PART_BYTES = 4 * 1024 * 1024;
 export const STEP_BYTES = 16 * 1024 * 1024;
 /** Rows per query of a table page. */
 export const PAGE_ROWS = 100;
-/** Evidence objects a step copies at most (a GET and a PUT each), and their bytes. */
+/** Evidence objects a step reads at most (a GET each, and a PUT each one found), and their bytes. */
 export const EVIDENCE_COPIES = 40;
 export const EVIDENCE_BYTES = 24 * 1024 * 1024;
 /** Evidence keys a step looks at (most were copied before: a row read each, no R2 call). */
@@ -120,6 +120,8 @@ interface Job {
   /** The last evidence key looked at, and the referenced ones the evidence bucket did not hold. */
   evidence_after: string;
   missing: string[];
+  /** The manifest is stored: a repeated last step writes only latest.json (a complete backup is never rewritten). */
+  manifest_written?: boolean;
 }
 export interface BackupState {
   /** When the object first ran a backup step (ms): a first backup's stale time runs from it. */
@@ -261,6 +263,12 @@ export function backupDue(store: Store, now: number): number {
   const state = backupState(store);
   if (state === null) return now;
   return state.job ? now : state.next_run;
+}
+
+/** After a restore: the restored store backs itself up at the next alarm, not at the next daily slot. */
+export function backupSoon(store: Store): void {
+  const state = backupState(store);
+  if (state !== null && state.job === null) saveState(store, { ...state, next_run: 0 });
 }
 
 export function backupFacts(store: Store): BackupFacts {
@@ -406,12 +414,14 @@ async function storePart(bucket: R2Bucket, key: string, lines: string[]): Promis
  * step's copies or bytes are spent. A key `backup_evidence` holds is already in the bucket: no R2 call.
  */
 async function evidenceStep({ store, bucket, evidence }: BackupDeps, job: Job): Promise<void> {
-  let copies = 0;
+  let reads = 0;
   let bytes = 0;
   const keys = referencedEvidence(store, job.evidence_after, EVIDENCE_SCAN);
   for (const key of keys) {
     if (store.one(`SELECT 1 AS found FROM backup_evidence WHERE key = ?`, key) === undefined) {
-      if (copies >= EVIDENCE_COPIES || bytes >= EVIDENCE_BYTES) return;
+      if (reads >= EVIDENCE_COPIES || bytes >= EVIDENCE_BYTES) return;
+      // Every GET counts, a missing object's too: a lost evidence bucket must not cost a step a thousand calls.
+      reads += 1;
       const object = evidence ? await evidence.get(key) : null;
       if (object === null) {
         // The scheduler waits during a job, so nothing deleted it meanwhile: the evidence bucket lost it.
@@ -424,7 +434,6 @@ async function evidenceStep({ store, bucket, evidence }: BackupDeps, job: Job): 
           customMetadata: { sha256 },
         });
         store.run(`INSERT OR REPLACE INTO backup_evidence (key, sha256, bytes) VALUES (?, ?, ?)`, key, sha256, data.byteLength);
-        copies += 1;
         bytes += data.byteLength;
       }
     }
@@ -462,7 +471,10 @@ async function finish({ store, bucket }: BackupDeps, state: BackupState, job: Jo
     excluded: { ...EXCLUDED_TABLES },
   };
   const json = { httpMetadata: { contentType: 'application/json' } };
-  await bucket.put(job.prefix + MANIFEST, JSON.stringify(manifest, null, 1), json);
+  if (job.manifest_written !== true) {
+    await bucket.put(job.prefix + MANIFEST, JSON.stringify(manifest, null, 1), json);
+    job.manifest_written = true;
+  }
   await bucket.put(LATEST, JSON.stringify({ key: job.prefix }), json);
   state.job = null;
   state.failed_jobs = 0;
@@ -499,19 +511,21 @@ async function deleteKeys(bucket: R2Bucket, keys: string[]): Promise<void> {
 }
 
 /**
- * Keeps the newest KEEP complete backups (`current` counts) and the evidence copies they name; deletes every other
- * complete backup older than them, every incomplete prefix older than `current`, and every evidence copy no kept
- * manifest names (the ones this store copied, and the ones the deleted manifests named). The copies go first, then
- * each deleted backup's manifest and its parts.
+ * Keeps the newest KEEP complete backups (`current` counts), every prefix newer than `current` (another object's, never
+ * this job's to judge) and the evidence copies they name; deletes every other complete backup older than them, every
+ * incomplete prefix older than `current`, and every evidence copy no kept manifest names (the ones this store copied,
+ * and the ones the deleted manifests named). The copies go first, then each deleted backup's manifest and its parts.
  */
 export async function applyRetention(store: Store, bucket: R2Bucket, current: string): Promise<{ deleted: string[]; evidence: number }> {
-  const older = (await backupPrefixes(bucket)).filter((prefix) => prefix <= current).sort().reverse();
+  const prefixes = (await backupPrefixes(bucket)).sort().reverse();
   const kept = new Set<string>();
   const retired: { prefix: string; manifest: Manifest | null }[] = [];
   let keptCount = 0;
-  for (const prefix of older) {
+  for (const prefix of prefixes) {
     const manifest = await readManifest(bucket, prefix);
-    if (manifest !== null && keptCount < KEEP) {
+    if (prefix > current) {
+      for (const object of manifest?.evidence.objects ?? []) kept.add(object.key);
+    } else if (manifest !== null && keptCount < KEEP) {
       keptCount += 1;
       for (const object of manifest.evidence.objects) kept.add(object.key);
     } else if (manifest !== null || prefix < current) retired.push({ prefix, manifest });

@@ -25,7 +25,7 @@ import {
   STEP_BYTES,
   type Manifest,
 } from '../../src/backup.ts';
-import { RESTORE_SEQUENCE_GAP } from '../../src/restore.ts';
+import { RESTORE_EVIDENCE_LOOKS, RESTORE_SEQUENCE_GAP } from '../../src/restore.ts';
 
 const DAY = 86_400_000;
 /** 2026-10-28T11:23:00Z: the daily slot. */
@@ -51,8 +51,9 @@ beforeAll(async () => {
       constructor(ctx, env) {
         super(ctx, env);
         this.store = new Store(ctx.storage.sql);
-        this.failing = { put: 0, get: 0 };
+        this.failing = { put: 0, get: 0, putKey: '' };
         this.calls = { put: 0, get: 0 };
+        this.evidenceCalls = { get: 0, head: 0, put: 0 };
         ctx.blockConcurrencyWhile(async () => this.store.migrate());
       }
       // BACKUPS with puts and gets that fail on demand, counted.
@@ -63,11 +64,19 @@ beforeAll(async () => {
           if (this.failing[kind] > 0) { this.failing[kind] -= 1; return Promise.reject(new Error('synthetic_outage')); }
           return run();
         };
-        return { put: (...a) => call('put', () => real.put(...a)), get: (...a) => call('get', () => real.get(...a)),
+        const put = (key, ...rest) => key === this.failing.putKey ? Promise.reject(new Error('synthetic_outage')) : call('put', () => real.put(key, ...rest));
+        return { put, get: (...a) => call('get', () => real.get(...a)),
           head: (...a) => real.head(...a), list: (...a) => real.list(...a), delete: (...a) => real.delete(...a) };
       }
+      // EVIDENCE_STORE with its calls counted (an invocation may make 1,000 calls to Cloudflare services).
+      evidence() {
+        const real = this.env.EVIDENCE_STORE;
+        const count = (kind, run) => { this.evidenceCalls[kind] += 1; return run(); };
+        return { get: (...a) => count('get', () => real.get(...a)), head: (...a) => count('head', () => real.head(...a)),
+          put: (...a) => count('put', () => real.put(...a)) };
+      }
       restoreDeps() {
-        return { store: this.store, backups: this.bucket(), evidence: this.env.EVIDENCE_STORE, transact: fn => this.ctx.storage.transactionSync(fn) };
+        return { store: this.store, backups: this.bucket(), evidence: this.evidence(), transact: fn => this.ctx.storage.transactionSync(fn) };
       }
       async fetch(request) {
         const { op, args } = await request.json();
@@ -82,9 +91,10 @@ beforeAll(async () => {
             }
             return Response.json({ ok: out });
           }
-          if (op === 'fail') { this.failing = { put: 0, get: 0, ...args[0] }; return Response.json({ ok: null }); }
+          if (op === 'fail') { this.failing = { put: 0, get: 0, putKey: '', ...args[0] }; return Response.json({ ok: null }); }
           if (op === 'calls') { const calls = this.calls; this.calls = { put: 0, get: 0 }; return Response.json({ ok: calls }); }
-          if (op === 'backup') return Response.json({ ok: await runBackup({ store: this.store, bucket: this.bucket(), evidence: this.env.EVIDENCE_STORE }, args[0]) });
+          if (op === 'evidence_calls') { const calls = this.evidenceCalls; this.evidenceCalls = { get: 0, head: 0, put: 0 }; return Response.json({ ok: calls }); }
+          if (op === 'backup') return Response.json({ ok: await runBackup({ store: this.store, bucket: this.bucket(), evidence: this.evidence() }, args[0]) });
           if (op === 'retention') return Response.json({ ok: await applyRetention(this.store, this.env.BACKUPS, args[0]) });
           if (op === 'restore_start') {
             try { await startRestore(this.restoreDeps(), args[0], args[1]); return Response.json({ ok: 'started' }); }
@@ -458,5 +468,95 @@ describe('the restore', () => {
     expect((await state('c')).restore?.state).toBe('succeeded');
     const restored = await tables('c');
     expect(restored.changes).toEqual((await tables('a')).changes);
+  });
+});
+
+describe('the R2 calls of a step, a repeated last step and a newer backup', () => {
+  /** 2027-01-06T11:23:00Z: after every backup above. */
+  const LATER = T + 70 * DAY;
+  type Calls = { get: number; head: number; put: number };
+
+  it('reads at most EVIDENCE_COPIES evidence objects a step, a lost one too', async () => {
+    const present = await seed('m', { evidence: 210 });
+    // Objects the evidence bucket lost: each costs a GET as well.
+    for (let i = 0; i < 45; i++) await sql('m', `INSERT INTO evidence_snapshots VALUES (?, 'w1', 1, 'sha', ?, '', 1)`, `lost${String(i).padStart(12, '0')}`, `captures/lost/${String(i)}.json`);
+    await call('m', 'evidence_calls');
+    let at = LATER;
+    let evidenceSteps = 0;
+    for (let steps = 0; steps < 50; steps++) {
+      const phase = (await state('m')).backup?.job?.phase ?? 'tables';
+      const step = await call<{ ran: boolean; next: number }>('m', 'backup', at);
+      const calls = await call<Calls>('m', 'evidence_calls');
+      expect(calls.get, `step ${String(steps)}`).toBeLessThanOrEqual(EVIDENCE_COPIES);
+      if (phase === 'evidence') evidenceSteps += 1;
+      if ((await state('m')).backup?.job == null) break;
+      at = step.next;
+    }
+    expect((await state('m')).backup?.status).toBe('ok');
+    expect(evidenceSteps).toBe(Math.ceil((present.length + 45) / EVIDENCE_COPIES));
+    const manifest = await json<Manifest>(`${(await json<{ key: string }>(LATEST)).key}manifest.json`);
+    expect(manifest.evidence.objects.map((object) => object.key)).toEqual(present);
+    expect(manifest.evidence.missing).toHaveLength(45);
+  });
+
+  it('a restore looks at most RESTORE_EVIDENCE_LOOKS evidence objects a step, all of them present', async () => {
+    const manifest = await json<Manifest>(`${(await json<{ key: string }>(LATEST)).key}manifest.json`);
+    expect(manifest.evidence.objects.length).toBeGreaterThan(RESTORE_EVIDENCE_LOOKS);
+    expect(await call('n', 'restore_start', '', LATER + DAY / 2)).toBe('started');
+    await call('n', 'evidence_calls');
+    let at = LATER + DAY / 2;
+    let evidenceSteps = 0;
+    for (let steps = 0; steps < 50 && (await state('n')).restore?.state === 'running'; steps++) {
+      at = (await call<number | null>('n', 'restore', at)) ?? at;
+      const calls = await call<Calls>('n', 'evidence_calls');
+      expect(calls.head, `step ${String(steps)}`).toBeLessThanOrEqual(RESTORE_EVIDENCE_LOOKS);
+      if (calls.head > 0) evidenceSteps += 1;
+    }
+    const { restore } = await state('n');
+    expect(restore?.state).toBe('succeeded');
+    expect(evidenceSteps).toBe(Math.ceil(manifest.evidence.objects.length / RESTORE_EVIDENCE_LOOKS));
+    expect(restore?.evidence).toEqual({ restored: 0, present: manifest.evidence.objects.length, missing: 45, mismatched: 0 });
+  });
+
+  it('the restored store backs itself up at its next alarm', async () => {
+    expect((await state('n')).backup?.next_run ?? 0).toBe(0);
+    await call('n', 'calls');
+    await backupAll('n', LATER + DAY / 2 + 60_000);
+    expect((await state('n')).backup?.status).toBe('ok');
+    // Every evidence copy came with the restore: the job PUT only its parts, the manifest and latest.json.
+    const manifest = await json<Manifest>(`${(await json<{ key: string }>(LATEST)).key}manifest.json`);
+    expect((await call<{ put: number }>('n', 'calls')).put).toBe(manifest.tables.reduce((sum, table) => sum + table.parts.length, 0) + 2);
+  });
+
+  it('a repeated last step writes latest.json, never the complete manifest again', async () => {
+    let at = LATER + DAY;
+    for (let steps = 0; steps < 50 && (await state('m')).backup?.job?.phase !== 'finish'; steps++) at = (await call<{ next: number }>('m', 'backup', at)).next;
+    const prefix = (await state('m')).backup?.job?.prefix ?? '';
+    await call('m', 'fail', { putKey: LATEST });
+    at = (await call<{ next: number }>('m', 'backup', at)).next;
+    const written = await backups.head(`${prefix}manifest.json`);
+    expect(written).not.toBeNull();
+    expect((await state('m')).backup?.job?.errors).toBe(1);
+    await call('m', 'fail', {});
+    await call('m', 'backup', at);
+    expect((await state('m')).backup?.status).toBe('ok');
+    expect((await json<{ key: string }>(LATEST)).key).toBe(prefix);
+    expect((await backups.head(`${prefix}manifest.json`))?.version).toBe(written?.version);
+  });
+
+  it('retention keeps a newer backup and the evidence copies it names', async () => {
+    const current = (await json<{ key: string }>(LATEST)).key;
+    const newer = 'backups/2099-01-01T000000Z/';
+    const key = 'images/0000000000000000000000000000000000000000000000000000000000000000.jpg';
+    const manifest = { ...(await json<Manifest>(`${current}manifest.json`)) };
+    manifest.evidence = { root: 'evidence/', objects: [{ key, sha256: sha256(JPEG), bytes: JPEG.byteLength }], missing: [] };
+    await backups.put(`${newer}manifest.json`, JSON.stringify(manifest));
+    await backups.put(`evidence/${key}`, JPEG);
+    // This store copied it once too, and none of its own backups names it.
+    await sql('m', `INSERT INTO backup_evidence VALUES (?, ?, ?)`, key, sha256(JPEG), JPEG.byteLength);
+    await call('m', 'retention', current);
+    expect(await backups.head(`evidence/${key}`)).not.toBeNull();
+    expect(await backups.head(`${newer}manifest.json`)).not.toBeNull();
+    await backups.delete([`${newer}manifest.json`, `evidence/${key}`]);
   });
 });

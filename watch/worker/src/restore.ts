@@ -12,7 +12,8 @@
  *             keeps an old state from acting again: every undelivered notification and every task request not yet
  *             created is settled without sending (the changes stay in the inbox), and the event feed's sequence moves
  *             RESTORE_SEQUENCE_GAP ahead with its floor, so a reader's saved position expires (CURSOR_EXPIRED: one gap,
- *             then a new baseline) and no new event repeats a sequence it saw.
+ *             then a new baseline) and no new event repeats a sequence it saw; the next alarm backs the restored
+ *             store up.
  *
  * The evidence goes first, so no row is visible before the objects it names. Until the restore succeeds every other
  * write is refused (RESTORE_RUNNING), the scheduler and the daily backup wait. MAX_ERRORS failed steps in a row fail
@@ -24,6 +25,7 @@ import {
   BACKUP_FORMAT,
   BACKUP_NAME,
   backupRunning,
+  backupSoon,
   backupTables,
   decodeCell,
   EVIDENCE_ROOT,
@@ -42,8 +44,12 @@ import { SCHEMA_VERSION, type Store } from './store.ts';
 
 /** Rows (decompressed) a step loads at most. */
 export const RESTORE_STEP_BYTES = 16 * 1024 * 1024;
-/** Evidence objects a step copies back at most, and their bytes. */
+/**
+ * Evidence objects a step copies back at most, and their bytes; and the objects it looks at (a HEAD each, a GET and a
+ * PUT for a copy), well inside an invocation's 1,000 calls to Cloudflare services when the bucket already holds them.
+ */
 export const RESTORE_EVIDENCE = 40;
+export const RESTORE_EVIDENCE_LOOKS = 200;
 export const RESTORE_EVIDENCE_BYTES = 24 * 1024 * 1024;
 export const CONTINUE_MS = 1000;
 export const ERROR_RETRY_MS = 60_000;
@@ -253,9 +259,11 @@ async function evidenceStep(backups: R2Bucket, evidence: R2Bucket, manifest: Man
   const objects = manifest.evidence.objects;
   let copies = 0;
   let bytes = 0;
-  while (state.evidence_index < objects.length && copies < RESTORE_EVIDENCE && bytes < RESTORE_EVIDENCE_BYTES) {
+  let looks = 0;
+  while (state.evidence_index < objects.length && copies < RESTORE_EVIDENCE && bytes < RESTORE_EVIDENCE_BYTES && looks < RESTORE_EVIDENCE_LOOKS) {
     const entry = objects[state.evidence_index];
     if (entry === undefined) break;
+    looks += 1;
     const head = await evidence.head(entry.key);
     if (head !== null && head.size === entry.bytes) state.evidence.present += 1;
     else {
@@ -349,6 +357,8 @@ function finish({ store, transact }: RestoreDeps, manifest: Manifest, state: Res
     // The evidence copies the backup bucket holds: the next backup copies none of them again.
     for (const object of manifest.evidence.objects)
       store.run(`INSERT OR IGNORE INTO backup_evidence (key, sha256, bytes) VALUES (?, ?, ?)`, object.key, object.sha256, object.bytes);
+    // The restored state's own first backup, at once (Home then sees its age; the copies above cost no R2 call).
+    backupSoon(store);
     saveState(store, done);
     return notifications + intents;
   });

@@ -157,6 +157,8 @@ describe('backup and restore of the real WatchState', () => {
     // Repeating it while it runs answers its progress; another backup or a write is refused.
     expect((await b.api.restoreBackup({ name: 'serviceStatus', backup: '' })).restore?.state).toBe(BackupRestore_State.RUNNING);
     expect(reasonOf(await rejection(b.api.createWatch({ watchId: 'early', requestId: op(), watch: { displayName: 'early', uri: SHOP } })))).toBe('RESTORE_RUNNING');
+    // Home's guard waits too (the restore counts the meta rows against the manifest).
+    await expect(b.opsSetGuard({ level: 'shed', reason: 'do_rows_read_high', until: new Date(restoredAt + HOUR).toISOString() })).rejects.toThrow('unavailable');
     // Its steps, and not one more: the next alarm would check the watches.
     at = restoredAt;
     for (let steps = 0; steps < 50; steps++) {
@@ -171,6 +173,10 @@ describe('backup and restore of the real WatchState', () => {
     expect(manifest.evidence.objects.filter((object) => object.key.startsWith('images/')).length).toBe(1);
     expect(done?.evidenceRestoredCount).toBe(manifest.evidence.objects.length);
     expect(done?.evidenceMissingCount).toBe(0);
+    // The next alarm backs the restored store up: Home sees a fresh age.
+    expect((await b.step(at)) as unknown).toMatchObject({ job: 'backup' });
+    for (let steps = 0; (await backupJobOpen(b)) && steps < 50; steps++) at = (await b.step(at + 1000)).next;
+    expect((await b.api.getServiceStatus({ name: 'serviceStatus' })).lastBackup).toMatch(/^backups\/2026-10-02T1323\d\dZ\/$/);
 
     // Row for row, but for what keeps the old state from acting again.
     const restored = await dump(b);

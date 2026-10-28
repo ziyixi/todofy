@@ -272,6 +272,8 @@ export class WatchState extends DurableObject<Env> {
 
   /** setGuard(): shed or normal (ops-status.ts); the next alarm pass applies it. */
   opsSetGuard(input: unknown): GuardOutcome {
+    // A restore counts its rows against the manifest, the guard's meta row too: Home's write waits (Ops: unavailable).
+    if (restoreBlocking(this.store)) throw new Error('unavailable');
     return this.transact(() => setGuard(this.store, input, this.now()));
   }
 
