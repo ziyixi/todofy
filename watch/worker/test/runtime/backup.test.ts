@@ -516,6 +516,9 @@ describe('the R2 calls of a step, a repeated last step and a newer backup', () =
     expect(restore?.state).toBe('succeeded');
     expect(evidenceSteps).toBe(Math.ceil(manifest.evidence.objects.length / RESTORE_EVIDENCE_LOOKS));
     expect(restore?.evidence).toEqual({ restored: 0, present: manifest.evidence.objects.length, missing: 45, mismatched: 0 });
+    // Row for row, but for what the restore settles on purpose.
+    const [source, restored] = [await tables('m'), await tables('n')];
+    for (const name of Object.keys(source)) if (!['notifications', 'intents', 'sqlite_sequence', 'meta'].includes(name)) expect(restored[name], name).toEqual(source[name]);
   });
 
   it('the restored store backs itself up at its next alarm', async () => {
