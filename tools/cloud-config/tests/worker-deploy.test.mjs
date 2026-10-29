@@ -65,6 +65,19 @@ test('the owner inputs overlay the map: the aliases are checked first, then the 
     assert.throws(() => deploy.generateSecrets({ ...env, WATCH_ACCESS_OWNER: 'x', WATCH_ACCESS_OWNER_ALIASES: 'x' }), { setting: 'WATCH_ACCESS_OWNER_ALIASES' })
     assert.throws(() => deploy.generateSecrets({ ...env, WATCH_ACCESS_OWNER: 'x' }), { setting: 'WATCH_ACCESS_OWNER' })
     assert.throws(() => deploy.generateSecrets({ ...env, WATCH_WORKER_SECRETS: JSON.stringify({ UNDECLARED: 'x' }) }), { setting: 'WATCH_WORKER_SECRETS' })
+    assert.throws(() => standard(url, { worker: 'no-such-worker' }), /Unknown Worker secret declaration/)
+  })
+})
+
+test('a map that names an owner-only secret is refused by the map name', () => {
+  scratch((_, url) => {
+    // An owner-only secret is never a declared binding (worker-secrets.json), so a map naming one is refused as
+    // undeclared first; this check is the second line. A declared name stands in for one here.
+    const deploy = standard(url, { worker: 'recall', owner: 'RECALL_ACCESS_OWNER', ownerOnly: ['ACCESS_OWNER_ALIASES'] })
+    assert.deepEqual(deploy.OWNER_ONLY_SECRETS, ['ACCESS_OWNER_ALIASES'])
+    assert.deepEqual(standard(url).OWNER_ONLY_SECRETS, [])
+    assert.throws(() => deploy.generateSecrets({ RECALL_ACCESS_OWNER: 'owner@example.org', RECALL_ACCESS_OWNER_ALIASES: '' }),
+      (error) => error instanceof SettingError && error.setting === 'RECALL_WORKER_SECRETS')
   })
 })
 

@@ -18,7 +18,7 @@
  *   node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy [--dry-run] \
  *     --config ../wrangler.toml --secrets-file "$RUNNER_TEMP/<app>-secrets.json"     (from worker/)
  */
-import { mergeWorkerSecrets } from './worker-secrets.mjs'
+import { mergeWorkerSecrets, workerSecretSpec } from './worker-secrets.mjs'
 import { spawnSync } from 'node:child_process'
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -80,10 +80,12 @@ const assignment = (key, value) => new RegExp(`^\\s*${key}\\s*=${value === undef
  * - worker: its entry in worker-secrets.json (the <APP>_WORKER_SECRETS map and the bindings it may hold);
  * - injected: the --var rows {name, from, kind, pattern} in flag order, BUILD_SHA among them;
  * - owner: the input holding the owner's address, whose aliases are `<owner>_ALIASES`;
+ * - ownerOnly: secrets the owner puts from their own machine, never by a deploy: a map that names one is refused;
  * - guard: {identifier: rule} (IDENTIFIERS, RULES), checked in this order.
  */
-export function workerDeploy(url, { worker, injected, owner, guard }) {
+export function workerDeploy(url, { worker, injected, owner, ownerOnly = [], guard }) {
   const CONFIG = fileURLToPath(new URL('../wrangler.toml', url))
+  const map = workerSecretSpec(worker).github_secret
   for (const [key, rule] of Object.entries(guard)) {
     if (!Object.hasOwn(IDENTIFIERS, key) || !RULES.includes(rule)) throw new Error(`Unknown deploy guard: ${key} ${rule}`)
   }
@@ -104,12 +106,14 @@ export function workerDeploy(url, { worker, injected, owner, guard }) {
   /** Worker secrets for `wrangler deploy --secrets-file`. */
   function generateSecrets(env) {
     const list = aliases(env, `${owner}_ALIASES`)
-    return mergeWorkerSecrets(worker, env, {
+    const merged = mergeWorkerSecrets(worker, env, {
       ACCESS_OWNER: checked(env, owner, ACCESS_EMAIL),
       // --secrets-file only adds or replaces secrets: an emptied list is uploaded as one space (read as no
       // aliases) rather than left out, which would keep the previous aliases working.
       ACCESS_OWNER_ALIASES: list.join(',') || ' ',
     }, SettingError)
+    if (ownerOnly.some((name) => Object.hasOwn(merged, name))) throw new SettingError(map)
+    return merged
   }
 
   /** Which guarded identifier the committed config does not hold for real yet, or null (a text scan of the TOML). */
@@ -205,7 +209,7 @@ export function workerDeploy(url, { worker, injected, owner, guard }) {
   }
 
   return {
-    CONFIG, INJECTED: injected, SettingError,
+    CONFIG, INJECTED: injected, OWNER_ONLY_SECRETS: ownerOnly, SettingError,
     injectedVars, wranglerArgs, generateSecrets, placeholderIn, writeSecrets, refusal, run, main,
   }
 }
