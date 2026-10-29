@@ -80,7 +80,7 @@ admission until it reports ready):
 3. Verify read-only: config-sync status shows this revision active and no pin; the next run's selection succeeds and
    its issue is accepted. Then move this section to the dated history.
 
-### Newsletter console (`claude/nl-console`, slices S1-S7; S1-S6 released, S7 next)
+### Newsletter console (slices S1-S7, all released 2026-10-29)
 
 Owner request 2026-10-29: a self-consistent Newsletter dashboard with each issue's full content, sources, model calls,
 runs and failures, deliveries, config revision and Notion status, where Notion is shown only as an async backup of
@@ -109,8 +109,12 @@ token or owner step exists; the Worker's owner identity is Home's (`identity_fro
   is the first real test that Access accepts the forwarded `cf-access-token` for the second destination: if
   Newsletter answers a redirect or 4xx (the Worker logs `upstream:"3xx"` or `"4xx"`), send the token as the
   `CF_Authorization` cookie instead.
-- Next: S7 (`claude/nl-console-s7`) aligns Home and Fleet: the engine row 「Newsletter 引擎」, no 「写入 Notion」 stage,
-  and links to the console. It deploys only Home and Fleet; land it once the console answers.
+- S7 aligns Home and Fleet: Home's engine row 「Newsletter 引擎」 and Newsletter tile open the console, the 每日
+  Newsletter flow has no 「写入 Notion」 stage (Notion is counted as a backup), and Fleet's Newsletter section links
+  the console through its new `NEWSLETTER_URL` var. It deploys Home and Fleet only. Home's 配置漂移 shows Fleet's new
+  var until the bounded Cloudflare drift check, advanced by its cron or Home's existing refresh button, reads it.
+- Verify: the same-SHA Personal cloud reconcile is green; Home shows the tile and the row; Fleet links the console.
+  This section moves to the dated history once the owner's first console visit loads 概览.
 
 ### Architecture review follow-ups (2026-10-29)
 
