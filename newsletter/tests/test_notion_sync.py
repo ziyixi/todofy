@@ -1221,3 +1221,87 @@ def test_destination_change_requires_migration_not_reassignment(
             rig.store, {**DESTINATION, "editions": "another-destination"}
         )
     assert rig.journal.entity(KEY) == before
+
+
+async def test_confirmed_progress_is_stamped_without_changing_remote_calls(
+    tmp_path,
+):
+    ticks = iter([1_000.0, 2_000.0, 3_000.0])
+    plain = Rig(tmp_path / "plain.sqlite3")
+    stamped = Rig(tmp_path / "stamped.sqlite3")
+    stamped.journal.clock = lambda: next(ticks)
+    for rig in (plain, stamped):
+        rig.journal.enqueue("material", projected())
+        assert rig.journal.entity(KEY)["progress_at"] == 0
+        rig.api.fail("create", code="NOTION_RATE_LIMITED")
+        assert await rig.sync.step()
+    # A deferral is not progress.
+    assert stamped.journal.entity(KEY)["progress_at"] == 0
+    assert stamped.journal.entity(KEY)["error"] == "NOTION_RATE_LIMITED"
+    for rig in (plain, stamped):
+        rig.due()
+        await rig.drain()
+    # The last confirmed step (the property update) owns the stamp.
+    assert stamped.journal.entity(KEY)["progress_at"] == 3_000.0
+    assert stamped.journal.entity(KEY)["error"] == ""
+    # Only local bookkeeping differs: the remote call log is identical.
+    assert stamped.api.calls == plain.api.calls
+    for rig in (plain, stamped):
+        rig.store.close()
+
+
+async def test_progress_stamp_follows_each_confirmed_step(rig):
+    ticks = iter(float(second) for second in range(100, 200))
+    rig.journal.clock = lambda: next(ticks)
+    rig.journal.enqueue("material", projected())
+    stamps = []
+    while await rig.sync.step():
+        stamps.append(rig.journal.entity(KEY)["progress_at"])
+    # create, append and the property update each stamp once, in order.
+    assert stamps == [100.0, 101.0, 102.0]
+    assert [name for name, _ in rig.api.calls] == [
+        "lookup",
+        "create",
+        "children",
+        "append",
+        "patch",
+    ]
+
+
+def test_old_journal_schema_gains_progress_column_once(tmp_path):
+    path = tmp_path / "old.sqlite3"
+    store = newsletter_store.Store(path, "mock")
+    with store.transaction():
+        # The entity table exactly as written before progress_at existed.
+        store.db.execute(
+            "CREATE TABLE notion_entities ("
+            "key TEXT PRIMARY KEY, kind TEXT NOT NULL, "
+            "page_id TEXT NOT NULL DEFAULT '', "
+            "create_state TEXT NOT NULL DEFAULT 'new', "
+            "properties TEXT NOT NULL, "
+            "applied_hash TEXT NOT NULL DEFAULT '', "
+            "error TEXT NOT NULL DEFAULT '', "
+            "retry_at REAL NOT NULL DEFAULT 0, "
+            "attempts INTEGER NOT NULL DEFAULT 0)"
+        )
+        store.db.execute(
+            "INSERT INTO notion_entities(key,kind,create_state,properties,"
+            "error,attempts) VALUES (?,?,?,?,?,?)",
+            (KEY, "material", "ready", "{}", "NOTION_UNKNOWN", 2),
+        )
+    journal = notion_journal.NotionJournal(
+        store, DESTINATION, clock=lambda: 42.0
+    )
+    entity = journal.entity(KEY)
+    assert entity["progress_at"] == 0
+    assert (entity["error"], entity["attempts"]) == ("NOTION_UNKNOWN", 2)
+    notion_journal.NotionJournal(store, DESTINATION)
+    columns = [
+        row["name"]
+        for row in store.db.execute("PRAGMA table_info(notion_entities)")
+    ]
+    assert columns.count("progress_at") == 1
+    journal.clear_error(KEY)
+    assert journal.entity(KEY)["progress_at"] == 42.0
+    assert journal.entity(KEY)["attempts"] == 0
+    store.close()
