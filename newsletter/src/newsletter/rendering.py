@@ -227,10 +227,88 @@ def render_edition(
             provenance.append(at.strftime("%m-%d %H:%M ") + zone + " 获取")
         personal["meta"] = " · ".join(meta)
         personal["provenance"] = " · ".join(provenance)
-    # Render the same normalized ProtoJSON shape that was validated, including
-    # optional scalar defaults and oneof presence, never the unchecked original.
-    draft = contracts.to_dict(draft_message)
-    packets = [contracts.to_dict(packet) for packet in packet_messages]
+    edition = edition_context(draft, packets)
+    draft = edition["draft"]
+    chart = edition["chart"]
+    fixture = bool(
+        is_fixture
+        or any(packet.get("is_fixture", False) for packet in edition["packets"])
+        or (personal and personal["is_fixture"])
+    )
+    chart_bytes = charts.render_chart_png(chart, fixture) if chart else b""
+    footer = newsletter_usage.usage_footer(
+        newsletter_usage.normalize_usage_summary(usage)
+        if usage is not None
+        else None,
+        is_fixture=fixture,
+    )
+    context = {
+        "draft": {
+            **draft,
+            "introduction": draft.get("introduction", ""),
+            "limitations": _limitations(draft.get("limitations", "")),
+        },
+        "sections": edition["sections"],
+        "references": edition["references"],
+        "chart": chart,
+        "chart_cid": CHART_CID,
+        "reading": edition["reading"],
+        "issue_date": str(issue_date),
+        "date_label": datetime.date.fromisoformat(issue_date).strftime(
+            "%Y / %m / %d"
+        ),
+        "weekday_label": "星期"
+        + "一二三四五六日"[datetime.date.fromisoformat(issue_date).weekday()],
+        "is_fixture": fixture,
+        "personal": personal,
+        "usage_footer": footer,
+    }
+    # None deliberately preserves the packaged renderer for legacy runs. New
+    # runs supply source bytes from their frozen workflow inputs, never a path.
+    html = (
+        load_template().render(**context)
+        if template_source is None
+        else email_templates.render_template(template_source, context)
+    )
+    text = _render_text(context, draft)
+    result = {
+        "html": html,
+        "text": text,
+        "chart_png": base64.b64encode(chart_bytes).decode("ascii"),
+    }
+    payload = json.dumps(
+        result, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return {
+        "html": html,
+        "text": text,
+        "chart_png": result["chart_png"],
+        "render_hash": hashlib.sha256(payload).hexdigest(),
+    }
+
+
+def edition_context(
+    draft: types.Payload, packets: list[types.Payload]
+) -> types.Payload:
+    """Number an edition's references exactly as its email does.
+
+    Returns the normalized ``draft`` and ``packets`` with the email's
+    ``sections``, ``chart`` (or None), ``reading`` (or None) and
+    ``references``, numbered by first appearance: section paragraphs, then
+    chart points, then the recommended reading and its support. The email and
+    a native reader therefore share one numbering. Pure: no chart image,
+    template or usage footer. Unknown citations or unsafe source links fail
+    as they do when rendering; full draft validation stays with the caller.
+    """
+    # Use the normalized ProtoJSON shape, including optional scalar defaults
+    # and oneof presence, never the unchecked original.
+    draft = contracts.to_dict(
+        contracts.parse_message(draft, editorial_pb2.Draft)
+    )
+    packets = [
+        contracts.to_dict(contracts.parse_message(packet, editorial_pb2.Packet))
+        for packet in packets
+    ]
     sources = {}
     for packet in packets:
         for source in packet["content"].get("sources", []):
@@ -273,13 +351,7 @@ def render_edition(
         }
         for section in draft["sections"]
     ]
-    fixture = bool(
-        is_fixture
-        or any(packet.get("is_fixture", False) for packet in packets)
-        or (personal and personal["is_fixture"])
-    )
     chart = None
-    chart_bytes = b""
     if draft.get("chart"):
         chart = {
             **draft["chart"],
@@ -305,7 +377,6 @@ def render_edition(
             + (f" · {ref['published_at']}" if ref["published_at"] else "")
             for ref in chart_references.values()
         )
-        chart_bytes = charts.render_chart_png(chart, fixture)
     reading = None
     if draft.get("recommended_reading"):
         recommendation = draft["recommended_reading"]
@@ -318,52 +389,11 @@ def render_edition(
             "reason": recommendation["reason"],
             "paragraphs": _reading_paragraphs(recommendation["reason"]),
         }
-    footer = newsletter_usage.usage_footer(
-        newsletter_usage.normalize_usage_summary(usage)
-        if usage is not None
-        else None,
-        is_fixture=fixture,
-    )
-    context = {
-        "draft": {
-            **draft,
-            "introduction": draft.get("introduction", ""),
-            "limitations": _limitations(draft.get("limitations", "")),
-        },
-        "sections": sections,
-        "references": references,
-        "chart": chart,
-        "chart_cid": CHART_CID,
-        "reading": reading,
-        "issue_date": str(issue_date),
-        "date_label": datetime.date.fromisoformat(issue_date).strftime(
-            "%Y / %m / %d"
-        ),
-        "weekday_label": "星期"
-        + "一二三四五六日"[datetime.date.fromisoformat(issue_date).weekday()],
-        "is_fixture": fixture,
-        "personal": personal,
-        "usage_footer": footer,
-    }
-    # None deliberately preserves the packaged renderer for legacy runs. New
-    # runs supply source bytes from their frozen workflow inputs, never a path.
-    html = (
-        load_template().render(**context)
-        if template_source is None
-        else email_templates.render_template(template_source, context)
-    )
-    text = _render_text(context, draft)
-    result = {
-        "html": html,
-        "text": text,
-        "chart_png": base64.b64encode(chart_bytes).decode("ascii"),
-    }
-    payload = json.dumps(
-        result, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    ).encode("utf-8")
     return {
-        "html": html,
-        "text": text,
-        "chart_png": result["chart_png"],
-        "render_hash": hashlib.sha256(payload).hexdigest(),
+        "draft": draft,
+        "packets": packets,
+        "sections": sections,
+        "chart": chart,
+        "reading": reading,
+        "references": references,
     }

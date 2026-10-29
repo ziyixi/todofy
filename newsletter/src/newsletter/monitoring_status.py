@@ -30,6 +30,16 @@ UNKNOWN_SOURCES = {
     "notion_versions": ("notion_versions", "state='unknown'"),
     "delivery": ("editions", "json_extract(body,'$.delivery_state')='unknown'"),
 }
+# The newest settled real delivery. A constant so other read-only views report
+# exactly what monitoring (and so Fleet) reports.
+LATEST_DELIVERY_SQL = (
+    "SELECT json_extract(body,'$.delivery_state') state, "
+    "json_extract(body,'$.updated_at') time FROM editions "
+    "WHERE json_extract(body,'$.delivery_state') IN "
+    "('provider_accepted','rejected','unknown') "
+    "AND COALESCE(json_extract(body,'$.is_fixture'),0)=0 "
+    "ORDER BY json_extract(body,'$.updated_at') DESC, id DESC LIMIT 1"
+)
 
 
 def snapshot(store: storage.Store) -> Observations:
@@ -67,14 +77,7 @@ def snapshot(store: storage.Store) -> Observations:
         revision = store.db.execute(
             "SELECT COALESCE(MAX(sequence),0) FROM monitoring_unknowns"
         ).fetchone()[0]
-        latest = store.db.execute(
-            "SELECT json_extract(body,'$.delivery_state') state, "
-            "json_extract(body,'$.updated_at') time FROM editions "
-            "WHERE json_extract(body,'$.delivery_state') IN "
-            "('provider_accepted','rejected','unknown') "
-            "AND COALESCE(json_extract(body,'$.is_fixture'),0)=0 "
-            "ORDER BY json_extract(body,'$.updated_at') DESC, id DESC LIMIT 1"
-        ).fetchone()
+        latest = store.db.execute(LATEST_DELIVERY_SQL).fetchone()
         return {
             "unknown_by_kind": counts,
             "unknown_revision": revision,
