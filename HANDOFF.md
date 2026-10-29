@@ -61,7 +61,7 @@ admission until it reports ready):
 3. Verify read-only: config-sync status shows this revision active and no pin; the next run's selection succeeds and
    its issue is accepted. Then move this section to the dated history.
 
-### Newsletter console (`claude/nl-console`, slices S1-S7; S1, S2 and S3 released)
+### Newsletter console (`claude/nl-console`, slices S1-S7; S1-S6 released, S7 next)
 
 Owner request 2026-10-29: a self-consistent Newsletter dashboard with each issue's full content, sources, model calls,
 runs and failures, deliveries, config revision and Notion status, where Notion is shown only as an async backup of
@@ -73,18 +73,25 @@ token or owner step exists; the Worker's owner identity is Home's (`identity_fro
 - S2 (`newsletter.ui.v1` in `proto/newsletter/ui/v1/`) and S3 (console scaffold, `owner["newsletter-console"]` with
   the second destination, the tunnel path rule, `PATH_RULES` in `reconcile_policy.py`, CI wiring, `identity_from`)
   land here. Expected selection: every check, `dashboard_deploy` only; the console stays check-only.
-- Release: "Infra drift" must show exactly create 1 (`owner["newsletter-console"]`), update 1 (the platform tunnel
-  config), output changes 1 (`access_aud`), then "Infra apply" with that line; the verify plan is no-op. An anonymous
-  request to the runtime path is redirected to Access; the Codex path and the daemon route are unchanged. The path
-  answers an error after Access until S4's listener exists.
+- "Infra apply" ran on 2026-10-29 with `create=1,outputs=1,update=1@ab3d6240ab01`; its verify plan was 52 no-op with
+  no output change. An anonymous request to the runtime path is redirected to Access, and the Codex path still
+  answers anonymous requests with 403.
 - S1 (engine observability gaps: per-call times, purpose, failure and Router request names; per-source feed counts;
   Notion progress time) released on 2026-10-29 after that day's run had finished; it releases the Newsletter and
   Platform images through the paired VPS release. Old usage rows keep their totals; the email bytes are unchanged.
   Verify after the next run: its collection and usage rows carry the new keys, and Notion rows get `progress_at`.
-- Next: "Infra apply" above (still pending), then S4 (the listener; the image bakes the console AUD, so S4, S5 and the
-  first-deploy commit land together after a 07:00 Los Angeles run has finished); S5 deploys the console (probe that Access accepts the forwarded token for the second destination); S6
-  adds the remaining pages; S7 aligns Home and Fleet (engine row 「Newsletter 引擎」, no 「写入 Notion」 stage, links to the
-  console) on top of the Newsletter config views already there.
+- S4 (Newsletter's read-only console listener on loopback 18767, which verifies the owner's Access token for the
+  console AUD baked into the image), S5 (the console Worker, which forwards that token, plus 概览 and 运行), S6 (期刊
+  with the full issue, 来源, 模型 and 备份) and the first-deploy commit (the AUD and application id read from the
+  Access API) land together, after that day's run had finished. This releases Newsletter, Platform, the Codex
+  gateway and Todofy (generated Python), Home's desired state and the console's first deploy.
+- Verify: the same-SHA Personal cloud reconcile and "Infra drift" are green; the release's Access probes block
+  anonymous requests on `news.ziyixi.science` and the runtime path; the owner's first visit loads 概览. That visit
+  is the first real test that Access accepts the forwarded `cf-access-token` for the second destination: if
+  Newsletter answers a redirect or 4xx (the Worker logs `upstream:"3xx"` or `"4xx"`), send the token as the
+  `CF_Authorization` cookie instead.
+- Next: S7 (`claude/nl-console-s7`) aligns Home and Fleet: the engine row 「Newsletter 引擎」, no 「写入 Notion」 stage,
+  and links to the console. It deploys only Home and Fleet; land it once the console answers.
 
 ### Architecture review follow-ups (2026-10-29)
 
