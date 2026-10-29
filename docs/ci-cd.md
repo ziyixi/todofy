@@ -91,9 +91,8 @@ retain their existing release rules. Manual dispatch and the full-run fallback a
 While Fleet is in that set, both Fleet and Home deploy outputs remain false, including dispatch, full-run
 and same-SHA reuse. Complete the reviewed Access bootstrap, commit its real AUD/identity configuration and
 remove that explicit freeze together before enabling those releases. A placeholder dry-run is not evidence
-that the production identity exists. `CHECK_ONLY` currently holds only the Newsletter console (`newsletter-console`),
-until "Infra apply" creates its Access application and its first-deploy commit records the AUD; Home does not bind
-it, so Home deploys as usual. recall left the set with its go-live commit (2026-10-10).
+that the production identity exists. `CHECK_ONLY` is empty: the Newsletter console left it with its first-deploy
+commit, which recorded the AUD "Infra apply" created, and recall with its go-live commit (2026-10-10).
 
 | Job | Checks or release responsibility |
 | --- | --- |
@@ -117,7 +116,7 @@ it, so Home deploys as usual. recall left the set with its go-live commit (2026-
 | Cloudflare app deploy jobs | After main's gate and app checks: build the verified UI, write private values, dry-run, enforce hostname safety, apply only the app's required D1 migrations and deploy its committed config. Each app retains its production probes and concurrency group. |
 | `Tasks deploy`, `Watch deploy`, `Personal MCP deploy` | Tasks waits for Todofy (its `MAIL` binding names Todofy's `Mail` entry); Watch waits for Tasks (its `TASKS` binding names Tasks' `TaskInbox`); Personal MCP waits for Tasks, Todofy, Watch and Recall, whose entries it binds. A failed release leaves the deploys after it skipped rather than failed, so a Todofy, Tasks or Watch deploy they wait for may be skipped only when this run did not select it: a failed Router or Todofy release stops the chain behind it. Recall has no deploy before it and may succeed or be skipped. |
 | `Dashboard deploy` | Also waits for Todofy, Mail Hero, Tasks, links, Watch, Fleet, Mailsort, Recall, Personal MCP and website relay deploys to succeed or be skipped, and for a selected Router deploy to succeed. Its `FLEET`/`NEWSLETTER` service bindings require Fleet's `Ops`/`NewsletterOps` and `TASK_INBOX` Tasks' `TaskInbox`; selected providers deploy before Home in the same SHA's release. |
-| `Newsletter console deploy` | After the gate and a `VPS deploy` this run made (Newsletter answers the console's reads) or skipped; `CHECK_ONLY` keeps it off until the console's Access application exists. Probes Access on the console's host and on Newsletter's read path. |
+| `Newsletter console deploy` | After the gate and a `VPS deploy` this run made (Newsletter answers the console's reads) or skipped. Probes Access on the console's host and on Newsletter's read path. |
 | `VPS deploy` | After both image publications and the gate, when `VPS_DEPLOY_ENABLED=true`: call the daemon's shared-proto release API and verify the durable result and fresh physical provenance. See the VPS section below. |
 | `Codex gateway deploy` | After its image publication and any selected Fleet release, use one gateway target through the existing daemon API. Router waits for this executor release; the paired VPS/Newsletter release then waits for Router, so their rollouts stay ordered and do not overlap. A selected gateway release that does not succeed (with `VPS_DEPLOY_ENABLED=true`) stops Router, and a selected Router release that does not succeed stops Todofy, Mailsort, Home and the paired VPS release (and through Todofy, Tasks, Watch and Personal MCP); only an unselected one may be skipped. Verify baked source, startup identity, digest and generation; retain Newsletter admission and trigger state. The gateway releases before the paired VPS release updates the Platform renderer: when a diff changes the gateway's rendered resources or that renderer, dispatch `app=codex-gateway` once after the paired release (reconcile's plan reports the leftover difference until then). |
 

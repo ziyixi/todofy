@@ -5,8 +5,8 @@
 不重发、不重试任何东西。
 
 当前阶段：Worker 把每个读取转发给 Newsletter 自己的控制台监听（[`newsletter/docs/console.md`](../newsletter/docs/console.md)），
-六个页面「概览」「期刊」「运行」「来源」「模型」「备份」都已就位。首次部署等 `Infra apply` 创建 Access 应用、
-AUD 记入 `config/resources.toml` 之后（见下文「上线顺序」），在此之前仍是 `ci_changes.py` 的 `CHECK_ONLY`。
+六个页面「概览」「期刊」「运行」「来源」「模型」「备份」都已就位。Access 应用的 AUD 已记入
+`config/resources.toml`，Worker 随 main 的 CI 发布（见下文「上线顺序」）。
 golden 回答在 `contracts/newsletter-ui-v1/fixtures/`。
 
 ## 结构

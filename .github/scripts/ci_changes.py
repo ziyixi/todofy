@@ -48,7 +48,7 @@ Outputs (GITHUB_OUTPUT, "true"/"false"; KEYS names every one):
   runs its tests; Home binds its Ops entrypoint, HOME_BOUND) and compiles in packages/edge-auth and the TypeScript
   proto runtime with proto/recall/ui/, proto/recall/ingest/, proto/recall/archive/ and proto/ops/. The Newsletter
   console (newsletter-console/, Newsletter's owner read UI on news.ziyixi.science, contracts/newsletter-ui-v1) is
-  CHECK_ONLY until its first deploy: its Access application comes first from "Infra apply". It compiles in
+  checked and deployed since its first-deploy commit recorded the AUD "Infra apply" created. It compiles in
   packages/edge-auth and the TypeScript proto runtime with proto/newsletter/ui/; Home does not bind it.
 
 proto/ (the protobuf IDL, proto/README.md) checks every app in PROTO_USERS (an app that depends on @ziyixi/proto or
@@ -142,7 +142,7 @@ APPS = tuple(load_catalog(Path(__file__).resolve().parents[2]).apps)
 PREFIX = {app: app.replace("-", "_") for app in APPS}
 # A new app is checked but its deploy output stays false until its Cloudflare resources are ready. Keep its output
 # present so the workflow and same-SHA reuse have one stable interface.
-CHECK_ONLY: set[str] = {"newsletter-console"}
+CHECK_ONLY: set[str] = set()
 # Apps whose Ops entrypoint Home binds (dashboard/wrangler.toml): while one of them is CHECK_ONLY its Worker does not
 # exist yet, so Home's deploy (whose binding would name a missing service) waits too.
 HOME_BOUND = {"fleet", "mailsort", "recall", "tasks", "personal-mcp", "model-router", "links"}
