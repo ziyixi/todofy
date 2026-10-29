@@ -59,7 +59,8 @@ function checked(env, name, pattern) {
   return value
 }
 
-function aliases(env, name) {
+function aliases(env, name, optional) {
+  if (optional && env[name] === undefined) return []
   if (typeof env[name] !== 'string') throw new SettingError(name)
   const items = env[name].split(',').map((item) => item.trim()).filter(Boolean)
   if (
@@ -79,7 +80,8 @@ const assignment = (key, value) => new RegExp(`^\\s*${key}\\s*=${value === undef
  * wrangler.toml beside deploy/):
  * - worker: its entry in worker-secrets.json (the <APP>_WORKER_SECRETS map and the bindings it may hold);
  * - injected: the --var rows {name, from, kind, pattern} in flag order, BUILD_SHA among them;
- * - owner: the input holding the owner's address, whose aliases are `<owner>_ALIASES`;
+ * - owner: the input holding the owner's address, whose aliases are `<owner>_ALIASES`; or null when the owner and the
+ *   optional aliases come from the app's own map, which is then required;
  * - secrets: every other personal input, a {name, from, pattern} row like the injected ones;
  * - ownerOnly: secrets the owner puts from their own machine, never by a deploy: a map that names one is refused;
  * - guard: {identifier: rule} (IDENTIFIERS, RULES), checked in this order.
@@ -106,14 +108,22 @@ export function workerDeploy(url, { worker, injected, owner, secrets = [], owner
 
   /** Worker secrets for `wrangler deploy --secrets-file`. */
   function generateSecrets(env) {
-    const list = aliases(env, `${owner}_ALIASES`)
-    const merged = mergeWorkerSecrets(worker, env, {
-      ACCESS_OWNER: checked(env, owner, ACCESS_EMAIL),
-      // --secrets-file only adds or replaces secrets: an emptied list is uploaded as one space (read as no
-      // aliases) rather than left out, which would keep the previous aliases working.
-      ACCESS_OWNER_ALIASES: list.join(',') || ' ',
-      ...Object.fromEntries(secrets.map(({ name, from, pattern }) => [name, checked(env, from, pattern)])),
-    }, SettingError)
+    let merged
+    if (owner === null) {
+      if (!env[map]) throw new SettingError(map)
+      const complete = mergeWorkerSecrets(worker, env, {}, SettingError)
+      checked(complete, 'ACCESS_OWNER', ACCESS_EMAIL)
+      merged = { ...complete, ACCESS_OWNER_ALIASES: aliases(complete, 'ACCESS_OWNER_ALIASES', true).join(',') || ' ' }
+    } else {
+      const list = aliases(env, `${owner}_ALIASES`, false)
+      merged = mergeWorkerSecrets(worker, env, {
+        ACCESS_OWNER: checked(env, owner, ACCESS_EMAIL),
+        // --secrets-file only adds or replaces secrets: an emptied list is uploaded as one space (read as no
+        // aliases) rather than left out, which would keep the previous aliases working.
+        ACCESS_OWNER_ALIASES: list.join(',') || ' ',
+        ...Object.fromEntries(secrets.map(({ name, from, pattern }) => [name, checked(env, from, pattern)])),
+      }, SettingError)
+    }
     if (ownerOnly.some((name) => Object.hasOwn(merged, name))) throw new SettingError(map)
     return merged
   }

@@ -87,6 +87,22 @@ test('a personal secret row is checked after the owner and lands beside the owne
   })
 })
 
+test('a null owner takes the owner and optional aliases from the complete map, which is then required', () => {
+  scratch((_, url) => {
+    const deploy = standard(url, { worker: 'tasks', owner: null })
+    const map = (value) => ({ TASKS_WORKER_SECRETS: JSON.stringify(value) })
+    assert.deepEqual(deploy.generateSecrets(map({ ACCESS_OWNER: 'owner@example.org' })), { ACCESS_OWNER: 'owner@example.org', ACCESS_OWNER_ALIASES: ' ' })
+    assert.equal(deploy.generateSecrets(map({ ACCESS_OWNER: 'owner@example.org', ACCESS_OWNER_ALIASES: 'a@example.org, b@example.org' })).ACCESS_OWNER_ALIASES,
+      'a@example.org,b@example.org')
+    for (const [setting, env] of [['TASKS_WORKER_SECRETS', {}], ['TASKS_WORKER_SECRETS', { TASKS_WORKER_SECRETS: '' }],
+      ['ACCESS_OWNER', map({ ACCESS_OWNER: 'not-an-email' })], ['TASKS_WORKER_SECRETS', map({ ACCESS_OWNER_ALIASES: 'a@example.org' })],
+      ['ACCESS_OWNER_ALIASES', map({ ACCESS_OWNER: 'owner@example.org', ACCESS_OWNER_ALIASES: 'a@example.org,a@example.org' })],
+      ['TASKS_WORKER_SECRETS', map({ ACCESS_OWNER: 'owner@example.org', UNDECLARED: 'x' })]]) {
+      assert.throws(() => deploy.generateSecrets(env), (error) => error instanceof SettingError && error.setting === setting, setting)
+    }
+  })
+})
+
 test('a map that names an owner-only secret is refused by the map name', () => {
   scratch((_, url) => {
     // An owner-only secret is never a declared binding (worker-secrets.json), so a map naming one is refused as
