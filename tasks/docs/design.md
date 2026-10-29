@@ -347,10 +347,12 @@ the rows GetPlan and a task's dependencies read.
 
 An isolate's start costs more than any request. The global scope's warm-up (`src/startup.ts`) measured 19.4-20.8
 reference ms on its first run (three runs, 2026-10-20): about 11 for the first Intl initialization and 9 for
-warming the task page's and the Focus week's code. Every request `cpu.test.ts` measures stays below 10 even as an
-isolate's first request and below 8 warm: owner pages, GetPlan, reorders, duplicates,
-Home's `Ops.status()` and Todofy's service calls (a footer search of 20 full descriptions, a page of 100); 5.8 was
-the highest first run and 4.2 the highest warm median. Completing a family is a fixed number of D1 statements, its
+warming the task page's and the Focus week's code. Warming the goal catalog's read joined it on 2026-10-29 and
+added about 2 (medians of eight alternating runs: 20.2 without it, 22.0 with it), against its bound of 30. Every
+request `cpu.test.ts` measures stays below 10 even as an isolate's first request and below 8 warm: owner pages,
+GetPlan, reorders, duplicates, Home's `Ops.status()` and Todofy's service calls (a footer search of 20 full
+descriptions, a page of 100). On 2026-10-20, 5.8 was the highest first run and 4.2 the highest warm median; the goal
+catalog's first read, measured since, is about 7.5. Completing a family is a fixed number of D1 statements, its
 subtree walked in D1, not in the Worker. So the only measured work near the CPU p99 Home's Cloudflare view showed on
 2026-10-20 (20.5 ms, p50 2.9 ms) is an isolate's start: the p99 matches new isolates (after a deploy, or an evicted
 one), not a heavy request. That reading assumes the metric counts an isolate's start with its first invocation,
