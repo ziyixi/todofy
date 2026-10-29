@@ -28,9 +28,12 @@ changes persist without a release. Newsletter's Codex contexts and current appli
 - Implemented: stateless Responses calls, separate subscription/API identity and usage, Router console labels,
   persisted Mailsort model/effort choices and provider-labelled Todofy choices. No dependency or inference field was
   added. Credits and enforced supplier spend caps use `MODEL_SPEND_LIMIT`, separately from ordinary rate limits.
+  OpenAI also checks the existing UTC-month cost ledger against its configured estimate limit before a new call;
+  this does not reserve in-flight usage or claim a supplier invoice cap.
 - Local checks passed: Router provider/workerd and console suites, Mailsort unit/workerd/CPU/web/smoke checks,
   Todofy saved model and synthetic email/report/recommendation scenarios, deployment-boundary tests and builds.
-- Pending: branch CI, integration with newer Claude commits, release through Actions and synthetic production
+- Integrated Claude's completed Brief retirement (`a7abdee0`); no source conflict, handoff sections retained by content.
+- Pending: branch CI, release through Actions and synthetic production
   verification. Existing application defaults, modes and completed content are unchanged.
 
 ### Verify after the October 28 releases (read-only)

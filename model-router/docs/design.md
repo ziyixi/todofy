@@ -41,9 +41,11 @@ Todofy 和 Mailsort 在各自设置页读取 Router 的目录，保存模型和�
 未配置的选项不可新选；当前选择暂不可用时仍显示出来并说明原因。新增 provider 不切换既有默认值。
 Newsletter 仍使用 Codex 短会话；未为其他 provider 增加会话实现。
 
-OpenAI API 共享一枚 Router secret，并受供应商处的项目消费限制约束。赠送 API credit 可用于 Responses，
-与 Codex 订阅额度独立；超出硬消费上限或耗尽 credit 返回 `MODEL_SPEND_LIMIT`，普通速率限制另行返回。
-不自动回退到另一个供应商。
+OpenAI API 共享一枚 Router secret。`OPENAI_MONTHLY_LIMIT_USD` 限定 Router 在当前 UTC 月度已记录费用
+估算达到上限后，停止接受新 OpenAI API 请求。它复用既有请求账本，不增加计费表；在途调用和未知用量
+可能产生差额，因此不等同于供应商的账单硬上限。供应商提供的硬限制可另外配置。
+赠送 API credit 可用于 Responses，与 Codex 订阅额度独立；达到上述限制或耗尽 credit 返回
+`MODEL_SPEND_LIMIT`，普通速率限制另行返回。不自动回退到另一个供应商。
 
 ## Newsletter 短会话
 

@@ -88,6 +88,17 @@ export class Store {
     this.env = env;
   }
 
+  async openaiMonthlyCost(now = Date.now()): Promise<number> {
+    const date = new Date(now);
+    const start = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1);
+    const end = Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1);
+    return await this.env.DB.prepare(`SELECT COALESCE(sum(json_extract(
+      COALESCE(json_extract(generation_json,'$.generation'),generation_json),
+      '$.usage.estimated_cost_microusd')),0) AS cost
+      FROM requests WHERE model GLOB 'openai/*' AND started_ms >= ? AND started_ms < ?`)
+      .bind(start, end).first<number>('cost') ?? 0;
+  }
+
   async start(value: RequestRecord, request: GenerateRequest): Promise<void> {
     const generation = value.generation!;
     const id = generation.name.slice('requests/'.length);

@@ -18,6 +18,7 @@ export interface Env {
   DEV_AUTH_BYPASS?: string;
   CODEX_EXECUTOR_ORIGIN?: string;
   OPENAI_API_KEY?: string;
+  OPENAI_MONTHLY_LIMIT_USD?: string;
   ANTHROPIC_API_KEY?: string;
   GEMINI_API_KEY?: string;
   CODEX_ACCESS_CLIENT_ID?: string;

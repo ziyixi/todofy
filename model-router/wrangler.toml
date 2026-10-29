@@ -59,3 +59,6 @@ ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"
 # Provider-assigned Access audience, generated from config/resources.toml.
 ACCESS_AUDIENCE = "205e46e84c7d7ee7d2c2e4b1fa65b9268ff66487e077d71f11c2c9cee7c9decf"
 CODEX_EXECUTOR_ORIGIN = "https://platform-runtime.ziyixi.science"
+# Stop new OpenAI API calls after the current UTC month's recorded estimate reaches this amount.
+# This excludes subscription reference values and is not an invoice hard cap.
+OPENAI_MONTHLY_LIMIT_USD = "80"

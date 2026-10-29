@@ -129,6 +129,12 @@ export class RouterEngine extends DurableObject<Env> {
     allowModel(app, route.provider);
     const started = Date.now();
     const duration = Math.min(budget(req.timeoutMs), context ? context.expireMs - started : 840000);
+    if (route.provider === 'openai') {
+      const configuredLimit = Number(this.env.OPENAI_MONTHLY_LIMIT_USD ?? 80);
+      const limitUsd = Number.isFinite(configuredLimit) && configuredLimit > 0 ? configuredLimit : 80;
+      if (await this.store.openaiMonthlyCost(started) >= limitUsd * 1_000_000)
+        throw new RpcError(Code.RESOURCE_EXHAUSTED, 'MODEL_SPEND_LIMIT', 'The Router monthly estimated OpenAI usage limit has been reached.');
+    }
     const timer = setTimeout(() => controller.abort(new DOMException('The model exceeded its time budget.', 'TimeoutError')), duration);
     let value = create(GenerationSchema, {
       name: `requests/${crypto.randomUUID()}`,

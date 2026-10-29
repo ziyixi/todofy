@@ -71,7 +71,9 @@ publication preserves:
 Backups do not export any credentials. Gmail grants stay with Mailsort.
 Playground calls record source `console` and perform no application business action.
 OpenAI API uses Responses; signed-in Codex keeps its independent subscription connection. Catalog IDs beginning
-with `openai/` select the API. Its project hard spend limit is managed at OpenAI, independently of subscription use.
+with `openai/` select the API. `OPENAI_MONTHLY_LIMIT_USD` stops new API calls when the existing ledger's known
+estimate reaches that amount in the UTC month. In-flight calls and unknown usage can differ from it; this is not
+an invoice hard cap. Supplier-enforced spend controls are configured separately when available.
 
 ## Checks and coordinated release
 

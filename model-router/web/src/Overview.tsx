@@ -78,6 +78,9 @@ function ModelCatalog({ models }: { models: readonly Model[] }) {
         </div>
         <span className="small muted">{models.length} 个模型</span>
       </div>
+      <p className="small muted">
+        OpenAI API 达到月度已知费用估算上限后暂停新请求。在途请求与未知用量可能造成差额，Codex 订阅参考值单独统计。
+      </p>
       {!models.length && <p className="muted">暂无模型目录。</p>}
       <div className="catalog-list">
         {models.map((model) => (

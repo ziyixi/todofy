@@ -4,6 +4,14 @@ import { startHarness } from './runtime-harness.ts'
 const api = 'openai/gpt-6.1-sol'
 const codex = 'gpt-6.1-sol'
 
+async function seedCost(h: Awaited<ReturnType<typeof startHarness>>, cost: number, { model = api, state = 'succeeded', started = Date.now(), legacy = false } = {}) {
+  const id = crypto.randomUUID()
+  const generation = { usage: { estimated_cost_microusd: cost, billing_kind: 'api' } }
+  await h.db.prepare('INSERT INTO requests VALUES (?,?,?,?,?,?,?,?,?,?)').bind(id, 'console', model, state,
+    started, started, `requests/console/${id}.json`, started + 86400000, '',
+    JSON.stringify(legacy ? generation : { generation })).run()
+}
+
 describe('OpenAI API and Codex through real D1/R2/SQLite DO bindings', () => {
   let h: Awaited<ReturnType<typeof startHarness>>
   beforeAll(async () => { h = await startHarness() })
@@ -74,6 +82,51 @@ describe('OpenAI API and Codex through real D1/R2/SQLite DO bindings', () => {
     }
     expect(h.calls).toHaveLength(3)
     expect(h.calls.every(call => call.path === '/v1/responses')).toBe(true)
+  })
+
+  it('stops new API calls at the monthly estimated limit before registering or calling a provider', async () => {
+    await seedCost(h, 40_000_000)
+    await seedCost(h, 40_000_000, { model: 'openai/gpt-6-luna', state: 'failed', legacy: true })
+    const bodiesBefore = (await h.bucket.list()).objects.length
+    await expect(h.models.generate({ model: api, input: 'Synthetic monthly limit refusal' })).rejects.toMatchObject({
+      status: { status: 'RESOURCE_EXHAUSTED', reason: 'MODEL_SPEND_LIMIT' },
+    })
+    expect(h.calls).toHaveLength(0)
+    expect(await h.db.prepare('SELECT count(*) AS n FROM requests').first('n')).toBe(2)
+    expect((await h.bucket.list()).objects).toHaveLength(bodiesBefore)
+  })
+
+  it('allows a call just below the estimated limit and stops the next call after its cost is recorded', async () => {
+    await seedCost(h, 79_999_999)
+    expect((await h.models.generate({ model: api, input: 'Synthetic below-limit request' })).error).toBeUndefined()
+    await expect(h.models.generate({ model: api, input: 'Synthetic after-limit request' })).rejects.toMatchObject({
+      status: { reason: 'MODEL_SPEND_LIMIT' },
+    })
+    expect(h.calls).toHaveLength(1)
+    expect(await h.db.prepare('SELECT count(*) AS n FROM requests').first('n')).toBe(2)
+  })
+
+  it('counts only the current UTC month and the OpenAI API model prefix', async () => {
+    const now = new Date()
+    const start = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)
+    const next = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)
+    await seedCost(h, 80_000_000, { started: start - 1 })
+    await seedCost(h, 80_000_000, { started: next })
+    await seedCost(h, 80_000_000, { model: codex, started: start })
+    await seedCost(h, 79_000_000, { started: start })
+    expect((await h.models.generate({ model: api, input: 'Synthetic current-month request' })).error).toBeUndefined()
+    expect(h.calls).toHaveLength(1)
+  })
+
+  it('leaves Codex and Claude on their existing paths when the OpenAI API estimate is at the limit', async () => {
+    await seedCost(h, 80_000_000)
+    expect((await h.models.generate({ model: codex, input: 'Synthetic Codex request at API limit' })).error).toBeUndefined()
+    const claude = await h.models.generate({ model: 'claude-opus-5-5', input: 'Synthetic Claude request at API limit' })
+    // This harness has no Claude key; its usual configuration error still registers the invocation.
+    expect(claude.error?.reason).toBe('MODEL_NOT_CONFIGURED')
+    expect((await h.owner.getRequest({ name: claude.name })).provider).toBe('anthropic')
+    expect(await h.db.prepare('SELECT count(*) AS n FROM requests').first('n')).toBe(3)
+    expect(h.calls.map(call => call.path)).toEqual(['/api/codex/v1/model/generations:generate'])
   })
 
   it('continues restricting Newsletter and conversations to Codex before registering work', async () => {

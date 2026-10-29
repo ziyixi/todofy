@@ -631,6 +631,11 @@
           "optional": true
         },
         {
+          "name": "OPENAI_MONTHLY_LIMIT_USD",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
           "name": "PUBLIC_HOST",
           "type": "plain_text",
           "source": "config"
