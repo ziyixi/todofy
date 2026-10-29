@@ -55,6 +55,25 @@ RECENT_RUNS = 7
 HISTORY_RUNS = 120
 MAX_REVISIONS = 10
 MAX_EXCEPTIONS = 50
+# The deployment gate's queued and in-flight predicates (drain.py
+# DeploymentDrain._status), whose sums monitoring reports to Fleet as 排队 and
+# 进行中; test_console_read.py holds them to drain.status().
+GATE_QUEUED = (
+    ("editions", "state='queued'"),
+    (
+        "collection_runs",
+        "state IN ('queued','collecting','projecting','editing')",
+    ),
+)
+GATE_INFLIGHT = (
+    ("deployment_activities", "state IN ('active','uncertain')"),
+    ("editions", "state='running'"),
+    ("packets", "projection='submitting'"),
+    ("workflow_attempts", "state='running'"),
+    ("notion_entities", "create_state='creating'"),
+    ("notion_versions", "state='appending'"),
+    ("editions", "json_extract(body,'$.delivery_state')='submitting'"),
+)
 _READS = frozenset(
     {
         sqlite3.SQLITE_READ,
@@ -113,6 +132,8 @@ _EDITION_COLUMNS = (
     "FROM editions e LEFT JOIN workflow_editions w ON w.edition_id=e.id "
 )
 _EDITION_ORDER = " ORDER BY issue_date DESC, e.rowid DESC"
+# Sorts a call recorded without any time first.
+_NEVER = datetime.datetime.min.replace(tzinfo=datetime.UTC)
 
 
 class ConsoleError(Exception):
@@ -162,6 +183,13 @@ class Snapshot:
         """The first row of a fixed, parameterized query, if any."""
         row: sqlite3.Row | None = self.db.execute(sql, tuple(args)).fetchone()
         return row
+
+    def count(self, table: str, predicate: str) -> int:
+        """Rows matching a fixed predicate; 0 for a table never created."""
+        if not self.has(table):
+            return 0
+        found = self.one(f"SELECT COUNT(*) FROM {table} WHERE {predicate}")
+        return int(found[0]) if found else 0
 
 
 @dataclasses.dataclass
@@ -623,9 +651,9 @@ class ConsoleReader:
         ordered = sorted(
             enumerate(run.calls),
             key=lambda pair: (
-                views.timestamp(pair[1].get("started_at"))
-                or views.timestamp(pair[1].get("update_time"))
-                or "",
+                views.instant(pair[1].get("started_at"))
+                or views.instant(pair[1].get("update_time"))
+                or _NEVER,
                 pair[0],
             ),
         )
@@ -1086,19 +1114,15 @@ class ConsoleReader:
                 "WHERE g.singleton=1"
             )
             drain = str(found[0]) if found else "active"
-        unknown: dict[str, int] = {}
         # The monitoring snapshot's own predicates (COUNT only: it also
         # records identities, which a read must not).
-        for category, (
-            table,
-            predicate,
-        ) in monitoring_status.UNKNOWN_SOURCES.items():
-            found = (
-                snap.one(f"SELECT COUNT(*) FROM {table} WHERE {predicate}")
-                if snap.has(table)
-                else None
-            )
-            unknown[category] = int(found[0]) if found else 0
+        unknown = {
+            category: snap.count(table, predicate)
+            for category, (
+                table,
+                predicate,
+            ) in monitoring_status.UNKNOWN_SOURCES.items()
+        }
         queued = running = 0
         if snap.has("collection_runs"):
             for state, count in snap.rows(
@@ -1117,6 +1141,8 @@ class ConsoleReader:
             running_run_count=running,
             unknown_count=sum(unknown.values()),
             unknown_category_counts=unknown,
+            queued_count=sum(snap.count(*gate) for gate in GATE_QUEUED),
+            inflight_count=sum(snap.count(*gate) for gate in GATE_INFLIGHT),
         )
 
     def config(self, now: datetime.datetime) -> catalog_pb.ConfigState:

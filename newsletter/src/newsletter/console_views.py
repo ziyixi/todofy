@@ -701,6 +701,15 @@ def replica(
     )
 
 
+def _moment(value: str) -> datetime.datetime:
+    # Canonical texts drop ".000", so their lengths differ: compare as times.
+    return instant(value) or datetime.datetime.min.replace(tzinfo=datetime.UTC)
+
+
+def _latest(times: Sequence[str]) -> str | None:
+    return max(times, key=_moment) if times else None
+
+
 def replica_counts(
     target: backup_pb.ReplicaCounts_Target,
     records: Sequence[tuple[backup_pb.Replica, object]],
@@ -726,7 +735,7 @@ def replica_counts(
         retrying_count=count[_REPLICA.RETRYING],
         unknown_count=count[_REPLICA.UNKNOWN],
         conflict_count=count[_REPLICA.CONFLICT],
-        last_progress_time=max(progress) if progress else None,
+        last_progress_time=_latest(progress),
         oldest_pending_time=timestamp(min(known).isoformat())
         if known
         else None,
@@ -746,9 +755,8 @@ def merge_counts(
         retrying_count=sum(t.retrying_count for t in targets),
         unknown_count=sum(t.unknown_count for t in targets),
         conflict_count=sum(t.conflict_count for t in targets),
-        # Canonical UTC text of one length orders as time.
-        last_progress_time=max(progress) if progress else None,
-        oldest_pending_time=min(pending) if pending else None,
+        last_progress_time=_latest(progress),
+        oldest_pending_time=min(pending, key=_moment) if pending else None,
     )
 
 

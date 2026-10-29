@@ -165,12 +165,13 @@ def test_the_port_is_validated(settings, port):
     dataclasses.replace(settings, console_port=0).validate()
 
 
-def test_the_console_cannot_take_the_engines_port(monkeypatch, capsys):
+@pytest.mark.parametrize("value", ["8080", " 08080"])
+def test_the_console_cannot_take_the_engines_port(monkeypatch, capsys, value):
     def unexpected(*args, **kwargs):
         pytest.fail("The server started")
 
     monkeypatch.setattr(cli.uvicorn, "run", unexpected)
-    monkeypatch.setenv("NEWSLETTER_CONSOLE_PORT", "8080")
+    monkeypatch.setenv("NEWSLETTER_CONSOLE_PORT", value)
     monkeypatch.setattr(sys, "argv", ["newsletter", "serve", "--port", "8080"])
     with pytest.raises(SystemExit):
         cli.main()

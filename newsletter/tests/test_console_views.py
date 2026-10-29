@@ -209,6 +209,38 @@ def test_the_notion_copy_takes_the_first_state_that_applies(
     )
 
 
+def test_backup_times_compare_as_times_not_text():
+    # A whole second is written without ".000", so text would order
+    # 07:00:00.500Z before 07:00:00Z.
+    whole, later = "2026-10-29T07:00:00Z", "2026-10-29T07:00:00.500Z"
+    records = [
+        (
+            backup_pb.Replica(state=REPLICA.SYNCING, last_progress_time=moment),
+            moment,
+        )
+        for moment in (whole, later)
+    ]
+    counts = views.replica_counts(
+        backup_pb.ReplicaCounts_Target.EDITIONS, records
+    )
+    assert counts.last_progress_time == later
+    assert counts.oldest_pending_time == whole
+    merged = views.merge_counts(
+        [
+            backup_pb.ReplicaCounts(
+                last_progress_time=whole, oldest_pending_time=later
+            ),
+            backup_pb.ReplicaCounts(
+                last_progress_time=later, oldest_pending_time=whole
+            ),
+        ]
+    )
+    assert (merged.last_progress_time, merged.oldest_pending_time) == (
+        later,
+        whole,
+    )
+
+
 @pytest.mark.parametrize(
     ("fixture", "correction", "key", "kind"),
     [

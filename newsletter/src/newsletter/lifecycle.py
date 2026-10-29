@@ -130,7 +130,6 @@ async def service_lifespan(
     todofy: newsletter_todofy.TodofyAdapter | None = None,
     collector: newsletter_collection_collector.Collector | None = None,
     start_worker: bool = True,
-    console_host: str | None = None,
 ) -> AsyncIterator[None]:
     """Own dependencies and workers under one exclusive database lifetime.
 
@@ -297,7 +296,7 @@ async def service_lifespan(
                         not start_worker
                         or (task is not None and not task.done())
                     ),
-                    console_host or CONSOLE_HOST,
+                    CONSOLE_HOST,
                 )
                 if settings.console_port
                 else None

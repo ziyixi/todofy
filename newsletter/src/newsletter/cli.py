@@ -110,8 +110,8 @@ def main() -> None:
     admin.configure(commands.add_parser("admin", help="Explicit maintenance"))
     args = parser.parse_args()
     if args.command == "serve":
-        console_port = os.getenv("NEWSLETTER_CONSOLE_PORT", "0")
-        if console_port.strip() == str(args.port):
+        console_port = os.getenv("NEWSLETTER_CONSOLE_PORT", "0").strip()
+        if console_port.isdigit() and int(console_port) == args.port:
             # The console listener binds during startup, before this server:
             # one port for both would take the engine's port from it.
             parser.error("NEWSLETTER_CONSOLE_PORT must differ from --port")

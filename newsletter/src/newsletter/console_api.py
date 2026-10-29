@@ -121,6 +121,14 @@ def encode(message: object) -> bytes:
     ).encode()
 
 
+def _answer(
+    reader: console_read.ConsoleReader, message: object, healthy: bool
+) -> bytes:
+    # Read and encode off the event loop the engine's server shares: an
+    # edition with its chart is the largest answer.
+    return encode(_dispatch(reader, message, healthy))
+
+
 def _dispatch(
     reader: console_read.ConsoleReader, message: object, healthy: bool
 ) -> Any:
@@ -179,10 +187,7 @@ class _Console:
         """The answer's wire bytes, read in a worker thread."""
         state = self.healthy()
         async with self.reads:
-            result = await asyncio.to_thread(
-                _dispatch, self.reader, message, state
-            )
-        return encode(result)
+            return await asyncio.to_thread(_answer, self.reader, message, state)
 
     def endpoint(
         self, binding: http_routes.HttpBinding

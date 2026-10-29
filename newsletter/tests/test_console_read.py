@@ -279,6 +279,49 @@ def test_unknown_counts_and_latest_delivery_agree_with_monitoring(
     )
 
 
+def test_queued_and_in_flight_work_agree_with_the_gate(world):
+    # Work in every state the gate counts, so a predicate that drifts from
+    # drain.py changes a number here.
+    db = world.store.db
+    with world.store.transaction():
+        db.execute(
+            "UPDATE collection_runs SET state='collecting' WHERE id=?",
+            (console_world.RUN_29M,),
+        )
+        db.execute(
+            "UPDATE editions SET state='queued' WHERE id=?",
+            (console_world.EDITION_24,),
+        )
+        db.execute(
+            "UPDATE editions SET state='running' WHERE id=?",
+            (console_world.EDITION_25,),
+        )
+        db.execute(
+            "UPDATE editions SET body=json_set(body,'$.delivery_state',"
+            "'submitting') WHERE id=?",
+            (console_world.EDITION_26,),
+        )
+        db.execute(
+            "INSERT INTO deployment_activities VALUES ('synthetic','run',"
+            "'active')"
+        )
+        for table, state in (
+            ("workflow_attempts", "state='running'"),
+            ("notion_entities", "create_state='creating'"),
+            ("notion_versions", "state='appending'"),
+        ):
+            db.execute(
+                f"UPDATE {table} SET {state} "
+                f"WHERE rowid=(SELECT MIN(rowid) FROM {table})"
+            )
+    gate = world.store.deployment.status()
+    service = world.reader.overview(healthy=True).service
+    assert service.queued_count == sum(gate["queued"].values()) >= 2
+    assert service.inflight_count == sum(gate["inflight"].values()) >= 6
+    # The run counts stay the collection runs' own.
+    assert service.running_run_count == 1
+
+
 def test_a_frozen_engine_still_answers(world):
     world.store.deployment.begin("release-1")
     world.store.deployment.freeze("release-1")

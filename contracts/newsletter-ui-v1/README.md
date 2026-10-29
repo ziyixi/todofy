@@ -112,8 +112,10 @@ that login expires.
   consecutive calendar dates ending with the newest issue date that has a run. An edition's `usage` is the summary
   frozen into its email, which has calls, tokens and completeness but no failure, partial or cost counts.
 - **Shared with Fleet and Home.** The unknown-record counts use the monitoring snapshot's predicates, the latest
-  delivery (`Overview.latest_delivery`) its query, and the drain state the deployment gate's rows, so the numbers agree
-  with Fleet. `ConfigState` carries the fields of Fleet's configuration observation, read by the same Newsletter helper
+  delivery (`Overview.latest_delivery`) its query, the drain state the deployment gate's rows, and the queued and
+  in-flight counts (`ServiceState.queued_count`, `inflight_count`, Fleet's 排队 and 进行中) the gate's own predicates, so
+  the numbers agree with Fleet. `queued_run_count` and `running_run_count` count collection runs only and are not
+  Fleet's numbers. `ConfigState` carries the fields of Fleet's configuration observation, read by the same Newsletter helper
   as the monitoring status, and its `state` is Fleet's rule (`configState`) evaluated when the view was read.
 - **The first page.** `Overview.latest_run` is the newest run of the daily schedule (a later manual or replayed run does
   not take its place), `latest_edition` the newest daily edition, and each strip day that date's scheduled run, or else
