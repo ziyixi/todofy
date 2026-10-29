@@ -111,8 +111,10 @@ test('only a deploy of the committed config runs, never with --env, --keep-vars 
 })
 
 test('a real deploy needs the real Access audience; a dry run is allowed only before the application exists', () => {
-  const withoutAudience = readFileSync(CONFIG, 'utf8')
-  assert.ok(!/^\s*ACCESS_AUDIENCE\s*=/m.test(withoutAudience))
+  // The committed config has no AUD before the first deploy and the real one from then on, never anything else.
+  const committed = readFileSync(CONFIG, 'utf8')
+  assert.equal(placeholderIn(committed) === null, /^\s*ACCESS_AUDIENCE\s*=/m.test(committed))
+  const withoutAudience = committed.split('\n').filter((line) => !/^\s*ACCESS_AUDIENCE\s*=/.test(line)).join('\n')
   const deploy = ['wrangler', 'deploy', '--config', '../wrangler.toml']
   assert.match(refusal(deploy, WORKER, () => withoutAudience) ?? '', /ACCESS_AUDIENCE/)
   assert.equal(refusal([...deploy, '--dry-run'], WORKER, () => withoutAudience), null)
@@ -134,8 +136,12 @@ test('exec appends the build var and passes the exit status through', () => {
     const result = invoke(['exec', '--', process.execPath, stub, 'deploy', '--dry-run', '--config', '../wrangler.toml'])
     assert.equal(result.status, 0, result.stderr)
     assert.deepEqual(JSON.parse(readFileSync(output, 'utf8')).slice(-2), ['--var', `BUILD_SHA:${'c'.repeat(40)}`])
-    const refused = invoke(['exec', '--', process.execPath, stub, 'deploy', '--config', '../wrangler.toml'])
-    assert.equal(refused.status, 2)
-    assert.match(refused.stderr, /ACCESS_AUDIENCE/)
+    // A real deploy runs only once the committed config holds the real AUD (the refusals themselves: the test above).
+    const real = invoke(['exec', '--', process.execPath, stub, 'deploy', '--config', '../wrangler.toml'])
+    if (placeholderIn(readFileSync(CONFIG, 'utf8')) === null) assert.equal(real.status, 0, real.stderr)
+    else {
+      assert.equal(real.status, 2)
+      assert.match(real.stderr, /ACCESS_AUDIENCE/)
+    }
   })
 })
