@@ -3,8 +3,8 @@ import { createModelClient, instructions, modelRequest, type ModelBinding, type 
 import { RpcStatusError } from '@ziyixi/proto/http-client';
 import { Code } from '@ziyixi/proto/rpc-status';
 import { classificationItems, CLASSIFICATION_OUTPUT_SCHEMA, type ClassificationEmail, type ClassificationItem } from './classification-result.ts';
-import { CLASSIFICATION_EFFORT, CLASSIFIER_MODELS } from './classifier-config.ts';
-import type { ClassificationProviderName } from './settings.ts';
+import { classifierEffort, classifierModel } from './classifier-config.ts';
+import type { ClassificationProviderName, SettingsValue } from './settings.ts';
 import { DRAIN_MAX } from './limits.ts';
 
 export interface ClassificationUsage {
@@ -52,7 +52,7 @@ function suffixOf(reason: string, code: number): string {
 
 /** Whether a stored safe code is a configuration failure the owner can fix (a spend limit waits for its month). */
 export function configurationCode(code: string): boolean {
-  return /^(claude|codex)_(auth|not_configured|not_allowed)$/.test(code);
+  return /^(claude|codex|openai|google)_(auth|not_configured|not_allowed)$/.test(code);
 }
 
 export class ClassificationError extends Error {
@@ -86,12 +86,13 @@ export async function classifyEmails(
   provider: ClassificationProviderName,
   emails: readonly ClassificationEmail[],
   prompt: { readonly basePrompt: string; readonly personalRules: string },
+  selection?: Pick<SettingsValue, 'classificationModel' | 'classificationEffort'>,
 ): Promise<ClassificationBatchResult> {
   if (binding === undefined) throw new ClassificationError(provider, 'MODEL_NOT_CONFIGURED');
   const ids = new Set(emails.map(email => email.id));
   // A broken local batch or an empty saved base prompt: held like configuration, never charged to the mail.
   if (!emails.length || emails.length > DRAIN_MAX || ids.size !== emails.length || ids.has('') || !prompt.basePrompt.trim()) throw new ClassificationError(provider, 'MODEL_INVALID_ANSWER', { kind: 'configuration' });
-  const options = { model: CLASSIFIER_MODELS[provider], effort: CLASSIFICATION_EFFORT, outputSchemaJson: JSON.stringify(CLASSIFICATION_OUTPUT_SCHEMA),
+  const options = { model: classifierModel({ classificationProvider: provider, ...selection }), effort: classifierEffort(selection ?? {}), outputSchemaJson: JSON.stringify(CLASSIFICATION_OUTPUT_SCHEMA),
     // No cache hint: a cache write costs more than the rare reuse between batches saves. Reported cache usage still counts.
     instructions: instructions(...[prompt.basePrompt, prompt.personalRules].filter(text => text.trim())) };
   let result;

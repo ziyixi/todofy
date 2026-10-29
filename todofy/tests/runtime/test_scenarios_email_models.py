@@ -12,6 +12,7 @@ from todofy.core.prompts import SUMMARY_RANGE
 EMAIL_ROUTE = "gemini-3.5-flash-lite"
 REPORT_ROUTE = "gemini-3.8-flash"
 SOL_ROUTE = "gpt-6.1-sol"
+API_SOL_ROUTE = "openai/gpt-6.1-sol"
 
 
 def arrive(worker: Worker) -> str:
@@ -90,6 +91,36 @@ def test_selecting_sol_changes_future_mail_but_preserves_completed_history(
     unchanged = worker.event(identifier)
     assert (unchanged["summary"], unchanged["summary_model"]) == (old["summary"], old["summary_model"])
     assert fresh_gemini.calls_mentioning(identifier) == []
+
+
+@pytest.mark.parametrize("kind,top_n", [("summary", None), ("recommendation", 5)])
+def test_saved_openai_api_routes_survive_restart_and_drive_mail_reports_and_recommendations(
+    launch: Launch, fresh_gemini: ModelRouterFake, kind: str, top_n: int | None
+):
+    worker = launch()
+    prior = arrive(worker)
+    frozen = worker.wait_event(prior, {"complete"})
+    chosen = update(worker, settings(worker), email_model=API_SOL_ROUTE, report_model=API_SOL_ROUTE)
+    worker.crash_and_restart()
+    assert settings(worker) == chosen
+    fresh_gemini.reset()
+    identifier = arrive(worker)
+    event = worker.wait_event(identifier, {"complete"})
+    assert event["summary_model"] == API_SOL_ROUTE
+    assert [call.requested_model for call in fresh_gemini.calls_mentioning(identifier)] == [API_SOL_ROUTE]
+    body = {"kind": kind, "request_id": str(uuid.uuid4())}
+    if top_n is not None:
+        body["top_n"] = top_n
+    response = worker.post_owner("/api/v1/latestReports:recompute", body)
+    assert response.status_code == 200, response.text
+    reports = [
+        call for call in fresh_gemini.calls() if call.system == SUMMARY_RANGE or call.response_schema is not None
+    ]
+    assert [call.requested_model for call in reports] == [API_SOL_ROUTE]
+    assert worker.event(prior)["summary_model"] == frozen["summary_model"]
+    budget = worker.overview()["gemini"]
+    assert budget["used_tokens"] > 0 and budget["reserved_tokens"] == 0
+    assert budget["email_models"] == [API_SOL_ROUTE] and budget["models"] == [API_SOL_ROUTE]
 
 
 def test_model_settings_reject_stale_etag_and_unknown_catalog_route(worker: Worker):

@@ -60,7 +60,7 @@ Home binds the content-free `Ops` entrypoint. Application request fields cannot 
 optional `ACCESS_OWNER_ALIASES`. The connections named in [app.toml](../app.toml) are Router secrets that normal
 publication preserves:
 
-- `ANTHROPIC_API_KEY` and `GEMINI_API_KEY`: one shared key per provider for every caller, Playground included.
+- `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` and `OPENAI_API_KEY`: one shared key per provider for every caller, Playground included.
   Provider keys are Router secrets; spending is capped at the provider. Application budgets and history remain
   in their applications.
 - `CODEX_ACCESS_CLIENT_ID` and `CODEX_ACCESS_CLIENT_SECRET`: the executor's Access service credential. The backend
@@ -70,6 +70,8 @@ publication preserves:
 
 Backups do not export any credentials. Gmail grants stay with Mailsort.
 Playground calls record source `console` and perform no application business action.
+OpenAI API uses Responses; signed-in Codex keeps its independent subscription connection. Catalog IDs beginning
+with `openai/` select the API. Its project hard spend limit is managed at OpenAI, independently of subscription use.
 
 ## Checks and coordinated release
 

@@ -8,7 +8,7 @@ const secrets = { ACCESS_OWNER: 'owner@example.test' }
 test('release requires its complete owner map and leaves owner-machine provider secrets out', () => {
   assert.deepEqual(generateSecrets({ MODEL_ROUTER_WORKER_SECRETS: JSON.stringify(secrets) }), { ...secrets, ACCESS_OWNER_ALIASES: ' ' })
   assert.throws(() => generateSecrets({}), /MODEL_ROUTER_WORKER_SECRETS/)
-  for (const name of ['ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'CODEX_ACCESS_CLIENT_ID', 'CODEX_ACCESS_CLIENT_SECRET', 'MODEL_ROUTER_NEWSLETTER_TOKEN']) {
+  for (const name of ['ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'OPENAI_API_KEY', 'CODEX_ACCESS_CLIENT_ID', 'CODEX_ACCESS_CLIENT_SECRET', 'MODEL_ROUTER_NEWSLETTER_TOKEN']) {
     assert.throws(() => generateSecrets({ MODEL_ROUTER_WORKER_SECRETS: JSON.stringify({ ...secrets, [name]: 'synthetic' }) }), /MODEL_ROUTER_WORKER_SECRETS/)
   }
 })

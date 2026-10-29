@@ -19,6 +19,14 @@ function binding(overrides: Partial<Omit<Generation, '$typeName' | '$unknown'>> 
 }
 
 describe('Mailsort Model Router calls', () => {
+  it('sends the saved API route and effort and keeps reported API cost', async () => {
+    const router = binding();
+    const result = await classifyEmails(router, 'openai', EMAILS, PROMPT, { classificationModel: 'openai/gpt-6.1-sol', classificationEffort: 'high' });
+    const sent = fromWire(GenerateRequestSchema, await router.fetch.mock.calls[0]?.[0].clone().json()).message;
+    expect(sent).toMatchObject({ model: 'openai/gpt-6.1-sol', effort: 'high', allowFallback: false });
+    expect(result).toMatchObject({ model: 'openai/gpt-6.1-sol', costMicros: 1506 });
+  });
+
   it.each(['claude', 'codex'] as const)('uses one common structured call for the saved %s selection', async provider => {
     const router = binding();
     const result = await classifyEmails(router, provider, EMAILS, PROMPT);
@@ -84,7 +92,7 @@ describe('Mailsort Model Router calls', () => {
     expect(await classifyEmails(router, 'codex', EMAILS, PROMPT)).toMatchObject({ inputTokens: 0, outputTokens: 0, costMicros: 0 });
   });
 
-  it.each(['claude', 'codex'] as const)('requires an API cost from common billing metadata under the saved %s choice', async provider => {
+  it.each(['claude', 'codex', 'openai', 'google'] as const)('requires an API cost from common billing metadata under the saved %s choice', async provider => {
     const router = binding({ usage: { $typeName: 'modelrouter.inference.v1.Usage', available: true, inputTokens: 150, outputTokens: 50, cachedInputTokens: 30, cacheWriteTokens: 20, billingKind: 'api' } });
     await expect(classifyEmails(router, provider, EMAILS, PROMPT)).rejects.toMatchObject({ code: `${provider}_bad_answer` });
   });

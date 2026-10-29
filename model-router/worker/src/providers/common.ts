@@ -2,8 +2,9 @@ import type { ProviderContext } from '../types.ts';
 import { secretFor } from '../catalog.ts';
 import { record } from './usage.ts';
 
-export function apiKey(context: ProviderContext, provider: 'ANTHROPIC' | 'GEMINI'): string | null {
-  return secretFor(context.env, provider === 'ANTHROPIC' ? 'anthropic' : 'gemini') || null;
+export function apiKey(context: ProviderContext, provider: 'OPENAI' | 'ANTHROPIC' | 'GEMINI'): string | null {
+  const providers = { OPENAI: 'openai', ANTHROPIC: 'anthropic', GEMINI: 'gemini' } as const;
+  return secretFor(context.env, providers[provider]) || null;
 }
 
 export function providerStatus(code: number, message: string, reason?: string, retryAfterSeconds = 0): { code: number; message: string; reason: string; retryAfterSeconds: number } {

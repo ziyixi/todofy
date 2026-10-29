@@ -40,8 +40,10 @@ export interface FlowGraph {
 
 const STAGES: readonly (readonly [MailFlow_Stage, string, string])[] = [
   [MailFlow_Stage.SKIPPED, 'skipped', '跳过'],
-  [MailFlow_Stage.CLAUDE, 'claude', 'Claude Opus 5.5'],
+  [MailFlow_Stage.CLAUDE, 'claude', 'Claude API'],
   [MailFlow_Stage.CODEX, 'codex', 'VPS Codex'],
+  [MailFlow_Stage.OPENAI, 'openai', 'OpenAI API'],
+  [MailFlow_Stage.GOOGLE, 'google', 'Gemini API'],
   [MailFlow_Stage.CLEF, 'clef', '历史 Clef 27B'],
   [MailFlow_Stage.CLEF_FLASH, 'clef-flash', '历史 Clef-flash'],
   [MailFlow_Stage.NO_MODEL, 'no_model', '历史未调用模型'],
@@ -173,7 +175,7 @@ export function flowGraph(counts: readonly MailFlow_Count[], labels: readonly La
 
 /** An empty day still shows the four priorities, with zero counts. */
 export function skeletonGraph(provider: ClassificationProvider = ClassificationProvider.CLAUDE): FlowGraph {
-  const model = provider === ClassificationProvider.CODEX ? 'codex' : 'claude'
+  const model = provider === ClassificationProvider.CODEX ? 'codex' : provider === ClassificationProvider.OPENAI ? 'openai' : provider === ClassificationProvider.GOOGLE ? 'google' : 'claude'
   const currentStages = STAGES.filter(([, id]) => id === 'skipped' || id === model || id === 'deferred')
   const stage = ([, id, name]: (typeof STAGES)[number]): FlowNodeData => ({ id, name, kind: id === 'skipped' || id === 'deferred' ? 'terminal' : 'stage', slot: 0 })
   const ranks: FlowNodeData[] = PRIORITIES.map((priority, index) => ({ id: `label:labels/${priority.id}`, name: priority.title, kind: 'label', slot: index + 1, group: priority.title, detail: [priority.policy] }))

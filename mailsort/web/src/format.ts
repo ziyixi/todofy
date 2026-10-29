@@ -61,11 +61,11 @@ export function claudeErrorMessage(code: string): string {
 
 /** Older settings and status responses did not carry a provider. */
 export function classificationProvider(value: ClassificationProvider | undefined): ClassificationProvider {
-  return value === ClassificationProvider.CODEX ? ClassificationProvider.CODEX : ClassificationProvider.CLAUDE
+  return value === ClassificationProvider.CODEX || value === ClassificationProvider.OPENAI || value === ClassificationProvider.GOOGLE ? value : ClassificationProvider.CLAUDE
 }
 
 export function classificationProviderName(value: ClassificationProvider): string {
-  return value === ClassificationProvider.CODEX ? 'VPS Codex' : 'Claude API'
+  return value === ClassificationProvider.CODEX ? 'VPS Codex' : value === ClassificationProvider.OPENAI ? 'OpenAI API' : value === ClassificationProvider.GOOGLE ? 'Gemini API' : 'Claude API'
 }
 
 const CODEX_ERRORS: Readonly<Record<string, string>> = {
@@ -88,6 +88,14 @@ const CODEX_ERRORS: Readonly<Record<string, string>> = {
 
 export function classifierErrorMessage(provider: ClassificationProvider, code: string): string {
   if (provider === ClassificationProvider.CLAUDE) return claudeErrorMessage(code)
+  if (provider !== ClassificationProvider.CODEX) {
+    const name = classificationProviderName(provider)
+    if (code.endsWith('_not_configured')) return `${name} 尚未配置`
+    if (code.endsWith('_auth')) return `${name} 授权失败，需检查 Router 连接`
+    if (code.endsWith('_not_allowed')) return `Model Router 不允许本应用使用所选 ${name} 模型`
+    if (code.endsWith('_quota') || code.endsWith('_spend_limit')) return `${name} 额度暂不可用，等待额度恢复`
+    return `${name} 请求失败，等待重试`
+  }
   const http = /^codex_http_(\d{3})$/.exec(code)
   if (http !== null) return `VPS Codex 返回 HTTP ${http[1] as string}，本次没有生成分级`
   return Object.hasOwn(CODEX_ERRORS, code) ? CODEX_ERRORS[code] as string : 'VPS Codex 请求失败，待重试；可刷新查看状态'

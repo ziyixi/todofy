@@ -4,6 +4,10 @@ import type { GetModelSettingsResponse } from '@ziyixi/proto/todofy/ui/v1/todofy
 import { todofy, newRequestId } from '../api/client';
 import { Button, ErrorPanel, Loading, Section } from './ui';
 
+const PROVIDERS: Readonly<Record<string, string>> = {
+  codex: 'Codex 订阅', openai: 'OpenAI API', anthropic: 'Claude API', google: 'Gemini API',
+};
+
 function Choices({ data }: { data: GetModelSettingsResponse }) {
   const cache = useQueryClient();
   const settings = data.settings!;
@@ -22,37 +26,43 @@ function Choices({ data }: { data: GetModelSettingsResponse }) {
       void cache.invalidateQueries({ queryKey: ['overview'] });
     },
   });
-  const options = data.models.filter((model) => model.configured && model.kind === 'text');
+  const options = data.models.filter((model) => model.kind === 'text');
+  const choices = (selected: string) => (
+    <>
+      {!options.some((model) => model.id === selected) && (
+        <option value={selected} disabled>{selected} · 目录不可用</option>
+      )}
+      {options.map((model) => (
+        <option key={model.id} value={model.id} disabled={!model.configured}>
+          {model.displayName || model.id} · {PROVIDERS[model.provider] || model.provider} ({model.id})
+          {model.configured ? '' : ' · 未配置'}
+        </option>
+      ))}
+    </>
+  );
+  const configured = (selected: string) => options.some((model) => model.id === selected && model.configured);
   return (
     <div className="stack">
       <label>
         逐封邮件摘要
         <select value={email} onChange={(event) => setEmail(event.target.value)}>
-          {options.map((model) => (
-            <option key={model.id} value={model.id}>
-              {model.displayName || model.id}{model.provider ? ` · ${model.provider}` : ''}
-            </option>
-          ))}
+          {choices(email)}
         </select>
       </label>
       <label>
         日报与推荐
         <select value={report} onChange={(event) => setReport(event.target.value)}>
-          {options.map((model) => (
-            <option key={model.id} value={model.id}>
-              {model.displayName || model.id}{model.provider ? ` · ${model.provider}` : ''}
-            </option>
-          ))}
+          {choices(report)}
         </select>
       </label>
       <p className="muted small">
-        只影响之后的新计算；已完成的邮件和日报保留。用量计入现有的每日 token 预算；Claude 和 Gemini 按 API
-        计费，与其他应用共用 Router 的工作区上限。选 Sol 时，家中主机离线不会改用 Gemini。
+        只影响之后的新计算；已完成的邮件和日报保留。所有模型共用现有的每日 token 预算。
+        Codex 使用订阅，OpenAI、Claude 和 Gemini 按 API 计费，费用见 Model Router。Codex 或 OpenAI API 失败时不会改用 Gemini。
       </p>
       {save.isError && <ErrorPanel error={save.error} />}
       <Button
         onClick={() => save.mutate()}
-        disabled={save.isPending || (email === settings.emailModel && report === settings.reportModel)}
+        disabled={save.isPending || !configured(email) || !configured(report) || (email === settings.emailModel && report === settings.reportModel)}
       >
         {save.isPending ? '保存中…' : '保存模型'}
       </Button>

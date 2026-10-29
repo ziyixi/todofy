@@ -29,7 +29,7 @@ export function unreadProgress(store: Store, now: number): UnreadClassification 
       coalesce(sum(b.state = 'skipped'), 0) AS skipped,
       coalesce(sum(b.state = 'failed' OR (b.state = 'pending' AND l.state = 'failed')), 0) AS failed,
       coalesce(sum(b.state = 'pending' AND p.not_before > ?), 0) AS deferred,
-      coalesce(sum(b.state = 'skipped' AND b.ledger_id IS NULL AND d.decider IN ('claude','codex')
+      coalesce(sum(b.state = 'skipped' AND b.ledger_id IS NULL AND d.decider IN ('claude','codex','openai','google')
         AND d.outcome = 'applied' AND d.decided_at >= ?), 0) AS unchanged
      FROM unread_batch b LEFT JOIN ledger l ON l.id = b.ledger_id LEFT JOIN pending p ON p.message_id = b.message_id
        LEFT JOIN decisions d ON d.message_id = b.message_id`, now, scan.startedAt,

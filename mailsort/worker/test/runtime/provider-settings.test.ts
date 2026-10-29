@@ -20,9 +20,9 @@ describe('classification provider settings and status', () => {
       updateMask: { paths: ['classification_provider', 'etag'] }, requestId,
     };
     const saved = await h.api.updateSettings(request);
-    expect(saved).toEqual({ ...before, classificationProvider: ClassificationProvider.CLAUDE, etag: saved.etag });
+    expect(saved).toEqual({ ...before, availableModels: [], classificationModel: 'claude-opus-5-5', classificationProvider: ClassificationProvider.CLAUDE, etag: saved.etag });
     expect(saved.etag).not.toBe(before.etag);
-    expect(await h.api.getSettings({ name: 'settings' })).toEqual(saved);
+    expect(await h.api.getSettings({ name: 'settings' })).toEqual({ ...saved, availableModels: before.availableModels });
     expect(await h.api.updateSettings(request)).toEqual(saved);
     expect(reasonOf(await rejection(h.api.updateSettings({ ...request, requestId: op() })))).toBe('ETAG_MISMATCH');
     const stored = await h.sql<{ value: string }>(`SELECT value FROM meta WHERE key = 'settings'`);
@@ -91,6 +91,36 @@ describe('classification provider settings and status', () => {
     expect(status.classifier).toMatchObject({ provider: ClassificationProvider.CLAUDE, model: 'claude-opus-5-5', effort: 'medium', configured: true, lastErrorCode: 'claude_invalid' });
     expect(status.classifier?.lastSuccessTime).toBeUndefined();
     expect(status.claudeBudget?.lastRequestTime).toEqual(timestampFromMs(T0));
+  });
+
+  it('saves a catalog model and effort without copying catalog state or altering mode, budgets or prompt', async () => {
+    const current = await h.api.getSettings({ name: 'settings' });
+    const prompt = await h.api.getClassificationPrompt({ name: 'classificationPrompt' });
+    const request = {
+      settings: create(SettingsSchema, { name: 'settings', classificationModel: 'openai/gpt-6.1-sol', classificationEffort: 'high', etag: current.etag }),
+      updateMask: { paths: ['classification_model', 'classification_effort', 'etag'] }, requestId: op(),
+    };
+    const saved = await h.api.updateSettings(request);
+    expect(saved).toMatchObject({ classificationProvider: ClassificationProvider.OPENAI, classificationModel: 'openai/gpt-6.1-sol', classificationEffort: 'high', mode: current.mode, dailyWriteLimit: current.dailyWriteLimit, runWriteLimit: current.runWriteLimit });
+    expect(await h.api.updateSettings(request)).toEqual(saved);
+    expect(await h.api.getSettings({ name: 'settings' })).toEqual({ ...saved, availableModels: current.availableModels });
+    const stored = JSON.parse((await h.sql<{ value: string }>(`SELECT value FROM meta WHERE key = 'settings'`))[0]?.value ?? '{}') as Record<string, unknown>;
+    expect(stored).toMatchObject({ classificationProvider: 'openai', classificationModel: 'openai/gpt-6.1-sol', classificationEffort: 'high' });
+    expect(stored).not.toHaveProperty('availableModels');
+    expect(await h.api.getClassificationPrompt({ name: 'classificationPrompt' })).toEqual(prompt);
+    expect(h.up.api.calls).toHaveLength(0);
+    expect(h.up.gmail.calls).toHaveLength(0);
+  });
+
+  it.each([
+    ['openai/gpt-6-astra', 'high'], ['openai/missing', 'medium'], ['openai/gpt-6.1-sol', 'ultra'], ['', 'medium'],
+  ])('rejects unavailable routes and unsupported efforts: %s / %s', async (model, effort) => {
+    const before = await h.api.getSettings({ name: 'settings' });
+    expect(reasonOf(await rejection(h.api.updateSettings({
+      settings: create(SettingsSchema, { name: 'settings', classificationModel: model, classificationEffort: effort, etag: before.etag }),
+      updateMask: { paths: ['classification_model', 'classification_effort'] }, requestId: op(),
+    })))).toBe('INVALID_SETTINGS');
+    expect(await h.api.getSettings({ name: 'settings' })).toEqual(before);
   });
 });
 

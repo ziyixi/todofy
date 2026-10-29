@@ -77,11 +77,11 @@ service ModelService {
 
 // One actual provider model, never an application policy or fallback-chain alias.
 message Model {
-  // Native provider model ID.
+  // Router model ID; OpenAI API IDs use openai/<native ID>, while raw gpt-* IDs select Codex.
   string id = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Display name.
   string display_name = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // openai, anthropic, google or cloudflare.
+  // codex, openai, anthropic, google or cloudflare.
   string provider = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
   // text or embedding.
   string kind = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
@@ -103,7 +103,7 @@ message Instruction {
 
 // One invocation. A conversation turn supplies conversation instead of model/options.
 message GenerateRequest {
-  // Native provider model ID; omitted for an existing context.
+  // Router catalog model ID; omitted for an existing context.
   string model = 1 [(google.api.field_behavior) = OPTIONAL];
   // Untrusted input text or caller-serialized JSON.
   string input = 2 [(google.api.field_behavior) = REQUIRED];
@@ -159,7 +159,7 @@ message Observations {
 message Generation {
   // Server-generated requests/{UUID} trace.
   string name = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Actual selected provider model ID, using the reported model when available.
+  // Selected model; OpenAI API IDs keep the openai/ prefix to distinguish them from Codex.
   string model = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Completed text or schema-valid JSON; empty on failure.
   string output = 3 [(google.api.field_behavior) = OUTPUT_ONLY];

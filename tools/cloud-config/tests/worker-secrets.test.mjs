@@ -70,7 +70,7 @@ test('Mail Hero retains required keys while old Todofy maps lose only the retire
 
 test('Router provider credentials cannot enter its GitHub deployment map', () => {
   const spec = workerSecretSpec('model-router')
-  for (const name of ['ANTHROPIC_API_KEY', 'GEMINI_API_KEY']) {
+  for (const name of ['ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'OPENAI_API_KEY']) {
     assert.ok(![...spec.required, ...spec.optional].includes(name))
     assert.throws(() => mergeWorkerSecrets('model-router', { [spec.github_secret]: JSON.stringify({ ACCESS_OWNER: 'owner@example.test', [name]: privateValue }) }, {}, SettingError),
       error => error.setting === spec.github_secret && !error.message.includes(privateValue), name)

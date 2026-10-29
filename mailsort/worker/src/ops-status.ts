@@ -14,7 +14,7 @@ import { backupOps, type BackupFacts } from './backup.ts';
 import { modeCeiling, publicHost, type Env } from './env.ts';
 import { ALARM_IDLE_MS, MINUTE } from './limits.ts';
 import { authState } from './session.ts';
-import { effectiveMode, readSettings } from './settings.ts';
+import { effectiveMode, readSettings, type ClassificationProviderName } from './settings.ts';
 import { CLAUDE_MONTHLY_LIMIT_MICROS, utcDay, type Store } from './store.ts';
 
 /** No complete sync for this long, while the mode reads Gmail and the grant works, raises `sync_stale`. */
@@ -77,7 +77,7 @@ export function uiUrl(host: string | null): string | undefined {
  * caller the Router does not allow), Codex capacity (quota, rate limit) and everything else unavailable. Claude's
  * spend limit has its own signal.
  */
-function modelSignal(provider: 'claude' | 'codex', code: string): string {
+function modelSignal(provider: ClassificationProviderName, code: string): string {
   const failure = code.slice(provider.length + 1);
   if (failure === 'not_configured') return `${provider}_not_configured`;
   if (['auth', 'not_allowed', '401', '403'].includes(failure)) return `${provider}_auth`;
@@ -119,8 +119,9 @@ export function sortStatus(store: Store, env: StatusEnv, now: number, backup: Ba
       if (store.getMeta('claude_limited_month') === month || claude.cost_micros >= CLAUDE_MONTHLY_LIMIT_MICROS) signals.push(signal('claude_spend_limit', Severity.WARNING, {}));
       else if (modelError !== '' && modelError !== 'claude_spend_limit') signals.push(signal(modelSignal('claude', modelError), Severity.WARNING, {}));
     } else if (mode !== 'off') {
-      const modelError = store.getMeta('codex_error') ?? (env.MODEL_ROUTER === undefined ? 'codex_not_configured' : '');
-      if (modelError !== '') signals.push(signal(modelSignal('codex', modelError), Severity.WARNING, {}));
+      const provider = settings.classificationProvider;
+      const modelError = store.getMeta(`${provider}_error`) ?? (env.MODEL_ROUTER === undefined ? `${provider}_not_configured` : '');
+      if (modelError !== '') signals.push(signal(modelSignal(provider, modelError), Severity.WARNING, {}));
     }
     signals.sort((a, b) => rank(a.severity) - rank(b.severity) || (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
 

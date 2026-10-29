@@ -37,7 +37,7 @@ import {
 import { readMessage, type ReadMessage } from './mime.ts';
 import { P1_ID, PRIORITY_IDS, priorityGmailIds, priorityStartedAt } from './priority.ts';
 import { Budget, noteGoogleError, noteTokenOk, openSession, writeScope } from './session.ts';
-import { adoptClassificationInterval, effectiveMode, readSettings } from './settings.ts';
+import { adoptClassificationInterval, effectiveMode, readSettings, type ClassificationProviderName } from './settings.ts';
 import { CLAUDE_MONTHLY_LIMIT_MICROS, utcDay, type Store } from './store.ts';
 import { finishUnread, isUnreadPending, scanUnread } from './unread.ts';
 import { executeWrites, intend, type WriteContext, type WriteGate } from './writes.ts';
@@ -359,7 +359,7 @@ async function prepareMail(ctx: MailContext, messageId: string, attempts: number
   return { read, gathered: await gather(read), unread, attempts };
 }
 
-async function applyClassification(ctx: MailContext, prepared: PreparedMail, result: ClaudeItem, provider: 'claude' | 'codex', model: string, writeNow = true): Promise<MailOutcome> {
+async function applyClassification(ctx: MailContext, prepared: PreparedMail, result: ClaudeItem, provider: ClassificationProviderName, model: string, writeNow = true): Promise<MailOutcome> {
   const { store } = ctx;
   const { read, gathered: g, unread } = prepared;
   const now = ctx.now();
@@ -395,7 +395,7 @@ async function applyClassification(ctx: MailContext, prepared: PreparedMail, res
 interface Recorded {
   readonly outcome: 'applied' | 'suggested' | 'unsure';
   readonly label: string | null;
-  readonly decider: 'claude' | 'codex' | 'none';
+  readonly decider: ClassificationProviderName | 'none';
   readonly model: string;
   readonly reason: string;
   readonly modelReason?: string;
@@ -524,7 +524,7 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
             time_zone: 'America/Los_Angeles', body: Array.from(g.features.body).slice(0, 12000).join(''),
             body_truncated: read.bodyTruncated === true || Array.from(read.body).length > 12000,
           }));
-          const recorded = await classifyEmails(modelRouterBinding(deps.env), provider, emails, { basePrompt: prompt.baseText, personalRules: prompt.personalRules });
+          const recorded = await classifyEmails(modelRouterBinding(deps.env), provider, emails, { basePrompt: prompt.baseText, personalRules: prompt.personalRules }, settings);
           answer = recorded;
           transact(() => {
             if (provider === 'claude') {

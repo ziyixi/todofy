@@ -25,7 +25,7 @@ export function duration(value: number | undefined): string {
 }
 
 export function modelName(name: string | undefined): string {
-  return name || '未提供'
+  return name?.replace(/^openai\//, '') || '未提供'
 }
 
 export function requestId(name: string | undefined): string {
@@ -61,6 +61,7 @@ export function modelErrorExplanation(reason: string | undefined): string | unde
       MODEL_TIMEOUT: '模型调用未在限定时间内完成。',
       MODEL_CANCELLED: '本次模型调用已取消。',
       MODEL_NOT_CONFIGURED: '所选模型尚未配置连接。',
+      MODEL_SPEND_LIMIT: '供应商额度已耗尽或达到消费上限；请检查供应商的额度与月度限制。',
       MODEL_INTERNAL: '模型执行发生内部错误。',
       MODEL_OUTPUT_LIMIT: '模型输出超过本次请求限制。',
     } as Record<string, string>
@@ -78,7 +79,7 @@ export function billingLabel(kind: string | undefined): string {
 export function providerLabel(provider: string | undefined): string {
   return (
     (
-      { openai: 'OpenAI', anthropic: 'Anthropic', google: 'Google', cloudflare: 'Cloudflare' } as Record<
+      { codex: 'Codex', openai: 'OpenAI API', anthropic: 'Anthropic', google: 'Google', cloudflare: 'Cloudflare' } as Record<
         string,
         string
       >
@@ -89,7 +90,7 @@ export function providerLabel(provider: string | undefined): string {
 }
 
 export function modelLabel(model: Model): string {
-  return `${providerLabel(model.provider)} · ${model.id || model.display_name || '未提供'}`
+  return `${providerLabel(model.provider)} · ${model.id ? modelName(model.id) : model.display_name || '未提供'}`
 }
 
 export function money(microusd: number): string {

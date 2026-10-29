@@ -96,3 +96,26 @@ export function geminiUsage(value: unknown, reportedModel = ''): TokenUsage {
   const cost = estimateCostMicrousd(reportedModel, result);
   return cost === undefined ? result : { ...result, estimatedCostMicrousd: cost };
 }
+
+/** Responses totals already include cached input, cache writes and output reasoning. */
+export function openaiUsage(value: unknown, reportedModel: string, serviceTier: unknown): TokenUsage {
+  const usage = record(value);
+  if (usage === null) return unknownUsage();
+  const details = record(usage['input_tokens_details']);
+  const input = tokenCount(usage['input_tokens']);
+  const output = tokenCount(usage['output_tokens']);
+  const cached = tokenCount(details?.['cached_tokens']);
+  const writes = tokenCount(details?.['cache_write_tokens']);
+  const total = tokenCount(usage['total_tokens']);
+  const reasoning = tokenCount(record(usage['output_tokens_details'])?.['reasoning_tokens'] ?? 0);
+  const result: TokenUsage = { available: input !== null && output !== null && cached !== null && writes !== null
+    && total === input + output && cached + writes <= input && reasoning !== null && reasoning <= output,
+  inputTokens: input ?? 0, outputTokens: output ?? 0, cachedInputTokens: cached ?? 0, cacheWriteTokens: writes ?? 0, billingKind: 'api' };
+  const lifetimes = record(details?.['cache_write_tokens_details']);
+  const thirtyMinuteTokens = tokenCount(lifetimes?.['ttl_30m_tokens']);
+  const twelveHourTokens = tokenCount(lifetimes?.['ttl_12h_tokens']);
+  const cacheCreation = thirtyMinuteTokens !== null && twelveHourTokens !== null ? { thirtyMinuteTokens, twelveHourTokens } : undefined;
+  // The adapter requests Standard; a provider-reported different or missing tier has no verified estimate.
+  const cost = serviceTier === 'default' ? estimateCostMicrousd(`openai/${reportedModel}`, result, cacheCreation) : undefined;
+  return cost === undefined ? result : { ...result, estimatedCostMicrousd: cost };
+}

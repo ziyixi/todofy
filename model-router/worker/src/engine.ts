@@ -25,6 +25,7 @@ import { modelCatalog, providerFor, routeFor } from './catalog.ts';
 import { executorClient } from './executor.ts';
 import { generateClaude } from './providers/claude.ts';
 import { generateGemini } from './providers/gemini.ts';
+import { generateOpenAI } from './providers/openai.ts';
 import { embedWorkersAI } from './providers/workers-ai.ts';
 import { estimateCostMicrousd } from './providers/pricing.ts';
 import { timedOut } from './providers/common.ts';
@@ -131,7 +132,7 @@ export class RouterEngine extends DurableObject<Env> {
     const timer = setTimeout(() => controller.abort(new DOMException('The model exceeded its time budget.', 'TimeoutError')), duration);
     let value = create(GenerationSchema, {
       name: `requests/${crypto.randomUUID()}`,
-      model: route.upstreamModel,
+      model: effective.model,
       usage: { billingKind: route.provider === 'codex' ? 'subscription' : 'api' },
     });
     const trace = create(RequestRecordSchema, {
@@ -164,7 +165,7 @@ export class RouterEngine extends DurableObject<Env> {
         };
         result.usage.estimatedCostMicrousd = estimateCostMicrousd(route.upstreamModel, result.usage);
       } else {
-        const provider = route.provider === 'anthropic' ? generateClaude : generateGemini;
+        const provider = route.provider === 'openai' ? generateOpenAI : route.provider === 'anthropic' ? generateClaude : generateGemini;
         result = await provider(providerRequest, {
           env: this.env,
           caller: app,
@@ -176,7 +177,7 @@ export class RouterEngine extends DurableObject<Env> {
       }
       value = create(GenerationSchema, {
         name: value.name,
-        model: result.reportedModel || route.upstreamModel,
+        model: route.provider === 'openai' ? effective.model : result.reportedModel || route.upstreamModel,
         output: result.error ? result.output : callerOutput(effective.outputSchemaJson, result.output),
         usage: create(UsageSchema, result.usage),
         observations: create(ObservationsSchema, result.observations),

@@ -77,6 +77,8 @@ export function labelMessage(row: LabelRow, exampleCount: number, trustedDomains
 const FLOW_STAGES: Readonly<Partial<Record<FlowStage, MailFlow_Stage>>> = {
   claude: MailFlow_Stage.CLAUDE,
   codex: MailFlow_Stage.CODEX,
+  openai: MailFlow_Stage.OPENAI,
+  google: MailFlow_Stage.GOOGLE,
   skipped: MailFlow_Stage.SKIPPED,
   clef: MailFlow_Stage.CLEF,
   'clef-flash': MailFlow_Stage.CLEF_FLASH,

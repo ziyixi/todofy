@@ -19,16 +19,12 @@ defaults to a 15-minute interval, configurable in 设置 → 自动分类间隔 
 recent Inbox mail without a P1-P4 classification, whether read or unread, in bounded batches of up to ten
 with one model request per batch. Automatic intake is limited to the past 48 hours; archived mail stays outside
 this automatic scope. Existing classifications and read/starred states are preserved.
-Choose either provider in **设置 → 分类引擎**:
+Choose a configured text model and its supported effort in **设置 → 分类引擎**. Choices come from Model Router and
+show their provider: VPS Codex, OpenAI API, Claude API or Gemini API. `gpt-6.1-sol` uses the existing Codex subscription;
+`openai/gpt-6.1-sol` uses the OpenAI API. Credentials remain in Router. Configuration does not prove successful inference.
 
-| Choice | Fixed model | Authentication |
-| --- | --- | --- |
-| Claude API | `models/claude-opus-5-5`, medium | Model Router, dedicated Mailsort connection |
-| VPS Codex | `models/sol-6-1`, medium | Model Router, existing VPS subscription executor |
-
-The Codex model and effort were checked against the production VPS catalog; inference requires separate verification.
-The choice is saved in the existing settings row and survives reload and deployment. A settings row without a choice
-(a fresh install or rebuilt state) uses Codex, the provider in use. Both providers use the same saved prompt; switching preserves mode, write limits and Claude
+The model and effort are saved in the existing settings row and survive reload and deployment. Older provider-only
+settings keep `claude-opus-5-5` medium or `gpt-6.1-sol` medium; settings without a choice use Codex. Every model uses the same saved prompt; switching preserves mode, write limits and Claude
 usage history. It affects the next batch without starting an unread batch or reclassifying labelled mail.
 There is no automatic provider or model fallback.
 
@@ -57,18 +53,19 @@ against any mail (5 minutes doubling to an hour, or the Router's Retry-After), s
 configuration or auth failure retries hourly, or at once after a settings save; an invalid request or answer gives
 a mail three tries and a timeout seven. A mail that already failed is retried alone.
 
-Claude API uses its own workspace with a **$20/calendar-month provider spend limit**, separate from Brief.
-Gift-credit usage counts toward provider limits. The app records returned input/output/thinking and cache tokens and
+Claude API retains the app's **$20/calendar-month recorded-usage stop**. Router owns the shared provider connection
+and its separate workspace limits. Gift-credit usage counts toward provider limits. The app records returned input/output/thinking and cache tokens and
 list-price cost, and stops new calls once its recorded monthly cost reaches $20. The console remains the billing
 authority; out-of-app calls and calls with a lost response may not appear in the app tally. A provider spend refusal
 leaves Claude work pending for the next UTC month. These limits apply only while Claude is selected; its usage and
-cache records remain visible as history while Codex is selected.
+cache records remain visible as history while another provider is selected. OpenAI and Gemini API usage and cost
+are recorded in Model Router and follow their provider limits; they do not spend the Claude local budget.
 
 Mailsort never asks for a prompt cache: a cache write costs more than the occasional reuse between batches saves.
 The stable base/rules prefix still comes first. Cache reads/writes the API reports still appear on the usage card and
 cost uses their separate prices.
 
-Both choices use the private `MODEL_ROUTER` service binding and the shared `modelrouter.inference.v1` contract.
+Every model uses the private `MODEL_ROUTER` service binding and the shared `modelrouter.inference.v1` contract.
 Mailsort sends trusted instruction blocks, masked input and a standard JSON Schema through
 `@ziyixi/model-router-client`. The Router owns model connections, provider formats, usage normalization and the
 VPS executor connection. Its authenticated caller identity attributes usage; all Claude callers share the Router's single key in the existing $80/month workspace. No model receives Gmail credentials or business tools. Model availability and successful real inference
@@ -83,7 +80,7 @@ older daily Codex rows only age out with their 400-day retention.
 - 分级: four fixed queues, counts and explicit unread-batch progress. A manual start queues immediately; existing
   P1-P4 mail is skipped. While an active batch is visible, progress updates every 30 seconds. It stops on completion
   or leaving the page, and a reached daily write cap shows its UTC-reset time in the browser timezone.
-- 设置: the persistent provider and interval choices, next classification time, personal rules, a collapsed base-prompt editor, mode, write limits and undo. Old examples, replay results and decision evidence remain readable as history.
+- 设置: persistent model, effort and interval choices, next classification time, personal rules, a collapsed base-prompt editor, mode, write limits and undo. Old examples, replay results and decision evidence remain readable as history.
 
 Off, shadow and live modes retain their existing meanings. Shadow records decisions without changing Gmail;
 live applies them. The deployment ceiling can lower the owner's mode. Existing labelled mail is not automatically

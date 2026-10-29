@@ -18,6 +18,7 @@ from todofy.core.owner_ui import UiError
 EMAIL = "gemini-3.5-flash-lite"
 REPORT = "gemini-3.8-flash"
 SOL = "gpt-6.1-sol"
+API_SOL = "openai/gpt-6.1-sol"
 MIGRATIONS = sorted((Path(__file__).parents[2] / "migrations").glob("*.sql"))
 REWRITE = MIGRATIONS[0].parent / "0017_native_model_ids.sql"
 
@@ -30,7 +31,13 @@ def settings_api(monkeypatch):
         class Client:
             async def list_models(self):
                 return models.ListModelsResponse(
-                    models=tuple(models.Model(id=name, configured=True, kind="text") for name in (EMAIL, REPORT, SOL))
+                    models=(
+                        models.Model(id=EMAIL, configured=True, kind="text", provider="google"),
+                        models.Model(id=REPORT, configured=True, kind="text", provider="google"),
+                        models.Model(id=SOL, configured=True, kind="text", provider="codex"),
+                        models.Model(id=API_SOL, configured=True, kind="text", provider="openai"),
+                        models.Model(id="openai/gpt-6-astra", configured=False, kind="text", provider="openai"),
+                    )
                 )
 
         monkeypatch.setattr(model, "client", lambda *_args: Client())
@@ -49,7 +56,7 @@ def test_initial_route_choices_and_configured_catalog(settings_api):
     module, env = settings_api
     result = asyncio.run(module.catalog(env))
     assert (result.settings.email_model, result.settings.report_model, result.settings.etag) == (EMAIL, REPORT, "0")
-    assert [model.id for model in result.models] == [EMAIL, REPORT, SOL]
+    assert [model.id for model in result.models] == [EMAIL, REPORT, SOL, API_SOL, "openai/gpt-6-astra"]
 
 
 @pytest.mark.parametrize(
@@ -75,6 +82,7 @@ def test_only_the_two_gemini_choices_fall_back_to_each_other(settings_api):
     assert module.fallback_models(EMAIL) == (REPORT,)
     assert module.fallback_models(REPORT, report=True) == (EMAIL,)
     assert module.fallback_models(SOL) == ()
+    assert module.fallback_models(API_SOL) == ()
 
 
 def test_update_replays_identical_operation_and_rejects_reused_identity(settings_api):
@@ -111,4 +119,23 @@ def test_stale_etag_and_unconfigured_model_are_rejected(settings_api):
     with pytest.raises(UiError, match="BAD_REQUEST"):
         asyncio.run(
             module.update(env, "owner", request(dataclasses.replace(updated, report_model="models/not-configured")))
+        )
+
+
+def test_api_and_subscription_routes_persist_independently(settings_api):
+    module, env = settings_api
+    current = asyncio.run(module.get(env))
+    changed = asyncio.run(
+        module.update(env, "owner", request(dataclasses.replace(current, email_model=SOL, report_model=API_SOL)))
+    )
+    assert asyncio.run(module.get(env)) == changed
+    assert (changed.email_model, changed.report_model) == (SOL, API_SOL)
+    result = asyncio.run(module.catalog(env))
+    assert {item.id: item.provider for item in result.models if item.id in {SOL, API_SOL}} == {
+        SOL: "codex",
+        API_SOL: "openai",
+    }
+    with pytest.raises(UiError, match="BAD_REQUEST"):
+        asyncio.run(
+            module.update(env, "owner", request(dataclasses.replace(changed, report_model="openai/gpt-6-astra")))
         )

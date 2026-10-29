@@ -46,6 +46,10 @@ message MailFlow {
     STAGE_CLAUDE = 6;
     // One VPS Codex request classified a bounded batch.
     STAGE_CODEX = 7;
+    // One OpenAI API request classified a bounded batch.
+    STAGE_OPENAI = 8;
+    // One Google Gemini API request classified a bounded batch.
+    STAGE_GOOGLE = 9;
   }
 
   // What became of the mail.

@@ -8,6 +8,7 @@ package mailsort.ui.v2;
 import "google/api/field_behavior.proto";
 import "google/api/resource.proto";
 import "google/protobuf/timestamp.proto";
+import "modelrouter/inference/v1/inference.proto";
 
 option java_multiple_files = true;
 option java_outer_classname = "StatusProto";
@@ -41,11 +42,19 @@ message Settings {
   // AIP-154: changes with every change. UpdateSettings that carries an etag is refused with ETAG_MISMATCH when
   // the settings changed since.
   string etag = 9 [(google.api.field_behavior) = OPTIONAL];
-  // The fixed classification provider. Settings without a choice use Codex; changing this affects the next model batch.
+  // The classification provider, derived from classification_model. Older provider-only updates retain their defaults.
   ClassificationProvider classification_provider = 10 [(google.api.field_behavior) = OPTIONAL];
   // Normal automatic classification interval in minutes: 5, 15, 30 or 60. Defaults to 15.
   // Gmail maintenance and pending-work retries keep their separate schedules.
   int32 classification_interval_minutes = 11 [(google.api.field_behavior) = OPTIONAL];
+  // Model Router route for the next batch. An older setting uses its provider's existing default model.
+  string classification_model = 12 [(google.api.field_behavior) = OPTIONAL];
+  // Reasoning effort supported by the selected route; empty for a route without effort choices. Defaults to medium.
+  string classification_effort = 13 [(google.api.field_behavior) = OPTIONAL];
+  // Current text routes from Model Router, including their provider and configuration status. GetSettings only.
+  // (-- api-linter: core::0215::foreign-type-reference=disabled
+  //     aip.dev/not-precedent: Settings expose the Router's catalog directly, as Todofy's model settings do. --)
+  repeated modelrouter.inference.v1.Model available_models = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // One label's share of the last 7 days of decisions.
@@ -209,9 +218,9 @@ message CodexUsage {
 message ClassifierStatus {
   // The owner's selected provider.
   ClassificationProvider provider = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The selected provider's fixed model ID.
+  // The selected Model Router route.
   string model = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The selected provider's fixed reasoning effort.
+  // The saved reasoning effort.
   string effort = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Required local configuration is present and valid; this does not check network reachability or credentials.
   bool configured = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
@@ -300,7 +309,7 @@ message UnreadClassification {
   int32 unchanged_count = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
-// The two classification providers the owner may select. There is no automatic fallback.
+// The selected route's provider. Historical values retain their original meaning. There is no automatic fallback.
 enum ClassificationProvider {
   // Never written; refused on input.
   CLASSIFICATION_PROVIDER_UNSPECIFIED = 0;
@@ -308,6 +317,10 @@ enum ClassificationProvider {
   CLASSIFICATION_PROVIDER_CLAUDE = 1;
   // The configured VPS Codex endpoint.
   CLASSIFICATION_PROVIDER_CODEX = 2;
+  // OpenAI API, billed separately from the Codex subscription.
+  CLASSIFICATION_PROVIDER_OPENAI = 3;
+  // Google Gemini API.
+  CLASSIFICATION_PROVIDER_GOOGLE = 4;
 }
 
 // What the pipeline may do.

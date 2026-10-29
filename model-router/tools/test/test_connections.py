@@ -13,7 +13,7 @@ connections = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(connections)
 ACCOUNT = "a" * 32
 PRIVATE_TOKEN = "synthetic-private-bypass-token-never-print"
-NAMES = ["ANTHROPIC_API_KEY", "GEMINI_API_KEY", "CODEX_ACCESS_CLIENT_ID", "CODEX_ACCESS_CLIENT_SECRET", "MODEL_ROUTER_NEWSLETTER_TOKEN"]
+NAMES = ["ANTHROPIC_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY", "CODEX_ACCESS_CLIENT_ID", "CODEX_ACCESS_CLIENT_SECRET", "MODEL_ROUTER_NEWSLETTER_TOKEN"]
 
 
 class ConnectionReadiness(unittest.TestCase):

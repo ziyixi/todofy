@@ -11,7 +11,7 @@ from typing import Any
 from tests.fakes.server import FakeServer, Recorded, Reply
 
 GENERATE_PATH = "/api/model/v1/generations:generate"
-PUBLIC_MODELS = ("gemini-3.5-flash-lite", "gemini-3.8-flash", "gpt-6.1-sol")
+PUBLIC_MODELS = ("gemini-3.5-flash-lite", "gemini-3.8-flash", "gpt-6.1-sol", "openai/gpt-6.1-sol")
 REPORTED = {"gemini-3.5-flash-lite": "model-a", "gemini-3.8-flash": "gemini-probe"}
 
 
@@ -125,7 +125,11 @@ class ModelRouterFake(FakeServer):
                         "id": model,
                         "configured": True,
                         "kind": "text",
-                        "provider": "openai" if model.startswith("gpt-") else "google",
+                        "provider": "openai"
+                        if model.startswith("openai/")
+                        else "codex"
+                        if model.startswith("gpt-")
+                        else "google",
                     }
                     for model in PUBLIC_MODELS
                 ]

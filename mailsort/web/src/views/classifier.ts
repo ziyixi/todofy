@@ -17,6 +17,7 @@ export function classifierDetails(status: ServiceStatus | null, now: number, sel
     el('p', { class: 'hint' }, `${classificationProviderName(selected)} · ${model} · ${effort}`),
     el('p', { class: classifier?.configured === false ? 'hint warn' : 'hint' }, classifier === undefined ? '配置状态未提供，请刷新或等待服务更新。' : classifier.configured ? '已配置' : '尚未配置，下一批无法分类'),
     selected === ClassificationProvider.CODEX ? el('p', { class: 'hint' }, '使用 Codex 订阅额度，不计入 Claude API 月费用。') : null,
+    selected === ClassificationProvider.OPENAI || selected === ClassificationProvider.GOOGLE ? el('p', { class: 'hint' }, '按 API 计费，用量和费用见 Model Router。Claude 的本地月上限仅适用于 Claude。') : null,
     el('p', { class: 'hint' }, (classifier?.classificationIntervalMinutes ?? 0) > 0 ? `自动分类间隔 ${String(classifier?.classificationIntervalMinutes)} 分钟，可在设置中调整。` : '自动分类间隔尚未提供'),
     el('p', { class: 'hint' }, '范围：最近 48 小时的 Inbox 未分类邮件，不区分已读、未读。'),
     el('p', { class: 'hint' }, next === undefined ? '下批判断时间尚未提供' : `下批判断最早在 ${relative(next, now)}（${when(next)}）。`),

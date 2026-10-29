@@ -31,6 +31,15 @@ describe('classification provider settings', () => {
     expect(effectiveMode(saved, 'shadow')).toBe('shadow');
     expect(writeSettings(value, { ...saved, classificationProvider: 'claude' }, NOW + 1)).toMatchObject({ mode: 'live', classificationProvider: 'claude' });
   });
+
+  it('reopens a saved API route and effort independently of the subscription default', () => {
+    const sql = memorySql();
+    const value = new Store(sql);
+    value.migrate();
+    const saved = writeSettings(value, { ...DEFAULTS, classificationProvider: 'openai', classificationModel: 'openai/gpt-6.1-sol', classificationEffort: 'high' }, NOW);
+    expect(readSettings(new Store(sql))).toEqual(saved);
+    expect(saved.mode).toBe(DEFAULTS.mode);
+  });
 });
 
 describe('automatic classification interval', () => {

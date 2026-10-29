@@ -6,7 +6,7 @@ import { api } from '../api.ts'
 import { card, emptyState, kpi, meter } from '../components.ts'
 import { el, fill } from '../dom.ts'
 import { flowGraph, sankeyChart } from '../flowchart.ts'
-import { classificationProvider, claudeErrorMessage, labelText, MODE_HINTS, MODE_NAMES, relative, when } from '../format.ts'
+import { classificationProvider, classificationProviderName, claudeErrorMessage, labelText, MODE_HINTS, MODE_NAMES, relative, when } from '../format.ts'
 import type { ViewContext } from '../app.ts'
 import { allLabels, frame } from './common.ts'
 import { classifierDetails } from './classifier.ts'
@@ -84,7 +84,6 @@ function budget(status: ServiceStatus, now: number): HTMLElement {
   if (usage === undefined) return card(title, '', el('p', { class: active ? 'hint warn' : 'hint' }, 'Claude 用量未提供，请刷新或等待服务更新。'))
   const dollars = (value: number) => `US$ ${value.toFixed(2)}`
   const exhausted = usage.limitUsd > 0 && usage.spentUsd >= usage.limitUsd
-  const model = usage.model === 'claude-opus-5-5' ? 'Claude Opus 5.5' : usage.model || '模型未提供'
   const note = usage.providerLimitReached
     ? 'Anthropic 工作区已达到消费上限，剩余邮件等待额度恢复。'
     : exhausted
@@ -94,14 +93,14 @@ function budget(status: ServiceStatus, now: number): HTMLElement {
   return card(
     title,
     usage.month || '月份未提供',
-    el('p', { class: 'hint' }, `${model} · ${usage.effort || 'effort 未提供'} · 提示词可在设置中编辑`),
+    el('p', { class: 'hint' }, '本月 Claude API 合计，包含本月使用的所有 Claude 模型。提示词可在设置中编辑。'),
     el('p', {}, `本月费用 ${dollars(usage.spentUsd)} / 配置月上限 ${dollars(usage.limitUsd)}`),
     meter(usage.spentUsd, usage.limitUsd, '本月 Claude 费用', active && (usage.providerLimitReached || exhausted) ? 'danger' : ''),
     el('p', { class: 'hint' }, `本应用记录的 API 用量：输入总计（含缓存）${String(usage.inputTokens)} token · 输出（含思考）${String(usage.outputTokens)} token · 思考明细${usage.thinkingTokens === undefined ? '未提供' : ` ${String(usage.thinkingTokens)} token`}`),
     el('p', { class: 'hint' }, `缓存读取 ${String(usage.cacheReadTokens)} token · 缓存写入 ${String(usage.cacheWriteTokens)} token，均已计入输入总计。`),
     el('p', { class: 'hint' }, '本应用不请求提示缓存；缓存用量以 API 实际返回为准。'),
     el('p', { class: 'hint' }, '费用按这些用量及标价估算，不含赠金、折扣或本应用以外的调用；工作区消费以 Anthropic 账单为准。'),
-    active ? el('p', { class: 'hint' }, usage.nextBatchTime === undefined ? '下批判断时间尚未提供' : `下批判断最早在 ${relative(usage.nextBatchTime, now)}（${when(usage.nextBatchTime)}）。`) : el('p', { class: 'hint' }, '当前使用 VPS Codex，其用量见 Model Router 控制台；这里保留 Claude API 的费用记录与月上限。'),
+    active ? el('p', { class: 'hint' }, usage.nextBatchTime === undefined ? '下批判断时间尚未提供' : `下批判断最早在 ${relative(usage.nextBatchTime, now)}（${when(usage.nextBatchTime)}）。`) : el('p', { class: 'hint' }, `当前使用 ${classificationProviderName(classificationProvider(status.classifier?.provider))}，其用量见 Model Router 控制台；这里保留 Claude API 的费用记录与月上限。`),
     el('p', { class: 'meta' }, usage.lastRequestTime === undefined ? '尚无已记录用量的 Claude 响应' : `最近用量记录 ${when(usage.lastRequestTime)}`),
     usage.lastErrorCode === '' ? null : el('p', { class: active ? 'hint warn' : 'hint' }, `${active ? '最近一次请求' : 'Claude 历史请求'}：${claudeErrorMessage(usage.lastErrorCode)}`),
     !active || (note === '' && waiting === '') ? null : el('p', { class: 'hint' }, [note, waiting].filter((text) => text !== '').join('；')),

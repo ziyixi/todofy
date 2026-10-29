@@ -10,6 +10,8 @@ test('uses native provider-labelled models and sends a flat request with cleared
   const api = mockApi()
   renderApp(<Playground api={api} models={models} onGenerated={vi.fn()} />)
   expect(screen.getByRole('option', { name: 'Anthropic · claude-opus-5-5' })).toBeInTheDocument()
+  expect(screen.getByRole('option', { name: 'Codex · gpt-6.1-sol' })).toHaveValue('gpt-6.1-sol')
+  expect(screen.getByRole('option', { name: 'OpenAI API · gpt-6.1-sol' })).toHaveValue('openai/gpt-6.1-sol')
   expect(screen.queryByRole('option', { name: /BGE/ })).not.toBeInTheDocument()
   expect(screen.queryByLabelText('Temperature')).not.toBeInTheDocument()
   expect(screen.queryByLabelText('要求实际网页检索观测')).not.toBeInTheDocument()
@@ -29,6 +31,29 @@ test('uses native provider-labelled models and sends a flat request with cleared
     input: 'Synthetic input',
     instructions: [],
   })
+})
+
+test('runs the selected OpenAI API route without confusing the same-named Codex model', async () => {
+  const user = userEvent.setup()
+  const api = mockApi({
+    generate: vi.fn().mockResolvedValue({
+      ...generation,
+      model: 'openai/gpt-6.1-sol',
+      usage: { available: true, input_tokens: 20, output_tokens: 5, billing_kind: 'api', estimated_cost_microusd: 90 },
+    }),
+  })
+  renderApp(<Playground api={api} models={models} onGenerated={vi.fn()} />)
+  await user.selectOptions(screen.getByLabelText('模型'), 'openai/gpt-6.1-sol')
+  await user.selectOptions(screen.getByLabelText('推理强度'), 'medium')
+  await user.type(screen.getByLabelText('输入'), 'Synthetic API route check')
+  await user.click(screen.getByRole('button', { name: '运行推理' }))
+  await waitFor(() => expect(api.generate).toHaveBeenCalledWith({
+    model: 'openai/gpt-6.1-sol', input: 'Synthetic API route check', instructions: [], effort: 'medium',
+  }))
+  const result = screen.getByRole('region', { name: '推理结果' })
+  expect(await within(result).findByText('OpenAI API · gpt-6.1-sol')).toBeInTheDocument()
+  expect(within(result).getByText('US$0.000090 API 估算')).toBeInTheDocument()
+  expect(within(result).queryByText('Codex · gpt-6.1-sol')).not.toBeInTheDocument()
 })
 
 test('renders final text safely and keeps unknown subscription usage and estimates unknown', async () => {
@@ -51,7 +76,7 @@ test('renders final text safely and keeps unknown subscription usage and estimat
   expect(within(result).getByText('服务未提供 token 用量，不能按零用量计算。')).toBeInTheDocument()
   expect(within(result).getByText('API 等价估算未提供')).toBeInTheDocument()
   expect(within(result).queryByText(/US\$0/)).not.toBeInTheDocument()
-  expect(within(result).getByText('OpenAI · gpt-6.1-sol')).toBeInTheDocument()
+  expect(within(result).getByText('Codex · gpt-6.1-sol')).toBeInTheDocument()
 })
 
 test('waits for one final result and keeps the draft on a model failure', async () => {

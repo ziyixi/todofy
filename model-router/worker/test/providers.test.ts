@@ -287,7 +287,7 @@ describe('provider isolation and usage', () => {
     const ctx = context('anthropic');
     const models = modelCatalog(ctx.env);
     expect(models.filter(model => model.provider === 'anthropic' || model.provider === 'google').every(model => model.configured)).toBe(true);
-    const executor = (modelCatalog({ ...ctx.env, CODEX_EXECUTOR_ORIGIN: 'https://synthetic-executor.example', CODEX_ACCESS_CLIENT_ID: 'synthetic-id', CODEX_ACCESS_CLIENT_SECRET: 'synthetic-secret' })).find(model => model.provider === 'openai');
+    const executor = (modelCatalog({ ...ctx.env, CODEX_EXECUTOR_ORIGIN: 'https://synthetic-executor.example', CODEX_ACCESS_CLIENT_ID: 'synthetic-id', CODEX_ACCESS_CLIENT_SECRET: 'synthetic-secret' })).find(model => model.provider === 'codex');
     expect(executor?.configured).toBe(true);
   });
 

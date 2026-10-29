@@ -625,6 +625,12 @@
           "optional": true
         },
         {
+          "name": "OPENAI_API_KEY",
+          "type": "secret_text",
+          "source": "manual",
+          "optional": true
+        },
+        {
           "name": "PUBLIC_HOST",
           "type": "plain_text",
           "source": "config"

@@ -23,62 +23,77 @@ function card(root: HTMLElement, title = '分类引擎'): HTMLElement {
   return section
 }
 
-function choice(root: HTMLElement, name: string): HTMLButtonElement {
-  const button = [...card(root).querySelectorAll('button')].find((node) => node.textContent === name)
-  if (button === undefined) throw new Error(`missing provider: ${name}`)
-  return button
+function model(root: HTMLElement): HTMLSelectElement {
+  return card(root).querySelector<HTMLSelectElement>('select[aria-label="分类模型"]')!
+}
+
+function save(root: HTMLElement, value: string): void {
+  const select = model(root)
+  select.value = value
+  select.dispatchEvent(new Event('change'))
+  card(root).querySelector<HTMLButtonElement>('button')!.click()
 }
 
 describe('classification provider', () => {
-  it('keeps legacy settings on Claude without writing any setting', async () => {
+  it('keeps the saved default and distinguishes Codex from the same OpenAI API model without writing', async () => {
     const server = new FakeServer()
     const root = await open(server)
-    expect(choice(root, 'Claude API').getAttribute('aria-pressed')).toBe('true')
-    expect(choice(root, 'VPS Codex').getAttribute('aria-pressed')).toBe('false')
+    expect(model(root).value).toBe('claude-opus-5-5')
+    const options = [...model(root).options]
+    expect(options.find(option => option.value === 'gpt-6.1-sol')?.textContent).toContain('VPS Codex · Sol 6.1')
+    expect(options.find(option => option.value === 'openai/gpt-6.1-sol')?.textContent).toContain('OpenAI API · Sol 6.1')
+    expect(options.find(option => option.value === 'openai/gpt-6-astra')?.disabled).toBe(true)
     expect(card(root).textContent).toContain('切换从下一批生效；已分类邮件不重判。')
     expect(card(root).textContent).toContain('配置状态未提供')
-    choice(root, 'Claude API').click()
-    await settle()
+    expect(card(root).querySelector<HTMLButtonElement>('button')?.disabled).toBe(true)
     expect(server.calls.some((call) => call.method === 'PATCH')).toBe(false)
   })
 
-  it('saves Codex in one click with an etag and request ID, retains mode and saved prompts, and survives reload', async () => {
+  it('saves an OpenAI route and effort with an etag and request ID, retains mode and prompts, and survives reload', async () => {
     const server = new FakeServer()
     Object.assign(server.settings, { mode: Mode.LIVE, effectiveMode: Mode.LIVE })
     const confirm = vi.fn(() => true)
     const root = await open(server, '/settings', confirm)
     const prompt = server.classificationPrompt
-    choice(root, 'VPS Codex').click()
-    expect(choice(root, 'VPS Codex').disabled).toBe(true)
+    const select = model(root)
+    select.value = 'openai/gpt-6.1-sol'
+    select.dispatchEvent(new Event('change'))
+    const effort = card(root).querySelector<HTMLSelectElement>('select[aria-label="推理强度"]')!
+    effort.value = 'high'
+    effort.dispatchEvent(new Event('change'))
+    card(root).querySelector<HTMLButtonElement>('button')!.click()
+    expect(model(root).disabled).toBe(true)
     await settle()
     const patch = server.calls.find((call) => call.method === 'PATCH')
     const url = new URL(patch?.path ?? '/', 'https://synthetic.example')
     expect(url.pathname).toBe('/api/v2/settings')
-    expect(url.searchParams.get('update_mask')).toBe('classification_provider,etag')
+    expect(url.searchParams.get('update_mask')).toBe('classification_model,classification_effort,etag')
     expect(url.searchParams.get('request_id')).toMatch(/^[0-9a-f-]{36}$/)
-    expect(patch?.body).toMatchObject({ classification_provider: 'codex', etag: 's1' })
-    expect(server.settings).toMatchObject({ classificationProvider: ClassificationProvider.CODEX, mode: Mode.LIVE })
+    expect(patch?.body).toMatchObject({ classification_model: 'openai/gpt-6.1-sol', classification_effort: 'high', etag: 's1' })
+    expect(patch?.body).not.toHaveProperty('available_models')
+    expect(server.settings).toMatchObject({ classificationProvider: ClassificationProvider.OPENAI, mode: Mode.LIVE })
     expect(server.classificationPrompt).toBe(prompt)
     expect(confirm).not.toHaveBeenCalled()
-    expect(choice(root, 'VPS Codex').getAttribute('aria-pressed')).toBe('true')
+    expect(model(root).value).toBe('openai/gpt-6.1-sol')
     expect(server.calls.filter((call) => call.method !== 'GET')).toHaveLength(1)
     const again = await open(server)
-    expect(choice(again, 'VPS Codex').getAttribute('aria-pressed')).toBe('true')
-    choice(again, 'Claude API').click()
+    expect(model(again).value).toBe('openai/gpt-6.1-sol')
+    expect(card(again).querySelector<HTMLSelectElement>('select[aria-label="推理强度"]')?.value).toBe('high')
+    save(again, 'gpt-6.1-sol')
     await settle()
-    expect(server.settings.classificationProvider).toBe(ClassificationProvider.CLAUDE)
+    expect(server.settings.classificationProvider).toBe(ClassificationProvider.CODEX)
     expect(server.settings.mode).toBe(Mode.LIVE)
-    expect(choice(again, 'Claude API').getAttribute('aria-pressed')).toBe('true')
+    expect(model(again).value).toBe('gpt-6.1-sol')
   })
 
   it('keeps the saved provider selected and shows a save error without claiming a switch', async () => {
     const server = new FakeServer()
     server.settingsSaveFails = true
     const root = await open(server)
-    choice(root, 'VPS Codex').click()
+    save(root, 'openai/gpt-6.1-sol')
     await settle()
-    expect(choice(root, 'Claude API').getAttribute('aria-pressed')).toBe('true')
-    expect(choice(root, 'VPS Codex').disabled).toBe(false)
+    expect(model(root).value).toBe('openai/gpt-6.1-sol')
+    expect(model(root).disabled).toBe(false)
     expect(card(root).querySelector('[role="status"]')?.textContent).toBe('请求失败（BAD_REQUEST）')
     expect(root.querySelector('#toast')?.textContent).not.toContain('已切到')
     expect(server.settings.classificationProvider).toBe(ClassificationProvider.UNSPECIFIED)
@@ -129,5 +144,20 @@ describe('classification provider', () => {
   it('explains unknown Codex errors without showing an opaque raw code', () => {
     expect(classifierErrorMessage(ClassificationProvider.CODEX, 'codex_unknown_response')).toBe('VPS Codex 请求失败，待重试；可刷新查看状态')
     expect(classifierErrorMessage(ClassificationProvider.CODEX, 'codex_http_502')).toContain('HTTP 502')
+  })
+
+  it('describes OpenAI as API billing and preserves Claude history', async () => {
+    const server = new FakeServer()
+    server.settings.classificationProvider = ClassificationProvider.OPENAI
+    server.settings.classificationModel = 'openai/gpt-6.1-sol'
+    server.settings.classificationEffort = 'high'
+    server.status = { classifier: create(ClassifierStatusSchema, { provider: ClassificationProvider.OPENAI, model: 'openai/gpt-6.1-sol', effort: 'high', configured: false, lastErrorCode: 'openai_not_configured' }) }
+    const root = await open(server)
+    expect(card(root).textContent).toContain('OpenAI API · openai/gpt-6.1-sol · high')
+    expect(card(root).textContent).toContain('按 API 计费')
+    expect(card(root).textContent).toContain('OpenAI API 尚未配置')
+    expect(card(root).textContent).not.toContain('使用 Codex 订阅额度')
+    const overview = await open(server, '/overview')
+    expect(card(overview, 'Claude 历史用量（当前未使用）').textContent).toContain('当前使用 OpenAI API')
   })
 })

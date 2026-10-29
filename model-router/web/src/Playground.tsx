@@ -116,7 +116,7 @@ export function Playground({
         )}
         <form ref={form} onSubmit={submit} onKeyDown={shortcut}>
           <p className="small muted">
-            Claude 调用计入供应商处的共享消费上限。此处只运行推理，不执行应用业务操作。
+            API 调用消耗所选供应商的额度，Codex 使用订阅额度。此处只运行推理，不执行应用业务操作。
           </p>
           <label>
             模型

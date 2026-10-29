@@ -14,10 +14,6 @@ import { act, allLabels, frame, labelSelect } from './common.ts'
 import { classifierDetails } from './classifier.ts'
 
 const MODES: readonly (readonly [Mode, string])[] = [Mode.OFF, Mode.SHADOW, Mode.LIVE].map((mode) => [mode, MODE_NAMES[mode] ?? ''] as const)
-const PROVIDERS: readonly (readonly [ClassificationProvider, string])[] = [
-  [ClassificationProvider.CLAUDE, 'Claude API'],
-  [ClassificationProvider.CODEX, 'VPS Codex'],
-]
 const CLASSIFICATION_INTERVALS = [5, 15, 30, 60].map((minutes) => [minutes, `${String(minutes)} 分钟`] as const)
 
 const HOUR = 3_600_000
@@ -82,36 +78,57 @@ function modeCard(settings: Settings, status: ServiceStatus | null, ctx: ViewCon
 
 function providerCard(settings: Settings, status: ServiceStatus | null, ctx: ViewContext, reload: () => Promise<void>): HTMLElement {
   const selected = classificationProvider(settings.classificationProvider)
+  const currentModel = settings.classificationModel || (selected === ClassificationProvider.CODEX ? 'gpt-6.1-sol' : 'claude-opus-5-5')
+  const currentEffort = settings.classificationModel ? settings.classificationEffort : 'medium'
+  const models = settings.availableModels.filter(model => model.kind === 'text')
+  const providers: Readonly<Record<string, string>> = { codex: 'VPS Codex', openai: 'OpenAI API', anthropic: 'Claude API', google: 'Gemini API' }
+  const model = el('select', { 'aria-label': '分类模型' }, ...models.map(item => el('option', { value: item.id, disabled: !item.configured },
+    `${providers[item.provider] ?? item.provider} · ${item.displayName || item.id} (${item.id})${item.configured ? '' : ' · 未配置'}`)))
+  if (!models.some(item => item.id === currentModel)) model.append(el('option', { value: currentModel, disabled: true }, `${classificationProviderName(selected)} · ${currentModel} · 目录不可用`))
+  model.value = currentModel
+  const effort = el('select', { 'aria-label': '推理强度' })
   const feedback = el('p', { class: 'hint warn', role: 'status', 'aria-live': 'polite' })
   let saving = false
-  const save = async (provider: ClassificationProvider) => {
-    if (saving || provider === selected) return
+  const paintEfforts = (desired: string) => {
+    const values = models.find(item => item.id === model.value)?.efforts ?? [currentEffort]
+    effort.replaceChildren(...(values.length ? values : ['']).map(value => el('option', { value }, value || '默认')))
+    effort.value = values.includes(desired) ? desired : values.includes('medium') ? 'medium' : values[0] ?? ''
+  }
+  const refresh = () => {
+    save.disabled = saving || !models.find(item => item.id === model.value)?.configured || (model.value === currentModel && effort.value === currentEffort)
+    model.disabled = saving || !models.length
+    effort.disabled = saving || effort.options.length < 2
+  }
+  const save = button('保存模型', () => void (async () => {
+    if (saving) return
     saving = true
-    for (const control of choices.querySelectorAll('button')) control.disabled = true
+    refresh()
     feedback.textContent = '正在保存…'
     const requestId = newRequestId()
     try {
       await withRetry(() => api.updateSettings({
-        settings: create(SettingsSchema, { name: 'settings', classificationProvider: provider, etag: settings.etag }),
-        updateMask: { paths: ['classification_provider', 'etag'] },
-        requestId,
+        settings: create(SettingsSchema, { name: 'settings', classificationModel: model.value, classificationEffort: effort.value, etag: settings.etag }),
+        updateMask: { paths: ['classification_model', 'classification_effort', 'etag'] }, requestId,
       }))
-      toast(`已切到 ${classificationProviderName(provider)}`)
+      toast('分类模型已保存')
       ctx.refreshStatus()
       await reload()
     } catch (error) {
       feedback.textContent = errorMessage(error)
     } finally {
       saving = false
-      for (const control of choices.querySelectorAll('button')) control.disabled = false
+      refresh()
     }
-  }
-  const choices = segmented('分类引擎', PROVIDERS, selected, (provider) => void save(provider))
+  })(), { class: 'primary' })
+  paintEfforts(currentEffort)
+  model.addEventListener('change', () => { paintEfforts(effort.value); refresh() })
+  effort.addEventListener('change', refresh)
+  refresh()
   return card(
-    '分类引擎',
-    '',
-    choices,
+    '分类引擎', '',
+    el('label', {}, '分类模型', model), el('label', {}, '推理强度', effort), save,
     el('p', { class: 'hint' }, '切换从下一批生效；已分类邮件不重判。'),
+    models.length ? null : el('p', { class: 'hint warn' }, '模型目录暂不可用，请刷新重试。'),
     classifierDetails(status, ctx.host.now(), selected),
     feedback,
   )

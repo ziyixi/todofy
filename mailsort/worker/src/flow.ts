@@ -12,7 +12,7 @@ import { DAY, FLOW_COUNTS_MAX } from './limits.ts';
 import { utcDay, type Store } from './store.ts';
 
 /** `rule` and `neighbours` only name the stages of decisions made before 2026-10-10 (a correction of one counts there). */
-export type FlowStage = 'claude' | 'codex' | 'skipped' | 'clef' | 'clef-flash' | 'deferred' | 'no_model' | 'rule' | 'neighbours';
+export type FlowStage = 'claude' | 'codex' | 'openai' | 'google' | 'skipped' | 'clef' | 'clef-flash' | 'deferred' | 'no_model' | 'rule' | 'neighbours';
 
 export type FlowOutcome =
   | 'archived'
@@ -33,7 +33,7 @@ const SKIP_OUTCOMES: ReadonlySet<string> = new Set(['not_inbox', 'thread_sorted'
 
 /** A decision's decider as its stage: a model (or a stage of the decisions before 2026-10-10); else no model answer. */
 export function stageOf(decider: string): FlowStage {
-  return decider === 'claude' || decider === 'codex' || decider === 'clef' || decider === 'clef-flash' || decider === 'rule' || decider === 'neighbours' ? decider : 'no_model';
+  return decider === 'claude' || decider === 'codex' || decider === 'openai' || decider === 'google' || decider === 'clef' || decider === 'clef-flash' || decider === 'rule' || decider === 'neighbours' ? decider : 'no_model';
 }
 
 /** A skip reason as its outcome (pipeline.ts recordSkip's reasons). */

@@ -63,7 +63,11 @@ function metadata(value: RequestRecord): string {
 }
 function record(row: RequestRow): RequestRecord {
   const raw = JSON.parse(row.generation_json) as Record<string, unknown>;
-  if (raw.generation) return fromWire(RequestRecordSchema, raw).message;
+  if (raw.generation) {
+    const value = fromWire(RequestRecordSchema, raw).message;
+    return { ...value, provider: value.provider === 'openai' && value.generation?.usage?.billingKind === 'subscription'
+      ? 'codex' : providerFor(row.model) || value.provider };
+  }
   const generation = fromWire(GenerationSchema, { ...raw, model: row.model }).message;
   return create(RequestRecordSchema, {
     generation,

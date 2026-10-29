@@ -52,6 +52,8 @@ export async function startHarness({ ownerBypass = true, maintenance = false }: 
   const calls: UpstreamCall[] = []
   const geminiOutputs: string[] = []
   const executorOutputs: string[] = []
+  const openaiOutputs: string[] = []
+  const openaiReplies: { body: unknown; status?: number; headers?: Record<string, string> }[] = []
   const conversations = new Map<string, string>()
   let generationFailureReason = ''
   let geminiDelayMs = 0
@@ -69,6 +71,20 @@ export async function startHarness({ ownerBypass = true, maintenance = false }: 
       bearer: request.headers.get('authorization'),
       userAgent: request.headers.get('user-agent'),
     })
+    if (url.hostname === 'api.openai.com') {
+      if (url.pathname !== '/v1/responses' || !['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-luna'].includes(String(data.model)))
+        return Response.json({ error: { code: 'model_not_found' } }, { status: 404 })
+      if (request.headers.get('authorization') !== 'Bearer synthetic-openai-key' || data.store !== false || data.stream !== false)
+        return Response.json({ error: { code: 'invalid_request' } }, { status: 400 })
+      const reply = openaiReplies.shift()
+      if (reply) return Response.json(reply.body, { status: reply.status ?? 200, ...(reply.headers ? { headers: reply.headers } : {}) })
+      return Response.json({
+        model: data.model, status: 'completed', service_tier: 'default',
+        output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: openaiOutputs.shift() ?? '{"answer":"synthetic API result"}' }] }],
+        usage: { input_tokens: 100, output_tokens: 50, total_tokens: 150,
+          input_tokens_details: { cached_tokens: 20, cache_write_tokens: 0 }, output_tokens_details: { reasoning_tokens: 30 } },
+      })
+    }
     if (url.hostname === 'generativelanguage.googleapis.com') {
       const delay = geminiDelayMs
       geminiDelayMs = 0
@@ -136,6 +152,7 @@ export async function startHarness({ ownerBypass = true, maintenance = false }: 
             CODEX_ACCESS_CLIENT_ID: 'synthetic-access-id',
             CODEX_ACCESS_CLIENT_SECRET: 'synthetic-access-secret',
             GEMINI_API_KEY: 'synthetic-gemini-key',
+            OPENAI_API_KEY: 'synthetic-openai-key',
             MODEL_ROUTER_NEWSLETTER_TOKEN: machineToken,
           },
           serviceBindings: { ASSETS: () => new Response('Synthetic private assets') },
@@ -221,6 +238,8 @@ export async function startHarness({ ownerBypass = true, maintenance = false }: 
     calls,
     geminiOutputs,
     executorOutputs,
+    openaiOutputs,
+    openaiReplies,
     failNextGeneration(reason: string) { generationFailureReason = reason },
     delayNextGemini(ms: number) { geminiDelayMs = ms },
     caller,

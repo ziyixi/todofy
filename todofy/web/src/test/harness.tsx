@@ -56,7 +56,9 @@ export function mockApi(handlers: Record<string, Handler>) {
       models: [
         { id: 'gemini-3.5-flash-lite', display_name: 'Gemini 3.5 Flash-Lite', provider: 'google', configured: true, kind: 'text' },
         { id: 'gemini-3.8-flash', display_name: 'Gemini 3.8 Flash', provider: 'google', configured: true, kind: 'text' },
-        { id: 'gpt-6.1-sol', display_name: 'Sol 6.1', provider: 'openai', configured: true, kind: 'text' },
+        { id: 'gpt-6.1-sol', display_name: 'Sol 6.1', provider: 'codex', configured: true, kind: 'text' },
+        { id: 'openai/gpt-6.1-sol', display_name: 'Sol 6.1', provider: 'openai', configured: true, kind: 'text' },
+        { id: 'openai/gpt-6-astra', display_name: 'GPT-6 Astra', provider: 'openai', configured: false, kind: 'text' },
       ],
     },
     'GET /api/v1/metricDays': dailyMetrics(),

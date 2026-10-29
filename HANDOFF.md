@@ -17,6 +17,21 @@ features, the FlowDay retirement), [October 20](docs/history/handoff-2026-10-20.
 
 ## Current work
 
+### OpenAI API and per-app model selection (`codex/router-openai-api`, in progress)
+
+Owner request 2026-10-28, based on `edce52cc`: distinguish the existing Codex subscription from a new direct
+OpenAI Responses API connection. Existing `gpt-6.1-sol` selections stay Codex; API choices use `openai/` model IDs.
+Provider keys stay in Router secrets. Todofy and Mailsort select a configured model from their own settings;
+changes persist without a release. Newsletter's Codex contexts and current application defaults stay as they are.
+
+- Implemented: stateless Responses calls, separate subscription/API identity and usage, Router console labels,
+  persisted Mailsort model/effort choices and provider-labelled Todofy choices. No dependency or inference field was
+  added. Credits and enforced supplier spend caps use `MODEL_SPEND_LIMIT`, separately from ordinary rate limits.
+- Local checks passed: Router provider/workerd and console suites, Mailsort unit/workerd/CPU/web/smoke checks,
+  Todofy saved model and synthetic email/report/recommendation scenarios, deployment-boundary tests and builds.
+- Pending: branch CI, integration with newer Claude commits, release through Actions and synthetic production
+  verification. Existing application defaults, modes and completed content are unchanged.
+
 ### Brief retirement (`claude/retire-brief`, released with this merge; teardown waits for the owner)
 
 Owner decision 2026-10-28: Brief is removed from the repository and taken off Cloudflare (PR 2 of the researcher

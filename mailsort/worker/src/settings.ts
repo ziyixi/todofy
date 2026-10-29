@@ -9,12 +9,14 @@ import { newEtag } from './ids.ts';
 import { DEFAULT_DAILY_WRITE_LIMIT, DEFAULT_RUN_WRITE_LIMIT, MINUTE } from './limits.ts';
 import { CLAUDE_MONTHLY_LIMIT_MICROS, utcDay, type Store } from './store.ts';
 
-export type ClassificationProviderName = 'claude' | 'codex';
+export type ClassificationProviderName = 'claude' | 'codex' | 'openai' | 'google';
 export const CLASSIFICATION_INTERVAL_MINUTES: readonly number[] = [5, 15, 30, 60];
 
 export interface SettingsValue {
   readonly mode: ModeName;
   readonly classificationProvider: ClassificationProviderName;
+  readonly classificationModel?: string;
+  readonly classificationEffort?: string;
   readonly classificationIntervalMinutes: number;
   readonly runWriteLimit: number;
   readonly dailyWriteLimit: number;
@@ -48,7 +50,9 @@ export function readSettings(store: Store): SettingsValue {
   const number = (value: unknown, fallback: number) => (typeof value === 'number' && Number.isFinite(value) ? value : fallback);
   return {
     mode,
-    classificationProvider: stored.classificationProvider === 'claude' ? 'claude' : 'codex',
+    classificationProvider: stored.classificationProvider === 'claude' || stored.classificationProvider === 'openai' || stored.classificationProvider === 'google' ? stored.classificationProvider : 'codex',
+    ...(typeof stored.classificationModel === 'string' && stored.classificationModel ? { classificationModel: stored.classificationModel } : {}),
+    ...(typeof stored.classificationEffort === 'string' ? { classificationEffort: stored.classificationEffort } : {}),
     classificationIntervalMinutes: CLASSIFICATION_INTERVAL_MINUTES.includes(stored.classificationIntervalMinutes ?? 0)
       ? stored.classificationIntervalMinutes ?? DEFAULTS.classificationIntervalMinutes : DEFAULTS.classificationIntervalMinutes,
     runWriteLimit: number(stored.runWriteLimit, DEFAULTS.runWriteLimit),
@@ -66,7 +70,7 @@ export function writeSettings(store: Store, value: Omit<SettingsValue, 'etag'>, 
     const month = utcDay(now).slice(0, 7);
     const held = value.classificationProvider === 'claude'
       ? store.getMeta('claude_limited_month') === month || store.claudeUsage(month).cost_micros >= CLAUDE_MONTHLY_LIMIT_MICROS
-      : store.getMeta('codex_error') === 'codex_quota';
+      : store.getMeta(`${value.classificationProvider}_error`) === `${value.classificationProvider}_quota`;
     if (Number.isFinite(nextAt) && nextAt > now && waiting === 0 && !held) {
       store.setMeta('next_model_at', String(Math.max(now, nextAt + (value.classificationIntervalMinutes - previous) * MINUTE)));
     }

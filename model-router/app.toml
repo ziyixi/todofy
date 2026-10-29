@@ -8,7 +8,7 @@ personal_secrets = ["ACCESS_OWNER", "ACCESS_OWNER_ALIASES"]
 manual_secrets = []
 optional_secrets = ["ACCESS_OWNER_ALIASES"]
 # Put by the owner, preserved by the release recipe, never sent through GitHub.
-owner_machine_secrets = ["ANTHROPIC_API_KEY", "GEMINI_API_KEY", "CODEX_ACCESS_CLIENT_ID", "CODEX_ACCESS_CLIENT_SECRET", "MODEL_ROUTER_NEWSLETTER_TOKEN"]
+owner_machine_secrets = ["ANTHROPIC_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY", "CODEX_ACCESS_CLIENT_ID", "CODEX_ACCESS_CLIENT_SECRET", "MODEL_ROUTER_NEWSLETTER_TOKEN"]
 hosts = ["models"]
 entry = "model-router"
 role = "统一模型推理与私有控制台"

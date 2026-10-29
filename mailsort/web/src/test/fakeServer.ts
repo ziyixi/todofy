@@ -9,6 +9,7 @@ import { vi } from 'vitest'
 import { updatePaths } from '@ziyixi/proto/field-mask'
 import { HttpTranscoder, type ServiceHandlers, type ShapeOf } from '@ziyixi/proto/http-transcoder'
 import { create } from '@ziyixi/proto/protobuf'
+import { ModelSchema } from '@ziyixi/proto/modelrouter/inference/v1/inference_pb'
 import { EmptySchema, timestampFromMs, timestampMs } from '@ziyixi/proto/protobuf/wkt'
 import { Code, RpcError } from '@ziyixi/proto/rpc-status'
 import { Label_GmailState, LabelSchema, type Label } from '@ziyixi/proto/mailsort/ui/v2/label_pb'
@@ -28,6 +29,7 @@ import { ReplayEvaluation_State, ReplayEvaluationSchema, type ReplayEvaluation }
 import { ExampleSchema, LedgerEntry_State, LedgerEntrySchema, ReviewItem_State, ReviewItemSchema, type Example, type LedgerEntry, type ReviewItem } from '@ziyixi/proto/mailsort/ui/v2/review_pb'
 import {
   ClaudeBudgetSchema,
+  ClassificationProvider,
   LabelCountSchema,
   LabelReportSchema,
   Mode,
@@ -118,7 +120,12 @@ export class FakeServer {
   reportFails = false
   /** Fields of GetServiceStatus that a test sets (the rest as below; review_count counts the pending items). */
   status: Partial<ServiceStatus> = {}
-  settings: Settings = create(SettingsSchema, { name: 'settings', mode: Mode.SHADOW, effectiveMode: Mode.SHADOW, classificationIntervalMinutes: 15, runWriteLimit: 10, dailyWriteLimit: 150, etag: 's1' })
+  settings: Settings = create(SettingsSchema, { name: 'settings', mode: Mode.SHADOW, effectiveMode: Mode.SHADOW, classificationIntervalMinutes: 15, runWriteLimit: 10, dailyWriteLimit: 150, etag: 's1', availableModels: [
+    create(ModelSchema, { id: 'claude-opus-5-5', displayName: 'Claude Opus 5.5', provider: 'anthropic', kind: 'text', configured: true, efforts: ['low', 'medium', 'high'] }),
+    create(ModelSchema, { id: 'gpt-6.1-sol', displayName: 'Sol 6.1', provider: 'codex', kind: 'text', configured: true, efforts: ['low', 'medium', 'high'] }),
+    create(ModelSchema, { id: 'openai/gpt-6.1-sol', displayName: 'Sol 6.1', provider: 'openai', kind: 'text', configured: true, efforts: ['low', 'medium', 'high'] }),
+    create(ModelSchema, { id: 'openai/gpt-6-astra', displayName: 'GPT-6 Astra', provider: 'openai', kind: 'text', configured: false, efforts: ['low', 'medium', 'high'] }),
+  ] })
   settingsSaveFails = false
   classificationPrompt = create(ClassificationPromptSchema, { name: 'classificationPrompt', baseText: '按 P1、P2、P3、P4 判断合成邮件。', personalRules: '合成个人规则。', etag: 'initial' })
   promptReadFails = false
@@ -289,6 +296,12 @@ export class FakeServer {
         if (paths.includes('mode')) next.mode = request.settings.mode
         if (paths.includes('run_write_limit')) next.runWriteLimit = request.settings.runWriteLimit
         if (paths.includes('classification_provider')) next.classificationProvider = request.settings.classificationProvider
+        if (paths.includes('classification_model')) {
+          next.classificationModel = request.settings.classificationModel
+          const provider = next.availableModels.find(model => model.id === next.classificationModel)?.provider
+          next.classificationProvider = provider === 'codex' ? ClassificationProvider.CODEX : provider === 'openai' ? ClassificationProvider.OPENAI : provider === 'google' ? ClassificationProvider.GOOGLE : ClassificationProvider.CLAUDE
+        }
+        if (paths.includes('classification_effort')) next.classificationEffort = request.settings.classificationEffort
         if (paths.includes('classification_interval_minutes')) next.classificationIntervalMinutes = request.settings.classificationIntervalMinutes
         next.effectiveMode = next.mode
         this.settings = next

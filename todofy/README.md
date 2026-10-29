@@ -44,8 +44,9 @@ configurable HTTP model endpoint.
 
 The owner UI saves separate mail and daily-report choices in D1 `model_settings`, using the Router's
 configured catalog. Before an owner choice is saved, mail uses `gemini-3.5-flash-lite` and reports use
-`gemini-3.8-flash`. Only these two fall back to each other: with `gpt-6.1-sol` (Sol) selected, no call moves
-to Gemini while the home mini-PC is down. Claude and Gemini are billed per API call against the Router's
+`gemini-3.8-flash`. Only these two fall back to each other. The dashboard labels `gpt-6.1-sol` as Codex subscription
+and `openai/gpt-6.1-sol` as OpenAI API; choosing either preserves that route on failure without switching to Gemini.
+OpenAI, Claude and Gemini are billed per API call against the Router's
 workspace limits that every app shares. Changes apply to future model calls; completed mail keeps its frozen
 summary and model. Results retain the provider-reported model when available, otherwise the selected model ID.
 

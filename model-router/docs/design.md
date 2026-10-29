@@ -20,13 +20,30 @@ Router 选择供应商、调用模型、归一用量，把结果一次返回。�
 Router 生成日志 ID，不维护客户端请求去重账本。结果返回 `name`、实际选用的 `model`、`output`、`usage`、
 必要的 `error`，以及业务需要的 web observations 和 native fallback writers。
 
-`Embed` 只接收实际模型和一组输入文本，返回有序向量、用量和错误。目录里的模型是供应商原生 ID；
-每个条目注明 provider。`gemini-email`、`gemini-report` 属于旧的调用策略，不是可选模型。
+`Embed` 只接收实际模型和一组输入文本，返回有序向量、用量和错误。目录里的模型使用实际模型名，
+每个条目注明 provider。Codex 订阅的现有 `gpt-6.1-sol` 保持有效，直接 OpenAI API 使用
+`openai/gpt-6.1-sol` 等带前缀的 ID，避免同名模型走错连接。API 请求发给 Responses 的仍是原生模型名。
+`gemini-email`、`gemini-report` 属于旧的调用策略，不是可选模型。
 Todofy 自己维护邮件与日报的 Gemini fallback 顺序。Gemini 3.7 已自动转到 3.8，当前目录不再重复列它。
 
 应用接口在 `proto/modelrouter/inference/v1/inference.proto`；owner 查询在同包 `console.proto`。
 后者负责调用来源、时间、状态、正文保留期和统计。它们不进入普通推理响应。
 所有调用方都在 monorepo 内，同次发布可以直接删除不用的字段，不保留空壳和 reserved 字段。
+
+## OpenAI API
+
+Router 复用现有 HTTP、截止时间、Schema 和用量处理，直接调用非流式 Responses API，使用 `store: false`。
+当前目录提供 Astra、Sol 6.1、Terra 6.1 和 Luna；它们与 Codex 各自有独立的 Router ID、连接状态和统计。
+API 的实际响应模型记在 `reported_model`，请求索引保留目录 ID，按模型筛选不会因供应商版本名变化而丢失记录。
+历史 Codex 记录只在读取时纠正 provider 显示，原记录及正文不改写。
+
+Todofy 和 Mailsort 在各自设置页读取 Router 的目录，保存模型和推理强度，后续调用立即使用保存值。
+未配置的选项不可新选；当前选择暂不可用时仍显示出来并说明原因。新增 provider 不切换既有默认值。
+Newsletter 仍使用 Codex 短会话；未为其他 provider 增加会话实现。
+
+OpenAI API 共享一枚 Router secret，并受供应商处的项目消费限制约束。赠送 API credit 可用于 Responses，
+与 Codex 订阅额度独立；超出硬消费上限或耗尽 credit 返回 `MODEL_SPEND_LIMIT`，普通速率限制另行返回。
+不自动回退到另一个供应商。
 
 ## Newsletter 短会话
 
@@ -68,7 +85,8 @@ API 估价与订阅的假设 API 价值分开显示。后者不会进入 Mailsor
 费用按已知请求求小计，另标出未计入的请求数；未知用量不按零计算。供应商在生成前以 4xx 拒绝的调用不计费，
 按零用量、零费用记录；超时、停滞和中断的流保持未知。向量走平台配额，不报告 token，不影响 token 完整性。
 订阅金额统一按 Standard 文本价折算，SDK 累计 token 不能确定每次内部调用的上下文档位。
-金额不包含工具、长上下文、存储、税费或服务档位附加费。
+金额不包含工具、存储、税费或服务档位附加费。OpenAI API 的 Standard 文本估价计入已知的长上下文
+档位和缓存读写费用；缺少计价信息时保留用量并明确显示估价未知。
 Claude 的 native fallback 按实际 writer 和缓存 TTL 逐段估价。
 
 费率集中在 `worker/src/providers/pricing.ts`，注明官方来源和核对日期。Google Flash 3.8 当前优惠价到

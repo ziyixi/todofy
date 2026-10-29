@@ -12,7 +12,9 @@ test('overview separates reported tokens, incomplete subscription estimates and 
   expect(screen.getAllByText('API 费用估算')[0]?.closest('article')).toHaveTextContent('US$0.000220')
   expect(screen.getByRole('heading', { name: '模型与连接' })).toBeInTheDocument()
   expect(screen.getByText('连接已配置不代表模型实时可用。')).toBeInTheDocument()
-  expect(screen.getAllByText('已配置')).toHaveLength(3)
+  expect(screen.getAllByText('已配置')).toHaveLength(4)
+  expect(screen.getByRole('heading', { name: 'Codex · Sol 6.1' })).toBeInTheDocument()
+  expect(screen.getByRole('heading', { name: 'OpenAI API · Sol 6.1' })).toBeInTheDocument()
 })
 
 test('overview keeps known API and subscription subtotals visible with request-level missing coverage', async () => {

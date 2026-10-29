@@ -81,8 +81,12 @@ Off stops Gmail/model work; shadow records model decisions without Gmail changes
 deployment ceiling can lower the owner mode. Setup or deployment does not raise it or replay old mail. The former
 breaker is removed: a stored breaker is ignored, and `Settings.breaker_tripped` and Ops `modes.breaker` stay false.
 
-`Settings.classification_provider` persists one of two choices: Claude API (`claude-opus-5-5`, medium) or VPS Codex
-(`gpt-6.1-sol`, medium). A missing field means Codex, the provider in use (a fresh install or rebuilt state). Both use the same
+`Settings.classification_model` and `classification_effort` persist the chosen Model Router route and its supported
+effort in the existing meta row. GetSettings returns the Router's current text catalog in output-only `available_models`;
+the catalog is never stored in settings or operation receipts. A model save requires a configured text route and a
+supported effort, and derives `classification_provider` from the catalog. Codex, OpenAI API, Claude and Gemini have
+separate provider identities in status and decision/flow history. Older provider-only settings retain Claude
+(`claude-opus-5-5`, medium) or Codex (`gpt-6.1-sol`, medium); no saved choice defaults to Codex. Every route uses the same
 saved prompt snapshot. The existing mask, etag and request-ID handling protects a switch; it preserves mode,
 write limits, prompt and Claude accounting history. The existing Alarm can resume pending work with the
 chosen provider. A switch does not start an unread batch, rewrite classified history or enable automatic fallback.
@@ -149,8 +153,9 @@ and priced. See [Router design](../../model-router/docs/design.md).
 At recorded Claude cost >= $20, new Claude calls wait until the next UTC month. A provider spend refusal does the same even if
 local accounting is lower. Network responses lost before usage is read and out-of-app calls may be absent locally;
 Anthropic's console is the billing authority. Config/auth failures stay visible and do not assign fallback P1.
-Claude's monthly cap does not apply to Codex. Selecting Codex preserves those records as
-history. Codex uses the existing ChatGPT subscription, subject to its account/model availability and usage limits;
+Claude's monthly cap applies only to Claude. Selecting another provider preserves those records as
+history. OpenAI and Gemini API costs are recorded by Router and follow provider limits without adding them to the
+Claude ledger. Codex uses the existing ChatGPT subscription, subject to its account/model availability and usage limits;
 the app does not convert Codex tokens into Claude API fees. A saved login or a healthy process cannot establish
 successful model access. Verify a real synthetic inference separately.
 
@@ -182,10 +187,10 @@ refuses every owner mutation but settings with CONSOLIDATION_ACTIVE, so no prior
 
 概览 shows Gmail freshness separately from the configured classification interval and next-batch time, the current model/effort, recorded monthly
 Claude cost/tokens, actual Claude cache reads/writes and the selected provider/config error. While Codex is selected,
-Claude figures are labelled history and the card points to the Model Router console for Codex usage. `ServiceStatus.classifier` reports the selected provider, fixed model/effort,
+Claude figures are labelled history and the card points to the Model Router console for usage. `ServiceStatus.classifier` reports the selected provider, saved model/effort,
 local configuration, next batch time, safe error and last successful response; configuration presence does not check
 network reachability or authentication. 分级 shows the four queues and explicit unread-batch progress. 设置 shows
-the persistent provider and 5/15/30/60-minute interval selectors, the fresh next-batch time and editable personal rules with a collapsed base-prompt field, alongside mode/write
+the catalog model and effort selectors and 5/15/30/60-minute interval selector, the fresh next-batch time and editable personal rules with a collapsed base-prompt field, alongside mode/write
 controls and undo. Saving updates that card in place; a prompt-load failure leaves other settings usable.
 Old examples, model stages and replay results are labelled history.
 

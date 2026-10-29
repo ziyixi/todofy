@@ -26,7 +26,7 @@ describe('automatic classification interval', () => {
       updateMask: { paths: ['classification_interval_minutes', 'etag'] }, requestId: op(),
     };
     const saved = await h.api.updateSettings(request);
-    expect(saved).toMatchObject({ ...initial, classificationIntervalMinutes: 30, etag: saved.etag });
+    expect(saved).toMatchObject({ ...initial, availableModels: [], classificationIntervalMinutes: 30, etag: saved.etag });
     expect(await h.api.updateSettings(request)).toEqual(saved);
     expect(reasonOf(await rejection(h.api.updateSettings({ ...request, requestId: op() })))).toBe('ETAG_MISMATCH');
     expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).classifier).toMatchObject({

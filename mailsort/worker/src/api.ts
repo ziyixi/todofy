@@ -34,8 +34,8 @@ import type { Kv } from './backup.ts';
 import { modelRouterBinding, type ModeName } from './env.ts';
 import { ClassificationPromptSchema } from '@ziyixi/proto/mailsort/ui/v2/prompt_pb';
 import { classificationPromptMessage, readClassificationPrompt, saveClassificationPrompt, validClassificationPrompt } from './classification-prompt.ts';
-import { CLASSIFICATION_EFFORT, CODEX_MODEL, CLAUDE_MODEL, CLASSIFIER_MODELS } from './classifier-config.ts';
-import { createModelClient, type ModelBinding } from '@ziyixi/model-router-client';
+import { CLASSIFICATION_EFFORT, CODEX_MODEL, CLAUDE_MODEL, classificationProvider, classifierModel, classifierEffort } from './classifier-config.ts';
+import { createModelClient, type Model, type ModelBinding } from '@ziyixi/model-router-client';
 import { configurationCode } from './classification-model.ts';
 import { deleteExample, deleteExamplesOfLabel } from './examples.ts';
 import { setVerdict } from './feedback.ts';
@@ -349,15 +349,15 @@ function choose(ctx: ApiContext, item: ReviewRow, decision: DecisionRow, chosen:
 const CLASSIFICATION_PROVIDERS: Readonly<Record<ClassificationProviderName, ClassificationProvider>> = {
   claude: ClassificationProvider.CLAUDE,
   codex: ClassificationProvider.CODEX,
+  openai: ClassificationProvider.OPENAI,
+  google: ClassificationProvider.GOOGLE,
 };
 
-async function configuredModels(env: ApiContext['env']): Promise<ReadonlySet<string>> {
+async function classificationModels(env: ApiContext['env']): Promise<Model[]> {
   const binding = modelRouterBinding(env);
-  if (!binding) return new Set();
-  try {
-    const { models } = await createModelClient(binding).listModels({});
-    return new Set(models.filter(model => model.configured).map(model => model.id));
-  } catch { return new Set(); }
+  if (!binding) return [];
+  const { models } = await createModelClient(binding).listModels({});
+  return models.filter(model => model.kind === 'text' && classificationProvider(model.provider) !== null);
 }
 
 function settingsMessage(ctx: ApiContext, value: SettingsValue): Settings {
@@ -365,6 +365,8 @@ function settingsMessage(ctx: ApiContext, value: SettingsValue): Settings {
     name: 'settings',
     mode: MODES[value.mode],
     classificationProvider: CLASSIFICATION_PROVIDERS[value.classificationProvider],
+    classificationModel: classifierModel(value),
+    classificationEffort: classifierEffort(value),
     classificationIntervalMinutes: value.classificationIntervalMinutes,
     effectiveMode: MODES[effectiveMode(value, ctx.ceiling)],
     runWriteLimit: value.runWriteLimit,
@@ -934,9 +936,10 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
     const lastRequest = Number(store.getMeta('claude_last_request_at') ?? 0);
     const nextBatch = Number(store.getMeta('next_model_at') ?? 0);
     const provider = settings.classificationProvider;
-    const model = provider === 'codex' ? CODEX_MODEL : CLAUDE_MODEL;
-    const connections = await configuredModels(ctx.env);
-    const configured = connections.has(CLASSIFIER_MODELS[provider]);
+    const model = classifierModel(settings);
+    const choices = await classificationModels(ctx.env).catch(() => []);
+    const connections = new Set(choices.filter(item => item.configured).map(item => item.id));
+    const configured = connections.has(model);
     const lastSuccess = Number(store.getMeta(`${provider}_last_success_at`) ?? 0);
     return create(ServiceStatusSchema, {
       name: 'serviceStatus',
@@ -957,7 +960,7 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
       gmailCallTodayCount: usage.gmail_calls,
       decisionModel: model,
       classifier: {
-        provider: CLASSIFICATION_PROVIDERS[provider], model, effort: CLASSIFICATION_EFFORT, configured,
+        provider: CLASSIFICATION_PROVIDERS[provider], model, effort: classifierEffort(settings), configured,
         classificationIntervalMinutes: settings.classificationIntervalMinutes,
         lastErrorCode: store.getMeta(`${provider}_error`) ?? (configured ? '' : `${provider}_not_configured`),
         ...(Number.isFinite(nextBatch) && nextBatch > 0 ? { nextBatchTime: timestampFromMs(nextBatch) } : {}),
@@ -1005,9 +1008,10 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
     }));
   },
 
-  getSettings(request, ctx) {
+  async getSettings(request, ctx) {
     if (request.name !== 'settings') notFound();
-    return Promise.resolve(settingsMessage(ctx, readSettings(ctx.store)));
+    const models = await classificationModels(ctx.env).catch(() => []);
+    return create(SettingsSchema, { ...settingsMessage(ctx, readSettings(ctx.store)), availableModels: models });
   },
 
   async updateSettings(request, ctx) {
@@ -1022,6 +1026,10 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
     }
     // An explicit mask only: a client that leaves a field out must never switch the mode by accident.
     if (paths === '*') bad('update_mask must name the fields to change');
+    const logged = replay(ctx, request.requestId, 'UpdateSettings', 'settings', SettingsSchema);
+    if (logged !== undefined) return logged;
+    const selectingModel = paths.includes('classification_model') || paths.includes('classification_effort');
+    const models = selectingModel ? await classificationModels(ctx.env).catch(() => { throw sortError('DEPENDENCY_UNAVAILABLE'); }) : [];
     const answer = once(ctx, request.requestId, 'UpdateSettings', 'settings', SettingsSchema, () => {
       const current = readSettings(ctx.store);
       if (input.etag !== '' && input.etag !== current.etag) throw sortError('ETAG_MISMATCH', [{ schema: SettingsSchema, message: settingsMessage(ctx, current) }]);
@@ -1033,10 +1041,15 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
           next = { ...next, mode };
         } else if (path === 'classification_provider') {
           const provider = input.classificationProvider === ClassificationProvider.CLAUDE ? 'claude'
-            : input.classificationProvider === ClassificationProvider.CODEX ? 'codex' : null;
-          if (provider === null) throw sortError('INVALID_SETTINGS');
-          next = { ...next, classificationProvider: provider };
-        } else if (path === 'run_write_limit') next = { ...next, runWriteLimit: integer(input.runWriteLimit, 1, RUN_WRITE_LIMIT_MAX) };
+            : input.classificationProvider === ClassificationProvider.CODEX ? 'codex'
+            : input.classificationProvider === ClassificationProvider.OPENAI ? 'openai'
+            : input.classificationProvider === ClassificationProvider.GOOGLE ? 'google' : null;
+          if (provider === null || (!selectingModel && provider !== 'claude' && provider !== 'codex')) throw sortError('INVALID_SETTINGS');
+          next = { ...next, classificationProvider: provider,
+            ...(selectingModel ? {} : { classificationModel: provider === 'claude' ? CLAUDE_MODEL : CODEX_MODEL, classificationEffort: CLASSIFICATION_EFFORT }) };
+        } else if (path === 'classification_model') next = { ...next, classificationModel: input.classificationModel };
+        else if (path === 'classification_effort') next = { ...next, classificationEffort: input.classificationEffort };
+        else if (path === 'run_write_limit') next = { ...next, runWriteLimit: integer(input.runWriteLimit, 1, RUN_WRITE_LIMIT_MAX) };
         else if (path === 'classification_interval_minutes') {
           if (!CLASSIFICATION_INTERVAL_MINUTES.includes(input.classificationIntervalMinutes)) throw sortError('INVALID_SETTINGS');
           next = { ...next, classificationIntervalMinutes: input.classificationIntervalMinutes };
@@ -1044,7 +1057,17 @@ export const handlers: ServiceHandlers<ShapeOf<typeof MailsortUiService>, ApiCon
         // A retired field an older UI may still name is accepted and ignored.
         else if (!['name', 'etag', 'effective_mode', 'breaker_tripped', 'breaker_reason', 'daily_neuron_budget'].includes(path)) bad('update_mask names an unknown field');
       }
-      if (next.classificationProvider !== current.classificationProvider) {
+      if (selectingModel) {
+        const selected = models.find(model => model.id === (paths.includes('classification_model') ? input.classificationModel : classifierModel(next)) && model.configured);
+        const provider = selected === undefined ? null : classificationProvider(selected.provider);
+        if (selected === undefined || provider === null) throw sortError('INVALID_SETTINGS');
+        let effort = classifierEffort(next);
+        if (paths.includes('classification_model')) effort = selected.efforts.includes(CLASSIFICATION_EFFORT) ? CLASSIFICATION_EFFORT : selected.efforts[0] ?? '';
+        if (paths.includes('classification_effort')) effort = input.classificationEffort;
+        if (selected.efforts.length ? !selected.efforts.includes(effort) : effort !== '') throw sortError('INVALID_SETTINGS');
+        next = { ...next, classificationProvider: provider, classificationModel: selected.id, classificationEffort: effort };
+      }
+      if (next.classificationProvider !== current.classificationProvider || classifierModel(next) !== classifierModel(current) || classifierEffort(next) !== classifierEffort(current)) {
         ctx.store.setMeta('next_model_at', String(ctx.now));
         ctx.store.run('UPDATE pending SET not_before = ? WHERE deferred > 0', ctx.now);
         // The other provider's outages say nothing about this one's: its deferral backoff starts over.

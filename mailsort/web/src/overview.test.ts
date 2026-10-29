@@ -164,7 +164,7 @@ describe('the flow diagram', () => {
 
   it('draws the whole skeleton at zero on a day without mail: muted nodes, hairline links, every count 0', () => {
     const skeleton = skeletonGraph()
-    expect(skeleton.nodes.map((node) => node.name)).toEqual(['新邮件', '跳过', 'Claude Opus 5.5', '等待判断', 'P1', 'P2', 'P3', 'P4', '影子建议（未写入）'])
+    expect(skeleton.nodes.map((node) => node.name)).toEqual(['新邮件', '跳过', 'Claude API', '等待判断', 'P1', 'P2', 'P3', 'P4', '影子建议（未写入）'])
     const box = sankeyChart(flowGraph([], []))
     const svg = box.querySelector('svg')
     expect(svg?.getAttribute('aria-label')).toBe('邮件流程：还没有邮件')
@@ -291,7 +291,7 @@ describe('概览', () => {
       nextBatchTime: timestampFromMs(NOW + 3_600_000), lastRequestTime: timestampFromMs(NOW - 600_000),
     }) }
     const root = await open(s, '/overview')
-    expect(root.textContent).toContain('Claude Opus 5.5 · medium · 提示词可在设置中编辑')
+    expect(root.textContent).toContain('本月 Claude API 合计，包含本月使用的所有 Claude 模型。提示词可在设置中编辑。')
     expect(root.textContent).toContain('本月费用 US$ 3.51 / 配置月上限 US$ 20.00')
     expect(root.textContent).toContain('本应用记录的 API 用量：输入总计（含缓存）125000 token · 输出（含思考）16000 token · 思考明细 5000 token')
     expect(root.textContent).toContain('缓存读取 100000 token · 缓存写入 5000 token，均已计入输入总计')
@@ -351,19 +351,24 @@ describe('概览', () => {
     const graph = flowGraph(s.flow, s.labels)
     expect(graph.total).toBe(23)
     expect(graph.links).toContainEqual({ source: 'claude', target: 'label:labels/p1', value: 3 })
-    expect(graph.nodes.map((node) => node.name)).toContain('Claude Opus 5.5')
+    expect(graph.nodes.map((node) => node.name)).toContain('Claude API')
     expect(graph.nodes.map((node) => node.name)).toContain('历史 Clef 27B')
   })
 
-  it('keeps Codex and Claude counters on their own model nodes', () => {
+  it('keeps Codex, Claude, OpenAI and Gemini counters on their own provider nodes', () => {
     const s = server()
-    s.flow.push(flowCount(MailFlow_Stage.CLAUDE, MailFlow_Outcome.KEPT_IN_INBOX, 'labels/p1', 3), flowCount(MailFlow_Stage.CODEX, MailFlow_Outcome.ARCHIVED, 'labels/p2', 4))
+    s.flow.push(flowCount(MailFlow_Stage.CLAUDE, MailFlow_Outcome.KEPT_IN_INBOX, 'labels/p1', 3), flowCount(MailFlow_Stage.CODEX, MailFlow_Outcome.ARCHIVED, 'labels/p2', 4),
+      flowCount(MailFlow_Stage.OPENAI, MailFlow_Outcome.ARCHIVED, 'labels/p3', 2), flowCount(MailFlow_Stage.GOOGLE, MailFlow_Outcome.ARCHIVED, 'labels/p4', 1))
     const graph = flowGraph(s.flow, s.labels)
-    expect(graph.total).toBe(27)
+    expect(graph.total).toBe(30)
     expect(graph.links).toContainEqual({ source: 'claude', target: 'label:labels/p1', value: 3 })
     expect(graph.links).toContainEqual({ source: 'codex', target: 'label:labels/p2', value: 4 })
+    expect(graph.links).toContainEqual({ source: 'openai', target: 'label:labels/p3', value: 2 })
+    expect(graph.links).toContainEqual({ source: 'google', target: 'label:labels/p4', value: 1 })
     expect(graph.nodes.map((node) => node.name)).toContain('VPS Codex')
-    expect(graph.nodes.map((node) => node.name)).toContain('Claude Opus 5.5')
+    expect(graph.nodes.map((node) => node.name)).toContain('Claude API')
+    expect(graph.nodes.map((node) => node.name)).toContain('OpenAI API')
+    expect(graph.nodes.map((node) => node.name)).toContain('Gemini API')
   })
 
   it('uses Codex in an empty-day diagram when it is the selected provider', async () => {

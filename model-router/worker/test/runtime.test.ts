@@ -38,8 +38,8 @@ describe('Router with native D1, private R2 and SQLite Durable Objects', () => {
 
   it('catalog lists actual models/providers and rejects unused request options', async () => {
     const models = (await harness.models.listModels({})).models
-    expect(models).toHaveLength(6)
-    expect(models.find((model) => model.id === sol)).toMatchObject({ provider: 'openai', kind: 'text' })
+    expect(models).toHaveLength(10)
+    expect(models.find((model) => model.id === sol)).toMatchObject({ provider: 'codex', kind: 'text' })
     expect(models.some((model) => /gemini-(email|report)/.test(model.id))).toBe(false)
     for (const body of [
       { model: gemini, input: 'Synthetic', temperature: 0.4 },
@@ -59,7 +59,7 @@ describe('Router with native D1, private R2 and SQLite Durable Objects', () => {
     expect(answer).not.toHaveProperty('state')
     expect(answer).not.toHaveProperty('parameters')
     const row = (await harness.owner.listRequests({})).requests[0]!
-    expect(row).toMatchObject({ app: 'console', provider: 'openai', state: 'succeeded', reportedModel: '', contentAvailable: false })
+    expect(row).toMatchObject({ app: 'console', provider: 'codex', state: 'succeeded', reportedModel: '', contentAvailable: false })
     expect(row.request).toBeUndefined()
     expect(row.generation?.output).toBe('')
     const detail = await harness.owner.getRequest({ name: answer.name })
@@ -132,7 +132,7 @@ describe('Router with native D1, private R2 and SQLite Durable Objects', () => {
     expect(new Set([...first.requests, ...last.requests].map((row) => row.generation?.name)).size).toBe(3)
     const usage = await harness.owner.getUsage({ days: 1 })
     expect(usage.buckets).toHaveLength(2)
-    expect(usage.buckets.find((bucket) => bucket.model === sol)).toMatchObject({ provider: 'openai', billingKind: 'subscription', requestCount: 2, inputTokens: 28, estimatedCostMicrousd: 156, usageAvailableCount: 2 })
+    expect(usage.buckets.find((bucket) => bucket.model === sol)).toMatchObject({ provider: 'codex', billingKind: 'subscription', requestCount: 2, inputTokens: 28, estimatedCostMicrousd: 156, usageAvailableCount: 2 })
     expect(usage.buckets.find((bucket) => bucket.model === gemini)).toMatchObject({ provider: 'google', billingKind: 'api', requestCount: 1 })
     expect(usage.buckets.every((bucket) => bucket.time?.seconds === BigInt(Math.floor(Date.now() / 3600000) * 3600))).toBe(true)
     const daily = await harness.owner.getUsage({ days: 7 })
@@ -339,7 +339,7 @@ it('maintenance returns standard UNAVAILABLE before parsing while history, healt
     }
     expect((await harness.owner.listRequests({})).requests).toEqual([])
     // Newsletter's startup preflight reads this catalog before it can become ready.
-    expect((await harness.models.listModels({})).models).toHaveLength(6)
+    expect((await harness.models.listModels({})).models).toHaveLength(10)
     // Startup recovery must acknowledge names registered before a refused Create.
     const close = await harness.mf.dispatchFetch(`${origin}/api/model/v1/conversations/${crypto.randomUUID()}:close`, {
       method: 'POST', headers: { authorization: `Bearer ${machineToken}`, 'content-type': 'application/json' }, body: '{}',

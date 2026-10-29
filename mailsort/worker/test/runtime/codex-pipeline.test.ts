@@ -40,6 +40,42 @@ const mail = (i: number, fields: Partial<SyntheticMail> = {}): SyntheticMail => 
 afterEach(async () => { checkGoogleCalls(h); await h.dispose(); });
 
 describe('Codex priority pipeline', () => {
+  it.each([
+    ['openai/gpt-6.1-sol', ClassificationProvider.OPENAI, 'openai', MailFlow_Stage.OPENAI],
+    ['gemini-3.8-flash', ClassificationProvider.GOOGLE, 'google', MailFlow_Stage.GOOGLE],
+  ] as const)('uses the saved API route %s without changing Claude budget or Codex history', async (model, provider, decider, stage) => {
+    await initialize();
+    await select(ClassificationProvider.CODEX);
+    const first = mail(93);
+    deliver(h, first, T0 + MINUTE);
+    await h.step(T0 + 2 * MINUTE);
+    const frozen = await decision(h, first.id);
+    await h.sql(`INSERT INTO claude_usage(day,requests,cost_micros) VALUES('2026-10-01',1,20000000)`);
+    await h.sql(`INSERT OR REPLACE INTO meta(key,value) VALUES('claude_limited_month','2026-10'),('claude_error','claude_spend_limit')`);
+    const current = await h.api.getSettings({ name: 'settings' });
+    await h.api.updateSettings({
+      settings: create(SettingsSchema, { name: 'settings', classificationModel: model, classificationEffort: 'high', etag: current.etag }),
+      updateMask: { paths: ['classification_model', 'classification_effort'] }, requestId: op(),
+    });
+    expect(h.up.api.calls).toHaveLength(0);
+    expect((await h.api.getSettings({ name: 'settings' }))).toMatchObject({ classificationProvider: provider, classificationModel: model, classificationEffort: 'high', mode: current.mode });
+    const second = mail(94);
+    deliver(h, second, T0 + 3 * MINUTE);
+    expect(await h.step(T0 + 4 * MINUTE)).toMatchObject({ decided: 1, applied: 1 });
+    expect(h.up.api.requests).toHaveLength(1);
+    expect(h.up.api.requests[0]).toMatchObject({ model, effort: 'high', allowFallback: false });
+    expect(h.up.codex.calls).toHaveLength(1);
+    expect(h.up.claude.calls).toHaveLength(0);
+    expect(await decision(h, second.id)).toMatchObject({ decider, model });
+    expect(await decision(h, first.id)).toEqual(frozen);
+    expect(await h.sql(`SELECT cost_micros FROM claude_usage`)).toEqual([{ cost_micros: 20000000 }]);
+    const flow = await h.api.getMailFlow({ name: 'mailFlows/today' });
+    expect(flow.counts.some(count => count.stage === stage && count.mailCount === 1)).toBe(true);
+    expect(await h.api.getServiceStatus({ name: 'serviceStatus' })).toMatchObject({ classifier: { provider, model, effort: 'high', configured: true }, claudeBudget: { spentUsd: 20, providerLimitReached: true } });
+    h.up.api.configured = false;
+    expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).classifier).toMatchObject({ provider, configured: false, lastErrorCode: `${decider}_not_configured` });
+  });
+
   it('uses the saved interval for new automatic batches while Gmail maintenance stays at five minutes', async () => {
     await initialize();
     await select(ClassificationProvider.CODEX);

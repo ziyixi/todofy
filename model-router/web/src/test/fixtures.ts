@@ -12,7 +12,8 @@ export const models: Model[] = [
     configured: true,
     efforts: ['low', 'high'],
   },
-  { id: 'gpt-6.1-sol', display_name: 'Sol 6.1', provider: 'openai', kind: 'text', configured: true },
+  { id: 'gpt-6.1-sol', display_name: 'Sol 6.1', provider: 'codex', kind: 'text', configured: true },
+  { id: 'openai/gpt-6.1-sol', display_name: 'Sol 6.1', provider: 'openai', kind: 'text', configured: true, efforts: ['low', 'medium', 'high'] },
   {
     id: 'gemini-3.8-flash',
     display_name: 'Gemini 3.8 Flash',
@@ -85,7 +86,7 @@ export const usage: UsageSummary = {
     {
       time: '2026-10-26T00:00:00Z',
       model: 'gpt-6.1-sol',
-      provider: 'openai',
+      provider: 'codex',
       billing_kind: 'subscription',
       request_count: 1,
       failure_count: 1,

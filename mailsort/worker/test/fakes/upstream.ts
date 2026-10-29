@@ -44,6 +44,17 @@ export class FakeUpstream {
     inputTokens: 1200,
     outputTokens: 120,
   };
+  readonly api = {
+    calls: [] as ClaudeEmail[][],
+    requests: [] as GenerateRequest[],
+    bucket: 'P2' as 'P1' | 'P2' | 'P3' | 'P4',
+    configured: true,
+    errorReason: '',
+    errorCode: 0,
+    badItems: false,
+    inputTokens: 1200,
+    outputTokens: 120,
+  };
   /** Requests that were neither Google nor Model Router. */
   readonly strays: string[] = [];
   /**
@@ -80,6 +91,13 @@ export class FakeUpstream {
     this.codex.badItems = false;
     this.codex.inputTokens = 1200;
     this.codex.outputTokens = 120;
+    this.api.calls.length = 0;
+    this.api.requests.length = 0;
+    this.api.bucket = 'P2';
+    this.api.configured = true;
+    this.api.errorReason = '';
+    this.api.errorCode = 0;
+    this.api.badItems = false;
     this.strays.length = 0;
   }
 
@@ -88,16 +106,22 @@ export class FakeUpstream {
     const body = request.method === 'GET' || request.method === 'HEAD' ? '' : await request.text();
     if (url.pathname === '/api/model/v1/models') {
       return Response.json(toWire(ListModelsResponseSchema, create(ListModelsResponseSchema, { models: [
-        { id: 'claude-opus-5-5', configured: this.claude.configured }, { id: 'gpt-6.1-sol', configured: this.codex.configured },
+        { id: 'claude-opus-5-5', displayName: 'Claude Opus 5.5', provider: 'anthropic', kind: 'text', efforts: ['low', 'medium', 'high'], configured: this.claude.configured },
+        { id: 'gpt-6.1-sol', displayName: 'Sol 6.1', provider: 'codex', kind: 'text', efforts: ['low', 'medium', 'high'], configured: this.codex.configured },
+        { id: 'openai/gpt-6.1-sol', displayName: 'Sol 6.1', provider: 'openai', kind: 'text', efforts: ['low', 'medium', 'high'], configured: this.api.configured },
+        { id: 'openai/gpt-6-astra', displayName: 'GPT-6 Astra', provider: 'openai', kind: 'text', efforts: ['low', 'medium', 'high'], configured: false },
+        { id: 'gemini-3.8-flash', displayName: 'Gemini 3.8 Flash', provider: 'google', kind: 'text', efforts: ['low', 'medium', 'high'], configured: this.api.configured },
       ] })));
     }
     if (request.method === 'POST' && url.pathname === '/api/model/v1/generations:generate') {
       const input = fromWire(GenerateRequestSchema, JSON.parse(body)).message;
       const emails = (JSON.parse(input.input) as { emails: ClaudeEmail[] }).emails;
       const isClaude = input.model === 'claude-opus-5-5';
-      const engine = isClaude ? this.claude : this.codex;
+      const isApi = input.model.startsWith('openai/') || input.model.startsWith('gemini-');
+      const engine = isClaude ? this.claude : isApi ? this.api : this.codex;
       if (engine.configured) engine.calls.push(emails);
       if (isClaude) this.claude.systems.push(input.instructions);
+      else if (isApi) this.api.requests.push(input);
       else this.codex.requests.push(input);
       const reason = !engine.configured ? 'MODEL_NOT_CONFIGURED' : isClaude && this.claude.spendLimit ? 'MODEL_SPEND_LIMIT' : engine.errorReason;
       const code = !engine.configured ? 9 : isClaude && this.claude.spendLimit ? 8 : engine.errorCode;
@@ -108,11 +132,11 @@ export class FakeUpstream {
       const inputTokens = engine.inputTokens + cacheWrite + cacheRead;
       const cost = Math.ceil(engine.inputTokens * 4 + cacheWrite * 5 + cacheRead * 0.2 + engine.outputTokens * 20);
       return Response.json(toWire(GenerationSchema, create(GenerationSchema, {
-        name: `requests/${crypto.randomUUID()}`, model: isClaude ? 'claude-opus-5-5' : 'gpt-6.1-sol', output: reason ? '' : JSON.stringify({ items }),
+        name: `requests/${crypto.randomUUID()}`, model: input.model, output: reason ? '' : JSON.stringify({ items }),
         ...(reason ? { error: { code, reason, message: 'Synthetic model failure.', retryAfterSeconds: isClaude ? this.claude.retryAfterSeconds : 0 } } : {}),
-        usage: { available: !reason, billingKind: isClaude ? 'api' : 'subscription', inputTokens: reason ? 0 : inputTokens, outputTokens: reason ? 0 : engine.outputTokens,
+        usage: { available: !reason, billingKind: isClaude || isApi ? 'api' : 'subscription', inputTokens: reason ? 0 : inputTokens, outputTokens: reason ? 0 : engine.outputTokens,
           cacheWriteTokens: cacheWrite, cachedInputTokens: cacheRead,
-          ...(isClaude ? { estimatedCostMicrousd: cost } : {}) },
+          ...(isClaude || isApi ? { estimatedCostMicrousd: cost } : {}) },
       })));
     }
     // The development fetch sends the real URL in a header; without the bypass (the CPU test) the URL is Google's itself.

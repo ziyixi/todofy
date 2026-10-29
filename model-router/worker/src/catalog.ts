@@ -6,33 +6,42 @@ import { invalid } from './errors.ts';
 export interface CatalogRoute {
   upstreamModel: string;
   displayName: string;
-  provider: 'codex' | 'anthropic' | 'gemini' | 'workers_ai';
+  provider: 'codex' | 'openai' | 'anthropic' | 'gemini' | 'workers_ai';
   efforts: string[];
   quotaUnitsPerToken?: number;
 }
 export const ROUTES: readonly CatalogRoute[] = [
   { upstreamModel: 'gpt-6.1-sol', displayName: 'Sol 6.1', provider: 'codex', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
+  { upstreamModel: 'gpt-6-astra', displayName: 'GPT-6 Astra', provider: 'openai', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
+  { upstreamModel: 'gpt-6.1-sol', displayName: 'Sol 6.1', provider: 'openai', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
+  { upstreamModel: 'gpt-6.1-terra', displayName: 'Terra 6.1', provider: 'openai', efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'] },
+  { upstreamModel: 'gpt-6-luna', displayName: 'GPT-6 Luna', provider: 'openai', efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'] },
   { upstreamModel: 'claude-opus-5-5', displayName: 'Claude Opus 5.5', provider: 'anthropic', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
   { upstreamModel: 'claude-haiku-5-5', displayName: 'Claude Haiku 5.5', provider: 'anthropic', efforts: ['low', 'medium', 'high'] },
   { upstreamModel: 'gemini-3.8-flash', displayName: 'Gemini 3.8 Flash', provider: 'gemini', efforts: ['low', 'medium', 'high'] },
   { upstreamModel: 'gemini-3.5-flash-lite', displayName: 'Gemini 3.5 Flash-Lite', provider: 'gemini', efforts: ['low', 'medium', 'high'] },
   { upstreamModel: '@cf/baai/bge-m3', displayName: 'BGE-M3', provider: 'workers_ai', efforts: [], quotaUnitsPerToken: 0.001075 },
 ];
-const providers = { codex: 'openai', anthropic: 'anthropic', gemini: 'google', workers_ai: 'cloudflare' } as const;
+const providers = { codex: 'codex', openai: 'openai', anthropic: 'anthropic', gemini: 'google', workers_ai: 'cloudflare' } as const;
+function modelId(route: CatalogRoute): string {
+  return route.provider === 'openai' ? `openai/${route.upstreamModel}` : route.upstreamModel;
+}
 export function providerFor(model: string): string {
-  if (model.startsWith('gpt-')) return 'openai';
+  if (model.startsWith('openai/')) return 'openai';
+  if (model.startsWith('gpt-')) return 'codex';
   if (model.startsWith('claude-')) return 'anthropic';
   if (model.startsWith('gemini-')) return 'google';
   if (model.startsWith('@cf/')) return 'cloudflare';
   return '';
 }
 export function routeFor(model: string): CatalogRoute {
-  const route = ROUTES.find((item) => item.upstreamModel === model);
+  const route = ROUTES.find((item) => modelId(item) === model);
   if (!route) invalid('MODEL_NOT_FOUND', 'Choose a configured native model.');
   return route;
 }
-export function secretFor(env: Env, provider: 'anthropic' | 'gemini'): string {
-  return (provider === 'anthropic' ? env.ANTHROPIC_API_KEY : env.GEMINI_API_KEY)?.trim() ?? '';
+export function secretFor(env: Env, provider: 'openai' | 'anthropic' | 'gemini'): string {
+  const keys = { openai: env.OPENAI_API_KEY, anthropic: env.ANTHROPIC_API_KEY, gemini: env.GEMINI_API_KEY };
+  return keys[provider]?.trim() ?? '';
 }
 export function modelCatalog(env: Env): Model[] {
   const codexConfigured = !!(env.CODEX_EXECUTOR_ORIGIN && env.CODEX_ACCESS_CLIENT_ID && env.CODEX_ACCESS_CLIENT_SECRET);
@@ -49,7 +58,7 @@ export function modelCatalog(env: Env): Model[] {
         configured = !!secretFor(env, route.provider);
     }
     return create(ModelSchema, {
-      id: route.upstreamModel,
+      id: modelId(route),
       displayName: route.displayName,
       provider: providers[route.provider],
       kind: route.provider === 'workers_ai' ? 'embedding' : 'text',
