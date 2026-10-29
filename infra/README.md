@@ -343,8 +343,8 @@ or an empty state). It prints one fixed line per step and the redacted summaries
    edited).
 3. Probes conditional writes on a throwaway key (report only).
 4. Notes whether the state object exists, then `tofu init` with the backend.
-5. Plans. The plan must hold **only imports**: every resource `import` (or already `no-op`), exactly 19
-   (`EXPECTED_OBJECTS`),
+5. Plans. The plan must hold **only imports**: every resource `import` (or already `no-op`), exactly
+   `EXPECTED_OBJECTS` of [`bootstrap_state.py`](scripts/bootstrap_state.py) (the count in "Managed here"),
    and outputs only created (a new state has none). Anything else (create, update, replace, delete,
    forget, import+update, an output update, another count) **refuses with exit 4 before any apply**. If the
    state object **already exists**, any import or output create refuses too (exit 4): a populated state changes
@@ -352,7 +352,7 @@ or an empty state). It prints one fixed line per step and the redacted summaries
 6. Applies exactly that saved plan, only into a missing state object. Import reads Cloudflare and writes only
    the state.
 7. Reads the state object back and checks that it is encrypted.
-8. Plans again: it must be "No changes" (exit 0, 19 no-op, no output change), or the script fails.
+8. Plans again: it must be "No changes" (exit 0, every object `no-op`, no output change), or the script fails.
 
 A second run on an existing state only verifies it: "No changes" passes, anything else refuses. The bootstrap
 needs the `import {}` blocks, which were [removed](#removing-the-import-blocks): restore `imports.tf` from git
@@ -527,7 +527,7 @@ AUD exists only once the application does, and the Worker must be deployed with 
    still undeployed: no route, the all-zeros AUD, the host as `PUBLIC_HOST`). The outputs check accepts the unknown
    AUD because no production config names it yet ([Outputs](#outputs)).
 2. **Merge**; the push's "Infra drift" run is **red by design** (exit 2). Check it against exactly this:
-   - `create: 1`, nothing else but `no-op` (19 rows in all);
+   - `create: 1`, nothing else but `no-op` (`EXPECTED_OBJECTS` rows in all, which this commit raises by one);
    - the one row `create` `cloudflare_zero_trust_access_application.owner["<name>"]`;
    - `output changes: 1`: `update` `access_aud`;
    - the expect line. For the watch app, computed from the addresses of this commit (the method reproduces P4's
@@ -536,7 +536,8 @@ AUD exists only once the application does, and the Worker must be deployed with 
    If anything differs, stop and find out why; never copy a differing line into the dispatch.
 3. **Dispatch "Infra apply"** on `main` with that `expect`. The token must be allowed to edit Access applications
    (Access: Apps and Policies Edit; [Replacing the token](#replacing-the-token)). It ends with "apply: done" and a
-   verify plan of `no-op: 19`, `output changes: 0`; then "Infra drift" is green with `no-op: 19`.
+   verify plan of only `no-op` rows (`EXPECTED_OBJECTS`), `output changes: 0`; then "Infra drift" is green with
+   the same count.
 4. **Read the AUD and the application id, read-only.** Neither workflow prints an output value (only counts and
    addresses), so read them from the Access API with the admin helper (a GET; the AUD is not secret, every
    `wrangler.toml` commits its own), keeping only the new application's line:
@@ -562,9 +563,10 @@ AUD exists only once the application does, and the Worker must be deployed with 
    From that commit on, "Infra drift" compares the committed AUD with `access_aud` every day.
 6. **After that commit reaches `main`**: it changes `infra/`, so its push runs "Infra drift". That run is the first
    check that the committed AUD is the application's (the deploy's Access probes cannot tell: Access answers before
-   the Worker runs, so a wrong AUD only shows as a 403 for the owner). It must be green: `no-op: 19`,
-   `output changes: 0`, and no outputs problem. Red with `vars.ACCESS_AUDIENCE differs from access_aud` means the
-   committed AUD is wrong: read it again (step 4), fix it and push; the app's deploy job then ships the fix.
+   the Worker runs, so a wrong AUD only shows as a 403 for the owner). It must be green: only `no-op`
+   rows (`EXPECTED_OBJECTS`), `output changes: 0`, and no outputs problem. Red with
+   `vars.ACCESS_AUDIENCE differs from access_aud` means the committed AUD is wrong: read it again (step 4), fix it
+   and push; the app's deploy job then ships the fix.
 
 Personal MCP follows this sequence with `CHECK_ONLY` still enabled and no `ACCESS_AUDIENCE` until the apply returns its
 real identity. Provider 5.25.0 supports `oauth_configuration`; only this application enables it. Its redirect allowlist
@@ -677,9 +679,9 @@ rebuild by import.** The state holds nothing that cannot be read again.
 1. `openssl rand -base64 32 > ~/.config/todofy-infra/state-passphrase.new` (chmod 600).
 2. Delete the state object: `python3 mail-hero/deploy/cloudflare-admin.py wrangler r2 object delete
    infra-state/production/terraform.tfstate --remote`. (The bootstrap writes only a missing state object.)
-3. Run the bootstrap with `--passphrase-file ~/.config/todofy-infra/state-passphrase.new`. It imports the
-   19 objects again (the watch application through the block added from `ids.tf`, [Bootstrap](#bootstrap-once)) into
-   a new encrypted state and ends with "No changes".
+3. Run the bootstrap with `--passphrase-file ~/.config/todofy-infra/state-passphrase.new`. It imports all
+   `EXPECTED_OBJECTS` objects again (the watch application through the block added from `ids.tf`,
+   [Bootstrap](#bootstrap-once)) into a new encrypted state and ends with "No changes".
 4. `gh secret set INFRA_STATE_PASSPHRASE --env production -R ziyixi/todofy < ~/.config/todofy-infra/state-passphrase.new`,
    update the password manager, dispatch "Infra drift".
 5. After a suspected leak: delete the old backups (above).
@@ -910,8 +912,8 @@ The added platform resources also need Access service-token and Cloudflare Tunne
 DNS access restricted to the configured zone. Use Read for planning and Edit for applying. Preserve
 existing Worker permissions when extending an existing token. The complete bootstrap also requires
 Identity Providers and Email Routing Rules Read/Write; see the [current permission list](../tools/cloud-bootstrap/README.md#cloudflare-token-权限).
-The original import instructions and 19-object counts below describe the pre-platform
-baseline; the platform follow-up creates nine new objects and expects 28 no-op objects after apply.
+The original import instructions and object counts below describe the pre-platform
+baseline; the current count is `EXPECTED_OBJECTS`.
 
 Store each from your own terminal (paste at the prompt, never in chat):
 `gh secret set CF_INFRA_READ_TOKEN --env production -R ziyixi/todofy`, likewise `CF_INFRA_TOKEN`. Then

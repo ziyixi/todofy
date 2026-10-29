@@ -70,19 +70,10 @@ _spec = importlib.util.spec_from_file_location("cloud_config_generate", REPO / "
 generate = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(generate)
 
-# Fleet's initial phase is explicit in ci_changes.CHECK_ONLY. Its sole production config already
-# describes the intended host, but carries no invented AUD and both Fleet/Home deploys stay disabled.
-# The activation commit records the real Access IDs/AUD and removes CHECK_ONLY in the same change.
-AHEAD_OF_DEPLOY = ({"fleet": load_profile(REPO)["platform_hostname"]}
-                  if "fleet" in test_wrangler_configs.ci_changes.CHECK_ONLY else {})
-if "tasks" in test_wrangler_configs.ci_changes.CHECK_ONLY:
-    AHEAD_OF_DEPLOY["tasks"] = "tasks." + load_profile(REPO)["zone"]
-if "personal-mcp" in test_wrangler_configs.ci_changes.CHECK_ONLY:
-    AHEAD_OF_DEPLOY["personal-mcp"] = "mcp." + load_profile(REPO)["zone"]
-
-
-if "model-router" in test_wrangler_configs.ci_changes.CHECK_ONLY:
-    AHEAD_OF_DEPLOY["model-router"] = "models." + load_profile(REPO)["zone"]
+# An app's first phase is explicit in ci_changes.CHECK_ONLY: its production config already names the intended host,
+# but carries no invented AUD, and its deploy stays disabled. The activation commit records the real Access ID/AUD
+# and removes CHECK_ONLY in the same change, and with it the app's entry here.
+AHEAD_OF_DEPLOY: dict[str, str] = {}
 if "newsletter-console" in test_wrangler_configs.ci_changes.CHECK_ONLY:
     AHEAD_OF_DEPLOY["newsletter-console"] = "news." + load_profile(REPO)["zone"]
 # Owner applications that also gate a path of the platform runtime host (the catalog's runtime_paths): the console's
@@ -320,8 +311,8 @@ class MatchesTheApps(unittest.TestCase):
                 self.assertEqual("outside_access: true" in body, on_access_host)
 
     def test_ahead_of_deploy_is_exact(self):
-        """A first-phase app (Fleet, mailsort and recall before; none now) has no fake AUD and cannot deploy
-        before the gated Access creation, and neither can Home while it binds the app."""
+        """A first-phase app (one in CHECK_ONLY) has no fake AUD and cannot deploy before the gated Access creation,
+        and neither can Home while it binds the app."""
         owner = hcl_map((INFRA / "access.tf").read_text(), "owner_apps")
         self.assertEqual(set(AHEAD_OF_DEPLOY), set(test_wrangler_configs.ci_changes.CHECK_ONLY))
         for worker, host in AHEAD_OF_DEPLOY.items():
