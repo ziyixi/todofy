@@ -102,7 +102,8 @@ runs:
       shell: bash -e {0}
       run: |
         test -n "$CLOUDFLARE_API_TOKEN"
-        node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml \
+        bash "$GITHUB_WORKSPACE/tools/cloud-release/assets-session-retry.sh" \
+          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml \
           --secrets-file "$RUNNER_TEMP/watch-secrets.json"
     # Nothing anonymous on the host shows BUILD_SHA (all of it is behind Access), so production is read through the
     # API with the deploy token (GETs only): the Worker serves exactly one version at 100% and that version's

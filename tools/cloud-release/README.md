@@ -20,7 +20,11 @@ The workflow holds the app's `*-production` concurrency group throughout these s
 4. When `required=true`, build the selected revision, validate its bundles, run the hostname guard,
    apply the existing app migrations, deploy, and run its production probes. The deploy wrappers
    use `BUILD_SOURCE_SHA` for build identity; a repair can therefore build an older app revision
-   while the workflow runs from a newer main revision.
+   while the workflow runs from a newer main revision. A Worker this workflow releases with static
+   assets deploys through `assets-session-retry.sh`: Cloudflare sometimes fails to open the asset
+   upload session (HTTP 500, code 10013) before anything is uploaded, and wrangler does not retry
+   that request, so the helper repeats the identical deploy after 60 s and 180 s on exactly that
+   error. Any other failure fails the step at once. The website's own release does not use it.
 5. `record` reads the provider again, verifies the exact build SHA, configuration, routes, and
    persistent resource identities, then writes a GitHub Deployment and a `success` status.
 
