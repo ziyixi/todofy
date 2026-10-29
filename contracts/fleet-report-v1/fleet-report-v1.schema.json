@@ -189,6 +189,56 @@
         "latest_delivery_time": {
           "description": "Update time of the latest delivery record, rather than proof of inbox arrival.",
           "type": "string"
+        },
+        "config_sync": {
+          "description": "The separate configuration poller's latest local observation; absent from older producers.",
+          "type": "object",
+          "properties": {
+            "active_revision": {
+              "description": "Source revision of the bundle currently used for new runs.",
+              "type": "string",
+              "pattern": "^(?:([0-9a-f]{40}|packaged))$(?!\\n)"
+            },
+            "active_digest": {
+              "description": "Digest of the active bundle.",
+              "type": "string",
+              "pattern": "^(?:[0-9a-f]{64})$(?!\\n)"
+            },
+            "wanted_revision": {
+              "description": "Source revision fetched during the last successful remote check.",
+              "type": "string",
+              "pattern": "^(?:([0-9a-f]{40}|packaged))$(?!\\n)"
+            },
+            "wanted_digest": {
+              "description": "Digest fetched during that check, not necessarily the current remote target.",
+              "type": "string",
+              "pattern": "^(?:[0-9a-f]{64})$(?!\\n)"
+            },
+            "wanted_commit": {
+              "description": "Published branch commit resolved by the last remote check.",
+              "type": "string",
+              "pattern": "^(?:[0-9a-f]{40})$(?!\\n)"
+            },
+            "pinned_digest": {
+              "description": "Intentional local pin, if any.",
+              "type": "string",
+              "pattern": "^(?:[0-9a-f]{64})$(?!\\n)"
+            },
+            "last_attempt_time": {
+              "description": "Latest attempted poll, including a failed attempt.",
+              "type": "string"
+            },
+            "last_success_time": {
+              "description": "Latest successful poll, even if the active bundle did not change.",
+              "type": "string"
+            },
+            "error": {
+              "description": "Last attempt's safe error code, absent after success.",
+              "type": "string",
+              "pattern": "^(?:CONFIG_[A-Z0-9_]{1,80})$(?!\\n)"
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

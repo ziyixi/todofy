@@ -163,7 +163,7 @@ describe('Newsletter process and release projection', () => {
     const report = classifiedReport();
     report.newsletter.worker_healthy = false;
     expect(newsletterStatus(report).signals.map((item) => item.code)).toEqual([
-      'newsletter_unavailable', 'newsletter_side_effect_unknown', 'newsletter_delivery_accepted', 'newsletter_unknown',
+      'newsletter_unavailable', 'newsletter_side_effect_unknown', 'newsletter_config_unobserved', 'newsletter_delivery_accepted', 'newsletter_unknown',
     ]);
   });
   it('keeps bookkeeping-only unknown records visible as info without a warning or process fault', () => {
@@ -171,6 +171,7 @@ describe('Newsletter process and release projection', () => {
     expect(newsletterStatus(report)).toMatchObject({
       health: 'ok',
       signals: [
+        { code: 'newsletter_config_unobserved', severity: 'info', metrics: {} },
         { code: 'newsletter_delivery_accepted', severity: 'info', since: '2026-10-02T22:00:00Z', metrics: {} },
         { code: 'newsletter_unknown', severity: 'info', metrics: { unknown_count: 32, unknown_revision: 7 } },
       ],
@@ -263,6 +264,7 @@ describe('Newsletter process and release projection', () => {
     report.newsletter.drain_state = 'frozen';
     expect(newsletterStatus(report).signals).toEqual([
       { code: 'deployment_pending', severity: 'warning', metrics: {} },
+      { code: 'newsletter_config_unobserved', severity: 'info', metrics: {} },
       { code: 'newsletter_delivery_accepted', severity: 'info', since: '2026-10-02T22:00:00Z', metrics: {} },
       { code: 'newsletter_paused', severity: 'info', metrics: {} },
       { code: 'newsletter_unknown', severity: 'info', metrics: { unknown_count: 32, unknown_revision: 7 } },
@@ -293,7 +295,7 @@ describe('Newsletter daily delivery evidence', () => {
     expect(signals).not.toContain('newsletter_delivery_overdue');
   });
   it('reports missing delivery evidence as overdue', () => {
-    expect(codes(fixture)).toEqual(['newsletter_delivery_overdue']);
+    expect(codes(fixture)).toEqual(['newsletter_delivery_overdue', 'newsletter_config_unobserved']);
   });
 });
 

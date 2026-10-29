@@ -2,6 +2,7 @@ import type { HostReport } from '@ziyixi/proto/fleet/telemetry/v1/host_report_wi
 import { daemonLabel, label, time } from './format.ts';
 import { Mark } from './Mark.tsx';
 import { RuntimeView } from './RuntimeView.tsx';
+import { NewsletterConfigView } from './NewsletterConfigView.tsx';
 
 const CATEGORY_NAMES: Record<string, string> = {
   interrupted_activities: '运行中断', packets: '采编记录',
@@ -13,7 +14,7 @@ const DELIVERY_NAMES: Record<string, string> = {
 };
 
 /** Snapshot metadata, rendered as text. Freshness is stated by the enclosing owner page. */
-export function HostReportView({ report }: { report: HostReport }) {
+export function HostReportView({ report, now }: { report: HostReport; now: number }) {
   const { cluster, newsletter } = report;
   const workerHealth = newsletter.worker_healthy === true ? '健康' : newsletter.worker_healthy === false ? '异常' : '未知';
   const delivery = newsletter.latest_delivery_state;
@@ -59,6 +60,7 @@ export function HostReportView({ report }: { report: HostReport }) {
           </dl>
         ) : null}
         <p className="muted">六类记录可能重复计入，合计并非失败邮件数；只有邮件投递、采编记录和 Notion 写入可能已产生实际结果，需要核对。</p>
+        <NewsletterConfigView config={newsletter.config_sync} now={now} />
       </section>
     </>
   );

@@ -41,6 +41,20 @@ describe('real workerd SQLite receipt persistence', () => {
       counters: { heartbeat_age_seconds: 1260 }, modes: { maintenance: false, deployment_paused: false },
     });
   });
+  it('retains config identities for Fleet and projects clocks only while the host receipt is fresh', async () => {
+    const h = await start();
+    const config = { active_revision: '1'.repeat(40), active_digest: 'a'.repeat(64),
+      wanted_revision: '2'.repeat(40), wanted_digest: 'b'.repeat(64), wanted_commit: '3'.repeat(40),
+      last_attempt_time: NOW, error: 'CONFIG_ACTIVATION_FAILED' };
+    expect((await h.send({ ...fixture, newsletter: { ...fixture.newsletter, config_sync: config } })).status).toBe(200);
+    expect(await h.view()).toMatchObject({ report: { newsletter: { config_sync: config } } });
+    const fresh = await h.status('newsletter', AT);
+    expect(fresh.signals).toContainEqual({ code: 'newsletter_config_failed', severity: 'warning', metrics: {} });
+    expect(fresh.counters).toMatchObject({ newsletter_config_last_attempt_at: AT / 1000, newsletter_config_attempt_age_seconds: 0 });
+    expect(await h.status('newsletter', AT + 21 * 60_000)).toMatchObject({
+      signals: [{ code: 'host_missing', severity: 'critical' }], counters: { heartbeat_age_seconds: 1260 },
+    });
+  });
   it('requires runtime evidence even when the Pod and application process look healthy', async () => {
     const h = await start();
     expect((await h.send({ ...fixture, runtime: null })).status).toBe(200);
@@ -49,6 +63,7 @@ describe('real workerd SQLite receipt persistence', () => {
         { code: 'newsletter_unavailable', severity: 'critical' },
         { code: 'deployment_pending', severity: 'warning' },
         { code: 'newsletter_delivery_overdue', severity: 'warning' },
+        { code: 'newsletter_config_unobserved', severity: 'info' },
       ],
     });
   });
@@ -74,6 +89,7 @@ describe('real workerd SQLite receipt persistence', () => {
       health: 'ok',
       signals: [
         { code: 'newsletter_side_effect_unknown', severity: 'warning', metrics: { count: 2, unknown_revision: 7 } },
+        { code: 'newsletter_config_unobserved', severity: 'info' },
         { code: 'newsletter_delivery_accepted', severity: 'info' },
         { code: 'newsletter_unknown', severity: 'info', metrics: { unknown_count: 32, unknown_revision: 7 } },
       ],
@@ -90,6 +106,7 @@ describe('real workerd SQLite receipt persistence', () => {
     expect(await h.status('newsletter', AT)).toMatchObject({
       signals: [
         { code: 'newsletter_side_effect_unknown', severity: 'warning', metrics: { count: 3, unknown_revision: 8 } },
+        { code: 'newsletter_config_unobserved', severity: 'info' },
         { code: 'newsletter_delivery_accepted', severity: 'info' },
         { code: 'newsletter_unknown', severity: 'info', metrics: { unknown_count: 33, unknown_revision: 8 } },
       ],

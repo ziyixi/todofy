@@ -138,7 +138,7 @@ worker/todofy/core/            pure stdlib Python, host-testable, no `js`/`worke
   model_input.py carryover.py mailbox.py metrics.py backup.py ops.py owner_ui.py
   sql/                         every D1 statement, one module per owning runtime module
 worker/todofy/runtime/         runs only inside workerd (imports `js`, `workers`, `pyodide`)
-tests/unit/                    host tests for core/, the migration and the API contract (golden/ = Go captures)
+tests/unit/                    host tests for core/, the migration and the API contract (golden/ = legacy captures and current prompts)
 tests/fakes/                   in-process loopback HTTP fake (+ its own tests)
 tests/runtime/                 black-box tests against `wrangler dev` (gateway + core) with real
                                D1/DO/alarms/cron/assets (harness.py; run serially or in parallel, §1)
@@ -486,8 +486,11 @@ neutralising embedded markers. Trusted `preface` text, such as a truncation noti
 The summary step uses `prompts.SUMMARY_EMAIL`, `model_input.summary_content(event)` and
 `render.content_notice(event)` with the saved email route. Reports use the saved report route and
 standard JSON Schema where needed. A completed mail keeps its frozen summary and model after a choice changes.
-`SUMMARY_EMAIL` retains the one deliberate brief line introduced in 2026-10; `core/mailbox.brief_of`
-reads it and `COMPLETE_SUMMARY` stores it in `summaries.brief`.
+`core/prompts.py` describes the task, decision rules, output format and synthetic input/output examples.
+`SUMMARY_EMAIL` produces one or two Chinese sentences with a plain first-line brief of at most 40 characters;
+`core/mailbox.brief_of` reads it and `COMPLETE_SUMMARY` stores it in `summaries.brief`. `SUMMARY_RANGE` keeps the
+four plain-text categories, and recommendations keep the existing JSON array schema. Current prompt snapshots
+and example checks live in `tests/unit/test_prompts.py`; legacy schema and event fixtures stay separate.
 
 ### reports.py (R)
 ```python

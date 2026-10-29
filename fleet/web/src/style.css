@@ -358,6 +358,9 @@ article h3 {
   gap: 8px;
   min-width: 0;
 }
+.newsletter-config .side {
+  width: 7em;
+}
 .side {
   flex: none;
   width: 3em;

@@ -142,6 +142,8 @@ macOS 上 `/tmp` 是符号链接时请用 `/private/tmp/newsletter-bundle.json`�
 执行 `python -m newsletter.config_sync initialize`。它只在配置卷完全为空时 seed 包内基线；
 已有活动配置只校验且不改写。非空目录缺少基线或基线损坏时失败，不自动重置配置。
 
+以下 Compose 命令用于本地演示；生产日常验收使用下文 Fleet/Home 只读入口。
+
 ```sh
 docker compose exec -T newsletter-config-sync python -m newsletter.config_sync status
 docker compose exec -T newsletter-config-sync python -m newsletter.config_sync once
@@ -153,3 +155,45 @@ pin 会持久化并切换到已保存的版本，后续自动同步不会覆盖�
 `status` 区分远端期望 commit、活动源 revision/digest、固定状态、最后成功时间和错误码。
 `releases/<digest>/bundle.json` 保存历史不可变版本，`active.json` 只在完整落盘后原子替换。
 配置目录纳入现有备份，但回退内容配置不需要也不允许回滚 SQLite 或发送台账。
+
+## 只读监视合同
+
+`GET /internal/monitoring/status` 继续使用 `version:2` 和独立的
+`NEWSLETTER_MONITOR_TOKEN` Bearer 身份，响应为 `Cache-Control: no-store`。
+editor、send 身份不能读取此接口，monitor 身份不能启动采编、发送或排空操作。
+
+配置观察使用服务已挂载的只读 `NEWSLETTER_CONTENT_CONFIG_DIR`，调用与 CLI 相同的
+`ConfigSync.status()`。响应的可选 `config_sync` 子对象只含以下九个字段，各字段允许 null：
+
+| 字段 | 含义 |
+| --- | --- |
+| `active_revision`、`active_digest` | 当前通过引擎校验的活动配置身份 |
+| `wanted_revision`、`wanted_digest`、`wanted_commit` | 同步器上次观察到的目标身份 |
+| `pinned_digest` | 本地固定的配置 digest |
+| `last_attempt`、`last_success` | 同步器最后尝试、成功的 Unix 秒，可含小数 |
+| `error` | 有界的 `CONFIG_` 错误码，成功时为 null |
+
+revision 为 40 位小写十六进制或 `packaged`，commit 为 40 位小写十六进制，
+digest 为 64 位小写十六进制。目标是上次观察结果，不能据此证明它就是远端最新发布；
+检查时间也不等于同步成功时间。没有配置目录时 `config_sync` 为 null。
+本地配置状态无法读取或字段不合法时，子对象的身份和时间为 null，
+`error` 为 `CONFIG_STATUS_UNAVAILABLE`，原有 `worker_healthy` 和业务计数照常返回。
+
+监视读取不会拉取远端、切换版本、写配置、执行回退或重试。响应不含仓库、目录、配置包、
+提示词、私有内容或异常原文；观察到配置失败也不表示业务 Worker 已不可用。
+
+## 从 Fleet 与 Home 验收激活
+
+Fleet 复用现有 owner 接口 `GET /api/v1/fleetStatus`，配置观察位于
+`report.newsletter.config_sync`，界面的 Newsletter「内容配置」展示相同数据。
+observer 将两项 Unix 秒转换为 `last_attempt_time`、`last_success_time`；
+共享 wire profile 省略没有值的字段。身份来自配置卷，独立于镜像发布身份。
+
+验收一次配置发布时，先确认主机报告为 fresh，再把活动 revision/digest 与公开
+`published` 分支的 `bundle.json` 元数据比较，检查源检查时间是否晚于发布、是否有错误或 pin。
+活动身份与 wanted 相同，只说明与上次检查目标一致，不能证明之后没有新发布。
+配置轮询沿用 15 分钟、observer 沿用 5 分钟；Home 沿用现有状态缓存，读取页面不会触发配置激活。
+
+Home 的 Newsletter 应用详情通过现有 Ops 响应显示配置状态、最近检查和成功时间，并链接到 Fleet。
+配置检查失败或超过 30 分钟未检查会产生可关闭的应用提醒，保持进程健康与每日投递状态各自独立。
+这些只读状态足以验收配置接管，无需进入容器读取状态文件。

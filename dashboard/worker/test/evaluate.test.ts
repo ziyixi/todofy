@@ -49,6 +49,16 @@ describe('levels', () => {
 });
 
 describe('entry health (the tile: the entry\'s own health, Q2)', () => {
+  it('places configuration failures in Newsletter details without failing its business flow', () => {
+    const base = input();
+    const doc = status('newsletter', { health: 'ok', signals: [signal('newsletter_config_failed', 'warning')] });
+    const statuses = { ...base.statuses, newsletter: doc };
+    expect(entry('newsletter').app_only_signals).toContain('newsletter_config_failed');
+    expect(state('newsletter', { statuses })).toMatchObject({ level: 'warning', reason: 'newsletter_config_failed' });
+    expect(targetOf('newsletter', 'newsletter_config_failed')).toEqual({ view: 'ops', entry: 'newsletter' });
+    expect(flow('daily-newsletter', { statuses }).level).toBe('ok');
+    expect(stage(flow('daily-newsletter', { statuses }), 'fetch').signals).toEqual([]);
+  });
   it('places an unconfirmed model execution on the registered Router Ops detail', () => {
     const doc = status('model-router', { health: 'degraded', signals: [signal('model_execution_unknown', 'warning', { count: 1 })] });
     expect(entry('model-router').app_only_signals).toContain('model_execution_unknown');
