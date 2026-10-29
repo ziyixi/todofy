@@ -22,7 +22,8 @@ def running(pid: int) -> bool:
     if sys.platform == "linux":
         try:
             stat = status.read_text()
-        except FileNotFoundError:
+        except (FileNotFoundError, ProcessLookupError):
+            # Reaped before the open (ENOENT) or between the open and the read (ESRCH).
             return False
         return stat.split(")", 1)[1].strip().split()[0] != "Z"
     return True
@@ -30,19 +31,25 @@ def running(pid: int) -> bool:
 
 class ProcessCleanupTests(unittest.TestCase):
     def test_a_process_that_exits_during_the_status_read_is_not_running(self):
-        with (
-            patch.object(sys, "platform", "linux"),
-            patch.object(os, "kill"),
-            patch.object(pathlib.Path, "read_text", side_effect=FileNotFoundError),
-        ):
-            self.assertFalse(running(12345))
+        for error in (FileNotFoundError, ProcessLookupError):
+            with (
+                self.subTest(error=error.__name__),
+                patch.object(sys, "platform", "linux"),
+                patch.object(os, "kill"),
+                patch.object(pathlib.Path, "read_text", side_effect=error),
+            ):
+                self.assertFalse(running(12345))
 
     def run_supervisor(self, directory: pathlib.Path, *, nested_parent: bool):
         receipt = directory / "pids"
+        # Written whole, then renamed: the receipt never exists without both PIDs.
+        staged = directory / "pids.tmp"
         child = (
             "import os,pathlib,subprocess,sys,time; "
             "child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)']); "
-            f"pathlib.Path({str(receipt)!r}).write_text(str(os.getpid())+' '+str(child.pid)); "
+            f"staged=pathlib.Path({str(staged)!r}); "
+            "staged.write_text(str(os.getpid())+' '+str(child.pid)); "
+            f"os.replace(staged,{str(receipt)!r}); "
             "time.sleep(60)"
         )
         launch = (
@@ -72,6 +79,7 @@ class ProcessCleanupTests(unittest.TestCase):
                 receipt.exists(), "Synthetic supervised process did not start"
             )
             pids = [int(value) for value in receipt.read_text().split()]
+            self.assertEqual(len(pids), 2)
             self.assertTrue(all(running(pid) for pid in pids))
             parent.send_signal(signal.SIGKILL if nested_parent else signal.SIGTERM)
             parent.wait(timeout=5)

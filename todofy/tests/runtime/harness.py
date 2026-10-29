@@ -235,6 +235,32 @@ def _wrangler(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+# wrangler dev answers through its own proxy, which forwards each request to the Worker's workerd over a pooled
+# keep-alive connection. Both ends drop an idle connection after exactly 5 s (kj's client idleTimeout and server
+# pipelineTimeout), so a request sent about 5 s after the server's last answer can be written into a connection workerd
+# is closing. The proxy then resends a GET or HEAD, but answers any other method with a 500 "Error: Network connection
+# lost." (workers-sdk #14641, #16348; docs/dev-notes.md). So a test client trusts no connection idle for PROXY_IDLE_S:
+# it closes its own (the hop to the proxy has the same 5 s race), and before a request the proxy would not resend it
+# sends GET /health, which the proxy resends if needed; the request then reuses the connection that GET left.
+PROXY_IDLE_S = 1.0
+
+
+class _DevProxyTransport(httpx.HTTPTransport):
+    """A Worker's client transport (PROXY_IDLE_S). It never sends a request twice."""
+
+    def __init__(self, worker: "Worker") -> None:
+        super().__init__(limits=httpx.Limits(keepalive_expiry=PROXY_IDLE_S))
+        self._worker = worker
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        if request.method not in ("GET", "HEAD"):
+            self._worker.refresh_proxy()
+        try:
+            return super().handle_request(request)
+        finally:
+            self._worker.answered_at = time.monotonic()
+
+
 def wait_until[T](probe: Callable[[], T | None], timeout_s: float, what: str) -> T:
     deadline = time.monotonic() + timeout_s
     while True:
@@ -268,9 +294,18 @@ class Worker:
         self.base_url = ""
         self._process: subprocess.Popen[bytes] | None = None
         self.hooks = self.owner = httpx.Client()  # host-bound clients replace it in start()
+        self.answered_at = 0.0  # monotonic time of the server's last answer to this harness; 0: none yet
 
     def client(self, host: str) -> httpx.Client:
-        return httpx.Client(base_url=self.base_url, headers={"host": host}, timeout=30)
+        return httpx.Client(
+            base_url=self.base_url, headers={"host": host}, timeout=30, transport=_DevProxyTransport(self)
+        )
+
+    def refresh_proxy(self) -> None:
+        """Before a request wrangler's proxy would not resend: GET /health if the server idled PROXY_IDLE_S."""
+        if time.monotonic() - self.answered_at > PROXY_IDLE_S:
+            httpx.get(f"{self.base_url}/health", headers={"host": HOOKS_HOST}, timeout=30)
+            self.answered_at = time.monotonic()
 
     def start(self) -> None:
         _ensure_synced()
@@ -365,9 +400,12 @@ class Worker:
         port = int(self.base_url.rsplit(":", 1)[1])
         lines = [f"{method} {path} HTTP/1.1", f"Host: {host}", "Connection: close"]
         lines += [f"{name}: {value}" for name, value in headers.items()]
+        self.refresh_proxy()
         with socket.create_connection(("127.0.0.1", port), timeout=30) as sock:
             sock.sendall(("\r\n".join(lines) + "\r\n\r\n").encode())
-            return int(sock.recv(64).split(b" ")[1])
+            status = int(sock.recv(64).split(b" ")[1])
+        self.answered_at = time.monotonic()
+        return status
 
     def trigger_cron(self, cron: str = "*/10 * * * *") -> httpx.Response:
         return httpx.get(f"{self.base_url}/cdn-cgi/local/scheduled", params={"cron": cron}, timeout=30)

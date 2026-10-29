@@ -153,7 +153,7 @@ async function run(origin: string, up: FakeUpstream, setClock: (now: number) => 
     now += advance;
     setClock(now);
     const response = await fetch(`${origin}/__dev/step?now=${String(now)}`, { method: 'POST' });
-    if (!response.ok) throw new Error(`step: ${String(response.status)}`);
+    if (!response.ok) throw new Error(`step: ${String(response.status)} ${(await response.text()).slice(0, 200)}`);
     return response.json<{ decided?: number; code: string }>();
   };
   const gmailId = (priority: string) => {
@@ -184,7 +184,9 @@ async function run(origin: string, up: FakeUpstream, setClock: (now: number) => 
   check((await fetch(`${origin}/health`)).ok, 'the local Worker answers /health');
   const page = await fetch(origin);
   check(page.ok && (await page.text()).includes('/assets/'), 'the local Worker serves the built UI');
-  const csrfRefusal = await fetch(`${origin}/api/v2/labels:initializePriorities`, { method: 'POST', headers: { 'content-type': 'application/json', origin }, body: '{}' });
+  // No body: an upload the Worker refuses unread makes wrangler dev's local proxy drop that connection, which can
+  // fail the next POST with a 500. The 403 is decided on headers alone (checkCsrf runs before the body is read).
+  const csrfRefusal = await fetch(`${origin}/api/v2/labels:initializePriorities`, { method: 'POST', headers: { 'content-type': 'application/json', origin } });
   check(csrfRefusal.status === 403, 'the owner mutation rejects a request without CSRF');
   check((await step(0)).code === 'priority_setup_required' && up.claude.calls.length === 0 && modifies() === 0, 'sorting waits for explicit priority setup');
   const setupId = id();
