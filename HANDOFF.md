@@ -53,6 +53,31 @@ The released notes are in the [October 28 archive](docs/history/handoff-2026-10-
 - Fleet: the per-workload charts fill in now that the RBAC rule is applied, and the PID 1 `net/dev` mount keeps
   reporting the host's interfaces.
 
+### Newsletter selection budget (`claude/newsletter-selection-timeout`, unreleased)
+
+The 2026-10-28 07:00 Los Angeles run sent nothing. Selection, which cannot continue on error, reached its 150 second
+content-config budget while its Router turn was still running (the day before it took about 58 seconds on the same
+input size); nodes are never re-attempted, so no plan froze and the run stopped at `no_publishable_content`.
+
+- Done: selection `timeout_seconds` 150 → 420 in `newsletter/content-config/workflow.yaml`, a test pinning it, and
+  the production node budgets in `newsletter/docs/workflow.md`. The packaged `daily.yaml` baseline is unchanged.
+- Local checks passed: Newsletter lock, lint, format, structure, mypy and the full pytest suite; the content-config
+  bundle builds and validates offline.
+- Expected selection (`ci_changes.py`): Newsletter and Platform checks and Contracts; a non-Markdown file under
+  `newsletter/content-config/` also selects the Newsletter image, Platform publish and Platform deploy (the VPS
+  release when enabled), although only configuration changed.
+
+Release, in order, finished before 13:45 UTC on a run day (a Platform release suspends `newsletter-daily` and closes
+admission until it reports ready):
+
+1. Push, full green `CI gate`, fast-forward `main`. "CI and deploy" validates the bundle in the candidate image and
+   releases it; the Platform release must reach ready with `newsletter-daily` unsuspended.
+2. The "Newsletter Content Config" push run defers (the commit also changes a test and docs); its `workflow_run` after
+   that CI publishes the bundle to `published`, and config-sync activates it within 900 seconds unless a local pin
+   holds the old one. Each run freezes the active bundle when it starts.
+3. Verify read-only: config-sync status shows this revision active and no pin; the next run's selection succeeds and
+   its issue is accepted. Then move this section to the dated history.
+
 ## Latest verified release
 
 `129d5fe9`, Router cost visibility and recommendation array schemas:
