@@ -77,10 +77,10 @@ def r2_put(worker: Worker, key: str, path: Path) -> None:
 
 
 def r2_exists(worker: Worker, key: str, tmp_path: Path) -> bool:
-    return (
-        wrangler("r2", "object", "get", f"{BUCKET}/{key}", "--file", str(tmp_path / "probe"), *local(worker)).returncode
-        == 0
-    )
+    got = wrangler("r2", "object", "get", f"{BUCKET}/{key}", "--file", str(tmp_path / "probe"), *local(worker))
+    # Only "not found" reads as absent: any other failure must not pass a retention check.
+    assert got.returncode == 0 or "The specified key does not exist." in got.stderr, got.stderr[-2000:]
+    return got.returncode == 0
 
 
 def restore_tool(*args: str) -> subprocess.CompletedProcess[str]:
@@ -185,7 +185,8 @@ def download(worker: Worker, prefix: str, out: Path) -> str:
 def test_weekly_backup_restores_into_an_empty_database(backup_worker: Worker, tmp_path: Path) -> None:
     worker, now = backup_worker, int(time.time())
     today = datetime.now(UTC)
-    # The object has not run yet (the harness waits on the gateway's /health only).
+    # The object has not run yet (the harness waits on the gateway's /health only), so the server has not
+    # opened the bucket and wrangler may write it.
     seed(worker, now)
     seed_old_backups(worker, tmp_path)
 
@@ -211,6 +212,9 @@ def test_weekly_backup_restores_into_an_empty_database(backup_worker: Worker, tm
     }
     assert status["last_backup_size_bytes"] > 0
 
+    # wrangler reads the bucket and D1 below as a second process on the server's SQLite files, which would race
+    # the server (Worker.d1), so only while it is stopped.
+    worker.stop()
     # Retention: today's and the five newest complete old ones stay; the oldest and the incomplete one go.
     for kept in OLD_COMPLETE[1:]:
         assert r2_exists(worker, kept + "manifest.json", tmp_path), kept
@@ -246,12 +250,14 @@ def test_weekly_backup_restores_into_an_empty_database(backup_worker: Worker, tm
     # the complete one alone, byte for byte. It copies the legacy text afresh, so a row that retention
     # deleted is in no newer backup.
     first_manifest = (out / "manifest.json").read_bytes()
+    worker.start()
     worker.d1("DELETE FROM legacy_mail_text WHERE event_id = 'legacy:a'")
     worker.crash_and_restart(lose_object_storage=True)
     assert worker.trigger_cron().status_code == 200
     again = wait_for_backup(worker)
     assert again["last_backup_key"] > prefix
     assert again["last_backup_row_count"] == rows - 1
+    worker.stop()
     assert f"PASS legacy_mail_text rows={LEGACY_TEXTS} " in download(worker, prefix, tmp_path / "first")
     assert (tmp_path / "first" / "manifest.json").read_bytes() == first_manifest
     assert f"PASS legacy_mail_text rows={LEGACY_TEXTS - 1} " in download(

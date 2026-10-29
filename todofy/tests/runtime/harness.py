@@ -350,6 +350,8 @@ class Worker:
                     # A private dev registry: the gateway's todofy-core binding must never reach
                     # another test server's core (or a missing core must stay missing).
                     "WRANGLER_REGISTRY_PATH": str(self.persist_to / "registry"),
+                    # The Local Explorer that Worker.d1 queries through: on by default, stated so it stays on.
+                    "X_LOCAL_EXPLORER": "true",
                 },
             )
         self.base_url = f"http://127.0.0.1:{port}"
@@ -411,20 +413,27 @@ class Worker:
         return httpx.get(f"{self.base_url}/cdn-cgi/local/scheduled", params={"cron": cron}, timeout=30)
 
     def d1(self, sql: str) -> list[dict[str, Any]]:
-        # A second process reads the SQLite file workerd is writing (the alarm may be mid-step), and
-        # wrangler sets no busy timeout, so a read can hit a transient lock; retry only that case.
-        args = ("d1", "execute", "DB", "--local", "--persist-to", str(self.persist_to), "--config", self.d1_config)
-        for attempt in range(5):
-            try:
-                result = _wrangler(*args, "--json", "--command", sql)
-            except subprocess.CalledProcessError as error:
-                output = f"{error.stdout}\n{error.stderr}"
-                if attempt < 4 and ("SQLITE_BUSY" in output or "database is locked" in output):
-                    time.sleep(0.5)
-                    continue
-                raise AssertionError(f"wrangler d1 execute failed: {output.strip()[-2000:]}") from error
-            return json.loads(result.stdout)[-1]["results"]
-        raise AssertionError("unreachable")
+        """The rows of the last statement in ``sql``, run by this server's own D1 (wrangler dev's Local Explorer),
+        in turn with the Worker's queries.
+
+        Never through a second process on the same SQLite file (`wrangler d1 execute --local`): local D1 writes
+        a session bookmark after every query, a SELECT too, and workerd sets no busy timeout, so whichever process
+        wants the write lock while the other holds it fails at once (SQLITE_BUSY, which a Worker's D1 call sees
+        as "internal error"). docs/dev-notes.md §3.
+        """
+        database, _ = _d1_database(self.d1_config)
+        self.refresh_proxy()  # a POST wrangler's proxy would not resend (PROXY_IDLE_S)
+        # Not self.hooks or self.owner: miniflare answers /cdn-cgi/ requests for their Host headers with 403.
+        response = httpx.post(
+            f"{self.base_url}/cdn-cgi/local/explorer/api/d1/database/{database['database_id']}/raw",
+            json={"sql": sql},
+            timeout=30,
+        )
+        self.answered_at = time.monotonic()
+        assert response.status_code == 200, f"D1 query failed: {response.text[-2000:]}"
+        [result] = response.json()["result"]
+        columns = result["results"]["columns"]
+        return [dict(zip(columns, row, strict=True)) for row in result["results"]["rows"]]
 
     # Mail Hero side.
 
