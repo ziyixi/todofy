@@ -94,7 +94,7 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(sync["name"], "网站同步")
         self.assertEqual(sync["status"], {"type": "ops_v1", "binding": "NOTION_PUBLISH", "guard": False})
         workers = [{key: worker[key] for key in ("script", "entry", "role")} for worker in loaded.workers]
-        self.assertEqual([worker for worker in workers if worker["script"] not in {"fleet", "mailsort", "recall", "tasks", "personal-mcp", "model-router"}], before["workers"])
+        self.assertEqual([worker for worker in workers if worker["script"] not in {"fleet", "mailsort", "recall", "tasks", "personal-mcp", "model-router", "newsletter-console"}], before["workers"])
 
     def test_generated_regions_are_fresh_and_deterministic(self):
         loaded = catalog.load_catalog()
@@ -113,7 +113,7 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(set(loaded.worker_configs().values()), catalog.production_configs(catalog.REPO))
         self.assertGreaterEqual(len(loaded.workers), 10)
         self.assertEqual({app for app, data in loaded.apps.items() if data["target"] == "cloudflare"},
-                         {"todofy", "mail-hero", "dashboard", "website", "links", "watch", "mailsort", "recall", "tasks", "personal-mcp", "model-router"}
+                         {"todofy", "mail-hero", "dashboard", "website", "links", "watch", "mailsort", "recall", "tasks", "personal-mcp", "model-router", "newsletter-console"}
                          | ({"fleet"} if "fleet" in loaded.apps else set()))
         self.assertEqual(loaded.apps["newsletter"]["image"], "ghcr.io/ziyixi/todofy-newsletter")
         self.assertEqual(loaded.apps["newsletter"]["target"], "vps")
@@ -123,6 +123,23 @@ class CatalogTests(unittest.TestCase):
         rules = {r["key"]: r for r in catalog.load_catalog().access}
         self.assertEqual(rules["links"]["destinations"], ["s.ziyixi.science/_/*", "s.ziyixi.science/_"])
         self.assertEqual(rules["mail-hero"]["name"], "Mail Hero")
+        # The console's one application also gates Newsletter's read path on the platform runtime host.
+        self.assertEqual(rules["newsletter-console"]["destinations"],
+                         ["news.ziyixi.science", "platform-runtime.ziyixi.science/api/newsletter/v1/*"])
+
+    def test_runtime_paths_are_exact_api_paths_on_the_profile_runtime_host(self):
+        access = ('\n[[access]]\nkey = "demo"\nkind = "owner"\nworker = "demo"\nname = "Demo"\npaths = [""]\n'
+                  'runtime_paths = ["/api/demo/v1/*"]\nsession = "24h"\n')
+        loaded = catalog.load_catalog(self.fixture(DEMO + access))
+        self.assertEqual(loaded.access[0]["destinations"],
+                         ["demo.ziyixi.science", "platform-runtime.ziyixi.science/api/demo/v1/*"])
+        self.assertNotIn("runtime_paths", loaded.access[0])
+        # Never the whole runtime host (the platform's machine application), a path outside /api/, a duplicate, or a
+        # host smuggled into the path.
+        for paths in ('[""]', '["/"]', '["/*"]', '["/admin/*"]', '["/api/demo/v1/*", "/api/demo/v1/*"]',
+                      '["//evil.example/api/*"]', '["/api/../*"]', '"/api/demo/v1/*"', '[1]'):
+            with self.subTest(paths=paths), self.assertRaises(catalog.CatalogError):
+                catalog.load_catalog(self.fixture(DEMO + access.replace('["/api/demo/v1/*"]', paths)))
 
     def test_unknown_fields_fail_at_every_level(self):
         mutations = [DEMO.replace('version = 1', 'version = 1\nsecret = "synthetic"'),

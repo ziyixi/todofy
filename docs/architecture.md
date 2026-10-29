@@ -267,12 +267,13 @@ accepted report nor a ready deployment receipt proves successful Newsletter deli
 ## Website
 
 Visitors read a Next.js static export served as Worker assets; no application request code reads Notion.
-The Notion relay handles buttons and a 15-minute change detector. Its release workflow checks hourly
-10:30–15:30 UTC for a missing daily reconcile, using the same gate/quiet period/concurrency as the relay;
-the schedule only dispatches the release, and does not itself publish.
+The relay Worker dispatches the release workflow from its one daily cron and when Home's **立即同步** asks it to
+(over a service binding); the workflow has no schedule of its own, and there is no Notion change detector or webhook
+button. A dispatch does not itself publish
+([daily content sync](../website/docs/architecture.md#daily-content-sync)).
 
 Publication uses `website-release.yml` and concurrency group `website-production`, whether started by CI,
-Notion, schedule or a manual dispatch. GitHub Deployments (`website-release`) record the release identity.
+the daily relay, Home or a manual dispatch. GitHub Deployments (`website-release`) record the release identity.
 Keep the gate, identity comparison, local/browser verification, live verification and rollback intact.
 Notion content/media never enter source, and relay logs contain only result codes/counts.
 

@@ -1,0 +1,133 @@
+// (-- api-linter: core::0142::time-field-type=disabled
+//     aip.dev/not-precedent: dates are calendar-day text: the wire profile has no Date. --)
+// The Notion backup as Newsletter's replication journal records it. Newsletter's SQLite database is the record;
+// Notion holds an asynchronous copy for reading and searching, written after the fact. Newsletter reads a page there
+// only to check it against the record, and nothing in Notion is ever copied back (an edit made in Notion does not
+// return). Every state here is the journal's: answering it never calls Notion.
+syntax = "proto3";
+
+package newsletter.ui.v1;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "BackupStatusProto";
+option java_package = "science.ziyixi.newsletter.ui.v1";
+
+// The Notion backup's state, per target and per record that needs attention (a singleton).
+message BackupStatus {
+  option (google.api.resource) = {
+    type: "news.ziyixi.science/BackupStatus"
+    pattern: "backupStatus"
+    singular: "backupStatus"
+    plural: "backupStatuses"
+  };
+
+  // Always backupStatus.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // When this view was read.
+  google.protobuf.Timestamp generate_time = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // False when Newsletter's Notion backup is off; the counts below then describe what was copied before.
+  bool enabled = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // True when the backup also copies an edition's private Todofy section (a Newsletter setting).
+  bool includes_personal = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // One entry per target: editions first, then materials.
+  repeated ReplicaCounts targets = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Records that need attention (unknown, conflict, retrying, outdated), the oldest first, at most 50.
+  repeated ReplicaException exceptions = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Import failures that kept a record out of the journal, by error code (`notion_edition_import_failed`, ...).
+  map<string, int32> import_error_counts = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// The copy of one record in Notion (an edition's page), as the journal knows it.
+message Replica {
+  // The copy's state. When several apply, the first in this order wins: CONFLICT, UNKNOWN, RETRYING, OUTDATED,
+  // SYNCING, SYNCED.
+  enum State {
+    // Never written.
+    STATE_UNSPECIFIED = 0;
+    // The Notion backup is off.
+    STATE_DISABLED = 1;
+    // The journal has no entry for the record yet.
+    STATE_NOT_STARTED = 2;
+    // A page or part of its content is being written.
+    STATE_SYNCING = 3;
+    // Every part of the current version is written.
+    STATE_SYNCED = 4;
+    // The record changed after its last import: the copy shows an older version until the next one.
+    STATE_OUTDATED = 5;
+    // The last write failed; another attempt is scheduled (`next_retry_time`).
+    STATE_RETRYING = 6;
+    // A write's outcome is unknown (a restart or a deferral during it): a page may exist already, so it is checked
+    // before anything is created again, never retried blindly.
+    STATE_UNKNOWN = 7;
+    // The page in Notion differs from what the journal expects (an edit made there, or a duplicate identity):
+    // automatic writes leave it alone until a later read finds it matching again.
+    STATE_CONFLICT = 8;
+  }
+
+  // The copy's state.
+  State state = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The journal's error code of the last failed write; empty without one.
+  string error_code = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Write attempts so far.
+  int32 attempt_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the next attempt is due; absent unless RETRYING.
+  google.protobuf.Timestamp next_retry_time = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When a write last succeeded; absent before the first one, and for records last written before progress
+  // times were recorded.
+  google.protobuf.Timestamp last_progress_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The page in Notion (https), empty until it exists.
+  string notion_url = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Replica counts of one backup target, or of every target together.
+message ReplicaCounts {
+  // A Notion database the backup writes.
+  enum Target {
+    // Every target together.
+    TARGET_UNSPECIFIED = 0;
+    // The editions (简报库).
+    TARGET_EDITIONS = 1;
+    // The research materials (材料库).
+    TARGET_MATERIALS = 2;
+  }
+
+  // The target; unspecified for every target together.
+  Target target = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Records whose copy is complete.
+  int32 synced_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Records being written or not started.
+  int32 syncing_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Records whose copy shows an older version.
+  int32 outdated_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Records waiting for another attempt.
+  int32 retrying_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Records whose last write's outcome is unknown.
+  int32 unknown_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Records held for a conflict.
+  int32 conflict_count = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When a write last succeeded; absent before the first recorded one.
+  google.protobuf.Timestamp last_progress_time = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Since when the oldest record not yet synced has waited; absent when every record is synced.
+  google.protobuf.Timestamp oldest_pending_time = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One backup record that needs attention.
+message ReplicaException {
+  // The target it belongs to.
+  ReplicaCounts.Target target = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // editions/{edition} for an edition; empty for a material.
+  string edition = 2 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "news.ziyixi.science/Edition"
+  ];
+  // The issue date the record belongs to (YYYY-MM-DD), empty when unknown.
+  string issue_date = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The record's title as the backup shows it (untrusted text), empty when unknown.
+  string title = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The copy's state and its last error.
+  Replica replica = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

@@ -106,7 +106,7 @@ describe('GetRegistry', () => {
     const first = await h.view<Registry>('registry');
     expect(first).toMatchObject({ status: 200, etag: '"test"' });
     expect(first.bytes).toBeLessThanOrEqual(VIEW_BODY_BUDGET.registry);
-    expect(first.body?.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'links', 'watch', 'website', 'notion-publish', 'newsletter', 'home', 'fleet', 'platform-runtime', 'mailsort', 'recall', 'tasks', 'personal-mcp', 'codex-gateway', 'model-router', 'self-hosted']);
+    expect(first.body?.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'links', 'watch', 'website', 'notion-publish', 'newsletter', 'home', 'fleet', 'platform-runtime', 'mailsort', 'recall', 'tasks', 'personal-mcp', 'codex-gateway', 'model-router', 'newsletter-console', 'self-hosted']);
     expect(first.body?.entries.find((entry) => entry.id === 'personal-mcp')).toMatchObject({
       group: 'services', access: true, status_type: 'ops_v1', scripts: ['personal-mcp'],
     });

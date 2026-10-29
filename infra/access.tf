@@ -52,17 +52,18 @@ resource "cloudflare_zero_trust_access_policy" "github_owner" {
 locals {
   owner_apps = {
     # BEGIN service-catalog owner
-    "home"         = { name = "Home", domain = "home.ziyixi.science", more = [], session = "24h" }
-    "fleet"        = { name = "Fleet", domain = "fleet.ziyixi.science", more = [], session = "24h" }
-    "links"        = { name = "links", domain = "s.ziyixi.science/_/*", more = ["s.ziyixi.science/_"], session = "168h" }
-    "mail-hero"    = { name = "Mail Hero", domain = "mail-hero.ziyixi.science", more = [], session = "24h" }
-    "mailsort"     = { name = "mailsort", domain = "sort.ziyixi.science", more = [], session = "24h" }
-    "model-router" = { name = "Model Router", domain = "models.ziyixi.science", more = [], session = "24h" }
-    "personal-mcp" = { name = "Personal MCP", domain = "mcp.ziyixi.science", more = [], session = "24h" }
-    "recall"       = { name = "recall", domain = "recall.ziyixi.science", more = [], session = "24h" }
-    "tasks"        = { name = "tasks", domain = "tasks.ziyixi.science", more = [], session = "168h" }
-    "todofy"       = { name = "Todofy", domain = "todofy.ziyixi.science", more = [], session = "24h" }
-    "watch"        = { name = "watch", domain = "watch.ziyixi.science", more = [], session = "24h" }
+    "home"               = { name = "Home", domain = "home.ziyixi.science", more = [], session = "24h" }
+    "fleet"              = { name = "Fleet", domain = "fleet.ziyixi.science", more = [], session = "24h" }
+    "links"              = { name = "links", domain = "s.ziyixi.science/_/*", more = ["s.ziyixi.science/_"], session = "168h" }
+    "mail-hero"          = { name = "Mail Hero", domain = "mail-hero.ziyixi.science", more = [], session = "24h" }
+    "mailsort"           = { name = "mailsort", domain = "sort.ziyixi.science", more = [], session = "24h" }
+    "model-router"       = { name = "Model Router", domain = "models.ziyixi.science", more = [], session = "24h" }
+    "newsletter-console" = { name = "Newsletter", domain = "news.ziyixi.science", more = ["platform-runtime.ziyixi.science/api/newsletter/v1/*"], session = "24h" }
+    "personal-mcp"       = { name = "Personal MCP", domain = "mcp.ziyixi.science", more = [], session = "24h" }
+    "recall"             = { name = "recall", domain = "recall.ziyixi.science", more = [], session = "24h" }
+    "tasks"              = { name = "tasks", domain = "tasks.ziyixi.science", more = [], session = "168h" }
+    "todofy"             = { name = "Todofy", domain = "todofy.ziyixi.science", more = [], session = "24h" }
+    "watch"              = { name = "watch", domain = "watch.ziyixi.science", more = [], session = "24h" }
     # END service-catalog owner
   }
 }

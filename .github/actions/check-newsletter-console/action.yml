@@ -1,0 +1,57 @@
+name: check-newsletter-console
+description: "check-newsletter-console; called by the repository workflow."
+runs:
+  using: composite
+  steps:
+    - name: Install the selected Node workspaces
+      uses: ./.github/actions/setup-workspace
+      with:
+        root: .
+        filters: 'newsletter-console-worker... newsletter-console-web...'
+    # The config test reads wrangler.toml with the pinned wrangler (worker/node_modules), hence after the workspace install.
+    - name: Test the production config and deploy values
+      working-directory: newsletter-console
+      shell: bash -e {0}
+      run: node --test deploy/test/deploy-vars.test.mjs deploy/test/wrangler-config.test.mjs
+    - name: Lint, typecheck and test the Worker
+      working-directory: newsletter-console/worker
+      shell: bash -e {0}
+      run: |
+        npm run lint
+        npm run typecheck
+        npm test
+    # The bundled Worker in workerd with a synthetic Access issuer; no Newsletter, host or account is reached.
+    - name: Runtime tests (workerd)
+      working-directory: newsletter-console/worker
+      shell: bash -e {0}
+      run: npm run test:runtime
+    # Builds web/dist, which the dry-run below serves as static assets, and holds its JavaScript to its budget.
+    - name: Lint, typecheck, test and build the UI
+      working-directory: newsletter-console/web
+      shell: bash -e {0}
+      run: |
+        npm run lint
+        npm run typecheck
+        npm test
+        npm run build
+    # The committed config, run exactly as the deploy runs it but with --dry-run and placeholder values for what the
+    # deploy adds (deploy/deploy-vars.mjs). No token is needed. The bundle it writes is held to the app's budget and
+    # the Workers Free limit (deploy/bundle-size.mjs).
+    - name: Dry-run the committed config and check the bundle size
+      working-directory: newsletter-console/worker
+      env:
+        NEWSLETTER_CONSOLE_ACCESS_OWNER: owner@example.com
+        NEWSLETTER_CONSOLE_ACCESS_OWNER_ALIASES: ''
+        # A synthetic Home map: only its owner identity may reach the console's secrets file.
+        DASHBOARD_WORKER_SECRETS: '{"ACCESS_OWNER":"owner@example.com","CF_ANALYTICS_TOKEN":"placeholder-token-0000000000000000"}'
+      shell: bash -e {0}
+      run: |
+        node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/newsletter-console-secrets.json"
+        node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
+          --secrets-file "$RUNNER_TEMP/newsletter-console-secrets.json" --outdir "$RUNNER_TEMP/newsletter-console-bundle"
+        node ../deploy/bundle-size.mjs "$RUNNER_TEMP/newsletter-console-bundle"
+    - name: Remove the placeholder secrets file
+      if: always()
+      working-directory: newsletter-console
+      shell: bash -e {0}
+      run: rm -f "$RUNNER_TEMP/newsletter-console-secrets.json"

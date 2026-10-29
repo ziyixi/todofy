@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Decide which apps a CI run checks and deploys. Standard library only (the runner's python3).
 
-Outputs (GITHUB_OUTPUT, "true"/"false"):
-  todofy_check, mail_hero_check, dashboard_check, website_check, links_check, watch_check, newsletter_check,
-  fleet_check, platform_check, mailsort_check, recall_check, tasks_check
-                    run that app's full checks
+Outputs (GITHUB_OUTPUT, "true"/"false"; KEYS names every one):
+  <app>_check       run that app's full checks: one per service-catalog app (APPS, read from */app.toml), with
+                    "-" written "_" (PREFIX)
   contracts         run the contract tests: both sides of mail.received.v1 and ops-v1, and the dashboard's
                     ops-v1 caller tests (also on a proto/ change: they read every contract with the generated
                     codecs)
@@ -17,11 +16,9 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
                     tools/ changed, or a dispatch.
   base              not a flag: the commit the diff started from (empty when everything runs), which
                     "Proto checks" compares the IDL with.
-  todofy_deploy, mail_hero_deploy, dashboard_deploy, website_deploy, links_deploy, watch_deploy,
-  newsletter_deploy, fleet_deploy, platform_publish, platform_deploy, mailsort_deploy, recall_deploy,
-  tasks_deploy
-                    the app, a shared package it compiles in, or a contract file it bundles changed
-                    (deploy jobs also require refs/heads/main)
+  <app>_deploy      the app, a shared package it compiles in, or a contract file it bundles changed
+                    (deploy jobs also require refs/heads/main), one per catalog app; platform_publish follows
+                    platform_deploy
   website_relay_deploy
                     website/relay/ (the Notion relay Worker, its own wrangler.toml) changed: deploy
                     the relay. A change only there checks the website but does not release the site;
@@ -49,7 +46,10 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
   (recall/, the browsing record on recall.ziyixi.science, recall/docs/design.md) is checked and deployed since "Infra
   apply" created its Access applications and its bucket (2026-10-10, design section 11): it answers ops-v1 (Contracts
   runs its tests; Home binds its Ops entrypoint, HOME_BOUND) and compiles in packages/edge-auth and the TypeScript
-  proto runtime with proto/recall/ui/, proto/recall/ingest/, proto/recall/archive/ and proto/ops/.
+  proto runtime with proto/recall/ui/, proto/recall/ingest/, proto/recall/archive/ and proto/ops/. The Newsletter
+  console (newsletter-console/, Newsletter's owner read UI on news.ziyixi.science, contracts/newsletter-ui-v1) is
+  CHECK_ONLY until its first deploy: its Access application comes first from "Infra apply". It compiles in
+  packages/edge-auth and the TypeScript proto runtime with proto/newsletter/ui/; Home does not bind it.
 
 proto/ (the protobuf IDL, proto/README.md) checks every app in PROTO_USERS (an app that depends on @ziyixi/proto or
 ziyixi-proto) and deploys only the apps whose bundle the changed path reaches (proto_deploys): PROTO_USERS[app] names
@@ -57,10 +57,10 @@ the languages whose generated code and runtime the app's production bundles comp
 links app's, the watch app's and the dashboard's Workers and UIs, and Todofy's gateway and UI
 (todofy.ui.v1's transcoder and client); "python": todofy-core, through the wheel pywrangler vendors), PROTO_RUNTIMES
 maps a language's runtime and generator to that language's users, and PROTO_PACKAGES maps each proto package to the apps
-that import its generated code (mailhero/ui reaches Mail Hero only, links/ui the links app only, watch/ui the watch app only, dashboard/ui the dashboard only, todofy/ui Todofy only; prototest, the
-runtimes' fixtures, reaches no app). Tests, test data, the check scripts, the api-linter tool module, check configs and
-Markdown (PROTO_NOT_BUNDLED), and the files of a package proto/retired.json lists (its deletion), deploy nothing; any
-other proto/ path (buf.yaml, buf.lock, the toolchain lockfile,
+that import its generated code (mailhero/ui reaches Mail Hero only, links/ui the links app only, watch/ui the watch app only, dashboard/ui the dashboard only, todofy/ui Todofy only, newsletter/ui the
+Newsletter console only until Newsletter's own reader imports it; prototest, the runtimes' fixtures, reach no app). Tests, test data,
+the check scripts, the api-linter tool module, check configs and Markdown (PROTO_NOT_BUNDLED), and the files of a
+package proto/retired.json lists (its deletion), deploy nothing; any other proto/ path (buf.yaml, buf.lock, the toolchain lockfile,
 ensure.mjs, a package not listed yet) deploys every user (fail safe). test_proto.py derives PROTO_USERS and the
 packages' importers from the sources. It also runs Contracts. A change to a contract proto/'s tests read (PROTO_READS:
 ops-v1's and mail-received-v1's fixtures and schemas, among others) runs Proto checks as well.
@@ -91,7 +91,8 @@ Documentation (is_documentation: Markdown anywhere, and any file in a docs/ fold
   reads, wheel package-data, image COPY sources, public/ folders and prettier checks, and fails when any of them
   reaches a path classified as documentation without selecting its reader.
 Newsletter remains an independent VPS image. newsletter_deploy publishes its tested image to GHCR; it does
-not upgrade the server. It still uses its locked external ziyixi-protos dependency, not the root proto runtime.
+not upgrade the server. It keeps its locked external ziyixi-protos dependency for the engine's own API, and takes the
+root proto's Python runtime only for the packages PROTO_PACKAGES lists it under (the Model Router client's).
 platform/ checks and publishes its own independently tested daemon image; platform_deploy upgrades the VPS.
 Newsletter production changes also check and publish Platform from the same source SHA before the VPS release.
 A push to main reuses a green branch run of the same commit (find_reusable): when a completed push run of
@@ -111,7 +112,8 @@ infra/: it runs only Infra checks, as infra/ does (and .github/ does too); the o
 The root workspace files (package.json, pnpm-workspace.yaml, pnpm-lock.yaml; pyproject.toml, uv.lock; .python-version)
 check every member of their workspace. A pnpm catalog version bump deploys the members whose package.json lists that
 name, a root uv constraint the members that declare it, and a lock what the manifest changes beside it reach
-(workspace_reach, reading both ends of the diff); anything else in them deploys the whole workspace (fail safe). Only
+(workspace_reach, reading both ends of the diff), and an app's members arriving or leaving with its directories only
+that app; anything else in them deploys the whole workspace (fail safe). Only
 the proto toolchain's dependencies (not its devDependencies) reach the Python proto package, and so the VPS images.
 workflow_dispatch: the "app" input checks and deploys that app ("both" = Todofy and Mail Hero, as
 before; "all" = every app; or one app; "website" = the site and its relay), and the contracts and
@@ -139,7 +141,7 @@ APPS = tuple(load_catalog(Path(__file__).resolve().parents[2]).apps)
 PREFIX = {app: app.replace("-", "_") for app in APPS}
 # A new app is checked but its deploy output stays false until its Cloudflare resources are ready. Keep its output
 # present so the workflow and same-SHA reuse have one stable interface.
-CHECK_ONLY: set[str] = set()
+CHECK_ONLY: set[str] = {"newsletter-console"}
 # Apps whose Ops entrypoint Home binds (dashboard/wrangler.toml): while one of them is CHECK_ONLY its Worker does not
 # exist yet, so Home's deploy (whose binding would name a missing service) waits too.
 HOME_BOUND = {"fleet", "mailsort", "recall", "tasks", "personal-mcp", "model-router", "links"}
@@ -159,6 +161,7 @@ KEYS = (
     "tasks_check",
     "personal_mcp_check",
     "model_router_check",
+    "newsletter_console_check",
     "contracts",
     "packages",
     "infra",
@@ -181,6 +184,7 @@ KEYS = (
     "tasks_deploy",
     "personal_mcp_deploy",
     "model_router_deploy",
+    "newsletter_console_deploy",
 )
 DISPATCH = {
     "both": ("todofy", "mail-hero"),
@@ -200,6 +204,7 @@ DISPATCH = {
     "tasks": ("tasks",),
     "personal-mcp": ("personal-mcp",),
     "model-router": ("model-router",),
+    "newsletter-console": ("newsletter-console",),
 }
 # The website's Notion relay Worker deploys on its own (website_relay_deploy).
 RELAY = "website/relay/"
@@ -207,7 +212,7 @@ RELAY = "website/relay/"
 # Release (recall_extension_publish).
 EXTENSION = ("recall/extension/", "recall/shared/")
 # Apps that neither provide nor consume a contract: their own changes do not run Contracts.
-NO_CONTRACTS = {"newsletter"}
+NO_CONTRACTS = {"newsletter", "newsletter-console"}
 # The OpenTofu configuration (infra/README.md) and its plan-summary tool: checked here without a token; only
 # .github/workflows/infra.yml plans it against Cloudflare, and only the manually dispatched infra-apply.yml applies it.
 INFRA = ("infra/", "tools/infra-plan-summary/")
@@ -253,6 +258,8 @@ APP_TEST_DIRECTORIES = (
     "personal-mcp/tools/test/",
     "model-router/worker/test/",
     "model-router/tools/test/",
+    "newsletter-console/worker/test/",
+    "newsletter-console/deploy/test/",
 )
 # Documentation (is_documentation) is Markdown anywhere and every file in these folders: docs/ at the root, and
 # <app>/docs/ or <app>/doc/ (the website's design notes and their images).
@@ -279,7 +286,7 @@ TESTED_DOCUMENTS: dict[str, tuple[str, ...]] = {
     "newsletter/content-config/": ("newsletter",),
 }
 # packages/<name>/ -> the apps whose Workers compile its workspace dependency in.
-PACKAGE_USERS = {"model-router-client": ("mailsort", "newsletter", "todofy"), "edge-auth": ("todofy", "mail-hero", "dashboard", "links", "watch", "fleet", "mailsort", "recall", "tasks", "personal-mcp", "model-router"), "planning-ui": ("tasks",), "task-dates": ("tasks",)}
+PACKAGE_USERS = {"model-router-client": ("mailsort", "newsletter", "todofy"), "edge-auth": ("todofy", "mail-hero", "dashboard", "links", "watch", "fleet", "mailsort", "recall", "tasks", "personal-mcp", "model-router", "newsletter-console"), "planning-ui": ("tasks",), "task-dates": ("tasks",)}
 # The protobuf IDL (proto/README.md): app -> the languages ("ts", "python") whose generated code and runtime
 # its production bundles compile in; () for a user whose bundles take nothing from it (types only, tests
 # only). test_proto.py derives this map from the apps' manifests and sources.
@@ -300,6 +307,7 @@ PROTO_USERS: dict[str, tuple[str, ...]] = {
     "personal-mcp": ("ts",),
     "model-router": ("ts",),
     "newsletter": ("python",),
+    "newsletter-console": ("ts",),
 }
 # The hand-written runtimes and generators: a change reaches every user of each language listed. The wire
 # profile's own options (common/wire/v1: value rules, map order, binding arguments) are part of both runtimes:
@@ -342,6 +350,9 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     "proto/dashboard/mcp/": ("dashboard", "personal-mcp"),
     # Mail Hero's owner API (mailhero.ui.v2): its Worker serves it, its UI calls it.
     "proto/mailhero/ui/": ("mail-hero",),
+    # Newsletter's owner read API (newsletter.ui.v1): the console Worker routes it with the shared transcoder and its UI
+    # calls it with the shared client. Newsletter answers it once its reader imports the generated Python code.
+    "proto/newsletter/ui/": ("newsletter-console",),
     # CommonReason: Platform bundles Python error aliases.
     "proto/common/errors/": ("platform",),
     # ops-v1 (contracts/ops-v1): every app's Ops entrypoint and the dashboard that calls them.
@@ -426,6 +437,7 @@ CHECK_JOBS = {
     "tasks_check": ("Tasks checks",),
     "personal_mcp_check": ("Personal MCP checks",),
     "model_router_check": ("Model Router checks",),
+    "newsletter_console_check": ("Newsletter console checks",),
     "contracts": ("Contracts",),
     "packages": ("Shared packages",),
     "infra": ("Infra checks",),
@@ -569,6 +581,26 @@ def pnpm_lock_sections(text: str) -> dict[str, dict[str, str]]:
     return sections
 
 
+def _member_entry(line: str) -> str:
+    """The member directory a pnpm-workspace.yaml `packages:` line names, or "" for any other line."""
+    match = re.fullmatch(r"""  - (["']?)([^"'\s]+)\1\s*""", line)
+    return match.group(2) if match else ""
+
+
+def _on_one_side_only(changed: set[str], read: Reader, members: list[str]) -> bool:
+    """Whether each member's package.json is in the diff and unreadable on one side of it (a member that has just
+    arrived, or just left): `read` raises for a file missing on either side."""
+    for member in members:
+        if f"{member}/package.json" not in changed:
+            return False
+        try:
+            read(f"{member}/package.json")
+        except ValueError:
+            continue
+        return False
+    return True
+
+
 def retired_members(changed: set[str], read: Reader, old_members: list[str], members: list[str], old_rest: str,
                     new_rest: str) -> bool:
     """True when the only workspace change removes members whose directories this diff deletes (an app's retirement):
@@ -577,20 +609,10 @@ def retired_members(changed: set[str], read: Reader, old_members: list[str], mem
     removed = [member for member in old_members if member not in members]
     if not removed or not set(members) <= set(old_members) or "pnpm-lock.yaml" not in changed:
         return False
-    for member in removed:
-        if f"{member}/package.json" not in changed:
-            return False
-        try:
-            read(f"{member}/package.json")
-        except ValueError:
-            continue  # gone after the diff (it was a member before it)
+    # Gone after the diff (each was a member before it).
+    if not _on_one_side_only(changed, read, removed):
         return False
-
-    def entry(line: str) -> str:
-        match = re.fullmatch(r"""  - (["']?)([^"'\s]+)\1\s*""", line)
-        return match.group(2) if match else ""
-
-    if "\n".join(line for line in old_rest.splitlines() if entry(line) not in removed) != new_rest:
+    if "\n".join(line for line in old_rest.splitlines() if _member_entry(line) not in removed) != new_rest:
         return False
     before, after = (pnpm_lock_sections(text) for text in read("pnpm-lock.yaml"))
     if before.keys() != after.keys() or not set(removed) <= before.get("importers", {}).keys():
@@ -604,6 +626,26 @@ def retired_members(changed: set[str], read: Reader, old_members: list[str], mem
     return True
 
 
+def added_members(changed: set[str], read: Reader, old_members: list[str], members: list[str], old_rest: str,
+                  new_rest: str) -> bool:
+    """True when the only workspace change adds members whose directories this diff creates (a new app): pnpm-workspace.yaml
+    differs by exactly their entries, and pnpm-lock.yaml only adds their importers and packages, changing no entry it
+    had, so every existing member resolves exactly as before. Anything else is False. The new members' own files are in
+    the diff, so their app is selected by them."""
+    added = [member for member in members if member not in old_members]
+    if not added or not set(old_members) <= set(members) or "pnpm-lock.yaml" not in changed:
+        return False
+    # Absent before the diff (each is a member after it).
+    if not _on_one_side_only(changed, read, added):
+        return False
+    if "\n".join(line for line in new_rest.splitlines() if _member_entry(line) not in added) != old_rest:
+        return False
+    before, after = (pnpm_lock_sections(text) for text in read("pnpm-lock.yaml"))
+    if before.keys() != after.keys() or set(after.get("importers", {})) - set(before.get("importers", {})) != set(added):
+        return False
+    return all(after[section].get(key) == block for section, entries in before.items() for key, block in entries.items())
+
+
 def catalog_reach(changed: set[str], read: Reader) -> list[str] | None:
     """The member package.json files a root Node change reaches, or None for every member."""
     if "package.json" in changed:
@@ -612,16 +654,21 @@ def catalog_reach(changed: set[str], read: Reader) -> list[str] | None:
         (old, old_members, old_rest), (new, members, new_rest) = (pnpm_workspace(text) for text in read("pnpm-workspace.yaml"))
         listed = {}
         for member in members:
+            # A member that has just arrived has no earlier manifest; added_members checks it.
+            if member not in old_members:
+                continue
             manifest = json.loads(read(f"{member}/package.json")[1])
             # The proto toolchain's devDependencies only run its own checks; its dependencies generate every app's code.
             groups = ("dependencies",) if member == "proto" else NODE_DEPENDENCY_GROUPS
             listed[f"{member}/package.json"] = {name for group in groups for name in manifest.get(group, {})}
         retired = old_rest != new_rest and retired_members(changed, read, old_members, members, old_rest, new_rest)
+        joined = old_rest != new_rest and not retired and added_members(changed, read, old_members, members, old_rest, new_rest)
     except (ValueError, AttributeError, IndexError):
         return None
     bumped = {name for name in old.keys() | new.keys() if old.get(name) != new.get(name)}
-    if retired:
-        # A retired app's members left; the others' resolution is unchanged, so only a catalog bump reaches anyone.
+    if retired or joined:
+        # A retired app's members left, or a new app's arrived; the others' resolution is unchanged, so only a catalog
+        # bump reaches anyone.
         return [manifest for manifest, names in listed.items() if names & bumped]
     if old_rest != new_rest or ("pnpm-lock.yaml" in changed and not bumped and not changed & listed.keys()):
         return None
@@ -657,9 +704,10 @@ def workspace_reach(paths: list[str], read: Reader | None) -> tuple[list[str], b
     """(the member manifests a root workspace change reaches, whether it reaches every Node member, every Python member).
 
     A version bump in pnpm-workspace.yaml's default catalog reaches the members whose package.json lists that name, a
-    root uv constraint the members that declare it, and a lock no more than the manifest changes beside it. Anything
-    else reaches the whole workspace (fail safe): the root package.json, another key, a lock changed alone, a pin no
-    member declares, an unreadable file or no reader. The interpreter (.python-version) reaches both: ensure.mjs uses it
+    root uv constraint the members that declare it, and a lock no more than the manifest changes beside it. An app's
+    arrival or retirement (its members added or removed with its directories, the lock changing nothing else they did
+    not use) reaches no other member. Anything else reaches the whole workspace (fail safe): the root package.json,
+    another key, a lock changed alone, a pin no member declares, an unreadable file or no reader. The interpreter (.python-version) reaches both: ensure.mjs uses it
     to generate code for every Node consumer too.
     """
     changed = set(paths)

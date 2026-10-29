@@ -117,6 +117,20 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "platform" {
           }
         }
       },
+      # Newsletter's owner read API: the Newsletter console's own owner application (access.tf, its runtime
+      # destination) admits the path, and the connector requires that application's audience too.
+      {
+        hostname = local.platform_runtime_hostname
+        path     = "/api/newsletter/v1/.*"
+        service  = "http://127.0.0.1:18767"
+        origin_request = {
+          access = {
+            required  = true
+            aud_tag   = [cloudflare_zero_trust_access_application.owner["newsletter-console"].aud]
+            team_name = local.platform_access_team
+          }
+        }
+      },
       {
         hostname = local.platform_runtime_hostname
         service  = "http://127.0.0.1:18765"

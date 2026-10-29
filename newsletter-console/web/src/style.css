@@ -1,0 +1,189 @@
+/* Light theme only: Fleet's warm paper ground, off-white cards, ink text and one ink-blue accent; amber only for the
+   masthead's brand mark. Every state is a shape and a word; colour only reinforces them. Hairlines, no shadows, no
+   gradients. */
+:root {
+  color-scheme: light;
+  --bg: #f3f1ec;
+  --surface: #fcfbf8;
+  --surface-2: #f6f4ef;
+  --fg: #1d2126;
+  --fg-2: #3a3f46;
+  --muted: #5a5f66;
+  --border: #dcd7cc;
+  --line: #eeeae2;
+  --accent: #2b5c8a;
+  --brand: #b7791f;
+  --ok: #1e6b43;
+  --warn: #7a4b00;
+  --bad: #9a2b21;
+  --unknown: #46536a;
+}
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+html {
+  -webkit-text-size-adjust: 100%;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans SC', 'Microsoft YaHei', system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+#root {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 40px 24px 48px;
+}
+h1, h2, p {
+  margin: 0;
+}
+h1 {
+  font-size: clamp(1.6rem, 3.6vw, 2.1rem);
+  font-weight: 700;
+  letter-spacing: .02em;
+}
+h2 {
+  font-size: 1.2rem;
+  font-weight: 650;
+  margin-bottom: 10px;
+}
+p + p {
+  margin-top: 8px;
+}
+a {
+  color: var(--accent);
+}
+a:focus-visible,
+button:focus-visible,
+main:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.muted {
+  color: var(--muted);
+  font-size: .87rem;
+}
+
+/* Skip link: visible only when focused. */
+.skip {
+  position: absolute;
+  left: 16px;
+  top: -48px;
+  padding: 6px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.skip:focus {
+  top: 12px;
+}
+
+/* Masthead */
+.masthead {
+  display: flex;
+  gap: 20px;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding-bottom: 24px;
+  margin-bottom: 28px;
+  border-bottom: 1px solid var(--border);
+}
+.masthead .muted {
+  margin-top: 8px;
+}
+.eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: .72rem;
+  letter-spacing: .14em;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.brand {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--brand);
+}
+.actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+.actions .muted {
+  margin: 0;
+}
+button {
+  font: inherit;
+  font-size: .9rem;
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 16px;
+  background: var(--surface);
+  white-space: nowrap;
+  cursor: pointer;
+}
+button:hover {
+  background: var(--surface-2);
+}
+button:disabled {
+  opacity: .55;
+  cursor: default;
+}
+
+/* The connection state */
+.state {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 28px 32px;
+  max-width: 44em;
+}
+.state p:not(.muted) {
+  color: var(--fg-2);
+}
+.state .muted {
+  margin-top: 14px;
+}
+.mark {
+  font-weight: 600;
+  margin-right: 4px;
+}
+.mark.ok { color: var(--ok); }
+.mark.warn { color: var(--warn); }
+.mark.bad { color: var(--bad); }
+.mark.unknown { color: var(--unknown); }
+
+footer {
+  margin-top: 40px;
+  font-size: .87rem;
+  color: var(--muted);
+}
+
+@media (max-width: 600px) {
+  #root {
+    padding: 28px 16px 40px;
+  }
+  .masthead {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .actions {
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+  }
+  .state {
+    padding: 22px 20px;
+  }
+}

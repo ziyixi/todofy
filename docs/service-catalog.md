@@ -89,6 +89,11 @@ paths = [""]                   # host itself; "/_/*" is a path scope
 session = "24h"                # 6h, 24h or 168h
 ```
 
+An owner application may also gate paths on the platform runtime host (`vps.platform_runtime_host` in
+`config/cloud.toml`) with `runtime_paths = ["/api/<app>/v1/*"]`: the app's read path into its VPS service, which the
+platform tunnel routes with the same application's audience (`infra/platform.tf`). Only paths under `/api/`, never the
+whole host, which the platform's machine application owns. The Newsletter console is the one user.
+
 All fields are checked by [`catalog.py`](../tools/service-catalog/catalog.py); unknown fields fail at
 every level. There is no free-form configuration blob. Worker paths must be ordinary, non-symlinked
 files inside their owning application, with basename `wrangler.toml`. Test and development configs
@@ -174,8 +179,9 @@ gateway. Changing a catalog row alone does not start a release.
 ## Adding or changing a service
 
 1. Add an application-owned manifest and, for Cloudflare, the committed production config and its
-   normal deploy wrapper. Add actual service bindings only when the receiving application's contract
-   requires them.
+   normal deploy wrapper, declared on the shared core `tools/cloud-config/worker-deploy.mjs` (as Watch's
+   is) rather than copied from another app. Add actual service bindings only when the receiving
+   application's contract requires them.
 2. Choose unused entry and Worker positions. Declare existing UI metadata and same-origin probe
    paths. A Worker with `ACCESS_AUDIENCE` must have its exact Access application key in the manifest.
 3. Regenerate, inspect both output diffs and run the catalog, Wrangler and infrastructure checks.

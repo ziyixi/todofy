@@ -30,8 +30,14 @@ def worker_secret_values(private: dict, scalar: dict, specs: dict, *, complete: 
         if any((isinstance(bindings, dict) and name in bindings) or (prefix and prefix + "_" + name in scalar)
                for name in names):
             raise BootstrapError("WORKER_SECRET_OWNER_MACHINE_ONLY")
+    # A Worker that borrows the owner's identity from another Worker's map (cloud_profile identity_from) has no map of
+    # its own: writing one here would replace its source's map with the identity alone.
+    if any("identity_from" in specs[worker] for worker in configured):
+        raise BootstrapError("WORKER_SECRETS_INVALID")
     result, missing = {}, []
     for worker, spec in specs.items():
+        if "identity_from" in spec:
+            continue
         if not complete and worker not in configured:
             continue
         if not isinstance(configured.get(worker, {}), dict):

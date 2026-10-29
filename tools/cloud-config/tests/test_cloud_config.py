@@ -286,6 +286,45 @@ SAFETY_BUDGET = "10"
                 cloud_profile.worker_secret_specs(root)
             self.assertNotIn('private-value', str(caught.exception))
 
+    def test_a_borrowed_owner_identity_names_its_source_map_and_nothing_else(self):
+        """identity_from: a Worker whose owner is another Worker's has no map of its own; its spec names the source's
+        GitHub map, and it may declare only the owner identity, which the source must hold."""
+        root = self.fixture()
+        (root / 'demo/app.toml').write_text(MANIFEST + 'personal_secrets = ["ACCESS_OWNER", "ACCESS_OWNER_ALIASES", "API_TOKEN"]\n'
+                                            'manual_secrets = []\noptional_secrets = ["ACCESS_OWNER_ALIASES"]\n')
+        (root / 'reader').mkdir()
+        reader = ('version = 1\nid = "reader"\ntarget = "cloudflare"\n[[workers]]\nconfig = "reader/wrangler.toml"\n'
+                  'hosts = ["reader"]\nidentity_from = "demo"\npersonal_secrets = ["ACCESS_OWNER", "ACCESS_OWNER_ALIASES"]\n'
+                  'manual_secrets = []\noptional_secrets = ["ACCESS_OWNER_ALIASES"]\n')
+        (root / 'reader/app.toml').write_text(reader)
+        (root / 'reader/wrangler.toml').write_text('name = "reader"\n')
+        specs = cloud_profile.worker_secret_specs(root)
+        self.assertEqual(specs['reader'], {'github_secret': 'DEMO_WORKER_SECRETS', 'identity_from': 'demo',
+                                           'required': ['ACCESS_OWNER'], 'optional': ['ACCESS_OWNER_ALIASES']})
+        self.assertEqual(specs['demo']['github_secret'], 'DEMO_WORKER_SECRETS')
+        self.assertNotIn('identity_from', specs['demo'])
+        for old, new in (('identity_from = "demo"', 'identity_from = "missing"'),
+                         ('identity_from = "demo"', 'identity_from = "reader"'),
+                         ('identity_from = "demo"', 'identity_from = 7'),
+                         ('"ACCESS_OWNER_ALIASES"]\nmanual', '"ACCESS_OWNER_ALIASES", "API_TOKEN"]\nmanual'),
+                         ('personal_secrets = ["ACCESS_OWNER", "ACCESS_OWNER_ALIASES"]', 'personal_secrets = ["ACCESS_OWNER_ALIASES"]'),
+                         ('manual_secrets = []', 'manual_secrets = ["API_TOKEN"]'),
+                         ('optional_secrets = ["ACCESS_OWNER_ALIASES"]\n', 'optional_secrets = ["ACCESS_OWNER_ALIASES"]\n'
+                                                                            'owner_machine_secrets = ["GRANT_TOKEN"]\n')):
+            (root / 'reader/app.toml').write_text(reader.replace(old, new))
+            with self.subTest(field=new), self.assertRaises(cloud_profile.ProfileError):
+                cloud_profile.worker_secret_specs(root)
+        # The source must hold the identity it lends.
+        (root / 'reader/app.toml').write_text(reader)
+        (root / 'demo/app.toml').write_text(MANIFEST + 'personal_secrets = ["API_TOKEN"]\nmanual_secrets = []\noptional_secrets = []\n')
+        with self.assertRaises(cloud_profile.ProfileError):
+            cloud_profile.worker_secret_specs(root)
+
+    def test_the_newsletter_console_borrows_only_homes_owner_identity(self):
+        spec = cloud_profile.worker_secret_specs(TOOL.parents[1])['newsletter-console']
+        self.assertEqual(spec, {'github_secret': 'DASHBOARD_WORKER_SECRETS', 'identity_from': 'home',
+                                'required': ['ACCESS_OWNER'], 'optional': ['ACCESS_OWNER_ALIASES']})
+
     def test_owner_machine_secrets_stay_out_of_the_github_spec(self):
         root = self.fixture()
         manifest = MANIFEST + ('personal_secrets = ["ACCESS_OWNER"]\nmanual_secrets = []\noptional_secrets = []\n'

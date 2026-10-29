@@ -81,7 +81,7 @@ describe('the registry', () => {
     expect(byGroup('apps')).toEqual(['mail-hero', 'todofy', 'links', 'watch', 'fleet', 'mailsort', 'recall', 'tasks', 'model-router']);
     expect(byGroup('sites')).toEqual(['website']);
     expect(byGroup('services')).toEqual(['notion-publish', 'newsletter', 'personal-mcp', 'codex-gateway']);
-    expect(byGroup('hidden')).toEqual(['home', 'self-hosted', 'platform-runtime']);
+    expect(byGroup('hidden')).toEqual(['home', 'self-hosted', 'platform-runtime', 'newsletter-console']);
     const status = Object.fromEntries(REGISTRY.entries.map((e) => [e.id, e.status.type]));
     expect(status).toEqual({
       'mail-hero': 'ops_v1',
@@ -101,6 +101,8 @@ describe('the registry', () => {
       'personal-mcp': 'ops_v1',
       'codex-gateway': 'ops_v1',
       'model-router': 'ops_v1',
+      // Hidden until its views exist; it has no status of its own.
+      'newsletter-console': 'none',
     });
   });
 

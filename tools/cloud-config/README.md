@@ -12,7 +12,7 @@ python3.12 tools/cloud-config/generate.py
 python3.12 tools/service-catalog/catalog.py
 python3.12 tools/cloud-config/generate.py --check
 python3.12 -m unittest discover -s tools/cloud-config/tests
-node --test tools/cloud-config/tests/worker-secrets.test.mjs
+node --test tools/cloud-config/tests/worker-secrets.test.mjs tools/cloud-config/tests/worker-deploy.test.mjs
 ```
 
 Each app manifest's `workers.hosts` declares relative host labels. An empty label means the zone itself; an
@@ -73,6 +73,19 @@ Todofy's core uses `TODOFY_CORE_WORKER_SECRETS`; its gateway uses `TODOFY_WORKER
 `website/relay/deploy/deploy-vars.mjs` wrapper with the same `check`, `secrets <path>` and `exec --` commands.
 Wrappers use `BUILD_SOURCE_SHA` when supplied, otherwise `GITHUB_SHA`, and require a full lowercase 40-hex SHA.
 Both the normal release and a repair can therefore report the exact source they built.
+
+`worker-deploy.mjs` is the deploy-vars core of the standard Workers. A wrapper built on it declares only what differs
+(the options listed in `worker-deploy.mjs`: its Worker secret entry, the vars it injects, its owner and other personal
+inputs, owner-only secrets, and how each committed AUD or D1 id gates a deploy). It re-exports the core's functions
+under its usual names, so CI, the app's tests and `drift_desired.py` still use the app's own `deploy/deploy-vars.mjs`.
+A change to the core deploys no app: each app's checks run its wrapper's tests (and, for all but Tasks, a dry run
+through it), and the real deploy path is proven at each app's next release.
+
+A Worker whose owner is another Worker's declares `identity_from = "<worker>"` and only `ACCESS_OWNER` (and optional
+`ACCESS_OWNER_ALIASES`). It has no map of its own: its spec names the source's map and `identity_from`, the deploy
+validates that map as the source's and takes only those two keys from it (`worker-secrets.mjs`), under the source's
+identity secrets as the source's own deploy merges them, so none of the source's other bindings can reach it; and
+bootstrap never writes a map for it. The Newsletter console borrows Home's.
 
 The optional Access application/policy maps and `managed_ids` remain an inventory for explicit infrastructure
 adoption. `managed_ids` accepts only the fixed OpenTofu addresses declared in `MANAGED_ADDRESSES`, with nonzero

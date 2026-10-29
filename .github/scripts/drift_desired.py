@@ -56,7 +56,8 @@ from cloud_profile import load_profile, owner_machine_secrets, read_public, work
 
 ZONES = (load_profile(REPO)["zone"],)
 
-# Each deploy-vars wrapper: language, file, and which Worker gets its vars and its secrets (per mode for Todofy).
+# Each deploy-vars wrapper: language, file, and which Worker gets its vars and its secrets (per mode for Todofy). The
+# one list of wrappers: test_wrangler_configs.py checks how CI calls each of them.
 WRAPPERS = {
     "model-router": {"language": "js", "file": "model-router/tools/deploy-vars.mjs", "vars": "model-router", "secrets": "model-router"},
     "mail-hero": {"language": "js", "file": "mail-hero/deploy/deploy-vars.mjs", "vars": "mail-hero", "secrets": "mail-hero"},
@@ -68,6 +69,7 @@ WRAPPERS = {
     "mailsort": {"language": "js", "file": "mailsort/deploy/deploy-vars.mjs", "vars": "mailsort", "secrets": "mailsort"},
     "recall": {"language": "js", "file": "recall/deploy/deploy-vars.mjs", "vars": "recall", "secrets": "recall"},
     "personal-mcp": {"language": "js", "file": "personal-mcp/deploy/deploy-vars.mjs", "vars": "personal-mcp", "secrets": "personal-mcp"},
+    "newsletter-console": {"language": "js", "file": "newsletter-console/deploy/deploy-vars.mjs", "vars": "newsletter-console", "secrets": "newsletter-console"},
     "website-relay": {"language": "js", "file": "website/relay/deploy/deploy-vars.mjs", "vars": "ziyixi-notion-publish", "secrets": "ziyixi-notion-publish"},
     "todofy": {
         "language": "py",
@@ -164,7 +166,9 @@ def config_bindings(worker: str, config: dict) -> list[dict]:
 # Placeholder inputs for a wrapper's secrets function, by input name: the same kind of synthetic values the CI
 # dry-runs use. Only the names of the returned secrets are kept.
 def _placeholder(name: str) -> str:
-    bundle = next((spec for spec in SECRET_SPECS.values() if spec["github_secret"] == name), None)
+    # The map's owner, not a Worker that borrows its identity from it (identity_from).
+    bundle = next((spec for spec in SECRET_SPECS.values()
+                   if spec["github_secret"] == name and "identity_from" not in spec), None)
     if bundle is not None:
         return json.dumps({binding: _placeholder(binding) for binding in bundle["required"]})
     if name.endswith("_ALIASES"):

@@ -23,6 +23,7 @@ Home is the daily starting point. Services run and release independently, sharin
 | Website | Notion 驱动的个人网站 / Personal website from Notion | Cloudflare static assets + relay | [website/](website/README.md) |
 | Newsletter | 生成并发送简报 / Build and send the newsletter | VPS k3s, separate image | [newsletter/](newsletter/README.md) |
 | Fleet | VPS、daemon 与发布状态 / VPS, daemons and release status | Cloudflare Worker + DO | [fleet/](fleet/README.md) |
+| Newsletter 控制台 / Newsletter console | 简报的只读控制台（建设中）/ Read-only newsletter console (in progress) | Cloudflare Worker, reads from Newsletter | [newsletter-console/](newsletter-console/README.md) |
 
 Tasks 是任务与规划入口，也保存 Focus 的每日队列与计时；Todofy 处理邮件和每日提醒。Todoist 只是 2026-10-17 的一次性迁移来源，现在没有代码读写它。
 

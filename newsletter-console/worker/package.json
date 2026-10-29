@@ -1,0 +1,36 @@
+{
+  "name": "newsletter-console-worker",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Newsletter console: owner authentication and the read-only newsletter.ui.v1 transport",
+  "scripts": {
+    "postinstall": "node ../../proto/tools/ensure.mjs",
+    "pretypecheck": "node ../../proto/tools/ensure.mjs",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test/runtime/tsconfig.json",
+    "prelint": "node ../../proto/tools/ensure.mjs",
+    "lint": "eslint .",
+    "pretest": "node ../../proto/tools/ensure.mjs",
+    "test": "vitest run",
+    "pretest:runtime": "node ../../proto/tools/ensure.mjs",
+    "test:runtime": "vitest run --config vitest.runtime.config.ts",
+    "predev": "node ../../proto/tools/ensure.mjs",
+    "dev": "wrangler dev --config ../wrangler.toml --ip 127.0.0.1 --port 8796 --local-upstream 127.0.0.1:8796"
+  },
+  "dependencies": {
+    "@ziyixi/edge-auth": "workspace:*",
+    "@ziyixi/proto": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "catalog:",
+    "@eslint/js": "catalog:",
+    "@types/node": "catalog:",
+    "esbuild": "catalog:",
+    "eslint": "catalog:",
+    "miniflare": "catalog:",
+    "typescript": "catalog:",
+    "typescript-eslint": "catalog:",
+    "vitest": "catalog:",
+    "wrangler": "catalog:"
+  }
+}

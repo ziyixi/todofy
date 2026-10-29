@@ -44,7 +44,7 @@ function driftRequests(harness: FlowHarness): number {
 }
 
 describe('the daily drift check', () => {
-  it('runs across four ticks within DRIFT_CALLS_PER_TICK calls each, with GETs only, and shows ok', async () => {
+  it('runs across five ticks within DRIFT_CALLS_PER_TICK calls each, with GETs only, and shows ok', async () => {
     h = await startFlows();
     const start = driftHour(1);
     await h.tick(start - 30 * MIN);
@@ -63,7 +63,7 @@ describe('the daily drift check', () => {
     expect(tick.length).toBeLessThanOrEqual(outboundPerTick());
     expect((await view<CloudflareView>(h, 'cloudflare')).drift).toMatchObject({ status: 'never_checked', checked_at: null });
 
-    // The remaining twelve Workers fill three ticks under the unchanged twelve-call drift bound.
+    // The remaining thirteen Workers fill three ticks and part of a fourth under the unchanged twelve-call drift bound.
     await h.tick(start + 30 * MIN);
     expect(driftRequests(h)).toBe(DRIFT_CALLS_PER_TICK);
     expect((await view<CloudflareView>(h, 'cloudflare')).drift).toMatchObject({ status: 'never_checked', checked_at: null });
@@ -71,14 +71,17 @@ describe('the daily drift check', () => {
     expect(driftRequests(h)).toBe(DRIFT_CALLS_PER_TICK);
     await h.tick(start + 90 * MIN);
     expect(driftRequests(h)).toBe(DRIFT_CALLS_PER_TICK);
+    expect((await view<CloudflareView>(h, 'cloudflare')).drift).toMatchObject({ status: 'never_checked', checked_at: null });
+    await h.tick(start + 120 * MIN);
+    expect(driftRequests(h)).toBe(3);
     const cloudflare = await view<CloudflareView>(h, 'cloudflare');
-    expect(cloudflare.drift).toMatchObject({ status: 'ok', in_progress: false, desired_workers: 14, findings: [], findings_omitted: 0, last_error: null });
+    expect(cloudflare.drift).toMatchObject({ status: 'ok', in_progress: false, desired_workers: 15, findings: [], findings_omitted: 0, last_error: null });
     expect(cloudflare.drift).not.toHaveProperty('audit_unchecked');
-    expect(cloudflare.drift.checked_at).toBe(new Date(start + 90 * MIN).toISOString());
+    expect(cloudflare.drift.checked_at).toBe(new Date(start + 120 * MIN).toISOString());
     const ops = await view<OpsView>(h, 'ops');
     expect(ops.digest.items.filter((item) => item.code === 'config_drift')).toEqual([]);
     // Once a day: later ticks of the same day make no drift call.
-    await h.tick(start + 120 * MIN);
+    await h.tick(start + 150 * MIN);
     expect(driftRequests(h)).toBe(0);
     // The GraphQL query still carries the same token; nothing else got it.
     expect(h.analytics.requests.every((r) => r.authorization === `Bearer ${TOKEN}`)).toBe(true);
@@ -288,14 +291,15 @@ describe('the daily drift check', () => {
 
       // A new isolate using the same desired hash continues the current run, not the discarded one.
       h = await startFlows({ persist: dir, bindings: { DEV_NOW: new Date(NOW + 2 * MIN).toISOString() } });
-      for (const minute of [2, 3, 4]) {
+      for (const minute of [2, 3, 4, 5]) {
         if (minute > 2) await h.redeploy({ DEV_NOW: new Date(NOW + minute * MIN).toISOString() });
         const refreshed = await h.refresh<CloudflareView>('cloudflare');
-        expect(h.cloudflare.requests.splice(0)).toHaveLength(DRIFT_CALLS_PER_TICK);
-        expect(refreshed.body?.drift.in_progress).toBe(minute < 4);
+        // Four Workers a step; the fifteenth is the last step's only one.
+        expect(h.cloudflare.requests.splice(0)).toHaveLength(minute < 5 ? DRIFT_CALLS_PER_TICK : 3);
+        expect(refreshed.body?.drift.in_progress).toBe(minute < 5);
       }
       const result = (await view<CloudflareView>(h, 'cloudflare')).drift;
-      expect(result).toMatchObject({ status: 'ok', findings: [], in_progress: false, checked_at: new Date(NOW + 4 * MIN).toISOString() });
+      expect(result).toMatchObject({ status: 'ok', findings: [], in_progress: false, checked_at: new Date(NOW + 5 * MIN).toISOString() });
       expect((await h.callsOf('tasks', 'createInboxTask'))).toEqual([]);
     } finally {
       await h?.dispose();

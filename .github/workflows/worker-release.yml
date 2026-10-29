@@ -36,7 +36,7 @@ jobs:
     timeout-minutes: ${{ inputs.app == 'website-relay' && 10 || 15 }}
     environment:
       name: production
-      url: ${{ steps.todofy.outputs.url || steps.mail_hero.outputs.url || steps.dashboard.outputs.url || steps.links.outputs.url || steps.watch.outputs.url || steps.mailsort.outputs.url || steps.recall.outputs.url || steps.fleet.outputs.url || steps.personal_mcp.outputs.url || steps.model_router.outputs.url }}
+      url: ${{ steps.todofy.outputs.url || steps.mail_hero.outputs.url || steps.dashboard.outputs.url || steps.links.outputs.url || steps.tasks.outputs.url || steps.watch.outputs.url || steps.mailsort.outputs.url || steps.recall.outputs.url || steps.fleet.outputs.url || steps.personal_mcp.outputs.url || steps.model_router.outputs.url || steps.newsletter_console.outputs.url }}
     concurrency:
       group: ${{ inputs.app }}-production
       cancel-in-progress: false
@@ -197,6 +197,16 @@ jobs:
           personal-mcp-access-owner: ${{ secrets.DASHBOARD_ACCESS_OWNER }}
           personal-mcp-access-owner-aliases: ${{ secrets.DASHBOARD_ACCESS_OWNER_ALIASES }}
           personal-mcp-worker-secrets: ${{ secrets.PERSONAL_MCP_WORKER_SECRETS }}
+      - name: Release newsletter-console
+        id: newsletter_console
+        if: inputs.app == 'newsletter-console' && steps.preflight.outputs.required == 'true'
+        uses: ./.github/actions/release-newsletter-console
+        with:
+          required: ${{ steps.preflight.outputs.required }}
+          cf-api-token: ${{ secrets.CF_API_TOKEN }}
+          dashboard-access-owner: ${{ secrets.DASHBOARD_ACCESS_OWNER }}
+          dashboard-access-owner-aliases: ${{ secrets.DASHBOARD_ACCESS_OWNER_ALIASES }}
+          dashboard-worker-secrets: ${{ secrets.DASHBOARD_WORKER_SECRETS }}
       - name: Release website-relay
         id: website_relay
         if: inputs.app == 'website-relay' && steps.preflight.outputs.required == 'true'

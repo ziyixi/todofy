@@ -248,7 +248,10 @@ Each app's adapter is the only place these values live: Mail Hero
 (deployed since its step L2), the watch app `watch/worker/src/auth.ts` (deployed since its step W2). On a short link (outside its path-scoped Access
 application) the links app verifies only a request that carries a token, and reads every failure there as anonymous;
 under `/_/` it maps the failures as the table below says. The watch app verifies every path but `/health` (its whole
-host is behind Access), checks CSRF in its fetch handler and forwards the owner API to its Durable Object.
+host is behind Access), checks CSRF in its fetch handler and forwards the owner API to its Durable Object. The
+Newsletter console (`newsletter-console/worker/src/http.ts`, read-only, so no CSRF) uses the dashboard's values with the
+verifier's default key cache, verifies every path of its host, and answers `not_configured`, `dev_bypass_refused` and
+`keys_unavailable` 503 `UNAVAILABLE` and the two token failures 401 `UNAUTHORIZED`, as google.rpc.Status bodies.
 
 | Parameter | Mail Hero | Todofy gateway | Dashboard `home` | Links `links` | Watch `watch` |
 | --- | --- | --- | --- | --- | --- |
@@ -314,7 +317,7 @@ Its dev dependencies use the same root catalog as every application.
 ## 7. CI
 
 `.github/scripts/ci_changes.py` maps each package to the apps that compile it in
-(`PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "links", "watch", "fleet", "mailsort", "recall", "tasks", "personal-mcp", "model-router"), ...}`).
+(`PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "links", "watch", "fleet", "mailsort", "recall", "tasks", "personal-mcp", "model-router", "newsletter-console"), ...}`).
 Any change inside
 `packages/edge-auth/` (this file included) runs the `Shared packages` job (`pnpm install --frozen-lockfile`, `npm run
 typecheck`, `pnpm test` in every `packages/*/`) and **checks and deploys** every user; an unmapped

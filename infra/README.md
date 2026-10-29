@@ -72,7 +72,7 @@ Nothing unrelated is imported, declared, read or modelled, not even read-only.
 [`test_infra_guard.py`](../.github/scripts/test_infra_guard.py) tests the guard itself against
 configurations built to slip past it.
 
-### Managed here (51 objects)
+### Managed here (52 objects)
 
 This is the maximum declared count. It includes the dedicated Codex inference token, policy and
 path application. Fresh bootstrap omits the optional legacy backup application and the mail rule
@@ -102,6 +102,7 @@ imports their actual IDs before switching to the managed references.
 | `cloudflare_zero_trust_access_application.recall_machine` | recall machine routes | Only the exact `/api/machine/v1/batches` and `/api/machine/v1/changes` and the blobs under `/api/machine/v1/blobs/*`; the Worker checks each route's own bearer token (recall/docs/design.md §2.1) |
 | `cloudflare_zero_trust_access_policy.recall_machine` | recall machine routes only | Bypass policy attached only to the machine-routes application; no owner API bypass |
 | `cloudflare_zero_trust_access_application.owner["model-router"]` | Model Router owner console | Whole configured Models host; the shared owner policies protect request history, bodies and Playground |
+| `cloudflare_zero_trust_access_application.owner["newsletter-console"]` | Access app "Newsletter" | Two destinations under one AUD and the two shared policies: the whole `news.ziyixi.science` host (the console) and the runtime host's `/api/newsletter/v1/*` (Newsletter's owner read API, which the console Worker calls with the owner's own assertion). **Created** here before the console's first deploy ([Adding an app](#adding-an-app)); no service token |
 | `cloudflare_zero_trust_access_application.model_router_inference` | Model Router machine routes | Only ModelService's catalog, generation, embedding and conversation paths; the Worker checks owner JWT or the Newsletter token |
 | `cloudflare_zero_trust_access_policy.model_router_inference` | Model Router machine-routes policy | Bypass for those exact paths; console and request-history paths retain owner Access |
 | `cloudflare_zero_trust_access_application.fleet_receipt` | Fleet machine receipt | Only the exact `/api/internal/fleet/v1/receipt` path; Worker independently validates signed POST receipts |
@@ -113,7 +114,7 @@ imports their actual IDs before switching to the managed references.
 | `cloudflare_zero_trust_access_policy.codex_gateway` | Inference machine policy | Includes only the dedicated inference token |
 | `cloudflare_zero_trust_access_application.codex_gateway` | Codex inference API | Only the existing runtime host's `/api/codex/v1/*` path; no deployment or owner access |
 | `cloudflare_zero_trust_tunnel_cloudflared.platform` | Platform connector | Dedicated tunnel; preserves the existing SSH tunnel |
-| `cloudflare_zero_trust_tunnel_cloudflared_config.platform` | Platform ingress | Exact Codex prefix to loopback 18766, daemon to loopback 18765, then 404; each validates its Access audience |
+| `cloudflare_zero_trust_tunnel_cloudflared_config.platform` | Platform ingress | Exact Codex prefix to loopback 18766, exact Newsletter read prefix to loopback 18767, daemon to loopback 18765, then 404; each validates its Access audience |
 | `cloudflare_dns_record.platform["runtime"]` | Runtime CNAME | Only this exact platform host; existing Worker and mailbox DNS remain with their current owners |
 | `cloudflare_zero_trust_access_application.mail_hero_backup` | Access app "Mail Hero backup API" | `mail-hero.ziyixi.science/api/internal/backup/*`. Used by the backup collector's machine identity (mail-hero/AGENTS.md §7). **Frozen**: an apply refuses any write to it ([Apply](#apply-p4)) |
 | `cloudflare_d1_database.app["mail-hero" \| "todofy" \| "links" \| "tasks" \| "model-router"]` | D1 databases | Existence only |
@@ -171,12 +172,17 @@ Listed by category only. These are neither declared nor read, and their values a
 
 Only the dedicated platform runtime CNAME is managed here, in [`platform.tf`](platform.tf).
 It points to the new platform tunnel and is restricted by the infrastructure guard to this exact address.
-The tunnel routes the authenticated daemon API and the exact `/api/codex/v1/.*` inference path on the
-same hostname. That path goes to loopback port 18766; the daemon uses 18765. A dedicated path Access
-application accepts only the inference service token, and its Tunnel rule validates that application's
-audience. The deployment app and token retain the daemon route. Kubernetes and the existing SSH
+The tunnel routes the authenticated daemon API and two exact paths on the same hostname, in this order:
+`/api/codex/v1/.*` (inference) to loopback port 18766 and `/api/newsletter/v1/.*` (Newsletter's owner read API) to
+18767; the daemon uses 18765. A dedicated path Access application accepts only the inference service token, and its
+Tunnel rule validates that application's audience. The Newsletter path is a second destination of the console's owner
+application (`owner["newsletter-console"]`, the shared owner policies): the console Worker forwards the owner's own
+assertion, and the Tunnel rule validates the console application's audience. No DNS record, service token or exported
+credential is added for it. The deployment app and token retain the daemon route. Kubernetes and the existing SSH
 ingress remain independent. `codex_gateway_bootstrap` is sensitive; the existing certificate handoff
 exports it as `codex-gateway-bootstrap.cms`, containing only the inference credentials and path app identity.
+[`reconcile_policy.py`](scripts/reconcile_policy.py) `PATH_RULES` lists the path rules in their order; an unattended
+repair accepts only that table, the daemon's catch-all and the 404.
 
 Worker hostnames remain Wrangler Custom Domains with read-only records. Mail Hero's receive subdomain
 MX, DKIM and SPF records remain Email Routing-owned. Apex mailbox records, third-party verification
@@ -337,8 +343,8 @@ or an empty state). It prints one fixed line per step and the redacted summaries
    edited).
 3. Probes conditional writes on a throwaway key (report only).
 4. Notes whether the state object exists, then `tofu init` with the backend.
-5. Plans. The plan must hold **only imports**: every resource `import` (or already `no-op`), exactly 19
-   (`EXPECTED_OBJECTS`),
+5. Plans. The plan must hold **only imports**: every resource `import` (or already `no-op`), exactly
+   `EXPECTED_OBJECTS` of [`bootstrap_state.py`](scripts/bootstrap_state.py) (the count in "Managed here"),
    and outputs only created (a new state has none). Anything else (create, update, replace, delete,
    forget, import+update, an output update, another count) **refuses with exit 4 before any apply**. If the
    state object **already exists**, any import or output create refuses too (exit 4): a populated state changes
@@ -346,7 +352,7 @@ or an empty state). It prints one fixed line per step and the redacted summaries
 6. Applies exactly that saved plan, only into a missing state object. Import reads Cloudflare and writes only
    the state.
 7. Reads the state object back and checks that it is encrypted.
-8. Plans again: it must be "No changes" (exit 0, 19 no-op, no output change), or the script fails.
+8. Plans again: it must be "No changes" (exit 0, every object `no-op`, no output change), or the script fails.
 
 A second run on an existing state only verifies it: "No changes" passes, anything else refuses. The bootstrap
 needs the `import {}` blocks, which were [removed](#removing-the-import-blocks): restore `imports.tf` from git
@@ -521,7 +527,7 @@ AUD exists only once the application does, and the Worker must be deployed with 
    still undeployed: no route, the all-zeros AUD, the host as `PUBLIC_HOST`). The outputs check accepts the unknown
    AUD because no production config names it yet ([Outputs](#outputs)).
 2. **Merge**; the push's "Infra drift" run is **red by design** (exit 2). Check it against exactly this:
-   - `create: 1`, nothing else but `no-op` (19 rows in all);
+   - `create: 1`, nothing else but `no-op` (`EXPECTED_OBJECTS` rows in all, which this commit raises by one);
    - the one row `create` `cloudflare_zero_trust_access_application.owner["<name>"]`;
    - `output changes: 1`: `update` `access_aud`;
    - the expect line. For the watch app, computed from the addresses of this commit (the method reproduces P4's
@@ -530,7 +536,8 @@ AUD exists only once the application does, and the Worker must be deployed with 
    If anything differs, stop and find out why; never copy a differing line into the dispatch.
 3. **Dispatch "Infra apply"** on `main` with that `expect`. The token must be allowed to edit Access applications
    (Access: Apps and Policies Edit; [Replacing the token](#replacing-the-token)). It ends with "apply: done" and a
-   verify plan of `no-op: 19`, `output changes: 0`; then "Infra drift" is green with `no-op: 19`.
+   verify plan of only `no-op` rows (`EXPECTED_OBJECTS`), `output changes: 0`; then "Infra drift" is green with
+   the same count.
 4. **Read the AUD and the application id, read-only.** Neither workflow prints an output value (only counts and
    addresses), so read them from the Access API with the admin helper (a GET; the AUD is not secret, every
    `wrangler.toml` commits its own), keeping only the new application's line:
@@ -556,9 +563,10 @@ AUD exists only once the application does, and the Worker must be deployed with 
    From that commit on, "Infra drift" compares the committed AUD with `access_aud` every day.
 6. **After that commit reaches `main`**: it changes `infra/`, so its push runs "Infra drift". That run is the first
    check that the committed AUD is the application's (the deploy's Access probes cannot tell: Access answers before
-   the Worker runs, so a wrong AUD only shows as a 403 for the owner). It must be green: `no-op: 19`,
-   `output changes: 0`, and no outputs problem. Red with `vars.ACCESS_AUDIENCE differs from access_aud` means the
-   committed AUD is wrong: read it again (step 4), fix it and push; the app's deploy job then ships the fix.
+   the Worker runs, so a wrong AUD only shows as a 403 for the owner). It must be green: only `no-op`
+   rows (`EXPECTED_OBJECTS`), `output changes: 0`, and no outputs problem. Red with
+   `vars.ACCESS_AUDIENCE differs from access_aud` means the committed AUD is wrong: read it again (step 4), fix it
+   and push; the app's deploy job then ships the fix.
 
 Personal MCP follows this sequence with `CHECK_ONLY` still enabled and no `ACCESS_AUDIENCE` until the apply returns its
 real identity. Provider 5.25.0 supports `oauth_configuration`; only this application enables it. Its redirect allowlist
@@ -569,6 +577,16 @@ See [OpenAI authentication](https://developers.openai.com/plugins/build/auth) an
 [Cloudflare Managed OAuth](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/managed-oauth/).
 The release probe checks the anonymous `401` OAuth challenge; an authenticated tool call and synthetic event remain
 separate acceptance checks.
+
+The Newsletter console (`newsletter-console`, `news.ziyixi.science`) follows the same sequence, `CHECK_ONLY` and with no
+`ACCESS_AUDIENCE`, with one addition: its application has a second destination, `/api/newsletter/v1/*` on the runtime
+host (the catalog's `runtime_paths`), and the platform tunnel gains the matching path rule pinned to its audience. Its
+step 2 is therefore `create: 1` (`owner["newsletter-console"]`), `update: 1`
+(`cloudflare_zero_trust_tunnel_cloudflared_config.platform`), the other 50 rows `no-op` (52 in all) and
+`output changes: 1` (`update` `access_aud`); computed from the addresses of its commit, with every optional instance
+present: `create=1,outputs=1,update=1@ab3d6240ab01`. The tunnel rule waits for the new application's AUD, so the apply
+creates the application first. Until Newsletter listens on 18767 the connector answers that path with an error after
+Access; anonymous requests get Access's login redirect either way.
 
 Between steps 3 and 5 the application gates a host that no Worker serves yet, which is harmless. Until the app's
 first deploy its Worker is also in `FIRST_DEPLOY_PENDING`
@@ -661,9 +679,9 @@ rebuild by import.** The state holds nothing that cannot be read again.
 1. `openssl rand -base64 32 > ~/.config/todofy-infra/state-passphrase.new` (chmod 600).
 2. Delete the state object: `python3 mail-hero/deploy/cloudflare-admin.py wrangler r2 object delete
    infra-state/production/terraform.tfstate --remote`. (The bootstrap writes only a missing state object.)
-3. Run the bootstrap with `--passphrase-file ~/.config/todofy-infra/state-passphrase.new`. It imports the
-   19 objects again (the watch application through the block added from `ids.tf`, [Bootstrap](#bootstrap-once)) into
-   a new encrypted state and ends with "No changes".
+3. Run the bootstrap with `--passphrase-file ~/.config/todofy-infra/state-passphrase.new`. It imports all
+   `EXPECTED_OBJECTS` objects again (the watch application through the block added from `ids.tf`,
+   [Bootstrap](#bootstrap-once)) into a new encrypted state and ends with "No changes".
 4. `gh secret set INFRA_STATE_PASSPHRASE --env production -R ziyixi/todofy < ~/.config/todofy-infra/state-passphrase.new`,
    update the password manager, dispatch "Infra drift".
 5. After a suspected leak: delete the old backups (above).
@@ -894,8 +912,8 @@ The added platform resources also need Access service-token and Cloudflare Tunne
 DNS access restricted to the configured zone. Use Read for planning and Edit for applying. Preserve
 existing Worker permissions when extending an existing token. The complete bootstrap also requires
 Identity Providers and Email Routing Rules Read/Write; see the [current permission list](../tools/cloud-bootstrap/README.md#cloudflare-token-权限).
-The original import instructions and 19-object counts below describe the pre-platform
-baseline; the platform follow-up creates nine new objects and expects 28 no-op objects after apply.
+The original import instructions and object counts below describe the pre-platform
+baseline; the current count is `EXPECTED_OBJECTS`.
 
 Store each from your own terminal (paste at the prompt, never in chat):
 `gh secret set CF_INFRA_READ_TOKEN --env production -R ziyixi/todofy`, likewise `CF_INFRA_TOKEN`. Then

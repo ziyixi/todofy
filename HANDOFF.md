@@ -36,7 +36,7 @@ The released notes are in the [October 28 archive](docs/history/handoff-2026-10-
 - Fleet: the per-workload charts fill in now that the RBAC rule is applied, and the PID 1 `net/dev` mount keeps
   reporting the host's interfaces.
 
-### Newsletter selection budget (`claude/newsletter-selection-timeout`, unreleased)
+### Newsletter selection budget (released `8ceaeca8`; the bundle is published)
 
 The 2026-10-28 07:00 Los Angeles run sent nothing. Selection, which cannot continue on error, reached its 150 second
 content-config budget while its Router turn was still running (the day before it took about 58 seconds on the same
@@ -60,6 +60,46 @@ admission until it reports ready):
    holds the old one. Each run freezes the active bundle when it starts.
 3. Verify read-only: config-sync status shows this revision active and no pin; the next run's selection succeeds and
    its issue is accepted. Then move this section to the dated history.
+
+### Newsletter console (`claude/nl-console`, slices S1-S7; S2 and S3 released with this merge)
+
+Owner request 2026-10-29: a self-consistent Newsletter dashboard with each issue's full content, sources, model calls,
+runs and failures, deliveries, config revision and Notion status, where Notion is shown only as an async backup of
+Newsletter's own SQLite. Design: a check-only Worker app `newsletter-console/` on its own Access host reads a new
+read-only listener inside the Newsletter process through the platform tunnel path `/api/newsletter/v1/*`. The owner's
+Access application covers both destinations, so the Worker forwards the owner's own token and no new secret, service
+token or owner step exists; the Worker's owner identity is Home's (`identity_from = "home"`).
+
+- S2 (`newsletter.ui.v1` in `proto/newsletter/ui/v1/`) and S3 (console scaffold, `owner["newsletter-console"]` with
+  the second destination, the tunnel path rule, `PATH_RULES` in `reconcile_policy.py`, CI wiring, `identity_from`)
+  land here. Expected selection: every check, `dashboard_deploy` only; the console stays check-only.
+- Release: "Infra drift" must show exactly create 1 (`owner["newsletter-console"]`), update 1 (the platform tunnel
+  config), output changes 1 (`access_aud`), then "Infra apply" with that line; the verify plan is no-op. An anonymous
+  request to the runtime path is redirected to Access; the Codex path and the daemon route are unchanged. The path
+  answers an error after Access until S4's listener exists.
+- Next: S1 (engine observability gaps: per-call times, purpose, failure and Router request names; per-source feed
+  counts; Notion progress time) and S4 (the listener) release the Newsletter image after a 07:00 Los Angeles run has
+  finished; S5 deploys the console (probe that Access accepts the forwarded token for the second destination); S6
+  adds the remaining pages; S7 aligns Home and Fleet (engine row 「Newsletter 引擎」, no 「写入 Notion」 stage, links to the
+  console) on top of the Newsletter config views already there.
+
+### Architecture review follow-ups (2026-10-29)
+
+The owner asked whether shared microservices could be extracted from the Workers. A read-only review found none
+worth extracting: every external credential has one holder, and the existing shared services (Model Router, Tasks'
+TaskInbox, Fleet's report ingest) each own a scarce resource or ledger with several callers. The complexity sits in
+build-time registration and cloned release recipes, so the approved follow-ups subtract there:
+
+- Released with this merge (no app deploys): Tasks, Watch and Personal MCP now refuse to ship past a selected
+  upstream deploy that failed (the SELECTED_ONLY form Router edges use); `finalize.py` APPS, `DEPLOY_JOBS`, the
+  wrapper map and Home's deploy-order test derive from configuration (the rebuild's finalize step listed 8 of 11
+  Durable Object apps); `worker-release.yml` records Tasks' environment URL; docs no longer misdescribe the links
+  backup schedule, the website sync triggers, Home's outbound bound or the infra object count.
+- Released with the `claude/deploy-core` merge (deploys those seven Workers once, with byte-identical secrets
+  files, wrangler arguments and Home desired state): one shared Worker deploy-vars core in
+  `tools/cloud-config/worker-deploy.mjs` for links, watch, recall, mailsort, fleet, tasks and personal-mcp; each
+  wrapper now declares its differences as data. Model Router, Mail Hero, Home, Todofy and the relay keep their own
+  wrappers for now; the console migrates after its slices land. A core change is proven at each app's next release.
 
 ## Latest verified release
 

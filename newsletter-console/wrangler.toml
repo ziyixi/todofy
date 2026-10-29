@@ -1,0 +1,35 @@
+# Top-level is the sole production source. No storage bindings: Newsletter's SQLite database is the record, and the
+# Worker only transports owner reads to it. ACCESS_AUDIENCE is added after "Infra apply" creates the console's Access
+# application (infra/README.md "Adding an app"); until then CI only dry-runs this config (ci_changes.py CHECK_ONLY).
+# Owner identities are Worker secrets; never put them here.
+name = "newsletter-console"
+account_id = "f57937bd1d93bf59e737b6d8445fb7a3"
+main = "worker/src/index.ts"
+compatibility_date = "2026-09-29"
+workers_dev = false
+preview_urls = false
+routes = [{ pattern = "news.ziyixi.science", custom_domain = true }]
+
+[assets]
+directory = "web/dist"
+binding = "ASSETS"
+run_worker_first = true
+not_found_handling = "single-page-application"
+
+# Explicit log lines only (IDs, method names, status classes, durations): no invocation log of each request.
+[observability]
+enabled = true
+[observability.logs]
+enabled = true
+invocation_logs = false
+[observability.traces]
+enabled = false
+
+[vars]
+PUBLIC_HOST = "news.ziyixi.science"
+# Public navigation only; web/vite.config.ts reads this at build time.
+HOME_URL = "https://home.ziyixi.science/"
+ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"
+# Newsletter's read path (/api/newsletter/v1/) lives on the platform runtime host, behind the console's own Access
+# application; generated from config/cloud.toml.
+NEWSLETTER_ORIGIN = "https://platform-runtime.ziyixi.science"

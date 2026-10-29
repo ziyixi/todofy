@@ -1,5 +1,5 @@
-# One workflow for the apps (Todofy, Mail Hero, the home dashboard, the website, the links app, the watch app, Fleet,
-# Newsletter, Platform, Codex gateway, mailsort, recall and Tasks).
+# One workflow for every app of the service catalog (*/app.toml, docs/service-catalog.md); ci_changes.py KEYS names
+# the "changes" outputs, one check and one deploy output per app.
 # "changes" decides what changed since a cumulative base (.github/scripts/ci_changes.py), each app's checks run
 # from its own directory, "Shared packages" checks packages/* (compiled into the apps), "Contracts" runs both
 # sides of mail.received.v1 and ops-v1 plus the dashboard's ops-v1 caller tests, "Proto checks"
@@ -22,7 +22,7 @@ on:
         description: App to check and (on main) deploy
         type: choice
         # both = Todofy and Mail Hero (as before the dashboard existed); all = every app.
-        options: [both, all, todofy, mail-hero, dashboard, website, links, watch, newsletter, fleet, platform, codex-gateway, mailsort, recall, tasks, personal-mcp, model-router]
+        options: [both, all, todofy, mail-hero, dashboard, website, links, watch, newsletter, fleet, platform, codex-gateway, mailsort, recall, tasks, personal-mcp, model-router, newsletter-console]
         default: both
       resume_vps_release:
         description: Explicitly resume a held VPS release after investigating its safe error
@@ -71,6 +71,8 @@ jobs:
       model_router_deploy: ${{ steps.decide.outputs.model_router_deploy }}
       personal_mcp_check: ${{ steps.decide.outputs.personal_mcp_check }}
       personal_mcp_deploy: ${{ steps.decide.outputs.personal_mcp_deploy }}
+      newsletter_console_check: ${{ steps.decide.outputs.newsletter_console_check }}
+      newsletter_console_deploy: ${{ steps.decide.outputs.newsletter_console_deploy }}
       tasks_deploy: ${{ steps.decide.outputs.tasks_deploy }}
       contracts: ${{ steps.decide.outputs.contracts }}
       packages: ${{ steps.decide.outputs.packages }}
@@ -122,9 +124,10 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version-file: package.json
-      # The deploy hostname guard every deploy job runs (dependency-free; synthetic API, no token).
+      # The deploy hostname guard every deploy job runs, and the Worker secret maps and deploy-vars core that the apps'
+      # deploy wrappers import (dependency-free; synthetic API and values, no token).
       - name: Test the deploy hostname guard
-        run: node --test tools/cf-guard/test/*.test.mjs tools/cloud-config/tests/worker-secrets.test.mjs
+        run: node --test tools/cf-guard/test/*.test.mjs tools/cloud-config/tests/worker-secrets.test.mjs tools/cloud-config/tests/worker-deploy.test.mjs
       # The shared test and build tools the apps' checks import by relative path (dependency-free, synthetic data):
       # the bundle-size budgets and the CPU meter of the workerd CPU tests, whose workerd side runs in the apps' own
       # suites (Tasks, Todofy, Mail Hero, Home, links, watch, mailsort and recall).
@@ -496,6 +499,19 @@ jobs:
       - name: Run personal-mcp checks
         uses: ./.github/actions/check-personal-mcp
 
+  newsletter-console-checks:
+    name: Newsletter console checks
+    needs: changes
+    if: needs.changes.outputs.newsletter_console_check == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run newsletter-console checks
+        uses: ./.github/actions/check-newsletter-console
+
   contracts:
     name: Contracts
     needs: changes
@@ -546,7 +562,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.proto == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # Typical runs took 5.5-9 minutes by 2026-10-29 as packages and breaking self-test cases grew; 10 cut a healthy run.
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: proto
@@ -627,7 +644,7 @@ jobs:
 
   gate:
     name: CI gate
-    needs: [changes, shared-packages, todofy-static, todofy-runtime, todofy-checks, mail-hero-checks, dashboard-checks, website-checks, tasks-checks, links-checks, watch-checks, fleet-checks, mailsort-checks, recall-checks, newsletter-checks, newsletter-image, platform-checks, codex-gateway-checks, personal-mcp-checks, model-router-checks, contracts, infra-checks, proto-checks]
+    needs: [changes, shared-packages, todofy-static, todofy-runtime, todofy-checks, mail-hero-checks, dashboard-checks, website-checks, tasks-checks, links-checks, watch-checks, fleet-checks, mailsort-checks, recall-checks, newsletter-checks, newsletter-image, platform-checks, codex-gateway-checks, personal-mcp-checks, model-router-checks, newsletter-console-checks, contracts, infra-checks, proto-checks]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -648,6 +665,7 @@ jobs:
           FLEET: ${{ needs.fleet-checks.result }}
           MODEL_ROUTER: ${{ needs.model-router-checks.result }}
           PERSONAL_MCP: ${{ needs.personal-mcp-checks.result }}
+          NEWSLETTER_CONSOLE: ${{ needs.newsletter-console-checks.result }}
           MAILSORT: ${{ needs.mailsort-checks.result }}
           RECALL: ${{ needs.recall-checks.result }}
           NEWSLETTER: ${{ needs.newsletter-checks.result }}
@@ -673,6 +691,7 @@ jobs:
             "Todofy runtime=$TODOFY_RUNTIME" "Todofy checks=$TODOFY" "Mail Hero checks=$MAIL_HERO" \
             "Dashboard checks=$DASHBOARD" "Website checks=$WEBSITE" "Links checks=$LINKS" "Watch checks=$WATCH" "Fleet checks=$FLEET" "Mailsort checks=$MAILSORT" \
             "Tasks checks=$TASKS" "Recall checks=$RECALL" "Personal MCP checks=$PERSONAL_MCP" "Model Router checks=$MODEL_ROUTER" \
+            "Newsletter console checks=$NEWSLETTER_CONSOLE" \
             "Newsletter checks=$NEWSLETTER" "Newsletter image checks=$NEWSLETTER_IMAGE" "Platform checks=$PLATFORM" "Codex gateway checks=$CODEX_GATEWAY" \
             "Contracts=$CONTRACTS" "Infra checks=$INFRA" "Proto checks=$PROTO"; do
             echo "$pair"
@@ -1012,13 +1031,14 @@ jobs:
     name: Tasks deploy
     # After Todofy: Tasks binds Todofy's Mail entry, and Todofy no longer calls Tasks' retired TasksApi.call.
     needs: [changes, tasks-checks, gate, todofy-deploy]
-    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
+    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors). A selected
+    # Todofy deploy must succeed: a failed Router leaves it skipped, and Tasks must not ship ahead of it.
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
       && (needs.tasks-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.tasks-checks.result == 'skipped'))
       && needs.gate.result == 'success'
-      && (needs.todofy-deploy.result == 'success' || needs.todofy-deploy.result == 'skipped')
+      && (needs.todofy-deploy.result == 'success' || needs.changes.outputs.todofy_deploy != 'true')
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.tasks_deploy == 'true' }}
@@ -1033,17 +1053,16 @@ jobs:
 
   watch-deploy:
     name: Watch deploy
-    # After Tasks: the watch app's TASKS binding names Tasks' TaskInbox entry. Todofy is listed too, because a failed
-    # Todofy deploy leaves Tasks deploy skipped (not failed), and Watch must not ship ahead of either.
-    needs: [changes, watch-checks, gate, todofy-deploy, tasks-deploy]
-    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
+    # After Tasks: the watch app's TASKS binding names Tasks' TaskInbox entry.
+    needs: [changes, watch-checks, gate, tasks-deploy]
+    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors). A selected
+    # Tasks deploy must succeed, so a failed Todofy (which leaves Tasks skipped) also holds Watch.
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
       && (needs.watch-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.watch-checks.result == 'skipped'))
       && needs.gate.result == 'success'
-      && (needs.todofy-deploy.result == 'success' || needs.todofy-deploy.result == 'skipped')
-      && (needs.tasks-deploy.result == 'success' || needs.tasks-deploy.result == 'skipped')
+      && (needs.tasks-deploy.result == 'success' || needs.changes.outputs.tasks_deploy != 'true')
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.watch_deploy == 'true' }}
@@ -1235,16 +1254,18 @@ jobs:
   personal-mcp-deploy:
     name: Personal MCP deploy
     needs: [changes, personal-mcp-checks, gate, tasks-deploy, todofy-deploy, recall-deploy, watch-deploy]
-    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
+    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors). Selected
+    # Tasks, Todofy and Watch deploys must succeed, since each is skipped when a release before it fails; Recall has
+    # no deploy before it.
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
       && (needs.personal-mcp-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.personal-mcp-checks.result == 'skipped'))
       && needs.gate.result == 'success'
-      && (needs.tasks-deploy.result == 'success' || needs.tasks-deploy.result == 'skipped')
-      && (needs.todofy-deploy.result == 'success' || needs.todofy-deploy.result == 'skipped')
+      && (needs.tasks-deploy.result == 'success' || needs.changes.outputs.tasks_deploy != 'true')
+      && (needs.todofy-deploy.result == 'success' || needs.changes.outputs.todofy_deploy != 'true')
       && (needs.recall-deploy.result == 'success' || needs.recall-deploy.result == 'skipped')
-      && (needs.watch-deploy.result == 'success' || needs.watch-deploy.result == 'skipped')
+      && (needs.watch-deploy.result == 'success' || needs.changes.outputs.watch_deploy != 'true')
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.personal_mcp_deploy == 'true' }}
@@ -1254,6 +1275,31 @@ jobs:
     uses: ./.github/workflows/worker-release.yml
     with:
       app: personal-mcp
+      source_sha: ${{ github.sha }}
+    secrets: inherit
+
+  newsletter-console-deploy:
+    name: Newsletter console deploy
+    # After the VPS release: Newsletter answers the console's reads, so a push carrying both its read API and the
+    # console ships the Worker once the server runs the new image. A VPS release that did not run is fine; one that
+    # failed or was cancelled stops this job.
+    needs: [changes, newsletter-console-checks, gate, vps-deploy]
+    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
+    if: >-
+      ${{ !cancelled()
+      && needs.changes.result == 'success'
+      && (needs.newsletter-console-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.newsletter-console-checks.result == 'skipped'))
+      && needs.gate.result == 'success'
+      && (needs.vps-deploy.result == 'success' || needs.vps-deploy.result == 'skipped')
+      && github.ref == 'refs/heads/main'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && needs.changes.outputs.newsletter_console_deploy == 'true' }}
+    permissions:
+      contents: read
+      deployments: write
+    uses: ./.github/workflows/worker-release.yml
+    with:
+      app: newsletter-console
       source_sha: ${{ github.sha }}
     secrets: inherit
 

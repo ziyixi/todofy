@@ -39,6 +39,10 @@ def deployed(result):
     return {app for app in ci_changes.APPS if result[f"{ci_changes.PREFIX[app]}_deploy"]}
 
 
+# Every app a change may deploy: an app in CHECK_ONLY (its first deploy waits for its Access application) is checked only.
+DEPLOYABLE = set(ci_changes.APPS) - ci_changes.CHECK_ONLY
+
+
 def checked(result):
     return {app for app in ci_changes.APPS if result[f"{ci_changes.PREFIX[app]}_check"]}
 
@@ -145,7 +149,7 @@ class DependencyWorkspaces(unittest.TestCase):
             with self.subTest(path=path):
                 result = ci_changes.classify([path])
                 self.assertTrue(all(result[f"{app.replace('-', '_')}_check"] for app in ci_changes.APPS))
-                self.assertTrue(all(result[f"{app.replace('-', '_')}_deploy"] for app in ci_changes.APPS))
+                self.assertTrue(all(result[f"{app.replace('-', '_')}_deploy"] for app in DEPLOYABLE))
                 for key in ("packages", "contracts", "proto", "platform_publish", "website_relay_deploy", "recall_extension_publish"):
                     self.assertTrue(result[key], key)
                 self.assertFalse(result["infra"])
@@ -158,7 +162,7 @@ class DependencyWorkspaces(unittest.TestCase):
                 result = ci_changes.classify([path])
                 for app in ci_changes.APPS:
                     self.assertEqual(result[f"{app.replace('-', '_')}_check"], app in expected)
-                    self.assertEqual(result[f"{app.replace('-', '_')}_deploy"], app in expected)
+                    self.assertEqual(result[f"{app.replace('-', '_')}_deploy"], app in expected and app in DEPLOYABLE)
                 self.assertTrue(result["platform_publish"])
                 self.assertTrue(result["proto"])
                 self.assertTrue(result["contracts"])
@@ -181,7 +185,7 @@ class DependencyWorkspaces(unittest.TestCase):
                 self.assertEqual(deployed(result) & vps, vps if name in generator else set())
         bump = lambda name: ci_changes.classify(["pnpm-workspace.yaml", "pnpm-lock.yaml"], reader({"pnpm-workspace.yaml": older(name)}))
         self.assertEqual(deployed(bump("postal-mime")), {"mail-hero"})
-        self.assertEqual(deployed(bump("vitest")), set(ci_changes.PROTO_USERS) - {"newsletter", "platform", "codex-gateway"})
+        self.assertEqual(deployed(bump("vitest")), (set(ci_changes.PROTO_USERS) & DEPLOYABLE) - {"newsletter", "platform", "codex-gateway"})
         self.assertEqual(deployed(bump("react-router")), {"mail-hero", "todofy"})
         self.assertEqual(deployed(bump("chrono-node")), set(ci_changes.PACKAGE_USERS["task-dates"]))
         site = bump("next")
@@ -201,12 +205,56 @@ class DependencyWorkspaces(unittest.TestCase):
         ):
             with self.subTest(paths=paths):
                 result = ci_changes.classify(paths, reader(before))
-                self.assertEqual(deployed(result), set(ci_changes.APPS))
+                self.assertEqual(deployed(result), DEPLOYABLE)
                 self.assertTrue(result["website_relay_deploy"] and result["recall_extension_publish"])
         # A lock beside a member manifest reaches what that manifest reaches; a comment reaches nothing.
         self.assertEqual(deployed(ci_changes.classify(["pnpm-lock.yaml", "mail-hero/web/package.json"], reader())), {"mail-hero"})
         commented = {"pnpm-workspace.yaml": workspace.replace("catalog:\n", "# Shared versions.\ncatalog:\n")}
         self.assertEqual(deployed(ci_changes.classify(["pnpm-workspace.yaml"], reader(commented))), set())
+
+    def test_a_new_apps_members_reach_no_other_member(self):
+        """A new app adds its members to pnpm-workspace.yaml and their importers (and any package only they use) to the
+        lock in the diff that creates their directories: every existing member resolves as before, so no other member is
+        reached and no VPS image is published. Anything more, or a member that existed before, reaches every member."""
+        workspace = (ROOT / "pnpm-workspace.yaml").read_text()
+        lock = (ROOT / "pnpm-lock.yaml").read_text()
+        importer = "  fresh/web:\n    devDependencies:\n      vitest:\n        specifier: 'catalog:'\n        version: 4.0.0\n\n"
+        after_workspace = workspace.replace("packages:\n", "packages:\n  - \"fresh/web\"\n", 1)
+        after_lock = lock.replace("importers:\n\n", "importers:\n\n" + importer, 1)
+        self.assertNotEqual(after_lock, lock)
+        only_new = after_lock.replace("packages:\n\n", "packages:\n\n  fresh-only@1.0.0:\n    resolution: {integrity: sha512-x}\n\n", 1)
+        self.assertNotEqual(only_new, after_lock)
+
+        def read_added(lock_after=after_lock, workspace_after=after_workspace, existed=False):
+            def read(path):
+                if path == "fresh/web/package.json":
+                    if existed:
+                        return "{}", "{}"
+                    raise ValueError(path)
+                after = {"pnpm-workspace.yaml": workspace_after, "pnpm-lock.yaml": lock_after}.get(path)
+                before = (ROOT / path).read_text()
+                return before, before if after is None else after
+            return read
+
+        paths = ["pnpm-workspace.yaml", "pnpm-lock.yaml", "fresh/web/package.json"]
+        for read in (read_added(), read_added(lock_after=only_new)):
+            result = ci_changes.classify(paths, read)
+            self.assertEqual(deployed(result), set())
+            self.assertEqual(checked(result), set(ci_changes.PROTO_USERS))
+            self.assertFalse(result["platform_publish"] or result["website_relay_deploy"] or result["recall_extension_publish"])
+        # A changed existing importer or package, another workspace change, a member that existed before, or a lock or
+        # manifest left out of the diff reach every member as before.
+        changed_importer = after_lock.replace("  .: {}\n", "  .:\n    dependencies: {}\n", 1)
+        self.assertNotEqual(changed_importer, after_lock)
+        for read, changed in (
+            (read_added(lock_after=changed_importer), paths),
+            (read_added(workspace_after=after_workspace.replace("strictPeerDependencies: true", "strictPeerDependencies: false")), paths),
+            (read_added(existed=True), paths),
+            (read_added(), ["pnpm-workspace.yaml", "fresh/web/package.json"]),
+            (read_added(), ["pnpm-workspace.yaml", "pnpm-lock.yaml"]),
+        ):
+            with self.subTest(paths=changed):
+                self.assertEqual(deployed(ci_changes.classify(changed, read)), DEPLOYABLE)
 
     def test_a_retired_members_removal_reaches_no_remaining_member(self):
         """An app's retirement drops its members from pnpm-workspace.yaml and their importers from the lock in the
@@ -247,7 +295,7 @@ class DependencyWorkspaces(unittest.TestCase):
             (read_retired(), ["pnpm-workspace.yaml", "pnpm-lock.yaml"]),
         ):
             with self.subTest(paths=changed):
-                self.assertEqual(deployed(ci_changes.classify(changed, read)), set(ci_changes.APPS))
+                self.assertEqual(deployed(ci_changes.classify(changed, read)), DEPLOYABLE)
         added = lock.replace("packages:\n\n", "packages:\n\n  new-only@1.0.0:\n    resolution: {integrity: sha512-x}\n\n", 1)
         self.assertNotEqual(added, lock)
 
@@ -257,7 +305,7 @@ class DependencyWorkspaces(unittest.TestCase):
             after = added if path == "pnpm-lock.yaml" else (ROOT / path).read_text()
             return {"pnpm-workspace.yaml": before_workspace, "pnpm-lock.yaml": before_lock}.get(path, after), after
 
-        self.assertEqual(deployed(ci_changes.classify(paths, read_added)), set(ci_changes.APPS))
+        self.assertEqual(deployed(ci_changes.classify(paths, read_added)), DEPLOYABLE)
 
     def test_a_root_constraint_deploys_only_the_python_members_that_declare_it(self):
         pin = r'^(  "{}==).+(",)$'
@@ -301,7 +349,7 @@ class DependencyWorkspaces(unittest.TestCase):
 
         result, _, _ = ci_changes.decide("push", ci_changes.MAIN, after, "", base, lambda b, a: ["pnpm-workspace.yaml"],
                                          lambda b, a: True, lambda a: base, show=missing)
-        self.assertEqual(deployed(result), set(ci_changes.APPS))
+        self.assertEqual(deployed(result), DEPLOYABLE)
 
     def test_website_code_identity_tracks_its_shared_inputs_and_ignores_other_apps(self):
         # Execute the production CLI's git query against real history, without running release side effects.

@@ -1,0 +1,136 @@
+name: release-newsletter-console
+description: "release-newsletter-console; called by the repository workflow."
+inputs:
+  cf-api-token:
+    description: "cf api token"
+    required: false
+    default: ''
+  dashboard-access-owner:
+    description: "dashboard access owner"
+    required: false
+    default: ''
+  dashboard-access-owner-aliases:
+    description: "dashboard access owner aliases"
+    required: false
+    default: ''
+  dashboard-worker-secrets:
+    description: "dashboard worker secrets"
+    required: false
+    default: ''
+  required:
+    description: "required"
+    required: false
+    default: ''
+outputs:
+  url:
+    description: "url"
+    value: ${{ steps.config.outputs.url }}
+runs:
+  using: composite
+  steps:
+    - name: Install the selected Node workspaces
+      if: inputs.required == 'true'
+      uses: ./.github/actions/setup-workspace
+      with:
+        root: .release-source
+        filters: 'newsletter-console-worker... newsletter-console-web...'
+    # Every static production value (account, host, Access, Newsletter's origin) is committed in
+    # newsletter-console/wrangler.toml; the environment URL and the Access probes read it there.
+    - name: Read the hosts and the Access issuer from the committed config
+      if: inputs.required == 'true'
+      id: config
+      working-directory: .release-source/newsletter-console
+      shell: bash -e {0}
+      run: |
+        python3 - >> "$GITHUB_OUTPUT" <<'PY'
+        import tomllib
+        from urllib.parse import urlsplit
+        with open("wrangler.toml", "rb") as file:
+            variables = tomllib.load(file)["vars"]
+        print("url=https://" + variables["PUBLIC_HOST"])
+        print("host=" + variables["PUBLIC_HOST"])
+        print("access_issuer=" + variables["ACCESS_ISSUER"])
+        print("newsletter_host=" + urlsplit(variables["NEWSLETTER_ORIGIN"]).hostname)
+        PY
+    # The UI's build (web/dist) is the one that ships; its JavaScript budget is checked by the build.
+    - name: Build the verified revision
+      if: inputs.required == 'true'
+      working-directory: .release-source/newsletter-console
+      shell: bash -e {0}
+      run: |
+        npm run build --prefix web
+    # The console's owner is Home's (one person, the same Access identities): the owner's addresses come from Home's
+    # identity secrets, and Home's map, when set, is validated and only its identity taken (deploy/deploy-vars.mjs);
+    # nothing else of Home's reaches this Worker, which has no secret of its own. Masked in this public log; they
+    # reach the Worker as secrets through --secrets-file.
+    - name: Write the Worker secrets file
+      if: inputs.required == 'true'
+      working-directory: .release-source/newsletter-console/worker
+      env:
+        NEWSLETTER_CONSOLE_ACCESS_OWNER: ${{ inputs.dashboard-access-owner }}
+        NEWSLETTER_CONSOLE_ACCESS_OWNER_ALIASES: ${{ inputs.dashboard-access-owner-aliases }}
+        DASHBOARD_WORKER_SECRETS: ${{ inputs.dashboard-worker-secrets }}
+      shell: bash -e {0}
+      run: node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/newsletter-console-secrets.json"
+    # deploy-vars.mjs adds BUILD_SHA as --var and refuses a missing or all-zeros Access AUD; the bundle that ships is
+    # held to the app's budget and the Workers Free limit (deploy/bundle-size.mjs).
+    - name: Validate the bundle before changing production
+      if: inputs.required == 'true'
+      working-directory: .release-source/newsletter-console/worker
+      shell: bash -e {0}
+      run: |
+        node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
+          --secrets-file "$RUNNER_TEMP/newsletter-console-secrets.json" --outdir "$RUNNER_TEMP/newsletter-console-bundle"
+        node ../deploy/bundle-size.mjs "$RUNNER_TEMP/newsletter-console-bundle"
+    # tools/cf-guard (read-only GETs; prints listed hostnames, counts, PASS/FAIL): wrangler applies a config's Custom
+    # Domains (or zone routes) as the Worker's complete set, so stop before any production change when a live
+    # hostname would be detached or another Worker's hostname or DNS record taken over. For an intentional
+    # change, set the exact hostnames here (space-separated) in the same commit that changes wrangler.toml.
+    - name: Check the hostnames against production
+      if: inputs.required == 'true'
+      working-directory: .release-source
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
+        CF_GUARD_ALLOW_REMOVE: ''
+        CF_GUARD_ALLOW_CONFLICT: ''
+      shell: bash -e {0}
+      run: node tools/cf-guard/cf-guard.mjs --config newsletter-console/wrangler.toml
+    - name: Deploy the Worker newsletter-console
+      if: inputs.required == 'true'
+      working-directory: .release-source/newsletter-console/worker
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
+      shell: bash -e {0}
+      run: |
+        test -n "$CLOUDFLARE_API_TOKEN"
+        node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml \
+          --secrets-file "$RUNNER_TEMP/newsletter-console-secrets.json"
+    # Nothing anonymous on the host shows BUILD_SHA (all of it is behind Access), so production is read through the
+    # API with the deploy token (GETs only): the Worker serves exactly one version at 100% and that version's
+    # BUILD_SHA is this commit. wrangler's JSON answers are parsed, never printed.
+    - name: Check that production runs this commit
+      if: inputs.required == 'true'
+      working-directory: .release-source/newsletter-console/worker
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
+      shell: bash -e {0}
+      run: |
+        bash "$GITHUB_WORKSPACE/.release-source/tools/deploy-probes/production.sh" newsletter-console ../wrangler.toml
+    # The whole console host stays behind Access, and so does Newsletter's read path on the runtime host: one
+    # application, whose login page is answered for each host.
+    - name: Check that Access answers unauthenticated requests
+      if: inputs.required == 'true'
+      env:
+        ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}
+        PUBLIC_HOST: ${{ steps.config.outputs.host }}
+        NEWSLETTER_HOST: ${{ steps.config.outputs.newsletter_host }}
+      working-directory: .release-source/newsletter-console
+      shell: bash -e {0}
+      run: |
+        bash "$GITHUB_WORKSPACE/.release-source/tools/deploy-probes/access.sh" / /api/v1/overview
+        PUBLIC_HOST="$NEWSLETTER_HOST" bash "$GITHUB_WORKSPACE/.release-source/tools/deploy-probes/access.sh" /api/newsletter/v1/overview
+    - name: Remove the secrets file
+      if: always() && inputs.required == 'true'
+      working-directory: .release-source/newsletter-console
+      shell: bash -e {0}
+      run: rm -f "$RUNNER_TEMP/newsletter-console-secrets.json"

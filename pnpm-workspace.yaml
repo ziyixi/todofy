@@ -11,6 +11,8 @@ packages:
   - "mailsort/worker"
   - "model-router/worker"
   - "model-router/web"
+  - "newsletter-console/web"
+  - "newsletter-console/worker"
   - "packages/model-router-client"
   - "packages/edge-auth"
   - "packages/planning-ui"

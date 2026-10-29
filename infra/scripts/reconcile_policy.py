@@ -9,6 +9,15 @@ from pathlib import Path
 WORKFLOW = "Personal cloud reconcile"
 DNS = 'cloudflare_dns_record.platform["runtime"]'
 TUNNEL_CONFIG = "cloudflare_zero_trust_tunnel_cloudflared_config.platform"
+# The tunnel's path rules on the runtime host, in their order before the daemon's catch-all (infra/platform.tf): the
+# path, its loopback service, the Access application whose audience the connector requires, and that application's
+# destination for the path (an exact `domain`, or one of an owner application's `destinations`).
+PATH_RULES = (
+    ("/api/codex/v1/.*", "http://127.0.0.1:18766", "cloudflare_zero_trust_access_application.codex_gateway",
+     "/api/codex/v1/*"),
+    ("/api/newsletter/v1/.*", "http://127.0.0.1:18767",
+     'cloudflare_zero_trust_access_application.owner["newsletter-console"]', "/api/newsletter/v1/*"),
+)
 
 
 def manual_reasons(plan: dict, team: str = "") -> list[dict[str, str]]:
@@ -18,19 +27,19 @@ def manual_reasons(plan: dict, team: str = "") -> list[dict[str, str]]:
     known = {item.get("address"): item.get("values", {}) for item in resources}
     tunnel = known.get("cloudflare_zero_trust_tunnel_cloudflared.platform", {}).get("id")
     app = known.get('cloudflare_zero_trust_access_application.platform_machine["runtime"]', {})
-    gateway_app = known.get("cloudflare_zero_trust_access_application.codex_gateway", {})
+    path_apps = {address: known.get(address, {}) for _, _, address, _ in PATH_RULES}
     for item in plan.get("resource_changes", []):
         change = item.get("change", {})
         if change.get("actions") in ([], ["no-op"]):
             continue
         address = item.get("address", "")
-        reason = _manual_reason(item, change, tunnel, app, team, gateway_app)
+        reason = _manual_reason(item, change, tunnel, app, team, path_apps)
         if reason:
             reasons.append({"address": address, "reason": reason})
     return reasons
 
 
-def _manual_reason(item: dict, change: dict, tunnel: str, app: dict, team: str, gateway_app: dict | None = None) -> str | None:
+def _manual_reason(item: dict, change: dict, tunnel: str, app: dict, team: str, path_apps: dict | None = None) -> str | None:
     if item.get("mode") != "managed" or change.get("actions") != ["update"]:
         return "IDENTITY_OR_RESOURCE_CHANGE"
     if change.get("importing") or _unknown_required(change.get("after_unknown", {})):
@@ -53,7 +62,7 @@ def _manual_reason(item: dict, change: dict, tunnel: str, app: dict, team: str, 
         if not all(before.get(key) == after.get(key) and after.get(key)
                    for key in ("id", "account_id", "tunnel_id")):
             return "CONNECTOR_IDENTITY_CHANGE"
-        if not _loopback_ingress(after.get("config"), app, team, gateway_app):
+        if not _loopback_ingress(after.get("config"), app, team, path_apps):
             return "CONNECTOR_TARGET_UNSAFE"
     else:
         return "SENSITIVE_OR_UNSUPPORTED_RESOURCE"
@@ -61,27 +70,45 @@ def _manual_reason(item: dict, change: dict, tunnel: str, app: dict, team: str, 
     return None if changed <= allowed else "UNSUPPORTED_ATTRIBUTE_CHANGE"
 
 
-def _loopback_ingress(config: object, app: dict, team: str, gateway_app: dict | None = None) -> bool:
+def _loopback_ingress(config: object, app: dict, team: str, path_apps: dict | None = None) -> bool:
+    """The runtime host's path rules in PATH_RULES order (each present one exact and pinned to its application's
+    audience), then the daemon's catch-all, then 404. Any other rule, order or target needs review."""
     if not isinstance(config, dict):
         return False
     ingress = config.get("ingress")
-    if isinstance(ingress, list) and len(ingress) == 3:
-        gateway = ingress[0]
-        if (not isinstance(gateway_app, dict)
-                or gateway_app.get("domain") != str(app.get("domain")) + "/api/codex/v1/*"
-                or not isinstance(gateway, dict) or gateway.get("hostname") != app.get("domain")
-                or gateway.get("path") != "/api/codex/v1/.*"
-                or gateway.get("service") != "http://127.0.0.1:18766"
-                or not _authenticated_origin(gateway.get("origin_request", {}).get("access"), gateway_app, team)):
+    if not isinstance(ingress, list):
+        return False
+    rules = list(PATH_RULES)
+    # A plan writes every attribute of a rule, an unset path as null.
+    while len(ingress) > 2 and isinstance(ingress[0], dict) and ingress[0].get("path"):
+        rule = ingress[0]
+        while rules and rules[0][0] != rule.get("path"):
+            rules.pop(0)
+        if not rules:
+            return False
+        path, service, address, destination = rules.pop(0)
+        path_app = (path_apps or {}).get(address)
+        if (not isinstance(path_app, dict)
+                or not _destination(path_app, str(app.get("domain")) + destination)
+                or rule.get("hostname") != app.get("domain") or not app.get("domain")
+                or rule.get("service") != service
+                or not _authenticated_origin(rule.get("origin_request", {}).get("access"), path_app, team)):
             return False
         ingress = ingress[1:]
-    return (isinstance(ingress, list) and len(ingress) == 2
+    return (len(ingress) == 2
             and isinstance(ingress[0], dict) and isinstance(ingress[1], dict)
-            and isinstance(ingress[0].get("hostname"), str)
+            and isinstance(ingress[0].get("hostname"), str) and not ingress[0].get("path")
             and ingress[0]["hostname"] == app.get("domain") and bool(app.get("domain"))
             and ingress[0].get("service") == "http://127.0.0.1:18765"
             and ingress[1].get("service") == "http_status:404"
             and _authenticated_origin(ingress[0].get("origin_request", {}).get("access"), app, team))
+
+
+def _destination(app: dict, uri: str) -> bool:
+    """Whether the Access application gates exactly `uri`: its domain, or one of its public destinations."""
+    destinations = app.get("destinations")
+    return app.get("domain") == uri or (isinstance(destinations, list) and any(
+        isinstance(item, dict) and item.get("type") == "public" and item.get("uri") == uri for item in destinations))
 
 
 def _authenticated_origin(access: object, app: dict, team: str) -> bool:

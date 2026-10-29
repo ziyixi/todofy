@@ -1,0 +1,44 @@
+version = 1
+id = "newsletter-console"
+target = "cloudflare"
+
+[[workers]]
+config = "newsletter-console/wrangler.toml"
+# The owner is Home's owner (one person, the same Access identities): the deploy takes exactly ACCESS_OWNER and
+# ACCESS_OWNER_ALIASES from Home's map and Home's identity secrets, and the console has no GitHub secret of its own.
+identity_from = "home"
+personal_secrets = ["ACCESS_OWNER", "ACCESS_OWNER_ALIASES"]
+manual_secrets = []
+optional_secrets = ["ACCESS_OWNER_ALIASES"]
+hosts = ["news"]
+entry = "newsletter-console"
+role = "每日简报的只读控制台"
+position = 34
+
+[[entries]]
+id = "newsletter-console"
+name = "Newsletter"
+description = "期刊正文、运行、来源、模型调用与 Notion 备份"
+# Hidden until the console shows real pages; it then joins the apps (S7 in its plan).
+group = "hidden"
+icon = "newspaper"
+accent = "amber"
+access = true
+url_path = "/"
+app_only_signals = []
+order = 11
+worker = "newsletter-console"
+position = 34
+[entries.status]
+type = "none"
+
+# One owner application, one AUD: the console's host and Newsletter's read path on the platform runtime host, which
+# the console Worker calls with the owner's own assertion (contracts/newsletter-ui-v1/README.md).
+[[access]]
+key = "newsletter-console"
+kind = "owner"
+worker = "newsletter-console"
+name = "Newsletter"
+paths = [""]
+runtime_paths = ["/api/newsletter/v1/*"]
+session = "24h"
