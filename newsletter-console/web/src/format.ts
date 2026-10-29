@@ -38,7 +38,14 @@ const DELIVERY_STATES: Readonly<Record<string, Word>> = {
   rejected: { label: '邮件服务拒绝', tone: 'bad' },
   unknown: { label: '结果尚未确认', tone: 'unknown' },
 };
-export const deliveryState = (state: string | undefined): Word => lookup(DELIVERY_STATES, state, { label: '无期刊', tone: 'none' });
+/**
+ * A delivery state. Without one, a day or a run made no edition (无期刊); an edition's own delivery without a state is
+ * a state this console does not know, which is never read as healthy or as not sent (EDITION_DELIVERY).
+ */
+export const deliveryState = (state: string | undefined, absent: Word = { label: '无期刊', tone: 'none' }): Word =>
+  lookup(DELIVERY_STATES, state, absent);
+/** What an edition's delivery without a state shows. */
+export const EDITION_DELIVERY: Word = { label: '状态未记录', tone: 'warn' };
 
 const NODE_STATES: Readonly<Record<string, Word>> = {
   pending: { label: '未开始', tone: 'none' },
@@ -303,6 +310,10 @@ export function duration(value: number | undefined): string {
 /** Whole seconds, for budgets and elapsed times compared with them: 161 秒. */
 export const wholeSeconds = (value: number | undefined): string =>
   value === undefined ? '未记录' : `${String(Math.round(value))} 秒`;
+
+/** A measured time beside a budget: tenths under ten seconds (0.5 秒), whole seconds from there (161 秒). */
+export const budgetSeconds = (value: number): string =>
+  value < 10 ? `${String(Math.round(value * 10) / 10)} 秒` : wholeSeconds(value);
 
 const grouped = new Intl.NumberFormat('zh-CN');
 /** A count: 5,400, or 21.8 万 from ten thousand on. */

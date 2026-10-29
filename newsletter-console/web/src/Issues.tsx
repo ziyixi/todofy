@@ -1,23 +1,26 @@
 import { useQuery } from '@tanstack/react-query';
 import type { Edition } from '@ziyixi/proto/newsletter/ui/v1/edition_wire';
 import { read } from './api.ts';
-import { deliveryState, editionKind, issueDate, month, replicaState } from './format.ts';
+import { EDITION_DELIVERY, deliveryState, editionKind, issueDate, month, replicaState } from './format.ts';
 import { Mark } from './Mark.tsx';
 import { issueHref, issuesHref, runsHref, type IssueFilter } from './route.ts';
 
-/** Deliveries whose outcome may still be a sent mail: never counted as 未发出. */
-const UNSETTLED = new Set(['provider_accepted', 'submitting', 'unknown']);
+/**
+ * Deliveries that certainly left no mail: not requested, refused, or written by the local fake adapter. Anything else,
+ * an unconfirmed or submitting send and a state this console does not know included, may have gone out.
+ */
+const UNSENT = new Set(['not_requested', 'rejected', 'simulated']);
 
 /**
- * The month's filters. 未发出 is an issue that is not a test and whose delivery cannot have reached the mail service;
- * an unconfirmed result is not counted, since the mail may have gone out (it is checked first, never resent).
+ * The month's filters. 未发出 is an issue that is not a test and whose delivery certainly left no mail; an unconfirmed
+ * result is never counted, since the mail may have gone out (it is checked first, never resent).
  */
 export const FILTERS: readonly { value: IssueFilter; name: string; test: (edition: Edition) => boolean; empty: string }[] = [
   { value: 'all', name: '全部', test: () => true, empty: '这个月没有期刊。' },
   { value: 'delivered', name: '已投递', test: (edition) => edition.delivery?.state === 'provider_accepted', empty: '这个月没有交给邮件服务的期刊。' },
   {
     value: 'unsent', name: '未发出',
-    test: (edition) => edition.kind !== 'test' && !UNSETTLED.has(edition.delivery?.state ?? ''),
+    test: (edition) => edition.kind !== 'test' && UNSENT.has(edition.delivery?.state ?? ''),
     empty: '这个月没有生成后未发出的期刊。运行停止、没有生成期刊的日子见「运行」。',
   },
   { value: 'test', name: '测试', test: (edition) => edition.kind === 'test', empty: '这个月没有测试期刊。' },
@@ -37,7 +40,7 @@ function IssueCard({ edition }: { edition: Edition }) {
         {edition.introduction ? <span className="issue-intro">{edition.introduction}</span> : null}
         <span className="issue-topics">{sections} 个栏目{topics.length ? ` · ${topics.join('、')}` : ''}</span>
         <span className="issue-marks">
-          <span><span className="issue-mark-label">投递</span><Mark word={deliveryState(edition.delivery?.state)} /></span>
+          <span><span className="issue-mark-label">投递</span><Mark word={deliveryState(edition.delivery?.state, EDITION_DELIVERY)} /></span>
           <span><span className="issue-mark-label">Notion 备份</span><Mark word={replicaState(edition.backup?.state)} /></span>
         </span>
       </a>

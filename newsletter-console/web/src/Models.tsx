@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { ModelUsageDay, ModelUsageNode, UsageTotals } from '@ziyixi/proto/newsletter/ui/v1/model_call_wire';
 import { read } from './api.ts';
 import { datesBetween, segmentRect, stackByModel, type Stacked } from './chart.ts';
-import { count, issueDate, microUsd, nodeNameById, purpose, wholeSeconds } from './format.ts';
+import { budgetSeconds, count, issueDate, microUsd, nodeNameById, purpose, wholeSeconds } from './format.ts';
 import { modelsHref, type UsageRange } from './route.ts';
 
 const RANGES: readonly UsageRange[] = [7, 30, 90];
@@ -25,11 +25,12 @@ function Tiles({ totals, days, timed }: { totals: UsageTotals | undefined; days:
   const cost = microUsd(totals?.estimated_cost_microusd);
   const input = totals?.input_tokens ?? 0;
   const cached = totals?.cached_input_tokens ?? 0;
+  const calls = totals?.call_count ?? 0;
   return (
     <dl className="tiles" aria-label="用量">
       <div>
         <dt>调用</dt>
-        <dd className="value">{count(totals?.call_count ?? 0)}<span className="unit"> 次</span></dd>
+        <dd className="value">{count(calls)}<span className="unit"> 次</span></dd>
         <dd>失败 {totals?.failed_count ?? 0} · 用量不完整 {totals?.partial_count ?? 0}</dd>
       </div>
       <div>
@@ -40,7 +41,7 @@ function Tiles({ totals, days, timed }: { totals: UsageTotals | undefined; days:
       <div>
         <dt>输出 tokens</dt>
         <dd className="value">{count(totals?.output_tokens ?? 0)}</dd>
-        <dd>{totals?.call_count && !totals.complete ? '有调用的用量未完整记录，这是下限' : '每次调用都有完整用量'}</dd>
+        <dd>{calls === 0 ? '没有调用' : totals?.complete ? '每次调用都有完整用量' : '有调用的用量未完整记录，这是下限'}</dd>
       </div>
       <div>
         <dt>模型</dt>
@@ -54,8 +55,8 @@ function Tiles({ totals, days, timed }: { totals: UsageTotals | undefined; days:
       </div>
       <div>
         <dt>有用时记录</dt>
-        <dd className="value">{count(timed)}<span className="unit"> / {count(totals?.call_count ?? 0)} 次</span></dd>
-        <dd>{timed < (totals?.call_count ?? 0) ? '更早的调用上线前未记录用时' : '每次调用都有开始与结束时间'}</dd>
+        <dd className="value">{count(timed)}<span className="unit"> / {count(calls)} 次</span></dd>
+        <dd>{calls === 0 ? '没有调用' : timed < calls ? '更早的调用上线前未记录用时' : '每次调用都有开始与结束时间'}</dd>
       </div>
     </dl>
   );
@@ -131,8 +132,14 @@ function DayTable({ days }: { days: readonly ModelUsageDay[] }) {
   );
 }
 
-const callSeconds = (value: number | undefined): string =>
-  value === undefined ? NOT_RECORDED : value < 10 ? `${String(Math.round(value * 10) / 10)} 秒` : wholeSeconds(value);
+const callSeconds = (value: number | undefined): string => (value === undefined ? NOT_RECORDED : budgetSeconds(value));
+
+/** A call's longest time against the newest frozen budget of its node: past it, or within its last fifth. */
+export function callBudgetNote(node: ModelUsageNode): string | null {
+  if (!node.budget_seconds || node.max_seconds === undefined) return null;
+  if (node.max_seconds > node.budget_seconds) return '▲ 超过节点预算';
+  return node.max_seconds > node.budget_seconds * 0.8 ? '▲ 接近节点预算' : null;
+}
 
 function Nodes({ nodes }: { nodes: readonly ModelUsageNode[] }) {
   return (
@@ -153,7 +160,7 @@ function Nodes({ nodes }: { nodes: readonly ModelUsageNode[] }) {
             <tbody>
               {nodes.map((node, index) => {
                 const usage = node.usage;
-                const near = node.budget_seconds && node.max_seconds !== undefined && node.max_seconds > node.budget_seconds * 0.8;
+                const note = callBudgetNote(node);
                 return (
                   <tr key={index}>
                     <th scope="row">
@@ -168,7 +175,7 @@ function Nodes({ nodes }: { nodes: readonly ModelUsageNode[] }) {
                     <td className="num">
                       {node.max_seconds === undefined ? NOT_RECORDED : callSeconds(node.max_seconds)}
                       {node.budget_seconds ? <span className="muted"> / {wholeSeconds(node.budget_seconds)}</span> : null}
-                      {near ? <span className="cell-sub warn-text">▲ 接近节点预算</span> : null}
+                      {note ? <span className="cell-sub warn-text">{note}</span> : null}
                     </td>
                     <td className="num">
                       {count(usage?.input_tokens ?? 0)} / {count(usage?.output_tokens ?? 0)}

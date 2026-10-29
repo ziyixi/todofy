@@ -1,4 +1,5 @@
 import { useIsFetching, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { MouseEvent } from 'react';
 import { RpcStatusError } from '@ziyixi/proto/http-client';
 import type { Overview } from '@ziyixi/proto/newsletter/ui/v1/overview_wire';
 import { read } from './api.ts';
@@ -100,6 +101,15 @@ function Notice({ link }: { link: Exclude<Link, 'connected'> }) {
   }
 }
 
+/**
+ * The skip link moves focus to the page's content without following its href: the location hash names the page
+ * (route.ts), and #main would read as the overview.
+ */
+function skipToMain(event: MouseEvent<HTMLAnchorElement>): void {
+  event.preventDefault();
+  document.getElementById('main')?.focus();
+}
+
 function AttentionLine({ overview }: { overview: Overview }) {
   const attention = attentionOf(overview);
   return (
@@ -151,7 +161,7 @@ export function App() {
 
   return (
     <>
-      <a className="skip" href="#main">跳到正文</a>
+      <a className="skip" href="#main" onClick={skipToMain}>跳到正文</a>
       <header className="masthead">
         <div className="masthead-title">
           <p className="eyebrow"><span className="brand" aria-hidden="true" />PERSONAL CLOUD / NEWSLETTER</p>

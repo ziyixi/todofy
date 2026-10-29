@@ -87,6 +87,10 @@ describe('来源', () => {
     expect(row('订阅源')).toHaveTextContent('●在预算内');
     expect(row('历史')).toHaveTextContent('○无单独预算');
     expect(budgetMark({ budget_seconds: 100 })).toEqual({ label: '尚无记录', tone: 'none' });
+    // A run that froze a larger budget ran past today's without an overrun: that is not merely close.
+    expect(budgetMark({ budget_seconds: 150, recent_max_seconds: 161 })).toEqual({ label: '超过当前预算', tone: 'warn' });
+    expect(budgetMark({ budget_seconds: 150, recent_max_seconds: 121 })).toEqual({ label: '接近预算', tone: 'warn' });
+    expect(budgetMark({ budget_seconds: 150, recent_max_seconds: 120 })).toEqual({ label: '在预算内', tone: 'ok' });
   });
 
   it('lists the editorial rules in the order an issue is composed', async () => {

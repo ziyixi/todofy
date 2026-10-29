@@ -5,8 +5,8 @@ import type {
 } from '@ziyixi/proto/newsletter/ui/v1/edition_wire';
 import { read } from './api.ts';
 import {
-  accessScope, count, deliveryState, editionKind, hostOf, httpsUrl, idOf, issueDate, personalState, replicaState,
-  sectionKind, short, time, webUrl, type Word,
+  EDITION_DELIVERY, accessScope, count, deliveryState, editionKind, hostOf, httpsUrl, idOf, issueDate, personalState,
+  replicaState, sectionKind, short, time, webUrl, type Word,
 } from './format.ts';
 import { Mark } from './Mark.tsx';
 import { issueHref, issuesHref, runHref, type ReaderView } from './route.ts';
@@ -280,7 +280,7 @@ function Rail({ edition }: { edition: Edition }) {
         </div>
         <div>
           <dt>投递</dt>
-          <dd><Mark word={deliveryState(delivery?.state)} /></dd>
+          <dd><Mark word={deliveryState(delivery?.state, EDITION_DELIVERY)} /></dd>
           {delivery?.update_time ? <dd className="rail-note">更新于 {time(delivery.update_time, true)}</dd> : null}
           {delivery?.error_code ? <dd className="rail-note"><code>{delivery.error_code}</code></dd> : null}
           {delivery?.verification_count ? <dd className="rail-note">这一天已发修订 {delivery.verification_count} 次</dd> : null}

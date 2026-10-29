@@ -47,7 +47,7 @@ describe('期刊', () => {
     const unknown = { ...list.editions[3], delivery: { state: 'unknown' } };
     const rejected = { ...list.editions[5], delivery: { state: 'rejected', error_code: 'mail_rejected' } };
     const pick = (state: string) => FILTERS.find((item) => item.value === 'unsent')!.test({ kind: 'daily', delivery: { state: state as never } });
-    expect(['unknown', 'submitting', 'provider_accepted'].map(pick)).toEqual([false, false, false]);
+    expect(['unknown', 'submitting', 'provider_accepted', '', 'brand_new'].map(pick)).toEqual([false, false, false, false, false]);
     expect(['not_requested', 'rejected', 'simulated'].map(pick)).toEqual([true, true, true]);
     serve(world({ '/api/v1/editions': { ...list, editions: [unknown, rejected] } }));
     show('#/issues?show=unsent');
@@ -57,6 +57,14 @@ describe('期刊', () => {
     show('#/issues?show=unsent');
     const empty = await screen.findByText(/这个月没有生成后未发出的期刊/);
     expect(within(empty).getByRole('link', { name: '查看这个月的运行 →' })).toHaveAttribute('href', '#/runs?month=2026-10');
+  });
+
+  it('never calls an edition without a delivery state 无期刊 or healthy', async () => {
+    const list = fixture<{ editions: Record<string, unknown>[] }>('editions');
+    serve(world({ '/api/v1/editions': { ...list, editions: [{ ...list.editions[3], delivery: {} }] } }));
+    show('#/issues');
+    const [card] = await cards();
+    expect(card).toHaveTextContent('投递▲状态未记录');
   });
 
   it('reads the month the address asks for, and offers the nearest months that have editions', async () => {

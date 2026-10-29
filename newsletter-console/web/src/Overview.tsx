@@ -7,8 +7,8 @@ import type { Dependency, Run, RunNode } from '@ziyixi/proto/newsletter/ui/v1/ru
 import type { ConfigState } from '@ziyixi/proto/newsletter/ui/v1/source_catalog_wire';
 import { runQuery } from './api.ts';
 import {
-  SHAPES, UNKNOWN_CATEGORIES, configState, count, deliveryState, dependency, dependencyState, drainState, duration,
-  editionKind, failureKind, issueDate, nodeName, nodeNameById, nodeState, replicaState, runState, seconds, short,
+  EDITION_DELIVERY, SHAPES, UNKNOWN_CATEGORIES, configState, count, deliveryState, dependency, dependencyState, drainState,
+  duration, editionKind, failureKind, issueDate, nodeName, nodeNameById, nodeState, replicaState, runState, seconds, short,
   stopReason, stripDay, time, trigger, webUrl, wholeSeconds, type Tone, type Word,
 } from './format.ts';
 import { Mark } from './Mark.tsx';
@@ -179,7 +179,7 @@ function Hero({ edition, run }: { edition: Edition | undefined; run: Run | undef
       ) : null}
       <dl className="hero-marks">
         <div><dt>运行</dt><dd><Mark word={ownRun ? runState(ownRun.state) : { label: '已生成', tone: 'ok' }} /></dd></div>
-        <div><dt>投递</dt><dd><Mark word={deliveryState(edition.delivery?.state)} /></dd></div>
+        <div><dt>投递</dt><dd><Mark word={deliveryState(edition.delivery?.state, EDITION_DELIVERY)} /></dd></div>
         <div><dt>Notion 备份</dt><dd><Mark word={replicaState(edition.backup?.state)} /></dd></div>
       </dl>
       <p className="hero-actions">
@@ -203,7 +203,7 @@ function ServiceCard({ service, delivery }: { service: ServiceState | undefined;
         {/* Fleet's and Home's latest delivery: the newest settled real one, whichever issue it belongs to. */}
         <li>
           <span>最近投递记录</span>
-          <Mark word={delivery ? deliveryState(delivery.delivery?.state) : { label: '尚无投递', tone: 'none' }} />
+          <Mark word={delivery ? deliveryState(delivery.delivery?.state, EDITION_DELIVERY) : { label: '尚无投递', tone: 'none' }} />
           {delivery ? <span className="row-note">{issueDate(delivery.issue_date)}一期 · 更新于 {time(delivery.delivery?.update_time, true)}</span> : null}
         </li>
       </ul>

@@ -3,8 +3,8 @@ import type { SourceOutcome } from '@ziyixi/proto/newsletter/ui/v1/run_wire';
 import type { ConfigRevision, Direction, FeedSource, NodeBudget, SourceCatalog } from '@ziyixi/proto/newsletter/ui/v1/source_catalog_wire';
 import { read } from './api.ts';
 import {
-  SHAPES, count, editorialLimit, editorialOrder, issueDate, nodeNameById, nodeState, short, sourceCode, sourceKind, time, webUrl,
-  wholeSeconds, type Word,
+  SHAPES, budgetSeconds, count, editorialLimit, editorialOrder, issueDate, nodeNameById, nodeState, short, sourceCode, sourceKind,
+  time, webUrl, wholeSeconds, type Word,
 } from './format.ts';
 import { Mark } from './Mark.tsx';
 import { ConfigCard } from './Overview.tsx';
@@ -165,16 +165,20 @@ function History({ history, active }: { history: readonly ConfigRevision[]; acti
   );
 }
 
-/** How a node's recent runs used its budget: an overrun against the budget each run froze, or close to today's. */
+/**
+ * How a node's recent runs used its budget: an overrun against the budget each run froze, else today's budget. A
+ * longest time past today's budget without an overrun (a run that froze a larger one) would not fit it now.
+ */
 export function budgetMark(budget: NodeBudget): Word {
   if (budget.overrun_count) return { label: `超出 ${String(budget.overrun_count)} 次`, tone: 'bad' };
   if (!budget.budget_seconds) return { label: '无单独预算', tone: 'none' };
   if (budget.recent_max_seconds === undefined) return { label: '尚无记录', tone: 'none' };
+  if (budget.recent_max_seconds > budget.budget_seconds) return { label: '超过当前预算', tone: 'warn' };
   if (budget.recent_max_seconds > budget.budget_seconds * 0.8) return { label: '接近预算', tone: 'warn' };
   return { label: '在预算内', tone: 'ok' };
 }
 
-const seconds = (value: number | undefined): string => (value === undefined ? '—' : value < 10 ? `${String(Math.round(value * 10) / 10)} 秒` : wholeSeconds(value));
+const seconds = (value: number | undefined): string => (value === undefined ? '—' : budgetSeconds(value));
 
 function Budgets({ budgets }: { budgets: readonly NodeBudget[] }) {
   return (

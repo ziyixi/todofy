@@ -1,6 +1,7 @@
 import { cleanup, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { serve, show, USAGE, world } from './test/world.tsx';
+import { callBudgetNote } from './Models.tsx';
+import { fixture, serve, show, USAGE, world } from './test/world.tsx';
 
 afterEach(() => {
   cleanup();
@@ -65,5 +66,22 @@ describe('模型', () => {
     expect(rows[2]).toHaveTextContent('下限');
     expect(rows[4]).toHaveTextContent('简讯审校');
     expect(screen.getByText(/这里是 Newsletter 自己的调用账本；Model Router 的请求记录是另一份账本/)).toBeVisible();
+  });
+
+  it('marks a call past its node budget as past it, not as close to it', () => {
+    expect(callBudgetNote({ budget_seconds: 150, max_seconds: 161 })).toBe('▲ 超过节点预算');
+    expect(callBudgetNote({ budget_seconds: 150, max_seconds: 125 })).toBe('▲ 接近节点预算');
+    expect(callBudgetNote({ budget_seconds: 150, max_seconds: 120 })).toBeNull();
+    expect(callBudgetNote({ max_seconds: 161 })).toBeNull();
+  });
+
+  it('says 没有调用 for a range without calls, never that every call was complete', async () => {
+    const empty = { ...fixture<Record<string, unknown>>('model-usage-30d'), totals: {}, days: [], nodes: [], timed_call_count: 0 };
+    serve(world({ [USAGE]: empty }));
+    show('#/models');
+    const tiles = within(await screen.findByLabelText('用量'));
+    expect(tiles.getByText('输出 tokens').parentElement).toHaveTextContent('没有调用');
+    expect(tiles.getByText('有用时记录').parentElement).toHaveTextContent('没有调用');
+    expect(tiles.queryByText(/每次调用都有/)).toBeNull();
   });
 });

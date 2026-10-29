@@ -57,6 +57,15 @@ describe('the console shell', () => {
     expect(await screen.findByRole('heading', { name: '10月28日 周三' })).toBeVisible();
   });
 
+  it('moves focus to the content from the skip link and stays on the page', async () => {
+    serve(world());
+    show('#/sources');
+    await screen.findByRole('heading', { name: '来源' });
+    fireEvent.click(screen.getByRole('link', { name: '跳到正文' }));
+    expect(window.location.hash).toBe('#/sources');
+    expect(document.activeElement).toBe(screen.getByRole('main'));
+  });
+
   it('has a tab for each page, and gives an issue to 期刊 and a run to 运行', async () => {
     const pages: [string, string][] = [
       ['#/issues', '期刊'], [`#/${EDITION.replace('editions/', 'issues/')}`, '期刊'], ['#/sources', '来源'], ['#/models?days=90', '模型'], ['#/backup', '备份'],
