@@ -20,6 +20,7 @@ import newsletter.contracts as contracts
 import newsletter.errors as errors
 import newsletter.model_io as model_io
 import newsletter.types as types
+import newsletter.usage as newsletter_usage
 import newsletter.workflow.schema as newsletter_workflow_schema
 import newsletter.workflow.sources as sources
 
@@ -826,20 +827,23 @@ class ContentPreparation:
         if notes:
             prompt["metadata_seed_notes_untrusted"] = notes
             rules += _RESEARCHER_NOTES
-        text, opened, searched = await self.engine.execute(
-            contracts.canonical_json(prompt),
-            newsletter_workflow_schema.discovery_schema(
-                classified=limits is not None
-            ),
-            rules
-            if content_config is None
-            else rules
-            + "\n本期编辑重心（取代旧的题材优先顺序）：\n"
-            + _configured_policy(
-                content_config, "prompts/discovery.md", DEFAULT_DISCOVERY_POLICY
-            ),
-            model_io.prepare_workspace(workspace, issue_date),
-        )
+        with newsletter_usage.purpose_scope("discovery"):
+            text, opened, searched = await self.engine.execute(
+                contracts.canonical_json(prompt),
+                newsletter_workflow_schema.discovery_schema(
+                    classified=limits is not None
+                ),
+                rules
+                if content_config is None
+                else rules
+                + "\n本期编辑重心（取代旧的题材优先顺序）：\n"
+                + _configured_policy(
+                    content_config,
+                    "prompts/discovery.md",
+                    DEFAULT_DISCOVERY_POLICY,
+                ),
+                model_io.prepare_workspace(workspace, issue_date),
+            )
         return parse_discovery(
             text,
             opened,
@@ -892,41 +896,43 @@ class ContentPreparation:
             [c["id"] for c in candidates],
             [c["url"] for c in candidates],
         )
-        text, _, _ = await self.engine.execute(
-            contracts.canonical_json(
+        prompt: types.Payload = {
+            "issue_date": issue_date,
+            "candidates_untrusted": candidates,
+            "history_untrusted": context,
+            "watchlist_untrusted": public_context(watchlist),
+            "max_tasks": max_tasks,
+            "reader_profile": reader_profile,
+            **(
                 {
-                    "issue_date": issue_date,
-                    "candidates_untrusted": candidates,
-                    "history_untrusted": context,
-                    "watchlist_untrusted": public_context(watchlist),
-                    "max_tasks": max_tasks,
-                    "reader_profile": reader_profile,
-                    **(
-                        {
-                            "candidate_classifications": classifications,
-                            "editorial_budget": {
-                                "max_public_items": limits.max_public_items,
-                                "max_research_items": limits.max_research_items,
-                                "max_deep": limits.max_deep,
-                            },
-                        }
-                        if limits is not None
-                        else {}
-                    ),
+                    "candidate_classifications": classifications,
+                    "editorial_budget": {
+                        "max_public_items": limits.max_public_items,
+                        "max_research_items": limits.max_research_items,
+                        "max_deep": limits.max_deep,
+                    },
                 }
+                if limits is not None
+                else {}
             ),
-            newsletter_workflow_schema.planning_schema(
-                ids, urls, max_tasks, classified=limits is not None
-            ),
-            _SELECTION
-            if content_config is None
-            else _CLASSIFIED_SELECTION_RULES
-            + "\n"
-            + _configured_policy(
-                content_config, "prompts/selection.md", DEFAULT_SELECTION_POLICY
-            ),
-            model_io.prepare_workspace(workspace, issue_date),
-        )
+        }
+        with newsletter_usage.purpose_scope("selection"):
+            text, _, _ = await self.engine.execute(
+                contracts.canonical_json(prompt),
+                newsletter_workflow_schema.planning_schema(
+                    ids, urls, max_tasks, classified=limits is not None
+                ),
+                _SELECTION
+                if content_config is None
+                else _CLASSIFIED_SELECTION_RULES
+                + "\n"
+                + _configured_policy(
+                    content_config,
+                    "prompts/selection.md",
+                    DEFAULT_SELECTION_POLICY,
+                ),
+                model_io.prepare_workspace(workspace, issue_date),
+            )
         if limits is not None:
             return parse_classified_plan(
                 text, candidates, classifications or {}, max_tasks, limits

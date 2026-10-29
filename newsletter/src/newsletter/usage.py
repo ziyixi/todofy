@@ -3,6 +3,11 @@
 The router returns per-call counts. Correction calls share one invocation and
 add their distinct final receipts once. Missing/interrupted usage is unknown.
 Historical stored provider labels and invocation IDs remain unchanged.
+
+Each record also keeps content-free observability: when the invocation ran,
+its editorial purpose, the Router request names and reported models, and a
+finite failure code. Records written before these keys existed lack them, so
+readers treat a missing key as "not recorded", never as zero.
 """
 
 from __future__ import annotations
@@ -11,8 +16,10 @@ from collections.abc import Callable, Iterator, Sequence
 import contextlib
 import contextvars
 import copy
+import datetime
 import logging
-from typing import cast, Literal, TypedDict
+import re
+from typing import cast, Literal, NotRequired, TypedDict
 import uuid
 
 import model_router_client as models
@@ -32,8 +39,21 @@ class TokenCounts(TypedDict):
     total_tokens: int
 
 
+class RouterRequest(TypedDict):
+    """One Router trace name and the model it reported; never content."""
+
+    name: str
+    model: str
+
+
 class UsageRecord(TypedDict):
-    """Normalized totals and completeness for one model invocation."""
+    """Normalized totals and completeness for one model invocation.
+
+    The optional keys are absent on records written before they existed.
+    ``estimated_cost_microusd`` and ``billing_kind`` stay absent when no call
+    reported them, ``finished_at`` until the invocation ends and ``failure``
+    unless it failed.
+    """
 
     id: str
     provider: Literal["codex", "model_router"]
@@ -47,6 +67,14 @@ class UsageRecord(TypedDict):
     turns_with_usage: int
     usage_events: int
     partial: bool
+    purpose: NotRequired[str]
+    started_at: NotRequired[str]
+    finished_at: NotRequired[str]
+    requests: NotRequired[list[RouterRequest]]
+    contributing_models: NotRequired[list[str]]
+    estimated_cost_microusd: NotRequired[int]
+    billing_kind: NotRequired[str]
+    failure: NotRequired[str]
 
 
 class UsageSummary(TypedDict):
@@ -59,8 +87,44 @@ class UsageSummary(TypedDict):
 
 
 UsageSink = Callable[[UsageRecord], None]
-_SCOPE: contextvars.ContextVar[tuple[UsageSink, str] | None] = (
+Clock = Callable[[], str]
+# The editorial jobs that call a model. Unlabelled invocations (schema smoke,
+# prompt evaluation) fall back to their stage's node name.
+PURPOSES = frozenset(
+    {
+        "discovery",
+        "selection",
+        "writer",
+        "reviewer",
+        "repair_writer",
+        "repair_reviewer",
+    }
+)
+# The editor's safe error categories, plus ``interrupted`` for an invocation
+# that ended without one (cancellation, a node budget or a process stop).
+FAILURES = frozenset(
+    {
+        "configuration",
+        "authentication",
+        "rate_limit",
+        "timeout",
+        "unavailable",
+        "invalid_output",
+        "invalid_input",
+        "interrupted",
+    }
+)
+# One invocation is at most two turns; the bound only guards the record.
+MAX_REQUESTS = 4
+MAX_MODELS = 4
+_REQUEST_NAME = re.compile(r"requests/[A-Za-z0-9-]{1,64}")
+_MODEL_NAME = re.compile(r"[A-Za-z0-9@/._:+-]{1,128}")
+_BILLING_KIND = re.compile(r"[a-z_]{1,32}")
+_SCOPE: contextvars.ContextVar[tuple[UsageSink, str, Clock] | None] = (
     contextvars.ContextVar("usage_scope", default=None)
+)
+_PURPOSE: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "usage_purpose", default=None
 )
 _CountField = Literal[
     "input_tokens",
@@ -87,14 +151,42 @@ def _consistent(counts: TokenCounts) -> bool:
     )
 
 
+def utc_now() -> str:
+    """Return the timezone-aware UTC ISO time used by durable records."""
+    return datetime.datetime.now(datetime.UTC).isoformat()
+
+
+def _label(value: object, pattern: re.Pattern[str]) -> str:
+    # Provider-reported identifiers are kept only in a bounded safe shape.
+    return value if isinstance(value, str) and pattern.fullmatch(value) else ""
+
+
 @contextlib.contextmanager
-def usage_scope(sink: UsageSink, stage: str) -> Iterator[None]:
+def usage_scope(
+    sink: UsageSink, stage: str, *, clock: Clock = utc_now
+) -> Iterator[None]:
     """Attach a persistence sink to this task, not global process state."""
-    token = _SCOPE.set((sink, stage))
+    token = _SCOPE.set((sink, stage, clock))
     try:
         yield
     finally:
         _SCOPE.reset(token)
+
+
+@contextlib.contextmanager
+def purpose_scope(purpose: str) -> Iterator[None]:
+    """Label the invocations started in this block with an editorial job.
+
+    A context variable keeps the label out of every editor signature, so
+    fakes and other callers stay unchanged.
+    """
+    if purpose not in PURPOSES:
+        raise ValueError("unknown_usage_purpose")
+    token = _PURPOSE.set(purpose)
+    try:
+        yield
+    finally:
+        _PURPOSE.reset(token)
 
 
 class ModelUsage:
@@ -103,11 +195,13 @@ class ModelUsage:
     def __init__(self, model: str) -> None:
         scope = _SCOPE.get()
         self.sink = scope[0] if scope else None
+        self.clock = scope[2] if scope else utc_now
+        stage = scope[1] if scope else "unscoped"
         self.record = UsageRecord(
             id=str(uuid.uuid4()),
             provider="model_router",
             model=model,
-            stage=scope[1] if scope else "unscoped",
+            stage=stage,
             thread_id=None,
             status="running",
             usage=None,
@@ -116,9 +210,15 @@ class ModelUsage:
             turns_with_usage=0,
             usage_events=0,
             partial=True,
+            purpose=_PURPOSE.get() or stage.partition(":")[0],
+            # The invocation starts before its conversation is created.
+            started_at=self.clock(),
+            requests=[],
+            contributing_models=[],
         )
         self._gap = False
         self._seen: set[str] = set()
+        self._failure = ""
 
     def _save(self) -> None:
         if self.sink is not None:
@@ -152,6 +252,7 @@ class ModelUsage:
             return
         self._seen.add(generation.name)
         self.record["turns_completed"] += 1
+        self._observe_trace(generation)
         reported = generation.usage
         if reported is None or not reported.available:
             self._gap = True
@@ -177,11 +278,45 @@ class ModelUsage:
             self._gap |= not _consistent(values)
         self._save()
 
+    def _observe_trace(self, generation: models.Generation) -> None:
+        # Fakes and older clients may lack these fields; read them softly.
+        requests = self.record.setdefault("requests", [])
+        if len(requests) < MAX_REQUESTS:
+            requests.append(
+                RouterRequest(
+                    name=_label(generation.name, _REQUEST_NAME),
+                    model=_label(getattr(generation, "model", ""), _MODEL_NAME),
+                )
+            )
+        contributing = self.record.setdefault("contributing_models", [])
+        for name in getattr(generation, "contributing_models", ()) or ():
+            model = _label(name, _MODEL_NAME)
+            if model and model not in contributing:
+                if len(contributing) >= MAX_MODELS:
+                    break
+                contributing.append(model)
+        reported = getattr(generation, "usage", None)
+        cost = getattr(reported, "estimated_cost_microusd", None)
+        if type(cost) is int and cost >= 0:
+            self.record["estimated_cost_microusd"] = (
+                self.record.get("estimated_cost_microusd", 0) + cost
+            )
+        kind = _label(getattr(reported, "billing_kind", ""), _BILLING_KIND)
+        if kind and "billing_kind" not in self.record:
+            self.record["billing_kind"] = kind
+
+    def fail(self, code: str) -> None:
+        """Keep the editor's safe failure category for the final record."""
+        self._failure = code if code in FAILURES else "unavailable"
+
     def finish(self, success: bool) -> None:
         """Persist invocation completion without inventing missing counters."""
         if not self.record["turns_started"]:
             return  # Startup/authentication made no model attempt.
         self.record["status"] = "completed" if success else "failed"
+        self.record["finished_at"] = self.clock()
+        if not success:
+            self.record["failure"] = self._failure or "interrupted"
         self.record["partial"] = bool(
             self._gap
             or not success

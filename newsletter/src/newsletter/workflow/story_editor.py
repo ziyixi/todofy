@@ -25,6 +25,7 @@ import newsletter.errors as errors
 import newsletter.model_io as model_io
 import newsletter.model_schema as model_schema
 import newsletter.types as types
+import newsletter.usage as newsletter_usage
 import newsletter.workflow.components as components
 import newsletter.workflow.publication as publication
 import newsletter.workflow.review as newsletter_workflow_review
@@ -766,17 +767,20 @@ class StoryEditor:
         path = model_io.prepare_workspace(
             workspace / f"writer-{job}", context["issue_date"]
         )
-        text, opened, _ = await self.editor.execute(
-            contracts.canonical_json(prompt),
-            story_writer_schema(
-                context["mode"],
-                repair=repair,
-                story_id=context["story_id"],
-                packets=packets,
-            ),
-            policy.get("editorial.md", ""),
-            path,
-        )
+        with newsletter_usage.purpose_scope(
+            "repair_writer" if repair else "writer"
+        ):
+            text, opened, _ = await self.editor.execute(
+                contracts.canonical_json(prompt),
+                story_writer_schema(
+                    context["mode"],
+                    repair=repair,
+                    story_id=context["story_id"],
+                    packets=packets,
+                ),
+                policy.get("editorial.md", ""),
+                path,
+            )
         value = model_io.load_json(text)
         if not isinstance(value, dict) or set(value) != {
             "content",
@@ -1098,9 +1102,14 @@ class StoryEditor:
                     }
                 ],
             }
-        return await self._review(
-            value, writer_job, round_name, context, policy, workspace
-        )
+        # Both rounds share one review job; the label keeps the repair round's
+        # model calls apart in the usage ledger.
+        with newsletter_usage.purpose_scope(
+            "repair_reviewer" if round_name == "repair" else "reviewer"
+        ):
+            return await self._review(
+                value, writer_job, round_name, context, policy, workspace
+            )
 
     @staticmethod
     def _reviewable_prior(
