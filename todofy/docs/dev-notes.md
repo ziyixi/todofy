@@ -262,7 +262,9 @@ Local runtime quirks (not production behaviour)
   Locally a Worker reading D1 in a loop failed 2 of 6,935 reads in 60 s beside the tests' 0.5 s `wrangler d1
   execute` poll, and none of 6,953 with the same poll through the server. `Worker.d1` therefore runs its SQL
   in the server, through wrangler dev's Local Explorer (`POST /cdn-cgi/local/explorer/api/d1/database/<id>/raw`),
-  in turn with the Worker's queries; run wrangler's own D1 commands only against a stopped server.
+  in turn with the Worker's queries. Local R2 keeps its object index in SQLite as well (a `wrangler r2 object
+  get` beside the backup test's server failed in CI with `internal error`), so run wrangler's own `--local` D1
+  and R2 commands only on files the server has not opened yet or with the server stopped (`test_backup.py`).
 - wrangler's local proxy passes a chunked upload on only in large pieces (1.1 MiB unterminated never
   reached the object in a probe; 3.2 MiB did) and may add a length, so an HTTP test cannot prove that the
   object stops reading early. `test_owner_body_limit.py` proves the early stop on `interop.read_capped`
