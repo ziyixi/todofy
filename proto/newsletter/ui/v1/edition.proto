@@ -26,9 +26,10 @@ message Edition {
     plural: "editions"
   };
 
-  // Which kind of issue, by the rules the Notion backup's type column uses (in this order): a fixture is TEST, an
-  // edition sent as a correction is CORRECTION, an edition of any run but the issue date's scheduled one is TEST, and
-  // the rest are DAILY.
+  // Which kind of issue, from Newsletter's own records by the first rule that applies: a fixture is TEST, an edition
+  // sent as a correction is CORRECTION, an edition of any run but the issue date's scheduled one is TEST, and the
+  // rest are DAILY. The Notion backup's type column copies these rules, except that it files the editions created
+  // before the backup began as tests.
   enum Kind {
     // Never written.
     KIND_UNSPECIFIED = 0;
@@ -92,7 +93,8 @@ message Edition {
   repeated string review_findings = 22 [(google.api.field_behavior) = OUTPUT_ONLY];
   // What the run decided for each story it considered.
   repeated StoryOutcome stories = 23 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The model usage frozen into the edition (the email footer's numbers).
+  // The model usage frozen into the edition when it was rendered (the email footer's numbers): `call_count`, the
+  // token sums and `complete` only. The frozen summary counts no failures, partial calls or cost: Run.usage has them.
   UsageTotals usage = 24 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The content-config revision the run froze (a commit SHA or `packaged`), empty when the run had none.
   string config_revision = 25 [(google.api.field_behavior) = OUTPUT_ONLY];
@@ -259,7 +261,8 @@ message PersonalDigest {
   google.protobuf.Timestamp fetch_time = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The fetch's error code; empty without one.
   string error_code = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // True when the Notion backup copies this section too (BackupStatus.includes_personal when it was written).
+  // True when the Notion backup copies this section with the edition (BackupStatus.includes_personal while the
+  // backup is on); false when it leaves the section out or is off.
   bool backup_included = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 

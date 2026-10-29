@@ -56,7 +56,8 @@ message Overview {
   ConfigState config = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The Notion backup over every target, absent when the backup is off.
   ReplicaCounts backup = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Model usage over the last 7 issue dates.
+  // Model usage over the 7 issue dates ending with the newest that has a run: SummarizeModelUsage's `totals` for
+  // day_count 7, so the two agree.
   UsageTotals week_usage = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The external interfaces over the latest run and the backup's journal, in `Dependency.Kind` order.
   repeated Dependency dependencies = 12 [(google.api.field_behavior) = OUTPUT_ONLY];

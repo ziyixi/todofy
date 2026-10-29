@@ -5,7 +5,8 @@
 // state). Read-only: no method writes, runs, sends, retries or syncs anything.
 //
 // The record. Newsletter's SQLite database is authoritative for everything answered here. Notion is an
-// asynchronous backup of it (backup_status.proto): written after the fact, never read back, never a source.
+// asynchronous backup of it (backup_status.proto): written after the fact and never a source; nothing in Notion is
+// ever copied back.
 //
 // Served by Newsletter itself (the Python engine, newsletter/), from a short read-only snapshot of its database and
 // content configuration, on a listener of its own that routes and decodes requests with the generated HTTP_BINDINGS
@@ -26,10 +27,10 @@
 // (proto/README.md): proto field names (snake_case), enum values in lower case without their prefix
 // (`Run.State.STATE_BLOCKED` is "blocked"), timestamps in RFC 3339 UTC. Inputs are read strictly, outputs leniently.
 // Every output field is OUTPUT_ONLY and written only when it has a value: no producer writes null. Errors are
-// common/errors/v1/errors.proto's reasons only: BAD_REQUEST, NOT_FOUND, UNAVAILABLE (Newsletter, its host or its
-// database cannot answer now, which a client may repeat) and INTERNAL from the service; UNAUTHORIZED,
-// NOT_CONFIGURED (the Worker has no Newsletter origin yet) and METHOD_NOT_ALLOWED from the Worker's own
-// authentication, configuration and transcoder.
+// common/errors/v1/errors.proto's reasons only. Newsletter's BAD_REQUEST and NOT_FOUND pass through; any other
+// failure to answer (Newsletter, its host, the tunnel or its database) is UNAVAILABLE, which a client may repeat,
+// since Newsletter is the Worker's dependency. The Worker's own authentication, configuration and transcoder answer
+// UNAUTHORIZED, NOT_CONFIGURED (it has no Newsletter origin yet), METHOD_NOT_ALLOWED, BAD_REQUEST and INTERNAL.
 //
 // Time. Issue dates (YYYY-MM-DD) and months (YYYY-MM) are counted in the service's time zone (Overview.time_zone),
 // in which the daily run is scheduled; timestamps are instants.
@@ -154,7 +155,8 @@ message GetOverviewRequest {
 
 // Input of ListRuns.
 message ListRunsRequest {
-  // At most this many runs: 0 means 64, a larger value is read as 64. A month with more answers its newest 64.
+  // At most this many runs: 0 means 64, a larger value is read as 64 and a negative one is INVALID_ARGUMENT. A
+  // month with more answers its newest 64.
   int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
   // Reserved for paging; must be empty (anything else is INVALID_ARGUMENT): a month is one page.
   string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
@@ -201,7 +203,8 @@ message ListModelCallsRequest {
     (google.api.field_behavior) = REQUIRED,
     (google.api.resource_reference).type = "news.ziyixi.science/Run"
   ];
-  // At most this many calls: 0 means 200, a larger value is read as 200 (a run makes fewer).
+  // At most this many calls: 0 means 200, a larger value is read as 200 (a run makes fewer) and a negative one is
+  // INVALID_ARGUMENT.
   int32 page_size = 2 [(google.api.field_behavior) = OPTIONAL];
   // Reserved for paging; must be empty (anything else is INVALID_ARGUMENT): a run's calls are one page.
   string page_token = 3 [(google.api.field_behavior) = OPTIONAL];
@@ -217,8 +220,9 @@ message ListModelCallsResponse {
 
 // Input of SummarizeModelUsage.
 message SummarizeModelUsageRequest {
-  // How many issue dates, ending with the newest that has a run: 7, 30 or 90; 0 means 7, and any other value is
-  // INVALID_ARGUMENT. A number rather than an enum, because Newsletter's Python reader decodes only integer and
+  // How many consecutive issue dates (calendar days, with or without a run), ending with the newest issue date that
+  // has a run: 7, 30 or 90; 0 means 7, and any other value is INVALID_ARGUMENT. Overview.week_usage is the answer's
+  // `totals` for 7. A number rather than an enum, because Newsletter's Python reader decodes only integer and
   // string query parameters.
   int32 day_count = 1 [(google.api.field_behavior) = OPTIONAL];
 }
@@ -241,7 +245,8 @@ message SummarizeModelUsageResponse {
 
 // Input of ListEditions.
 message ListEditionsRequest {
-  // At most this many editions: 0 means 64, a larger value is read as 64. A month with more answers its newest 64.
+  // At most this many editions: 0 means 64, a larger value is read as 64 and a negative one is INVALID_ARGUMENT. A
+  // month with more answers its newest 64.
   int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
   // Reserved for paging; must be empty (anything else is INVALID_ARGUMENT): a month is one page.
   string page_token = 2 [(google.api.field_behavior) = OPTIONAL];

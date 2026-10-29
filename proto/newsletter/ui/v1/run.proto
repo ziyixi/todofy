@@ -71,7 +71,7 @@ message Run {
   google.protobuf.Timestamp create_time = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
   // When the workflow started; absent while queued.
   google.protobuf.Timestamp start_time = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // When it last finished an attempt or stopped; absent while queued or running.
+  // When it finished or stopped; absent while queued or running.
   google.protobuf.Timestamp end_time = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The whole run's deadline in seconds, frozen at its start; 0 when it had none.
   int32 deadline_seconds = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
@@ -184,7 +184,7 @@ message RunNodeItem {
 }
 
 // What stopped a run, or degraded it when nothing stopped it: the earliest failed or unknown attempt of a node whose
-// failure stops the run, else the first degraded node.
+// failure stops the run, else the first degraded node, else the run's own stop code.
 message RunFailure {
   // The failure in plain words.
   enum Kind {
@@ -192,7 +192,8 @@ message RunFailure {
     KIND_UNSPECIFIED = 0;
     // The node ran past its own budget (`timeout`).
     KIND_NODE_BUDGET = 1;
-    // The run's whole deadline passed while the node ran (`interrupted` at or after the deadline).
+    // The run's whole deadline passed while the node ran (`interrupted` at or after the deadline), or the run
+    // stopped at its deadline with no failed attempt (`workflow_deadline`).
     KIND_RUN_DEADLINE = 2;
     // Cancelled or cut off by a restart before the deadline (`interrupted`).
     KIND_INTERRUPTED = 3;
@@ -208,7 +209,7 @@ message RunFailure {
     KIND_OTHER = 8;
   }
 
-  // The node.
+  // The node; empty when only the run's stop code explains the stop.
   string node_id = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The node's item, empty for a node without items.
   string item_id = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
@@ -272,7 +273,7 @@ message Dependency {
     KIND_TODOFY = 3;
     // The mail provider.
     KIND_MAIL = 4;
-    // The Notion backup: an asynchronous copy, written after the record, never read back.
+    // The Notion backup: an asynchronous copy, written after the record; nothing in it is copied back.
     KIND_NOTION_BACKUP = 5;
   }
 

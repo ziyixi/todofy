@@ -1,8 +1,9 @@
 // (-- api-linter: core::0142::time-field-type=disabled
 //     aip.dev/not-precedent: dates are calendar-day text: the wire profile has no Date. --)
 // The Notion backup as Newsletter's replication journal records it. Newsletter's SQLite database is the record;
-// Notion holds an asynchronous copy for reading and searching, written after the fact and never read back (an edit
-// made in Notion does not return). Every state here is the journal's: answering it never calls Notion.
+// Notion holds an asynchronous copy for reading and searching, written after the fact. Newsletter reads a page there
+// only to check it against the record, and nothing in Notion is ever copied back (an edit made in Notion does not
+// return). Every state here is the journal's: answering it never calls Notion.
 syntax = "proto3";
 
 package newsletter.ui.v1;

@@ -18,11 +18,12 @@ its UI come next, and with the reader the golden answers in `fixtures/`.
 
 ## The record
 
-Newsletter's SQLite database is authoritative for every answer. Notion is an asynchronous backup of it: the
-backup is written after the fact from Newsletter's replication journal, never read back, and never a source or a
-step of the daily pipeline, so an edit made in Notion does not return. The backup's state in these answers is the
-journal's; answering never calls Notion. The console takes no lock of the engine and registers no deployment
-activity, so its reads stay available while a release has frozen the engine's work.
+Newsletter's SQLite database is authoritative for every answer. Notion is an asynchronous backup of it: the backup is
+written after the fact from Newsletter's replication journal and is never a source or a step of the daily pipeline.
+Newsletter reads a Notion page only to check it against the record and copies nothing back, so an edit made in Notion
+does not return. The backup's state in these answers is the journal's; answering never calls Notion. The console takes
+no lock of the engine and registers no deployment activity, so its reads stay available while a release has frozen the
+engine's work.
 
 ## Transport and authentication
 
@@ -33,11 +34,11 @@ shared owner policies and identity providers, so one owner login, and one audien
 1. The browser reaches the console Worker through that application. The Worker verifies the owner's assertion with
    `packages/edge-auth` (signature, issuer, the console's audience, lifetime, the owner's address) before anything
    else.
-2. The Worker forwards an admitted request to `https://<platform runtime host>/api/newsletter/v1/<rest>`: the
-   binding's `/api/v1/` becomes `/api/newsletter/v1/`, and the query string is kept. The only credential it sends is
-   the assertion it has just verified, in the `cf-access-token` header, which Access reads for requests that are not
-   a browser's. It never stores, logs or echoes it. Redirects are not followed, and a request that takes longer than
-   15 seconds is abandoned.
+2. The Worker forwards an admitted request to `https://<platform runtime host>/api/newsletter/v1/<rest>`, always as a
+   `GET` (it answers a `HEAD` from that without the body): the binding's `/api/v1/` becomes `/api/newsletter/v1/`, and
+   the query string is kept. The only credential it sends is the assertion it has just verified, in the
+   `cf-access-token` header, which Access reads for requests that are not a browser's. It never stores, logs or echoes
+   it. Redirects are not followed, and a request that takes longer than 15 seconds is abandoned.
 3. Access admits that path only with an assertion of the same application, and the tunnel's rule for the path
    requires that application's audience as well.
 4. Newsletter verifies the assertion again before it reads anything, with PyJWT, as the Codex gateway does: RS256,
@@ -65,9 +66,11 @@ that login expires.
   or seconds to the millisecond, which both languages spell alike), so the Worker passes them through without
   parsing them.
 - What the Worker answers: Newsletter's `200` with `application/json`, read under a streamed 4 MiB cap, unchanged;
-  Newsletter's `404` as `NOT_FOUND` and `400` as `BAD_REQUEST`; anything else (a redirect, Access refusing, a `5xx`,
-  a timeout, another content type, a larger body) as `UNAVAILABLE`, which a client may repeat. It never copies
-  Newsletter's body into an error. Every answer is `no-store`; nothing is cached at the edge.
+  Newsletter's `404` as `NOT_FOUND` and `400` as `BAD_REQUEST`; anything else (a redirect, Access refusing, a `5xx`, a
+  timeout, another content type, a larger body) as `UNAVAILABLE`, which a client may repeat, as for any failed
+  dependency ([`proto/README.md`](../../proto/README.md#http-apis)). Its own authentication, configuration and
+  transcoder answer `UNAUTHORIZED`, `NOT_CONFIGURED`, `METHOD_NOT_ALLOWED`, `BAD_REQUEST` and `INTERNAL`. It never
+  copies Newsletter's body into an error. Every answer is `no-store`; nothing is cached at the edge.
 
 ## Bounds
 
@@ -88,17 +91,23 @@ that login expires.
 
 - **Budgets.** A node's budget is always the one its run froze when it started (`params.timeout_seconds` of the run's
   frozen graph), never today's configuration.
-- **What stopped a run** (`RunFailure`). The earliest failed or unknown attempt of a node whose failure stops the
-  run, else the first degraded node. `timeout` is `NODE_BUDGET`; `interrupted` is `RUN_DEADLINE` when the attempt
-  ended at or after the run's deadline, else `INTERRUPTED`; `authentication`, `rate_limit`, `unavailable` and
-  `invalid_output` are `MODEL_ERROR`; `no_findings` is `NO_FINDINGS`; the run's `no_publishable_content` is
-  `NOTHING_PUBLISHABLE` and `workflow_storage` is `STORAGE`. A timed-out attempt may run past its budget by up to
-  about 30 seconds while its model conversation closes.
+- **What stopped a run** (`RunFailure`). The earliest failed or unknown attempt of a node whose failure stops the run,
+  else the first degraded node, else the run's own stop code. `timeout` is `NODE_BUDGET`; `interrupted` is
+  `RUN_DEADLINE` when the attempt ended at or after the run's deadline, else `INTERRUPTED`; the run's
+  `workflow_deadline` is `RUN_DEADLINE` too; `authentication`, `rate_limit`, `unavailable` and `invalid_output` are
+  `MODEL_ERROR`; `no_findings` is `NO_FINDINGS`; the run's `no_publishable_content` is `NOTHING_PUBLISHABLE` and
+  `workflow_storage` is `STORAGE`. A timed-out attempt may run past its budget by up to about 30 seconds while its
+  model conversation closes.
 - **Notion copy** (`Replica.State`). `CONFLICT` > `UNKNOWN` > `RETRYING` > `OUTDATED` (the edition changed after its
   last import) > `SYNCING` > `SYNCED`; `DISABLED` when the backup is off, `NOT_STARTED` when the journal has no
   entry yet.
-- **Edition kind.** The rules the Notion backup's type column uses: a fixture is 测试, an edition sent as a
-  correction is 修订, an edition of any run but its issue date's scheduled run is 测试, and the rest are 日常.
+- **Edition kind.** From Newsletter's own records, the first rule that applies: a fixture is 测试, an edition sent as a
+  correction is 修订, an edition of any run but its issue date's scheduled run is 测试, and the rest are 日常. The Notion
+  backup's type column copies these rules (it also files the editions from before the backup began as 测试), so the two
+  agree for every edition created after it began.
+- **Model usage.** `Overview.week_usage` is `SummarizeModelUsage`'s `totals` for 7 issue dates: both count the
+  consecutive calendar dates ending with the newest issue date that has a run. An edition's `usage` is the summary
+  frozen into its email, which has calls, tokens and completeness but no failure, partial or cost counts.
 - **Shared with Fleet and Home.** The unknown-record counts use the monitoring snapshot's predicates, the latest
   delivery its query, and the drain state the deployment gate's rows, so the numbers agree with Fleet.
 - **Never shown as live state.** The legacy packet projection, a run body's per-direction states and an edition
