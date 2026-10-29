@@ -233,8 +233,11 @@ def generated_files(root: Path) -> dict[str, str]:
         if name == "model-router":
             replacements["CODEX_EXECUTOR_ORIGIN"] = "https://" + profile["vps"]["platform_runtime_host"]
         if name == "newsletter-console":
-            # Newsletter's read path on the platform runtime host, gated by the console's own Access application.
+            # Newsletter's read path on the platform runtime host, gated by the console's own Access application, and
+            # the public pages the console links to (Fleet for the host, Model Router for each model call's requests).
             replacements["NEWSLETTER_ORIGIN"] = "https://" + profile["vps"]["platform_runtime_host"]
+            replacements["FLEET_URL"] = "https://fleet." + profile["zone"] + "/"
+            replacements["MODEL_ROUTER_URL"] = "https://models." + profile["zone"] + "/"
         for variable, value in replacements.items():
             if variable in variables:
                 text = literal_field(text, variable, value, "vars")

@@ -27,8 +27,11 @@ enabled = false
 
 [vars]
 PUBLIC_HOST = "news.ziyixi.science"
-# Public navigation only; web/vite.config.ts reads this at build time.
+# Public navigation only; web/vite.config.ts reads these at build time. Model Router's page opens each model call's
+# Router requests.
 HOME_URL = "https://home.ziyixi.science/"
+FLEET_URL = "https://fleet.ziyixi.science/"
+MODEL_ROUTER_URL = "https://models.ziyixi.science/"
 ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"
 # Newsletter's read path (/api/newsletter/v1/) lives on the platform runtime host, behind the console's own Access
 # application; generated from config/cloud.toml.
