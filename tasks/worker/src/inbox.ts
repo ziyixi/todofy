@@ -65,15 +65,17 @@ export async function createInboxTask(
       )
       .bind(answer.task_id, task.title, task.description, project, project, now, now),
   ];
-  if (subtasks.length)
-    writes.push(
-      db
-        .prepare(
-          `INSERT INTO tasks(id,title,description,project_id,parent_id,sort_order,created_at,updated_at)
-          SELECT value->>'id',value->>'title',value->>'description',?,?,key+1,?,? FROM json_each(?) ORDER BY key`,
-        )
-        .bind(project, answer.task_id, now, now, JSON.stringify(subtasks)),
-    );
+  // One statement per subtask, binding its text as given: a json_each statement over the subtasks would first encode
+  // up to 30 descriptions into one JSON string, which D1's request then escapes again (about 0.6 ms of the largest
+  // create's CPU). The batch still counts as one D1 query per invocation; a statement binds 8 of D1's 100 parameters.
+  const insertSubtask = db.prepare(
+    'INSERT INTO tasks(id,title,description,project_id,parent_id,sort_order,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)',
+  );
+  writes.push(
+    ...subtasks.map((item, index) =>
+      insertSubtask.bind(item.id, item.title, item.description, project, answer.task_id, index + 1, now, now),
+    ),
+  );
   const stored = JSON.parse(
     await commit(
       db,
