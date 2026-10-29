@@ -84,6 +84,8 @@ class Settings:
     )
     content_config_dir: pathlib.Path | None = None
     workflow_timeout_seconds: float = 5400
+    # The owner console's read-only listener (console_api.py); 0 is off.
+    console_port: int = 0
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -151,6 +153,7 @@ class Settings:
             workflow_timeout_seconds=_number_env(
                 "NEWSLETTER_WORKFLOW_TIMEOUT_SECONDS", "5400", float
             ),
+            console_port=_number_env("NEWSLETTER_CONSOLE_PORT", "0", int),
         )
 
     @property
@@ -241,6 +244,8 @@ class Settings:
             )
         if self.mode not in {"mock", "live"}:
             raise ValueError("NEWSLETTER_MODE must be mock or live")
+        if self.console_port and not 1024 <= self.console_port <= 65535:
+            raise ValueError("NEWSLETTER_CONSOLE_PORT must be 0 or 1024..65535")
         if self.editor_backend not in {"mock", "codex"}:
             raise ValueError("NEWSLETTER_EDITOR must be mock or codex")
         if self.notion_backend not in {"disabled", "fake", "notion"}:

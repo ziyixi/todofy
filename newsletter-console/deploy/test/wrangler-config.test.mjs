@@ -6,7 +6,7 @@ import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import { parseToml } from '../../../tools/cf-guard/toml.mjs'
 import { CONFIG, INJECTED, generateSecrets } from '../deploy-vars.mjs'
-import { homeURLFromConfig, validateHomeURL } from '../public-navigation.mjs'
+import { homeURLFromConfig, navigationFromConfig, validateHomeURL, validateNavigationURL } from '../public-navigation.mjs'
 
 const APP = new URL('../../', import.meta.url)
 const require = createRequire(new URL('worker/package.json', APP))
@@ -42,12 +42,15 @@ test('the console stores nothing: Newsletter\'s SQLite database is the record', 
 })
 
 test('public vars match the profile, and an activated AUD must be the recorded real identity', () => {
-  const keys = ['ACCESS_ISSUER', 'HOME_URL', 'NEWSLETTER_ORIGIN', 'PUBLIC_HOST']
+  const keys = ['ACCESS_ISSUER', 'FLEET_URL', 'HOME_URL', 'MODEL_ROUTER_URL', 'NEWSLETTER_ORIGIN', 'PUBLIC_HOST']
   if (config.vars.ACCESS_AUDIENCE !== undefined) keys.push('ACCESS_AUDIENCE')
   assert.deepEqual(Object.keys(config.vars).sort(), keys.sort())
   assert.equal(config.vars.PUBLIC_HOST, `news.${profile.zone}`)
   assert.equal(config.vars.ACCESS_ISSUER, profile.access_issuer)
   assert.equal(config.vars.NEWSLETTER_ORIGIN, `https://${profile.vps.platform_runtime_host}`)
+  assert.equal(config.vars.HOME_URL, `https://home.${profile.zone}/`)
+  assert.equal(config.vars.FLEET_URL, `https://fleet.${profile.zone}/`)
+  assert.equal(config.vars.MODEL_ROUTER_URL, `https://models.${profile.zone}/`)
   assert.equal(config.vars.ACCESS_AUDIENCE, resources.access_audiences['newsletter-console'])
   if (config.vars.ACCESS_AUDIENCE !== undefined) {
     assert.match(config.vars.ACCESS_AUDIENCE, /^[0-9a-f]{64}$/)
@@ -55,8 +58,10 @@ test('public vars match the profile, and an activated AUD must be the recorded r
   }
 })
 
-test('the Home navigation link is a declared HTTPS origin, not UI source', () => {
+test('the navigation links are declared HTTPS origins, not UI source', () => {
   assert.equal(homeURLFromConfig(), config.vars.HOME_URL)
+  assert.deepEqual(navigationFromConfig(), { HOME_URL: config.vars.HOME_URL, FLEET_URL: config.vars.FLEET_URL, MODEL_ROUTER_URL: config.vars.MODEL_ROUTER_URL })
+  assert.throws(() => validateNavigationURL('FLEET_URL', 'http://fleet.example.test/'), /Newsletter console FLEET_URL/)
   assert.equal(validateHomeURL('https://home.example.test/'), 'https://home.example.test/')
   for (const value of [undefined, '', 'javascript:alert(1)', 'http://home.example.test/', 'https://127.0.0.1/', 'https://user:secret@home.example.test/', 'https://home.example.test/path', 'https://home.example.test/?token=x']) {
     assert.throws(() => validateHomeURL(value), /Newsletter console HOME_URL/)

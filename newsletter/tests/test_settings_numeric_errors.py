@@ -16,6 +16,7 @@ FIELDS = (
         600.0,
     ),
     ("NEWSLETTER_TODOFY_TOP", "todofy_top", int, 5),
+    ("NEWSLETTER_CONSOLE_PORT", "console_port", int, 0),
 )
 
 

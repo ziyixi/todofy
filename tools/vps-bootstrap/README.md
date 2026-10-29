@@ -84,6 +84,10 @@ The gateway runs as UID 10001, mounts the existing `newsletter-auth` claim, and 
 service token. Its loopback port is 18766. The existing remotely managed platform Tunnel routes only
 `/api/codex/v1/.*` to that port before the normal platform rule. Each route retains the origin JWT
 check for its dedicated Access application; inference credentials do not grant deployment access.
+Newsletter's console listener needs no secret either: its image bakes the public issuer and the console
+application's audience, its manifest sets `NEWSLETTER_CONSOLE_PORT` (controlled; private input cannot set
+it) and publishes it on loopback 18767, and the Tunnel routes only `/api/newsletter/v1/.*` there, checked
+against the console's own Access application.
 The renderer controls persistent paths, release/admission IDs, and service URLs.
 Private input cannot override those paths or inject PATH/HOME/PYTHONPATH,
 OPENAI_API_KEY or loader variables. A fresh VPS may use `old_paths: {}`; Newsletter's

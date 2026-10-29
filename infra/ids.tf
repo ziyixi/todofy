@@ -25,12 +25,13 @@ locals {
     "links"     = "a6e2a6e3-b432-4093-ac20-0211ca180dce"
     # Created by "Infra apply", not imported (README.md "Adding an app"); the id read in step 4, with the AUD in
     # watch/wrangler.toml.
-    "watch"        = "7d5134ca-1362-4fa3-9c84-d2ee9afb656c"
-    "mailsort"     = "3d8f08e0-1327-4408-99c8-2431abed5892"
-    "recall"       = "abe1f041-0786-4a3d-9ce5-72ce418627a5"
-    "tasks"        = "1cf91393-a308-4b4a-bcb0-962bc2840ea3"
-    "personal-mcp" = "0ae92f11-d672-4c2c-b511-83fb3e73b68e"
-    "model-router" = "fef4b5c4-d15d-47f7-b8c0-69ac89db7bf0"
+    "watch"              = "7d5134ca-1362-4fa3-9c84-d2ee9afb656c"
+    "mailsort"           = "3d8f08e0-1327-4408-99c8-2431abed5892"
+    "recall"             = "abe1f041-0786-4a3d-9ce5-72ce418627a5"
+    "tasks"              = "1cf91393-a308-4b4a-bcb0-962bc2840ea3"
+    "personal-mcp"       = "0ae92f11-d672-4c2c-b511-83fb3e73b68e"
+    "model-router"       = "fef4b5c4-d15d-47f7-b8c0-69ac89db7bf0"
+    "newsletter-console" = "dca06c66-01f2-4d04-a61a-c4ba0b8ac174"
   }
   d1_database_ids = {
     "mail-hero"    = "6c13e4c3-e239-42fb-a7a4-96810fa8d7dc"

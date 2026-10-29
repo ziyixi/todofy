@@ -233,8 +233,11 @@ def generated_files(root: Path) -> dict[str, str]:
         if name == "model-router":
             replacements["CODEX_EXECUTOR_ORIGIN"] = "https://" + profile["vps"]["platform_runtime_host"]
         if name == "newsletter-console":
-            # Newsletter's read path on the platform runtime host, gated by the console's own Access application.
+            # Newsletter's read path on the platform runtime host, gated by the console's own Access application, and
+            # the public pages the console links to (Fleet for the host, Model Router for each model call's requests).
             replacements["NEWSLETTER_ORIGIN"] = "https://" + profile["vps"]["platform_runtime_host"]
+            replacements["FLEET_URL"] = "https://fleet." + profile["zone"] + "/"
+            replacements["MODEL_ROUTER_URL"] = "https://models." + profile["zone"] + "/"
         for variable, value in replacements.items():
             if variable in variables:
                 text = literal_field(text, variable, value, "vars")
@@ -252,9 +255,12 @@ def generated_files(root: Path) -> dict[str, str]:
             used_databases.add(database.get("database_name"))
         text = d1_fields(text, resources)
         outputs[relative] = text
-    # The VPS inference image bakes this public policy alongside its source SHA.
-    if "codex-gateway" in resources["access_audiences"]:
-        used_audiences.add("codex-gateway")
+    # The VPS images bake these public policies at build time: the inference gateway its own, and Newsletter the console
+    # application's (its console listener checks the assertion the console Worker forwards), which the console Worker's
+    # own ACCESS_AUDIENCE takes too once it is deployed.
+    for baked in ("codex-gateway", "newsletter-console"):
+        if baked in resources["access_audiences"]:
+            used_audiences.add(baked)
     require(used_audiences == set(resources["access_audiences"]), "Access audience coverage")
     require(used_databases == set(resources["d1_databases"]), "D1 identity coverage")
     outputs[IDENTITY_MODULE] = identity_module(profile, resources)

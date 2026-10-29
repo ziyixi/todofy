@@ -166,6 +166,10 @@ def test_docker_context_only_allows_build_inputs():
         "pyproject.toml",
         "uv.lock",
         ".python-version",
+        # The public issuer and audience the console's Access check bakes.
+        "config/",
+        "config/cloud.toml",
+        "config/resources.toml",
         "codex-gateway/",
         "codex-gateway/pyproject.toml",
         "platform/",

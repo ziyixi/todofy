@@ -201,12 +201,13 @@ SAFETY_BUDGET = "10"
             with self.subTest(field=old), self.assertRaises(cloud_profile.ProfileError):
                 generate.generated_files(root)
 
-    def test_gateway_is_the_only_additional_non_worker_access_audience(self):
-        for name in ("codex-gateway", "unregistered-vps"):
+    def test_only_the_images_baked_audiences_need_no_worker(self):
+        # The inference gateway's and the console's: Newsletter's image bakes it before the console Worker takes it.
+        for name in ("codex-gateway", "newsletter-console", "unregistered-vps"):
             root = self.fixture()
             baseline = generate.generated_files(root)["demo/wrangler.toml"]
-            (root / "config/resources.toml").write_text(RESOURCE.replace("[d1_databases]", f'{name} = "' + "f" * 64 + '"\n[d1_databases]'))
-            if name == "codex-gateway":
+            (root / "config/resources.toml").write_text(RESOURCE.replace("[d1_databases]", f'"{name}" = "' + "f" * 64 + '"\n[d1_databases]'))
+            if name != "unregistered-vps":
                 self.assertEqual(generate.generated_files(root)["demo/wrangler.toml"], baseline)
             else:
                 with self.assertRaises(cloud_profile.ProfileError):

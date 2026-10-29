@@ -318,17 +318,16 @@ class Classify(unittest.TestCase):
         self.assertEqual(push(paths), expect(T, T, T, T, T, **DASH))
 
     def test_every_app_has_stable_check_and_deploy_outputs_during_bootstrap(self):
-        """Every app but the Newsletter console has its release prerequisites (the console's Access application comes
-        first from "Infra apply"); check and deploy outputs remain explicit."""
-        self.assertEqual(ci_changes.CHECK_ONLY, {"newsletter-console"})
+        """Every app has its release prerequisites (the Newsletter console's Access application was the last); check
+        and deploy outputs remain explicit."""
+        self.assertEqual(ci_changes.CHECK_ONLY, set())
         for app in ci_changes.APPS:
             with self.subTest(app=app):
                 self.assertIn(f"{ci_changes.PREFIX[app]}_check", ci_changes.KEYS)
                 self.assertIn(f"{ci_changes.PREFIX[app]}_deploy", ci_changes.KEYS)
 
-    def test_the_newsletter_console_is_checked_but_never_deployed_until_its_access_application_exists(self):
-        """CHECK_ONLY keeps its deploy output false; Home does not bind it, so Home is unaffected; newsletter.ui.v1 reaches
-        it and nothing else (Newsletter's reader does not import it yet)."""
+    def test_the_newsletter_console_deploys_its_own_changes_and_home_is_unaffected(self):
+        """Its own files deploy it alone (Home does not bind it); newsletter.ui.v1 reaches it and Newsletter."""
         self.assertNotIn("newsletter-console", ci_changes.HOME_BOUND)
         console = {"newsletter_console_check": True, "newsletter_console_deploy": True}
         for path in ("newsletter-console/worker/src/http.ts", "newsletter-console/web/src/App.tsx",
@@ -336,8 +335,8 @@ class Classify(unittest.TestCase):
             with self.subTest(path=path):
                 result = push([path])
                 self.assertEqual(result, expect(F, F, F, F, F, **console))
-                self.assertFalse(result["newsletter_console_deploy"])
-        self.assertEqual(ci_changes.proto_deploys("proto/newsletter/ui/v1/run.proto"), {"newsletter-console"})
+                self.assertTrue(result["newsletter_console_deploy"])
+        self.assertEqual(ci_changes.proto_deploys("proto/newsletter/ui/v1/run.proto"), {"newsletter-console", "newsletter"})
 
     def test_fleet_publishes_bundle_changes_after_resource_bootstrap(self):
         for path in ("fleet/app.toml", "fleet/worker/src/report.ts", "fleet/web/src/App.tsx", "fleet/observer/collector.py", "fleet/wrangler.toml"):
@@ -649,10 +648,10 @@ class Classify(unittest.TestCase):
             # Mail Hero's owner API reaches only Mail Hero (not Todofy, which shares the mailhero/webhook package).
             "proto/mailhero/ui/v2/mail_hero_ui_service.proto": {"mail-hero"},
             "proto/mailhero/ui/v2/errors.proto": {"mail-hero"},
-            # Newsletter's owner read API: the console's Worker and UI only, until Newsletter's reader imports it (no
-            # image and no VPS release yet).
-            "proto/newsletter/ui/v1/newsletter_ui_service.proto": {"newsletter-console"},
-            "proto/newsletter/ui/v1/edition.proto": {"newsletter-console"},
+            # Newsletter's owner read API: Newsletter's reader answers it (its image and the paired VPS release) and the
+            # console's Worker and UI carry it.
+            "proto/newsletter/ui/v1/newsletter_ui_service.proto": {"newsletter-console", "newsletter"},
+            "proto/newsletter/ui/v1/edition.proto": {"newsletter-console", "newsletter"},
             # The TypeScript runtime and generator: every TypeScript user.
             "proto/ts/wire-json.ts": ts,
             "proto/ts/wire-rules.ts": ts,

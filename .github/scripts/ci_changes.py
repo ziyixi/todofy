@@ -48,7 +48,7 @@ Outputs (GITHUB_OUTPUT, "true"/"false"; KEYS names every one):
   runs its tests; Home binds its Ops entrypoint, HOME_BOUND) and compiles in packages/edge-auth and the TypeScript
   proto runtime with proto/recall/ui/, proto/recall/ingest/, proto/recall/archive/ and proto/ops/. The Newsletter
   console (newsletter-console/, Newsletter's owner read UI on news.ziyixi.science, contracts/newsletter-ui-v1) is
-  CHECK_ONLY until its first deploy: its Access application comes first from "Infra apply". It compiles in
+  checked and deployed since its first-deploy commit recorded the AUD "Infra apply" created. It compiles in
   packages/edge-auth and the TypeScript proto runtime with proto/newsletter/ui/; Home does not bind it.
 
 proto/ (the protobuf IDL, proto/README.md) checks every app in PROTO_USERS (an app that depends on @ziyixi/proto or
@@ -58,7 +58,7 @@ links app's, the watch app's and the dashboard's Workers and UIs, and Todofy's g
 (todofy.ui.v1's transcoder and client); "python": todofy-core, through the wheel pywrangler vendors), PROTO_RUNTIMES
 maps a language's runtime and generator to that language's users, and PROTO_PACKAGES maps each proto package to the apps
 that import its generated code (mailhero/ui reaches Mail Hero only, links/ui the links app only, watch/ui the watch app only, dashboard/ui the dashboard only, todofy/ui Todofy only, newsletter/ui the
-Newsletter console only until Newsletter's own reader imports it; prototest, the runtimes' fixtures, reach no app). Tests, test data,
+Newsletter console and Newsletter, whose reader answers it; prototest, the runtimes' fixtures, reach no app). Tests, test data,
 the check scripts, the api-linter tool module, check configs and Markdown (PROTO_NOT_BUNDLED), and the files of a
 package proto/retired.json lists (its deletion), deploy nothing; any other proto/ path (buf.yaml, buf.lock, the toolchain lockfile,
 ensure.mjs, a package not listed yet) deploys every user (fail safe). test_proto.py derives PROTO_USERS and the
@@ -93,7 +93,8 @@ Documentation (is_documentation: Markdown anywhere, and any file in a docs/ fold
   reaches a path classified as documentation without selecting its reader.
 Newsletter remains an independent VPS image. newsletter_deploy publishes its tested image to GHCR; it does
 not upgrade the server. It keeps its locked external ziyixi-protos dependency for the engine's own API, and takes the
-root proto's Python runtime only for the packages PROTO_PACKAGES lists it under (the Model Router client's).
+root proto's Python runtime only for the packages PROTO_PACKAGES lists it under (the Model Router client's, and its
+owner read API, newsletter.ui.v1, which its console listener answers).
 platform/ checks and publishes its own independently tested daemon image; platform_deploy upgrades the VPS.
 Newsletter production changes also check and publish Platform from the same source SHA before the VPS release.
 A push to main reuses a green branch run of the same commit (find_reusable): when a completed push run of
@@ -142,7 +143,7 @@ APPS = tuple(load_catalog(Path(__file__).resolve().parents[2]).apps)
 PREFIX = {app: app.replace("-", "_") for app in APPS}
 # A new app is checked but its deploy output stays false until its Cloudflare resources are ready. Keep its output
 # present so the workflow and same-SHA reuse have one stable interface.
-CHECK_ONLY: set[str] = {"newsletter-console"}
+CHECK_ONLY: set[str] = set()
 # Apps whose Ops entrypoint Home binds (dashboard/wrangler.toml): while one of them is CHECK_ONLY its Worker does not
 # exist yet, so Home's deploy (whose binding would name a missing service) waits too.
 HOME_BOUND = {"fleet", "mailsort", "recall", "tasks", "personal-mcp", "model-router", "links"}
@@ -351,9 +352,9 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     "proto/dashboard/mcp/": ("dashboard", "personal-mcp"),
     # Mail Hero's owner API (mailhero.ui.v2): its Worker serves it, its UI calls it.
     "proto/mailhero/ui/": ("mail-hero",),
-    # Newsletter's owner read API (newsletter.ui.v1): the console Worker routes it with the shared transcoder and its UI
-    # calls it with the shared client. Newsletter answers it once its reader imports the generated Python code.
-    "proto/newsletter/ui/": ("newsletter-console",),
+    # Newsletter's owner read API (newsletter.ui.v1): Newsletter's console listener answers it with the generated Python
+    # code, the console Worker routes it with the shared transcoder and its UI calls it with the shared client.
+    "proto/newsletter/ui/": ("newsletter-console", "newsletter"),
     # CommonReason: Platform bundles Python error aliases.
     "proto/common/errors/": ("platform",),
     # ops-v1 (contracts/ops-v1): every app's Ops entrypoint and the dashboard that calls them.
@@ -383,6 +384,8 @@ PROTO_READS = (
     "contracts/fleet-report-v1/",
     "contracts/platform-runtime-v1/",
     "contracts/recall-archive-v1/",
+    # newsletter-ui.test.ts reads every golden answer back and writes it again byte for byte.
+    "contracts/newsletter-ui-v1/",
 )
 # proto/ paths that never reach a bundle: a change there checks the users but deploys none.
 PROTO_NOT_BUNDLED = (

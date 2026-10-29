@@ -1,41 +1,73 @@
 /**
- * Owner HTTP surface: authenticate first, admit reads only, then the shared IDL transcoder of newsletter.ui.v1.
+ * Owner HTTP surface: authenticate first, admit reads only, then the shared IDL transcoder of newsletter.ui.v1, whose
+ * every method forwards the read to Newsletter (upstream.ts).
  *
  * Newsletter's SQLite database is the record and Newsletter answers every method itself; this Worker only transports
- * the owner's reads to it (contracts/newsletter-ui-v1/README.md). That transport is not built yet, so every method
- * answers UNAVAILABLE with the reason NOT_CONFIGURED, which the UI shows as such, after the same authentication the
- * finished console uses.
+ * the owner's reads to it (contracts/newsletter-ui-v1/README.md) and holds no data and no credential of its own.
  */
-import { createAccessVerifier, withPrivateHeaders, STRICT_CSP } from '@ziyixi/edge-auth';
+import {
+  ACCESS_TOKEN_COOKIE,
+  ACCESS_TOKEN_HEADER,
+  createAccessVerifier,
+  readCookie,
+  STRICT_CSP,
+  withPrivateHeaders,
+  type AccessPolicy,
+} from '@ziyixi/edge-auth';
 import { NewsletterUiService } from '@ziyixi/proto/newsletter/ui/v1/newsletter_ui_service_pb';
 import { HttpTranscoder, type PreEncoded } from '@ziyixi/proto/http-transcoder';
 import { RpcError, Code } from '@ziyixi/proto/rpc-status';
 import type { Env } from './env.ts';
+import { forward, type UpstreamOutcome } from './upstream.ts';
 
-interface OwnerContext { readonly env: Env; }
+interface OwnerContext {
+  readonly env: Env;
+  readonly url: URL;
+  /** The owner's assertion edge-auth verified, the only credential sent upstream; null under the local bypass. */
+  readonly assertion: string | null;
+  /** How the forwarded read ended, for the log line. */
+  outcome: UpstreamOutcome | null;
+}
 const verifier = createAccessVerifier();
 /** Hashed build output under /assets/ never changes, so the browser may keep it; everything else is no-store. */
 const IMMUTABLE = 'private, max-age=31536000, immutable';
+/**
+ * Where edge-auth reads the login from. ownerAssertion() reads it by the same rule, so the token forwarded is the one
+ * that was verified.
+ */
+const TOKEN_SOURCE: AccessPolicy['tokenSource'] = { emptyHeader: 'use-cookie', cookie: 'last' };
 function error(code: Code, reason: string): RpcError {
   return new RpcError(code, reason, 'Newsletter console request failed.');
 }
 
-/** The answer of every method until the Worker forwards reads to Newsletter. */
-function notConfigured(): Promise<PreEncoded> {
-  return Promise.reject(error(Code.UNAVAILABLE, 'NOT_CONFIGURED'));
+/** The assertion edge-auth verifies under TOKEN_SOURCE: the header unless it is empty, else the last Access cookie. */
+export function ownerAssertion(request: Request): string | null {
+  const header = request.headers.get(ACCESS_TOKEN_HEADER);
+  const token = header !== null && header !== '' ? header : readCookie(request, ACCESS_TOKEN_COOKIE, TOKEN_SOURCE.cookie);
+  return token === null || token === '' ? null : token;
+}
+
+/** Every method is a read Newsletter answers: the transcoder has matched and strictly decoded it before this runs. */
+function read(_request: unknown, context: OwnerContext): Promise<PreEncoded> {
+  return forward({
+    url: context.url,
+    assertion: context.assertion,
+    origin: context.env.NEWSLETTER_ORIGIN,
+    report: (outcome) => { context.outcome = outcome; },
+  });
 }
 
 const api = new HttpTranscoder<typeof NewsletterUiService.method, OwnerContext>(NewsletterUiService, {
-  getOverview: notConfigured,
-  listRuns: notConfigured,
-  getRun: notConfigured,
-  listModelCalls: notConfigured,
-  summarizeModelUsage: notConfigured,
-  listEditions: notConfigured,
-  getEdition: notConfigured,
-  getEditionRendering: notConfigured,
-  getSourceCatalog: notConfigured,
-  getBackupStatus: notConfigured,
+  getOverview: read,
+  listRuns: read,
+  getRun: read,
+  listModelCalls: read,
+  summarizeModelUsage: read,
+  listEditions: read,
+  getEdition: read,
+  getEditionRendering: read,
+  getSourceCatalog: read,
+  getBackupStatus: read,
 }, {
   domain: 'news.ziyixi.science',
   // Every method is a GET with its input in the path and query: no request body is ever read.
@@ -54,11 +86,14 @@ function localRequest(request: Request, env: Env, url: URL): boolean {
     && !request.headers.has('cf-ray');
 }
 
-/** One line per API request: its ID, method name, status class and duration; never a path value, query or body. */
-function logRequest(id: string, rpc: string | undefined, status: number, started: number): void {
+/**
+ * One line per API request: its ID, method name, status class, how the read to Newsletter ended (a status class or a
+ * code) and duration; never a path value, query, body or token.
+ */
+function logRequest(id: string, rpc: string | undefined, status: number, upstream: UpstreamOutcome | null, started: number): void {
   console.log(JSON.stringify({
     event: 'newsletter_console_request', request_id: id, rpc: rpc ?? null,
-    status_class: `${String(Math.floor(status / 100))}xx`, ms: Date.now() - started,
+    status_class: `${String(Math.floor(status / 100))}xx`, upstream, ms: Date.now() - started,
   }));
 }
 
@@ -77,7 +112,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     aliases: env.ACCESS_OWNER_ALIASES,
     emailMatch: 'case-insensitive',
     nbfLeewaySeconds: 60,
-    tokenSource: { emptyHeader: 'use-cookie', cookie: 'last' },
+    tokenSource: TOKEN_SOURCE,
     devBypass: {
       enabled: env.DEV_AUTH_BYPASS === 'true',
       hosts: 'loopback-http',
@@ -98,9 +133,10 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       { httpStatus: 405, headers: { allow: 'GET, HEAD' } });
     return withPrivateHeaders(api.errorResponse(notAllowed, id, false));
   }
-  const result = await api.handle(request, { env }, id);
+  const context: OwnerContext = { env, url, assertion: auth.bypassed ? null : ownerAssertion(request), outcome: null };
+  const result = await api.handle(request, context, id);
   if (result) {
-    logRequest(id, result.route?.method.name, result.response.status, started);
+    logRequest(id, result.route?.method.name, result.response.status, context.outcome, started);
     return withPrivateHeaders(result.response);
   }
   if (url.pathname.startsWith('/api/')) {

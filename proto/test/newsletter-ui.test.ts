@@ -5,8 +5,12 @@
  * parameters, and its generator (tools/gen_py.py) takes no oneof, 64-bit integer, float, bytes or nested message, so
  * adding the package to PYTHON_PACKAGES cannot stop generation for every Python user. Every answer field is
  * OUTPUT_ONLY or IDENTIFIER, never REQUIRED: no producer writes null, so the bytes Newsletter writes are the bytes toWire
- * writes, which the Worker passes through as PreEncoded without parsing them.
+ * writes, which the Worker passes through as PreEncoded without parsing them. The golden answers Newsletter's reader
+ * writes (contracts/newsletter-ui-v1/fixtures, newsletter/scripts/console_fixtures.py) prove it: each reads back and
+ * writes again byte for byte.
  */
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { create, getOption, ScalarType, type DescField, type DescMessage } from '@bufbuild/protobuf';
 import { field_behavior, FieldBehavior } from '../ts/google/api/field_behavior_pb.ts';
@@ -15,7 +19,7 @@ import { HttpTranscoder, type ServiceHandlers, type ShapeOf } from '../ts/http-t
 import { NewsletterUiService } from '../ts/newsletter/ui/v1/newsletter_ui_service_pb.ts';
 import { RunFailure_Kind, RunSchema, Run_State } from '../ts/newsletter/ui/v1/run_pb.ts';
 import type * as wire from '../ts/newsletter/ui/v1/run_wire.ts';
-import { toWire } from '../ts/wire-json.ts';
+import { fromWire, toWire } from '../ts/wire-json.ts';
 
 type Handlers = ServiceHandlers<ShapeOf<typeof NewsletterUiService>, Record<string, never>>;
 
@@ -53,6 +57,22 @@ function outsidePythonProfile(field: DescField): string | null {
   if (scalar !== undefined && !PYTHON_SCALARS.has(scalar)) return `the scalar ${ScalarType[scalar]}`;
   return null;
 }
+
+const FIXTURES = join(import.meta.dirname, '..', '..', 'contracts', 'newsletter-ui-v1', 'fixtures');
+/** Each golden answer and the method that answers it. */
+const ANSWERS = {
+  'overview': NewsletterUiService.method.getOverview,
+  'runs': NewsletterUiService.method.listRuns,
+  'run-blocked-selection-timeout': NewsletterUiService.method.getRun,
+  'run-ready': NewsletterUiService.method.getRun,
+  'model-calls': NewsletterUiService.method.listModelCalls,
+  'model-usage-30d': NewsletterUiService.method.summarizeModelUsage,
+  'editions': NewsletterUiService.method.listEditions,
+  'edition': NewsletterUiService.method.getEdition,
+  'edition-rendering': NewsletterUiService.method.getEditionRendering,
+  'source-catalog': NewsletterUiService.method.getSourceCatalog,
+  'backup-status': NewsletterUiService.method.getBackupStatus,
+} as const;
 
 const methods = NewsletterUiService.methods;
 const inputs = reachable(methods.map((method) => method.input));
@@ -139,5 +159,19 @@ describe('newsletter.ui.v1', () => {
         '"failure":{"node_id":"selection","error_code":"timeout","kind":"node_budget","elapsed_seconds":171.25,"budget_seconds":150},' +
         '"feeds":{"source_count":35,"ok_count":35,"seed_count":0}}',
     );
+  });
+});
+
+describe('Newsletter’s golden answers are the codec’s bytes', () => {
+  test('there is one fixture per golden answer', () => {
+    const files = readdirSync(FIXTURES).filter((name) => name.endsWith('.json')).map((name) => name.slice(0, -5));
+    expect(files.sort()).toEqual(Object.keys(ANSWERS).sort());
+  });
+
+  test.each(Object.entries(ANSWERS))('%s reads back strictly and writes the same bytes', (name, method) => {
+    const text = readFileSync(join(FIXTURES, `${name}.json`), 'utf8');
+    const { message, unrecognized } = fromWire(method.output, JSON.parse(text), { strict: true });
+    expect(unrecognized).toEqual([]);
+    expect(JSON.stringify(toWire(method.output, message))).toBe(text);
   });
 });

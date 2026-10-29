@@ -104,10 +104,11 @@ def test_probe_uses_traversable_interface_for_absent_generated_package(
 
 @pytest.fixture
 def source_root(tmp_path):
-    package = tmp_path / "src/newsletter"
+    root = tmp_path / "newsletter"
+    package = root / "src/newsletter"
     package.mkdir(parents=True)
     (package / "__init__.py").write_text('"""Synthetic source."""\n')
-    scripts = tmp_path / "scripts"
+    scripts = root / "scripts"
     scripts.mkdir()
     (scripts / "smoke_codex_startup.py").write_text(
         "# Synthetic startup fixture\n"
@@ -115,7 +116,14 @@ def source_root(tmp_path):
     (scripts / "smoke_image_probe.py").write_text(
         "# Synthetic container fixture\n"
     )
-    return tmp_path
+    # The repository's public identities: the console AUD the image bakes.
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config/resources.toml").write_text(
+        'version = 1\n[access_audiences]\n"newsletter-console" = "'
+        + "c" * 64
+        + '"\n'
+    )
+    return root
 
 
 @pytest.fixture
@@ -167,10 +175,13 @@ def test_smoke_uses_fixed_inspected_id_without_mounts_network_or_credentials(
     )
     assert IMAGE_ID in command and "mutable:tag" not in command
     assert options["timeout"] == 120 and options["check"] is True
-    assert set(json.loads(options["input"])) == {
+    payload = json.loads(options["input"])
+    assert set(payload) == {
         "source_hashes",
         "startup_source",
+        "console_audience",
     }
+    assert payload["console_audience"] == "c" * 64
     name = command[command.index("--name") + 1]
     assert name.startswith("newsletter-image-smoke-")
     assert cleanup[0] == ["docker", "rm", "--force", name]

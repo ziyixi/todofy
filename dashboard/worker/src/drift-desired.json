@@ -659,6 +659,11 @@
       "crons": [],
       "bindings": [
         {
+          "name": "ACCESS_AUDIENCE",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
           "name": "ACCESS_ISSUER",
           "type": "plain_text",
           "source": "config"
@@ -685,7 +690,17 @@
           "source": "deploy"
         },
         {
+          "name": "FLEET_URL",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
           "name": "HOME_URL",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "MODEL_ROUTER_URL",
           "type": "plain_text",
           "source": "config"
         },

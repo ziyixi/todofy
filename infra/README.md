@@ -585,7 +585,8 @@ step 2 is therefore `create: 1` (`owner["newsletter-console"]`), `update: 1`
 (`cloudflare_zero_trust_tunnel_cloudflared_config.platform`), the other 50 rows `no-op` (52 in all) and
 `output changes: 1` (`update` `access_aud`); computed from the addresses of its commit, with every optional instance
 present: `create=1,outputs=1,update=1@ab3d6240ab01`. The tunnel rule waits for the new application's AUD, so the apply
-creates the application first. Until Newsletter listens on 18767 the connector answers that path with an error after
+creates the application first; the console's first-deploy commit then recorded its AUD and id (step 5). Until
+Newsletter listens on 18767 the connector answers that path with an error after
 Access; anonymous requests get Access's login redirect either way.
 
 Between steps 3 and 5 the application gates a host that no Worker serves yet, which is harmless. Until the app's

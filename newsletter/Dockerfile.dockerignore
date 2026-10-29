@@ -6,6 +6,9 @@
 !package.json
 !pnpm-workspace.yaml
 !pnpm-lock.yaml
+!config/
+!config/cloud.toml
+!config/resources.toml
 !codex-gateway/
 !codex-gateway/pyproject.toml
 !platform/

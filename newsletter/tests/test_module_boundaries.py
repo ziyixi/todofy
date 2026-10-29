@@ -16,6 +16,10 @@ import newsletter.rendering as rendering
         ("charts", "rendering"),
         ("model_io", "editor"),
         ("model_schema", "editor"),
+        # The console's pure rules and its Access check need no engine.
+        ("console_views", "console_api"),
+        ("console_views", "store"),
+        ("console_access", "store"),
     ],
 )
 def test_import_does_not_load_higher_layer(module, unneeded, tmp_path):

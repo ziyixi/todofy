@@ -33,7 +33,8 @@
 - 应用从不互相导入代码、配置或测试工具。允许共享的只有 `contracts/`、`proto/`、`packages/`；
   `tools/` 只供测试、构建和部署脚本使用，生产源码与包不得导入应用或这些工具。
 - `packages/<name>` 以 `workspace:*` 写进使用者的 package.json，依赖由根 `pnpm-lock.yaml` 锁定，编译进各应用；不是独立服务。
-  `edge-auth` 保持零运行时依赖，不在应用里复制 JWT、CSRF 或私有响应头实现。
+  `edge-auth` 保持零运行时依赖，不在应用里复制 JWT、CSRF 或私有响应头实现。VPS 上的 Python 服务核对 Access 断言只是配置
+  维护中的 PyJWT（Codex 网关核对机器断言，Newsletter 控制台监听核对 owner 身份断言，都不比对邮箱）；owner 邮箱匹配只在 edge-auth。
 - Cookie、token 来源、邮箱匹配、nbf、开发绕过、密钥派生和错误映射属于应用行为；改前核对
   [edge-auth SPEC §4、§5.4](packages/edge-auth/SPEC.md)。
 - 包代码变更检查并发布每个使用者。Markdown 与 docs 文件夹是文档，不选中任何应用检查或发布（构建打包或检查读取的例外见 CI/CD）。新增包/使用者同步 `PACKAGE_USERS`，守卫核对实际依赖。
@@ -49,7 +50,8 @@
   通过 `@ziyixi/proto/protobuf` 使用唯一版本。新增语言/包使用者同步 `PROTO_USERS`、`PROTO_PACKAGES`。
 - Access JWT、Origin、mutation CSRF 必须在转码器读取正文之前验证。机器接口有独立鉴权，不能隐式继承 owner 权限。
   Newsletter 保留外部 `ziyixi-protos`、wire JSON 和现有机器 HTTP 模型；其内部部署 drain API 使用应用文档中的版本化 JSON 合同。
-  入仓不授权重写它的运行时或迁移全部接口到根 proto。
+  入仓不授权重写它的运行时或迁移全部接口到根 proto。它的 owner 只读接口 `newsletter.ui.v1` 是根 proto 的新包，由独立的控制台监听
+  回答（[contracts/newsletter-ui-v1](contracts/newsletter-ui-v1/README.md)），不改变引擎接口。
 - 更新用 `update_mask`，竞争动作用 `etag`，列表分页和有界索引读取；原因与 Google RPC Status 按 proto 规则。
   只有依赖失败是可重试 UNAVAILABLE，意外代码错误是 INTERNAL。
 - 合同包含语义、生成 Schema、无依赖规则与 golden fixture，不放应用实现。[contracts README](contracts/README.md) 列明所有权。

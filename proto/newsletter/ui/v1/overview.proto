@@ -38,12 +38,13 @@ message Overview {
   string time_zone = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The running engine's build: a commit SHA, empty when the build did not record one.
   string engine_revision = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The newest run (list view), absent before the first.
+  // The newest run of the daily schedule (list view), else the newest run; absent before the first. A later manual or
+  // replayed run does not take its place.
   // (-- api-linter: core::0122::embedded-resource=disabled
   //     aip.dev/not-precedent: read in the same snapshot as the rest of the overview, so its numbers agree; a
   //     second read by name could see a newer state. --)
   Run latest_run = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The newest edition (list view), absent before the first.
+  // The newest daily edition (`Edition.Kind.DAILY`, list view), else the newest edition; absent before the first.
   // (-- api-linter: core::0122::embedded-resource=disabled
   //     aip.dev/not-precedent: read in the same snapshot as the rest of the overview, so its numbers agree; a
   //     second read by name could see a newer state. --)
@@ -61,6 +62,13 @@ message Overview {
   UsageTotals week_usage = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The external interfaces over the latest run and the backup's journal, in `Dependency.Kind` order.
   repeated Dependency dependencies = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The edition of the newest settled real delivery (provider accepted, rejected or unknown; fixtures left out), read
+  // with the monitoring snapshot's own query, so its `delivery` is the latest delivery Fleet and Home report; absent
+  // before the first.
+  // (-- api-linter: core::0122::embedded-resource=disabled
+  //     aip.dev/not-precedent: read in the same snapshot as the rest of the overview, so its numbers agree; a
+  //     second read by name could see a newer state. --)
+  Edition latest_delivery = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // One issue date of the overview's strip.
@@ -105,13 +113,19 @@ message ServiceState {
   bool worker_healthy = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The deployment gate.
   DrainState drain_state = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Runs admitted and not started.
+  // Collection runs admitted and not started. Not Fleet's 排队 (`queued_count`).
   int32 queued_run_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Runs in progress.
+  // Collection runs in progress. Not Fleet's 进行中 (`inflight_count`).
   int32 running_run_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Records whose outcome is unknown (待核对), the sum of `unknown_category_counts`.
   int32 unknown_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Unknown records by category, with the monitoring snapshot's categories (`interrupted_activities`, `packets`,
   // `workflow_attempts`, `notion_entities`, `notion_versions`, `delivery`), every one present.
   map<string, int32> unknown_category_counts = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Work the deployment gate holds as queued, Fleet's 排队: queued editions and collection runs not yet finished, with
+  // the gate's own predicates, so the number is the one Fleet and Home show.
+  int32 queued_count = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Work in flight that a release waits for, Fleet's 进行中: registered activities, running editions and attempts,
+  // submitting packets and deliveries, and Notion pages being created or appended, with the gate's own predicates.
+  int32 inflight_count = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
 }

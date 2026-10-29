@@ -223,8 +223,6 @@ jobs:
       max-parallel: 3
       matrix:
         app: [todofy, mail-hero, dashboard, links, watch, fleet, mailsort, recall, tasks, personal-mcp, model-router, newsletter-console, website-relay]
-        exclude:
-          - app: newsletter-console
     permissions:
       contents: read
       deployments: write
