@@ -56,7 +56,8 @@ from cloud_profile import load_profile, owner_machine_secrets, read_public, work
 
 ZONES = (load_profile(REPO)["zone"],)
 
-# Each deploy-vars wrapper: language, file, and which Worker gets its vars and its secrets (per mode for Todofy).
+# Each deploy-vars wrapper: language, file, and which Worker gets its vars and its secrets (per mode for Todofy). The
+# one list of wrappers: test_wrangler_configs.py checks how CI calls each of them.
 WRAPPERS = {
     "model-router": {"language": "js", "file": "model-router/tools/deploy-vars.mjs", "vars": "model-router", "secrets": "model-router"},
     "mail-hero": {"language": "js", "file": "mail-hero/deploy/deploy-vars.mjs", "vars": "mail-hero", "secrets": "mail-hero"},

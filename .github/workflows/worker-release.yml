@@ -36,7 +36,7 @@ jobs:
     timeout-minutes: ${{ inputs.app == 'website-relay' && 10 || 15 }}
     environment:
       name: production
-      url: ${{ steps.todofy.outputs.url || steps.mail_hero.outputs.url || steps.dashboard.outputs.url || steps.links.outputs.url || steps.watch.outputs.url || steps.mailsort.outputs.url || steps.recall.outputs.url || steps.fleet.outputs.url || steps.personal_mcp.outputs.url || steps.model_router.outputs.url || steps.newsletter_console.outputs.url }}
+      url: ${{ steps.todofy.outputs.url || steps.mail_hero.outputs.url || steps.dashboard.outputs.url || steps.links.outputs.url || steps.tasks.outputs.url || steps.watch.outputs.url || steps.mailsort.outputs.url || steps.recall.outputs.url || steps.fleet.outputs.url || steps.personal_mcp.outputs.url || steps.model_router.outputs.url || steps.newsletter_console.outputs.url }}
     concurrency:
       group: ${{ inputs.app }}-production
       cancel-in-progress: false

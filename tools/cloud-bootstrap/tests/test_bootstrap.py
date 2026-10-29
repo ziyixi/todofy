@@ -17,6 +17,7 @@ import cloud_api
 import github_config
 import github_secrets
 import bootstrap_inventory as inventory
+import finalize
 import private_input
 import state_imports
 import tofu_bootstrap
@@ -450,6 +451,20 @@ class Cloud(unittest.TestCase):
         self.assertEqual(caught.exception.details, {"address": address, "headlines": ["Error: Cannot import <…>"]})
         self.assertNotIn(private_value, json.dumps(caught.exception.details))
         self.assertEqual(len(calls), 1)
+
+
+class Finalize(unittest.TestCase):
+    def test_first_releases_name_every_durable_object_namespace(self):
+        # finalize requires the namespaces read from these apps' first releases to be exactly DO_KEYS, so an app missing
+        # here stops every fresh or adopt rebuild with FIRST_RELEASE_NAMESPACE_MISSING, and a class missing from DO_KEYS
+        # is never captured. The release units come from control.py (on sys.path through finalize), so the test reads
+        # only finalize's APPS, however that is written.
+        from control import WORKERS, read_toml
+
+        bound = {binding["class_name"]
+                 for app in finalize.APPS for path in WORKERS[app]
+                 for binding in read_toml(ROOT / path).get("durable_objects", {}).get("bindings", [])}
+        self.assertEqual(bound, set(finalize.DO_KEYS))
 
 
 if __name__ == "__main__":

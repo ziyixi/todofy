@@ -1,5 +1,5 @@
-# One workflow for the apps (Todofy, Mail Hero, the home dashboard, the website, the links app, the watch app, Fleet,
-# Newsletter, Platform, Codex gateway, mailsort, recall, Tasks and the Newsletter console).
+# One workflow for every app of the service catalog (*/app.toml, docs/service-catalog.md); ci_changes.py KEYS names
+# the "changes" outputs, one check and one deploy output per app.
 # "changes" decides what changed since a cumulative base (.github/scripts/ci_changes.py), each app's checks run
 # from its own directory, "Shared packages" checks packages/* (compiled into the apps), "Contracts" runs both
 # sides of mail.received.v1 and ops-v1 plus the dashboard's ops-v1 caller tests, "Proto checks"
@@ -562,7 +562,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.proto == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # Typical runs took 5.5-9 minutes by 2026-10-29 as packages and breaking self-test cases grew; 10 cut a healthy run.
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: proto
@@ -1030,13 +1031,14 @@ jobs:
     name: Tasks deploy
     # After Todofy: Tasks binds Todofy's Mail entry, and Todofy no longer calls Tasks' retired TasksApi.call.
     needs: [changes, tasks-checks, gate, todofy-deploy]
-    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
+    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors). A selected
+    # Todofy deploy must succeed: a failed Router leaves it skipped, and Tasks must not ship ahead of it.
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
       && (needs.tasks-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.tasks-checks.result == 'skipped'))
       && needs.gate.result == 'success'
-      && (needs.todofy-deploy.result == 'success' || needs.todofy-deploy.result == 'skipped')
+      && (needs.todofy-deploy.result == 'success' || needs.changes.outputs.todofy_deploy != 'true')
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.tasks_deploy == 'true' }}
@@ -1051,17 +1053,16 @@ jobs:
 
   watch-deploy:
     name: Watch deploy
-    # After Tasks: the watch app's TASKS binding names Tasks' TaskInbox entry. Todofy is listed too, because a failed
-    # Todofy deploy leaves Tasks deploy skipped (not failed), and Watch must not ship ahead of either.
-    needs: [changes, watch-checks, gate, todofy-deploy, tasks-deploy]
-    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
+    # After Tasks: the watch app's TASKS binding names Tasks' TaskInbox entry.
+    needs: [changes, watch-checks, gate, tasks-deploy]
+    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors). A selected
+    # Tasks deploy must succeed, so a failed Todofy (which leaves Tasks skipped) also holds Watch.
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
       && (needs.watch-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.watch-checks.result == 'skipped'))
       && needs.gate.result == 'success'
-      && (needs.todofy-deploy.result == 'success' || needs.todofy-deploy.result == 'skipped')
-      && (needs.tasks-deploy.result == 'success' || needs.tasks-deploy.result == 'skipped')
+      && (needs.tasks-deploy.result == 'success' || needs.changes.outputs.tasks_deploy != 'true')
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.watch_deploy == 'true' }}
@@ -1253,16 +1254,18 @@ jobs:
   personal-mcp-deploy:
     name: Personal MCP deploy
     needs: [changes, personal-mcp-checks, gate, tasks-deploy, todofy-deploy, recall-deploy, watch-deploy]
-    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
+    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors). Selected
+    # Tasks, Todofy and Watch deploys must succeed, since each is skipped when a release before it fails; Recall has
+    # no deploy before it.
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
       && (needs.personal-mcp-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.personal-mcp-checks.result == 'skipped'))
       && needs.gate.result == 'success'
-      && (needs.tasks-deploy.result == 'success' || needs.tasks-deploy.result == 'skipped')
-      && (needs.todofy-deploy.result == 'success' || needs.todofy-deploy.result == 'skipped')
+      && (needs.tasks-deploy.result == 'success' || needs.changes.outputs.tasks_deploy != 'true')
+      && (needs.todofy-deploy.result == 'success' || needs.changes.outputs.todofy_deploy != 'true')
       && (needs.recall-deploy.result == 'success' || needs.recall-deploy.result == 'skipped')
-      && (needs.watch-deploy.result == 'success' || needs.watch-deploy.result == 'skipped')
+      && (needs.watch-deploy.result == 'success' || needs.changes.outputs.watch_deploy != 'true')
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.personal_mcp_deploy == 'true' }}

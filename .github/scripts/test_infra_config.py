@@ -59,27 +59,10 @@ import infra_state  # noqa: E402
 import reconcile_policy  # noqa: E402
 
 # Production Workers whose D1 database and Access applications are not adopted into infra/ yet. Empty since IaC P4
-# adopted the links app. A new app's Worker goes here until a change writes its import blocks and, in the
-# same commit, moves it into PRODUCTION below (Coverage checks that the two lists together are test_wrangler_configs.py's).
+# adopted the links app. A new app's Worker goes here until a change writes its import blocks.
 NOT_ADOPTED: dict[str, str] = {}
-# Worker name -> production config: the list of test_wrangler_configs.py without NOT_ADOPTED.
-PRODUCTION = {
-    "mail-hero": "mail-hero/wrangler.toml",
-    "todofy-core": "todofy/wrangler.toml",
-    "todofy": "todofy/gateway/wrangler.toml",
-    "home": "dashboard/wrangler.toml",
-    "ziyixi-website": "website/wrangler.toml",
-    "ziyixi-notion-publish": "website/relay/wrangler.toml",
-    "links": "links/wrangler.toml",
-    "watch": "watch/wrangler.toml",
-    "fleet": "fleet/wrangler.toml",
-    "personal-mcp": "personal-mcp/wrangler.toml",
-    "mailsort": "mailsort/wrangler.toml",
-    "recall": "recall/wrangler.toml",
-    "tasks": "tasks/wrangler.toml",
-    "model-router": "model-router/wrangler.toml",
-    "newsletter-console": "newsletter-console/wrangler.toml",
-}
+# Worker name -> production config: the catalog's list (test_wrangler_configs.py) without NOT_ADOPTED.
+PRODUCTION = {worker: path for worker, path in test_wrangler_configs.PRODUCTION.items() if worker not in NOT_ADOPTED}
 from cloud_profile import load_profile, load_resources  # noqa: E402
 
 # The public configuration generator, loaded by file: its module name "generate" is too generic for sys.path.
@@ -87,19 +70,10 @@ _spec = importlib.util.spec_from_file_location("cloud_config_generate", REPO / "
 generate = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(generate)
 
-# Fleet's initial phase is explicit in ci_changes.CHECK_ONLY. Its sole production config already
-# describes the intended host, but carries no invented AUD and both Fleet/Home deploys stay disabled.
-# The activation commit records the real Access IDs/AUD and removes CHECK_ONLY in the same change.
-AHEAD_OF_DEPLOY = ({"fleet": load_profile(REPO)["platform_hostname"]}
-                  if "fleet" in test_wrangler_configs.ci_changes.CHECK_ONLY else {})
-if "tasks" in test_wrangler_configs.ci_changes.CHECK_ONLY:
-    AHEAD_OF_DEPLOY["tasks"] = "tasks." + load_profile(REPO)["zone"]
-if "personal-mcp" in test_wrangler_configs.ci_changes.CHECK_ONLY:
-    AHEAD_OF_DEPLOY["personal-mcp"] = "mcp." + load_profile(REPO)["zone"]
-
-
-if "model-router" in test_wrangler_configs.ci_changes.CHECK_ONLY:
-    AHEAD_OF_DEPLOY["model-router"] = "models." + load_profile(REPO)["zone"]
+# An app's first phase is explicit in ci_changes.CHECK_ONLY: its production config already names the intended host,
+# but carries no invented AUD, and its deploy stays disabled. The activation commit records the real Access ID/AUD
+# and removes CHECK_ONLY in the same change, and with it the app's entry here.
+AHEAD_OF_DEPLOY: dict[str, str] = {}
 if "newsletter-console" in test_wrangler_configs.ci_changes.CHECK_ONLY:
     AHEAD_OF_DEPLOY["newsletter-console"] = "news." + load_profile(REPO)["zone"]
 # Owner applications that also gate a path of the platform runtime host (the catalog's runtime_paths): the console's
@@ -263,9 +237,9 @@ class Coverage(unittest.TestCase):
                 self.assertNotEqual(value, placeholder, "fill in the application id read after the apply")
 
     def test_every_production_worker_is_adopted_or_listed_as_not_adopted(self):
-        """A Worker added to test_wrangler_configs.PRODUCTION must be either checked here or named in NOT_ADOPTED,
-        so a new app's D1 database is never skipped silently by the checks below."""
-        self.assertEqual(set(PRODUCTION) & set(NOT_ADOPTED), set())
+        """Every Worker of test_wrangler_configs.PRODUCTION is checked here unless NOT_ADOPTED names it with its own
+        config, so a new app's D1 database is never skipped silently by the checks below."""
+        self.assertLessEqual(NOT_ADOPTED.items(), test_wrangler_configs.PRODUCTION.items())
         self.assertEqual({**PRODUCTION, **NOT_ADOPTED}, test_wrangler_configs.PRODUCTION)
 
 
@@ -337,8 +311,8 @@ class MatchesTheApps(unittest.TestCase):
                 self.assertEqual("outside_access: true" in body, on_access_host)
 
     def test_ahead_of_deploy_is_exact(self):
-        """A first-phase app (Fleet, mailsort and recall before; none now) has no fake AUD and cannot deploy
-        before the gated Access creation, and neither can Home while it binds the app."""
+        """A first-phase app (one in CHECK_ONLY) has no fake AUD and cannot deploy before the gated Access creation,
+        and neither can Home while it binds the app."""
         owner = hcl_map((INFRA / "access.tf").read_text(), "owner_apps")
         self.assertEqual(set(AHEAD_OF_DEPLOY), set(test_wrangler_configs.ci_changes.CHECK_ONLY))
         for worker, host in AHEAD_OF_DEPLOY.items():

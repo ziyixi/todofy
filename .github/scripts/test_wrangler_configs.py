@@ -12,7 +12,7 @@ value; these tests keep ci.yml, the wrappers and the configs in step. They read 
 why they live here and not in any app (root AGENTS.md). Standard library only.
 """
 
-from workflow_sources import effective_ci, workflow_data
+from workflow_sources import effective_ci, jobs as source_jobs, workflow_data
 
 import os
 import re
@@ -33,6 +33,7 @@ except ModuleNotFoundError:
 
 sys.path.insert(0, str(Path(__file__).parent))
 import ci_changes  # noqa: E402
+import drift_desired  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO / ".github" / "workflows" / "ci.yml"
@@ -58,25 +59,17 @@ TEST_CONFIGS = {
     "recall/wrangler.test.toml",
 }
 
-# Each app with a deploy-vars wrapper: the wrapper, how CI calls it, and its production configs.
-WRAPPERS = {
-    "model-router": ("model-router/tools/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["model-router"]),
-    "mail-hero": ("mail-hero/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["mail-hero"]),
-    "todofy": (
-        "todofy/deploy/deploy_vars.py",
-        r"deploy_vars\.py (exec core|exec gateway|secrets core|secrets gateway)\b",
-        ["todofy-core", "todofy"],
-    ),
-    "dashboard": ("dashboard/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["home"]),
-    "links": ("links/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["links"]),
-    "tasks": ("tasks/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["tasks"]),
-    "watch": ("watch/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["watch"]),
-    "fleet": ("fleet/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["fleet"]),
-    "mailsort": ("mailsort/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["mailsort"]),
-    "recall": ("recall/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["recall"]),
-    "personal-mcp": ("personal-mcp/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["personal-mcp"]),
-    "newsletter-console": ("newsletter-console/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["newsletter-console"]),
-}
+
+def _wrapper(spec: dict) -> tuple[str, str, list[str]]:
+    """The wrapper, how CI calls it, and its production Workers, from drift_desired.py's entry (per mode for Todofy)."""
+    if spec["language"] == "js":
+        return spec["file"], r"deploy-vars\.mjs (exec|secrets)\b", [spec["vars"]]
+    calls = "|".join(f"{verb} {mode}" for verb in ("exec", "secrets") for mode in spec["vars"])
+    return spec["file"], rf"deploy_vars\.py ({calls})\b", list(spec["vars"].values())
+
+
+# Each app with a deploy-vars wrapper: drift_desired.py's one map, read here as above.
+WRAPPERS = {app: _wrapper(spec) for app, spec in drift_desired.WRAPPERS.items()}
 # Worker vars that must never be committed: personal values (GitHub environment secrets) ...
 PERSONAL_VARS = {
     "RECEIVE_ADDRESS",
@@ -139,7 +132,9 @@ TOGGLES = {
     # mailsort's ceiling (live, shadow or off): the emergency switch of mailsort/docs/design.md section 10.
     "MAILSORT_MODE",
 }
-DEPLOY_JOBS = ("todofy-deploy", "mail-hero-deploy", "dashboard-deploy", "links-deploy", "watch-deploy", "fleet-deploy", "mailsort-deploy", "recall-deploy", "personal-mcp-deploy", "model-router-deploy", "newsletter-console-deploy")
+# Every Worker deploy job: the ci.yml jobs that call the release recipe.
+DEPLOY_JOBS = tuple(name for name, block in source_jobs(WORKFLOW.read_text()).items()
+                    if "uses: ./.github/workflows/worker-release.yml" in block)
 # The retired generators' required GitHub variables, still set in production: a revert of the committed-config
 # layout needs them (README "Rolling back the committed-config layout"), and nothing may read them now.
 LEGACY_VARIABLES = {
