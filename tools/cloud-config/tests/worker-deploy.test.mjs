@@ -69,6 +69,24 @@ test('the owner inputs overlay the map: the aliases are checked first, then the 
   })
 })
 
+test('a personal secret row is checked after the owner and lands beside the owner values, over the map', () => {
+  scratch((_, url) => {
+    const deploy = standard(url, {
+      worker: 'fleet', owner: 'FLEET_ACCESS_OWNER',
+      secrets: [{ name: 'REPORT_HMAC_KEY', from: 'FLEET_REPORT_HMAC_KEY', pattern: /^[0-9a-f]{64}$/ }],
+    })
+    const env = { FLEET_ACCESS_OWNER: 'owner@example.org', FLEET_ACCESS_OWNER_ALIASES: '', FLEET_REPORT_HMAC_KEY: 'd'.repeat(64) }
+    assert.deepEqual(deploy.generateSecrets(env), { ACCESS_OWNER: 'owner@example.org', ACCESS_OWNER_ALIASES: ' ', REPORT_HMAC_KEY: 'd'.repeat(64) })
+    const map = { FLEET_WORKER_SECRETS: JSON.stringify({ REPORT_HMAC_KEY: 'e'.repeat(64) }) }
+    assert.equal(deploy.generateSecrets({ ...env, ...map }).REPORT_HMAC_KEY, 'd'.repeat(64))
+    assert.throws(() => deploy.generateSecrets({ ...env, FLEET_ACCESS_OWNER: 'x', FLEET_REPORT_HMAC_KEY: 'x' }), { setting: 'FLEET_ACCESS_OWNER' })
+    for (const value of [undefined, 'd'.repeat(63), 'D'.repeat(64)]) {
+      assert.throws(() => deploy.generateSecrets({ ...env, FLEET_REPORT_HMAC_KEY: value }),
+        (error) => error instanceof SettingError && error.setting === 'FLEET_REPORT_HMAC_KEY', String(value))
+    }
+  })
+})
+
 test('a map that names an owner-only secret is refused by the map name', () => {
   scratch((_, url) => {
     // An owner-only secret is never a declared binding (worker-secrets.json), so a map naming one is refused as
@@ -139,23 +157,23 @@ test('as a script the wrapper runs its commands, printing names only; imported, 
   scratch((dir) => {
     const wrapper = join(dir, 'deploy', 'deploy-vars.mjs')
     writeFileSync(wrapper, `import { BUILD_SHA, workerDeploy } from ${JSON.stringify(CORE)}\n`
-      + 'const deploy = workerDeploy(import.meta.url, { worker: \'watch\', injected: [BUILD_SHA], owner: \'WATCH_ACCESS_OWNER\',\n'
-      + '  guard: { ACCESS_AUDIENCE: \'strict\' } })\n'
+      + 'const deploy = workerDeploy(import.meta.url, { worker: \'fleet\', injected: [BUILD_SHA], owner: \'FLEET_ACCESS_OWNER\',\n'
+      + '  secrets: [{ name: \'REPORT_HMAC_KEY\', from: \'FLEET_REPORT_HMAC_KEY\', pattern: /^[0-9a-f]{64}$/ }], guard: { ACCESS_AUDIENCE: \'strict\' } })\n'
       + 'export const { run } = deploy\ndeploy.main()\n')
     const stub = join(dir, 'stub.mjs')
     const recorded = join(dir, 'argv.json')
     writeFileSync(stub, `import { writeFileSync } from 'node:fs'\nwriteFileSync(${JSON.stringify(recorded)}, JSON.stringify(process.argv.slice(2)))\n`)
-    const env = { PATH: process.env.PATH, ...owner }
+    const env = { PATH: process.env.PATH, GITHUB_SHA: 'c'.repeat(40), FLEET_ACCESS_OWNER: 'owner@example.org', FLEET_ACCESS_OWNER_ALIASES: '', FLEET_REPORT_HMAC_KEY: 'd'.repeat(64) }
     const invoke = (args, extra = {}) => spawnSync(process.execPath, [wrapper, ...args], { cwd: join(dir, 'worker'), env: { ...env, ...extra }, encoding: 'utf8' })
 
     const secrets = join(dir, 'secrets.json')
     const written = invoke(['secrets', secrets])
     assert.equal(written.status, 0, written.stderr)
-    assert.equal(written.stdout, 'Wrote the secrets file: ACCESS_OWNER, ACCESS_OWNER_ALIASES (values not printed).\n')
+    assert.equal(written.stdout, 'Wrote the secrets file: ACCESS_OWNER, ACCESS_OWNER_ALIASES, REPORT_HMAC_KEY (values not printed).\n')
     const again = invoke(['secrets', secrets])
     assert.deepEqual([again.status, again.stderr], [1, 'The secrets file already exists; nothing was overwritten.\n'])
-    const invalid = invoke(['check'], { WATCH_ACCESS_OWNER: 'secret-looking-value' })
-    assert.deepEqual([invalid.status, invalid.stderr], [1, 'Invalid or missing deploy setting: WATCH_ACCESS_OWNER\n'])
+    const invalid = invoke(['check'], { FLEET_REPORT_HMAC_KEY: 'secret-looking-value' })
+    assert.deepEqual([invalid.status, invalid.stderr], [1, 'Invalid or missing deploy setting: FLEET_REPORT_HMAC_KEY\n'])
     // The config has no AUD yet: a dry run runs the stub with the flag added, a real deploy is refused before it.
     const dry = invoke(['exec', '--', process.execPath, stub, 'deploy', '--dry-run', '--config', '../wrangler.toml'])
     assert.equal(dry.status, 0, dry.stderr)
@@ -167,7 +185,7 @@ test('as a script the wrapper runs its commands, printing names only; imported, 
     assert.ok(!existsSync(recorded))
     assert.equal(invoke(['nonsense']).status, 2)
     for (const result of [written, again, invalid, dry, refused]) {
-      for (const value of ['owner@example.org', 'c'.repeat(40), 'secret-looking-value']) {
+      for (const value of ['owner@example.org', 'd'.repeat(64), 'c'.repeat(40), 'secret-looking-value']) {
         assert.ok(!(result.stdout + result.stderr).includes(value), 'printed a value')
       }
     }

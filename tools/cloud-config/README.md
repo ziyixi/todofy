@@ -74,11 +74,11 @@ Todofy's core uses `TODOFY_CORE_WORKER_SECRETS`; its gateway uses `TODOFY_WORKER
 Wrappers use `BUILD_SOURCE_SHA` when supplied, otherwise `GITHUB_SHA`, and require a full lowercase 40-hex SHA.
 Both the normal release and a repair can therefore report the exact source they built.
 
-`worker-deploy.mjs` is the deploy-vars core of the standard Workers. A wrapper built on it declares only its Worker
-secret entry, the vars it injects, the input holding the owner's address, and how each committed AUD or D1 id gates
-a deploy. It re-exports the core's functions under its usual names, so CI, the app's tests and `drift_desired.py`
-still use the app's own `deploy/deploy-vars.mjs`. A change to the core deploys no app; each app's checks run its
-wrapper's tests and dry run.
+`worker-deploy.mjs` is the deploy-vars core of the standard Workers. A wrapper built on it declares only what differs
+(the options listed in `worker-deploy.mjs`: its Worker secret entry, the vars it injects, its owner and other personal
+inputs, owner-only secrets, and how each committed AUD or D1 id gates a deploy). It re-exports the core's functions
+under its usual names, so CI, the app's tests and `drift_desired.py` still use the app's own `deploy/deploy-vars.mjs`.
+A change to the core deploys no app; each app's checks run its wrapper's tests and dry run.
 
 A Worker whose owner is another Worker's declares `identity_from = "<worker>"` and only `ACCESS_OWNER` (and optional
 `ACCESS_OWNER_ALIASES`). It has no map of its own: its spec names the source's map and `identity_from`, the deploy

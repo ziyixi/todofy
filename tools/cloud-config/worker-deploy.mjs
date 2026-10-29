@@ -7,8 +7,8 @@
  * A wrapper adds at deploy time the values never committed to the app's wrangler.toml:
  * - with `wrangler deploy --var NAME:value` (a plain_text var, exactly like a [vars] entry): the commit (BUILD_SHA) and
  *   any GitHub-variable switch;
- * - with `--secrets-file` (Worker secrets, hidden in wrangler's output): the owner's addresses, over the app's optional
- *   <APP>_WORKER_SECRETS map (worker-secrets.mjs).
+ * - with `--secrets-file` (Worker secrets, hidden in wrangler's output): the owner's addresses and any other personal
+ *   input, over the app's optional <APP>_WORKER_SECRETS map (worker-secrets.mjs).
  *
  * Wrangler silently DELETES a var that a deploy does not send (no config has keep_vars), so a wrapper refuses to run
  * unless every value is present and valid. Messages name the setting, never a value.
@@ -80,10 +80,11 @@ const assignment = (key, value) => new RegExp(`^\\s*${key}\\s*=${value === undef
  * - worker: its entry in worker-secrets.json (the <APP>_WORKER_SECRETS map and the bindings it may hold);
  * - injected: the --var rows {name, from, kind, pattern} in flag order, BUILD_SHA among them;
  * - owner: the input holding the owner's address, whose aliases are `<owner>_ALIASES`;
+ * - secrets: every other personal input, a {name, from, pattern} row like the injected ones;
  * - ownerOnly: secrets the owner puts from their own machine, never by a deploy: a map that names one is refused;
  * - guard: {identifier: rule} (IDENTIFIERS, RULES), checked in this order.
  */
-export function workerDeploy(url, { worker, injected, owner, ownerOnly = [], guard }) {
+export function workerDeploy(url, { worker, injected, owner, secrets = [], ownerOnly = [], guard }) {
   const CONFIG = fileURLToPath(new URL('../wrangler.toml', url))
   const map = workerSecretSpec(worker).github_secret
   for (const [key, rule] of Object.entries(guard)) {
@@ -111,6 +112,7 @@ export function workerDeploy(url, { worker, injected, owner, ownerOnly = [], gua
       // --secrets-file only adds or replaces secrets: an emptied list is uploaded as one space (read as no
       // aliases) rather than left out, which would keep the previous aliases working.
       ACCESS_OWNER_ALIASES: list.join(',') || ' ',
+      ...Object.fromEntries(secrets.map(({ name, from, pattern }) => [name, checked(env, from, pattern)])),
     }, SettingError)
     if (ownerOnly.some((name) => Object.hasOwn(merged, name))) throw new SettingError(map)
     return merged
@@ -162,6 +164,7 @@ export function workerDeploy(url, { worker, injected, owner, ownerOnly = [], gua
       : `${blocked} is missing from the committed config, malformed or all zeros (a deploy needs the real resource)`
   }
 
+  const written = ['ACCESS_OWNER', 'ACCESS_OWNER_ALIASES', ...secrets.map(({ name }) => name)]
   function run(argv, env = process.env) {
     const [command, ...rest] = argv
     if (command === 'check' && rest.length === 0) {
@@ -172,7 +175,7 @@ export function workerDeploy(url, { worker, injected, owner, ownerOnly = [], gua
     }
     if (command === 'secrets' && rest.length === 1) {
       writeSecrets(rest[0], env)
-      console.log('Wrote the secrets file: ACCESS_OWNER, ACCESS_OWNER_ALIASES (values not printed).')
+      console.log(`Wrote the secrets file: ${written.join(', ')} (values not printed).`)
       return 0
     }
     if (command === 'exec' && rest[0] === '--') {
