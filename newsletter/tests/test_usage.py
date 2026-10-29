@@ -5,6 +5,7 @@ import asyncio
 import model_router_client as models
 import pytest
 
+import newsletter.errors as errors
 import newsletter.usage as newsletter_usage
 import tests.support.usage as tests_support_usage
 
@@ -226,27 +227,34 @@ def test_trace_keys_are_bounded_and_unsafe_labels_are_dropped():
         newsletter_usage.usage_scope(records.append, "synthetic"),
         newsletter_usage.model_usage("fixture") as usage,
     ):
+        # Unsafe labels come first, so no bound hides them.
+        usage.start_turn()
+        usage.observe_generation(
+            receipt(
+                "requests/../../outside",
+                model="m" * 129,
+                kind="Subscription <b>",
+                contributing=("bad model <script>",),
+            )
+        )
         for number in range(newsletter_usage.MAX_REQUESTS + 2):
             usage.start_turn()
             usage.observe_generation(
                 receipt(
                     f"requests/synthetic-{number}",
-                    model="m" * 129 if number == 0 else "model-a",
-                    contributing=tuple(f"model-{n}" for n in range(6))
-                    + ("bad model <script>",),
+                    model="model-a",
+                    contributing=tuple(f"model-{n}" for n in range(6)),
                 )
             )
-        usage.start_turn()
-        usage.observe_generation(receipt("requests/../../outside"))
     record = records[-1]
-    assert len(record["requests"]) == newsletter_usage.MAX_REQUESTS
-    assert record["requests"][0] == {
-        "name": "requests/synthetic-0",
-        "model": "",
-    }
+    assert record["requests"] == [{"name": "", "model": ""}] + [
+        {"name": f"requests/synthetic-{n}", "model": "model-a"}
+        for n in range(newsletter_usage.MAX_REQUESTS - 1)
+    ]
     assert record["contributing_models"] == [
         f"model-{n}" for n in range(newsletter_usage.MAX_MODELS)
     ]
+    assert "billing_kind" not in record
     # Counters still see every call; only the trace list is bounded.
     assert record["turns_completed"] == newsletter_usage.MAX_REQUESTS + 3
 
@@ -286,6 +294,13 @@ def test_failure_is_a_finite_code(code, expected):
     assert records[-1]["status"] == "failed"
     assert records[-1]["failure"] == expected
     assert expected in newsletter_usage.FAILURES
+
+
+def test_failure_codes_cover_every_editor_category():
+    # A new editor category must be kept as itself, not folded into
+    # "unavailable" by a stale copy of the list.
+    expected = {*errors._ERROR_MESSAGES, "interrupted"}
+    assert expected == newsletter_usage.FAILURES
 
 
 def test_cancellation_records_interrupted_with_finish_time():

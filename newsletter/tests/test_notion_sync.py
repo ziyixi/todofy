@@ -355,6 +355,7 @@ async def test_unknown_create_recovers_by_lookup_not_recreation(rig, landed):
     assert rig.journal.entity(KEY)["create_state"] == "unknown"
     assert rig.api.count("create") == 1
     rig.restart()
+    rig.journal.clock = lambda: 7.0
     for _ in range(2):
         rig.due()
         await rig.drain()
@@ -362,11 +363,14 @@ async def test_unknown_create_recovers_by_lookup_not_recreation(rig, landed):
     if landed:
         assert rig.versions()[0]["state"] == "done"
         assert rig.api.count("append") == 1
+        assert rig.journal.entity(KEY)["progress_at"] == 7.0
     else:
         assert not rig.api.pages and not rig.api.count("append")
         assert rig.journal.entity(KEY)["create_state"] == "unknown"
         assert rig.journal.entity(KEY)["error"] == "NOTION_CREATE_UNCONFIRMED"
         assert rig.api.count("lookup") == 3
+        # Reading without confirming the create is never progress.
+        assert rig.journal.entity(KEY)["progress_at"] == 0
 
 
 @pytest.mark.parametrize("landed", [False, True])

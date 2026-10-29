@@ -153,6 +153,8 @@ def _consistent(counts: TokenCounts) -> bool:
 
 def utc_now() -> str:
     """Return the timezone-aware UTC ISO time used by durable records."""
+    # store.now has the same format, but importing the store here would be
+    # circular (store -> types -> usage).
     return datetime.datetime.now(datetime.UTC).isoformat()
 
 

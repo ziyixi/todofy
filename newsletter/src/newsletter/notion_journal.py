@@ -68,9 +68,10 @@ class NotionJournal:
     """Own the local Notion projection state and its import read models.
 
     ``progress_at`` is the local epoch time of an entity's last confirmed
-    step (create, append or property update). It is bookkeeping for the
-    owner console only; no decision reads it, and it is 0 until the first
-    step after the column was added.
+    step: a create, chart upload, append or property update, or a read that
+    confirms an earlier one landed. It is bookkeeping for the owner console
+    only; no decision reads it, and it is 0 until the first step after the
+    column was added.
     """
 
     def __init__(
