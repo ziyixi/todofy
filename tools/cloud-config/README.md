@@ -78,7 +78,8 @@ Both the normal release and a repair can therefore report the exact source they 
 (the options listed in `worker-deploy.mjs`: its Worker secret entry, the vars it injects, its owner and other personal
 inputs, owner-only secrets, and how each committed AUD or D1 id gates a deploy). It re-exports the core's functions
 under its usual names, so CI, the app's tests and `drift_desired.py` still use the app's own `deploy/deploy-vars.mjs`.
-A change to the core deploys no app; each app's checks run its wrapper's tests and dry run.
+A change to the core deploys no app: each app's checks run its wrapper's tests (and, for all but Tasks, a dry run
+through it), and the real deploy path is proven at each app's next release.
 
 A Worker whose owner is another Worker's declares `identity_from = "<worker>"` and only `ACCESS_OWNER` (and optional
 `ACCESS_OWNER_ALIASES`). It has no map of its own: its spec names the source's map and `identity_from`, the deploy
