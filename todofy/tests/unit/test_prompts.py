@@ -1,12 +1,19 @@
+"""Current business prompts and their examples agree with the existing output readers."""
+
+import json
+import re
+
 import pytest
 
 from todofy.core import prompts
-from todofy.core.report_schema import Recommendation, parse_recommendations
+from todofy.core.contract import parse_mail_event
+from todofy.core.mailbox import brief_of
+from todofy.core.render import clean_summary
+from todofy.core.report_schema import fit_summary, parse_recommendations, recommendation_response_schema
 
-BRIEF_LINE = (
-    "\tIMPORTANT: Start with one plain sentence of at most 40 Chinese characters on its own line, saying what this "
-    "email is and what it asks of me, if anything. No markdown or greeting on that line.\n"
-)
+
+def example_outputs(prompt: str) -> list[str]:
+    return re.findall(r"^输出：\n(.+?)(?=\n\n|\Z)", prompt, re.MULTILINE | re.DOTALL)
 
 
 def test_summary_prompts_are_pinned(golden):
@@ -14,160 +21,95 @@ def test_summary_prompts_are_pinned(golden):
     assert prompts.SUMMARY_RANGE.encode() == golden.bytes("prompt_summary_range.txt")
 
 
-def test_the_email_prompt_is_go_s_but_for_the_brief_line():
-    """The one deliberate change since Go (2026-10): the summary starts with the Mailbox's brief, right after the
-    length rule. Deleting the line restores Go's bytes; reading the brief needs nothing else (core/mailbox.py)."""
-    assert prompts.SUMMARY_EMAIL.count(BRIEF_LINE) == 1
-    go = prompts.SUMMARY_EMAIL.replace(BRIEF_LINE, "")
-    assert "concise to 1-2 sentences.\n\tIMPORTANT: Avoid showing # symbol" in go
-    assert prompts.SUMMARY_EMAIL.index("1-2 sentences") < prompts.SUMMARY_EMAIL.index(BRIEF_LINE)
-
-
 @pytest.mark.parametrize("top_n", [1, 3, 10])
-def test_recommend_prompt_matches_go_sprintf(golden, top_n):
-    """Go: fmt.Sprintf(DefaultPromptToRecommendTopTasks, n, n, n, n) in handle_recommendation.go."""
+def test_recommend_prompt_is_pinned(golden, top_n):
     assert prompts.recommend_prompt(top_n).encode() == golden.bytes(f"prompt_recommend_top{top_n}.txt")
 
 
-@pytest.mark.parametrize("top_n", [1, 3, 10])
-def test_recommend_prompt_names_n_in_all_four_places(top_n):
-    """Go: utils/recommendation_prompt_test.go TestRecommendationPromptFormatting."""
-    assert prompts.RECOMMEND_TOP_TASKS.count("{top_n}") == 4
-    assert "%" not in prompts.RECOMMEND_TOP_TASKS
-    rendered = prompts.recommend_prompt(top_n)
-    assert "{top_n}" not in rendered
-    for fragment in (
-        f"pick up to {top_n} distinct tasks",
-        f"never exceeding #{top_n}",
-        f'"rank" (integer 1-{top_n})',
-        f"Output at most {top_n} items",
-    ):
-        assert fragment in rendered
+def test_carryover_prompt_is_pinned(golden):
+    assert prompts.recommend_prompt(10, carryover=True).encode() == golden.bytes("prompt_recommend_top10_carryover.txt")
 
 
-@pytest.mark.parametrize(
-    "instruction",
-    [
-        "Fewer items are correct; return [] when none qualify",
-        "Never fill unused slots, invent an action, or repeat a task to reach the limit",
-        "Rank only the selected tasks consecutively from #1",
-        "Example output when no task requires action:\n[]",
-        "Example output when only one task qualifies, even if the limit is higher",
-        "ONLY a valid JSON array",
-        '"title" (string, one-line), "reason" (string, 1-2 sentences)',
-        "Chinese as response language for title and reason",
-    ],
-)
-def test_recommend_prompt_allows_fewer_or_zero_tasks(instruction):
-    """Go: utils/recommendation_prompt_test.go TestRecommendationPromptAllowsFewerOrZeroTasks."""
-    assert instruction in prompts.RECOMMEND_TOP_TASKS
+def test_email_examples_survive_cleanup_and_supply_the_mailbox_brief(payload):
+    event = parse_mail_event(json.dumps(payload, ensure_ascii=False).encode())
+    examples = example_outputs(prompts.SUMMARY_EMAIL)
+    assert len(examples) == 4
+    for example in examples:
+        first, *rest = example.splitlines()
+        assert len(first) <= 40
+        assert len(rest) <= 1
+        assert 1 <= len(re.findall(r"[。！？]", example)) <= 2
+        assert not any(mark in example for mark in ("#", "```", "**", "{", "}"))
+        assert clean_summary(example, event) == example
+        assert brief_of(example) == first
 
 
-@pytest.mark.parametrize("forbidden", ["exactly {top_n}", "re-emphasize the same task"])
-def test_recommend_prompt_drops_padding_instructions(forbidden):
-    assert forbidden not in prompts.RECOMMEND_TOP_TASKS
+def test_range_examples_are_plain_text_in_the_four_categories():
+    examples = example_outputs(prompts.SUMMARY_RANGE)
+    assert len(examples) == 2
+    categories = ["Urgent", "Important", "Normal", "Low Priority"]
+    for example in examples:
+        assert fit_summary(example) == example
+        assert [line for line in example.splitlines() if line in categories] == categories
+        for line in example.splitlines():
+            assert line in categories or line == "无。" or re.match(r"[一二三四五六七八九十]+、.+[。！？]$", line)
+        assert not any(mark in example for mark in ("#", "```", "**", '"', "{", "}"))
 
 
-@pytest.mark.parametrize(
-    "instruction",
-    [
-        "specific unresolved action, concrete risk if ignored, and time remaining",
-        "Do not invent deadlines or imply that already resolved actions remain open",
-        "A statement being available is not evidence that a payment action is required",
-        "Ordinary bills with confirmed autopay and no unresolved issue must not consume a priority slot",
-        "Autopay must be explicitly supported for that account or bill",
-        "never infer that all cards use autopay",
-        "If autopay status is not given, treat it as unknown",
-        "自动扣款状态未知",
-        "Unknown autopay alone is not a reason to create a task",
-    ],
-)
-def test_recommend_prompt_requires_evidence_for_payment_action(instruction):
-    """Go: utils/recommendation_prompt_test.go TestRecommendationPromptRequiresEvidenceForPaymentAction."""
-    assert instruction in prompts.RECOMMEND_TOP_TASKS
+@pytest.mark.parametrize("top_n", [1, 3, 5, 10])
+def test_recommendation_examples_parse_for_each_supported_limit(top_n):
+    """Even the smallest limit must accept every few-shot, including the carried pick."""
+    prompt = prompts.recommend_prompt(top_n, carryover=True)
+    assert f"本次最多选择 {top_n} 项。" in prompt
+    assert "{top_n}" not in prompt
+    examples = example_outputs(prompt)
+    assert len(examples) == 7
+    assert examples[0] == "[]"
+    for example in examples:
+        tasks = parse_recommendations(example, top_n)
+        assert tasks is not None
+        assert [task.rank for task in tasks] == list(range(1, len(tasks) + 1))
+        assert all(set(item) == {"rank", "title", "reason"} for item in json.loads(example))
+        assert all("\n" not in task.title for task in tasks)
 
 
-@pytest.mark.parametrize(
-    "instruction",
-    [
-        "Never suppress unresolved exceptions just because autopay is confirmed or the topic is routine",
-        "overdue obligations",
-        "failed or returned payments",
-        "partial payments leaving an amount due",
-        "insufficient funds",
-        "suspicious activity or security alerts",
-        "changed obligations requiring action",
-        "actual deadlines requiring a specific unresolved action must remain eligible for priority",
-        "distinct risks or actions must not be collapsed merely because they concern the same service",
-    ],
-)
-def test_recommend_prompt_preserves_actionable_exceptions(instruction):
-    """Go: utils/recommendation_prompt_test.go TestRecommendationPromptPreservesActionableExceptions."""
-    assert instruction in prompts.RECOMMEND_TOP_TASKS
+def test_recommendation_examples_match_the_structured_output_schema():
+    jsonschema = pytest.importorskip("jsonschema")
+    schema = recommendation_response_schema(1)
+    for example in example_outputs(prompts.recommend_prompt(1, carryover=True)):
+        jsonschema.validate(json.loads(example), schema)
 
 
-@pytest.mark.parametrize(
-    ("model_output", "expected"),
-    [
-        ("[]", []),
-        (
-            '[{"rank":1,"title":"处理扣款失败","reason":"仍有未付金额。"}]',
-            [Recommendation(1, "处理扣款失败", "仍有未付金额。")],
-        ),
-        (
-            '[{"rank":1,"title":"检查安全警报","reason":"发现可疑活动。"},'
-            '{"rank":2,"title":"处理扣款失败","reason":"仍有未付金额。"}]',
-            [
-                Recommendation(1, "检查安全警报", "发现可疑活动。"),
-                Recommendation(2, "处理扣款失败", "仍有未付金额。"),
-            ],
-        ),
-    ],
-    ids=["zero", "one", "two"],
-)
-def test_recommendations_below_the_limit_are_not_padded(model_output, expected):
-    """Go: handle_recommendation_test.go:48 TestHandleRecommendation_DoesNotPadBelowLimit (top=5)."""
-    prompt = prompts.recommend_prompt(5)
-    assert "Output at most 5 items" in prompt
-    assert parse_recommendations(model_output, 5) == expected
+def test_only_the_carried_example_uses_its_input_age():
+    plain = prompts.recommend_prompt(3)
+    carried = prompts.recommend_prompt(3, carryover=True)
+    assert carried.startswith(prompts.RECOMMEND_TOP_TASKS)
+    new_examples = example_outputs(plain)
+    carried_examples = example_outputs(carried)
+    assert carried_examples[: len(new_examples)] == new_examples
+    old_example, resolved_example = carried_examples[len(new_examples) :]
+    assert parse_recommendations(resolved_example, 3) == []
+    assert all(
+        not task.reason.startswith("（") for example in new_examples for task in parse_recommendations(example, 3)
+    )
+    (task,) = parse_recommendations(old_example, 3)
+    assert "[6 天前]" in carried
+    assert task.reason.startswith("（6 天前）")
+    assert "逾期" not in task.title + task.reason
+    assert "会议日期和回复期限尚未确定" in task.reason
 
 
-def test_go_raw_string_indentation_is_kept():
-    assert "overly long. \n\t\n\tIMPORTANT: Please do not write" in prompts.SUMMARY_EMAIL
-    assert prompts.SUMMARY_EMAIL.endswith("\n\n\tThe email content you are to summarize is as follows:")
-    assert prompts.SUMMARY_RANGE.endswith("\n\n\tAll the emails previous summarized by gemini API are as follows:")
-
-
-def test_report_input_matches_go_handlers(golden):
-    """Go: handle_summary.go and handle_recommendation.go build the same separator-fenced input."""
+def test_report_input_keeps_the_existing_separator_bytes(golden):
     summaries = ["第一条合成摘要", "Second synthetic summary"]
     assert prompts.report_input(summaries).encode() == golden.bytes("report_input.txt")
     assert prompts.report_input([]) == prompts.REPORT_SEPARATOR
 
 
-# ---- the morning brief's carryover (core/carryover.py) ---------------------------------------
-
-
-@pytest.mark.parametrize("top_n", [1, 3, 10])
-def test_without_carryover_the_prompt_is_the_old_one(golden, top_n):
-    assert prompts.recommend_prompt(top_n, carryover=False).encode() == golden.bytes(f"prompt_recommend_top{top_n}.txt")
-
-
-def test_the_carryover_prompt_is_pinned(golden):
-    """Changing this text changes what the model is told about older mail: update the golden on purpose."""
-    assert prompts.recommend_prompt(10, carryover=True).encode() == golden.bytes("prompt_recommend_top10_carryover.txt")
-
-
-def test_the_carryover_prompt_differs_only_by_its_three_edits():
-    plain, carried = prompts.recommend_prompt(3), prompts.recommend_prompt(3, carryover=True)
-    rebuilt = carried
-    for old, new in prompts.CARRYOVER_EDITS:
-        assert new.replace("{top_n}", "3") in carried
-        rebuilt = rebuilt.replace(new, old)
-    assert rebuilt == plain
-    assert '"[N 天前]"' in carried and "still awaits my decision" in carried
-    assert "Never call it overdue unless its summary states a date that has passed" in carried
-    # The age reaches the reader: a carried pick's reason starts with it (the newsletter shows reasons).
-    assert 'start its "reason" with "（N 天前）"' in carried
-    for fragment in ("pick up to 3 distinct tasks", "never exceeding #3", "Output at most 3 items"):
-        assert fragment in carried
+def test_current_paid_update_resolves_the_appended_older_failure():
+    prompt = prompts.recommend_prompt(1, carryover=True)
+    match = re.search(r"示例七：[^\n]*\n输入：\n(.+?)\n输出：\n(\[\])", prompt, re.DOTALL)
+    assert match is not None
+    current, carried = match[1].splitlines()
+    assert current.startswith("10月28日确认") and "已缴清" in current
+    assert carried.startswith("[3 天前] 10月25日") and "扣款失败" in carried
+    assert parse_recommendations(match[2], 1) == []

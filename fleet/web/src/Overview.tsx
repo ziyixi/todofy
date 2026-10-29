@@ -37,7 +37,7 @@ export function Overview({ view, nodes, nodesError, now }: {
         {legacy && <NodeSummary report={legacy} reportFreshness={freshness} unread={nodesError} now={now} />}
         {nodesError && <p className="muted">节点指标暂时无法读取；以上主机状态不受影响。</p>}
       </section>
-      {view.report && <HostReportView report={view.report} />}
+      {view.report && <HostReportView report={view.report} now={now} />}
       <section>
         <h2>最近状态变化</h2>
         {view.changes?.length ? (

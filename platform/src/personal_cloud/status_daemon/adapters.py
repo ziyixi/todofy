@@ -45,17 +45,13 @@ def newsletter(value: dict) -> Business:
         "build_source_sha",
         "release_request_id",
     }
+    if isinstance(value, dict) and value.get("version") == 2:
+        expected.update({"unknown_by_kind", "unknown_revision", "latest_delivery"})
+        if "config_sync" in value:
+            expected.add("config_sync")
     if (
         not isinstance(value, dict)
-        or set(value)
-        != (
-            expected
-            | (
-                {"unknown_by_kind", "unknown_revision", "latest_delivery"}
-                if value.get("version") == 2
-                else set()
-            )
-        )
+        or set(value) != expected
         or type(value["version"]) is not int
         or value["version"] not in {1, 2}
         or type(value["worker_healthy"]) is not bool

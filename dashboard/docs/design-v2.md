@@ -348,6 +348,14 @@ gradients, no side-stripe cards, no emoji; inline lucide-style stroke SVGs (lock
 separate button ("<name> 状态：<level>，查看详情") opening a detail sheet; skeletons of the same size
 while loading; one failing source greys only its own tile. Times in the browser time zone.
 
+### Newsletter 内容配置
+
+Newsletter 的内容配置状态复用 Fleet 的 `NewsletterOps.status()`，只增加 `newsletter_config_*` 信号和
+最近尝试、最近成功的 Unix 秒时间及检查年龄计数，不增加绑定或调用。配置检查失败与超过 30 分钟未检查
+是应用级提醒，不计入每日 Newsletter 的业务流程。固定版本、等待激活和旧版未观测是提示；正常状态只称
+“与上次检查目标一致”。操作与记录中显示配置检查时间，并链接 Fleet 的完整版本、摘要、固定状态与错误码。
+提醒继续使用 Home 的关闭与恢复机制；检查时间变化不重新打开同一条已关闭提醒。
+
 ### Codex gateway
 
 The Codex gateway's ops-v1 status comes through Fleet and carries process and release evidence only, like

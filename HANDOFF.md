@@ -1,10 +1,11 @@
 # Handoff
 
-Updated 2026-10-28 UTC. Current work describes in-flight and unreleased work in detail; released work moves to a
+Updated 2026-10-29 UTC. Current work describes in-flight and unreleased work in detail; released work moves to a
 dated record under `docs/history/` and is linked here, without run-ID ledgers. Rules are in [AGENTS](AGENTS.md);
 entry points in [README](README.md). Never put private content, credentials or raw production output here.
 
-Archives (their waiting lists are not instructions): [October 28](docs/history/handoff-2026-10-28.md) (the review
+Archives (their waiting lists are not instructions): [October 29](docs/history/handoff-2026-10-29.md) (business
+prompt clarity), [October 28](docs/history/handoff-2026-10-28.md) (the review
 cleanup wave, the fixed K3s node address and DNS, the backups wave, Fleet node telemetry, the Newsletter researcher,
 Brief's retirement),
 [October 27](docs/history/handoff-2026-10-27.md) (Model Router
@@ -62,10 +63,11 @@ admission until it reports ready):
 
 ## Latest verified release
 
-`b4990110`, direct OpenAI API, separate Codex identity and persisted caller model selection:
-[main release](https://github.com/ziyixi/todofy/actions/runs/40817114662). Its matching Personal cloud reconcile
-passed with resolved drift, resource registration and VPS gates; Home's fresh configuration check reported no
-difference. [Verification](model-router/docs/verification.md#openai-api-and-saved-model-choices).
+`7f8f4c3b`, Newsletter configuration activation visible through Fleet and Home:
+[main release](https://github.com/ziyixi/todofy/actions/runs/40835158998). Its matching Personal cloud reconcile
+passed with resolved drift, resource registration and VPS gates. A fresh new observer report carried real
+configuration identities and source poll times; Fleet and Home showed the same times through existing read-only
+interfaces. [Acceptance](docs/history/handoff-2026-10-29.md#newsletter-configuration-visibility-released-7f8f4c3b).
 Per-app identities are in GitHub production Deployments.
 
 ## Verify after deploy

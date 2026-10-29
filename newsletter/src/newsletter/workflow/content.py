@@ -21,6 +21,7 @@ import newsletter.errors as errors
 import newsletter.model_io as model_io
 import newsletter.types as types
 import newsletter.usage as newsletter_usage
+import newsletter.workflow.prompt_examples as prompt_examples
 import newsletter.workflow.schema as newsletter_workflow_schema
 import newsletter.workflow.sources as sources
 
@@ -206,10 +207,12 @@ DEFAULT_SELECTION_POLICY = (
     "论文或重复正文。研究可以保存在材料库供以后跟进，"
     "不意味着必须出现在今天邮件。\n"
 )
+DEFAULT_DISCOVERY_POLICY += prompt_examples.DISCOVERY
+DEFAULT_SELECTION_POLICY += prompt_examples.SELECTION
 _CLASSIFIED_SELECTION_RULES = _SAFETY + (
     "\n"
     "只比较给定候选、classification和历史，不search/open，"
-    "不新增ID或URL；同事件合并。\n"
+    "不新增候选ID或URL；同事件合并。\n"
     "每个research_task对应一个刊出topic，"
     "priority从1开始且不重复。max_tasks与editorial_budget\n"
     "是代码预算，不是建议。editorial_kind使用news/research/unkn"

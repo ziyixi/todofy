@@ -1,9 +1,9 @@
 """Shared fixtures for host-CPython unit tests of ``todofy.core``.
 
-tests/unit/golden holds bytes captured once from the Go service at 6c46ed4 (the
-recommendation prompts from the owner-approved 2026-09-05 utils/consts.go) by a
-throwaway Go program that is not kept in the repository; gemini_user_turn_*.txt
-pin Todofy's own Gemini framing.
+tests/unit/golden holds legacy Go byte captures and current prompt snapshots.
+The legacy captures came from the Go service at 6c46ed4 via a throwaway program;
+prompt_*.txt pin the current business prompts, and gemini_user_turn_*.txt pin
+Todofy's untrusted-input framing.
 """
 
 import json
