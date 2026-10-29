@@ -356,3 +356,14 @@ def test_authored_bundle_carries_registry_and_a_bounded_feed_budget():
     assert feeds.on_error == "continue"
     assert feeds.params == {"timeout_seconds": 180}
     assert len(snapshot["files"]) < content_config.MAX_FILES
+
+
+def test_authored_selection_budget_outlasts_slow_model_turns():
+    # Selection cannot continue on error: its timeout leaves nothing to send.
+    source = pathlib.Path(__file__).resolve().parents[1] / "content-config"
+    definition = content_config.config_definition(
+        content_config.build_directory(source, "a" * 40)
+    )
+    (selection,) = [n for n in definition.nodes if n.type == "selection"]
+    assert selection.on_error == "stop"
+    assert selection.params == {"max_tasks": 8, "timeout_seconds": 420}

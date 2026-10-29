@@ -21,7 +21,7 @@ nodes:
   - id: selection
     type: selection
     needs: [history, candidates]
-    params: {max_tasks: 8, timeout_seconds: 150}
+    params: {max_tasks: 8, timeout_seconds: 420}
   - id: story_plan
     type: story_plan
     needs: [history, candidates, selection]
