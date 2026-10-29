@@ -14,10 +14,15 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "tools/cloud-release"))
 from api import Api, ReleaseError  # noqa: E402
 from cloudflare import DO_KEYS, observe  # noqa: E402
-from control import release_inputs  # noqa: E402
+from control import WORKERS, read_toml, release_inputs  # noqa: E402
 from deployments import last_good  # noqa: E402
 
-APPS = ("fleet", "dashboard", "mail-hero", "todofy", "watch", "mailsort", "recall", "personal-mcp")
+# The release units whose configs bind a Durable Object: observe() reads every namespace from those bindings (Todofy's
+# from its gateway, which binds the core's class by script_name), so their first releases name all of DO_KEYS.
+APPS = tuple(
+    app for app, paths in WORKERS.items()
+    if any(read_toml(REPO / path).get("durable_objects", {}).get("bindings") for path in paths)
+)
 
 
 class Github:

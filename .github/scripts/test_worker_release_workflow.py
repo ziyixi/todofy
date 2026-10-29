@@ -51,6 +51,15 @@ class WorkerReleaseWorkflow(unittest.TestCase):
                 self.assertEqual(caller["with"]["source_sha"], "${{ github.sha }}")
                 self.assertEqual(caller["secrets"], "inherit")
 
+    def test_the_environment_url_names_every_release_that_reports_one(self):
+        # A release whose composite reports a url but is missing here records no environment URL (Tasks' did not).
+        recipe = self.release_data["jobs"]["release"]
+        named = set(re.findall(r"steps\.([a-z_]+)\.outputs\.url", recipe["environment"]["url"]))
+        reporting = {step["id"] for step in recipe["steps"]
+                     if step.get("uses", "").startswith("./.github/actions/release-")
+                     and "url" in workflow_data(ROOT / step["uses"] / "action.yml").get("outputs", {})}
+        self.assertEqual(named, reporting)
+
     def test_write_permission_is_granted_by_the_real_caller_and_recipe(self):
         permissions = {"contents": "read", "deployments": "write"}
         self.assertEqual(self.release_data["permissions"], permissions)

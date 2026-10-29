@@ -2,6 +2,7 @@
 
 from workflow_sources import effective_ci
 
+import ast
 import fnmatch
 import io
 import json
@@ -1829,9 +1830,14 @@ class DeployConditions(unittest.TestCase):
     def test_the_dashboard_deploys_after_the_apps_and_watch_after_tasks(self):
         # Tasks alone: a failed Todofy leaves a selected Tasks deploy skipped, which already stops Watch.
         self.assertEqual(["tasks-deploy"], [need for need in self.needs(self.jobs()["watch-deploy"]) if need.endswith("-deploy")])
+        # Home waits for exactly the release of each Worker its service bindings name: the release units of
+        # tools/cloud-release/control.py (read without importing it: its module names are generic), by Worker name.
+        workers = next(ast.literal_eval(node.value) for node in ast.parse((REPO / "tools/cloud-release/control.py").read_text()).body
+                       if isinstance(node, ast.Assign) and [target.id for target in node.targets] == ["WORKERS"])
+        release = {tomllib.loads((REPO / path).read_text())["name"]: app + "-deploy" for app, paths in workers.items() for path in paths}
+        bound = {release[service["service"]] for service in tomllib.loads((REPO / "dashboard/wrangler.toml").read_text())["services"]}
         block = self.jobs()["dashboard-deploy"]
-        self.assertLessEqual({"todofy-deploy", "mail-hero-deploy", "links-deploy", "watch-deploy", "fleet-deploy", "mailsort-deploy", "recall-deploy"},
-                             set(self.needs(block)))
+        self.assertEqual({need for need in self.needs(block) if need.endswith("-deploy")}, bound)
         self.assertIn("group: dashboard-production", block)
 
         # The only token: the one Todofy deploy uses; no other secret reaches wrangler's environment.

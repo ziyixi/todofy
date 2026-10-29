@@ -1,5 +1,5 @@
-# One workflow for the apps (Todofy, Mail Hero, the home dashboard, the website, the links app, the watch app, Fleet,
-# Newsletter, Platform, Codex gateway, mailsort, recall, Tasks and the Newsletter console).
+# One workflow for every app of the service catalog (*/app.toml, docs/service-catalog.md); ci_changes.py KEYS names
+# the "changes" outputs, one check and one deploy output per app.
 # "changes" decides what changed since a cumulative base (.github/scripts/ci_changes.py), each app's checks run
 # from its own directory, "Shared packages" checks packages/* (compiled into the apps), "Contracts" runs both
 # sides of mail.received.v1 and ops-v1 plus the dashboard's ops-v1 caller tests, "Proto checks"
