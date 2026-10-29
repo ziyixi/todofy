@@ -1,11 +1,17 @@
 /// <reference types="vitest/config" />
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
-import { homeURLFromConfig } from '../deploy/public-navigation.mjs'
+import { navigationFromConfig } from '../deploy/public-navigation.mjs'
+
+const navigation = navigationFromConfig()
 
 export default defineConfig({
   plugins: [react()],
-  define: { 'import.meta.env.VITE_HOME_URL': JSON.stringify(homeURLFromConfig()) },
+  // Public navigation (Home, the Newsletter console), declared in ../wrangler.toml, never written in UI source.
+  define: {
+    'import.meta.env.VITE_HOME_URL': JSON.stringify(navigation.HOME_URL),
+    'import.meta.env.VITE_NEWSLETTER_URL': JSON.stringify(navigation.NEWSLETTER_URL),
+  },
   build: {
     // Served by the Worker "fleet" as static assets (../wrangler.toml [assets]).
     outDir: 'dist',

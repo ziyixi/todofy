@@ -295,6 +295,8 @@ function entries(patch: Record<string, Partial<EntryState>> = {}): EntryState[] 
     entry('website', { metric: { kind: 'latency', ms: 180 }, ...patch.website }),
     entry('notion-publish', { ...patch['notion-publish'] }),
     entry('newsletter', { level: 'unmonitored', checked_at: null, ...patch.newsletter }),
+    // The Newsletter console has no status of its own (status none).
+    entry('newsletter-console', { level: 'unmonitored', checked_at: null, ...patch['newsletter-console'] }),
   ]
 }
 
@@ -468,13 +470,14 @@ function flowStates(options: { geminiWarning?: boolean; todofyDown?: boolean } =
       canary: null,
     },
     {
+      // Todofy's personal items, then the engine (unseen in these fixtures); Notion is a backup copy, not a stage.
       id: 'daily-newsletter',
       level: 'ok',
-      partial: true,
-      coverage: { monitored: 1, total: 3 },
+      partial: false,
+      coverage: { monitored: 1, total: 2 },
       first_issue: null,
       freshness: { kind: 'none', at: null },
-      stages: [stage('report'), stage('fetch', { level: 'unmonitored' }), stage('write', { level: 'unmonitored' })],
+      stages: [stage('report'), stage('fetch', { level: 'unmonitored' })],
       unclassified: [],
       canary: null,
     },
@@ -863,6 +866,28 @@ export function canaryFailed(): Scenario {
     flows: { ...base.flows, flows: [{ ...mail, level: 'critical', stages, canary: { ...canary, last_ok_at: null } }, ...base.flows.flows.slice(1)] },
     ops: { ...base.ops, canary },
   }
+}
+
+/**
+ * 网站发布 seeing one of its three stages: the website's probe switched off (`enabled: false`) and no content check
+ * recorded yet, so it is partial (fewer than half its stages seen) and has no freshness.
+ */
+export function withPartialSite(patch: Partial<FlowState> = {}): Scenario {
+  const base = healthy()
+  const partial = { partial: true, coverage: { monitored: 1, total: 3 }, freshness: { kind: 'none' as const, at: null } }
+  const flows = base.flows.flows.map((flow) => flow.id !== 'site-publish' ? flow : {
+    ...flow,
+    ...partial,
+    stages: flow.stages.map((s) => (s.id === 'serve' ? stage('serve', { level: 'unmonitored' }) : s)),
+    ...patch,
+  })
+  const summaries = base.home.flows.map((summary) => summary.id !== 'site-publish' ? summary : {
+    ...summary,
+    ...partial,
+    ...(patch.level ? { level: patch.level } : {}),
+    ...(patch.first_issue !== undefined ? { first_issue: patch.first_issue } : {}),
+  })
+  return { ...base, flows: { ...base.flows, flows }, home: { ...base.home, flows: summaries } }
 }
 
 /**

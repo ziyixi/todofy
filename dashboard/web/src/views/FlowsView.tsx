@@ -8,7 +8,7 @@ import { Metrics, Pill, Time } from '../components/ui'
 import { flowMark, freshnessText } from '../lib/flows'
 import { formatDayHour, formatDayTime, formatNumber, formatPercent, utcHourWithLocal } from '../lib/format'
 import { CANARY_BADGE, LEVEL, SEVERITY, counterShort, reasonLabel, signalLabel } from '../lib/labels'
-import { entryOf, nameOf, sortedByOrder, stageScripts, type Reg } from '../lib/registry'
+import { entryOf, nameOf, readIn, sortedByOrder, stageScripts, type Reg } from '../lib/registry'
 import { httpsUrl } from '../lib/url'
 import { routeHash } from '../router'
 
@@ -58,7 +58,10 @@ function StageDetail({ reg, flow, stage, state, now }: { reg: Reg; flow: string;
   const headingId = useId()
   const entry = entryOf(reg, stage.entry)
   const scripts = stageScripts(reg, stage)
-  const url = httpsUrl(entry?.url)
+  // An entry without pages of its own links the console it is read in (the Newsletter engine's runs and issues).
+  const reader = readIn(reg, entry)
+  const url = httpsUrl(entry?.url) ?? reader?.url ?? null
+  const urlName = reader?.name ?? entry?.name
   const level = state?.level ?? 'unknown'
   const attention = useAttention()
   const dismissed = dismissedFor(attention, { flow, stage: stage.id }, level)
@@ -145,9 +148,9 @@ function StageDetail({ reg, flow, stage, state, now }: { reg: Reg; flow: string;
           {scripts.length > 0 ? (
             <a href={routeHash({ view: 'cloudflare', script: scripts[0] as string })}>在 Cloudflare 中查看 {scripts.join('、')} →</a>
           ) : null}
-          {url && entry ? (
-            <a href={url} target="_blank" rel="noreferrer noopener" aria-label={`打开 ${entry.name}（新标签页）`}>
-              打开 {entry.name}
+          {url && urlName ? (
+            <a href={url} target="_blank" rel="noreferrer noopener" aria-label={`打开 ${urlName}（新标签页）`}>
+              打开 {urlName}
               <ExternalLink size={13} aria-hidden="true" />
             </a>
           ) : null}

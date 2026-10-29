@@ -228,8 +228,9 @@ describe('flows (stage chains)', () => {
     const flows = Object.fromEntries(flowStates(input()).map((f) => [f.id, f]));
     expect(flows['site-publish']).toMatchObject({ level: 'ok', partial: false, coverage: { monitored: 2, total: 3 }, freshness: { kind: 'content_check', at: new Date(NOW - 2 * MIN).toISOString() } });
     expect(stage(flows['site-publish'] as FlowState, 'serve').probe).toEqual({ checked_at: new Date(NOW - MIN).toISOString(), ok: true, http_status: 200, latency_ms: 180 });
-    // Two of three stages observed; Notion business success remains unmonitored.
-    expect(flows['daily-newsletter']).toMatchObject({ level: 'ok', partial: false, coverage: { monitored: 2, total: 3 }, freshness: { kind: 'none' } });
+    // Both stages observed. Notion is Newsletter's asynchronous backup copy, not a stage of the flow.
+    expect(flows['daily-newsletter']).toMatchObject({ level: 'ok', partial: false, coverage: { monitored: 2, total: 2 }, freshness: { kind: 'none' } });
+    expect(flows['daily-newsletter']?.stages.map((s) => s.id)).toEqual(['report', 'fetch']);
     expect(flows['ops-digest']).toMatchObject({ level: 'ok', freshness: { kind: 'digest', at: '2026-09-29T07:00:00.000Z', accepted: true } });
     expect(flowSummaries(input()).map((f) => f.id)).toEqual(['mail-to-task', 'gtd', 'site-publish', 'daily-newsletter', 'web-watch', 'ops-digest']);
     // The watch app's flow: the watched sites are outside the dashboard; its three stages read its ops-v1 counters.
@@ -313,8 +314,13 @@ describe('flows (stage chains)', () => {
 
   it('shows unmonitored stages as 未接入 and an unreachable app on every one of its stages', () => {
     const unreachable = failedStatus(status('todofy'), 2);
-    const f = flow('daily-newsletter', { statuses: { 'mail-hero': status('mail-hero'), todofy: unreachable, watch: status('watch'), newsletter: status('newsletter'), 'codex-gateway': status('codex-gateway'), fleet: status('fleet'), 'notion-publish': status('notion-publish'), mailsort: status('mailsort'), recall: status('recall'), tasks: status('tasks'), 'personal-mcp': status('personal-mcp'), 'model-router': status('model-router'), links: status('links') } });
-    expect(f.stages.map((s) => s.level)).toEqual(['critical', 'ok', 'unmonitored']);
+    const statuses = { 'mail-hero': status('mail-hero'), todofy: unreachable, watch: status('watch'), newsletter: status('newsletter'), 'codex-gateway': status('codex-gateway'), fleet: status('fleet'), 'notion-publish': status('notion-publish'), mailsort: status('mailsort'), recall: status('recall'), tasks: status('tasks'), 'personal-mcp': status('personal-mcp'), 'model-router': status('model-router'), links: status('links') };
+    // The source mailbox's forwarding is outside the dashboard; Todofy's two stages both read its unreachable status.
+    const mail = flow('mail-to-task', { statuses });
+    expect(mail.stages.map((s) => s.level)).toEqual(['unmonitored', 'ok', 'ok', 'ok', 'critical', 'critical']);
+    expect(mail).toMatchObject({ level: 'critical', first_issue: { stage: 'consume', code: 'unreachable' } });
+    const f = flow('daily-newsletter', { statuses });
+    expect(f.stages.map((s) => s.level)).toEqual(['critical', 'ok']);
     expect(f).toMatchObject({ level: 'critical', partial: false, first_issue: { stage: 'report', code: 'unreachable' } });
   });
 });

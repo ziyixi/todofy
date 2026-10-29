@@ -1,7 +1,7 @@
 import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { CANARY_DISABLED_NOTE } from '../components/Canary'
-import { canaryDisabled, canaryFailed, healthy, oneWarning, todofyUnreachable, type Scenario } from '../test/fixtures'
+import { canaryDisabled, canaryFailed, healthy, oneWarning, todofyUnreachable, withPartialSite, type Scenario } from '../test/fixtures'
 import { freezeClock, renderApp, serve } from '../test/harness'
 
 async function showFlows(scenario: Scenario, hash = '#/flows') {
@@ -47,41 +47,40 @@ describe('业务流程', () => {
     expect(within(site).getByText('已监测 2/3')).toBeInTheDocument()
     expect(within(site).getByText('内容检查 今天 00:00')).toBeInTheDocument()
 
-    // Fewer than half the stages seen: never a green dot.
+    // Newsletter's flow: Todofy's personal items, then the engine. Notion is its backup copy, never a stage.
     const newsletter = card('每日 Newsletter')
-    expect(within(newsletter).getByText('部分接入')).toBeInTheDocument()
-    expect(within(newsletter).queryByText('正常', { selector: '.level-badge .level-word' })).toBeNull()
-    expect(within(newsletter).getByText('无法判断新鲜度：部分阶段尚未接入')).toBeInTheDocument()
+    const chain = within(within(newsletter).getByRole('list', { name: '阶段' })).getAllByRole('listitem')
+    expect(chain.map((pill) => pill.textContent)).toEqual(['Todofy 个人事项：正常', '→采编与投递：未接入'])
+    expect(within(newsletter).getByText('已监测 1/2')).toBeInTheDocument()
 
     expect(within(card('运维摘要')).getByText('上次摘要 昨天 23:00 · 已在 Tasks 创建')).toBeInTheDocument()
   })
 
+  it('never shows a green dot on a flow that sees fewer than half of its stages', async () => {
+    await showFlows(withPartialSite())
+    const site = card('网站发布')
+    expect(within(site).getByText('部分接入')).toBeInTheDocument()
+    expect(within(site).queryByText('正常', { selector: '.level-badge .level-word' })).toBeNull()
+    expect(within(site).getByText('无法判断新鲜度：部分阶段尚未接入')).toBeInTheDocument()
+  })
+
   it('shows a partial flow\'s real level when it is not ok: 部分接入 only replaces 正常 (F2)', async () => {
-    const base = healthy()
-    const flows = base.flows.flows.map((flow) =>
-      flow.id === 'daily-newsletter'
-        ? {
-            ...flow,
-            level: 'critical' as const,
-            first_issue: { stage: 'report', code: 'unreachable' },
-            stages: flow.stages.map((s) => (s.id === 'report' ? { ...s, level: 'critical' as const, reason: 'unreachable' } : s)),
-          }
-        : flow,
-    )
-    const summaries = base.home.flows.map((summary) =>
-      summary.id === 'daily-newsletter' ? { ...summary, level: 'critical' as const, first_issue: { stage: 'report', code: 'unreachable' } } : summary,
-    )
-    const user = await showFlows({ ...base, flows: { ...base.flows, flows }, home: { ...base.home, flows: summaries } })
-    const newsletter = card('每日 Newsletter')
-    expect(within(newsletter).getByText('故障', { selector: '.level-badge .level-word' })).toBeInTheDocument()
-    expect(within(newsletter).queryByText('部分接入')).toBeNull()
-    expect(within(newsletter).getByText('已监测 1/3')).toBeInTheDocument()
+    const issue = { stage: 'publish', code: 'unreachable' }
+    const base = withPartialSite({ level: 'critical', first_issue: issue })
+    const publish = base.flows.flows.find((flow) => flow.id === 'site-publish')!
+    const stages = publish.stages.map((s) => (s.id === 'publish' ? { ...s, level: 'critical' as const, reason: 'unreachable' } : s))
+    const flows = base.flows.flows.map((flow) => (flow.id === 'site-publish' ? { ...publish, stages } : flow))
+    const user = await showFlows({ ...base, flows: { ...base.flows, flows } })
+    const site = card('网站发布')
+    expect(within(site).getByText('故障', { selector: '.level-badge .level-word' })).toBeInTheDocument()
+    expect(within(site).queryByText('部分接入')).toBeNull()
+    expect(within(site).getByText('已监测 1/3')).toBeInTheDocument()
     // A problem flow opens by default, partial or not.
-    expect(within(newsletter).getByRole('button', { name: '收起 每日 Newsletter' })).toHaveAttribute('aria-expanded', 'true')
+    expect(within(site).getByRole('button', { name: '收起 网站发布' })).toHaveAttribute('aria-expanded', 'true')
 
     await user.click(screen.getByRole('link', { name: /^首页/ }))
     const rows = await screen.findByRole('region', { name: '业务流程' })
-    expect(within(rows).getByRole('link', { name: /^每日 Newsletter：故障，/ })).toBeInTheDocument()
+    expect(within(rows).getByRole('link', { name: /^网站发布：故障，/ })).toBeInTheDocument()
   })
 
   it('opens on the worst stage (the flow\'s first issue), not an earlier lesser one', async () => {
@@ -121,8 +120,17 @@ describe('业务流程', () => {
     await showFlows(healthy(), '#/flows/daily-newsletter')
     const nodes = within(within(card('每日 Newsletter')).getByRole('list', { name: '阶段' })).getAllByRole('button')
     // TICK (16:30:04 UTC) in Asia/Shanghai: 00:30 today.
-    expect(nodes[0]).toHaveAttribute('aria-label', '阶段 1 Todofy 报告：正常，可达 · 今天 00:30 检查')
+    expect(nodes[0]).toHaveAttribute('aria-label', '阶段 1 Todofy 个人事项：正常，可达 · 今天 00:30 检查')
     expect(within(nodes[0]!).queryAllByText('正常')).toHaveLength(1)
+  })
+
+  it('links the Newsletter engine\'s stage to the console its runs and issues are read in', async () => {
+    await showFlows(healthy(), '#/flows/daily-newsletter/fetch')
+    const detail = within(card('每日 Newsletter')).getByRole('region', { name: /^采编与投递/ })
+    const link = within(detail).getByRole('link', { name: '打开 Newsletter（新标签页）' })
+    expect(link).toHaveAttribute('href', 'https://news.ziyixi.science/')
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', 'noreferrer noopener')
   })
 
   it('opens the flow with a problem on its failing stage', async () => {

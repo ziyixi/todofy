@@ -82,6 +82,9 @@ describe('Fleet owner page', () => {
     expect(screen.getByText(/合计并非失败邮件数/)).toBeVisible();
     expect(screen.queryByText(/关闭提醒/)).toBeNull();
     expect(screen.getByRole('link', { name: '返回 Home' })).toHaveAttribute('href', import.meta.env.VITE_HOME_URL);
+    // Fleet counts; the Newsletter console reads the runs, issues and Notion backup behind those counts.
+    expect(screen.getByRole('link', { name: '运行、期刊与备份详情 →' })).toHaveAttribute('href', import.meta.env.VITE_NEWSLETTER_URL);
+    expect(import.meta.env.VITE_NEWSLETTER_URL).toMatch(/^https:\/\/[a-z0-9.-]+\/$/);
   });
   it('does not turn missing Newsletter observations into zero or a healthy process', async () => {
     const report = { ...fixture, newsletter: { state: 'unavailable', drain_state: 'unknown' } };
@@ -116,6 +119,9 @@ describe('Fleet owner page', () => {
     expect(screen.getByText('未确认完成记录').nextElementSibling).toHaveTextContent('4');
     expect(screen.getByText('运行中断').nextElementSibling).toHaveTextContent('2');
     expect(screen.getByText('邮件投递').nextElementSibling).toHaveTextContent('1');
+    // Notion is Newsletter's backup copy, never a destination of its own.
+    expect(screen.getByText('Notion 备份·创建').nextElementSibling).toHaveTextContent('0');
+    expect(screen.getByText('Notion 备份·更新').nextElementSibling).toHaveTextContent('0');
     expect(screen.getByText(/需要核对/)).toBeVisible();
   });
   it('keeps absent legacy delivery metadata visibly unobserved', async () => {

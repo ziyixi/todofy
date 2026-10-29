@@ -36,7 +36,7 @@ describe('概览', () => {
     expect(service.getByText('排队').nextElementSibling).toHaveTextContent('0');
     expect(service.getByText('进行中').nextElementSibling).toHaveTextContent('0');
     expect(service.getByText('未确认完成记录').nextElementSibling).toHaveTextContent('2');
-    expect(service.getByText(/Notion 创建 1 · Notion 更新 1/)).toBeVisible();
+    expect(service.getByText(/Notion 备份·创建 1 · Notion 备份·更新 1/)).toBeVisible();
     expect(service.getByText('最近投递记录').closest('li')).toHaveTextContent(/^最近投递记录●邮件服务已接收10月29日一期 · 更新于 .+$/);
   });
 

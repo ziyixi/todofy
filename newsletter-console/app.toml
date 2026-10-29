@@ -19,8 +19,7 @@ position = 34
 id = "newsletter-console"
 name = "Newsletter"
 description = "期刊正文、运行、来源、模型调用与 Notion 备份"
-# Hidden until the console shows real pages; it then joins the apps (S7 in its plan).
-group = "hidden"
+group = "apps"
 icon = "newspaper"
 accent = "amber"
 access = true

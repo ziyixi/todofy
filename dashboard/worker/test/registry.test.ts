@@ -78,10 +78,10 @@ describe('the registry', () => {
 
   it('registers the entries of the design, in their groups and order', () => {
     const byGroup = (group: string) => REGISTRY.entries.filter((e) => e.group === group).sort((a, b) => a.order - b.order).map((e) => e.id);
-    expect(byGroup('apps')).toEqual(['mail-hero', 'todofy', 'links', 'watch', 'fleet', 'mailsort', 'recall', 'tasks', 'model-router']);
+    expect(byGroup('apps')).toEqual(['mail-hero', 'todofy', 'links', 'watch', 'fleet', 'mailsort', 'recall', 'newsletter-console', 'tasks', 'model-router']);
     expect(byGroup('sites')).toEqual(['website']);
     expect(byGroup('services')).toEqual(['notion-publish', 'newsletter', 'personal-mcp', 'codex-gateway']);
-    expect(byGroup('hidden')).toEqual(['home', 'self-hosted', 'platform-runtime', 'newsletter-console']);
+    expect(byGroup('hidden')).toEqual(['home', 'self-hosted', 'platform-runtime']);
     const status = Object.fromEntries(REGISTRY.entries.map((e) => [e.id, e.status.type]));
     expect(status).toEqual({
       'mail-hero': 'ops_v1',
@@ -101,9 +101,24 @@ describe('the registry', () => {
       'personal-mcp': 'ops_v1',
       'codex-gateway': 'ops_v1',
       'model-router': 'ops_v1',
-      // Hidden until its views exist; it has no status of its own.
+      // The console has no status of its own: its pages read the engine, whose status comes through Fleet.
       'newsletter-console': 'none',
     });
+  });
+
+  it("names Newsletter's engine and console apart, and keeps Notion out of its flow (a backup copy, not a stage)", () => {
+    const byId = (id: string) => REGISTRY.entries.find((e) => e.id === id);
+    expect(byId('newsletter')).toMatchObject({ name: 'Newsletter 引擎', group: 'services', url: null });
+    expect(byId('newsletter')?.description).toContain('Notion 为异步备份');
+    expect(byId('newsletter-console')).toMatchObject({ name: 'Newsletter', group: 'apps', access: true, status: { type: 'none' } });
+    const newsletter = REGISTRY.flows.find((f) => f.id === 'daily-newsletter');
+    // Stage ids stay stable for reminders already targeted at them.
+    expect(newsletter?.stages.map((s) => [s.id, s.name, s.entry])).toEqual([
+      ['report', 'Todofy 个人事项', 'todofy'],
+      ['fetch', '采编与投递', 'newsletter'],
+    ]);
+    expect(newsletter?.stages.some((s) => s.name.includes('Notion'))).toBe(false);
+    expect(newsletter?.description).toContain('Notion 是异步备份');
   });
 
   it('gives no tile with a health level an accent that reads as a status colour', () => {

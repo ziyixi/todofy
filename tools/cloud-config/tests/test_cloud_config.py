@@ -123,6 +123,7 @@ account_id = "dddddddddddddddddddddddddddddddd"
 HOST_KEY = "vps" # public node alias
 HOST_EPOCH = "7" # operator-managed recovery epoch
 SAFETY_BUDGET = "10"
+NEWSLETTER_URL = "https://news.old.test/"
 '''
         for node_key in ("vps", "replacement-vps"):
             with self.subTest(node_key=node_key):
@@ -131,12 +132,15 @@ SAFETY_BUDGET = "10"
                 (root / "fleet").mkdir()
                 (root / "fleet/app.toml").write_text(MANIFEST.replace("demo", "fleet").replace('hosts = ["fleet"]', 'hosts = []'))
                 (root / "fleet/wrangler.toml").write_text(fleet)
-                demo = CONFIG + 'HOST_KEY = "unrelated-host"\n'
+                demo = CONFIG + 'HOST_KEY = "unrelated-host"\nNEWSLETTER_URL = "https://unrelated.example.test/"\n'
                 (root / "demo/wrangler.toml").write_text(demo)
                 outputs = generate.generated_files(root)
                 expected = fleet.replace("d" * 32, "a" * 32).replace('HOST_KEY = "vps"', f'HOST_KEY = "{node_key}"')
+                expected = expected.replace("https://news.old.test/", "https://news.example.test/")
                 self.assertEqual(outputs["fleet/wrangler.toml"], expected)
                 self.assertIn('HOST_KEY = "unrelated-host"', outputs["demo/wrangler.toml"])
+                # Fleet's console link follows the zone; another Worker's var of the same name is its own.
+                self.assertIn('NEWSLETTER_URL = "https://unrelated.example.test/"', outputs["demo/wrangler.toml"])
                 self.assertEqual((root / "fleet/wrangler.toml").read_text(), fleet)
 
     def test_router_executor_origin_follows_the_existing_runtime_host_only(self):

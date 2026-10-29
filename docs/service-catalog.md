@@ -122,9 +122,11 @@ signal or collector. Two probes remain: the website's `build-info.json`, and the
 `ops_v1` answer (`LINKS`, its daily backup's age and failures), so a broken Custom Domain or route still shows on its
 tile with the Worker's error rate and the probe's latency.
 
-Newsletter uses `target = "vps"`, its image repository and no `workers` or `access`. Its Home entry uses
-`ops_v1` through the exact Fleet provider/binding above, with `guard = false`. This reports the latest
-bounded Newsletter business snapshot without Home reaching the VPS or storing a second business ledger.
+Newsletter uses `target = "vps"`, its image repository and no `workers` or `access`. Its Home entry (「Newsletter 引擎」)
+uses `ops_v1` through the exact Fleet provider/binding above, with `guard = false`. This reports the latest
+bounded Newsletter business snapshot without Home reaching the VPS or storing a second business ledger. Its owner pages
+are a separate Cloudflare app, the Newsletter console (`newsletter-console`, an `apps` tile with status `none`), which
+reads the engine's own records; Home's engine row opens it.
 Platform is a separate VPS image application with a hidden `platform-runtime` entry and `status.type = "none"`;
 Fleet displays the shared runtime node/workload/release status. Both image fields identify repositories,
 never mutable deployment tags. Release targets, heartbeat transport and Kubernetes manifests belong to

@@ -72,18 +72,18 @@ describe('操作与记录', () => {
       '服务器监控',
       '邮件分拣',
       '浏览记录',
+      // The Newsletter console; its engine keeps the services row below.
+      'Newsletter',
       'Tasks',
       'Model Router',
       '个人网站',
       '网站同步',
-      'Newsletter',
+      'Newsletter 引擎',
       '个人 MCP',
       'Codex 推理',
       '个人控制台',
       '自托管服务器',
       '平台运行时',
-      // The Newsletter console, hidden until its views exist (its engine keeps the services row above).
-      'Newsletter',
     ])
     expect(rows[1]).toHaveTextContent('ops-v1 状态接口')
     // The links app: its Ops entrypoint (the database and the daily backup).
@@ -99,18 +99,21 @@ describe('操作与记录', () => {
     // recall: its Ops entrypoint (counts and codes of the browsing record).
     expect(rows[6]).toHaveTextContent('ops-v1 状态接口')
     expect(within(rows[6] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('recall')
-    expect(rows[7]).toHaveTextContent('ops-v1 状态接口')
-    expect(within(rows[7] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('tasks')
-    expect(rows[8]).toHaveTextContent('Model Router')
+    // The Newsletter console: its own Worker, no status of its own (the engine's comes through Fleet).
+    expect(rows[7]).toHaveTextContent('未接入监控')
+    expect(within(rows[7] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('newsletter-console')
     expect(rows[8]).toHaveTextContent('ops-v1 状态接口')
-    expect(rows[9]).toHaveTextContent('公开地址探测')
-    expect(rows[11]).toHaveTextContent('ops-v1 状态接口')
+    expect(within(rows[8] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('tasks')
+    expect(rows[9]).toHaveTextContent('Model Router')
+    expect(rows[9]).toHaveTextContent('ops-v1 状态接口')
+    expect(rows[10]).toHaveTextContent('公开地址探测')
+    expect(rows[12]).toHaveTextContent('ops-v1 状态接口')
     // Hidden, with no Worker: it only names the self-hosted servers' backup bucket.
     const servers = within(about).getByRole('rowheader', { name: '自托管服务器' }).closest('tr')
     expect(servers).toHaveTextContent('未接入监控')
     expect(within(servers as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('—')
-    expect(rows[12]).toHaveTextContent('ops-v1 状态接口')
-    expect(within(rows[12] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('personal-mcp')
+    expect(rows[13]).toHaveTextContent('ops-v1 状态接口')
+    expect(within(rows[13] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('personal-mcp')
   })
 
   it('names a link-only entry of the registry as such', async () => {

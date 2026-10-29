@@ -179,7 +179,7 @@ export const drainState = (state: string | undefined): Word => lookup(DRAIN_STAT
 /** Fleet's names of the unknown-record categories. */
 export const UNKNOWN_CATEGORIES: Readonly<Record<string, string>> = {
   interrupted_activities: '运行中断', packets: '采编记录', workflow_attempts: '工作流步骤',
-  notion_entities: 'Notion 创建', notion_versions: 'Notion 更新', delivery: '邮件投递',
+  notion_entities: 'Notion 备份·创建', notion_versions: 'Notion 备份·更新', delivery: '邮件投递',
 };
 
 // ---- Editions -----------------------------------------------------------------------------------------------------

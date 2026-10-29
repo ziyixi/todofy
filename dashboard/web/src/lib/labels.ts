@@ -383,8 +383,8 @@ const COUNTERS: Readonly<Record<string, { label: string; kind: CounterKind }>> =
   unknown_interrupted_activities: { label: '运行中断记录', kind: 'count' },
   unknown_packets: { label: '采编待核对', kind: 'count' },
   unknown_workflow_attempts: { label: '工作流待核对', kind: 'count' },
-  unknown_notion_entities: { label: 'Notion 创建待核对', kind: 'count' },
-  unknown_notion_versions: { label: 'Notion 更新待核对', kind: 'count' },
+  unknown_notion_entities: { label: 'Notion 备份创建待核对', kind: 'count' },
+  unknown_notion_versions: { label: 'Notion 备份更新待核对', kind: 'count' },
   unknown_delivery: { label: '邮件投递待核对', kind: 'count' },
   // Mail Hero
   jobs_pending: { label: '待处理任务', kind: 'count' },
