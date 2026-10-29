@@ -3,10 +3,15 @@ import { RpcStatusError } from '@ziyixi/proto/http-client';
 import type { Overview } from '@ziyixi/proto/newsletter/ui/v1/overview_wire';
 import { read } from './api.ts';
 import { SHAPES, short, time } from './format.ts';
+import { BackupPage } from './Backup.tsx';
+import { IssuesPage } from './Issues.tsx';
+import { ModelsPage } from './Models.tsx';
 import { attentionOf, OverviewPage } from './Overview.tsx';
+import { IssuePage } from './Reader.tsx';
 import { runHref, useRoute, type Route } from './route.ts';
 import { RunPage } from './RunDetail.tsx';
 import { RunsPage } from './Runs.tsx';
+import { SourcesPage } from './Sources.tsx';
 import './style.css';
 
 /** What the console knows about its connection to Newsletter, from the overview read. */
@@ -38,12 +43,17 @@ const FAILED_REFRESH: Readonly<Partial<Record<Link, string>>> = {
   unreachable: '无法连接控制台，或登录已过期',
 };
 
-/** The pages with a tab; a run's own page belongs to 运行. */
-const TABS: readonly { page: 'overview' | 'runs'; href: string; name: string }[] = [
+type Tab = 'overview' | 'issues' | 'runs' | 'sources' | 'models' | 'backup';
+/** The pages with a tab; an issue's own page belongs to 期刊 and a run's to 运行. */
+const TABS: readonly { page: Tab; href: string; name: string }[] = [
   { page: 'overview', href: '#/', name: '概览' },
+  { page: 'issues', href: '#/issues', name: '期刊' },
   { page: 'runs', href: '#/runs', name: '运行' },
+  { page: 'sources', href: '#/sources', name: '来源' },
+  { page: 'models', href: '#/models', name: '模型' },
+  { page: 'backup', href: '#/backup', name: '备份' },
 ];
-const tabOf = (route: Route): 'overview' | 'runs' => (route.page === 'overview' ? 'overview' : 'runs');
+const tabOf = (route: Route): Tab => (route.page === 'issue' ? 'issues' : route.page === 'run' ? 'runs' : route.page);
 
 function Notice({ link }: { link: Exclude<Link, 'connected'> }) {
   const fleet = <a href={import.meta.env.VITE_FLEET_URL}>Fleet</a>;
@@ -105,10 +115,20 @@ function Page({ route, overview }: { route: Route; overview: Overview }) {
   switch (route.page) {
     case 'overview':
       return <OverviewPage overview={overview} />;
+    case 'issues':
+      return <IssuesPage month={route.month} filter={route.filter} />;
+    case 'issue':
+      return <IssuePage key={route.id} id={route.id} view={route.view} />;
     case 'runs':
       return <RunsPage month={route.month} />;
     case 'run':
       return <RunPage key={route.id} id={route.id} />;
+    case 'sources':
+      return <SourcesPage />;
+    case 'models':
+      return <ModelsPage days={route.days} />;
+    case 'backup':
+      return <BackupPage />;
   }
 }
 

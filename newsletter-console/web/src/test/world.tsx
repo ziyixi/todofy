@@ -12,6 +12,9 @@ import { App } from '../App.tsx';
 const FIXTURES = join(import.meta.dirname, '..', '..', '..', '..', 'contracts', 'newsletter-ui-v1', 'fixtures');
 
 export const BLOCKED_RUN = 'runs/00000000-0000-4000-8000-000000002800';
+/** The 10-27 daily edition, the one fixtures/edition.json answers in full. */
+export const EDITION = 'editions/00000000-0000-4000-8000-000000000027';
+export const USAGE = '/api/v1/runs:summarizeModelUsage';
 export const READY_RUN = 'runs/00000000-0000-4000-8000-000000002700';
 export const LATEST_RUN = 'runs/00000000-0000-4000-8000-000000002900';
 
@@ -43,6 +46,12 @@ export function world(overrides: Record<string, Answer> = {}): Record<string, An
     [`/api/v1/${LATEST_RUN}`]: fixture('run-ready'),
     [`/api/v1/${BLOCKED_RUN}/modelCalls`]: TIMED_OUT_CALLS,
     [`/api/v1/${READY_RUN}/modelCalls`]: fixture('model-calls'),
+    '/api/v1/editions': fixture('editions'),
+    [`/api/v1/${EDITION}`]: fixture('edition'),
+    [`/api/v1/${EDITION}/rendering`]: fixture('edition-rendering'),
+    '/api/v1/sourceCatalog': fixture('source-catalog'),
+    '/api/v1/backupStatus': fixture('backup-status'),
+    [USAGE]: fixture('model-usage-30d'),
     ...overrides,
   };
 }
@@ -52,7 +61,7 @@ export function serve(answers: Record<string, Answer>): string[] {
   const requested: string[] = [];
   vi.stubGlobal('fetch', (input: string) => {
     requested.push(input);
-    const answer = answers[new URL(input, 'https://news.example.test').pathname];
+    const answer = answers[decodeURIComponent(new URL(input, 'https://news.example.test').pathname)];
     if (typeof answer === 'function') return Promise.resolve((answer as () => Response)());
     if (answer === undefined) {
       return Promise.resolve(Response.json({ error: { code: 404, message: '', status: 'NOT_FOUND' } }, { status: 404 }));

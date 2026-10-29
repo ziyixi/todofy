@@ -9,8 +9,9 @@ it. It is read-only: no method writes, runs, sends, retries or syncs anything.
 Status: Newsletter answers every method on its console listener
 ([`newsletter/docs/console.md`](../../newsletter/docs/console.md)), and `fixtures/` holds its golden answers. The
 console Worker ([`newsletter-console/`](../../newsletter-console/README.md), on `news.<zone>`) routes it behind the
-owner's Access login and forwards every read to that listener; its UI shows the overview and the runs, and the
-issues, sources, model usage and backup pages follow. A change to the IDL checks and deploys Newsletter (with the
+owner's Access login and forwards every read to that listener; its UI shows the overview, the issues (each readable
+as rendered from its body, as the frozen email and as plain text), the runs, the sources, the model usage and the
+backup. A change to the IDL checks and deploys Newsletter (with the
 paired VPS release) and the console (`PROTO_PACKAGES`).
 
 | Side | What it does |

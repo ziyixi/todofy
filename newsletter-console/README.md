@@ -5,7 +5,7 @@
 不重发、不重试任何东西。
 
 当前阶段：Worker 把每个读取转发给 Newsletter 自己的控制台监听（[`newsletter/docs/console.md`](../newsletter/docs/console.md)），
-页面有「概览」与「运行」；「期刊」「来源」「模型」「备份」随后加入。首次部署等 `Infra apply` 创建 Access 应用、
+六个页面「概览」「期刊」「运行」「来源」「模型」「备份」都已就位。首次部署等 `Infra apply` 创建 Access 应用、
 AUD 记入 `config/resources.toml` 之后（见下文「上线顺序」），在此之前仍是 `ci_changes.py` 的 `CHECK_ONLY`。
 golden 回答在 `contracts/newsletter-ui-v1/fixtures/`。
 
@@ -20,8 +20,19 @@ golden 回答在 `contracts/newsletter-ui-v1/fixtures/`。
   （● 正常 · ▲ 需要关注 · ■ 失败或未发出 · ◆ 未确认或进行中 · ○ 无记录），投递、发布入口与配置状态用 Fleet 和 Home
   的同一套词。「概览」：最新一期、服务状态、最近 14 天、关键数字、今日流程（Notion 备份只是发布旁的虚线分支，不是
   流程中的一步）、外部接口与内容配置。「运行」：按月列出，每次运行有停止原因的白话说明（预算取运行开始时冻结的值）、
-  节点时间线、外部调用、选题、模型调用（可打开 Model Router 的请求记录）与投递。模型、订阅源与邮件文本一律按文本
-  显示（lint 禁止 `dangerouslySetInnerHTML`）。Home、Fleet 与 Model Router 的链接在构建时从 `wrangler.toml` 读取。
+  节点时间线、外部调用、选题、模型调用（可打开 Model Router 的请求记录）与投递。「期刊」：按月的卡片（全部、已投递、
+  未发出、测试），每一期有三种读法：「阅读」按结构化正文重排，栏目、边界、图表、研究介绍、参考编号与邮件完全一致，
+  Todofy 个人事项标明「仅你可见」以及是否写入 Notion 备份；「邮件原样」与「纯文本」打开时才读取冻结的邮件。旁边是
+  这一期的记录：运行、投递、Notion 副本（以记录为准）、模型用量与审校。「来源」：内容配置（与 Fleet 同一套词）、
+  最近运行冻结的版本、四类输入、每个搜集方向及其订阅源最近 7 次的结果、节点预算与编辑规则；这一页不提 Notion，
+  因为备份是记录的输出，不是输入。「模型」：7、30 或 90 天的调用、失败、tokens 与估算费用，按模型堆叠的每日柱状图
+  （附表格）与按节点的用时。「备份」：先说明权威记录是 SQLite、Notion 只是异步副本，再列两个库的计数、最早等待与
+  需要关注的记录（结果未确认时先核对，避免重复创建）。模型、订阅源与邮件文本一律按文本显示（lint 禁止
+  `dangerouslySetInnerHTML`），只有 http 与 https 地址成为链接，并在新标签页打开、不带来源与 opener。邮件 HTML 只在
+  `sandbox=""` 的 srcdoc 框里显示，先放一条自己的 CSP（不许脚本与网络，只许内嵌的 `data:` 图片）和
+  `<base target="_blank">`（沙箱拒绝新窗口，所以点链接什么也不发生）。页面本身仍是 `STRICT_CSP`：srcdoc 不经网络读取，
+  Chromium 与 WebKit 在它之下都正常显示，所以不需要再放宽 `frame-src`。Home、Fleet 与 Model Router 的链接在构建时从
+  `wrangler.toml` 读取。
 - `deploy/`：部署包装器、Worker 与界面的体积预算、配置测试。
 
 接口合同、传输与鉴权见 [`contracts/newsletter-ui-v1`](../contracts/newsletter-ui-v1/README.md)。

@@ -23,6 +23,7 @@ describe('概览', () => {
     expect(hero.getByText('运行').nextElementSibling).toHaveTextContent('●已生成');
     expect(hero.getByText('投递').nextElementSibling).toHaveTextContent('●邮件服务已接收');
     expect(hero.getByText('Notion 备份').nextElementSibling).toHaveTextContent('◆同步中');
+    expect(hero.getByRole('link', { name: '阅读本期' })).toHaveAttribute('href', '#/issues/00000000-0000-4000-8000-000000000029');
     expect(hero.getByRole('link', { name: '查看运行' })).toHaveAttribute('href', '#/runs/00000000-0000-4000-8000-000000002900');
   });
 

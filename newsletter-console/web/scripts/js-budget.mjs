@@ -2,12 +2,13 @@
 // (../dist/assets), so a build over the budget fails in CI. The page loads every chunk of the assets on its first
 // visit, so their gzip total is what the owner's phone downloads. A ratchet set at about 1.2 times the measured total:
 // 114.0 KiB gzip on 2026-10-29 for the shell (React, TanStack Query, the protobuf-es runtime, the embedded
-// newsletter.ui.v1 descriptors and the shared HTTP client). Raise it only in the commit that needs it (the console's
-// views), saying why there.
+// newsletter.ui.v1 descriptors and the shared HTTP client); 137.6 KiB the same day with all six pages, which read
+// every newsletter.ui.v1 message (the issues, sources and backup schemas joined the bundle). Raise it only in the
+// commit that needs it, saying why there.
 import { fileURLToPath } from 'node:url'
 import { assetsJsSize, isMain, uiProblem } from '../../../tools/bundle-size/bundle-size.mjs'
 
-export const JS_BUDGET_GZIP_BYTES = 140 * 1024
+export const JS_BUDGET_GZIP_BYTES = 165 * 1024
 
 /** Raw and gzip bytes of every .js file directly in `assetsDir`. */
 export const jsSize = assetsJsSize

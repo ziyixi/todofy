@@ -9,7 +9,7 @@ import {
 } from './format.ts';
 import { Mark } from './Mark.tsx';
 import { Dependencies } from './Overview.tsx';
-import { runHref, runsHref } from './route.ts';
+import { issueHref, runHref, runsHref } from './route.ts';
 import { Timeline } from './Timeline.tsx';
 
 const ROUTER_REQUEST = /^requests\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -205,6 +205,7 @@ function Delivery({ run }: { run: Run }) {
             ? '邮件服务已接收不代表已进入收件箱。'
             : run.edition ? '这期简报没有交给邮件服务。' : '这次运行没有生成期刊，所以没有投递。'}
       </p>
+      {run.edition ? <p className="delivery-read"><a href={issueHref(run.edition)}>阅读这一期 →</a></p> : null}
     </section>
   );
 }

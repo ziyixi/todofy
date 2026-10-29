@@ -175,6 +175,69 @@ export const UNKNOWN_CATEGORIES: Readonly<Record<string, string>> = {
   notion_entities: 'Notion 创建', notion_versions: 'Notion 更新', delivery: '邮件投递',
 };
 
+// ---- Editions -----------------------------------------------------------------------------------------------------
+
+/** The edition kinds, as the Notion backup's type column names them. */
+const EDITION_KINDS: Readonly<Record<string, string>> = { daily: '日常', correction: '修订', test: '测试' };
+export const editionKind = (kind: string | undefined): string => EDITION_KINDS[kind ?? ''] ?? (kind || '类型未记录');
+
+/** The email's own section labels (newsletter/src/newsletter/rendering.py `_KIND_LABELS`), so both say the same. */
+const SECTION_KINDS: Readonly<Record<string, string>> = {
+  world: '世界简报', ai_ml: 'AI / ML 进展', science: '科学进展', economy: '经济与产业', technology: '技术与工程',
+  health: '健康与公共卫生', feature: '研究与进展', context: '背景与观察',
+};
+export const sectionKind = (kind: string | undefined): string => SECTION_KINDS[kind ?? ''] ?? (kind || '栏目');
+
+/** How much of a source was read, in the email's words (rendering.py `_ACCESS_LABELS`). */
+const ACCESS_SCOPES: Readonly<Record<string, string>> = { metadata: '元数据', abstract: '摘要', full_text: '全文', dataset: '数据集' };
+export const accessScope = (scope: string | undefined): string | null =>
+  scope === undefined || scope === '' ? null : ACCESS_SCOPES[scope] ?? scope;
+
+const PERSONAL_STATES: Readonly<Record<string, Word>> = {
+  current: { label: '已读取', tone: 'ok' },
+  empty: { label: '没有相关事项', tone: 'none' },
+  unavailable: { label: 'Todofy 没有可用回答', tone: 'warn' },
+  disabled: { label: '未启用', tone: 'none' },
+};
+export const personalState = (state: string | undefined): Word => lookup(PERSONAL_STATES, state, NOT_RECORDED);
+
+/** A Notion database the backup writes. */
+const REPLICA_TARGETS: Readonly<Record<string, string>> = { editions: '简报库', materials: '材料库' };
+export const replicaTarget = (target: string | undefined): string => REPLICA_TARGETS[target ?? ''] ?? (target || '全部');
+
+// ---- Sources ------------------------------------------------------------------------------------------------------
+
+/** The researcher's per-source outcome codes (newsletter/src/newsletter/workflow/researcher.py `FAILURES` and ok). */
+const SOURCE_CODES: Readonly<Record<string, Word>> = {
+  ok: { label: '正常', tone: 'ok' },
+  http_error: { label: '无法访问', tone: 'bad' },
+  timeout: { label: '超时', tone: 'bad' },
+  too_large: { label: '内容过大', tone: 'bad' },
+  parse_error: { label: '无法解析', tone: 'bad' },
+  unavailable: { label: '暂不可用', tone: 'bad' },
+  unsafe_address: { label: '地址不安全', tone: 'bad' },
+  deadline: { label: '超出节点期限', tone: 'bad' },
+};
+export const sourceCode = (code: string | undefined): Word => lookup(SOURCE_CODES, code, NOT_RECORDED);
+
+const SOURCE_KINDS: Readonly<Record<string, string>> = { feed: 'RSS', arxiv: 'arXiv', crossref: 'Crossref', hf_daily: 'HF 日报' };
+export const sourceKind = (kind: string | undefined): string => SOURCE_KINDS[kind ?? ''] ?? (kind || '来源');
+
+/** The editorial limits (content-config `editorial.yaml`). */
+const EDITORIAL_LIMITS: Readonly<Record<string, string>> = {
+  max_public_items: '每期条目上限',
+  max_research_items: '其中研究条目上限',
+  max_deep: '每期深读上限',
+  max_research_candidates: '研究候选上限',
+};
+export const editorialLimit = (key: string): string => EDITORIAL_LIMITS[key] ?? key;
+/** The limits in the order above (how an issue is composed), then any other by name. */
+export function editorialOrder<T>(entries: readonly (readonly [string, T])[]): (readonly [string, T])[] {
+  const known = Object.keys(EDITORIAL_LIMITS);
+  const rank = (key: string): number => (known.includes(key) ? known.indexOf(key) : known.length);
+  return [...entries].sort((a, b) => rank(a[0]) - rank(b[0]) || a[0].localeCompare(b[0]));
+}
+
 // ---- Dates, times and numbers -------------------------------------------------------------------------------------
 
 const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
@@ -272,4 +335,23 @@ export function webUrl(value: string | undefined): string | null {
   } catch {
     return null;
   }
+}
+
+/** Only https URLs: for links the API promises are https (a Notion page, a commit page). */
+export function httpsUrl(value: string | undefined): string | null {
+  const url = webUrl(value);
+  return url !== null && url.startsWith('https:') ? url : null;
+}
+
+/** A URL's host, shown beside a reference's title so the reader sees where a link goes before following it. */
+export function hostOf(value: string | undefined): string | null {
+  const url = webUrl(value);
+  return url === null ? null : new URL(url).hostname;
+}
+
+/** Whole days from `from` to `to` (instants), or undefined when either is missing: 3 天. */
+export function daysBetween(from: string | undefined, to: string | undefined): number | undefined {
+  if (!from || !to) return undefined;
+  const ms = Date.parse(to) - Date.parse(from);
+  return Number.isFinite(ms) ? Math.max(0, Math.floor(ms / 86_400_000)) : undefined;
 }

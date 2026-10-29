@@ -8,11 +8,11 @@ import type { ConfigState } from '@ziyixi/proto/newsletter/ui/v1/source_catalog_
 import { runQuery } from './api.ts';
 import {
   SHAPES, UNKNOWN_CATEGORIES, configState, count, deliveryState, dependency, dependencyState, drainState, duration,
-  failureKind, issueDate, nodeName, nodeNameById, nodeState, replicaState, runState, seconds, short, stopReason,
-  stripDay, time, trigger, webUrl, wholeSeconds, type Tone, type Word,
+  editionKind, failureKind, issueDate, nodeName, nodeNameById, nodeState, replicaState, runState, seconds, short,
+  stopReason, stripDay, time, trigger, webUrl, wholeSeconds, type Tone, type Word,
 } from './format.ts';
 import { Mark } from './Mark.tsx';
-import { runHref } from './route.ts';
+import { issueHref, runHref } from './route.ts';
 
 /** What stopped a run, in one line: 选题超出节点预算（用时 161 秒 / 预算 150 秒）. */
 export function stopSentence(run: Run): string {
@@ -165,7 +165,7 @@ function Hero({ edition, run }: { edition: Edition | undefined; run: Run | undef
       </section>
     );
   }
-  const kind = edition.kind === 'daily' ? '日常' : edition.kind === 'correction' ? '修订' : edition.kind === 'test' ? '测试' : '';
+  const kind = edition.kind ? editionKind(edition.kind) : '';
   const ownRun = run !== undefined && run.name === edition.run ? run : undefined;
   return (
     <section className="card hero" aria-labelledby="hero-title">
@@ -182,7 +182,10 @@ function Hero({ edition, run }: { edition: Edition | undefined; run: Run | undef
         <div><dt>投递</dt><dd><Mark word={deliveryState(edition.delivery?.state)} /></dd></div>
         <div><dt>Notion 备份</dt><dd><Mark word={replicaState(edition.backup?.state)} /></dd></div>
       </dl>
-      {edition.run ? <p className="hero-actions"><a className="button" href={runHref(edition.run)}>查看运行</a></p> : null}
+      <p className="hero-actions">
+        <a className="button primary" href={issueHref(edition.name)}>阅读本期</a>
+        {edition.run ? <a className="button" href={runHref(edition.run)}>查看运行</a> : null}
+      </p>
     </section>
   );
 }

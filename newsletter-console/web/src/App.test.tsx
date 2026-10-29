@@ -6,7 +6,7 @@ import { RpcStatusError } from '@ziyixi/proto/http-client';
 import { parseStatus } from '@ziyixi/proto/rpc-status';
 import { linkOf } from './App.tsx';
 import { routeOf } from './route.ts';
-import { BLOCKED_RUN, fixture, serve, show, world } from './test/world.tsx';
+import { BLOCKED_RUN, EDITION, fixture, serve, show, world } from './test/world.tsx';
 
 afterEach(() => {
   cleanup();
@@ -57,6 +57,21 @@ describe('the console shell', () => {
     expect(await screen.findByRole('heading', { name: '10月28日 周三' })).toBeVisible();
   });
 
+  it('has a tab for each page, and gives an issue to 期刊 and a run to 运行', async () => {
+    const pages: [string, string][] = [
+      ['#/issues', '期刊'], [`#/${EDITION.replace('editions/', 'issues/')}`, '期刊'], ['#/sources', '来源'], ['#/models?days=90', '模型'], ['#/backup', '备份'],
+    ];
+    for (const [hash, tab] of pages) {
+      serve(world());
+      show(hash);
+      const tabs = within(screen.getByRole('navigation', { name: '页面' }));
+      expect(tabs.getAllByRole('link').map((link) => link.textContent)).toEqual(['概览', '期刊', '运行', '来源', '模型', '备份']);
+      expect(tabs.getAllByRole('link').filter((link) => link.getAttribute('aria-current') === 'page').map((link) => link.textContent)).toEqual([tab]);
+      await screen.findByText('数据时间');
+      cleanup();
+    }
+  });
+
   it('reads the hash as a page, a run or a month, never anything else', () => {
     expect(routeOf('')).toEqual({ page: 'overview' });
     expect(routeOf('#/')).toEqual({ page: 'overview' });
@@ -66,6 +81,18 @@ describe('the console shell', () => {
     expect(routeOf('#/runs/00000000-0000-4000-8000-000000002800')).toEqual({ page: 'run', id: '00000000-0000-4000-8000-000000002800' });
     expect(routeOf('#/runs/a%2Fb')).toEqual({ page: 'runs', month: '' });
     expect(routeOf('#/somewhere')).toEqual({ page: 'overview' });
+    expect(routeOf('#/issues')).toEqual({ page: 'issues', month: '', filter: 'all' });
+    expect(routeOf('#/issues?month=2026-09&show=unsent')).toEqual({ page: 'issues', month: '2026-09', filter: 'unsent' });
+    expect(routeOf('#/issues?show=everything')).toEqual({ page: 'issues', month: '', filter: 'all' });
+    expect(routeOf('#/issues/abc-1')).toEqual({ page: 'issue', id: 'abc-1', view: 'read' });
+    expect(routeOf('#/issues/abc-1?view=mail')).toEqual({ page: 'issue', id: 'abc-1', view: 'mail' });
+    expect(routeOf('#/issues/abc-1?view=html')).toEqual({ page: 'issue', id: 'abc-1', view: 'read' });
+    expect(routeOf('#/issues/a%2Fb')).toEqual({ page: 'issues', month: '', filter: 'all' });
+    expect(routeOf('#/models')).toEqual({ page: 'models', days: 7 });
+    expect(routeOf('#/models?days=90')).toEqual({ page: 'models', days: 90 });
+    expect(routeOf('#/models?days=1000')).toEqual({ page: 'models', days: 7 });
+    expect(routeOf('#/sources')).toEqual({ page: 'sources' });
+    expect(routeOf('#/backup')).toEqual({ page: 'backup' });
   });
 
   it('is light only', () => {

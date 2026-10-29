@@ -70,7 +70,9 @@ describe('a delivered run', () => {
     const stories = await section('选题');
     expect(stories.getByText('合成选题：港口')).toBeVisible();
     expect(stories.getByText('通过')).toBeVisible();
-    expect((await section('投递')).getByText('邮件服务已接收不代表已进入收件箱。')).toBeVisible();
+    const delivery = await section('投递');
+    expect(delivery.getByText('邮件服务已接收不代表已进入收件箱。')).toBeVisible();
+    expect(delivery.getByRole('link', { name: '阅读这一期 →' })).toHaveAttribute('href', '#/issues/00000000-0000-4000-8000-000000000027');
   });
 
   it('says 上线前未记录 for a call recorded before purposes and times were', async () => {
