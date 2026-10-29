@@ -67,10 +67,11 @@ ops-v1's and mail-received-v1's fixtures and schemas, among others) runs Proto c
 
 push: the files changed between a cumulative base and github.sha, never only this push's own diff,
 so a change whose run was cancelled or failed is checked (and deployed) again by the next run.
-  main           base = the commit of the last successful push run of this workflow on main
-                 (last_successful_main). Any run that failed or was cancelled, including a cancelled
-                 deploy (also while pending in the concurrency group), is not "success", so its changes
-                 stay in the next run's diff.
+  main           base = the newest earlier commit, through every parent (git_ancestors: a landing that
+                 merged main into its branch carries main on its second parent), whose push run of this
+                 workflow on main succeeded (last_successful_main). Any run that failed or was cancelled,
+                 including a cancelled deploy (also while pending in the concurrency group), is not
+                 "success", so its changes stay in the next run's diff.
   other branches base = git merge-base origin/main HEAD, so the head commit's gate covers every
                  change on the branch, not only the latest push.
   No usable base (no successful main run yet, API failure, base not an ancestor, no origin/main)
@@ -447,8 +448,9 @@ CHECK_JOBS = {
 ALWAYS_JOBS = ("Changes", "CI gate")
 # How many same-SHA branch runs are inspected (newest first).
 MAX_REUSE_CANDIDATES = 5
-# How many first-parent commits before this push are searched for the last successful main run.
-MAX_BASE_CANDIDATES = 50
+# How many commits before this push (git_ancestors, every merged branch's commits included) are searched for the last
+# successful main run; when it is further back no base is found and everything runs.
+MAX_BASE_CANDIDATES = 150
 
 
 def everything() -> dict[str, bool]:
@@ -955,7 +957,7 @@ def github_get(token: str, api_url: str) -> Callable[[str], dict]:
 
 
 def last_successful_main(get: Callable[[str], dict], repository: str, run_id: str, commits: Iterable[str]) -> str:
-    """The newest of `commits` (this push's first-parent history, newest first) whose push run of this workflow on
+    """The newest of `commits` (this push's ancestors, newest first: git_ancestors) whose push run of this workflow on
     main concluded success, or "" when none did. Git decides the order, never the API's run listing, which twice
     returned a months-old Go-era run first; the workflow is this run's by numeric id, as the Go-era CI shared its
     path. A commit whose lookup fails is passed over: an older base only checks more."""
@@ -987,7 +989,7 @@ def find_last_success(after: str, environ: dict[str, str], get: Callable[[str], 
     if not (get and repository and run_id):
         return ""
     try:
-        return last_successful_main(get, repository, run_id, git_first_parents(after, MAX_BASE_CANDIDATES))
+        return last_successful_main(get, repository, run_id, git_ancestors(after, MAX_BASE_CANDIDATES))
     except Exception:  # noqa: BLE001 - no base means: run everything
         return ""
 
@@ -1036,9 +1038,11 @@ def git_is_ancestor(base: str, after: str) -> bool:
     )
 
 
-def git_first_parents(after: str, count: int) -> list[str]:
-    """The commits before `after` on its first-parent line, newest first; empty when git cannot tell."""
-    command = ["git", "rev-list", "--first-parent", f"--max-count={count}", f"{after}~1"]
+def git_ancestors(after: str, count: int) -> list[str]:
+    """The commits before `after`, through every parent, newest first; empty when git cannot tell. --date-order lists
+    no commit before its descendants, so the first green one is the last green main head while main only moves
+    forward (a head rewound away and brought back by a branch that had merged it would be read as the base)."""
+    command = ["git", "rev-list", "--date-order", f"--max-count={count}", f"{after}^@"]
     result = subprocess.run(command, capture_output=True, text=True, check=False)
     return result.stdout.split() if result.returncode == 0 else []
 

@@ -133,10 +133,10 @@ jobs:
       # suites (Tasks, Todofy, Mail Hero, Home, links, watch, mailsort and recall).
       - name: Test the shared bundle-size and CPU test tools
         run: node --test tools/bundle-size/test/*.test.mjs tools/workerd-cpu/test/*.test.mts
-      # On a push to main it reads this workflow's runs with the read-only token: the newest first-parent commit
-      # whose push run on main succeeded is the diff base (ci_changes.py last_successful_main; any error runs
-      # everything), and a green branch push run of this exact commit may be reused. It prints only commits, run
-      # URLs and job names.
+      # On a push to main it reads this workflow's runs with the read-only token: the newest earlier commit, through
+      # every parent, whose push run on main succeeded is the diff base (ci_changes.py last_successful_main; any
+      # error runs everything), and a green branch push run of this exact commit may be reused. It prints only
+      # commits, run URLs and job names.
       - name: Decide which apps to check and deploy
         id: decide
         env:
