@@ -73,6 +73,23 @@ quota holds. Unknown receipt dates are skipped and valid decisions stay frozen. 
 keep their original scope. The change reached production with the later Model Router releases; natural intake has
 not been observed separately. Evidence: [branch runs](https://github.com/ziyixi/todofy/actions/workflows/ci.yml?query=branch%3Acodex%2Fmailsort-recent-read-mail).
 
+## Optional accounting and recovery (2026-10-29)
+
+Bounded production metadata showed live mode, valid Gmail auth/write scope and `openai_bad_answer`. Five Router
+requests had succeeded with known token counts but no optional estimate. Mailsort was rejecting the missing price
+before parsing the classification. No real mail or retained inference body was read for this diagnosis.
+
+`f72e447e` accepts valid results independently of optional accounting for every provider. Unknown usage remains
+absent; existing pre-call known-spend checks and known-cost recording remain. Unit and real-workerd regressions
+first reproduced the failure, then confirmed OpenAI/Google/Claude Gmail writes with no price, applied ledgers and
+no fictitious zero-cost accounting. Existing JSON/ID validation, Claude spend-limit and Gmail error cases passed.
+Worker/UI/type/lint/runtime/smoke checks passed. [Main release](https://github.com/ziyixi/todofy/actions/runs/40909752359)
+and [matching reconcile](https://github.com/ziyixi/todofy/actions/runs/40910801785) passed for both repaired Workers.
+
+Router's real synthetic pricing acceptance is [recorded separately](../../model-router/docs/verification.md#openai-default-billing-metadata-2026-10-29).
+Actual post-release Gmail application remains pending a new eligible message: the observed queue was empty.
+No old decision was replayed, no mail was sent by the test tooling, and no settings, model, prompt or budget changed.
+
 ## History
 
 - 2026-10-24: a one-off comparison of six Claude configurations on 100 private messages (one request each, about
