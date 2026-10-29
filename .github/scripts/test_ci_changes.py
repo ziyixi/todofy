@@ -624,6 +624,9 @@ class Classify(unittest.TestCase):
             # Mail Hero's owner API reaches only Mail Hero (not Todofy, which shares the mailhero/webhook package).
             "proto/mailhero/ui/v2/mail_hero_ui_service.proto": {"mail-hero"},
             "proto/mailhero/ui/v2/errors.proto": {"mail-hero"},
+            # Newsletter's owner read API before any app imports it: no Worker, no image and no VPS release.
+            "proto/newsletter/ui/v1/newsletter_ui_service.proto": set(),
+            "proto/newsletter/ui/v1/edition.proto": set(),
             # The TypeScript runtime and generator: every TypeScript user.
             "proto/ts/wire-json.ts": ts,
             "proto/ts/wire-rules.ts": ts,

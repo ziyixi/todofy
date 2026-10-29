@@ -1,0 +1,148 @@
+// (-- api-linter: core::0142::time-field-type=disabled
+//     aip.dev/not-precedent: durations are numbers with their unit in the name (seconds, days) and dates are
+//     calendar-day text: the wire profile has no Duration or Date. --)
+// Where Newsletter's inputs come from (来源): the content configuration in effect and its history, the discovery
+// directions, the researcher's feed registry, the node budgets and the editorial limits, all from the active
+// content-config bundle and the runs that froze it, with the recent outcome of each source from the runs' feeds
+// artifacts. The registry, the directions and the rules are public (the published content-config branch).
+syntax = "proto3";
+
+package newsletter.ui.v1;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+import "newsletter/ui/v1/run.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "SourceCatalogProto";
+option java_package = "science.ziyixi.newsletter.ui.v1";
+
+// The inputs of the next run and how they fared recently (a singleton).
+message SourceCatalog {
+  option (google.api.resource) = {
+    type: "news.ziyixi.science/SourceCatalog"
+    pattern: "sourceCatalog"
+    singular: "sourceCatalog"
+    plural: "sourceCatalogs"
+  };
+
+  // Always sourceCatalog.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // When this view was read.
+  google.protobuf.Timestamp generate_time = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The content configuration in effect and its sync.
+  ConfigState config = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The revisions recent runs froze, the newest first, at most 10.
+  repeated ConfigRevision config_history = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The discovery directions, in their order (01, 02, ...).
+  repeated Direction directions = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The researcher's feed sources, in the registry's order; empty when the bundle has no registry.
+  repeated FeedSource sources = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The workflow's node budgets, in the graph's order, with how recent runs used them.
+  repeated NodeBudget budgets = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The editorial limits (`editorial.yaml`) by name.
+  map<string, int32> editorial_limits = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The optional Todofy input.
+  PersonalInput personal_input = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Candidates remembered across runs, which discovery skips as already seen.
+  int32 history_candidate_count = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// The content configuration in effect. Each run freezes the revision in effect when it starts.
+message ConfigState {
+  // The active revision: a commit SHA of the published branch, or `packaged` (the image's baseline); empty when
+  // none is active.
+  string active_revision = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The active bundle's digest.
+  string active_digest = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // True when the owner pinned the active bundle, so syncs do not replace it.
+  bool pinned = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The revision the last sync wanted, when it differs from the active one; empty otherwise.
+  string wanted_revision = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When a sync was last attempted; absent before the first.
+  google.protobuf.Timestamp last_sync_attempt_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When a sync last succeeded; absent before the first.
+  google.protobuf.Timestamp last_sync_success_time = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The last sync's `CONFIG_*` error code; empty when it succeeded.
+  string sync_error_code = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The active revision's public commit page (https); empty for `packaged`.
+  string revision_url = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One revision recent runs froze.
+message ConfigRevision {
+  // A commit SHA or `packaged`.
+  string revision = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The first issue date (YYYY-MM-DD) of a run that froze it.
+  string first_issue_date = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The last one.
+  string last_issue_date = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Runs that froze it.
+  int32 run_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One discovery direction (搜集方向): what the model is asked to look for.
+message Direction {
+  // The direction's ID (`01-ai-ml`, ...).
+  string id = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its title.
+  string title = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its instructions as plain text (with the curated source guide, where it has one).
+  string instructions = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Enabled feed sources routed to it.
+  int32 source_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its discovery item's state in the latest run; unspecified when that run had none.
+  RunNode.State latest_state = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Candidates it found in the latest run.
+  int32 latest_candidate_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One feed source of the researcher's registry.
+message FeedSource {
+  // The source's ID.
+  string id = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its display name (several sources may share one, `arXiv` say).
+  string display_name = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The direction its leads go to.
+  string direction_id = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // feed, arxiv, crossref or hf_daily.
+  string kind = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The endpoint it fetches (http or https; public).
+  string url = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Whether runs fetch it.
+  bool enabled = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // At most this many leads per run.
+  int32 max_seeds = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Entries older than this many days are ignored; 0 when unbounded.
+  int32 max_age_days = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its outcome in the latest scheduled runs, the newest first, at most 7.
+  repeated SourceOutcome recent = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One node's budget and how recent runs used it.
+message NodeBudget {
+  // The node.
+  string node_id = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its budget in seconds in the active configuration; 0 for a node without one.
+  int32 budget_seconds = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The median duration of its finished attempts over the recent runs, in seconds (milliseconds precision); absent
+  // without one.
+  optional double recent_median_seconds = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The longest such duration (milliseconds precision); absent without one.
+  optional double recent_max_seconds = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The recent runs counted (at most 7 scheduled runs).
+  int32 recent_run_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Of those, the runs in which it ran past the budget that run froze.
+  int32 overrun_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// The optional Todofy input (个人事项).
+message PersonalInput {
+  // Whether runs fetch it.
+  bool enabled = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the latest edition's fetch happened; absent without one.
+  google.protobuf.Timestamp last_fetch_time = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // That fetch's error code; empty without one.
+  string last_error_code = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

@@ -1,0 +1,116 @@
+// (-- api-linter: core::0142::time-field-type=disabled
+//     aip.dev/not-precedent: dates are calendar-day text: the wire profile has no Date. --)
+// The console's first page (概览): the latest issue and run, the last 14 issue dates, the service's state and the
+// external interfaces, read in one snapshot of Newsletter's SQLite database. The unknown-record counts, the latest
+// delivery and the drain state are read with the same predicates as the monitoring snapshot Fleet and Home show, so
+// the numbers agree.
+syntax = "proto3";
+
+package newsletter.ui.v1;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+import "newsletter/ui/v1/backup_status.proto";
+import "newsletter/ui/v1/edition.proto";
+import "newsletter/ui/v1/model_call.proto";
+import "newsletter/ui/v1/run.proto";
+import "newsletter/ui/v1/source_catalog.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "OverviewProto";
+option java_package = "science.ziyixi.newsletter.ui.v1";
+
+// The overview (a singleton).
+message Overview {
+  option (google.api.resource) = {
+    type: "news.ziyixi.science/Overview"
+    pattern: "overview"
+    singular: "overview"
+    plural: "overviews"
+  };
+
+  // Always overview.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // When this view was read.
+  google.protobuf.Timestamp generate_time = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The service's time zone (an IANA name), in which issue dates and months are counted.
+  string time_zone = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The running engine's build: a commit SHA, empty when the build did not record one.
+  string engine_revision = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The newest run (list view), absent before the first.
+  // (-- api-linter: core::0122::embedded-resource=disabled
+  //     aip.dev/not-precedent: read in the same snapshot as the rest of the overview, so its numbers agree; a
+  //     second read by name could see a newer state. --)
+  Run latest_run = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The newest edition (list view), absent before the first.
+  // (-- api-linter: core::0122::embedded-resource=disabled
+  //     aip.dev/not-precedent: read in the same snapshot as the rest of the overview, so its numbers agree; a
+  //     second read by name could see a newer state. --)
+  Edition latest_edition = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The last 14 issue dates up to today in the service's time zone, the newest first, each with or without a run.
+  repeated DayStatus days = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The service's state.
+  ServiceState service = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The content configuration in effect.
+  ConfigState config = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The Notion backup over every target, absent when the backup is off.
+  ReplicaCounts backup = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Model usage over the last 7 issue dates.
+  UsageTotals week_usage = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The external interfaces over the latest run and the backup's journal, in `Dependency.Kind` order.
+  repeated Dependency dependencies = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One issue date of the overview's strip.
+message DayStatus {
+  // YYYY-MM-DD in the service's time zone.
+  string issue_date = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // That date's scheduled run, or else its newest run; empty when it had none.
+  string run = 2 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "news.ziyixi.science/Run"
+  ];
+  // That run's edition, empty when it has none.
+  string edition = 3 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "news.ziyixi.science/Edition"
+  ];
+  // That run's state; unspecified without a run.
+  Run.State run_state = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // That edition's delivery; unspecified without an edition.
+  Delivery.State delivery_state = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // That run's stop code; empty unless it stopped.
+  string stop_reason = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The node of its failure (`Run.failure`); empty without one.
+  string failed_node = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// The engine process and its work, as Fleet's monitoring reads them.
+message ServiceState {
+  // The deployment gate: whether new work is admitted.
+  enum DrainState {
+    // Never written.
+    DRAIN_STATE_UNSPECIFIED = 0;
+    // New work is admitted (可接收).
+    DRAIN_STATE_ACTIVE = 1;
+    // A release is draining: no new work, running work finishes (排空中).
+    DRAIN_STATE_DRAINING = 2;
+    // Drained and frozen for a release (已冻结). Reads stay available.
+    DRAIN_STATE_FROZEN = 3;
+  }
+
+  // True while the engine's worker runs.
+  bool worker_healthy = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The deployment gate.
+  DrainState drain_state = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Runs admitted and not started.
+  int32 queued_run_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Runs in progress.
+  int32 running_run_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Records whose outcome is unknown (待核对), the sum of `unknown_category_counts`.
+  int32 unknown_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Unknown records by category, with the monitoring snapshot's categories (`interrupted_activities`, `packets`,
+  // `workflow_attempts`, `notion_entities`, `notion_versions`, `delivery`), every one present.
+  map<string, int32> unknown_category_counts = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

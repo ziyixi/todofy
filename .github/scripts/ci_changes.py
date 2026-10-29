@@ -58,9 +58,9 @@ links app's, the watch app's and the dashboard's Workers and UIs, and Todofy's g
 (todofy.ui.v1's transcoder and client); "python": todofy-core, through the wheel pywrangler vendors), PROTO_RUNTIMES
 maps a language's runtime and generator to that language's users, and PROTO_PACKAGES maps each proto package to the apps
 that import its generated code (mailhero/ui reaches Mail Hero only, links/ui the links app only, watch/ui the watch app only, dashboard/ui the dashboard only, todofy/ui Todofy only; prototest, the
-runtimes' fixtures, reaches no app). Tests, test data, the check scripts, the api-linter tool module, check configs and
-Markdown (PROTO_NOT_BUNDLED), and the files of a package proto/retired.json lists (its deletion), deploy nothing; any
-other proto/ path (buf.yaml, buf.lock, the toolchain lockfile,
+runtimes' fixtures, and newsletter/ui, until Newsletter and its console import it, reach no app). Tests, test data,
+the check scripts, the api-linter tool module, check configs and Markdown (PROTO_NOT_BUNDLED), and the files of a
+package proto/retired.json lists (its deletion), deploy nothing; any other proto/ path (buf.yaml, buf.lock, the toolchain lockfile,
 ensure.mjs, a package not listed yet) deploys every user (fail safe). test_proto.py derives PROTO_USERS and the
 packages' importers from the sources. It also runs Contracts. A change to a contract proto/'s tests read (PROTO_READS:
 ops-v1's and mail-received-v1's fixtures and schemas, among others) runs Proto checks as well.
@@ -91,7 +91,8 @@ Documentation (is_documentation: Markdown anywhere, and any file in a docs/ fold
   reads, wheel package-data, image COPY sources, public/ folders and prettier checks, and fails when any of them
   reaches a path classified as documentation without selecting its reader.
 Newsletter remains an independent VPS image. newsletter_deploy publishes its tested image to GHCR; it does
-not upgrade the server. It still uses its locked external ziyixi-protos dependency, not the root proto runtime.
+not upgrade the server. It keeps its locked external ziyixi-protos dependency for the engine's own API, and takes the
+root proto's Python runtime only for the packages PROTO_PACKAGES lists it under (the Model Router client's).
 platform/ checks and publishes its own independently tested daemon image; platform_deploy upgrades the VPS.
 Newsletter production changes also check and publish Platform from the same source SHA before the VPS release.
 A push to main reuses a green branch run of the same commit (find_reusable): when a completed push run of
@@ -342,6 +343,9 @@ PROTO_PACKAGES: dict[str, tuple[str, ...]] = {
     "proto/dashboard/mcp/": ("dashboard", "personal-mcp"),
     # Mail Hero's owner API (mailhero.ui.v2): its Worker serves it, its UI calls it.
     "proto/mailhero/ui/": ("mail-hero",),
+    # Newsletter's owner read API (newsletter.ui.v1): nothing imports it yet, so a change deploys nothing. Newsletter
+    # answers it and the console Worker and UI pass it through and call it once they import it (test_proto.py).
+    "proto/newsletter/ui/": (),
     # CommonReason: Platform bundles Python error aliases.
     "proto/common/errors/": ("platform",),
     # ops-v1 (contracts/ops-v1): every app's Ops entrypoint and the dashboard that calls them.

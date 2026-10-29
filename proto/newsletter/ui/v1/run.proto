@@ -1,0 +1,307 @@
+// (-- api-linter: core::0142::time-field-type=disabled
+//     aip.dev/not-precedent: durations are numbers of seconds and dates are calendar-day text: the wire profile
+//     has no Duration or Date. --)
+// A run (运行): one execution of the frozen daily workflow, from its graph, node attempts, artifacts and ledgers in
+// Newsletter's SQLite database. Every budget is the one the run froze when it started, never today's
+// configuration. Codes are Newsletter's closed vocabularies (workflow/repository.py ERROR_CODES, the run's stop
+// reasons, the researcher's feed codes); a client shows an unknown code as it is.
+syntax = "proto3";
+
+package newsletter.ui.v1;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+import "newsletter/ui/v1/edition.proto";
+import "newsletter/ui/v1/model_call.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "RunProto";
+option java_package = "science.ziyixi.newsletter.ui.v1";
+
+// One run. ListRuns and the overview answer every field but `nodes`, `stories` and `dependencies`, which GetRun
+// adds.
+message Run {
+  option (google.api.resource) = {
+    type: "news.ziyixi.science/Run"
+    pattern: "runs/{run}"
+    singular: "run"
+    plural: "runs"
+  };
+
+  // Where the run is.
+  enum State {
+    // Never written.
+    STATE_UNSPECIFIED = 0;
+    // Admitted, not started.
+    STATE_QUEUED = 1;
+    // Collecting, projecting or editing.
+    STATE_RUNNING = 2;
+    // Finished with an edition.
+    STATE_READY = 3;
+    // Stopped without an edition by a business outcome (`stop_reason`, e.g. no_publishable_content).
+    STATE_BLOCKED = 4;
+    // Stopped by an error (`stop_reason`).
+    STATE_FAILED = 5;
+  }
+
+  // Why the run exists.
+  enum Trigger {
+    // Never written.
+    TRIGGER_UNSPECIFIED = 0;
+    // The daily schedule's run (request key `daily-<issue date>`).
+    TRIGGER_SCHEDULED = 1;
+    // A replay of a parent run's stories (`parent_run`).
+    TRIGGER_REPLAY = 2;
+    // Any other request.
+    TRIGGER_MANUAL = 3;
+  }
+
+  // runs/{run}.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // YYYY-MM-DD in the service's time zone.
+  string issue_date = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Why the run exists.
+  Trigger trigger = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Where the run is.
+  State state = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The run's stop code when it is BLOCKED or FAILED (`no_publishable_content`, `workflow_storage`, ...).
+  string stop_reason = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When it was admitted.
+  google.protobuf.Timestamp create_time = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the workflow started; absent while queued.
+  google.protobuf.Timestamp start_time = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When it last finished an attempt or stopped; absent while queued or running.
+  google.protobuf.Timestamp end_time = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The whole run's deadline in seconds, frozen at its start; 0 when it had none.
+  int32 deadline_seconds = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The model the run asked for, frozen at its start.
+  string requested_model = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The content-config revision the run froze (a commit SHA of the published branch, or `packaged`); empty when it
+  // had none.
+  string config_revision = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The digest of that content-config bundle.
+  string config_digest = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its edition, empty when it has none.
+  string edition = 13 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "news.ziyixi.science/Edition"
+  ];
+  // For a replay, the run it replays; empty otherwise.
+  string parent_run = 14 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "news.ziyixi.science/Run"
+  ];
+  // The replay of this run, empty when there is none.
+  string replay_run = 15 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "news.ziyixi.science/Run"
+  ];
+  // Its edition's delivery; unspecified without an edition.
+  Delivery.State delivery_state = 16 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // What stopped or degraded it, absent when nothing did.
+  RunFailure failure = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its model calls' totals.
+  UsageTotals usage = 18 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // What the feeds node fetched, absent before that node finished.
+  FeedSummary feeds = 19 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Candidates the candidates node kept.
+  int32 candidate_count = 20 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Research tasks the selection chose.
+  int32 selected_count = 21 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The frozen graph's nodes, in its order, with their attempts (GetRun only).
+  repeated RunNode nodes = 22 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // What the run decided for each story it considered (GetRun only).
+  repeated StoryOutcome stories = 23 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The external interfaces the run called (GetRun only).
+  repeated Dependency dependencies = 24 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One node of the run's frozen graph.
+message RunNode {
+  // Where a node or an item is.
+  enum State {
+    // Never written.
+    STATE_UNSPECIFIED = 0;
+    // Not started: waiting, or never reached when the run stopped first.
+    STATE_PENDING = 1;
+    // Claimed and running.
+    STATE_RUNNING = 2;
+    // Finished.
+    STATE_SUCCEEDED = 3;
+    // Finished without work to do (an explicit skip with a code).
+    STATE_SKIPPED = 4;
+    // Failed (`error_code`).
+    STATE_FAILED = 5;
+    // Its outcome is unknown (a restart while it ran); never repeated automatically.
+    STATE_UNKNOWN = 6;
+  }
+
+  // The node's ID in the graph (`feeds`, `selection`, ...).
+  string node_id = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The node's type (`api_feed`, `selection`, `story_brief`, ...).
+  string type = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The nodes it waits for.
+  repeated string needs = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // True when the graph lets the run continue after this node fails (`on_error: continue`).
+  // (-- api-linter: core::0140::prepositions=disabled
+  //     aip.dev/not-precedent: the name mirrors the workflow definition's `on_error: continue`. --)
+  bool continue_on_error = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Where the node is.
+  State state = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The node's error code; empty without one.
+  string error_code = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // True when it finished with some items or sources failed (`partial_failure`).
+  bool degraded = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The node's budget in seconds as the run froze it; 0 for a node without one.
+  int32 budget_seconds = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When its first attempt started; absent before.
+  google.protobuf.Timestamp start_time = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When its last attempt finished; absent while any runs.
+  google.protobuf.Timestamp end_time = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Items of a mapped node (directions, stories); 0 for a node without items.
+  int32 item_count = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Items that failed.
+  int32 failed_item_count = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The items, in the graph's order. At most 64 over the whole run.
+  repeated RunNodeItem items = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One item of a mapped node.
+message RunNodeItem {
+  // The item's ID (a direction ID, a story ID).
+  string item_id = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // A short label: the direction's ID or the story's title (untrusted model text).
+  string label = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Where the item is.
+  RunNode.State state = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its error code; empty without one.
+  string error_code = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When its attempt started.
+  google.protobuf.Timestamp start_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When its attempt finished.
+  google.protobuf.Timestamp end_time = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// What stopped a run, or degraded it when nothing stopped it: the earliest failed or unknown attempt of a node whose
+// failure stops the run, else the first degraded node.
+message RunFailure {
+  // The failure in plain words.
+  enum Kind {
+    // Never written.
+    KIND_UNSPECIFIED = 0;
+    // The node ran past its own budget (`timeout`).
+    KIND_NODE_BUDGET = 1;
+    // The run's whole deadline passed while the node ran (`interrupted` at or after the deadline).
+    KIND_RUN_DEADLINE = 2;
+    // Cancelled or cut off by a restart before the deadline (`interrupted`).
+    KIND_INTERRUPTED = 3;
+    // The model service refused or failed (authentication, rate_limit, unavailable, invalid_output).
+    KIND_MODEL_ERROR = 4;
+    // The model found nothing (`no_findings`).
+    KIND_NO_FINDINGS = 5;
+    // Nothing was publishable (`no_publishable_content`).
+    KIND_NOTHING_PUBLISHABLE = 6;
+    // Newsletter's own storage failed (`workflow_storage`).
+    KIND_STORAGE = 7;
+    // Any other code (`error_code`).
+    KIND_OTHER = 8;
+  }
+
+  // The node.
+  string node_id = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The node's item, empty for a node without items.
+  string item_id = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The attempt's error code, or the run's stop code when no attempt failed.
+  string error_code = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The failure in plain words.
+  Kind kind = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // How long the attempt ran, in seconds (milliseconds precision). A timed-out attempt may exceed its budget by
+  // the time its model conversation took to close, up to about 30 seconds.
+  double elapsed_seconds = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The node's budget in seconds as the run froze it; 0 for a node without one.
+  int32 budget_seconds = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The model call that was in flight when the attempt failed, empty when none was.
+  string model_call = 7 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "news.ziyixi.science/ModelCall"
+  ];
+}
+
+// What a run's feeds node fetched.
+message FeedSummary {
+  // Sources the run's registry enabled.
+  int32 source_count = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Sources that answered usably.
+  int32 ok_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Sources that failed.
+  int32 failed_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Leads the sources contributed to discovery; absent for runs before per-source counts were recorded.
+  optional int32 seed_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The failed sources, in the registry's order.
+  repeated SourceOutcome failures = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// What one feed source gave one run.
+message SourceOutcome {
+  // The source's ID in the registry.
+  string source_id = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The run's issue date (YYYY-MM-DD).
+  string issue_date = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // `ok` or the researcher's failure code (`http_error`, `timeout`, `parse_error`, ...).
+  string code = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Entries parsed; absent for runs before per-source counts were recorded (as are the next two).
+  optional int32 entry_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Entries accepted as fresh and in scope.
+  optional int32 accepted_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Leads routed to discovery.
+  optional int32 seed_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One external interface a run or the service calls (the overview's 外部接口).
+message Dependency {
+  // The interface.
+  enum Kind {
+    // Never written.
+    KIND_UNSPECIFIED = 0;
+    // The feed sources' HTTP endpoints.
+    KIND_FEEDS = 1;
+    // Model Router, for every model call.
+    KIND_MODEL_ROUTER = 2;
+    // Todofy's personal items (optional).
+    KIND_TODOFY = 3;
+    // The mail provider.
+    KIND_MAIL = 4;
+    // The Notion backup: an asynchronous copy, written after the record, never read back.
+    KIND_NOTION_BACKUP = 5;
+  }
+
+  // How it went.
+  enum State {
+    // Never written.
+    STATE_UNSPECIFIED = 0;
+    // Every call succeeded.
+    STATE_OK = 1;
+    // Some calls failed, or one needs checking.
+    STATE_ATTENTION = 2;
+    // The calls failed.
+    STATE_FAILED = 3;
+    // An outcome is unknown (a call cut off by a restart).
+    STATE_UNKNOWN = 4;
+    // Not configured or turned off.
+    STATE_DISABLED = 5;
+  }
+
+  // The interface.
+  Kind kind = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // How it went.
+  State state = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Calls (sources, model calls, fetches, sends, backup writes) in the scope.
+  int32 call_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Calls that failed.
+  int32 failed_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the last call happened; absent when unknown.
+  google.protobuf.Timestamp last_call_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The last failure's code; empty without one.
+  string error_code = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

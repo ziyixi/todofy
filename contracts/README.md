@@ -1,7 +1,7 @@
 # Cross-app contracts
 
 Cross-app semantics, schemas, fixtures and dependency-free value rules used by Mail Hero, Todofy, Home,
-Watch, Fleet and Platform. No app imports another. The IDL and shared authentication runtime live separately in `proto/`
+Watch, Fleet, Platform and Newsletter. No app imports another. The IDL and shared authentication runtime live separately in `proto/`
 and `packages/`; the [architecture guide](../docs/architecture.md) explains those boundaries.
 
 The protobuf IDL of these contracts lives in [`../proto/`](../proto/README.md): `ops-v1` and `mail-received-v1`
@@ -17,6 +17,7 @@ Todofy stopped writing tasks: the watch app creates its tasks through Tasks' `Ta
 | `platform-runtime-v1/` | Independent platform daemon → deployment verifier/host observer; shared bounded runtime metadata | Platform; [contract](platform-runtime-v1/README.md) |
 | `fleet-report-v1/` | Platform host observer → Fleet; signed metadata with the shared runtime snapshot | Fleet; [contract](fleet-report-v1/README.md) |
 | `recall-archive-v1/` | recall → a file store (today the owner's Dropbox app folder, which the NAS syncs) and any program reading its change feed: the plain-file archive layout and the feed | recall; see [`recall-archive-v1/README.md`](recall-archive-v1/README.md) |
+| `newsletter-ui-v1/` | Newsletter → the console Worker, which passes its answers through → the console's UI (`newsletter.ui.v1`, the owner's read-only view; Notion appears only as Newsletter's asynchronous backup) | Newsletter; [contract](newsletter-ui-v1/README.md) |
 
 ## `mail-received-v1/`
 

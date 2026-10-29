@@ -1,0 +1,294 @@
+// (-- api-linter: core::0142::time-field-type=disabled
+//     aip.dev/not-precedent: dates are calendar-day text: the wire profile has no Date. --)
+// An edition (期刊) as Newsletter stored it: the structured body the email was rendered from, its delivery and the
+// state of its Notion copy. The body is model-written and the references are third-party: every text is untrusted
+// and is shown as text, never as markup.
+syntax = "proto3";
+
+package newsletter.ui.v1;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+import "newsletter/ui/v1/backup_status.proto";
+import "newsletter/ui/v1/model_call.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "EditionProto";
+option java_package = "science.ziyixi.newsletter.ui.v1";
+
+// One edition. ListEditions answers the list view: `name` to `backup` (fields 1-13); GetEdition answers every field.
+message Edition {
+  option (google.api.resource) = {
+    type: "news.ziyixi.science/Edition"
+    pattern: "editions/{edition}"
+    singular: "edition"
+    plural: "editions"
+  };
+
+  // Which kind of issue, by the rules the Notion backup's type column uses (in this order): a fixture is TEST, an
+  // edition sent as a correction is CORRECTION, an edition of any run but the issue date's scheduled one is TEST, and
+  // the rest are DAILY.
+  enum Kind {
+    // Never written.
+    KIND_UNSPECIFIED = 0;
+    // The scheduled daily issue (日常).
+    KIND_DAILY = 1;
+    // A corrected issue sent after a daily one (修订).
+    KIND_CORRECTION = 2;
+    // A fixture, a manual or a replayed run's issue (测试).
+    KIND_TEST = 3;
+  }
+
+  // editions/{edition}.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // YYYY-MM-DD in the service's time zone.
+  string issue_date = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Which kind of issue.
+  Kind kind = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The run that wrote it, empty for an edition without one.
+  string run = 4 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "news.ziyixi.science/Run"
+  ];
+  // When it was created.
+  google.protobuf.Timestamp create_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When it last changed (its delivery's last write, in practice).
+  google.protobuf.Timestamp update_time = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The email's subject.
+  string subject = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The issue's title.
+  string title = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The introduction.
+  string introduction = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Every section's heading, in order.
+  repeated string topics = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // How many sections the body has.
+  int32 section_count = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The delivery's outcome.
+  Delivery delivery = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The Notion copy's state.
+  Replica backup = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The sections, in the email's order.
+  repeated EditionSection sections = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The chart, absent when the issue has none.
+  EditionChart chart = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The chart as the email embedded it (PNG); empty without a chart.
+  // (-- api-linter: core::0140::base64=disabled
+  //     aip.dev/not-precedent: the wire profile has no bytes scalar; the bounded image stays opaque text. --)
+  string chart_png_base64 = 16 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The recommended reading, absent when the issue has none.
+  EditionReading recommended_reading = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The issue's limitations.
+  string limitations = 18 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The references, numbered in the order the email first cites them, so `[n]` means the same source here and
+  // in the email.
+  repeated EditionReference references = 19 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The private Todofy section, absent when the issue has none. Only the owner sees it.
+  PersonalDigest personal_digest = 20 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Whether the editorial review passed.
+  bool review_passed = 21 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The review's findings (untrusted model text).
+  repeated string review_findings = 22 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // What the run decided for each story it considered.
+  repeated StoryOutcome stories = 23 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The model usage frozen into the edition (the email footer's numbers).
+  UsageTotals usage = 24 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The content-config revision the run froze (a commit SHA or `packaged`), empty when the run had none.
+  string config_revision = 25 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // For a correction, the edition it corrects; empty otherwise.
+  string corrected_edition = 26 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "news.ziyixi.science/Edition"
+  ];
+  // The hash of the frozen rendering, which the send ledger checks.
+  string render_hash = 27 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// The outcome of an edition's delivery as the send ledger and the edition record hold it.
+message Delivery {
+  // What the mail provider's answer was.
+  enum State {
+    // Never written.
+    STATE_UNSPECIFIED = 0;
+    // No send was requested.
+    STATE_NOT_REQUESTED = 1;
+    // The send was submitted and its answer has not arrived yet.
+    STATE_SUBMITTING = 2;
+    // A local fake mail adapter wrote the mail instead of sending it (a demo or a test): no mail left.
+    STATE_SIMULATED = 3;
+    // The mail provider accepted the mail. That is not arrival in an inbox.
+    STATE_PROVIDER_ACCEPTED = 4;
+    // The mail provider refused it.
+    STATE_REJECTED = 5;
+    // The outcome is unknown (a restart during the send): the actual mail is checked first; it is never sent again
+    // under another request key.
+    STATE_UNKNOWN = 6;
+  }
+
+  // What the mail provider's answer was.
+  State state = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the outcome was recorded.
+  google.protobuf.Timestamp update_time = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The mail adapter's error code; empty without one.
+  string error_code = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // How many corrections were sent for this issue date.
+  int32 verification_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// What a run decided for one story.
+message StoryOutcome {
+  // The story's ID within the run.
+  string story_id = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its working title (untrusted model text).
+  string title = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // deep, brief, watch or deferred.
+  string disposition = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Why (untrusted model text).
+  string reason = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The editor's result: approved, confirmed_signal, withheld, repaired, invalid_output or editor_unavailable;
+  // empty for a story that was not written.
+  string result = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One section of the body.
+message EditionSection {
+  // world, feature or context.
+  string kind = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The heading.
+  string heading = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The paragraphs, in order.
+  repeated EditionParagraph paragraphs = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The section's limitations.
+  string limitations = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One paragraph and the references it cites.
+message EditionParagraph {
+  // The text.
+  string text = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // `EditionReference.number` of each citation, in order.
+  repeated int32 reference_numbers = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// The issue's chart, as structured data.
+message EditionChart {
+  // bar or line.
+  string kind = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The question it answers.
+  string question = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The measured quantity.
+  string metric = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The unit of every value.
+  string unit = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The period it covers.
+  string period = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The caption.
+  string caption = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The image's text alternative.
+  string alt_text = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The chart's limitations.
+  string limitations = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The points, in order.
+  repeated EditionChartPoint points = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One point of the chart: exactly one of `decimal_value` and `missing_reason` is set.
+message EditionChartPoint {
+  // The label.
+  string label = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // A finite decimal as text, empty when the value is missing.
+  string decimal_value = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Why the value is missing (never an implicit zero), empty when it is not.
+  string missing_reason = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // `EditionReference.number` of each citation, in order.
+  repeated int32 reference_numbers = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// The recommended reading.
+message EditionReading {
+  // The recommended source's `EditionReference.number`.
+  int32 reference_number = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Why (untrusted model text).
+  string reason = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // `EditionReference.number` of each supporting source.
+  repeated int32 supporting_reference_numbers = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One numbered source the edition cites.
+message EditionReference {
+  // The number the email shows (`[n]`), from 1.
+  int32 number = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The source's title (untrusted).
+  string title = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The source's http or https URL; empty for any other scheme. Never fetched by the console.
+  string url = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // How much of the source was read: metadata, abstract, full_text or dataset.
+  string access_scope = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The source's publication date or time as the source stated it (untrusted text), empty when unknown.
+  string publication_date = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// The private Todofy section of an edition.
+message PersonalDigest {
+  // What the fetch found.
+  enum State {
+    // Never written.
+    STATE_UNSPECIFIED = 0;
+    // Current items were fetched.
+    STATE_CURRENT = 1;
+    // The fetch succeeded with nothing to report.
+    STATE_EMPTY = 2;
+    // Todofy did not answer usably (`error_code`).
+    STATE_UNAVAILABLE = 3;
+    // The personal input is off.
+    STATE_DISABLED = 4;
+  }
+
+  // What the fetch found.
+  State state = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The section's title.
+  string title = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its summary.
+  string summary = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The items, by rank.
+  repeated PersonalItem items = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The task count Todofy reported; absent when unknown (never a guessed zero).
+  optional int32 task_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When it was fetched.
+  google.protobuf.Timestamp fetch_time = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The fetch's error code; empty without one.
+  string error_code = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // True when the Notion backup copies this section too (BackupStatus.includes_personal when it was written).
+  bool backup_included = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One item of the private section.
+message PersonalItem {
+  // Its rank, from 1.
+  int32 rank = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The title.
+  string title = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The detail.
+  string detail = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// The edition's frozen email rendering, read only when the owner opens it.
+message EditionRendering {
+  option (google.api.resource) = {
+    type: "news.ziyixi.science/EditionRendering"
+    pattern: "editions/{edition}/rendering"
+    singular: "editionRendering"
+    plural: "editionRenderings"
+  };
+
+  // editions/{edition}/rendering.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The email's HTML with its embedded images as data: URIs, including the private section. Untrusted: shown only
+  // isolated from the page (no scripts, no network), never as the page's own markup.
+  string html = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The email's plain-text part.
+  string text = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The rendering's hash (Edition.render_hash).
+  string render_hash = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

@@ -1,0 +1,309 @@
+// (-- api-linter: core::0142::time-field-type=disabled
+//     aip.dev/not-precedent: dates are calendar-day text: the wire profile has no Date. --)
+// Newsletter's owner read API: the HTTP/JSON interface of the Newsletter console (issues with their full content,
+// runs and their failures, model calls, sources and content configuration, deliveries, and the Notion backup's
+// state). Read-only: no method writes, runs, sends, retries or syncs anything.
+//
+// The record. Newsletter's SQLite database is authoritative for everything answered here. Notion is an
+// asynchronous backup of it (backup_status.proto): written after the fact, never read back, never a source.
+//
+// Served by Newsletter itself (the Python engine, newsletter/), from a short read-only snapshot of its database and
+// content configuration, on a listener of its own that routes and decodes requests with the generated HTTP_BINDINGS
+// (proto/README.md, "Personal-cloud Python runtime"), each binding's /api/v1/ served as /api/newsletter/v1/, and
+// answers every message written by the wire codec. The engine's business API is not part of this service and does
+// not move here: it keeps its external `ziyixi-protos` contract (newsletter/AGENTS.md).
+//
+// Transported by the console Worker: it verifies the owner's Cloudflare Access login (packages/edge-auth), admits
+// GET and HEAD only, routes the request with the shared transcoder (proto/ts/http-transcoder.ts), forwards it to
+// Newsletter with that same verified owner assertion as its only credential, and passes Newsletter's answer through
+// unchanged as `PreEncoded` (proto/README.md, HTTP APIs). The console's one Access application covers both the
+// console's host and Newsletter's path, and Newsletter verifies the assertion again before it reads anything
+// (contracts/newsletter-ui-v1/README.md). The bytes are what the wire profile writes for these messages, so the
+// console's UI reads them with the shared client like any other answer; fixtures written by Newsletter's own reader
+// prove it on both sides.
+//
+// Wire. google.api.http bindings under /api/v1. Query parameters and answers are JSON in the wire JSON profile
+// (proto/README.md): proto field names (snake_case), enum values in lower case without their prefix
+// (`Run.State.STATE_BLOCKED` is "blocked"), timestamps in RFC 3339 UTC. Inputs are read strictly, outputs leniently.
+// Every output field is OUTPUT_ONLY and written only when it has a value: no producer writes null. Errors are
+// common/errors/v1/errors.proto's reasons only: BAD_REQUEST, NOT_FOUND, UNAVAILABLE (Newsletter, its host or its
+// database cannot answer now, which a client may repeat) and INTERNAL from the service; UNAUTHORIZED,
+// NOT_CONFIGURED (the Worker has no Newsletter origin yet) and METHOD_NOT_ALLOWED from the Worker's own
+// authentication, configuration and transcoder.
+//
+// Time. Issue dates (YYYY-MM-DD) and months (YYYY-MM) are counted in the service's time zone (Overview.time_zone),
+// in which the daily run is scheduled; timestamps are instants.
+//
+// Lists. A list answers one calendar month of issue dates as one page (Fleet's ListNodes precedent): `page_token`
+// is reserved and always empty, and `month` moves between months; the answer names the nearest earlier and later
+// months that have records. Every bound is in its field's comment and enforced by Newsletter's reader.
+//
+// Untrusted text. Model output, feed metadata, mail HTML and URLs in these answers are third-party or model-written:
+// a client shows them as text, links only http and https URLs, and isolates the mail HTML.
+//
+// buf lint. The methods that answer a resource carry two `buf:lint:ignore` lines: RPC_RESPONSE_STANDARD_NAME and
+// RPC_REQUEST_RESPONSE_UNIQUE, which the AIPs contradict (a standard method answers the resource itself; api-linter
+// checks those names instead). They are excused here, next to each method, not in buf.yaml: buf.yaml is a path
+// every proto user's deploy depends on (.github/scripts/ci_changes.py), and this package must not redeploy the other
+// apps.
+
+syntax = "proto3";
+
+package newsletter.ui.v1;
+
+import "google/api/annotations.proto";
+import "google/api/client.proto";
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "newsletter/ui/v1/backup_status.proto";
+import "newsletter/ui/v1/edition.proto";
+import "newsletter/ui/v1/model_call.proto";
+import "newsletter/ui/v1/overview.proto";
+import "newsletter/ui/v1/run.proto";
+import "newsletter/ui/v1/source_catalog.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "NewsletterUiServiceProto";
+option java_package = "science.ziyixi.newsletter.ui.v1";
+
+// The owner's read-only view of the daily newsletter.
+// (-- api-linter: core::0121::resource-must-support-get=disabled
+//     aip.dev/not-precedent: a run's model calls are read together (ListModelCalls, at most 200); a Get of one
+//     call alone would have no caller. --)
+service NewsletterUiService {
+  option (google.api.default_host) = "news.ziyixi.science";
+
+  // The overview (AIP-131, a singleton).
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetOverview(GetOverviewRequest) returns (Overview) {
+    option (google.api.http) = {get: "/api/v1/{name=overview}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // One month's runs, the newest first (AIP-132; one page per month).
+  rpc ListRuns(ListRunsRequest) returns (ListRunsResponse) {
+    option (google.api.http) = {get: "/api/v1/runs"};
+  }
+
+  // One run with its nodes, stories and external calls (AIP-131).
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetRun(GetRunRequest) returns (Run) {
+    option (google.api.http) = {get: "/api/v1/{name=runs/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // A run's model calls, in the order they started (AIP-132; one page).
+  rpc ListModelCalls(ListModelCallsRequest) returns (ListModelCallsResponse) {
+    option (google.api.http) = {get: "/api/v1/{parent=runs/*}/modelCalls"};
+    option (google.api.method_signature) = "parent";
+  }
+
+  // Model usage over the latest issue dates, by day and model and by node (AIP-136).
+  rpc SummarizeModelUsage(SummarizeModelUsageRequest) returns (SummarizeModelUsageResponse) {
+    option (google.api.http) = {get: "/api/v1/runs:summarizeModelUsage"};
+  }
+
+  // One month's editions, the newest first, in the list view (AIP-132; one page per month).
+  rpc ListEditions(ListEditionsRequest) returns (ListEditionsResponse) {
+    option (google.api.http) = {get: "/api/v1/editions"};
+  }
+
+  // One edition with its full structured body (AIP-131).
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetEdition(GetEditionRequest) returns (Edition) {
+    option (google.api.http) = {get: "/api/v1/{name=editions/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // An edition's frozen email rendering (AIP-131, a singleton of the edition), read only when the owner opens it.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetEditionRendering(GetEditionRenderingRequest) returns (EditionRendering) {
+    option (google.api.http) = {get: "/api/v1/{name=editions/*/rendering}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // The inputs and their recent outcomes (AIP-131, a singleton).
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetSourceCatalog(GetSourceCatalogRequest) returns (SourceCatalog) {
+    option (google.api.http) = {get: "/api/v1/{name=sourceCatalog}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // The Notion backup's state (AIP-131, a singleton).
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc GetBackupStatus(GetBackupStatusRequest) returns (BackupStatus) {
+    option (google.api.http) = {get: "/api/v1/{name=backupStatus}"};
+    option (google.api.method_signature) = "name";
+  }
+}
+
+// Input of GetOverview.
+message GetOverviewRequest {
+  // Always overview.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "news.ziyixi.science/Overview"
+  ];
+}
+
+// Input of ListRuns.
+message ListRunsRequest {
+  // At most this many runs: 0 means 64, a larger value is read as 64. A month with more answers its newest 64.
+  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
+  // Reserved for paging; must be empty (anything else is INVALID_ARGUMENT): a month is one page.
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The month of issue dates (YYYY-MM); empty means the newest month with a run. Any other form is
+  // INVALID_ARGUMENT.
+  // (-- api-linter: core::0132::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: a month replaces page tokens, which Newsletter's Python reader does not have. --)
+  string month = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of ListRuns.
+message ListRunsResponse {
+  // The month's runs, the newest first (by issue date, then by creation).
+  repeated Run runs = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Always empty.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The month answered (YYYY-MM); empty when there is no run at all.
+  // (-- api-linter: core::0132::response-unknown-fields=disabled
+  //     aip.dev/not-precedent: the month and its neighbours replace page tokens. --)
+  string month = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The nearest earlier month with a run; empty when there is none.
+  // (-- api-linter: core::0132::response-unknown-fields=disabled
+  //     aip.dev/not-precedent: the month and its neighbours replace page tokens. --)
+  string earlier_month = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The nearest later month with a run; empty when there is none.
+  // (-- api-linter: core::0132::response-unknown-fields=disabled
+  //     aip.dev/not-precedent: the month and its neighbours replace page tokens. --)
+  string later_month = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of GetRun.
+message GetRunRequest {
+  // runs/{run}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "news.ziyixi.science/Run"
+  ];
+}
+
+// Input of ListModelCalls.
+message ListModelCallsRequest {
+  // runs/{run}.
+  string parent = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "news.ziyixi.science/Run"
+  ];
+  // At most this many calls: 0 means 200, a larger value is read as 200 (a run makes fewer).
+  int32 page_size = 2 [(google.api.field_behavior) = OPTIONAL];
+  // Reserved for paging; must be empty (anything else is INVALID_ARGUMENT): a run's calls are one page.
+  string page_token = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of ListModelCalls.
+message ListModelCallsResponse {
+  // The run's calls, in the order they started (calls without a start time by when they were recorded).
+  repeated ModelCall model_calls = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Always empty.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of SummarizeModelUsage.
+message SummarizeModelUsageRequest {
+  // How many issue dates, ending with the newest that has a run: 7, 30 or 90; 0 means 7, and any other value is
+  // INVALID_ARGUMENT. A number rather than an enum, because Newsletter's Python reader decodes only integer and
+  // string query parameters.
+  int32 day_count = 1 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of SummarizeModelUsage.
+message SummarizeModelUsageResponse {
+  // The range's first issue date (YYYY-MM-DD); empty when there is no run at all.
+  string first_issue_date = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The range's last issue date.
+  string last_issue_date = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Every call of the range.
+  UsageTotals totals = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Per issue date and model, oldest first, then by model; dates without calls are absent.
+  repeated ModelUsageDay days = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Per node and purpose, in the graph's order.
+  repeated ModelUsageNode nodes = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Calls with both a start and an end time; older calls were recorded without them.
+  int32 timed_call_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of ListEditions.
+message ListEditionsRequest {
+  // At most this many editions: 0 means 64, a larger value is read as 64. A month with more answers its newest 64.
+  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
+  // Reserved for paging; must be empty (anything else is INVALID_ARGUMENT): a month is one page.
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+  // The month of issue dates (YYYY-MM); empty means the newest month with an edition. Any other form is
+  // INVALID_ARGUMENT.
+  // (-- api-linter: core::0132::request-unknown-fields=disabled
+  //     aip.dev/not-precedent: a month replaces page tokens, which Newsletter's Python reader does not have. --)
+  string month = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of ListEditions.
+message ListEditionsResponse {
+  // The month's editions in the list view, the newest first (by issue date, then by creation).
+  repeated Edition editions = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Always empty.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The month answered (YYYY-MM); empty when there is no edition at all.
+  // (-- api-linter: core::0132::response-unknown-fields=disabled
+  //     aip.dev/not-precedent: the month and its neighbours replace page tokens. --)
+  string month = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The nearest earlier month with an edition; empty when there is none.
+  // (-- api-linter: core::0132::response-unknown-fields=disabled
+  //     aip.dev/not-precedent: the month and its neighbours replace page tokens. --)
+  string earlier_month = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The nearest later month with an edition; empty when there is none.
+  // (-- api-linter: core::0132::response-unknown-fields=disabled
+  //     aip.dev/not-precedent: the month and its neighbours replace page tokens. --)
+  string later_month = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of GetEdition.
+message GetEditionRequest {
+  // editions/{edition}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "news.ziyixi.science/Edition"
+  ];
+}
+
+// Input of GetEditionRendering.
+message GetEditionRenderingRequest {
+  // editions/{edition}/rendering.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "news.ziyixi.science/EditionRendering"
+  ];
+}
+
+// Input of GetSourceCatalog.
+message GetSourceCatalogRequest {
+  // Always sourceCatalog.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "news.ziyixi.science/SourceCatalog"
+  ];
+}
+
+// Input of GetBackupStatus.
+message GetBackupStatusRequest {
+  // Always backupStatus.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "news.ziyixi.science/BackupStatus"
+  ];
+}

@@ -1,0 +1,140 @@
+// (-- api-linter: core::0142::time-field-type=disabled
+//     aip.dev/not-precedent: durations are numbers of seconds and dates are calendar-day text: the wire profile
+//     has no Duration or Date. --)
+// Newsletter's own ledger of model calls (model_usage), the totals derived from it and the usage summaries. It is
+// not Model Router's ledger: a call names the Router requests it made (`router_requests`), which the Router's own
+// console shows. Content-free: no prompt, output or provider message is stored or answered.
+syntax = "proto3";
+
+package newsletter.ui.v1;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "ModelCallProto";
+option java_package = "science.ziyixi.newsletter.ui.v1";
+
+// One model invocation of a run's node: the call and at most one correction turn, recorded as Newsletter saw it.
+// Calls recorded before the console's release lack `purpose`, `reported_models`, the cost, the failure, the times
+// and `router_requests`; a client says so ("上线前未记录") instead of reading them as empty.
+message ModelCall {
+  option (google.api.resource) = {
+    type: "news.ziyixi.science/ModelCall"
+    pattern: "runs/{run}/modelCalls/{model_call}"
+    singular: "modelCall"
+    plural: "modelCalls"
+  };
+
+  // What the invocation is now.
+  enum State {
+    // Never written.
+    STATE_UNSPECIFIED = 0;
+    // A turn is open. A call of an ended run that is still running was cut off and never finished.
+    STATE_RUNNING = 1;
+    // Finished with a usable answer.
+    STATE_COMPLETED = 2;
+    // Finished without one: `failure_code` says why when it was recorded.
+    STATE_FAILED = 3;
+  }
+
+  // runs/{run}/modelCalls/{model_call}: Newsletter's local invocation ID, not a Router request.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // The workflow node that made the call (`selection`, `discovery`, `briefs`, ...).
+  string node_id = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The node's item (a direction or a story ID), empty for a node without items.
+  string item_id = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // What the call was for: discovery, selection, writer, reviewer, repair_writer or repair_reviewer, or the node's ID
+  // for a call outside those jobs; empty when not recorded.
+  string purpose = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The model the run asked for, frozen when it started.
+  string requested_model = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The distinct models the Router reported for the call's answers, in the order first reported, at most 4; empty
+  // when none was reported.
+  repeated string reported_models = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // What the invocation is now.
+  State state = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // A code of Newsletter's closed vocabulary (`timeout`, `interrupted`, `rate_limit`, `invalid_output`, ...) for a
+  // failed call; empty for any other call, or when it was not recorded.
+  string failure_code = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // True when some turn's usage was never observed, so the token counts are a lower bound.
+  bool partial = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Turns started: 1, or 2 with the correction turn.
+  int32 turn_count = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Turns that finished with an answer.
+  int32 completed_turn_count = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Input tokens over every observed turn, as the Router reported them.
+  int32 input_tokens = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The part of `input_tokens` the provider read from its cache.
+  int32 cached_input_tokens = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Output tokens over every observed turn.
+  int32 output_tokens = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The Router's cost estimate in millionths of a US dollar, summed over the turns that reported one; absent when
+  // none did. A subscription's quota is not a bill.
+  optional int32 estimated_cost_microusd = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // How the Router said the provider bills the call (as its Usage reports it); empty when not reported.
+  string billing_kind = 16 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the first turn started; absent when not recorded.
+  google.protobuf.Timestamp start_time = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the invocation finished; absent while running and when not recorded.
+  google.protobuf.Timestamp end_time = 18 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When Newsletter last wrote the record.
+  google.protobuf.Timestamp update_time = 19 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The Router conversation the turns ran in (`conversations/{uuid}`), empty before the first turn was bound.
+  string conversation = 20 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The Router requests that answered (`requests/{uuid}`), at most 4. A turn that was cut off before it answered has
+  // none: only the conversation and the call's times identify it in the Router's console.
+  repeated string router_requests = 21 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Model usage totals of a scope (a run, an edition, a range of issue dates). Counts are calls; token and cost sums are
+// doubles so that long ranges cannot overflow, and whole numbers, which both languages' codecs write as the same
+// bytes.
+message UsageTotals {
+  // Model calls in the scope.
+  int32 call_count = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Calls that failed.
+  int32 failed_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Calls whose usage is a lower bound (`ModelCall.partial`).
+  int32 partial_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Input tokens.
+  double input_tokens = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The part of `input_tokens` read from a cache.
+  double cached_input_tokens = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Output tokens.
+  double output_tokens = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The sum of the Router's cost estimates in millionths of a US dollar; absent when no call reported one. Calls
+  // without an estimate add nothing, so this is a lower bound unless every call reported one. Not a bill.
+  optional double estimated_cost_microusd = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // True when every call's usage was observed (no partial call, none missing).
+  bool complete = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One issue date's calls of one model.
+message ModelUsageDay {
+  // YYYY-MM-DD in the service's time zone.
+  string issue_date = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Each call's first model the Router reported, or its requested model when the Router reported none.
+  string model = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Calls, failures and tokens of that day and model.
+  UsageTotals usage = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One workflow node's calls over a range.
+message ModelUsageNode {
+  // The workflow node.
+  string node_id = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // What its calls were for; empty for calls recorded before purposes were.
+  string purpose = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Calls, failures and tokens.
+  UsageTotals usage = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Calls with both a start and an end time: the durations below cover only these.
+  int32 timed_call_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The median call duration in seconds (milliseconds precision); absent without a timed call.
+  optional double median_seconds = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The longest call duration in seconds (milliseconds precision); absent without a timed call.
+  optional double max_seconds = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The node's budget in seconds as the newest run of the range froze it; 0 when no run of the range had the node.
+  int32 budget_seconds = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
