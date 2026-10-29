@@ -12,7 +12,7 @@ import { WorkerEntrypoint } from 'cloudflare:workers';
 import { Code, RpcError } from '@ziyixi/proto/rpc-status';
 import { CreateInboxTaskRequestSchema, type CreateInboxTaskRequest } from '@ziyixi/proto/tasks/inbox/v1/task_inbox_pb';
 import type * as wire from '@ziyixi/proto/tasks/inbox/v1/task_inbox_wire';
-import { fromWire } from '@ziyixi/proto/wire-json';
+import { fromWire, prepareWire } from '@ziyixi/proto/wire-json';
 import type { Env } from './env.ts';
 import { invalid } from './errors.ts';
 import { routedProject } from './inbox-routes.ts';
@@ -23,6 +23,8 @@ const MAX_TITLE = 500;
 const MAX_DESCRIPTION = 16000;
 const SOURCES = ['home', 'watch'] as const;
 type Source = (typeof SOURCES)[number];
+// Reads the request's descriptors at global scope, outside every call's CPU time, as TasksApi's transcoder does.
+prepareWire(CreateInboxTaskRequestSchema);
 
 function text(title: string, description: string): { title: string; description: string } {
   const trimmed = title.trim();
