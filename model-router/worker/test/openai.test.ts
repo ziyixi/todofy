@@ -50,6 +50,38 @@ describe('OpenAI Responses adapter', () => {
   });
 
   it.each([
+    ['service tier', { service_tier: undefined }, 677],
+    ['null service tier', { service_tier: null }, 677],
+    ['cache write lifetimes', { usage: { ...usage(), input_tokens_details: { cached_tokens: 20, cache_write_tokens: 10 } } }, 667],
+    ['null cache write lifetimes', { usage: { ...usage(), input_tokens_details: { cached_tokens: 20, cache_write_tokens: 10,
+      cache_write_tokens_details: null } } }, 667],
+    ['both billing details', { service_tier: undefined, usage: { ...usage(), input_tokens_details: { cached_tokens: 20, cache_write_tokens: 10 } } }, 667],
+  ])('prices the requested Standard/default-cache call when the response omits %s', async (_name, value, cost) => {
+    const result = await generateOpenAI(request(), context(vi.fn<typeof fetch>().mockResolvedValue(Response.json(response(value)))));
+    expect(result.error).toBeUndefined();
+    expect(result.usage).toMatchObject({ available: true, estimatedCostMicrousd: cost });
+  });
+
+  it.each([{ ttl_30m_tokens: 6 }, { ttl_12h_tokens: 4 }])('derives the omitted cache write lifetime count from the reported total: %j', async lifetimes => {
+    const result = await generateOpenAI(request(), context(vi.fn<typeof fetch>().mockResolvedValue(Response.json(response({
+      usage: { ...usage(), input_tokens_details: { cached_tokens: 20, cache_write_tokens: 10, cache_write_tokens_details: lifetimes } },
+    })))));
+    expect(result.usage).toMatchObject({ available: true, estimatedCostMicrousd: 677 });
+  });
+
+  it.each([
+    ['tier', { service_tier: 'priority' }],
+    ['unknown model', { model: 'unreported-snapshot' }],
+    ['inconsistent cache write lifetimes', { usage: { ...usage(), input_tokens_details: { cached_tokens: 20, cache_write_tokens: 10,
+      cache_write_tokens_details: { ttl_30m_tokens: 10, ttl_12h_tokens: 1 } } } }],
+  ])('keeps explicitly unknown or inconsistent provider %s unpriced', async (_name, value) => {
+    const result = await generateOpenAI(request(), context(vi.fn<typeof fetch>().mockResolvedValue(Response.json(response(value)))));
+    expect(result.error).toBeUndefined();
+    expect(result.usage.available).toBe(true);
+    expect(result.usage.estimatedCostMicrousd).toBeUndefined();
+  });
+
+  it.each([
     ['credit_balance_exhausted', 429, 'MODEL_SPEND_LIMIT'],
     ['insufficient_quota', 400, 'MODEL_SPEND_LIMIT'],
     ['organization_spend_limit_exceeded', 429, 'MODEL_SPEND_LIMIT'],

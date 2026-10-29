@@ -41,6 +41,38 @@ afterEach(async () => { checkGoogleCalls(h); await h.dispose(); });
 
 describe('Codex priority pipeline', () => {
   it.each([
+    ['openai/gpt-6.1-sol', ClassificationProvider.OPENAI, 'openai'],
+    ['gemini-3.8-flash', ClassificationProvider.GOOGLE, 'google'],
+    ['claude-opus-5-5', ClassificationProvider.CLAUDE, 'claude'],
+  ] as const)('writes valid %s classifications when the Router has no API estimate', async (model, provider, decider) => {
+    await initialize();
+    const current = await h.api.getSettings({ name: 'settings' });
+    await h.api.updateSettings({
+      settings: create(SettingsSchema, { name: 'settings', classificationModel: model, classificationEffort: 'medium', etag: current.etag }),
+      updateMask: { paths: ['classification_model', 'classification_effort'] }, requestId: op(),
+    });
+    h.up.api.costAvailable = false;
+    h.up.claude.costAvailable = false;
+    const input = mail(95);
+    const at = T0 + 16 * MINUTE;
+    deliver(h, input, at - MINUTE);
+    expect(await h.step(at)).toMatchObject({ code: 'ok', decided: 1, applied: 1 });
+    expect(gmailLabels(h, input.id)).toContain(h.up.gmail.labelIdByName('P2'));
+    expect(gmailLabels(h, input.id)).not.toContain('INBOX');
+    expect(await decision(h, input.id)).toMatchObject({ outcome: 'applied', decider, model });
+    expect(await h.sql(`SELECT state FROM ledger WHERE message_id = ?`, input.id)).toEqual([{ state: 'applied' }]);
+    expect(await h.sql(`SELECT * FROM claude_usage`)).toEqual([]);
+    expect(await h.sql(`SELECT * FROM codex_usage`)).toEqual([]);
+    expect(await h.api.getServiceStatus({ name: 'serviceStatus' })).toMatchObject({
+      decidedTodayCount: 1, appliedTodayCount: 1,
+      classifier: { provider, model, lastErrorCode: '', lastSuccessTime: timestampFromMs(at) },
+    });
+    if (decider === 'claude') {
+      expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).claudeBudget?.lastRequestTime).toEqual(timestampFromMs(at));
+    }
+  });
+
+  it.each([
     ['openai/gpt-6.1-sol', ClassificationProvider.OPENAI, 'openai', MailFlow_Stage.OPENAI],
     ['gemini-3.8-flash', ClassificationProvider.GOOGLE, 'google', MailFlow_Stage.GOOGLE],
   ] as const)('uses the saved API route %s without changing Claude budget or Codex history', async (model, provider, decider, stage) => {

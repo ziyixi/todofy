@@ -55,6 +55,22 @@ describe('OpenAI API and Codex through real D1/R2/SQLite DO bindings', () => {
     expect(await h.owner.getRequest({ name: answer.name })).toMatchObject({ reportedModel: 'gpt-6.1-sol-synthetic-snapshot', generation: { model: api } })
   })
 
+  it('retains a Standard/default-cache estimate through the Mailsort binding and usage ledger when billing details are omitted', async () => {
+    h.openaiReplies.push({ body: { model: 'gpt-6.1-sol', status: 'completed',
+      output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Synthetic classification result' }] }],
+      usage: { input_tokens: 1200, output_tokens: 12, total_tokens: 1212,
+        input_tokens_details: { cached_tokens: 200, cache_write_tokens: 400 } } } })
+    const answer = await h.forCaller('mailsort').generate({ model: api, input: 'Synthetic classification request' })
+    expect(answer.error).toBeUndefined()
+    expect(answer.usage).toMatchObject({ available: true, billingKind: 'api', inputTokens: 1200, outputTokens: 12,
+      cachedInputTokens: 200, cacheWriteTokens: 400, estimatedCostMicrousd: 2340 })
+    expect(h.calls[0]?.body.service_tier).toBe('default')
+    expect(await h.owner.getRequest({ name: answer.name })).toMatchObject({ app: 'mailsort', state: 'succeeded',
+      generation: { usage: { estimatedCostMicrousd: 2340 } } })
+    expect((await h.owner.getUsage({ days: 1 })).buckets.find(row => row.model === api)).toMatchObject({
+      provider: 'openai', billingKind: 'api', estimatedCostMicrousd: 2340 })
+  })
+
   it('uses the existing root-array envelope and rejects invalid output while retaining consumed usage', async () => {
     const schema = { type: 'array', items: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'], additionalProperties: false } }
     h.openaiOutputs.push('{"result":[{"title":"Synthetic reading"}]}', '{"result":[{"wrong":true}]}')

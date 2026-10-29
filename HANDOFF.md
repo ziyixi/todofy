@@ -19,6 +19,22 @@ features, the FlowDay retirement), [October 20](docs/history/handoff-2026-10-20.
 
 ## Current work
 
+### Mailsort processing diagnosis (`codex/mailsort-processing-check`, in progress)
+
+Owner reports successful Router requests without corresponding Gmail classification. Diagnose only bounded
+operational metadata; no mail content, automatic recheck or budget/mode changes. Work from current main in an
+isolated checkout; Claude's Newsletter console and CI ancestry work stay separate.
+
+- Observed: production is live, Gmail auth/write scope are valid, and the selected OpenAI classifier reports
+  `openai_bad_answer`. Five successful Router metadata records have complete tokens but no price. Mailsort was
+  rejecting that optional price before reading the classification. Synthetic unit and workerd cases reproduced it.
+- Done locally: valid classifications no longer depend on optional accounting, for every provider; unknown usage
+  stays absent and Claude's existing pre-call known-spend gate stays intact. Router uses its known Standard/default
+  cache request settings when optional response billing metadata is missing; reported information still wins.
+- Checks passed: Mailsort worker/UI/type/lint/runtime/smoke and targeted Claude-budget regressions; Router worker,
+  real-workerd persistence, type/lint and targeted request-default pricing tests. Pending: integrate current main,
+  branch CI, normal release, a new priced synthetic Router call and natural Mailsort/Gmail outcome metadata.
+
 ### Verify after the October 28 releases (read-only)
 
 The released notes are in the [October 28 archive](docs/history/handoff-2026-10-28.md).

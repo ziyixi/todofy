@@ -15,9 +15,10 @@ export interface ClassificationUsage {
   readonly thinkingTokens: number | null;
   readonly costMicros: number;
 }
-export interface ClassificationBatchResult extends ClassificationUsage {
+export interface ClassificationBatchResult {
   readonly model: string;
   readonly items: readonly ClassificationItem[];
+  readonly usage?: ClassificationUsage;
 }
 /**
  * How a failed batch is handled, by the shared Model Router error contract. Configuration waits an hour (or until a
@@ -77,8 +78,10 @@ export class ClassificationError extends Error {
 }
 
 function usageOf(usage: Usage | undefined): ClassificationUsage | undefined {
-  if (!usage?.available || (usage.billingKind === 'api' && usage.estimatedCostMicrousd === undefined)) return undefined;
-  return { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cacheWriteTokens: usage.cacheWriteTokens, cacheReadTokens: usage.cachedInputTokens, thinkingTokens: null, costMicros: usage.billingKind === 'api' ? usage.estimatedCostMicrousd ?? 0 : 0 };
+  if (!usage?.available) return undefined;
+  const costMicros = usage.billingKind === 'api' ? usage.estimatedCostMicrousd : 0;
+  if (costMicros === undefined) return undefined;
+  return { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cacheWriteTokens: usage.cacheWriteTokens, cacheReadTokens: usage.cachedInputTokens, thinkingTokens: null, costMicros };
 }
 
 export async function classifyEmails(
@@ -106,11 +109,9 @@ export async function classifyEmails(
   const usage = usageOf(result.usage);
   const outcome = { usage };
   if (result.error) throw new ClassificationError(provider, result.error.reason, { ...outcome, code: result.error.code, retryAfterSeconds: result.error.retryAfterSeconds });
-  if (result.usage?.billingKind === 'api' && usage === undefined) throw new ClassificationError(provider, 'MODEL_INVALID_ANSWER', outcome);
   let output: unknown;
   try { output = JSON.parse(result.output); } catch { throw new ClassificationError(provider, 'MODEL_INVALID_ANSWER', outcome); }
   const items = classificationItems(output, ids);
   if (items === null) throw new ClassificationError(provider, 'MODEL_INVALID_ANSWER', outcome);
-  return { model: result.model, items,
-    inputTokens: usage?.inputTokens ?? 0, outputTokens: usage?.outputTokens ?? 0, cacheWriteTokens: usage?.cacheWriteTokens ?? 0, cacheReadTokens: usage?.cacheReadTokens ?? 0, thinkingTokens: usage?.thinkingTokens ?? null, costMicros: usage?.costMicros ?? 0 };
+  return { model: result.model, items, ...(usage === undefined ? {} : { usage }) };
 }

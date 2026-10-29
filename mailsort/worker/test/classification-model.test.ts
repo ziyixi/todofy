@@ -24,7 +24,33 @@ describe('Mailsort Model Router calls', () => {
     const result = await classifyEmails(router, 'openai', EMAILS, PROMPT, { classificationModel: 'openai/gpt-6.1-sol', classificationEffort: 'high' });
     const sent = fromWire(GenerateRequestSchema, await router.fetch.mock.calls[0]?.[0].clone().json()).message;
     expect(sent).toMatchObject({ model: 'openai/gpt-6.1-sol', effort: 'high', allowFallback: false });
-    expect(result).toMatchObject({ model: 'openai/gpt-6.1-sol', costMicros: 1506 });
+    expect(result).toMatchObject({ model: 'openai/gpt-6.1-sol', usage: { costMicros: 1506 } });
+  });
+
+  it.each([
+    ['openai', 'openai/gpt-6.1-sol'], ['google', 'gemini-3.8-flash'], ['codex', 'gpt-6.1-sol'],
+  ] as const)('accepts a valid %s classification without an API estimate or a fabricated local cost', async (provider, model) => {
+    const router = binding({ usage: { $typeName: 'modelrouter.inference.v1.Usage', available: true, inputTokens: 150, outputTokens: 50, cachedInputTokens: 30, cacheWriteTokens: 20, billingKind: 'api' } });
+    const result = await classifyEmails(router, provider, EMAILS, PROMPT, { classificationModel: model, classificationEffort: 'medium' });
+    expect(result).toMatchObject({ model, items: ITEMS });
+    expect(result.usage).toBeUndefined();
+    expect(result).not.toHaveProperty('costMicros');
+  });
+
+  it.each(['openai', 'google'] as const)('accepts a valid %s classification when API usage is unavailable', async provider => {
+    const router = binding({ usage: { $typeName: 'modelrouter.inference.v1.Usage', available: false, inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0, billingKind: 'api' } });
+    const result = await classifyEmails(router, provider, EMAILS, PROMPT);
+    expect(result.items).toEqual(ITEMS);
+    expect(result.usage).toBeUndefined();
+  });
+
+  it.each([
+    ['invalid JSON', '{'],
+    ['missing IDs', JSON.stringify({ items: [] })],
+    ['foreign IDs', JSON.stringify({ items: [{ id: 'foreign-id', bucket: 'P3', reason: 'Synthetic' }] })],
+  ] as const)('still rejects %s when the API estimate is absent', async (_case, output) => {
+    const router = binding({ output, usage: { $typeName: 'modelrouter.inference.v1.Usage', available: true, inputTokens: 150, outputTokens: 50, cachedInputTokens: 30, cacheWriteTokens: 20, billingKind: 'api' } });
+    await expect(classifyEmails(router, 'openai', EMAILS, PROMPT)).rejects.toMatchObject({ code: 'openai_bad_answer', usage: undefined });
   });
 
   it.each(['claude', 'codex'] as const)('uses one common structured call for the saved %s selection', async provider => {
@@ -43,7 +69,7 @@ describe('Mailsort Model Router calls', () => {
     expect(sent.maxOutputTokens).toBe(0);
     expect(JSON.parse(sent.input)).toEqual({ emails: EMAILS });
     expect(JSON.parse(sent.outputSchemaJson)).toMatchObject({ properties: { items: { items: { required: ['id', 'bucket', 'reason'] } } } });
-    expect(result).toMatchObject({ items: [{ id: 'synthetic-a', bucket: 'P3' }], costMicros: 1506, inputTokens: 150, cacheWriteTokens: 20, cacheReadTokens: 30, thinkingTokens: null });
+    expect(result).toMatchObject({ items: [{ id: 'synthetic-a', bucket: 'P3' }], usage: { costMicros: 1506, inputTokens: 150, cacheWriteTokens: 20, cacheReadTokens: 30, thinkingTokens: null } });
   });
 
   it.each([
@@ -89,22 +115,24 @@ describe('Mailsort Model Router calls', () => {
 
   it('does not claim subscription token usage when it is unavailable', async () => {
     const router = binding({ usage: { $typeName: 'modelrouter.inference.v1.Usage', available: false, inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0, billingKind: 'subscription' } });
-    expect(await classifyEmails(router, 'codex', EMAILS, PROMPT)).toMatchObject({ inputTokens: 0, outputTokens: 0, costMicros: 0 });
+    expect((await classifyEmails(router, 'codex', EMAILS, PROMPT)).usage).toBeUndefined();
   });
 
-  it.each(['claude', 'codex', 'openai', 'google'] as const)('requires an API cost from common billing metadata under the saved %s choice', async provider => {
-    const router = binding({ usage: { $typeName: 'modelrouter.inference.v1.Usage', available: true, inputTokens: 150, outputTokens: 50, cachedInputTokens: 30, cacheWriteTokens: 20, billingKind: 'api' } });
-    await expect(classifyEmails(router, provider, EMAILS, PROMPT)).rejects.toMatchObject({ code: `${provider}_bad_answer` });
+  it.each([true, false])('accepts valid Claude classification without an API cost (usage available: %s)', async available => {
+    const router = binding({ usage: { $typeName: 'modelrouter.inference.v1.Usage', available, inputTokens: 150, outputTokens: 50, cachedInputTokens: 30, cacheWriteTokens: 20, billingKind: 'api' } });
+    const result = await classifyEmails(router, 'claude', EMAILS, PROMPT);
+    expect(result.items).toEqual(ITEMS);
+    expect(result.usage).toBeUndefined();
   });
 
   it.each(['claude', 'codex'] as const)('accepts subscription usage without an API price under the saved %s choice', async provider => {
     const router = binding({ usage: { $typeName: 'modelrouter.inference.v1.Usage', available: true, inputTokens: 150, outputTokens: 50, cachedInputTokens: 30, cacheWriteTokens: 0, billingKind: 'subscription' } });
-    expect(await classifyEmails(router, provider, EMAILS, PROMPT)).toMatchObject({ inputTokens: 150, outputTokens: 50, costMicros: 0 });
+    expect(await classifyEmails(router, provider, EMAILS, PROMPT)).toMatchObject({ usage: { inputTokens: 150, outputTokens: 50, costMicros: 0 } });
   });
 
   it.each(['claude', 'codex'] as const)('keeps subscription reference value out of API spend under the saved %s choice', async provider => {
     const router = binding({ usage: { $typeName: 'modelrouter.inference.v1.Usage', available: true, inputTokens: 150, outputTokens: 50, cachedInputTokens: 30, cacheWriteTokens: 0, estimatedCostMicrousd: 999, billingKind: 'subscription' } });
-    expect(await classifyEmails(router, provider, EMAILS, PROMPT)).toMatchObject({ inputTokens: 150, outputTokens: 50, costMicros: 0 });
+    expect(await classifyEmails(router, provider, EMAILS, PROMPT)).toMatchObject({ usage: { inputTokens: 150, outputTokens: 50, costMicros: 0 } });
   });
 
   it('refuses a missing binding before sending any input', async () => {
