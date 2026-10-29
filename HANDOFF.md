@@ -66,14 +66,12 @@ admission until it reports ready):
 `61e4206d`, clearer Todofy/Newsletter business prompts and schema-checked synthetic examples:
 [main release](https://github.com/ziyixi/todofy/actions/runs/40826685310). Its matching Personal cloud reconcile
 passed with resolved drift, resource registration and VPS gates. Seven live synthetic Todofy prompt checks passed;
-Newsletter's image and separate content bundle were published. [Verification](todofy/docs/verification.md#business-prompt-checks-2026-10-28).
+Newsletter's image and separate content bundle were published; the owner's read-only receipt confirmed the new
+bundle active with matching identities and no pin/error. [Verification](todofy/docs/verification.md#business-prompt-checks-2026-10-28).
 Per-app identities are in GitHub production Deployments.
 
 ## Verify after deploy
 
-- Newsletter's new prompt bundle: confirm config-sync's active revision and digest match the published bundle,
-  with no pin or error. Publication and VPS readiness passed; actual activation has not yet been observed. The next
-  natural edition's editorial quality remains unverified; no real edition was regenerated for these checks.
 - Model Router's daily 04:47 UTC backup: the next natural run. A fresh-account cloud restore is a separate exercise
   ([backup](model-router/docs/backup.md)).
 - Mail Hero's daily 04:17 UTC backup after the write reduction (`d1a6e526`): the next natural run and its daily
