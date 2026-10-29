@@ -77,14 +77,6 @@ WRAPPERS = {
     "personal-mcp": ("personal-mcp/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["personal-mcp"]),
     "newsletter-console": ("newsletter-console/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["newsletter-console"]),
 }
-# The shared deploy-vars core: a wrapper that imports it declares its inputs and takes the core's rules and refusals.
-WRAPPER_CORE = "tools/cloud-config/worker-deploy.mjs"
-
-
-def wrapper_rules(wrapper: str) -> str:
-    """The text holding a wrapper's owner rules and refusals: the wrapper's own, or the core's when it imports it."""
-    text = (REPO / wrapper).read_text()
-    return (REPO / WRAPPER_CORE).read_text() if f"/{WRAPPER_CORE}'" in text else text
 # Worker vars that must never be committed: personal values (GitHub environment secrets) ...
 PERSONAL_VARS = {
     "RECEIVE_ADDRESS",
@@ -235,6 +227,16 @@ def markers(wrapper: str) -> dict[str, list[str]]:
     for mode, names in re.findall(r"^(?:#|//) deploy-vars-inputs (\w+): (.+)$", (REPO / wrapper).read_text(), re.M):
         found.setdefault(mode, []).extend(names.split())
     return found
+
+
+# The shared deploy-vars core: a wrapper that imports it declares its inputs and takes the core's rules and refusals.
+WRAPPER_CORE = "tools/cloud-config/worker-deploy.mjs"
+
+
+def wrapper_rules(wrapper: str) -> str:
+    """The text holding a wrapper's owner rules and refusals: the wrapper's own, or the core's when it imports it."""
+    text = (REPO / wrapper).read_text()
+    return (REPO / WRAPPER_CORE).read_text() if f"/{WRAPPER_CORE}'" in text else text
 
 
 # wrangler options that take a value (the value may be the next token): skipped to find the command.
