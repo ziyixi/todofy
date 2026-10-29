@@ -103,6 +103,13 @@ build-time registration and cloned release recipes, so the approved follow-ups s
   `tools/cloud-config/worker-deploy.mjs` for links, watch, recall, mailsort, fleet, tasks and personal-mcp; each
   wrapper now declares its differences as data. Model Router, Mail Hero, Home, Todofy and the relay keep their own
   wrappers for now; the console migrates after its slices land. A core change is proven at each app's next release.
+- Released with the `claude/ci-base-ancestry` merge (one website rebuild, same content): a push to main now diffs
+  from the newest green ancestor through every parent (`git rev-list --date-order <push>^@`), not the first-parent
+  line. Landings that merged main into the branch and fast-forwarded main had sent the base back to the branch's
+  old base, so `ee7c0e2f` and `26dab066` redeployed nine Workers and the paired VPS release for small changes.
+  The website release's green-commit pick had the same flaw when main's head was not green yet. Land with main as
+  the first parent anyway (`git merge --no-ff <branch>` on top of origin/main), which keeps `--first-parent` logs
+  readable. Verify: the next main push's Changes job prints the previous main head as its base.
 
 ## Latest verified release
 
