@@ -69,6 +69,23 @@ test('creates one task with its subtasks in the Inbox, and a replay answers the 
   expect(await create('watch', request)).toEqual({ error: 'invalid_input' });
 });
 
+test("stores each subtask's text exactly as given, in order", async () => {
+  const texts = [
+    'Quote " backslash \\ slash / tab\t newline\n return\r',
+    'NUL\u0000 bell\u0007 escape\u001b delete\u007f',
+    '汉字 🙂 \u2028 \u2029 \ufeff e\u0301',
+    '\\u0041 is no escape, {"json":true} [1,2]',
+  ];
+  const created = await create('home', {
+    request_id: randomUUID(),
+    title: 'Synthetic characters',
+    subtasks: texts.map((text, index) => ({ title: `Item ${String(index)} ${text}`, description: text })),
+  });
+  expect((await rows(created.subtask_ids)).map((row) => [row.title, row.description, row.sort_order])).toEqual(
+    texts.map((text, index) => [`Item ${String(index)} ${text}`.trim(), text, index + 1]),
+  );
+});
+
 test('refuses an unknown source and input the wire rules or Tasks reject, writing nothing', async () => {
   const before = await harness.db.prepare('SELECT count(*) AS n FROM tasks').first();
   const valid = { request_id: randomUUID(), title: 'Synthetic' };

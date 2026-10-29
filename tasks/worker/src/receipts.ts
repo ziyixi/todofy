@@ -10,10 +10,14 @@ interface Receipt {
   fingerprint: string;
   response: string;
 }
-/** A request's identity: `wire` is stored with new receipts; `legacy` matches receipts stored before it. */
+/**
+ * A request's identity: `wire` is stored with new receipts; `legacy` matches receipts stored before it. `legacy` is
+ * computed only for a stored receipt that `wire` does not match: a new request has none, and one hash of TaskInbox's
+ * largest request (about half a million characters) costs about 1.5 ms of the request's CPU.
+ */
 export interface RequestHash {
   wire: string;
-  legacy: string;
+  legacy: () => Promise<string>;
 }
 const requestSchemas = new Map(
   [...TasksUiService.methods, ...TaskInboxService.methods].map((method) => [method.input.typeName, method.input]),
@@ -45,7 +49,9 @@ function legacyForm(method: string, input: object): object {
 }
 /**
  * A receipt hashes its request's wire JSON. The wire form leaves unset fields out, so adding a field never
- * changes the hash of an older request. `legacyInput` is what receipts written before the wire form hashed.
+ * changes the hash of an older request. `legacyInput` is what receipts written before the wire form hashed. `legacy`
+ * reads `request` and `legacyInput` when it is called: a caller must not change either before its last replay() or
+ * commit().
  */
 export async function fingerprint(
   method: string,
@@ -56,7 +62,7 @@ export async function fingerprint(
   if (!schema) throw new TypeError(`Not a Tasks request message: ${request.$typeName}`);
   return {
     wire: await sha256([method, toWire(schema, request)]),
-    legacy: await sha256([method, legacyForm(method, legacyInput)]),
+    legacy: () => sha256([method, legacyForm(method, legacyInput)]),
   };
 }
 export async function replay(db: D1Database, id: string, hash: RequestHash): Promise<string | null> {
@@ -66,7 +72,7 @@ export async function replay(db: D1Database, id: string, hash: RequestHash): Pro
     db.prepare('SELECT fingerprint,response FROM requests WHERE id=?').bind(id).first<Receipt>(),
   );
   if (!receipt) return null;
-  if (receipt.fingerprint !== hash.wire && receipt.fingerprint !== hash.legacy)
+  if (receipt.fingerprint !== hash.wire && receipt.fingerprint !== (await hash.legacy()))
     invalid('Request ID was already used for different input');
   return receipt.response;
 }
