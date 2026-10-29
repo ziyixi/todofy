@@ -77,6 +77,14 @@ WRAPPERS = {
     "personal-mcp": ("personal-mcp/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["personal-mcp"]),
     "newsletter-console": ("newsletter-console/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["newsletter-console"]),
 }
+# The shared deploy-vars core: a wrapper that imports it declares its inputs and takes the core's rules and refusals.
+WRAPPER_CORE = "tools/cloud-config/worker-deploy.mjs"
+
+
+def wrapper_rules(wrapper: str) -> str:
+    """The text holding a wrapper's owner rules and refusals: the wrapper's own, or the core's when it imports it."""
+    text = (REPO / wrapper).read_text()
+    return (REPO / WRAPPER_CORE).read_text() if f"/{WRAPPER_CORE}'" in text else text
 # Worker vars that must never be committed: personal values (GitHub environment secrets) ...
 PERSONAL_VARS = {
     "RECEIVE_ADDRESS",
@@ -409,7 +417,7 @@ class Files(unittest.TestCase):
         for job in DEPLOY_JOBS:
             with self.subTest(job=job):
                 self.assertEqual(dev.findall(jobs[job]), [])
-        for wrapper, _, _ in WRAPPERS.values():
+        for wrapper in [*(wrapper for wrapper, _, _ in WRAPPERS.values()), WRAPPER_CORE]:
             with self.subTest(wrapper=wrapper):
                 self.assertEqual(dev.findall((REPO / wrapper).read_text()), [])
 
@@ -1032,10 +1040,11 @@ class Workflow(unittest.TestCase):
 
     def test_links_and_watch_accept_exactly_the_owner_values_the_dashboard_accepts(self):
         """The same secrets feed these wrappers: their owner and alias rules must be the same lines, or a valid
-        dashboard value could stop Links deploy or Watch deploy, or the reverse. Here, in Changes, a change to any one wrapper runs this comparison, whichever app's checks it runs."""
+        dashboard value could stop Links deploy or Watch deploy, or the reverse. Here, in Changes, a change to any one wrapper runs this comparison, whichever app's checks it runs.
+        A wrapper built on the shared core (WRAPPER_CORE) is held to the core's lines."""
         rules = r"^(?:const ACCESS_EMAIL|const MAX_ALIASES|const MAX_LIST_CHARS) = .+$"
         dashboard, links, watch, console = (
-            re.findall(rules, (REPO / app / "deploy" / "deploy-vars.mjs").read_text(), re.M)
+            re.findall(rules, wrapper_rules(WRAPPERS[app][0]), re.M)
             for app in ("dashboard", "links", "watch", "newsletter-console")
         )
         self.assertEqual(len(dashboard), 3)

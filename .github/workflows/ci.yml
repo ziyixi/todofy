@@ -124,9 +124,10 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version-file: package.json
-      # The deploy hostname guard every deploy job runs (dependency-free; synthetic API, no token).
+      # The deploy hostname guard every deploy job runs, and the Worker secret maps and deploy-vars core that the apps'
+      # deploy wrappers import (dependency-free; synthetic API and values, no token).
       - name: Test the deploy hostname guard
-        run: node --test tools/cf-guard/test/*.test.mjs tools/cloud-config/tests/worker-secrets.test.mjs
+        run: node --test tools/cf-guard/test/*.test.mjs tools/cloud-config/tests/worker-secrets.test.mjs tools/cloud-config/tests/worker-deploy.test.mjs
       # The shared test and build tools the apps' checks import by relative path (dependency-free, synthetic data):
       # the bundle-size budgets and the CPU meter of the workerd CPU tests, whose workerd side runs in the apps' own
       # suites (Tasks, Todofy, Mail Hero, Home, links, watch, mailsort and recall).

@@ -12,7 +12,7 @@ python3.12 tools/cloud-config/generate.py
 python3.12 tools/service-catalog/catalog.py
 python3.12 tools/cloud-config/generate.py --check
 python3.12 -m unittest discover -s tools/cloud-config/tests
-node --test tools/cloud-config/tests/worker-secrets.test.mjs
+node --test tools/cloud-config/tests/worker-secrets.test.mjs tools/cloud-config/tests/worker-deploy.test.mjs
 ```
 
 Each app manifest's `workers.hosts` declares relative host labels. An empty label means the zone itself; an
@@ -73,6 +73,12 @@ Todofy's core uses `TODOFY_CORE_WORKER_SECRETS`; its gateway uses `TODOFY_WORKER
 `website/relay/deploy/deploy-vars.mjs` wrapper with the same `check`, `secrets <path>` and `exec --` commands.
 Wrappers use `BUILD_SOURCE_SHA` when supplied, otherwise `GITHUB_SHA`, and require a full lowercase 40-hex SHA.
 Both the normal release and a repair can therefore report the exact source they built.
+
+`worker-deploy.mjs` is the deploy-vars core of the standard Workers. A wrapper built on it declares only its Worker
+secret entry, the vars it injects, the input holding the owner's address, and how each committed AUD or D1 id gates
+a deploy. It re-exports the core's functions under its usual names, so CI, the app's tests and `drift_desired.py`
+still use the app's own `deploy/deploy-vars.mjs`. A change to the core deploys no app; each app's checks run its
+wrapper's tests and dry run.
 
 A Worker whose owner is another Worker's declares `identity_from = "<worker>"` and only `ACCESS_OWNER` (and optional
 `ACCESS_OWNER_ALIASES`). It has no map of its own: its spec names the source's map and `identity_from`, the deploy

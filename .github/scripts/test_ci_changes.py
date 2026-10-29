@@ -3452,7 +3452,8 @@ class HostnameGuard(unittest.TestCase):
         self.assertIn('path.resolve(cwd, "..", "tools", "cf-guard", "cf-guard.mjs")', cloudflare)
 
     def test_the_changes_job_tests_the_guard(self):
-        self.assertIn("run: node --test tools/cf-guard/test/*.test.mjs tools/cloud-config/tests/worker-secrets.test.mjs\n", workflow_jobs()["changes"])
+        self.assertIn("run: node --test tools/cf-guard/test/*.test.mjs tools/cloud-config/tests/worker-secrets.test.mjs"
+                      " tools/cloud-config/tests/worker-deploy.test.mjs\n", workflow_jobs()["changes"])
 
     def test_website_jobs_cache_the_playwright_browser_by_its_locked_version(self):
         release = (REPO / ".github" / "workflows" / "website-release.yml").read_text()
