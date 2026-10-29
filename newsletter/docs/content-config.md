@@ -153,3 +153,29 @@ pin 会持久化并切换到已保存的版本，后续自动同步不会覆盖�
 `status` 区分远端期望 commit、活动源 revision/digest、固定状态、最后成功时间和错误码。
 `releases/<digest>/bundle.json` 保存历史不可变版本，`active.json` 只在完整落盘后原子替换。
 配置目录纳入现有备份，但回退内容配置不需要也不允许回滚 SQLite 或发送台账。
+
+## 只读监视合同
+
+`GET /internal/monitoring/status` 继续使用 `version:2` 和独立的
+`NEWSLETTER_MONITOR_TOKEN` Bearer 身份，响应为 `Cache-Control: no-store`。
+editor、send 身份不能读取此接口，monitor 身份不能启动采编、发送或排空操作。
+
+配置观察使用服务已挂载的只读 `NEWSLETTER_CONTENT_CONFIG_DIR`，调用与 CLI 相同的
+`ConfigSync.status()`。响应的可选 `config_sync` 子对象只含以下九个字段，各字段允许 null：
+
+| 字段 | 含义 |
+| --- | --- |
+| `active_revision`、`active_digest` | 当前通过引擎校验的活动配置身份 |
+| `wanted_revision`、`wanted_digest`、`wanted_commit` | 同步器上次观察到的目标身份 |
+| `pinned_digest` | 本地固定的配置 digest |
+| `last_attempt`、`last_success` | 同步器最后尝试、成功的 Unix 秒，可含小数 |
+| `error` | 有界的 `CONFIG_` 错误码，成功时为 null |
+
+revision 为 40 位小写十六进制或 `packaged`，commit 为 40 位小写十六进制，
+digest 为 64 位小写十六进制。目标是上次观察结果，不能据此证明它就是远端最新发布；
+检查时间也不等于同步成功时间。没有配置目录时 `config_sync` 为 null。
+本地配置状态无法读取或字段不合法时，子对象的身份和时间为 null，
+`error` 为 `CONFIG_STATUS_UNAVAILABLE`，原有 `worker_healthy` 和业务计数照常返回。
+
+监视读取不会拉取远端、切换版本、写配置、执行回退或重试。响应不含仓库、目录、配置包、
+提示词、私有内容或异常原文；观察到配置失败也不表示业务 Worker 已不可用。

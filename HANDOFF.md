@@ -19,6 +19,22 @@ features, the FlowDay retirement), [October 20](docs/history/handoff-2026-10-20.
 
 ## Current work
 
+### Newsletter configuration activation visibility (`codex/newsletter-config-status`, in progress)
+
+Owner request: expose the existing config-sync observation through Newsletter's private monitoring response,
+the current observer/Fleet receipt and Home Ops, so activation can be verified through authenticated monitoring.
+Reuse the current read-only identities and cadence; do not add services, permissions or activation controls.
+
+- Done locally: the private monitor exposes only active/last-observed target identities, pin, poll times and safe
+  error codes. The existing observer normalizes them into an optional typed report field; Fleet displays the full
+  identities, while Home uses the current NewsletterOps signals and numeric clocks. Configuration warnings stay
+  separate from process health and daily business-flow health; alert dismissal is preserved.
+- Checks: Newsletter's 2,401 tests; Platform's 154 tests (two existing local skips); Fleet/Home worker, web and
+  real-workerd suites; proto lint/API lint/breaking, 458 TypeScript and 122 Python tests, and schema checks. No new
+  dependency, service, provider call, permission or polling cadence.
+- Pending: branch CI, normal PR release and production metadata verification through Fleet/Home. A match means
+  consistency with the last checked target, not proof that no newer remote publication exists.
+
 ### Verify after the October 28 releases (read-only)
 
 The released notes are in the [October 28 archive](docs/history/handoff-2026-10-28.md).

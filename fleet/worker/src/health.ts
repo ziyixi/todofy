@@ -3,6 +3,7 @@ import type * as ops from '@ziyixi/proto/ops/v1/ops_wire';
 import type { Report } from './report.ts';
 import { freshness, reportCodes } from './report.ts';
 import { releaseReady, runtimeHealthReady, workload } from './runtime.ts';
+import { configCounters, configState } from './newsletter-config.ts';
 
 const HOUR_MS = 3_600_000;
 /**
@@ -79,6 +80,8 @@ export function statusSnapshot(
       if (!runtime || !releaseReady(runtime)) add('deployment_pending');
       if (['draining', 'frozen'].includes(report.newsletter.drain_state)) add('newsletter_paused', 'info');
       signals.push(...newsletterOutcomes(report.newsletter, now));
+      const config = configState(report.newsletter.config_sync, now);
+      add(`newsletter_config_${config}`, config === 'failed' || config === 'stale' ? 'warning' : 'info');
     } else {
       for (const code of reportCodes(report)) {
         if (code.startsWith('newsletter_')) continue;
@@ -92,6 +95,7 @@ export function statusSnapshot(
   if (receivedAt !== null) counters.heartbeat_age_seconds = Math.floor(Math.max(0, now - receivedAt) / 1000);
   if (age === 'fresh' && report) {
     if (app === 'newsletter') {
+      Object.assign(counters, configCounters(report.newsletter.config_sync, now));
       for (const [key, count] of Object.entries(report.newsletter.unknown_by_kind ?? {})) counters[`unknown_${key}`] = count;
       for (const key of ['queued_count', 'inflight_count', 'unknown_count', 'unknown_revision'] as const) {
         const value = report.newsletter[key];
@@ -110,8 +114,9 @@ export function statusSnapshot(
     version: 'ops-v1',
     app,
     generated_at: new Date(now).toISOString(),
-    // Unknown historical outcomes need reconciliation, but they are not a process failure.
-    health: signals.some((item) => item.severity !== 'info' && item.code !== 'newsletter_side_effect_unknown') ? 'degraded' : 'ok',
+    // Historical outcomes and configuration checks do not change process availability.
+    health: signals.some((item) => item.severity !== 'info' && item.code !== 'newsletter_side_effect_unknown'
+      && !item.code.startsWith('newsletter_config_')) ? 'degraded' : 'ok',
     modes,
     guard: { level: 'normal', reason: null, until: null, set_at: null, deferred: [] },
     signals,

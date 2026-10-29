@@ -103,6 +103,20 @@ def observe(*, wanted=None, deploy=None, running=None, business=None):
 
 
 class Evidence(unittest.TestCase):
+    def test_optional_configuration_observation_preserves_release_evidence(self):
+        value = {
+            **monitor(),
+            "version": 2,
+            "unknown_by_kind": {},
+            "unknown_revision": 0,
+            "latest_delivery": None,
+            "config_sync": {"error": "CONFIG_GITHUB_NETWORK_ERROR"},
+        }
+        result = observe(business=newsletter(value))
+        self.assertEqual(result.health_state, "healthy")
+        self.assertEqual(result.admission_state, "accepting")
+        self.assertEqual(result.release.state, "ready")
+
     def test_shared_generated_producer_and_consumer_agree(self):
         value = observe()
         wire = to_wire(value)
