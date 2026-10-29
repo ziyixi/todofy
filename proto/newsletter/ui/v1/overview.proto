@@ -38,12 +38,13 @@ message Overview {
   string time_zone = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The running engine's build: a commit SHA, empty when the build did not record one.
   string engine_revision = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The newest run (list view), absent before the first.
+  // The newest run of the daily schedule (list view), else the newest run; absent before the first. A later manual or
+  // replayed run does not take its place.
   // (-- api-linter: core::0122::embedded-resource=disabled
   //     aip.dev/not-precedent: read in the same snapshot as the rest of the overview, so its numbers agree; a
   //     second read by name could see a newer state. --)
   Run latest_run = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The newest edition (list view), absent before the first.
+  // The newest daily edition (`Edition.Kind.DAILY`, list view), else the newest edition; absent before the first.
   // (-- api-linter: core::0122::embedded-resource=disabled
   //     aip.dev/not-precedent: read in the same snapshot as the rest of the overview, so its numbers agree; a
   //     second read by name could see a newer state. --)
@@ -61,6 +62,13 @@ message Overview {
   UsageTotals week_usage = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The external interfaces over the latest run and the backup's journal, in `Dependency.Kind` order.
   repeated Dependency dependencies = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The edition of the newest settled real delivery (provider accepted, rejected or unknown; fixtures left out), read
+  // with the monitoring snapshot's own query, so its `delivery` is the latest delivery Fleet and Home report; absent
+  // before the first.
+  // (-- api-linter: core::0122::embedded-resource=disabled
+  //     aip.dev/not-precedent: read in the same snapshot as the rest of the overview, so its numbers agree; a
+  //     second read by name could see a newer state. --)
+  Edition latest_delivery = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // One issue date of the overview's strip.

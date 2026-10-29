@@ -883,11 +883,13 @@ name = "personal-newsletter"
 version = "0.1.0"
 source = { editable = "newsletter" }
 dependencies = [
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "jinja2" },
     { name = "pillow" },
     { name = "protobuf" },
+    { name = "pyjwt" },
     { name = "pyyaml" },
     { name = "uvicorn" },
     { name = "ziyixi-model-router-client" },
@@ -907,11 +909,13 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "jinja2" },
     { name = "pillow" },
     { name = "protobuf" },
+    { name = "pyjwt" },
     { name = "pyyaml" },
     { name = "uvicorn" },
     { name = "ziyixi-model-router-client", directory = "packages/model-router-client/python" },

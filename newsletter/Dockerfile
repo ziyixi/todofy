@@ -36,13 +36,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 WORKDIR /opt/newsletter
 RUN python -c 'import json, os; from pathlib import Path; Path("build-info.json").write_text(json.dumps({"source_sha": os.environ.get("BUILD_SHA", "")}))'
 COPY --from=builder /opt/newsletter/.venv /opt/newsletter/.venv
+# The owner console's public Access policy: the team's issuer and the console application's AUD, as codex-gateway
+# bakes its own. No file until config/resources.toml records that AUD; the console then answers NOT_CONFIGURED.
+COPY config/cloud.toml config/resources.toml ./public-build-config/
+RUN /opt/newsletter/.venv/bin/python -I -c 'import pathlib, newsletter.console_access as access; access.write_policy(pathlib.Path("public-build-config"), access.POLICY_FILE)'
 RUN mkdir -p /var/lib/newsletter \
     && chown newsletter:newsletter /var/lib/newsletter
 USER newsletter
 ENV PATH="/opt/newsletter/.venv/bin:$PATH" \
     NEWSLETTER_DATA_DIR=/var/lib/newsletter \
     NEWSLETTER_CHART_FONT=/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc
-EXPOSE 8080
+EXPOSE 8080 8081
 # Long startup probes are intentional; liveness is exposed only after preflight.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)"
 ENTRYPOINT ["newsletter"]

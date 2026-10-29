@@ -13,6 +13,7 @@ import json
 import pathlib
 import re
 import subprocess
+import tomllib
 import uuid
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -107,11 +108,18 @@ def verify(
         )
     if metadata["user"].split(":", 1)[0] in {"", "0", "root"}:
         raise ValueError("The image must configure a nonroot user")
+    resources = tomllib.loads(
+        (root.parent / "config" / "resources.toml").read_text()
+    )
     payload = {
         "source_hashes": source_hashes(root),
         "startup_source": (
             root / "scripts" / "smoke_codex_startup.py"
         ).read_text(),
+        # The console AUD the image must have baked, None before it exists.
+        "console_audience": resources.get("access_audiences", {}).get(
+            "newsletter-console"
+        ),
     }
     probe = (root / "scripts" / "smoke_image_probe.py").read_text()
     name = "newsletter-image-smoke-" + uuid.uuid4().hex

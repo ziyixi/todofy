@@ -27,7 +27,13 @@ _CONFIG_IDENTITIES = {
 _CONFIG_TIMES = ("last_attempt", "last_success")
 
 
-def _config_status(root: pathlib.Path | None) -> dict[str, object] | None:
+def config_status(root: pathlib.Path | None) -> dict[str, object] | None:
+    """The content configuration's identities and check times, validated.
+
+    The one reading of the configuration's sync status: this endpoint reports
+    it to Fleet and Home, and the owner console (console_read.py) shows it, so
+    the two never disagree about the same files.
+    """
     if root is None:
         return None
     empty = dict.fromkeys((*_CONFIG_IDENTITIES, *_CONFIG_TIMES))
@@ -98,7 +104,7 @@ def register(
                 ),
                 "build_source_sha": source_sha,
                 "release_request_id": request_id,
-                "config_sync": _config_status(content_config_dir),
+                "config_sync": config_status(content_config_dir),
             },
             headers={"Cache-Control": "no-store"},
         )

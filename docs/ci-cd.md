@@ -303,9 +303,11 @@ scheduled path, suspended until release verification completes. [newsletter-dail
 is an optional preparation-only caller, with no send schedule. It still requires a separately configured,
 Actions-reachable HTTPS `NEWSLETTER_SERVICE_URL` and editor token. This migration does not connect or
 verify that manual workflow: Newsletter's Service is internal ClusterIP, and the dedicated daemon Tunnel
-exposes the runtime/release API, not Newsletter's `/v1/runs`. An old URL cannot be assumed to keep working.
+exposes the runtime/release API and Newsletter's read-only console path (`/api/newsletter/v1/`, the console's own Access
+application), not Newsletter's `/v1/runs`. An old URL cannot be assumed to keep working.
 Newsletter retains its locked external wire runtime and private drain/monitor JSON adapters;
-its generic runtime API uses the root proto. Service migration and live provider acceptance are recorded
+its generic runtime API and its owner read API (`newsletter.ui.v1`) use the root proto, so a change to
+`proto/newsletter/ui/` publishes Newsletter (and Platform) for the paired VPS release as well as the console Worker. Service migration and live provider acceptance are recorded
 separately in HANDOFF, not inferred from a successful image build.
 
 ## Other release paths

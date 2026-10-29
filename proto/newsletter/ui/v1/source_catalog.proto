@@ -49,25 +49,58 @@ message SourceCatalog {
   int32 history_candidate_count = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
-// The content configuration in effect. Each run freezes the revision in effect when it starts.
+// The content configuration in effect and its sync: the fields of the observation Fleet and Home show
+// (fleet.telemetry.v1 NewsletterConfigSync, read by Newsletter's monitoring status from the same files) and the state
+// Fleet derives from them, so the console never reports another state for the same observation. Each run freezes the
+// revision in effect when it starts.
 message ConfigState {
+  // Fleet's configuration state (fleet/worker/src/newsletter-config.ts `configState`), evaluated when the view was
+  // read: the first that applies of FAILED, UNOBSERVED (no attempt, or one in the future), STALE (no attempt for 30
+  // minutes), UNOBSERVED (no active bundle), PINNED or PENDING (a pin, matched or not), UNOBSERVED (no target), and
+  // CURRENT or PENDING (the target matched or not).
+  enum State {
+    // Never written.
+    STATE_UNSPECIFIED = 0;
+    // The active bundle is the last check's target (与上次检查目标一致).
+    STATE_CURRENT = 1;
+    // The active bundle differs from the last check's target or from the pin (等待激活).
+    STATE_PENDING = 2;
+    // The last check failed (`sync_error_code`) (配置检查失败).
+    STATE_FAILED = 3;
+    // No check for 30 minutes (配置检查延迟).
+    STATE_STALE = 4;
+    // The active bundle is the pinned one (固定版本).
+    STATE_PINNED = 5;
+    // Not enough was observed to tell (尚未取得完整配置观测).
+    STATE_UNOBSERVED = 6;
+  }
+
   // The active revision: a commit SHA of the published branch, or `packaged` (the image's baseline); empty when
   // none is active.
   string active_revision = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The active bundle's digest.
   string active_digest = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // True when the owner pinned the active bundle, so syncs do not replace it.
+  // True when the owner pinned a bundle (`pinned_digest`), so syncs do not replace it.
   bool pinned = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The revision the last sync wanted, when it differs from the active one; empty otherwise.
+  // The revision the last successful check fetched (上次检查目标); empty before the first.
   string wanted_revision = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // When a sync was last attempted; absent before the first.
+  // When a check was last attempted, a failed one included; absent before the first.
   google.protobuf.Timestamp last_sync_attempt_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // When a sync last succeeded; absent before the first.
+  // When a check last succeeded, even if the active bundle did not change; absent before the first.
   google.protobuf.Timestamp last_sync_success_time = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The last sync's `CONFIG_*` error code; empty when it succeeded.
+  // The last check's `CONFIG_*` error code; empty after a success. `CONFIG_STATUS_UNAVAILABLE` when the status itself
+  // could not be read.
   string sync_error_code = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The active revision's public commit page (https); empty for `packaged`.
   string revision_url = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The state, as Fleet derives it from these fields.
+  State state = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The digest of the bundle the last successful check fetched.
+  string wanted_digest = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The published branch's commit that check resolved.
+  string wanted_commit = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The digest the owner pinned; empty without a pin.
+  string pinned_digest = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // One revision recent runs froze.
@@ -92,9 +125,9 @@ message Direction {
   string instructions = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Enabled feed sources routed to it.
   int32 source_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Its discovery item's state in the latest run; unspecified when that run had none.
+  // Its discovery item's state in the latest scheduled run; unspecified when that run had none.
   RunNode.State latest_state = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Candidates it found in the latest run.
+  // Candidates it found in the latest scheduled run.
   int32 latest_candidate_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 

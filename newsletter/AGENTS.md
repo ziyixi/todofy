@@ -5,15 +5,17 @@
 是异步副本。原料、模型输出、URL 与供应商响应均为不可信内容。
 
 镜像固定 `ghcr.io/ziyixi/todofy-newsletter`，构建 context 为仓库根，Dockerfile 为 `newsletter/Dockerfile`，
-仅复制本应用源码和根 workspace 元数据。Python 3.14.7、依赖版本与 lock 统一在仓库根；成员保持各自依赖职责。CI 位于根
-`.github/workflows/`，不添加此目录下的嵌套 Actions。本次保留锁定的外部
-`ziyixi-protos==0.1.0.dev7` 依赖；共享 proto 迁移须另行设计，不顺带替换。
+仅复制本应用源码、根 workspace 元数据和 `config/` 的两份公开身份文件（控制台 Access 策略）。Python 3.14.7、依赖版本与 lock 统一在
+仓库根；成员保持各自依赖职责。CI 位于根 `.github/workflows/`，不添加此目录下的嵌套 Actions。引擎接口保留锁定的外部
+`ziyixi-protos==0.1.0.dev7` 依赖；共享 proto 迁移须另行设计，不顺带替换。owner 只读接口 `newsletter.ui.v1` 使用根 proto
+生成的 Python 代码（[控制台](docs/console.md)）。
 
 保持 service.lock 单一 owner、稳定 run/request/provider key、冻结输入、unknown
 不自动重放。部署使用 [持久排空合同](docs/deployment-drain.md)：新业务 admission
 与活动登记原子核对 gate；freeze 需同时核对活动与实际 submitting 账本。
 取消的本机活动在旧进程存活期间不能伪装为已经结束；restart recovery 只在独占锁下。
-内部部署 JSON 接口只用既有 send 机器身份，不扩展 owner UI 或跨应用 RPC。
+内部部署 JSON 接口只用既有 send 机器身份，不扩展跨应用 RPC。唯一的 owner 例外是[控制台](docs/console.md)的只读监听：
+独立端口、只读 SQLite 快照、只认控制台 Access 应用的 owner 断言，不写、不运行、不发送、不重试，也不取锁或登记部署活动。
 
 不读取/提交私有 env、登录缓存、生产内容与备份；不调用真实模型/Notion/发信来
 代替测试。测试默认禁止网络，使用合成 fixture；记录检查与生产验收的区别。

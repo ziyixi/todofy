@@ -20,6 +20,7 @@ import urllib.error as error
 import urllib.request as urllib_request
 
 import newsletter.collection.instructions as instructions
+import newsletter.console_access as console_access
 import newsletter.contracts as contracts
 import newsletter.preflight as preflight
 import newsletter.rendering as rendering
@@ -31,6 +32,7 @@ class ProbeInput(TypedDict):
 
     source_hashes: dict[str, str]
     startup_source: str
+    console_audience: str | None
 
 
 def check_package(expected: dict[str, str]) -> None:
@@ -74,11 +76,52 @@ def check_package(expected: dict[str, str]) -> None:
     preflight.check_proto_dependency()
 
 
-def check_http(root: pathlib.Path) -> None:
+def check_console_policy(audience: str | None) -> None:
+    """The baked Access policy is the recorded console AUD, or absent."""
+    verifier = console_access.load_policy()
+    if audience is None:
+        assert not console_access.POLICY_FILE.exists() and verifier is None
+    else:
+        assert verifier is not None and verifier.audience == audience
+
+
+def check_console(port: int, token: str, configured: bool) -> None:
+    """The console listener refuses every request without an Access login."""
+    client = urllib_request.build_opener(urllib_request.ProxyHandler({}))
+    expected = (401, "UNAUTHORIZED") if configured else (503, "NOT_CONFIGURED")
+    base = f"http://127.0.0.1:{port}"
+    for path, headers, answer in (
+        ("/api/newsletter/v1/overview", {}, expected),
+        # The engine's machine credential is no console credential.
+        (
+            "/api/newsletter/v1/overview",
+            {"Authorization": "Bearer " + token},
+            expected,
+        ),
+        # Nothing of the engine is served on the console's port.
+        ("/v1/runs", {"Authorization": "Bearer " + token}, (404, "NOT_FOUND")),
+    ):
+        try:
+            client.open(
+                urllib_request.Request(base + path, headers=headers), timeout=3
+            )
+        except error.HTTPError as refused:
+            body = json.load(refused)
+            reason = body["error"]["details"][0]["reason"]
+            assert (refused.code, reason) == answer, path
+            assert refused.headers["Cache-Control"] == "no-store"
+        else:
+            raise AssertionError("The console answered without a login")
+
+
+def check_http(root: pathlib.Path, *, console_configured: bool) -> None:
     """Exercise mock collection and preview over container-local loopback."""
-    with socket.socket() as available:
-        available.bind(("127.0.0.1", 0))
-        port = available.getsockname()[1]
+    ports = []
+    for _ in range(2):
+        with socket.socket() as available:
+            available.bind(("127.0.0.1", 0))
+            ports.append(available.getsockname()[1])
+    port, console = ports
     tokens = {role: secrets.token_urlsafe(32) for role in ("EDITOR", "SEND")}
     environment = {
         "PATH": os.defpath,
@@ -92,6 +135,7 @@ def check_http(root: pathlib.Path) -> None:
         "NEWSLETTER_NOTION": "fake",
         "NEWSLETTER_TODOFY": "fake",
         "NEWSLETTER_DATA_DIR": str(root / "data"),
+        "NEWSLETTER_CONSOLE_PORT": str(console),
         **{f"NEWSLETTER_{role}_TOKEN": value for role, value in tokens.items()},
     }
     process = subprocess.Popen(
@@ -169,6 +213,7 @@ def check_http(root: pathlib.Path) -> None:
 
     try:
         poll("/healthz", lambda value: value["status"] == "ok")
+        check_console(console, tokens["EDITOR"], console_configured)
         run = request(
             "/v1/runs",
             {"request_key": "image-smoke", "issue_date": "2026-09-05"},
@@ -214,6 +259,7 @@ def check_http(root: pathlib.Path) -> None:
 def main(payload: ProbeInput) -> None:
     """Verify the final image without credentials, email or external network."""
     check_package(payload["source_hashes"])
+    check_console_policy(payload["console_audience"])
     with tempfile.TemporaryDirectory(
         prefix="newsletter-image-probe-"
     ) as temporary:
@@ -232,7 +278,9 @@ def main(payload: ProbeInput) -> None:
             check=True,
             timeout=40,
         )
-        check_http(root)
+        check_http(
+            root, console_configured=payload["console_audience"] is not None
+        )
         assert not list(root.rglob("auth.json")) and not list(
             root.rglob("*.eml")
         )
@@ -244,6 +292,7 @@ def main(payload: ProbeInput) -> None:
                 "production_distributions": len(list(metadata.distributions())),
                 "model_router_client_checks": 2,
                 "mock_http": "ready/preview",
+                "console": "refuses without login",
                 "mail_files": 0,
                 "external_network": False,
                 "rootfs_read_only": True,

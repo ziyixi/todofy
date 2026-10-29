@@ -37,8 +37,12 @@ gate 与操作回执没有 TTL，不会因为请求超时、进程重启或一�
 ## 私有机器 HTTP 接口
 
 沿用既有 `NEWSLETTER_SEND_TOKEN` Bearer 身份，editor token 无此权限。
-不新增 owner UI、公共入口、跨应用导入或共享 proto。调用端只允许私有网络或
+不新增公共入口、跨应用导入或共享 proto。调用端只允许私有网络或
 HTTPS；token 只放环境或正规 secret store，不放 URL、参数、日志或聊天。
+
+唯一的 owner 例外是[控制台](console.md)的只读监听（`NEWSLETTER_CONSOLE_PORT`）：它不是部署接口，
+不接受这些 token，不取 `service.lock`/`store.lock`，不登记 `deployment_activities`，也不受 gate 影响；
+它只读 SQLite 快照，所以 drain 与 frozen 期间照常回答，Pod 重建期间暂不可用。
 
 | 接口 | 输入 | 成功行为 |
 | --- | --- | --- |
@@ -63,7 +67,7 @@ POST 仅接受 `application/json`，最多 1024 bytes，只允许唯一 `request
 | 409 `deployment_conflict` | 操作键冲突；不能轮询绕过或换键取消别人的 drain |
 | 503 `deployment_draining` | 新业务 run/send/维护请求被 gate 拒绝，Retry-After 30 秒 |
 
-业务查询、预览和健康检查仍可用。`/healthz` 200 表示进程健康，不代表 gate 已恢复；
+业务查询、预览、控制台只读查询和健康检查仍可用。`/healthz` 200 表示进程健康，不代表 gate 已恢复；
 正常 frozen 服务仍健康。POST run 的同键重复在 drain 期间也拒绝，恢复后返回原回执。
 
 ## CLI 与升级顺序

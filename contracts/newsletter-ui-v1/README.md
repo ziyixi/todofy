@@ -6,10 +6,12 @@ the Notion backup). Source: [`proto/newsletter/ui/v1/`](../../proto/newsletter/u
 the generated Python and TypeScript types are the contract on every side, with no hand-written DTOs. Newsletter owns
 it. It is read-only: no method writes, runs, sends, retries or syncs anything.
 
-Status: the console Worker ([`newsletter-console/`](../../newsletter-console/README.md), on `news.<zone>`) routes it
-behind the owner's Access login and answers every method `UNAVAILABLE` with the reason `NOT_CONFIGURED` until it
-forwards reads; its UI shows that state. A change to the IDL checks and deploys the console only (`PROTO_PACKAGES`).
-Newsletter's reader and listener come next, and with the reader the golden answers in `fixtures/`.
+Status: Newsletter answers every method on its console listener
+([`newsletter/docs/console.md`](../../newsletter/docs/console.md)), and `fixtures/` holds its golden answers. The
+console Worker ([`newsletter-console/`](../../newsletter-console/README.md), on `news.<zone>`) routes it behind the
+owner's Access login and still answers every method `UNAVAILABLE` with the reason `NOT_CONFIGURED` until it forwards
+reads; its UI shows that state. A change to the IDL checks and deploys Newsletter (with the paired VPS release) and the
+console (`PROTO_PACKAGES`).
 
 | Side | What it does |
 | --- | --- |
@@ -110,7 +112,12 @@ that login expires.
   consecutive calendar dates ending with the newest issue date that has a run. An edition's `usage` is the summary
   frozen into its email, which has calls, tokens and completeness but no failure, partial or cost counts.
 - **Shared with Fleet and Home.** The unknown-record counts use the monitoring snapshot's predicates, the latest
-  delivery its query, and the drain state the deployment gate's rows, so the numbers agree with Fleet.
+  delivery (`Overview.latest_delivery`) its query, and the drain state the deployment gate's rows, so the numbers agree
+  with Fleet. `ConfigState` carries the fields of Fleet's configuration observation, read by the same Newsletter helper
+  as the monitoring status, and its `state` is Fleet's rule (`configState`) evaluated when the view was read.
+- **The first page.** `Overview.latest_run` is the newest run of the daily schedule (a later manual or replayed run does
+  not take its place), `latest_edition` the newest daily edition, and each strip day that date's scheduled run, or else
+  its newest run.
 - **Never shown as live state.** The legacy packet projection, a run body's per-direction states and an edition
   body's queue fields, which the daily workflow no longer updates.
 - **Not recorded is not zero.** Model calls recorded before this API lack their purpose, times, Router requests,
@@ -132,8 +139,12 @@ assertion: logs carry request IDs, method names, status classes and durations, o
 ## Checks and changes
 
 `Proto checks` holds the IDL to `buf lint`, Google's api-linter, `buf breaking` and the wire profile's breaking
-rules. With Newsletter's reader, `fixtures/` gets the golden answers it writes over synthetic databases, and the
-console Worker's tests read each back and write it again byte for byte.
+rules; a change to `fixtures/` runs it too (`PROTO_READS`).
+
+`fixtures/` holds the answers Newsletter's reader writes for a synthetic database
+(`newsletter/tests/support/console_world.py`; `newsletter/scripts/console_fixtures.py` checks them and `--update` rewrites
+them), with no trailing newline. `newsletter/tests/test_console_contract.py` and `proto/test/newsletter-ui.test.ts` read
+each back with the Python and the TypeScript codec and write it again byte for byte.
 
 Changes are additive: a new field, method or enum value. Enums are open, so a client keeps a default branch and
 shows a code it does not know as it is. Anything incompatible is `newsletter.ui.v2`.

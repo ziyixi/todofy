@@ -5,8 +5,9 @@
 不重发、不重试任何东西。
 
 当前阶段：Worker、鉴权、外壳页面与基础设施已就位，尚未部署（`ci_changes.py` 的 `CHECK_ONLY`）。
-`newsletter.ui.v1` 的每个方法在鉴权之后回答 `UNAVAILABLE`（原因 `NOT_CONFIGURED`），页面据此显示“尚未接通”；
-转发到 Newsletter 的读取路径、Newsletter 自己的读取接口和各个视图随后加入。
+Newsletter 自己的读取接口已经在它的控制台监听上回答（[`newsletter/docs/console.md`](../newsletter/docs/console.md)），
+golden 回答在 `contracts/newsletter-ui-v1/fixtures/`。本 Worker 在鉴权之后仍对每个方法回答 `UNAVAILABLE`
+（原因 `NOT_CONFIGURED`），页面据此显示“尚未接通”；转发到 Newsletter 的读取路径和各个视图随后加入。
 
 ## 结构
 

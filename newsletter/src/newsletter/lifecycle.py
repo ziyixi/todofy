@@ -1,20 +1,28 @@
 """Application resource ownership and explicit backend composition.
 
 This is the only place that opens storage, checks dependencies and starts/stops
-the worker. Request handlers do not construct providers or own their lifetime.
+the worker and the owner console's listener. Request handlers do not construct
+providers or own their lifetime.
 """
 
 import asyncio
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Iterator
 import contextlib
+import logging
+import socket
 
 import fastapi
+import uvicorn
 
 import newsletter.adapters as adapters
 import newsletter.collection.collector as newsletter_collection_collector
 import newsletter.collection.instructions as instructions
 import newsletter.collection.pipeline as newsletter_collection_pipeline
 import newsletter.collection.repository as repository
+import newsletter.console_access as console_access
+import newsletter.console_api as console_api
+import newsletter.console_read as console_read
+import newsletter.diagnostics as diagnostics
 import newsletter.editor as newsletter_editor
 import newsletter.model_client as model_client
 import newsletter.notion_api as notion_api
@@ -29,6 +37,87 @@ import newsletter.worker as newsletter_worker
 import newsletter.workflow.pipeline as newsletter_workflow_pipeline
 import newsletter.workflow.state as state
 
+_LOGGER = logging.getLogger(__name__)
+# Every interface: the pod's hostPort reaches the container's own address, not
+# its loopback. The listener authenticates each request itself.
+CONSOLE_HOST = "0.0.0.0"
+
+
+class _ConsoleServer(uvicorn.Server):
+    """A second server in the service's event loop.
+
+    The engine's server owns the process signals; this one must not replace
+    or restore them, so a SIGTERM still drains the engine as before.
+    """
+
+    @contextlib.contextmanager
+    def capture_signals(self) -> Iterator[None]:
+        yield
+
+
+async def _serve_console(server: _ConsoleServer, sock: socket.socket) -> None:
+    # The console must never take the engine down with it: a failed listener
+    # is logged and the engine keeps serving.
+    try:
+        await server.serve(sockets=[sock])
+    except (SystemExit, Exception) as error:  # noqa: BLE001
+        diagnostics.record_failure(
+            _LOGGER, phase="console_listener_failed", error=error
+        )
+    finally:
+        sock.close()
+
+
+def _start_console(
+    settings: newsletter_settings.Settings,
+    healthy: Callable[[], bool],
+    host: str,
+) -> tuple[_ConsoleServer, asyncio.Task[None]] | None:
+    """Bind the console's port first, so a conflict is caught and logged."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((host, settings.console_port))
+    except OSError as error:
+        sock.close()
+        diagnostics.record_failure(
+            _LOGGER, phase="console_listener_failed", error=error
+        )
+        return None
+    server = _ConsoleServer(
+        uvicorn.Config(
+            console_api.create_console_app(
+                console_read.ConsoleReader(settings),
+                console_access.load_policy(),
+                healthy,
+            ),
+            lifespan="off",
+            access_log=False,
+            server_header=False,
+            proxy_headers=False,
+            limit_concurrency=4,
+            timeout_keep_alive=5,
+            timeout_graceful_shutdown=5,
+            # The engine's server configured logging; leave it as it is.
+            log_config=None,
+        )
+    )
+    return server, asyncio.create_task(_serve_console(server, sock))
+
+
+async def _stop_console(
+    console: tuple[_ConsoleServer, asyncio.Task[None]] | None,
+) -> None:
+    if console is None:
+        return
+    server, task = console
+    server.should_exit = True
+    await asyncio.wait({task}, timeout=10)
+    if not task.done():
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
 
 @contextlib.asynccontextmanager
 async def service_lifespan(
@@ -41,8 +130,13 @@ async def service_lifespan(
     todofy: newsletter_todofy.TodofyAdapter | None = None,
     collector: newsletter_collection_collector.Collector | None = None,
     start_worker: bool = True,
+    console_host: str | None = None,
 ) -> AsyncIterator[None]:
-    """Own dependencies and workers under one exclusive database lifetime."""
+    """Own dependencies and workers under one exclusive database lifetime.
+
+    The console listener (settings.console_port) starts after storage is
+    open and recovered and stops before the worker and the store do.
+    """
     with ownership.exclusive_store(settings.data_dir):
         store = newsletter_store.Store(
             settings.data_dir / "newsletter.sqlite3",
@@ -196,9 +290,22 @@ async def service_lifespan(
                 else None
             )
             app.state.notion_sync_task = sync_task
+            console = (
+                _start_console(
+                    settings,
+                    lambda: (
+                        not start_worker
+                        or (task is not None and not task.done())
+                    ),
+                    console_host or CONSOLE_HOST,
+                )
+                if settings.console_port
+                else None
+            )
             try:
                 yield
             finally:
+                await _stop_console(console)
                 if sync_task:
                     sync_task.cancel()
                     with contextlib.suppress(asyncio.CancelledError):

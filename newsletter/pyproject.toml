@@ -10,6 +10,9 @@ requires-python = ">=3.14"
 dependencies = [
   "fastapi", "uvicorn", "httpx",
   "protobuf", "jinja2", "pillow", "pyyaml",
+  # The console listener's Access check (console_access.py): RS256 needs
+  # cryptography, which PyJWT's crypto extra would add.
+  "PyJWT", "cryptography",
   "ziyixi-protos",
   "ziyixi-proto", "ziyixi-model-router-client",
 ]
@@ -86,3 +89,9 @@ disallow_any_generics = true
 disallow_untyped_calls = true
 warn_unreachable = true
 strict_equality = true
+
+[[tool.mypy.overrides]]
+# The proto package's generated modules are annotated, but its wheel carries no
+# py.typed marker; read their annotations anyway.
+module = ["ziyixi_proto", "ziyixi_proto.*"]
+follow_untyped_imports = true

@@ -33,7 +33,7 @@ UNKNOWN_SOURCES = {
 # The newest settled real delivery. A constant so other read-only views report
 # exactly what monitoring (and so Fleet) reports.
 LATEST_DELIVERY_SQL = (
-    "SELECT json_extract(body,'$.delivery_state') state, "
+    "SELECT id, json_extract(body,'$.delivery_state') state, "
     "json_extract(body,'$.updated_at') time FROM editions "
     "WHERE json_extract(body,'$.delivery_state') IN "
     "('provider_accepted','rejected','unknown') "

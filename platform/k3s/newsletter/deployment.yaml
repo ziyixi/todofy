@@ -30,6 +30,11 @@ spec:
             - containerPort: 8080
               hostPort: 8765
               hostIP: 127.0.0.1
+            # The owner console's read-only listener; the platform tunnel's /api/newsletter/v1/ rule reaches it.
+            - containerPort: 8081
+              hostPort: 18767
+              hostIP: 127.0.0.1
+              name: console
           envFrom:
             - secretRef:
                 name: newsletter-settings
@@ -44,6 +49,8 @@ spec:
               value: bootstrap-pending
             - name: NEWSLETTER_RELEASE_REQUEST_ID
               value: pending
+            - name: NEWSLETTER_CONSOLE_PORT
+              value: '8081'
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

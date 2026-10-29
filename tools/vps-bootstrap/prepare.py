@@ -21,6 +21,8 @@ CONTROLLED = {
     "NEWSLETTER_CONTENT_CONFIG_DIR",
     "NEWSLETTER_BOOTSTRAP_DRAIN_KEY",
     "NEWSLETTER_RELEASE_REQUEST_ID",
+    # The console listener's port is the manifest's (hostPort 18767); the private Secret cannot move it.
+    "NEWSLETTER_CONSOLE_PORT",
 }
 
 

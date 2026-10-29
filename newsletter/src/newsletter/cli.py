@@ -5,6 +5,7 @@ import asyncio
 import base64
 import importlib.resources as resources
 import json
+import os
 import pathlib
 import secrets
 import sys
@@ -109,6 +110,11 @@ def main() -> None:
     admin.configure(commands.add_parser("admin", help="Explicit maintenance"))
     args = parser.parse_args()
     if args.command == "serve":
+        console_port = os.getenv("NEWSLETTER_CONSOLE_PORT", "0")
+        if console_port.strip() == str(args.port):
+            # The console listener binds during startup, before this server:
+            # one port for both would take the engine's port from it.
+            parser.error("NEWSLETTER_CONSOLE_PORT must differ from --port")
         uvicorn.run(
             "newsletter.app:create_app",
             factory=True,
