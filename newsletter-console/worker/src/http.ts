@@ -93,7 +93,10 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     ));
   }
   if (request.method !== 'GET' && request.method !== 'HEAD') {
-    return withPrivateHeaders(new Response(null, { status: 405, headers: { allow: 'GET, HEAD' } }));
+    // The contract's METHOD_NOT_ALLOWED, as a Status body like every other answer (mailsort's and recall's shape).
+    const notAllowed = new RpcError(Code.UNIMPLEMENTED, 'METHOD_NOT_ALLOWED', 'this method is not allowed on this path',
+      { httpStatus: 405, headers: { allow: 'GET, HEAD' } });
+    return withPrivateHeaders(api.errorResponse(notAllowed, id, false));
   }
   const result = await api.handle(request, { env }, id);
   if (result) {

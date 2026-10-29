@@ -48,7 +48,7 @@ describe('the deployed Worker', () => {
     expect(await reason(overview)).toBe('NOT_CONFIGURED');
     const write = await h.fetch('/api/v1/overview', { method: 'POST', headers: { 'cf-access-jwt-assertion': await login() } });
     expect(write.status).toBe(405);
-    await write.text();
+    expect(await reason(write)).toBe('METHOD_NOT_ALLOWED');
   });
 
   it('reaches only the issuer keys, never Newsletter or anything else', () => {

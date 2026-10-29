@@ -174,12 +174,16 @@ describe('the owner API', () => {
     expect(await head.text()).toBe('');
   });
 
-  it('admits reads only', async () => {
+  it('admits reads only, answering anything else METHOD_NOT_ALLOWED on the API and the UI alike', async () => {
     stubCerts();
-    for (const method of ['POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']) {
-      const response = await call('/api/v1/overview', { method, ...(method === 'OPTIONS' ? {} : { body: '{}' }) });
-      expect(response.status, method).toBe(405);
-      expect(response.headers.get('allow'), method).toBe('GET, HEAD');
+    for (const path of ['/api/v1/overview', '/']) {
+      for (const method of ['POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']) {
+        const response = await call(path, { method, ...(method === 'OPTIONS' ? {} : { body: '{}' }) });
+        expect(response.status, `${method} ${path}`).toBe(405);
+        expect(response.headers.get('allow'), method).toBe('GET, HEAD');
+        expect(await reason(response), method).toBe('METHOD_NOT_ALLOWED');
+        expectPrivate(response);
+      }
     }
   });
 
