@@ -241,6 +241,18 @@ Local runtime quirks (not production behaviour)
   answer still leaves an upload in flight (405 from assets), wrangler's local proxy may fail the next POST
   on that dev server with a 500. Send such requests without a body, use `Worker.headers_only_status`, or
   use the per-test `throwaway_worker` fixture.
+- wrangler's local proxy forwards each request to workerd over a pooled keep-alive connection, and both
+  ends drop an idle connection after exactly 5 s (kj's client `idleTimeout` and server `pipelineTimeout`).
+  A request sent about 5 s after the server's last answer can be written into a connection workerd is
+  closing; the proxy resends a GET or HEAD but answers any other method with a 500 `Error: Network
+  connection lost.` (dev.log: `Error inside ProxyWorker ... (failed after 1 attempt)`, and no request line:
+  the Worker never saw it). Locally 16 of 85 POSTs sent 4.993-4.999 s after an answer failed, and none
+  outside that window; in CI it failed about one runtime shard in 135. The harness's clients trust no
+  connection idle for `PROXY_IDLE_S` (1 s): `_DevProxyTransport` closes its own, and before any method but
+  GET or HEAD after such a pause `Worker.refresh_proxy` sends `GET /health` (which the proxy does resend),
+  as `headers_only_status` does too; the request then reuses the connection that GET left. Never retry the
+  request itself: a real Durable Object call that drops reads the same. Remove the workaround once wrangler
+  resends a request with a body (workers-sdk #16348) or expires its pool before workerd closes (#14641).
 - wrangler's local proxy passes a chunked upload on only in large pieces (1.1 MiB unterminated never
   reached the object in a probe; 3.2 MiB did) and may add a length, so an HTTP test cannot prove that the
   object stops reading early. `test_owner_body_limit.py` proves the early stop on `interop.read_capped`
