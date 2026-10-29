@@ -6,8 +6,8 @@ import { NewsletterConfigView } from './NewsletterConfigView.tsx';
 
 const CATEGORY_NAMES: Record<string, string> = {
   interrupted_activities: '运行中断', packets: '采编记录',
-  workflow_attempts: '工作流步骤', notion_entities: 'Notion 创建',
-  notion_versions: 'Notion 更新', delivery: '邮件投递',
+  workflow_attempts: '工作流步骤', notion_entities: 'Notion 备份·创建',
+  notion_versions: 'Notion 备份·更新', delivery: '邮件投递',
 };
 const DELIVERY_NAMES: Record<string, string> = {
   provider_accepted: '邮件服务已接收', rejected: '邮件服务拒绝', unknown: '结果尚未确认',
@@ -59,7 +59,9 @@ export function HostReportView({ report, now }: { report: HostReport; now: numbe
             {Object.entries(newsletter.unknown_by_kind).map(([kind, count]) => <div key={kind}><dt>{CATEGORY_NAMES[kind] ?? kind}</dt><dd>{count}</dd></div>)}
           </dl>
         ) : null}
-        <p className="muted">六类记录可能重复计入，合计并非失败邮件数；只有邮件投递、采编记录和 Notion 写入可能已产生实际结果，需要核对。</p>
+        <p className="muted">六类记录可能重复计入，合计并非失败邮件数；只有邮件投递、采编记录和 Notion 备份写入可能已产生实际结果，需要核对。</p>
+        {/* Fleet only counts; the console reads Newsletter's own record (runs, issues, the Notion backup). */}
+        <p><a href={import.meta.env.VITE_NEWSLETTER_URL}>运行、期刊与备份详情 →</a></p>
         <NewsletterConfigView config={newsletter.config_sync} now={now} />
       </section>
     </>

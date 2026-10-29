@@ -238,6 +238,9 @@ def generated_files(root: Path) -> dict[str, str]:
             replacements["NEWSLETTER_ORIGIN"] = "https://" + profile["vps"]["platform_runtime_host"]
             replacements["FLEET_URL"] = "https://fleet." + profile["zone"] + "/"
             replacements["MODEL_ROUTER_URL"] = "https://models." + profile["zone"] + "/"
+        if name == "fleet":
+            # Fleet's Newsletter section links the console for runs, issues and the Notion backup.
+            replacements["NEWSLETTER_URL"] = "https://news." + profile["zone"] + "/"
         for variable, value in replacements.items():
             if variable in variables:
                 text = literal_field(text, variable, value, "vars")
