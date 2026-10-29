@@ -166,6 +166,10 @@ the first attempts of reruns, found these causes, all now fixed at their root:
   side could fail with "internal error" (the alarm then retried its report 10 minutes later, past the 30 s wait).
   `Worker.d1()` now runs SQL in the server through wrangler dev's Local Explorer, and the backup test reads its
   bucket with the server stopped. Production is unaffected: a transient D1 error delays a report tick, never drops it.
+- Tasks' sidebar drag tests failed when a project landed in the sidebar's bottom fifth: dnd-kit auto-scrolled the
+  sidebar away under the pointer, and a target that scrolled under a still pointer never lit. That was a real UI bug
+  too. The sidebar now holds still during a task drag (wheel-scroll to reach a project below the fold; the task list
+  keeps its auto-scroll), targets are re-detected when measured, and the test helper centres its targets.
 
 ## Latest verified release
 
