@@ -43,6 +43,7 @@
 .task-detach-zone span {
   font-size: 12px;
 }
+/* Drop highlights must not change layout: TaskDrag re-detects targets whenever one moves. */
 .task-detach-zone.is-over {
   background: var(--selected);
   border-color: var(--accent);

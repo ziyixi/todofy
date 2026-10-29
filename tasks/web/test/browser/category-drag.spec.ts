@@ -1,5 +1,11 @@
-import { dragTask } from "./drag";
-import { expect, test, type APIRequestContext } from "@playwright/test";
+import { beginTaskDrag, dragTask } from "./drag";
+import {
+  expect,
+  test,
+  type APIRequestContext,
+  type Locator,
+  type Page,
+} from "@playwright/test";
 import { reachesTodofy } from "./planning-stub";
 
 async function writer(request: APIRequestContext) {
@@ -19,6 +25,19 @@ async function writer(request: APIRequestContext) {
       title: string;
     }>;
   };
+}
+
+async function bounds(link: Locator) {
+  const box = await link.boundingBox();
+  if (!box) throw new Error("Sidebar link is not visible");
+  return box;
+}
+
+/** Moves a dragged task onto a sidebar link where it is, without dropTaskOn's centring. */
+async function hoverLink(page: Page, link: Locator) {
+  const { x, y, width, height } = await bounds(link);
+  await page.mouse.move(x + width / 2, y + height / 2, { steps: 8 });
+  await expect(link).toHaveAttribute("data-task-drop", "true");
 }
 
 test("sidebar drops move a subtask family, add a label and schedule Today without changing its deadline", async ({
@@ -133,6 +152,50 @@ test("sidebar drops move a subtask family, add a label and schedule Today withou
   ).json();
   expect(descendant.project_id || "").toBe("");
   expect(descendant.parent_id).toBe(child.id);
+});
+
+test("a sidebar link wheel-scrolled under a still pointer lights and takes the drop", async ({
+  page,
+  request,
+}) => {
+  const write = await writer(request);
+  const suffix = crypto.randomUUID();
+  const source = await write("projects", {
+    title: `Synthetic source ${suffix}`,
+  });
+  // Sort orders no other project has keep the two links adjacent, upper first.
+  const sortOrder = Math.random();
+  const upper = await write("projects", {
+    title: `Synthetic upper ${suffix}`,
+    sort_order: sortOrder,
+  });
+  const lower = await write("projects", {
+    title: `Synthetic lower ${suffix}`,
+    sort_order: sortOrder + 1e-9,
+  });
+  const task = await write("tasks", {
+    title: `Synthetic wheeled ${suffix}`,
+    project_id: source.id,
+  });
+  await page.goto(`/#/project/${source.id}`);
+  const link = (project: { title: string }) =>
+    page.getByRole("link", { name: project.title, exact: true });
+  await beginTaskDrag(page, page.getByText(task.title, { exact: true }));
+  await link(lower).evaluate((e) => e.scrollIntoView({ block: "center" }));
+  await hoverLink(page, link(lower));
+  // The wheel brings the upper link under the pointer, which does not move.
+  const rise = (await bounds(link(upper))).y - (await bounds(link(lower))).y;
+  await page.mouse.wheel(0, rise);
+  await expect(link(upper)).toHaveAttribute("data-task-drop", "true");
+  await expect(link(lower)).not.toHaveAttribute("data-task-drop");
+  await page.mouse.up();
+  await expect
+    .poll(
+      async () =>
+        (await (await request.get(`/api/tasks/v1/tasks/${task.id}`)).json())
+          .project_id,
+    )
+    .toBe(upper.id);
 });
 
 test("planning tags come with the rows, each task's own, and never masquerade as labels", async ({
