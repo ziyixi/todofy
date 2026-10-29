@@ -1,12 +1,16 @@
 import { localDate } from '@ziyixi/task-dates';
 import { create } from '@ziyixi/proto/protobuf';
+import { GoalCatalogSchema } from '@ziyixi/proto/tasks/ui/v1/goals_pb';
 import {
+  GetGoalCatalogRequestSchema,
   ListFocusDaysResponseSchema,
   ListTasksRequestSchema,
   ListTasksResponseSchema,
 } from '@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb';
 import { fromWire, toWire } from '@ziyixi/proto/wire-json';
 import { focusDaysAnswer } from './focus.ts';
+import { KEY_RESULT_LIMIT, OBJECTIVE_LIMIT, type KeyResultRow, type ObjectiveRow } from './goal-model.ts';
+import { getGoalCatalog } from './goal-read.ts';
 import type { TaskRow } from './model.ts';
 import { MAX_DEPENDENCIES } from './planning.ts';
 import { listTasks } from './task-read.ts';
@@ -17,7 +21,8 @@ const STARTUP_ROWS = 100;
  * Runs, once per isolate, the work an isolate's first owner requests would otherwise do first: index.ts calls it in
  * the Worker's global scope with the account's zone, under the platform's startup budget, before any owner's request
  * CPU is charged. No clock, network, bindings, user data or repeated compilation loops are involved. Its promise (the
- * task page's) settles in the startup's own microtasks and never rejects; only its test awaits it.
+ * task page's and the goal catalog's) settles in the startup's own microtasks and never rejects; only its test awaits
+ * it.
  */
 export function warmUp(zone: string): Promise<void> {
   // workerd measured ~12ms for first Intl initialization alone, and a zone's first formatter about 0.15 ms more.
@@ -36,7 +41,7 @@ export function warmUp(zone: string): Promise<void> {
   );
   const taskPage = warmTaskPage(zone);
   warmFocusWeek();
-  return taskPage;
+  return Promise.all([taskPage, warmGoalCatalog(zone)]).then(() => undefined);
 }
 
 /**
@@ -144,4 +149,71 @@ function warmFocusWeek(): void {
       '2000-01-01',
     ),
   );
+}
+
+/**
+ * The goal catalog is the other large answer an isolate may write first, and its first read ran nearest Free's 10 ms
+ * (GitHub runners: 8.7 reference ms, p50 of 52 runs, twice above 10): getGoalCatalog runs here whole over a stub D1
+ * batch of the most Objectives and Key Results a year holds, so its mapping and codec run before an isolate's first
+ * catalog read does. Measured 2026-10-29 in two series of four alternating runs (every run the median of five
+ * isolates): that first read went from about 8.0 to about 7.5 reference ms (0.5 and 0.6 less in the two series), and
+ * the warm-up's own first run from about 20.2 to about 22.0.
+ */
+function warmGoalCatalog(zone: string): Promise<void> {
+  const objectives = Array.from(
+    { length: OBJECTIVE_LIMIT },
+    (_, index): ObjectiveRow => ({
+      id: `startup-${String(index)}`,
+      title: 'Startup',
+      description: 'Startup',
+      year: 2000,
+      source_url: '',
+      archived: index % 2,
+      sort_order: index,
+      revision: 1,
+      created_at: 0,
+      updated_at: 0,
+      deleted_at: null,
+    }),
+  );
+  const keyResults = Array.from(
+    { length: KEY_RESULT_LIMIT },
+    (_, index): KeyResultRow => ({
+      id: `startup-${String(index)}`,
+      objective_id: `startup-${String(index % OBJECTIVE_LIMIT)}`,
+      year: 2000,
+      objective_archived: 0,
+      title: 'Startup',
+      floor_text: '',
+      target_text: '',
+      notes: '',
+      kind: 'outcome',
+      completed: index % 2,
+      milestones: '[]',
+      milestone_count: 2,
+      completed_milestone_count: index % 2,
+      focus_start_month: '2000-01',
+      focus_end_month: '2000-03',
+      focus_text: 'Startup',
+      source_url: '',
+      archived: 0,
+      sort_order: index,
+      revision: 1,
+      created_at: 0,
+      updated_at: 0,
+      deleted_at: null,
+    }),
+  );
+  const statement = { bind: () => statement };
+  const stubDb = {
+    prepare: () => statement,
+    batch: () => Promise.resolve([{ results: objectives }, { results: keyResults }]),
+  } as unknown as D1Database;
+  return getGoalCatalog(stubDb, create(GetGoalCatalogRequestSchema, { name: 'goalCatalog', year: 2000 }), zone, 0)
+    .then((catalog) => {
+      toWire(GoalCatalogSchema, catalog);
+    })
+    .catch((error: unknown) => {
+      console.error('Tasks startup warm-up failed', error);
+    });
 }

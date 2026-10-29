@@ -68,7 +68,7 @@ export function upstreamOrigin(value: string | undefined): string | null {
  * A byte stream (every fetch body in workerd) is read straight into the buffer, which halves the CPU of reading it
  * chunk by chunk (cpu.test.ts); any other stream is copied into it.
  */
-async function readCapped(response: Response): Promise<Uint8Array | null> {
+async function readCapped(response: Response): Promise<Uint8Array<ArrayBuffer> | null> {
   const body = response.body as ReadableStream<Uint8Array> | null;
   if (body === null) return new Uint8Array();
   let buffer = new ArrayBuffer(MAX_ANSWER_BYTES + 1);
@@ -152,7 +152,7 @@ async function exchange(read: Forwarded, note: (outcome: UpstreamOutcome) => voi
     note('not_json');
     throw unavailable();
   }
-  let bytes: Uint8Array | null;
+  let bytes: Uint8Array<ArrayBuffer> | null;
   try {
     bytes = await readCapped(response);
   } catch (error) {
@@ -164,10 +164,12 @@ async function exchange(read: Forwarded, note: (outcome: UpstreamOutcome) => voi
     throw unavailable();
   }
   try {
-    // Newsletter writes UTF-8; anything else is not its answer.
-    return new PreEncoded(new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes));
+    // Newsletter writes UTF-8; anything else is not its answer. Decoding only checks that: the bytes read are what
+    // the console answers, never encoded again (cpu.test.ts).
+    new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes);
   } catch {
     note('not_json');
     throw unavailable();
   }
+  return new PreEncoded(bytes);
 }

@@ -14,7 +14,7 @@ golden 回答在 `contracts/newsletter-ui-v1/fixtures/`。
 - `worker/src/`：只接受本主机的 HTTPS 请求；先用 `packages/edge-auth` 验证 owner 的 Access 登录，再只允许 GET/HEAD，
   然后由共享转码器按 `proto/newsletter/ui/v1` 路由并严格解码；`upstream.ts` 把读取以 GET 转给
   `NEWSLETTER_ORIGIN` 的 `/api/newsletter/v1/`，不跟随重定向，15 秒超时，回答按流读取、上限 2 MiB，原样（PreEncoded）
-  返回，不解析。每 MiB 回答约 1–3 ms CPU（`worker/test/runtime/cpu.test.ts`），所以上限是 2 MiB 而不是 4 MiB；
+  返回，不解析，只校验 UTF-8。每 MiB 回答最多约 1.5 ms CPU（`worker/test/runtime/cpu.test.ts`），上限是 2 MiB 而不是 4 MiB；
   真实回答只有几百 KiB。没有任何存储绑定。
 - `web/`：React 页面，只读、仅浅色，沿用 Fleet 的暖纸与墨蓝配色，每个状态都是形状加文字
   （● 正常 · ▲ 需要关注 · ■ 失败或未发出 · ◆ 未确认或进行中 · ○ 无记录），投递、发布入口与配置状态用 Fleet 和 Home

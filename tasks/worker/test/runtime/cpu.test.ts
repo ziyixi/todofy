@@ -63,8 +63,9 @@ test(
   async () => {
     const owner = await syntheticOwner();
     const result = await measureInIsolates(
-      // Five independent cold starts reduce profile variance on this near-budget path.
-      // The first request still includes Access key import and catalog encoding; no pre-warm or retry.
+      // Five independent cold starts reduce profile variance on this near-budget path. The first request includes
+      // Access key import and the catalog's own read and encoding. The isolate's global-scope warm-up (src/startup.ts)
+      // has already run the catalog's code over a stub D1, as production's does. No warm-up request or retry.
       5,
       async () => {
         const harness = await startHarness({

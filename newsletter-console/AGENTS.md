@@ -11,7 +11,7 @@ Follow root `AGENTS.md`. The console is a read-only owner view of Newsletter, no
   wrapper as exactly `ACCESS_OWNER`/`ACCESS_OWNER_ALIASES`; never let another of Home's values reach it. Upstream it
   sends only the assertion it has just verified (`cf-access-token`, read by edge-auth's own token rule), never follows
   a redirect, never parses or echoes Newsletter's answer, and never logs the assertion. Keep answers within
-  `MAX_ANSWER_BYTES`: each MiB costs up to about 3 ms of Free's 10 ms (`worker/test/runtime/cpu.test.ts`).
+  `MAX_ANSWER_BYTES`: each MiB costs up to about 1.5 ms of Free's 10 ms (`worker/test/runtime/cpu.test.ts`).
 - Model, feed and mail text is untrusted: render it as text, link only http and https URLs outside any frame, and
   show mail HTML only in a sandboxed frame with no scripts and no network. `dangerouslySetInnerHTML` is lint-banned.
 - Logs carry request IDs, method names, status classes and durations only: never a path value, query, body or token.

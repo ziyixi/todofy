@@ -133,7 +133,8 @@ runs:
       shell: bash -e {0}
       run: |
         test -n "$CLOUDFLARE_API_TOKEN"
-        uv run --locked --package todofy python deploy/deploy_vars.py exec gateway -- npx --no-install wrangler deploy \
+        bash "$GITHUB_WORKSPACE/tools/cloud-release/assets-session-retry.sh" \
+          uv run --locked --package todofy python deploy/deploy_vars.py exec gateway -- npx --no-install wrangler deploy \
           --config gateway/wrangler.toml --secrets-file "$RUNNER_TEMP/todofy-gateway-secrets.json"
     # A first deploy waits for the Custom Domain certificate and DNS, hence 10 tries x 15 s. /health is
     # answered by the gateway alone, so this proves the gateway build; the next step proves the core.

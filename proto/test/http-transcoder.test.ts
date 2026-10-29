@@ -126,6 +126,21 @@ describe('pre-encoded answers', () => {
     expect(await head?.response.text()).toBe('');
   });
 
+  test('UTF-8 bytes are answered as they are, like the text', async () => {
+    // workers-types allows TextEncoder's bytes to be shared memory, which they never are and a Response cannot send.
+    const bytes = new TextEncoder().encode(text) as Uint8Array<ArrayBuffer>;
+    const getBook = () => Promise.resolve(new PreEncoded(bytes));
+    const passing = new HttpTranscoder(BookService, handlers({ getBook }), {
+      domain: 'a.example.com',
+      maxBodyBytes: 1024,
+      authorize: () => undefined,
+    });
+    const result = await passing.handle(new Request(BOOK), { user: 'u' });
+    expect(result?.response.status).toBe(200);
+    expect(new Uint8Array(await result?.response.arrayBuffer() ?? new ArrayBuffer(0))).toEqual(bytes);
+    expect(result?.response.headers.get('content-type')).toBe('application/json; charset=utf-8');
+  });
+
   test('a null body is 304 without a body or a content type', async () => {
     const result = await api.handle(new Request(BOOK, { headers: { 'if-none-match': '"v1"' } }), { user: 'u' });
     expect(result?.response.status).toBe(304);

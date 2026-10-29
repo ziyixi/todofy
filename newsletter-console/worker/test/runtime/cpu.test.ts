@@ -5,17 +5,17 @@
  *
  * Every API request costs the same few steps: one RS256 verification (the keys cached in the isolate after the first),
  * the transcoder's route and strict decode of the path and query, one fetch to Newsletter and its answer passed through
- * without being parsed (read into one buffer, decoded and written again as the PreEncoded text). So the size and the
- * script of the answer are what vary: CJK text, three bytes a character, makes the text two-byte, which costs the most
- * to decode and write again. Measured (2026-10-29), warm: about 1 ms per MiB of ASCII and up to about 3 ms per MiB of
- * mostly CJK, so a 3.7 MiB answer took about 10.7 ms: that is why MAX_ANSWER_BYTES is 2 MiB and not the 4 MiB first
- * planned. Real answers are far smaller: an edition's rendering (its HTML with the chart embedded) is a few hundred
- * KiB.
+ * without being parsed (read into one buffer, checked to be UTF-8 and answered as those bytes, PreEncoded). So the
+ * size and the script of the answer are what vary: CJK text, three bytes a character, costs the most to check.
+ * Measured (2026-10-29), warm: up to about 1.5 ms per MiB of mostly CJK. When the check's text was also written again
+ * as the answer it was up to about 3 ms per MiB (a 3.7 MiB answer took about 10.7 ms), which is why MAX_ANSWER_BYTES
+ * is 2 MiB and not the 4 MiB first planned. Real answers are far smaller: an edition's rendering (its HTML with the
+ * chart embedded) is a few hundred KiB.
  *
  * Measured: the overview, the read every page load makes; an edition of 256 KiB, mostly CJK, the size of a large real
  * one; and the worst answer the cap admits (2 MiB, its text CJK and an embedded image). The isolate's very first
- * request (the keys fetched and imported, the transcoder's first run) is measured in COLD_ISOLATES fresh isolates and
- * bounded by the median.
+ * request (the keys fetched and imported, the transcoder's first run) and the isolate's first answer at the cap (its
+ * first buffers of that size) are measured in COLD_ISOLATES fresh isolates and bounded by the median.
  *
  * No dev bypass: Access is verified as in production.
  */
@@ -56,9 +56,14 @@ const WORST = rendering(MAX_ANSWER_BYTES, 120_000);
  * and the transcoder's first run (measured 3.8-4.5).
  */
 const COLD_BOUND_MS = 0.6 * FREE_CPU_MS;
-/** A read of a real size, its first run and warm (measured 1.0-1.2 ms for the overview, 1.7 for 256 KiB of CJK). */
+/** A read of a real size, its first run and warm (measured 1.0-1.2 ms for the overview, 1.3-1.6 for 256 KiB of CJK). */
 const READ_BOUND_MS = 0.3 * FREE_CPU_MS;
-/** The worst answer the cap admits (measured 6.7 first, 5.5 warm): still under Free's limit. */
+/**
+ * The worst answer the cap admits (measured 4.2-4.5 first, single isolates 3.6-5.5, and 3.3-3.5 warm). The bound
+ * keeps it under Free's limit with room for runners; it is not a regression margin, so a few ms more at the cap alone
+ * can pass. Written again as text it read 6.3-7.2 first and 5.5-6.0 warm, and GitHub runners read its first run
+ * 7.3-10.1 (one isolate each).
+ */
 const WORST_BOUND_MS = 0.9 * FREE_CPU_MS;
 const RUNS = 9;
 const COLD = "GET overview as the isolate's first request";
@@ -109,12 +114,14 @@ async function session({ h, meter }: ConsoleIsolate, index: number): Promise<Mea
     if (response.status !== 200 || body !== expected) throw new Error(`${path}: ${String(response.status)}`);
   }
   const cold = await meter.measure(COLD, () => read('/api/v1/overview', OVERVIEW), 1);
-  if (index !== COLD_ISOLATES - 1) return [cold];
+  // The cap's first run is one number per isolate too (its first 2 MiB answer), so every isolate measures it.
+  const worst = await meter.measure(WORST_LABEL, () => read(`/api/v1/${EDITION}/rendering`, WORST), RUNS);
+  if (index !== COLD_ISOLATES - 1) return [cold, worst];
   return [
     cold,
+    worst,
     await meter.measure(READS[0] ?? '', () => read('/api/v1/overview', OVERVIEW), RUNS),
     await meter.measure(READS[1] ?? '', () => read(`/api/v1/${EDITION}`, LARGE), RUNS),
-    await meter.measure(WORST_LABEL, () => read(`/api/v1/${EDITION}/rendering`, WORST), RUNS),
   ];
 }
 

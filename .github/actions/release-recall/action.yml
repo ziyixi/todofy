@@ -105,7 +105,8 @@ runs:
       shell: bash -e {0}
       run: |
         test -n "$CLOUDFLARE_API_TOKEN"
-        node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml \
+        bash "$GITHUB_WORKSPACE/tools/cloud-release/assets-session-retry.sh" \
+          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml \
           --secrets-file "$RUNNER_TEMP/recall-secrets.json"
     # Nothing anonymous on the host shows BUILD_SHA (the UI and /health are behind Access, the machine routes need a
     # token), so production is read through the API with the deploy token (GETs only), as mailsort's is.

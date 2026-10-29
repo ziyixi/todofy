@@ -115,6 +115,25 @@ class WorkerReleaseWorkflow(unittest.TestCase):
                 else:
                     self.assertIn('.release-source/tools/deploy-probes/production.sh"', block)
 
+    def test_static_asset_deploys_repeat_only_an_unopened_upload_session(self):
+        """wrangler never retries opening the asset upload session; tools/cloud-release/assets-session-retry.sh
+        repeats a deploy that failed there, and only a deploy of a Worker with static assets opens one."""
+        helper = 'bash "$GITHUB_WORKSPACE/tools/cloud-release/assets-session-retry.sh" '
+        wrapped = 0
+        for app in APPS:
+            for step in steps(self.releases[app + "-deploy"]):
+                directory = field(step, "working-directory")
+                for line in step.replace("\\\n", " ").splitlines():
+                    deploy = re.search(r"(?<![\w-])wrangler deploy\b.*--config[ =](\S+)", line)
+                    if not deploy or "--dry-run" in line:
+                        continue
+                    config = ROOT / directory.removeprefix(".release-source/") / deploy.group(1)
+                    assets = bool(re.search(r"(?m)^\[assets\]", config.read_text()))
+                    with self.subTest(app=app, config=deploy.group(1)):
+                        self.assertEqual(line.strip().startswith(helper), assets)
+                    wrapped += assets
+        self.assertGreaterEqual(wrapped, 11)
+
     def test_check_only_forwards_to_preflight_and_guards_every_following_write(self):
         for app in APPS:
             with self.subTest(app=app):

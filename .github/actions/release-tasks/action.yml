@@ -79,7 +79,8 @@ runs:
       run: |
         test -n "$CLOUDFLARE_API_TOKEN"
         npx --no-install wrangler d1 migrations apply DB --remote --config ../wrangler.toml
-        node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml \
+        bash "$GITHUB_WORKSPACE/tools/cloud-release/assets-session-retry.sh" \
+          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml \
           --secrets-file "$RUNNER_TEMP/tasks-secrets.json"
     - name: Check that production runs this commit
       if: inputs.required == 'true'

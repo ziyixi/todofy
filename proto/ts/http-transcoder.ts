@@ -92,18 +92,19 @@ type MessageOf<D> = D extends DescMessage ? MessageShape<D> : never;
 export type ShapeOf<T> = T extends GenService<infer S> ? S : never;
 
 /**
- * An answer a handler already holds as wire JSON text, written as it is instead of encoding a message: a body a Durable
- * Object serialized once, which the Worker passes through without decoding it (Workers Free gives a request 10 ms of
- * CPU), with extra response headers (an ETag). `body: null` answers 304 Not Modified without a body, for a GET whose
- * If-None-Match names the current validator; any other method answering null is a bug (INTERNAL). The transcoder does
- * not check the text: the app's tests prove that it is exactly what toWire writes for the method's output (a strict
- * read of it, written back byte for byte).
+ * An answer a handler already holds as wire JSON, as text or as its UTF-8 bytes, written as it is instead of encoding
+ * a message: a body a Durable Object serialized once, or an upstream's answer read into one buffer, which the Worker
+ * passes through without decoding it (Workers Free gives a request 10 ms of CPU), with extra response headers (an
+ * ETag). `body: null` answers 304 Not Modified without a body, for a GET whose If-None-Match names the current
+ * validator; any other method answering null is a bug (INTERNAL). The transcoder does not check the text: the app's
+ * tests prove that it is exactly what toWire writes for the method's output (a strict read of it, written back byte
+ * for byte).
  */
 export class PreEncoded {
-  readonly body: string | null;
+  readonly body: string | Uint8Array<ArrayBuffer> | null;
   readonly headers: Readonly<Record<string, string>>;
 
-  constructor(body: string | null, headers: Readonly<Record<string, string>> = {}) {
+  constructor(body: string | Uint8Array<ArrayBuffer> | null, headers: Readonly<Record<string, string>> = {}) {
     this.body = body;
     this.headers = headers;
   }

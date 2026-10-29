@@ -89,7 +89,7 @@ that login expires.
 | `SourceCatalog.config_history` | 10 revisions |
 | `FeedSource.recent` | The latest 7 scheduled runs |
 | `BackupStatus.exceptions` | 50, oldest first |
-| An answer through the Worker | 2 MiB (each MiB costs the Worker up to about 3 ms of CPU; real answers are a few hundred KiB) |
+| An answer through the Worker | 2 MiB (each MiB costs the Worker up to about 1.5 ms of CPU; real answers are a few hundred KiB) |
 
 ## Rules that keep the console consistent
 
