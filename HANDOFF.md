@@ -160,8 +160,12 @@ the first attempts of reruns, found these causes, all now fixed at their root:
 - Cloudflare's asset upload session answered `10013` at deploy (3 times, before anything reached production):
   `tools/cloud-release/assets-session-retry.sh` repeats that one deploy once after 60 s, for that code only.
 - Verify: Recall's first run on main saves the `.deb` set and the next shows "Need to get 0 B"; the Tasks and
-  console CPU lines stay below their bounds; the census signatures stay absent. `test_reports_alarm`'s D1
-  "internal error" under parallel load is being investigated separately (`claude/reports-alarm-flake`).
+  console CPU lines stay below their bounds; the census signatures stay absent.
+- Todofy's `test_reports_alarm` and `test_backup` lost a SQLite lock race: `wrangler d1 execute` and `wrangler r2
+  object` ran as a second workerd beside the test server, and local D1 writes its file on every query, so either
+  side could fail with "internal error" (the alarm then retried its report 10 minutes later, past the 30 s wait).
+  `Worker.d1()` now runs SQL in the server through wrangler dev's Local Explorer, and the backup test reads its
+  bucket with the server stopped. Production is unaffected: a transient D1 error delays a report tick, never drops it.
 
 ## Latest verified release
 
