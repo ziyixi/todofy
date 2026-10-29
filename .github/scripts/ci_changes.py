@@ -590,7 +590,7 @@ def _member_entry(line: str) -> str:
     return match.group(2) if match else ""
 
 
-def _absent_before(changed: set[str], read: Reader, members: list[str]) -> bool:
+def _on_one_side_only(changed: set[str], read: Reader, members: list[str]) -> bool:
     """Whether each member's package.json is in the diff and unreadable on one side of it (a member that has just
     arrived, or just left): `read` raises for a file missing on either side."""
     for member in members:
@@ -613,7 +613,7 @@ def retired_members(changed: set[str], read: Reader, old_members: list[str], mem
     if not removed or not set(members) <= set(old_members) or "pnpm-lock.yaml" not in changed:
         return False
     # Gone after the diff (each was a member before it).
-    if not _absent_before(changed, read, removed):
+    if not _on_one_side_only(changed, read, removed):
         return False
     if "\n".join(line for line in old_rest.splitlines() if _member_entry(line) not in removed) != new_rest:
         return False
@@ -639,7 +639,7 @@ def added_members(changed: set[str], read: Reader, old_members: list[str], membe
     if not added or not set(old_members) <= set(members) or "pnpm-lock.yaml" not in changed:
         return False
     # Absent before the diff (each is a member after it).
-    if not _absent_before(changed, read, added):
+    if not _on_one_side_only(changed, read, added):
         return False
     if "\n".join(line for line in new_rest.splitlines() if _member_entry(line) not in added) != old_rest:
         return False

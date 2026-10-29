@@ -69,15 +69,16 @@ precedence. A supplied map must contain all required bindings after that merge.
 without a map and without that flag retain their previous behavior.
 
 Todofy's core uses `TODOFY_CORE_WORKER_SECRETS`; its gateway uses `TODOFY_WORKER_SECRETS`. Home uses
-`DASHBOARD_WORKER_SECRETS`, and the Website relay uses `WEBSITE_RELAY_WORKER_SECRETS`.
-
-A Worker whose owner is another Worker's declares `identity_from = "<worker>"` and only `ACCESS_OWNER` (and optional
-`ACCESS_OWNER_ALIASES`). It has no map of its own: its spec names the source's map and `identity_from`, the deploy
-validates that map as the source's and takes only those two keys from it (`worker-secrets.mjs`), so none of the
-source's other bindings can reach it, and bootstrap never writes a map for it. The Newsletter console borrows Home's. The relay has its own
+`DASHBOARD_WORKER_SECRETS`, and the Website relay uses `WEBSITE_RELAY_WORKER_SECRETS`. The relay has its own
 `website/relay/deploy/deploy-vars.mjs` wrapper with the same `check`, `secrets <path>` and `exec --` commands.
 Wrappers use `BUILD_SOURCE_SHA` when supplied, otherwise `GITHUB_SHA`, and require a full lowercase 40-hex SHA.
 Both the normal release and a repair can therefore report the exact source they built.
+
+A Worker whose owner is another Worker's declares `identity_from = "<worker>"` and only `ACCESS_OWNER` (and optional
+`ACCESS_OWNER_ALIASES`). It has no map of its own: its spec names the source's map and `identity_from`, the deploy
+validates that map as the source's and takes only those two keys from it (`worker-secrets.mjs`), under the source's
+identity secrets as the source's own deploy merges them, so none of the source's other bindings can reach it; and
+bootstrap never writes a map for it. The Newsletter console borrows Home's.
 
 The optional Access application/policy maps and `managed_ids` remain an inventory for explicit infrastructure
 adoption. `managed_ids` accepts only the fixed OpenTofu addresses declared in `MANAGED_ADDRESSES`, with nonzero

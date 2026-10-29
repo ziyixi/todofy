@@ -53,7 +53,13 @@ describe('the console shell', () => {
 
   it('asks for a new login when Access no longer admits the request', async () => {
     show(statusError(401, 'UNAUTHORIZED'));
-    expect(await screen.findByRole('heading', { name: /登录已过期/ })).toBeVisible();
+    expect(await screen.findByRole('heading', { name: '登录已过期' })).toBeVisible();
+  });
+
+  it('names both causes when fetch itself fails, never claiming the login expired', async () => {
+    show(new TypeError('Failed to fetch'));
+    expect(await screen.findByRole('heading', { name: /无法连接控制台，或登录已过期/ })).toBeVisible();
+    expect(screen.queryByRole('heading', { name: '登录已过期' })).toBeNull();
   });
 
   it('reads each answer of the overview read as one connection state', () => {
@@ -62,8 +68,8 @@ describe('the console shell', () => {
     expect(linkOf(false, statusError(503, 'NOT_CONFIGURED'))).toBe('not_configured');
     expect(linkOf(false, statusError(503, 'UNAVAILABLE'))).toBe('unavailable');
     expect(linkOf(false, statusError(401, 'UNAUTHORIZED'))).toBe('signed_out');
-    // fetch refuses to follow Access's redirect to its login page (redirect: 'error').
-    expect(linkOf(false, new TypeError('redirect'))).toBe('signed_out');
+    // fetch refuses to follow Access's redirect to its login page (redirect: 'error'), and fails the same way offline.
+    expect(linkOf(false, new TypeError('redirect'))).toBe('unreachable');
     expect(linkOf(false, statusError(500, 'INTERNAL'))).toBe('failed');
     expect(linkOf(false, new Error('unexpected'))).toBe('failed');
   });

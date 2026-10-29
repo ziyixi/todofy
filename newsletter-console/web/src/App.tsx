@@ -4,12 +4,13 @@ import { client } from './api.ts';
 import './style.css';
 
 /** What the console knows about its connection to Newsletter, from the overview read. */
-export type Link = 'checking' | 'connected' | 'not_configured' | 'unavailable' | 'signed_out' | 'failed';
+export type Link = 'checking' | 'connected' | 'not_configured' | 'unavailable' | 'signed_out' | 'unreachable' | 'failed';
 
 /**
- * The connection state of an overview read. The Worker answers NOT_CONFIGURED until it forwards reads to Newsletter
- * and UNAVAILABLE when Newsletter, its host or the tunnel does not answer; an expired Access login is either the
- * Worker's UNAUTHORIZED or a redirect to the login page, which the client refuses to follow (a TypeError).
+ * The connection state of an overview read. The Worker answers NOT_CONFIGURED until it forwards reads to Newsletter,
+ * UNAVAILABLE when Newsletter, its host or the tunnel does not answer, and UNAUTHORIZED when the login it got is not
+ * the owner's. When fetch itself fails (a TypeError) the page cannot tell an expired Access login, whose redirect to
+ * the login page the client refuses to follow, from a lost network, so it names both, as Home does.
  */
 export function linkOf(pending: boolean, error: unknown): Link {
   if (pending) return 'checking';
@@ -20,7 +21,7 @@ export function linkOf(pending: boolean, error: unknown): Link {
     if (error.status.reason === 'UNAUTHORIZED') return 'signed_out';
     return 'failed';
   }
-  return error instanceof TypeError ? 'signed_out' : 'failed';
+  return error instanceof TypeError ? 'unreachable' : 'failed';
 }
 
 const clock = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
@@ -59,6 +60,13 @@ function State({ link }: { link: Link }) {
         <>
           <h2><span className="mark warn" aria-hidden="true">▲</span> 登录已过期</h2>
           <p>请刷新页面，重新通过 Cloudflare Access 登录。</p>
+        </>
+      );
+    case 'unreachable':
+      return (
+        <>
+          <h2><span className="mark warn" aria-hidden="true">▲</span> 无法连接控制台，或登录已过期</h2>
+          <p>请检查网络后刷新页面；登录过期时，刷新会打开 Cloudflare Access 的登录页。</p>
         </>
       );
     case 'failed':
