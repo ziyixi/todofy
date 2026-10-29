@@ -88,6 +88,8 @@ AI 机构与作者博客、Nature/Science 及地球物理、地震学期刊，�
 节点产物的 `diagnostics` 逐源记录 `<id>:<code>`，代码只有 `ok`、`http_error`、`too_large`、
 `parse_error`、`timeout`、`unavailable`、`unsafe_address`、`deadline`，另有 `truncated`、
 `undated:<n>`、`invalid_items:<n>` 计数，以及 `registry:absent`、`registry:invalid`、`artifact:trimmed:<n>`。
+产物另有 `sources`，按源 ID（几个 arXiv 源同名，所以不用名称）记录代码、解析条目、通过筛选的条目、
+分到的线索数和是否截断；合并的线索只计入最先产生它的源。它不占线索的字节预算，也没有节点读取它。
 日志只有一行来源、成功、失败和线索数量。地址失效时直接改这份配置。
 
 包内初始基线不含 `researcher.yaml`，离线 demo 和没有该文件的配置不抓取任何订阅源。

@@ -85,6 +85,7 @@ async def test_without_registry_no_feed_is_fetched(nodes, tmp_path):
             "candidates": [],
             "diagnostics": ["registry:absent"],
             "notes": {},
+            "sources": [],
         }
 
 
@@ -136,6 +137,10 @@ async def test_feed_node_keeps_partial_results_and_budget(nodes, tmp_path):
         "synthetic-feed:ok",
         "down:parse_error",
     ]
+    assert [
+        (item["id"], item["code"], item["seeds"])
+        for item in result.value["sources"]
+    ] == [("synthetic-feed", "ok", 1), ("down", "parse_error", 0)]
     assert len(result.value["candidates"]) == 1
     assert set(result.value["notes"]) == {result.value["candidates"][0]["id"]}
 

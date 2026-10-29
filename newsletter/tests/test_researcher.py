@@ -774,6 +774,126 @@ async def test_shared_paper_merges_into_its_arxiv_direction_and_ranks_first():
     )
 
 
+async def test_source_counts_are_keyed_by_id_and_seeds_add_up():
+    network = fake.Network(
+        {
+            # Two arXiv sources share one name and one host's answer.
+            "export.arxiv.org": fake.atom(
+                fake.arxiv_entry("2610.00001", title="First paper"),
+                fake.arxiv_entry("2610.00002", title="Second paper"),
+            ),
+            "feeds.example.org": fake.rss(
+                fake.rss_item(link="https://feeds.example.org/now"),
+                fake.rss_item(link="https://feeds.example.org/u", date=""),
+                fake.rss_item(link="https://feeds.example.org/known"),
+            ),
+            "down.example.org": httpx.Response(503),
+        }
+    )
+    arxiv = {
+        "name": "arXiv",
+        "direction": "08-llm-architectures",
+        "kind": "arxiv",
+        "url": "https://export.arxiv.org/api/query",
+    }
+    registry = load(
+        fake.source(id="arxiv-a", query="cat:cs.CL", **arxiv),
+        fake.source(id="arxiv-b", query="cat:cs.LG", **arxiv),
+        fake.source(),
+        fake.source(id="down", url="https://down.example.org/rss"),
+    )
+    result = await run(
+        network,
+        registry,
+        history=[{"url": "https://feeds.example.org/known", "title": "Old"}],
+    )
+    assert result.sources == [
+        {
+            "id": "arxiv-a",
+            "code": "ok",
+            "entries": 2,
+            "accepted": 2,
+            "seeds": 2,
+            "truncated": False,
+        },
+        {
+            "id": "arxiv-b",
+            "code": "ok",
+            "entries": 2,
+            "accepted": 2,
+            "seeds": 0,
+            "truncated": False,
+        },
+        {
+            "id": "synthetic-feed",
+            "code": "ok",
+            "entries": 3,
+            "accepted": 1,
+            "seeds": 1,
+            "truncated": False,
+        },
+        {
+            "id": "down",
+            "code": "http_error",
+            "entries": 0,
+            "accepted": 0,
+            "seeds": 0,
+            "truncated": False,
+        },
+    ]
+    assert sum(item["seeds"] for item in result.sources) == len(
+        result.candidates
+    )
+    # The counts add a key; the diagnostic strings and failed() are as before.
+    assert result.diagnostics == [
+        "arxiv-a:ok",
+        "arxiv-b:ok",
+        "synthetic-feed:ok",
+        "synthetic-feed:undated:1",
+        "down:http_error",
+    ]
+    assert researcher.failed(result)
+    assert not researcher.failed(
+        sources.MetadataResult([], result.diagnostics[:4], {}, result.sources)
+    )
+
+
+def test_source_counts_follow_trimming_and_stay_outside_the_lead_budget(
+    monkeypatch,
+):
+    monkeypatch.setattr(researcher, "MAX_ARTIFACT_BYTES", 3000)
+    registry = load(fake.source())
+    entries = [
+        researcher.Entry(
+            title=f"Synthetic bounded item {n}",
+            url=f"https://feeds.example.org/a/{n}",
+            doi="",
+            version="",
+            published="2026-10-27",
+            text=fake.LONG,
+            excerpt=True,
+        )
+        for n in range(5)
+    ]
+    outcomes = {0: researcher._Outcome("ok", entries, truncated=True)}
+    result = researcher.assemble(registry, outcomes, DAY)
+    monkeypatch.setattr(researcher, "_source_counts", lambda *_: [])
+    without = researcher.assemble(registry, outcomes, DAY)
+    assert result.candidates == without.candidates
+    assert result.diagnostics == without.diagnostics
+    assert result.sources == [
+        {
+            "id": "synthetic-feed",
+            "code": "ok",
+            "entries": 5,
+            "accepted": 5,
+            "seeds": len(result.candidates),
+            "truncated": True,
+        }
+    ]
+    assert 0 < len(result.candidates) < 5
+
+
 async def test_routing_round_robins_sources_and_caps_each_direction():
     def items(host, count):
         return fake.rss(

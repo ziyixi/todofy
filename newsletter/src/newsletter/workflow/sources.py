@@ -189,11 +189,17 @@ class MetadataResult:
     ``notes`` maps a candidate ID to untrusted feed context (an excerpt and
     ranking signals). It is additive: older artifacts have no notes, and notes
     never enter a Candidate, the candidate pool or Notion.
+
+    ``sources`` holds one content-free count record per fetched registry
+    source (id, outcome code, parsed entries, accepted entries, routed seeds,
+    truncation) for the owner console. It is also additive: older artifacts
+    lack it, and no workflow node reads it.
     """
 
     candidates: list[Candidate]
     diagnostics: list[str]
     notes: dict[str, types.Payload] = dataclasses.field(default_factory=dict)
+    sources: list[types.Payload] = dataclasses.field(default_factory=list)
 
 
 def metadata_candidate(

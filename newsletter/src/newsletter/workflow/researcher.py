@@ -984,6 +984,7 @@ def _leads(
     issue_date: str,
     history: Sequence[Mapping[str, object]],
     diagnostics: list[str],
+    accepted: dict[int, int],
 ) -> list[_Lead]:
     known: set[str] = set()
     for record in history:
@@ -1027,6 +1028,7 @@ def _leads(
             keys = sources.identity_keys(candidate)
             if keys & known:
                 continue
+            accepted[source.index] = accepted.get(source.index, 0) + 1
             excerpt = _excerpt(entry.text) if entry.excerpt else ""
             existing = next((index[key] for key in keys if key in index), None)
             if existing is None:
@@ -1096,6 +1098,34 @@ def _note(lead: _Lead) -> types.Payload:
     }
 
 
+def _source_counts(
+    registry: Sequence[Source],
+    outcomes: Mapping[int, _Outcome],
+    accepted: Mapping[int, int],
+    kept: Sequence[_Lead],
+) -> list[types.Payload]:
+    """Count each source's outcome by id, never by its shared display name.
+
+    Several arXiv sources share one name. A merged lead counts once, as a
+    seed of the source that first produced it, whose ``max_seeds`` bounded
+    it, so per-source seeds add up to the artifact's candidates.
+    """
+    seeds: dict[int, int] = {}
+    for lead in kept:
+        seeds[lead.source.index] = seeds.get(lead.source.index, 0) + 1
+    return [
+        {
+            "id": source.id,
+            "code": outcomes[source.index].code,
+            "entries": len(outcomes[source.index].entries),
+            "accepted": accepted.get(source.index, 0),
+            "seeds": seeds.get(source.index, 0),
+            "truncated": outcomes[source.index].truncated,
+        }
+        for source in registry
+    ]
+
+
 def assemble(
     registry: Sequence[Source],
     outcomes: Mapping[int, _Outcome],
@@ -1104,8 +1134,9 @@ def assemble(
 ) -> sources.MetadataResult:
     """Filter, merge, rank and route fetched entries into a bounded result."""
     diagnostics: list[str] = []
+    accepted: dict[int, int] = {}
     routed = _route(
-        _leads(registry, outcomes, issue_date, history, diagnostics)
+        _leads(registry, outcomes, issue_date, history, diagnostics, accepted)
     )
     candidates: list[sources.Candidate] = []
     notes: dict[str, types.Payload] = {}
@@ -1114,6 +1145,8 @@ def assemble(
         candidate["source_basis"] = _basis(lead.names)
         candidates.append(content.seed_view(candidate))
         notes[candidate["id"]] = _note(lead)
+    # The per-source counts sit outside this lead budget (at most MAX_SOURCES
+    # small records), so adding them never changes which leads are kept.
     size = len(
         contracts.canonical_json(
             {
@@ -1133,4 +1166,8 @@ def assemble(
         trimmed += 1
     if trimmed:
         diagnostics.append(f"artifact:trimmed:{trimmed}")
-    return sources.MetadataResult(candidates, diagnostics, notes)
+    # Trimming pops from the end, so the kept leads are a prefix of routed.
+    counts = _source_counts(
+        registry, outcomes, accepted, routed[: len(candidates)]
+    )
+    return sources.MetadataResult(candidates, diagnostics, notes, counts)

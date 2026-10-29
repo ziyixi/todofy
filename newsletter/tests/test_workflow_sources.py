@@ -88,6 +88,18 @@ def test_old_metadata_artifacts_read_without_notes():
     assert "notes" in json.dumps(dataclasses.asdict(current))
 
 
+def test_per_source_counts_are_additive():
+    # Older artifacts lack the key; positional construction keeps working.
+    current = sources.MetadataResult([lead()], ["nature:ok"], {})
+    assert dataclasses.asdict(current)["sources"] == []
+    assert list(dataclasses.asdict(current)) == [
+        "candidates",
+        "diagnostics",
+        "notes",
+        "sources",
+    ]
+
+
 def test_identity_keys_and_ids_are_unchanged_for_tracking_parameters():
     first = lead(url="https://example.org/a?utm_source=x&fbclid=y", doi="")
     second = lead(url="https://example.org/a", doi="")
