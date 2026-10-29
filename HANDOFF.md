@@ -141,6 +141,28 @@ build-time registration and cloned release recipes, so the approved follow-ups s
   the first parent anyway (`git merge --no-ff <branch>` on top of origin/main), which keeps `--first-parent` logs
   readable. Verify: the next main push's Changes job prints the previous main head as its base.
 
+### CI flakes (2026-10-29)
+
+The owner asked why CI so often showed "RPC" failures. A census of 316 ci.yml runs from 10-19 to 10-29, counting
+the first attempts of reruns, found these causes, all now fixed at their root:
+
+- "Network connection lost" in Todofy runtime: `wrangler dev`'s ProxyWorker reuses a keep-alive connection that
+  workerd drops after about 5 s idle, and it resends only GET and HEAD, so a POST after a pause failed before reaching
+  the Worker. The harness now refreshes the connection with a GET before any other method after 1 s idle
+  (`9648a9fe`, `todofy/docs/dev-notes.md`); Mailsort's smoke refusal no longer sends a body; codex-gateway's cleanup
+  test treats a process reaped mid-read as gone. Proof: 0 of 216 delayed POSTs failed locally (18 before), and 9 of
+  9 Linux runtime shards passed with no proxy error.
+- CPU-budget tests whose cold first run sat at the bound: TaskInbox's create hashed every request twice and
+  double-encoded its subtasks (`4d18f591`, CI first run 7.1, was 8.5-10.5); Tasks' goal catalog now warms at
+  startup; the console answers Newsletter's bytes without decoding and re-encoding them, and its 2 MiB cap is a
+  median of three isolates. No bound changed.
+- Recall's WebKit install timed out on slow Azure apt mirrors (6 times): apt's `.deb` files are now cached.
+- Cloudflare's asset upload session answered `10013` at deploy (3 times, before anything reached production):
+  `tools/cloud-release/assets-session-retry.sh` repeats that one deploy once after 60 s, for that code only.
+- Verify: Recall's first run on main saves the `.deb` set and the next shows "Need to get 0 B"; the Tasks and
+  console CPU lines stay below their bounds; the census signatures stay absent. `test_reports_alarm`'s D1
+  "internal error" under parallel load is being investigated separately (`claude/reports-alarm-flake`).
+
 ## Latest verified release
 
 `7f8f4c3b`, Newsletter configuration activation visible through Fleet and Home:
