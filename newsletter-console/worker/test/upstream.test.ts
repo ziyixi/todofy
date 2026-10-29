@@ -47,6 +47,12 @@ function expectNoEcho(error: RpcError): void {
   expect(JSON.stringify({ message: error.message, headers: error.headers })).not.toContain(SECRET);
 }
 
+/** What an answer passes on, as text: the bytes read, never decoded and written again. */
+function answered(answer: PreEncoded): string {
+  expect(answer.body).toBeInstanceOf(Uint8Array);
+  return new TextDecoder().decode(answer.body as Uint8Array);
+}
+
 const json = (body: string, init: { status?: number } = {}) =>
   new Response(body, { status: init.status ?? 200, headers: { 'content-type': 'application/json; charset=utf-8' } });
 
@@ -55,7 +61,7 @@ describe('what is sent', () => {
     const { result, sent, outcomes } = exchange(() => json('{"month":"2026-10"}'));
     const answer = await result;
     expect(answer).toBeInstanceOf(PreEncoded);
-    expect(answer.body).toBe('{"month":"2026-10"}');
+    expect(answered(answer)).toBe('{"month":"2026-10"}');
     expect(answer.headers).toEqual({});
     expect(sent).toHaveLength(1);
     const request = sent[0]?.request;
@@ -105,7 +111,7 @@ describe('what is answered', () => {
     const body = `{"title":"合成 ${'x'.repeat(MAX_ANSWER_BYTES - 40)}"}`;
     expect(new TextEncoder().encode(body).byteLength).toBeLessThanOrEqual(MAX_ANSWER_BYTES);
     const answer = await exchange(() => json(body)).result;
-    expect(answer.body).toBe(body);
+    expect(answered(answer)).toBe(body);
   });
 
   it('maps 404 to NOT_FOUND and 400 to BAD_REQUEST, without the body', async () => {
