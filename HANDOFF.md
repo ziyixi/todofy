@@ -18,6 +18,20 @@ features, the FlowDay retirement), [October 20](docs/history/handoff-2026-10-20.
 
 ## Current work
 
+### Business prompt clarity (`codex/prompt-quality`, in progress)
+
+Owner request 2026-10-28, from `a96663d5`: use Mailsort's clear task, decision rules, examples and output contract
+as a reference for the other actual model callers. Mailsort's effective prompt stays unchanged. Todofy keeps plain
+text email/daily summaries and the recommendation JSON array; Newsletter keeps its current schemas, evidence
+requirements, editorial policy and workflow. No provider, budget, scheduler or completed result changes.
+
+- Done locally: clear task/input/decision/output instructions and synthetic examples for email summaries, digests,
+  recommendations (including carryover) and the active discovery/selection/writer/repair/reviewer prompts. Current
+  prompt snapshots changed intentionally; historical contracts and fixtures remain intact. Examples pass the
+  existing schemas and readers; Todofy's 1,058 unit tests and Newsletter's 2,388 tests pass.
+- Pending: synthetic live-model checks, branch CI, integration with newer Claude commits if any, and release through the existing
+  application publication paths. No real mail, Notion material or newsletter is regenerated for acceptance.
+
 ### Verify after the October 28 releases (read-only)
 
 The released notes are in the [October 28 archive](docs/history/handoff-2026-10-28.md).

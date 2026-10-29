@@ -79,6 +79,13 @@ uv run --locked python scripts/evaluate_prompts.py \
 
 ## 哪些检查仍由测试负责
 
+当前发现和选题提示在 `content-config/prompts/` 中附有合成输入与完整 JSON 输出；
+新安装使用的内置基线保留相同示例。逐题写作只携带当前 brief、deep 或 repair 对应的示例，
+审校示例演示正文有事实错误时仍可独立批准已证实的最小事件。示例不会增加模型轮次，
+也不能作为实际来源观察或本期可用 ID。完整字段仍以调用时传入的 schema 为准。
+`test_prompt_examples.py` 将示例交给现有候选、选题、正文和审校校验器，核对引用资格、
+分类、模式和真实输入的冻结；这些离线检查只证明合同一致性，不证明模型的采编质量提高。
+
 `make check` 覆盖候选去重和数量限制、引用与材料 hash、旧快照恢复、局部失败时保留其他已审内容、图表与邮件格式、个人事件位置、用量和防重复发送。提示词对比工具本身的隔离与授权测试在 [test_prompt_evaluation.py](../tests/test_prompt_evaluation.py)。
 
 [tests/fixtures/editorial/](../tests/fixtures/editorial/) 保存三份仍用于回归的提示词基准，不是待上线配置。历史试验报告和淘汰的候选版本可从 Git 历史查看，不再放在现行目录中。

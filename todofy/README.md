@@ -53,9 +53,9 @@ summary and model. Results retain the provider-reported model when available, ot
 The physical budget setting remains `GEMINI_DAILY_TOKEN_BUDGET` (3,000,000 tokens/day); this legacy name
 also remains in existing metric fields. Model selection does not reset its usage or change business retries.
 
-Since 2026-10 the email summary starts with a one-sentence brief on its own line (one deliberate prompt line,
-read back by a pure function, no new call); Tasks' Mail shows it. Mail summarised before that line
-gets a model-written brief once, in the background, within half of the day's token budget.
+The email summary is one or two Chinese sentences, starting with a plain one-sentence brief of at most 40 characters
+on its own line; Tasks' Mail reads that line without another model call. The current prompts in `core/prompts.py`
+include synthetic input/output examples, evidence rules and the existing plain-text or JSON output constraints.
 
 ## Event states
 

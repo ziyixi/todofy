@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 
 from tests.unit.report_cases import newsletter_text_ok
-from todofy.core.prompts import RECOMMEND_TOP_TASKS
+from todofy.core.prompts import recommend_prompt
 from todofy.core.report_schema import (
     EMPTY_WINDOW_SUMMARY,
     MAX_REASON_CHARS,
@@ -262,8 +262,8 @@ def test_recommendation_rejects(response):
 
 
 def test_prompt_examples_are_valid_model_output():
-    examples = re.findall(r"^\[.*?\]$", RECOMMEND_TOP_TASKS, re.MULTILINE | re.DOTALL)
-    assert [len(json.loads(example)) for example in examples] == [0, 1]
+    examples = re.findall(r"^\[.*\]$", recommend_prompt(1, carryover=True), re.MULTILINE)
+    assert examples and "[]" in examples
     for example in examples:
         assert errors(MODEL_OUTPUT, json.loads(example)) == []
 
