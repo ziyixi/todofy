@@ -142,6 +142,8 @@ macOS 上 `/tmp` 是符号链接时请用 `/private/tmp/newsletter-bundle.json`�
 执行 `python -m newsletter.config_sync initialize`。它只在配置卷完全为空时 seed 包内基线；
 已有活动配置只校验且不改写。非空目录缺少基线或基线损坏时失败，不自动重置配置。
 
+以下 Compose 命令用于本地演示；生产日常验收使用下文 Fleet/Home 只读入口。
+
 ```sh
 docker compose exec -T newsletter-config-sync python -m newsletter.config_sync status
 docker compose exec -T newsletter-config-sync python -m newsletter.config_sync once
@@ -179,3 +181,19 @@ digest 为 64 位小写十六进制。目标是上次观察结果，不能据此
 
 监视读取不会拉取远端、切换版本、写配置、执行回退或重试。响应不含仓库、目录、配置包、
 提示词、私有内容或异常原文；观察到配置失败也不表示业务 Worker 已不可用。
+
+## 从 Fleet 与 Home 验收激活
+
+Fleet 复用现有 owner 接口 `GET /api/v1/fleetStatus`，配置观察位于
+`report.newsletter.config_sync`，界面的 Newsletter「内容配置」展示相同数据。
+observer 将两项 Unix 秒转换为 `last_attempt_time`、`last_success_time`；
+共享 wire profile 省略没有值的字段。身份来自配置卷，独立于镜像发布身份。
+
+验收一次配置发布时，先确认主机报告为 fresh，再把活动 revision/digest 与公开
+`published` 分支的 `bundle.json` 元数据比较，检查源检查时间是否晚于发布、是否有错误或 pin。
+活动身份与 wanted 相同，只说明与上次检查目标一致，不能证明之后没有新发布。
+配置轮询沿用 15 分钟、observer 沿用 5 分钟；Home 沿用现有状态缓存，读取页面不会触发配置激活。
+
+Home 的 Newsletter 应用详情通过现有 Ops 响应显示配置状态、最近检查和成功时间，并链接到 Fleet。
+配置检查失败或超过 30 分钟未检查会产生可关闭的应用提醒，保持进程健康与每日投递状态各自独立。
+这些只读状态足以验收配置接管，无需进入容器读取状态文件。
