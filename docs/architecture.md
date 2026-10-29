@@ -267,8 +267,9 @@ accepted report nor a ready deployment receipt proves successful Newsletter deli
 ## Website
 
 Visitors read a Next.js static export served as Worker assets; no application request code reads Notion.
-The relay Worker's one daily cron and Home's **立即同步** each dispatch the release workflow, which has no
-schedule of its own; there is no Notion change detector or webhook button. A dispatch does not itself publish
+The relay Worker dispatches the release workflow from its one daily cron and when Home's **立即同步** asks it to
+(over a service binding); the workflow has no schedule of its own, and there is no Notion change detector or webhook
+button. A dispatch does not itself publish
 ([daily content sync](../website/docs/architecture.md#daily-content-sync)).
 
 Publication uses `website-release.yml` and concurrency group `website-production`, whether started by CI,
