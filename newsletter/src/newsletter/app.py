@@ -209,6 +209,7 @@ def create_app(
         app,
         settings.monitor_token,
         lambda: not start_worker or task_healthy(app),
+        content_config_dir=settings.content_config_dir,
     )
     app.exception_handler(drain.DrainError)(deployment_api.known_error)
     app.middleware("http")(_private_responses)

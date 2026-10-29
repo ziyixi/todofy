@@ -23,6 +23,17 @@ function controlled(entry: AttentionItem | undefined): AttentionItem & { name: s
 }
 
 describe('bounded reminder dispositions', () => {
+  it('keeps dismissed configuration warnings closed while source clocks and ages advance', () => {
+    const { database, ledger, restart } = fixture();
+    try {
+      const warning = { ...item('newsletter_config_failed'), metrics: { newsletter_config_attempt_age_seconds: 300 } };
+      const first = controlled(ledger.project(attention([warning]), NOW, () => false).attention.items[0]);
+      const closed = ledger.change(first.name, first.etag, true, NOW);
+      const next = restart().project(attention([{ ...warning, metrics: { newsletter_config_attempt_age_seconds: 900 } }]), NOW + 600_000, () => false);
+      expect(next.attention.items).toEqual([]);
+      expect(next.attention.dismissed_items?.[0]?.etag).toBe(closed?.etag);
+    } finally { database.close(); }
+  });
   it('keeps the immutable sequence through owner changes and restart, and advances only for a new episode', () => {
     const { database, ledger, restart } = fixture();
     try {
