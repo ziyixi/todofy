@@ -561,7 +561,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.proto == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # Typical runs took 5.5-9 minutes by 2026-10-29 as packages and breaking self-test cases grew; 10 cut a healthy run.
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: proto
