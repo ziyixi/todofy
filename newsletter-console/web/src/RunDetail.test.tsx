@@ -46,11 +46,13 @@ describe('the 10-28 run (selection ran out of its frozen 150-second budget)', ()
     expect(row).toHaveTextContent('只有会话记录');
   });
 
-  it('says why there is no delivery', async () => {
+  it('says why there is no delivery, and never calls the unused mail service 正常', async () => {
     serve(world());
     show(`#/${BLOCKED_RUN}`);
     const delivery = await section('投递');
     expect(delivery.getByText('这次运行没有生成期刊，所以没有投递。')).toBeVisible();
+    const mail = (await section('外部调用')).getAllByRole('listitem').find((row) => row.textContent?.includes('邮件服务'));
+    expect(mail).toHaveTextContent('○没有调用');
   });
 });
 

@@ -1,10 +1,12 @@
-import { cleanup, screen, within } from '@testing-library/react';
+import { cleanup, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { RUNNING_REFETCH_MS } from './api.ts';
 import { dayMark } from './Overview.tsx';
-import { fixture, serve, show, world } from './test/world.tsx';
+import { fixture, LATEST_RUN, serve, show, world } from './test/world.tsx';
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   window.location.hash = '';
 });
@@ -34,6 +36,21 @@ describe('概览', () => {
     expect(service.getByText('进行中').nextElementSibling).toHaveTextContent('0');
     expect(service.getByText('未确认完成记录').nextElementSibling).toHaveTextContent('2');
     expect(service.getByText(/Notion 创建 1 · Notion 更新 1/)).toBeVisible();
+    expect(service.getByText('最近投递记录').closest('li')).toHaveTextContent(/^最近投递记录●邮件服务已接收10月29日一期 · 更新于 .+$/);
+  });
+
+  it("shows Fleet's latest delivery, the newest settled one, even when it is not the latest issue's", async () => {
+    const overview = fixture<{ latest_delivery: Record<string, unknown> }>('overview');
+    const latest = { ...overview.latest_delivery, issue_date: '2026-10-27', delivery: { state: 'unknown', update_time: '2026-10-29T15:10:00Z' } };
+    serve(world({ '/api/v1/overview': { ...overview, latest_delivery: latest } }));
+    show('#/');
+    const row = (await section('服务状态')).getByText('最近投递记录').closest('li');
+    expect(row).toHaveTextContent('10月27日');
+    expect(row).toHaveTextContent('◆结果尚未确认');
+    cleanup();
+    serve(world({ '/api/v1/overview': { ...overview, latest_delivery: undefined } }));
+    show('#/');
+    expect((await section('服务状态')).getByText('最近投递记录').closest('li')).toHaveTextContent('○尚无投递');
   });
 
   it('marks each of the 14 days with a shape and a word, oldest first, with a table twin', async () => {
@@ -82,6 +99,24 @@ describe('概览', () => {
     expect(flow.getByText('Notion 备份').closest('.side-note')).toHaveTextContent('发布之后异步复制，不是流程中的一步');
   });
 
+  it('reads a running run again, so the flow keeps up with the attention line', async () => {
+    // Fake timers that still advance on their own, so the page's waits run as usual and the test can jump ahead.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const overview = fixture<{ latest_run: Record<string, unknown> }>('overview');
+    const running: Record<string, unknown> = { ...fixture('run-ready'), name: LATEST_RUN, state: 'running' };
+    delete running.end_time;
+    const requested = serve(world({
+      '/api/v1/overview': { ...overview, latest_run: { ...overview.latest_run, state: 'running' } },
+      [`/api/v1/${LATEST_RUN}`]: running,
+    }));
+    show('#/');
+    await (await section('今日流程')).findByRole('list', { name: '流程各步' });
+    const reads = () => requested.filter((url) => url.endsWith(LATEST_RUN)).length;
+    expect(reads()).toBe(1);
+    await vi.advanceTimersByTimeAsync(RUNNING_REFETCH_MS);
+    await waitFor(() => { expect(reads()).toBe(2); });
+  });
+
   it('lists the external interfaces, the backup as an asynchronous copy', async () => {
     serve(world());
     show('#/');
@@ -90,6 +125,10 @@ describe('概览', () => {
     expect(rows.map((row) => row.querySelector('strong')?.textContent)).toEqual(['订阅源 HTTP', 'Model Router', 'Todofy 个人事项', '邮件服务', 'Notion 备份']);
     expect(rows[4]).toHaveTextContent('异步副本，写在记录之后');
     expect(rows[2]).toHaveTextContent('可选，仅你可见');
+    // The latest run fetched no personal items: Newsletter's OK over no call is not 正常.
+    expect(rows[2]).toHaveTextContent('○没有调用');
+    expect(rows[2]).not.toHaveTextContent('正常');
+    expect(rows[3]).toHaveTextContent('●正常');
   });
 
   it("shows the content configuration in Fleet's words", async () => {

@@ -1,3 +1,4 @@
+import { queryOptions } from '@tanstack/react-query';
 import { NewsletterUiService } from '@ziyixi/proto/newsletter/ui/v1/newsletter_ui_service_pb';
 import { ListModelCallsResponseSchema, ListRunsResponseSchema } from '@ziyixi/proto/newsletter/ui/v1/newsletter_ui_service_pb';
 import { OverviewSchema } from '@ziyixi/proto/newsletter/ui/v1/overview_pb';
@@ -22,3 +23,13 @@ export const read = {
   modelCalls: async (parent: string): Promise<ListModelCallsResponse> =>
     toWire(ListModelCallsResponseSchema, await client.listModelCalls({ parent, pageSize: 200 })),
 };
+
+/** While a run is queued or running, every page that shows it reads it again this often, until it ends. */
+export const RUNNING_REFETCH_MS = 30_000;
+
+/** One run's read, the same wherever it is shown (the overview's flow and the run's page share it). */
+export const runQuery = (name: string) => queryOptions({
+  queryKey: ['run', name],
+  queryFn: () => read.run(name),
+  refetchInterval: (query) => (query.state.data?.state === 'running' || query.state.data?.state === 'queued' ? RUNNING_REFETCH_MS : false),
+});

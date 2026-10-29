@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { cleanup, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RpcStatusError } from '@ziyixi/proto/http-client';
 import { parseStatus } from '@ziyixi/proto/rpc-status';
@@ -139,6 +139,19 @@ describe('connection states', () => {
     show('#/');
     expect(await screen.findByRole('heading', { name: /无法连接控制台，或登录已过期/ })).toBeVisible();
     expect(screen.queryByRole('heading', { name: '登录已过期' })).toBeNull();
+  });
+
+  it('says a refresh failed rather than show the earlier read as current', async () => {
+    let reads = 0;
+    serve(world({ '/api/v1/overview': () => (reads++ === 0 ? Response.json(fixture('overview')) : status(503, 'UNAVAILABLE')()) }));
+    show('#/');
+    await attentionLine(/已交给邮件服务/);
+    expect(screen.queryByText(/刷新失败/)).toBeNull();
+    fireEvent.click(await screen.findByRole('button', { name: '刷新' }));
+    expect(await screen.findByText(/^刷新失败：无法连接 Newsletter 服务。下方保留 .+ 读取的记录。$/)).toBeVisible();
+    // The earlier read stays, under that line.
+    expect(screen.getByRole('region', { name: '合成期刊 10/29' })).toBeVisible();
+    expect(reads).toBe(2);
   });
 
   it('reads each answer of the overview read as one connection state', () => {

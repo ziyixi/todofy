@@ -196,6 +196,10 @@ button:disabled {
   background: var(--bad-bg);
   border-color: #e6cfc9;
 }
+.refresh-failed {
+  margin-top: 10px;
+  font-size: .9rem;
+}
 
 /* Tabs */
 .tabs {
@@ -372,15 +376,22 @@ button:disabled {
 /* Service state */
 .rows li {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: baseline;
-  gap: 12px;
+  gap: 2px 12px;
   padding: 8px 0;
   border-bottom: 1px solid var(--line);
   font-size: .92rem;
 }
 .rows li > span:first-child {
   color: var(--fg-2);
+}
+/* A row's second line (the latest delivery's issue and time), under its label and mark. */
+.row-note {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: .78rem;
 }
 .counts {
   display: grid;

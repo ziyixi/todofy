@@ -5,7 +5,7 @@ import type { ReplicaCounts } from '@ziyixi/proto/newsletter/ui/v1/backup_status
 import type { DayStatus, Overview as OverviewView, ServiceState } from '@ziyixi/proto/newsletter/ui/v1/overview_wire';
 import type { Dependency, Run, RunNode } from '@ziyixi/proto/newsletter/ui/v1/run_wire';
 import type { ConfigState } from '@ziyixi/proto/newsletter/ui/v1/source_catalog_wire';
-import { read } from './api.ts';
+import { runQuery } from './api.ts';
 import {
   SHAPES, UNKNOWN_CATEGORIES, configState, count, deliveryState, dependency, dependencyState, drainState, duration,
   failureKind, issueDate, nodeName, nodeNameById, nodeState, replicaState, runState, seconds, short, stopReason,
@@ -187,7 +187,7 @@ function Hero({ edition, run }: { edition: Edition | undefined; run: Run | undef
   );
 }
 
-function ServiceCard({ service }: { service: ServiceState | undefined }) {
+function ServiceCard({ service, delivery }: { service: ServiceState | undefined; delivery: Edition | undefined }) {
   const unknown = Object.entries(service?.unknown_category_counts ?? {}).filter(([, n]) => n > 0);
   const worker: Word = service?.worker_healthy === true ? { label: '健康', tone: 'ok' } : service?.worker_healthy === false
     ? { label: '异常', tone: 'bad' } : { label: '未知', tone: 'unknown' };
@@ -197,6 +197,12 @@ function ServiceCard({ service }: { service: ServiceState | undefined }) {
       <ul className="rows">
         <li><span>后台进程</span><Mark word={worker} /></li>
         <li><span>发布入口</span><Mark word={drainState(service?.drain_state)} /></li>
+        {/* Fleet's and Home's latest delivery: the newest settled real one, whichever issue it belongs to. */}
+        <li>
+          <span>最近投递记录</span>
+          <Mark word={delivery ? deliveryState(delivery.delivery?.state) : { label: '尚无投递', tone: 'none' }} />
+          {delivery ? <span className="row-note">{issueDate(delivery.issue_date)}一期 · 更新于 {time(delivery.delivery?.update_time, true)}</span> : null}
+        </li>
       </ul>
       <dl className="counts">
         <div><dt>排队</dt><dd>{service?.queued_count ?? 0}</dd></div>
@@ -287,11 +293,8 @@ function Step({ node }: { node: RunNode }) {
 }
 
 function Flow({ run, edition }: { run: Run | undefined; edition: Edition | undefined }) {
-  const detail = useQuery({
-    queryKey: ['run', run?.name],
-    queryFn: () => read.run(run?.name ?? ''),
-    enabled: Boolean(run?.name),
-  });
+  // Read again while the run is in progress, so the chain keeps up with the attention line above it.
+  const detail = useQuery({ ...runQuery(run?.name ?? ''), enabled: Boolean(run?.name) });
   const nodes = detail.data?.nodes ?? [];
   const publish = nodes.findIndex((node) => node.type === 'publish' || node.node_id === 'publish');
   const delivery = deliveryState(detail.data?.delivery_state);
@@ -356,7 +359,7 @@ export function Dependencies({ dependencies, title, note, wide = false }: { depe
                 <span className="muted small">{named.note}</span>
               </div>
               <div className="dep-state">
-                <Mark word={dependencyState(item.state)} />
+                <Mark word={dependencyState(item.state, item.call_count)} />
                 <span className="muted small">{facts}{item.error_code ? <> · <code>{item.error_code}</code></> : null}</span>
               </div>
             </li>
@@ -393,7 +396,7 @@ export function OverviewPage({ overview }: { overview: OverviewView }) {
     <div className="page overview">
       <div className="lead">
         <Hero edition={overview.latest_edition} run={overview.latest_run} />
-        <ServiceCard service={overview.service} />
+        <ServiceCard service={overview.service} delivery={overview.latest_delivery} />
       </div>
       <DayStrip days={overview.days ?? []} />
       <Tiles overview={overview} />

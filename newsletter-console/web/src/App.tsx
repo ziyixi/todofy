@@ -30,6 +30,14 @@ export function linkOf(pending: boolean, error: unknown): Link {
   return error instanceof TypeError ? 'unreachable' : 'failed';
 }
 
+/** Why a later overview read failed, in the notices' words, said above what the earlier read showed (as Home does). */
+const FAILED_REFRESH: Readonly<Partial<Record<Link, string>>> = {
+  not_configured: '控制台尚未接通 Newsletter',
+  unavailable: '无法连接 Newsletter 服务',
+  signed_out: '登录已过期，请刷新页面',
+  unreachable: '无法连接控制台，或登录已过期',
+};
+
 /** The pages with a tab; a run's own page belongs to 运行. */
 const TABS: readonly { page: 'overview' | 'runs'; href: string; name: string }[] = [
   { page: 'overview', href: '#/', name: '概览' },
@@ -115,6 +123,9 @@ export function App() {
     refetchOnWindowFocus: true,
   });
   const link = linkOf(overview.isPending && overview.fetchStatus !== 'idle', overview.data ? null : overview.error);
+  // A failed refresh keeps the pages of the last good read; say so rather than show them as current.
+  const failedRefresh = overview.data && overview.isRefetchError
+    ? FAILED_REFRESH[linkOf(false, overview.error)] ?? '无法读取' : null;
   const generated = overview.data?.generate_time;
   const current = tabOf(route);
 
@@ -135,6 +146,11 @@ export function App() {
         </div>
       </header>
       {overview.data ? <AttentionLine overview={overview.data} /> : null}
+      {failedRefresh ? (
+        <p className="notice refresh-failed" role="status">
+          刷新失败：{failedRefresh}。下方保留 {time(generated, true)} 读取的记录。
+        </p>
+      ) : null}
       <nav className="tabs" aria-label="页面">
         {TABS.map((tab) => (
           <a key={tab.page} href={tab.href} aria-current={tab.page === current ? 'page' : undefined}>{tab.name}</a>

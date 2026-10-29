@@ -128,7 +128,14 @@ const DEPENDENCY_STATES: Readonly<Record<string, Word>> = {
   unknown: { label: '待核对', tone: 'unknown' },
   disabled: { label: '未启用', tone: 'none' },
 };
-export const dependencyState = (state: string | undefined): Word => lookup(DEPENDENCY_STATES, state, NOT_RECORDED);
+/**
+ * An interface's state. Newsletter answers OK ("every call succeeded") for an interface with no call at all, such as
+ * the mail service of a run that made no issue, so that is 没有调用, never 正常.
+ */
+export function dependencyState(state: string | undefined, calls: number | undefined): Word {
+  if (state === 'ok' && !calls) return { label: '没有调用', tone: 'none' };
+  return lookup(DEPENDENCY_STATES, state, NOT_RECORDED);
+}
 
 const REPLICA_STATES: Readonly<Record<string, Word>> = {
   disabled: { label: '未启用', tone: 'none' },

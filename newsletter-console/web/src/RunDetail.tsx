@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { ModelCall } from '@ziyixi/proto/newsletter/ui/v1/model_call_wire';
 import type { Run } from '@ziyixi/proto/newsletter/ui/v1/run_wire';
 import type { StoryOutcome } from '@ziyixi/proto/newsletter/ui/v1/edition_wire';
-import { read } from './api.ts';
+import { read, runQuery } from './api.ts';
 import {
   callState, count, deliveryState, duration, failureKind, idOf, issueDate, microUsd, nodeNameById, purpose, runState,
   seconds, short, stopReason, time, trigger, wholeSeconds,
@@ -211,12 +211,7 @@ function Delivery({ run }: { run: Run }) {
 
 export function RunPage({ id }: { id: string }) {
   const name = `runs/${id}`;
-  const run = useQuery({
-    queryKey: ['run', name],
-    queryFn: () => read.run(name),
-    // A run in progress is read again every 30 seconds until it ends.
-    refetchInterval: (query) => (query.state.data?.state === 'running' || query.state.data?.state === 'queued' ? 30_000 : false),
-  });
+  const run = useQuery(runQuery(name));
   const calls = useQuery({ queryKey: ['modelCalls', name], queryFn: () => read.modelCalls(name), enabled: run.isSuccess });
   if (run.isPending) return <p className="muted">正在读取这次运行…</p>;
   if (run.isError || run.data === undefined) {
