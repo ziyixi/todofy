@@ -12,7 +12,7 @@ value; these tests keep ci.yml, the wrappers and the configs in step. They read 
 why they live here and not in any app (root AGENTS.md). Standard library only.
 """
 
-from workflow_sources import effective_ci, workflow_data
+from workflow_sources import effective_ci, jobs as source_jobs, workflow_data
 
 import os
 import re
@@ -33,6 +33,7 @@ except ModuleNotFoundError:
 
 sys.path.insert(0, str(Path(__file__).parent))
 import ci_changes  # noqa: E402
+import drift_desired  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO / ".github" / "workflows" / "ci.yml"
@@ -58,25 +59,17 @@ TEST_CONFIGS = {
     "recall/wrangler.test.toml",
 }
 
-# Each app with a deploy-vars wrapper: the wrapper, how CI calls it, and its production configs.
-WRAPPERS = {
-    "model-router": ("model-router/tools/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["model-router"]),
-    "mail-hero": ("mail-hero/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["mail-hero"]),
-    "todofy": (
-        "todofy/deploy/deploy_vars.py",
-        r"deploy_vars\.py (exec core|exec gateway|secrets core|secrets gateway)\b",
-        ["todofy-core", "todofy"],
-    ),
-    "dashboard": ("dashboard/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["home"]),
-    "links": ("links/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["links"]),
-    "tasks": ("tasks/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["tasks"]),
-    "watch": ("watch/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["watch"]),
-    "fleet": ("fleet/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["fleet"]),
-    "mailsort": ("mailsort/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["mailsort"]),
-    "recall": ("recall/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["recall"]),
-    "personal-mcp": ("personal-mcp/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["personal-mcp"]),
-    "newsletter-console": ("newsletter-console/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["newsletter-console"]),
-}
+
+def _wrapper(spec: dict) -> tuple[str, str, list[str]]:
+    """The wrapper, how CI calls it, and its production Workers, from drift_desired.py's entry (per mode for Todofy)."""
+    if spec["language"] == "js":
+        return spec["file"], r"deploy-vars\.mjs (exec|secrets)\b", [spec["vars"]]
+    calls = "|".join(f"{verb} {mode}" for verb in ("exec", "secrets") for mode in spec["vars"])
+    return spec["file"], rf"deploy_vars\.py ({calls})\b", list(spec["vars"].values())
+
+
+# Each app with a deploy-vars wrapper: drift_desired.py's one map, read here as above.
+WRAPPERS = {app: _wrapper(spec) for app, spec in drift_desired.WRAPPERS.items()}
 # Worker vars that must never be committed: personal values (GitHub environment secrets) ...
 PERSONAL_VARS = {
     "RECEIVE_ADDRESS",
@@ -139,7 +132,9 @@ TOGGLES = {
     # mailsort's ceiling (live, shadow or off): the emergency switch of mailsort/docs/design.md section 10.
     "MAILSORT_MODE",
 }
-DEPLOY_JOBS = ("todofy-deploy", "mail-hero-deploy", "dashboard-deploy", "links-deploy", "watch-deploy", "fleet-deploy", "mailsort-deploy", "recall-deploy", "personal-mcp-deploy", "model-router-deploy", "newsletter-console-deploy")
+# Every Worker deploy job: the ci.yml jobs that call the release recipe.
+DEPLOY_JOBS = tuple(name for name, block in source_jobs(WORKFLOW.read_text()).items()
+                    if "uses: ./.github/workflows/worker-release.yml" in block)
 # The retired generators' required GitHub variables, still set in production: a revert of the committed-config
 # layout needs them (README "Rolling back the committed-config layout"), and nothing may read them now.
 LEGACY_VARIABLES = {
@@ -227,6 +222,16 @@ def markers(wrapper: str) -> dict[str, list[str]]:
     for mode, names in re.findall(r"^(?:#|//) deploy-vars-inputs (\w+): (.+)$", (REPO / wrapper).read_text(), re.M):
         found.setdefault(mode, []).extend(names.split())
     return found
+
+
+# The shared deploy-vars core: a wrapper that imports it declares its inputs and takes the core's rules and refusals.
+WRAPPER_CORE = "tools/cloud-config/worker-deploy.mjs"
+
+
+def wrapper_rules(wrapper: str) -> str:
+    """The text holding a wrapper's owner rules and refusals: the wrapper's own, or the core's when it imports it."""
+    text = (REPO / wrapper).read_text()
+    return (REPO / WRAPPER_CORE).read_text() if f"/{WRAPPER_CORE}'" in text else text
 
 
 # wrangler options that take a value (the value may be the next token): skipped to find the command.
@@ -409,7 +414,7 @@ class Files(unittest.TestCase):
         for job in DEPLOY_JOBS:
             with self.subTest(job=job):
                 self.assertEqual(dev.findall(jobs[job]), [])
-        for wrapper, _, _ in WRAPPERS.values():
+        for wrapper in [*(wrapper for wrapper, _, _ in WRAPPERS.values()), WRAPPER_CORE]:
             with self.subTest(wrapper=wrapper):
                 self.assertEqual(dev.findall((REPO / wrapper).read_text()), [])
 
@@ -1032,10 +1037,11 @@ class Workflow(unittest.TestCase):
 
     def test_links_and_watch_accept_exactly_the_owner_values_the_dashboard_accepts(self):
         """The same secrets feed these wrappers: their owner and alias rules must be the same lines, or a valid
-        dashboard value could stop Links deploy or Watch deploy, or the reverse. Here, in Changes, a change to any one wrapper runs this comparison, whichever app's checks it runs."""
+        dashboard value could stop Links deploy or Watch deploy, or the reverse. Here, in Changes, a change to any one wrapper runs this comparison, whichever app's checks it runs.
+        A wrapper built on the shared core (WRAPPER_CORE) is held to the core's lines."""
         rules = r"^(?:const ACCESS_EMAIL|const MAX_ALIASES|const MAX_LIST_CHARS) = .+$"
         dashboard, links, watch, console = (
-            re.findall(rules, (REPO / app / "deploy" / "deploy-vars.mjs").read_text(), re.M)
+            re.findall(rules, wrapper_rules(WRAPPERS[app][0]), re.M)
             for app in ("dashboard", "links", "watch", "newsletter-console")
         )
         self.assertEqual(len(dashboard), 3)

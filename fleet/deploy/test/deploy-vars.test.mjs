@@ -91,8 +91,8 @@ test('a missing AUD permits only dry runs; real, zero and malformed AUD cases ca
     const wrapper = join(deploy, 'deploy-vars.mjs')
     const output = join(directory, 'executed.json')
     const stub = join(directory, 'stub.mjs')
-    writeFileSync(wrapper, readFileSync(WRAPPER, 'utf8').replace('../../tools/cloud-config/worker-secrets.mjs',
-      pathToFileURL(fileURLToPath(new URL('../../../tools/cloud-config/worker-secrets.mjs', import.meta.url))).href))
+    writeFileSync(wrapper, readFileSync(WRAPPER, 'utf8').replace('../../tools/cloud-config/worker-deploy.mjs',
+      pathToFileURL(fileURLToPath(new URL('../../../tools/cloud-config/worker-deploy.mjs', import.meta.url))).href))
     writeFileSync(stub, `import { writeFileSync } from 'node:fs'\nwriteFileSync(${JSON.stringify(output)}, JSON.stringify(process.argv.slice(2)))\n`)
     for (const [aud, dry, accepted] of [
       [null, true, true], [null, false, false], ['a'.repeat(64), true, true], ['a'.repeat(64), false, true],

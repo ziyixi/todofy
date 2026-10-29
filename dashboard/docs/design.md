@@ -167,9 +167,10 @@ A failure of the object itself (reset, storage error) is an exception, which the
 ## 5. The tick
 
 Order: (1) status, (2) usage, (3) guard, (4) canary, (5) digest, (6) cleanup and persist. Every
-service call has a 10 s timeout; the GraphQL call 15 s; the tick makes at most 8 outbound calls
-(2 `status`, ≤ 2 `setGuard`, ≤ 2 canary calls, ≤ 1 `createInboxTask`, 1 GraphQL), well under Free's 50
-subrequests and 32 Worker invocations per request.
+service call has a 10 s timeout; the GraphQL call 15 s. The tick's outbound calls grow with the registry
+(a status poll per app, probes, drift reads): the bound is `outboundPerTick()` of
+[`design-v2.md`](design-v2.md) §5, whose exact value `worker/test/registry.test.ts` pins under
+`MAX_OUTBOUND_PER_TICK`, a margin under Free's 50 subrequests per request.
 
 ### 5.1 Calling the apps (`ops-client.ts`)
 

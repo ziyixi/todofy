@@ -83,6 +83,24 @@ token or owner step exists; the Worker's owner identity is Home's (`identity_fro
   adds the remaining pages; S7 aligns Home and Fleet (engine row 「Newsletter 引擎」, no 「写入 Notion」 stage, links to the
   console) on top of the Newsletter config views already there.
 
+### Architecture review follow-ups (2026-10-29)
+
+The owner asked whether shared microservices could be extracted from the Workers. A read-only review found none
+worth extracting: every external credential has one holder, and the existing shared services (Model Router, Tasks'
+TaskInbox, Fleet's report ingest) each own a scarce resource or ledger with several callers. The complexity sits in
+build-time registration and cloned release recipes, so the approved follow-ups subtract there:
+
+- Released with this merge (no app deploys): Tasks, Watch and Personal MCP now refuse to ship past a selected
+  upstream deploy that failed (the SELECTED_ONLY form Router edges use); `finalize.py` APPS, `DEPLOY_JOBS`, the
+  wrapper map and Home's deploy-order test derive from configuration (the rebuild's finalize step listed 8 of 11
+  Durable Object apps); `worker-release.yml` records Tasks' environment URL; docs no longer misdescribe the links
+  backup schedule, the website sync triggers, Home's outbound bound or the infra object count.
+- Released with the `claude/deploy-core` merge (deploys those seven Workers once, with byte-identical secrets
+  files, wrangler arguments and Home desired state): one shared Worker deploy-vars core in
+  `tools/cloud-config/worker-deploy.mjs` for links, watch, recall, mailsort, fleet, tasks and personal-mcp; each
+  wrapper now declares its differences as data. Model Router, Mail Hero, Home, Todofy and the relay keep their own
+  wrappers for now; the console migrates after its slices land. A core change is proven at each app's next release.
+
 ## Latest verified release
 
 `7f8f4c3b`, Newsletter configuration activation visible through Fleet and Home:

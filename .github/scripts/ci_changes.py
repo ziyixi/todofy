@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Decide which apps a CI run checks and deploys. Standard library only (the runner's python3).
 
-Outputs (GITHUB_OUTPUT, "true"/"false"):
-  todofy_check, mail_hero_check, dashboard_check, website_check, links_check, watch_check, newsletter_check,
-  fleet_check, platform_check, mailsort_check, recall_check, tasks_check, newsletter_console_check
-                    run that app's full checks
+Outputs (GITHUB_OUTPUT, "true"/"false"; KEYS names every one):
+  <app>_check       run that app's full checks: one per service-catalog app (APPS, read from */app.toml), with
+                    "-" written "_" (PREFIX)
   contracts         run the contract tests: both sides of mail.received.v1 and ops-v1, and the dashboard's
                     ops-v1 caller tests (also on a proto/ change: they read every contract with the generated
                     codecs)
@@ -17,11 +16,9 @@ Outputs (GITHUB_OUTPUT, "true"/"false"):
                     tools/ changed, or a dispatch.
   base              not a flag: the commit the diff started from (empty when everything runs), which
                     "Proto checks" compares the IDL with.
-  todofy_deploy, mail_hero_deploy, dashboard_deploy, website_deploy, links_deploy, watch_deploy,
-  newsletter_deploy, fleet_deploy, platform_publish, platform_deploy, mailsort_deploy, recall_deploy,
-  tasks_deploy, newsletter_console_deploy
-                    the app, a shared package it compiles in, or a contract file it bundles changed
-                    (deploy jobs also require refs/heads/main)
+  <app>_deploy      the app, a shared package it compiles in, or a contract file it bundles changed
+                    (deploy jobs also require refs/heads/main), one per catalog app; platform_publish follows
+                    platform_deploy
   website_relay_deploy
                     website/relay/ (the Notion relay Worker, its own wrangler.toml) changed: deploy
                     the relay. A change only there checks the website but does not release the site;
