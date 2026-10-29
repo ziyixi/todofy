@@ -8,6 +8,10 @@ export function alertGuidance(code: string, source?: string): AlertGuidance {
     if (code === 'source_unavailable') return { explanation: '个人 MCP 无法读取来源服务的当前状态。', next: '查看来源服务的检查状态，恢复后会继续检查。' }
   }
   switch (code) {
+    case 'newsletter_config_failed':
+      return { explanation: '最近一次内容配置检查失败，当前生效版本需要核对。每日投递结果仍按原有记录判断。', next: '打开 Fleet 查看配置错误码与生效版本，处理配置同步后等待下一次检查；可以关闭本次提醒。' }
+    case 'newsletter_config_stale':
+      return { explanation: '超过 30 分钟没有内容配置检查记录。主机报告及时不能替代配置同步检查。', next: '打开 Fleet 核对最近配置检查时间和配置同步进程，恢复检查后刷新状态；可以关闭本次提醒。' }
     case 'model_execution_unknown':
       return { explanation: '有推理请求超过 15 分钟没有留下最终结果。', next: '先在 Model Router 查看对应请求的时间与结果，核对后再发起新请求。' }
     case 'website_sync_stale':

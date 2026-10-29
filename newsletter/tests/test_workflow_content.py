@@ -12,6 +12,7 @@ import newsletter.contracts as contracts
 import newsletter.errors as errors
 import newsletter.settings as settings
 import newsletter.store as newsletter_store
+import newsletter.usage as newsletter_usage
 import newsletter.workflow.content as content
 import newsletter.workflow.definition as newsletter_workflow_definition
 import newsletter.workflow.engine as newsletter_workflow_engine
@@ -423,6 +424,39 @@ async def test_discover_passes_public_history_watchlist_never_private_fields(
     assert "private marker" not in prompt and "secret marker" not in prompt
     assert "Watch future replication" in prompt
     assert "不得读本地文件" in engine.calls[0][2]
+
+
+async def test_discovery_and_selection_label_their_model_invocations(
+    tmp_path,
+):
+    purposes = []
+
+    class LabelledEngine(workflow_content.Engine):
+        async def execute(self, *args):
+            # The purpose a real invocation would record at this call.
+            purposes.append(newsletter_usage.ModelUsage("m").record["purpose"])
+            return await super().execute(*args)
+
+    engine = LabelledEngine(
+        (
+            workflow_content.discovered(workflow_content.candidate()),
+            {workflow_content.URL},
+            True,
+        ),
+        (workflow_content.planned(workflow_content.task()), set(), False),
+    )
+    service = content.ContentPreparation(engine)
+    await service.discover(
+        instructions.Instruction("01-ai-ml", "Find research", "a" * 64),
+        workflow_content.DAY,
+        tmp_path.resolve() / "discover",
+    )
+    await service.shortlist(
+        [workflow_content.candidate()],
+        workflow_content.DAY,
+        tmp_path.resolve() / "select",
+    )
+    assert purposes == ["discovery", "selection"]
 
 
 async def test_shortlist_accepts_12_cap_empty_candidates_never_invoke_model(

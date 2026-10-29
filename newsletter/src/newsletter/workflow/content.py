@@ -20,6 +20,8 @@ import newsletter.contracts as contracts
 import newsletter.errors as errors
 import newsletter.model_io as model_io
 import newsletter.types as types
+import newsletter.usage as newsletter_usage
+import newsletter.workflow.prompt_examples as prompt_examples
 import newsletter.workflow.schema as newsletter_workflow_schema
 import newsletter.workflow.sources as sources
 
@@ -205,10 +207,12 @@ DEFAULT_SELECTION_POLICY = (
     "论文或重复正文。研究可以保存在材料库供以后跟进，"
     "不意味着必须出现在今天邮件。\n"
 )
+DEFAULT_DISCOVERY_POLICY += prompt_examples.DISCOVERY
+DEFAULT_SELECTION_POLICY += prompt_examples.SELECTION
 _CLASSIFIED_SELECTION_RULES = _SAFETY + (
     "\n"
     "只比较给定候选、classification和历史，不search/open，"
-    "不新增ID或URL；同事件合并。\n"
+    "不新增候选ID或URL；同事件合并。\n"
     "每个research_task对应一个刊出topic，"
     "priority从1开始且不重复。max_tasks与editorial_budget\n"
     "是代码预算，不是建议。editorial_kind使用news/research/unkn"
@@ -826,20 +830,23 @@ class ContentPreparation:
         if notes:
             prompt["metadata_seed_notes_untrusted"] = notes
             rules += _RESEARCHER_NOTES
-        text, opened, searched = await self.engine.execute(
-            contracts.canonical_json(prompt),
-            newsletter_workflow_schema.discovery_schema(
-                classified=limits is not None
-            ),
-            rules
-            if content_config is None
-            else rules
-            + "\n本期编辑重心（取代旧的题材优先顺序）：\n"
-            + _configured_policy(
-                content_config, "prompts/discovery.md", DEFAULT_DISCOVERY_POLICY
-            ),
-            model_io.prepare_workspace(workspace, issue_date),
-        )
+        with newsletter_usage.purpose_scope("discovery"):
+            text, opened, searched = await self.engine.execute(
+                contracts.canonical_json(prompt),
+                newsletter_workflow_schema.discovery_schema(
+                    classified=limits is not None
+                ),
+                rules
+                if content_config is None
+                else rules
+                + "\n本期编辑重心（取代旧的题材优先顺序）：\n"
+                + _configured_policy(
+                    content_config,
+                    "prompts/discovery.md",
+                    DEFAULT_DISCOVERY_POLICY,
+                ),
+                model_io.prepare_workspace(workspace, issue_date),
+            )
         return parse_discovery(
             text,
             opened,
@@ -892,41 +899,43 @@ class ContentPreparation:
             [c["id"] for c in candidates],
             [c["url"] for c in candidates],
         )
-        text, _, _ = await self.engine.execute(
-            contracts.canonical_json(
+        prompt: types.Payload = {
+            "issue_date": issue_date,
+            "candidates_untrusted": candidates,
+            "history_untrusted": context,
+            "watchlist_untrusted": public_context(watchlist),
+            "max_tasks": max_tasks,
+            "reader_profile": reader_profile,
+            **(
                 {
-                    "issue_date": issue_date,
-                    "candidates_untrusted": candidates,
-                    "history_untrusted": context,
-                    "watchlist_untrusted": public_context(watchlist),
-                    "max_tasks": max_tasks,
-                    "reader_profile": reader_profile,
-                    **(
-                        {
-                            "candidate_classifications": classifications,
-                            "editorial_budget": {
-                                "max_public_items": limits.max_public_items,
-                                "max_research_items": limits.max_research_items,
-                                "max_deep": limits.max_deep,
-                            },
-                        }
-                        if limits is not None
-                        else {}
-                    ),
+                    "candidate_classifications": classifications,
+                    "editorial_budget": {
+                        "max_public_items": limits.max_public_items,
+                        "max_research_items": limits.max_research_items,
+                        "max_deep": limits.max_deep,
+                    },
                 }
+                if limits is not None
+                else {}
             ),
-            newsletter_workflow_schema.planning_schema(
-                ids, urls, max_tasks, classified=limits is not None
-            ),
-            _SELECTION
-            if content_config is None
-            else _CLASSIFIED_SELECTION_RULES
-            + "\n"
-            + _configured_policy(
-                content_config, "prompts/selection.md", DEFAULT_SELECTION_POLICY
-            ),
-            model_io.prepare_workspace(workspace, issue_date),
-        )
+        }
+        with newsletter_usage.purpose_scope("selection"):
+            text, _, _ = await self.engine.execute(
+                contracts.canonical_json(prompt),
+                newsletter_workflow_schema.planning_schema(
+                    ids, urls, max_tasks, classified=limits is not None
+                ),
+                _SELECTION
+                if content_config is None
+                else _CLASSIFIED_SELECTION_RULES
+                + "\n"
+                + _configured_policy(
+                    content_config,
+                    "prompts/selection.md",
+                    DEFAULT_SELECTION_POLICY,
+                ),
+                model_io.prepare_workspace(workspace, issue_date),
+            )
         if limits is not None:
             return parse_classified_plan(
                 text, candidates, classifications or {}, max_tasks, limits

@@ -1,3 +1,5 @@
+## 编辑取舍
+
 为私人中文日报选择“今天哪些重要变化值得知道”，重点是有现实意义的科技变化，
 同时保留重大国际新闻，而非研究进展汇编。排序先比较现实影响、变化幅度、波及范围、
 持续性与证据成熟度；质量相近时优先科技。科技不限于AI论文，还包括真实可用的工具、
@@ -15,3 +17,23 @@
 重要的新方法或早期科学信号仍可竞争极少研究位置，明确新增insight与缺失证据，不硬限大机构。
 note说明重要取舍及缺口，不承诺任务列表以外的研究。阅读卡只深化已入选同一话题，不加第二篇
 论文或重复正文。研究可以保存在材料库供以后跟进，不意味着必须出现在今天邮件。
+
+## 任务与输出
+
+本阶段只比较当前候选及历史，不搜索或打开网页。按上面的取舍规则和输入的代码预算排序；
+先合并同一事件，再给每个实际要采编的话题一个 `research_task`。每项仅引用输入里已有的
+`candidate_ids` 和 `source_urls`，新建的任务 `id` 只标识本次任务；`priority` 从 1 开始且不重复。
+`why` 说明本项具体价值，`question` 留下有界核查问题，`evidence_context` 分开已有主张和未知。
+按给定 schema 只输出包含 `research_tasks` 和 `note` 的 JSON，不加围栏或前后说明。
+没有值得刊出的候选时返回空列表，并在 `note` 说明缺口；不能用 `note` 代替任务。
+
+以下为合成输入节选与完整输出，省略了不影响取舍的候选字段。示例 ID、URL 和事件仅用于演示，
+实际结果必须使用本期输入中允许的引用，不能复制示例；这组取舍不构成固定题材或机构偏好。
+
+```json
+{"max_tasks":1,"editorial_budget":{"max_public_items":1,"max_research_items":1,"max_deep":1},"candidates_untrusted":[{"id":"example-news","url":"https://example.org/synthetic-ferry","summary":"虚构渡轮允许现场购票，航线不变。"},{"id":"example-paper","url":"https://example.org/synthetic-paper","summary":"虚构论文讨论重要问题，但相对旧方法的增量未知。"}],"candidate_classifications":{"example-news":{"kind":"news","basis":"允许现场购票，航线不变。"},"example-paper":{"kind":"research"}}}
+```
+
+```json
+{"research_tasks":[{"id":"example-task","candidate_ids":["example-news"],"question":"现场购票何时生效，适用哪些乘客？核对公告中的限制。","why":"购票方式已经变化，直接影响临时出行的安排。","priority":1,"evidence_context":"候选称允许现场购票且航线不变；覆盖范围和实施条件仍需原文核对，不能据此推断客流增长。","source_urls":["https://example.org/synthetic-ferry"],"editorial_kind":"news"}],"note":"仅保留有具体变化的虚构事件；另一篇的贡献尚不清楚，未占本次有限版面，也未承诺额外研究。"}
+```

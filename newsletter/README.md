@@ -101,7 +101,7 @@ newsletter-trigger --send --timeout 7200
 ## 开发与维护
 
 项目采用 Python、FastAPI 和 SQLite，使用 uv 管理依赖。SQLite 保存完整运行记录和发送账本，Notion 是便于阅读的副本，不会把手工修改同步回服务。
-Newsletter 只使用共享的 `modelrouter.inference.v1` Python 客户端，不安装模型 SDK，也不挂载登录目录。默认模型是 `gpt-6.1-sol`（`settings.DEFAULT_MODEL`）；未指定 effort 时保留模型默认值。一次采编调用可在同一短会话内补查一轮，使用 Router 返回的实际网页观察和逐次用量。历史运行、业务开关、提示词和发送账本保持原样。
+Newsletter 只使用共享的 `modelrouter.inference.v1` Python 客户端，不安装模型 SDK，也不挂载登录目录。默认模型是 `gpt-6.1-sol`（`settings.DEFAULT_MODEL`）；未指定 effort 时保留模型默认值。一次采编调用可在同一短会话内补查一轮，使用 Router 返回的实际网页观察和逐次用量。历史运行保留冻结输入，既有业务开关和发送账本保持原样。
 
 ```sh
 make check    # Ruff、mypy、结构检查和离线测试；与 CI 相同

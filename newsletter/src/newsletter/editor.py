@@ -372,9 +372,15 @@ class ModelEditor:
         if len(prompt.encode("utf-8")) > model_io.MAX_JSON_BYTES:
             raise errors.EditorError("invalid_input")
         with newsletter_usage.model_usage(self.model) as usage:
-            return await self._execute(
-                prompt, schema, instructions, workspace, usage, sources
-            )
+            try:
+                return await self._execute(
+                    prompt, schema, instructions, workspace, usage, sources
+                )
+            except errors.EditorError as exc:
+                # The safe category only; a cancellation records nothing here
+                # and the usage record then reads "interrupted".
+                usage.fail(exc.code)
+                raise
 
     async def _execute(
         self,

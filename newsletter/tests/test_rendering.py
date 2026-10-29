@@ -220,6 +220,70 @@ def test_reading_support_is_numbered_without_adding_primary_reading_links():
     )
 
 
+def test_edition_context_numbers_references_exactly_as_the_email():
+    draft, packets = (
+        copy.deepcopy(rendering.SAMPLE_DRAFT),
+        copy.deepcopy(rendering.SAMPLE_PACKETS),
+    )
+    packets[0]["content"]["sources"].append(
+        {
+            "id": "journal",
+            "title": "模拟期刊收录记录",
+            "url": "https://example.org/journal",
+            "excerpt": "模拟收录信息，非真实新闻。",
+            "access_scope": "metadata",
+        }
+    )
+    draft["recommended_reading"]["supporting_citations"] = [
+        "sample-packet/journal"
+    ]
+    before = (copy.deepcopy(draft), copy.deepcopy(packets))
+    edition = newsletter_rendering.edition_context(draft, packets)
+    assert (draft, packets) == before
+    assert edition == newsletter_rendering.edition_context(draft, packets)
+    references = edition["references"]
+    assert [ref["number"] for ref in references] == [1, 2, 3]
+    text = newsletter_rendering.render_edition(draft, packets, "2026-09-05")[
+        "text"
+    ]
+    listed = text.split("来源与核对\n", 1)[1]
+    for ref in references:
+        assert f"[{ref['number']}] {ref['title']}\n{ref['url']}" in listed
+    for section in edition["sections"]:
+        for paragraph in section["paragraphs"]:
+            markers = "".join(
+                f"[{ref['number']}]" for ref in paragraph["references"]
+            )
+            assert paragraph["text"] + markers in text
+    for row in edition["chart"]["rows"]:
+        markers = "".join(f"[{ref['number']}]" for ref in row["references"])
+        assert row["label"] in text and markers in text
+    reading = edition["reading"]
+    assert f"原文与方法 [{reading['reference']['number']}]" in text
+    assert [ref["number"] for ref in reading["supporting_references"]] == [3]
+    # Pure: no image bytes, template or usage footer in the shared context.
+    assert set(edition) == {
+        "draft",
+        "packets",
+        "sections",
+        "chart",
+        "reading",
+        "references",
+    }
+
+
+def test_edition_context_without_chart_or_reading_and_unknown_citation():
+    draft = sample_without_chart()
+    draft.pop("recommended_reading")
+    edition = newsletter_rendering.edition_context(
+        draft, rendering.SAMPLE_PACKETS
+    )
+    assert edition["chart"] is None and edition["reading"] is None
+    draft["sections"][0]["paragraphs"][0]["citations"] = ["unknown/source"]
+    with pytest.raises(ValueError, match="UNKNOWN_CITATION"):
+        newsletter_rendering.edition_context(draft, rendering.SAMPLE_PACKETS)
+
+
 def test_html_injection_is_text_not_markup():
     draft = sample_without_chart()
     attack = '<img src="x" onerror="alert(1)"> & <script>alert(2)</script>'

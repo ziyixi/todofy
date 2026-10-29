@@ -151,7 +151,7 @@ const ENTRIES: readonly EntryDef[] = [
     access: false,
     status: { type: 'ops_v1', provider: 'fleet', binding: 'NEWSLETTER', guard: false },
     tile_metric: null,
-    app_only_signals: [],
+    app_only_signals: ['newsletter_config_current', 'newsletter_config_pending', 'newsletter_config_failed', 'newsletter_config_stale', 'newsletter_config_pinned', 'newsletter_config_unobserved'],
     order: 2,
   },
   {

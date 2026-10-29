@@ -10,7 +10,9 @@ import uuid
 import pytest
 
 import newsletter.contracts as contracts
+import newsletter.editor as newsletter_editor
 import newsletter.errors as errors
+import newsletter.usage as newsletter_usage
 import newsletter.workflow.components as components
 import newsletter.workflow.publication as publication
 import newsletter.workflow.story_editor as newsletter_workflow_story_editor
@@ -171,6 +173,32 @@ async def test_bad_body_repairs_once_and_never_changes_approved_signal(rig):
     assert len({call["path"] for call in rig.calls}) == 4
     for checkpoint in rig.checkpoints:
         publication.validate_result(checkpoint)
+
+
+async def test_each_story_job_labels_its_model_invocation(rig, monkeypatch):
+    purposes = []
+    fake = newsletter_editor.ModelEditor.execute
+
+    async def labelled(editor, *args, **kwargs):
+        # The purpose a real invocation would record at this call.
+        purposes.append(newsletter_usage.ModelUsage("m").record["purpose"])
+        return await fake(editor, *args, **kwargs)
+
+    monkeypatch.setattr(newsletter_editor.ModelEditor, "execute", labelled)
+    rig.replies = [
+        story_editor.reply(story_editor.writer(story_editor.story())),
+        story_editor.reply(story_editor.review(body="blocked")),
+        story_editor.reply(story_editor.writer(story_editor.story("修正。"))),
+        story_editor.reply(story_editor.review()),
+    ]
+    with newsletter_usage.usage_scope(lambda _: None, "briefs:story-a"):
+        await rig.run()
+    assert purposes == [
+        "writer",
+        "reviewer",
+        "repair_writer",
+        "repair_reviewer",
+    ]
 
 
 async def test_second_body_hold_keeps_signal_without_third_attempt(rig):

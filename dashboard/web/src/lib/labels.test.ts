@@ -61,6 +61,17 @@ describe('labels', () => {
     expect(signalLabel('newsletter_delivery_overdue')).toBe('Newsletter 每日投递逾期')
   })
 
+  it('names configuration states and gives warning actions without claiming a failed daily delivery', () => {
+    for (const state of ['current', 'pending', 'failed', 'stale', 'pinned', 'unobserved']) {
+      const code = `newsletter_config_${state}`
+      expect(signalLabel(code)).not.toBe(code)
+    }
+    expect(signalLabel('newsletter_config_current')).toBe('与上次检查目标一致')
+    for (const state of ['failed', 'stale']) {
+      expect(alertGuidance(`newsletter_config_${state}`, 'newsletter').next).toContain('Fleet')
+    }
+  })
+
   it('shows the GTD counters in their units', () => {
     expect(counterInfo('inbox_oldest_days')).toEqual({ label: '收件箱最老', kind: 'days' })
     expect(counterValue('review_age_days', 12)).toBe('12 天')

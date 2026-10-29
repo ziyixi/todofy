@@ -40,6 +40,21 @@ option (common.wire.v1.formats) = {
   pattern: "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
   description: "Random kernel boot identity; a new value means every cumulative counter restarted."
 };
+option (common.wire.v1.formats) = {
+  name: "ConfigRevision"
+  pattern: "([0-9a-f]{40}|packaged)"
+  description: "Editorial configuration source commit or the initial packaged baseline."
+};
+option (common.wire.v1.formats) = {
+  name: "ConfigDigest"
+  pattern: "[0-9a-f]{64}"
+  description: "Editorial bundle SHA-256, without content."
+};
+option (common.wire.v1.formats) = {
+  name: "ConfigError"
+  pattern: "CONFIG_[A-Z0-9_]{1,80}"
+  description: "Fixed configuration error code, never exception text."
+};
 // One bounded, content-free observation, not proof of business success.
 message HostReport {
   // Always fleet-report-v1.
@@ -459,4 +474,27 @@ message Newsletter {
   }];
   // Update time of the latest delivery record, rather than proof of inbox arrival.
   optional google.protobuf.Timestamp latest_delivery_time = 10;
+  // The separate configuration poller's latest local observation; absent from older producers.
+  NewsletterConfigSync config_sync = 11;
+}
+// Read-only configuration identities and poll times. The observed target may precede a newer publication.
+message NewsletterConfigSync {
+  // Source revision of the bundle currently used for new runs.
+  optional string active_revision = 1 [(common.wire.v1.field).format = "ConfigRevision"];
+  // Digest of the active bundle.
+  optional string active_digest = 2 [(common.wire.v1.field).format = "ConfigDigest"];
+  // Source revision fetched during the last successful remote check.
+  optional string wanted_revision = 3 [(common.wire.v1.field).format = "ConfigRevision"];
+  // Digest fetched during that check, not necessarily the current remote target.
+  optional string wanted_digest = 4 [(common.wire.v1.field).format = "ConfigDigest"];
+  // Published branch commit resolved by the last remote check.
+  optional string wanted_commit = 5 [(common.wire.v1.field).format = "Sha"];
+  // Intentional local pin, if any.
+  optional string pinned_digest = 6 [(common.wire.v1.field).format = "ConfigDigest"];
+  // Latest attempted poll, including a failed attempt.
+  optional google.protobuf.Timestamp last_attempt_time = 7;
+  // Latest successful poll, even if the active bundle did not change.
+  optional google.protobuf.Timestamp last_success_time = 8;
+  // Last attempt's safe error code, absent after success.
+  optional string error = 9 [(common.wire.v1.field).format = "ConfigError"];
 }

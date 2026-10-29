@@ -18,6 +18,7 @@ import { httpsUrl } from '../lib/url'
 import { Card, Fact, Facts, Metrics, Notice, Pill, Time } from './ui'
 import { SignalActions } from './AttentionActions'
 import { PersonalMcpDetails } from './PersonalMcpDetails'
+import { NewsletterConfigDetails } from './NewsletterConfigDetails'
 
 /** A status older than this is marked as possibly outdated (the cron reads it every 30 minutes). */
 const STATUS_STALE_MS = 60 * 60_000
@@ -99,11 +100,12 @@ export function AppDetails({
 function StatusDetails({ status, source, guard, now }: { status: OpsStatus; source: string; guard: GuardAppView | undefined; now: Date }) {
   const effective = guard?.state ?? status.guard
   const modes = Object.entries(status.modes)
-  const all = Object.entries(status.counters)
+  const all = Object.entries(status.counters).filter(([key]) => status.app !== 'newsletter' || !key.startsWith('newsletter_config_'))
 
   return (
     <>
       {status.app === 'personal-mcp' ? <PersonalMcpDetails status={status} now={now} /> : null}
+      {status.app === 'newsletter' ? <NewsletterConfigDetails status={status} now={now} /> : null}
       <div className="subsection">
         <h4>运行模式</h4>
         <ul className="chips" aria-label="运行模式">

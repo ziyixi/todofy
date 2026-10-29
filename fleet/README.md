@@ -9,6 +9,11 @@ Newsletter 的未确认数量是六类记录的合计，可能包含历史运行
 Fleet 保留只读；提醒的关闭与恢复在 Home 管理。导航地址由本应用 `wrangler.toml` 的公开 `HOME_URL` 声明，
 UI 构建时读取；迁移 Home 域名时同步更新这一项，不从观察报告或另一应用的配置推断地址。
 
+Newsletter 的“内容配置”显示生效版本、摘要、上次检查目标、固定摘要、尝试与成功时间及安全错误码。
+“与上次检查目标一致”只比较这份观测中的版本和摘要，不证明检查之后没有新发布。配置检查失败或超过
+30 分钟未检查会向 Home 提醒；固定版本、等待激活与缺少旧版字段只作提示，不改变进程或每日投递结果。
+Home 复用 `NewsletterOps.status()` 的信号与数值时间，版本身份只在 Fleet 显示，不增加远端检查。
+
 - `worker/src/`：独立 HMAC 机器入口、Access owner API、SQLite DO 状态与 Home service bindings；`metrics.ts` 是节点遥测历史。
 - `web/`：只读 owner UI，“概览”与“资源”两个标签；每分钟读取缓存观测，资源曲线每五分钟读取一次，不探测服务器。
 - `platform/src/personal_cloud/observer/`：非 root k3s CronJob，使用平台镜像每五分钟发送状态与节点数值；只读挂载见 `observer/README.md`。

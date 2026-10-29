@@ -45,6 +45,71 @@ def observe(value, status=200):
 
 
 class NewsletterOutcomeTests(unittest.TestCase):
+    def test_configuration_identities_and_poll_times_reach_the_fleet_report(self):
+        original = monitor()
+        original["config_sync"] = {
+            "active_revision": "a" * 40,
+            "active_digest": "b" * 64,
+            "wanted_revision": "a" * 40,
+            "wanted_digest": "b" * 64,
+            "wanted_commit": "c" * 40,
+            "pinned_digest": None,
+            "last_attempt": 1793254787.3939369,
+            "last_success": 1793254788.8080678,
+            "error": None,
+        }
+        untouched = copy.deepcopy(original)
+        result = observe(original)
+        self.assertEqual(result["state"], "healthy")
+        self.assertEqual(
+            result["config_sync"],
+            {
+                "active_revision": "a" * 40,
+                "active_digest": "b" * 64,
+                "wanted_revision": "a" * 40,
+                "wanted_digest": "b" * 64,
+                "wanted_commit": "c" * 40,
+                "last_attempt_time": "2026-10-29T06:19:47.393Z",
+                "last_success_time": "2026-10-29T06:19:48.808Z",
+            },
+        )
+        self.assertEqual(result["unknown_by_kind"], CATEGORIES)
+        self.assertEqual(original, untouched)
+
+    def test_configuration_failure_and_pin_do_not_change_business_health(self):
+        for config in (
+            {"error": "CONFIG_GITHUB_NETWORK_ERROR"},
+            {"active_revision": "packaged", "pinned_digest": "d" * 64},
+        ):
+            with self.subTest(config=config):
+                result = observe({**monitor(), "config_sync": config})
+                self.assertEqual(result["state"], "healthy")
+                self.assertEqual(result["config_sync"], config)
+
+    def test_missing_configuration_is_not_invented(self):
+        for version in (1, 2):
+            result = observe(monitor(version))
+            self.assertNotIn("config_sync", result)
+        result = observe({**monitor(), "config_sync": None})
+        self.assertEqual(result["state"], "healthy")
+        self.assertNotIn("config_sync", result)
+
+    def test_invalid_configuration_is_reported_without_free_text_or_content(self):
+        for config in (
+            [],
+            {"error": "synthetic private exception text"},
+            {"active_revision": "not-a-revision"},
+            {"last_attempt": True},
+            {"last_success": -1},
+            {"body": "synthetic private content"},
+        ):
+            with self.subTest(config=config):
+                result = observe({**monitor(), "config_sync": config})
+                self.assertEqual(result["state"], "healthy")
+                self.assertEqual(
+                    result["config_sync"], {"error": "CONFIG_STATUS_UNAVAILABLE"}
+                )
+
     def test_legacy_monitor_preserves_health_without_inventing_outcomes(self):
         result = observe(monitor(1))
         self.assertEqual(result["state"], "healthy")

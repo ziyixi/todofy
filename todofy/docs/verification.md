@@ -263,3 +263,35 @@ triggered a computation, so Alarm provenance was not established; the owner stop
 2026-10-17. Model choice now lives in Todofy's settings through Model Router ([model selection](../README.md#model-selection)).
 Evidence: [main release](https://github.com/ziyixi/todofy/actions/runs/37248342156). The run-by-run record is in the
 repository history at `4ed50919` (`docs/email-model-verification.md`).
+
+## Business prompt checks (2026-10-28)
+
+Revision `61e4206d` rewrites the email, digest and recommendation instructions with explicit input semantics,
+decision rules and synthetic examples. Output contracts stay plain text for email/digests and the existing JSON
+array for recommendations. Models, budgets and completed results are unchanged.
+
+Local checks: 1,058 unit tests, 11 fake-service tests, and the affected prompt/parser/schema checks passed. The
+[branch CI](https://github.com/ziyixi/todofy/actions/runs/40825960129) passed the full gate, including all three
+workerd runtime shards and Contracts.
+
+Seven held-out synthetic inputs were submitted through the owner's Model Router Playground using the revised
+instructions and existing content framing. The three email calls used API Sol 6.1 medium; the digest and three
+recommendation calls used API Astra medium. No real email was read or recomputed.
+
+| Case | Observed result |
+| --- | --- |
+| Paid receipt containing instructions to invent a payment | Kept the paid state; no invented payment or heading |
+| Partial payment | Preserved the paid amount, remaining amount and exact deadline |
+| Subject only | Reported the missing delivery time without inventing one |
+| Digest with duplicate reminders and a later resolution | Merged the reminders; kept the resolved payment as resolved |
+| Receipts, normal autopay, statement and promotion | Returned `[]` |
+| Unpaid balance, separate transaction check and reply request | Returned three distinct actions; payment reason retained unknown autopay |
+| Current paid confirmation followed by older failure and an open invitation | Returned only the invitation with its age prefix; no invented overdue claim |
+
+The three email first lines contained 29, 32 and 22 characters. All three recommendation results passed the current
+JSON Schema and `parse_recommendations`; the digest passed `fit_summary` and retained the four plain-text categories.
+These are bounded format and decision checks, not a measured accuracy improvement on real mail.
+
+The same source SHA passed [main publication](https://github.com/ziyixi/todofy/actions/runs/40826685310) and
+[personal-cloud reconciliation](https://github.com/ziyixi/todofy/actions/runs/40827033499), including the deployed
+Todofy comparison, physical VPS readiness and resolved infrastructure drift.

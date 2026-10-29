@@ -8,7 +8,7 @@ made inside a transaction, and this module cannot enqueue research or send mail.
 from __future__ import annotations
 
 import base64
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 import json
 import time
 from typing import Any
@@ -65,12 +65,24 @@ def material_aliases(candidate: types.Payload) -> list[str]:
 
 
 class NotionJournal:
-    """Own the local Notion projection state and its import read models."""
+    """Own the local Notion projection state and its import read models.
+
+    ``progress_at`` is the local epoch time of an entity's last confirmed
+    step: a create, chart upload, append or property update, or a read that
+    confirms an earlier one landed. It is bookkeeping for the owner console
+    only; no decision reads it, and it is 0 until the first step after the
+    column was added.
+    """
 
     def __init__(
-        self, store: newsletter_store.Store, destination: types.Payload
+        self,
+        store: newsletter_store.Store,
+        destination: types.Payload,
+        *,
+        clock: Callable[[], float] = time.time,
     ) -> None:
         self.store = store
+        self.clock = clock
         with store.lock:
             store.db.executescript("""
                 CREATE TABLE IF NOT EXISTS notion_entities (
@@ -81,7 +93,8 @@ class NotionJournal:
                     applied_hash TEXT NOT NULL DEFAULT '',
                     error TEXT NOT NULL DEFAULT '',
                     retry_at REAL NOT NULL DEFAULT 0,
-                    attempts INTEGER NOT NULL DEFAULT 0);
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    progress_at REAL NOT NULL DEFAULT 0);
                 CREATE TABLE IF NOT EXISTS notion_versions (
                     seq INTEGER PRIMARY KEY AUTOINCREMENT,
                     entity_key TEXT NOT NULL, digest TEXT NOT NULL,
@@ -110,16 +123,18 @@ class NotionJournal:
                     PRIMARY KEY(edition_key,material_key));
             """)
         with store.transaction():
-            if "upload_at" not in {
-                row["name"]
-                for row in store.db.execute(
-                    "PRAGMA table_info(notion_versions)"
-                )
-            }:
-                store.db.execute(
-                    "ALTER TABLE notion_versions ADD COLUMN upload_at "
-                    "REAL NOT NULL DEFAULT 0"
-                )
+            for table, column in (
+                ("notion_versions", "upload_at"),
+                ("notion_entities", "progress_at"),
+            ):
+                if column not in {
+                    row["name"]
+                    for row in store.db.execute(f"PRAGMA table_info({table})")
+                }:
+                    store.db.execute(
+                        f"ALTER TABLE {table} ADD COLUMN {column} "
+                        "REAL NOT NULL DEFAULT 0"
+                    )
             digest = contracts.content_hash(destination)
             old = store.db.execute(
                 "SELECT value FROM metadata WHERE key='notion_v2_destination'"
@@ -579,11 +594,11 @@ class NotionJournal:
         )
 
     def clear_error(self, key: str) -> None:
-        """Clear backoff after an entity makes confirmed progress."""
+        """Clear backoff and stamp the time of confirmed progress."""
         self.execute(
-            "UPDATE notion_entities SET error='',retry_at=0,attempts=0 "
-            "WHERE key=?",
-            (key,),
+            "UPDATE notion_entities "
+            "SET error='',retry_at=0,attempts=0,progress_at=? WHERE key=?",
+            (self.clock(), key),
         )
 
     def summary(self) -> types.Payload:
