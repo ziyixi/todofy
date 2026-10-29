@@ -1,8 +1,4 @@
-import {
-  Accessibility,
-  defaultPreset,
-  type DragDropManagerInput,
-} from "@dnd-kit/dom";
+import { Accessibility, defaultPreset } from "@dnd-kit/dom";
 import type { Language } from "./model";
 
 type Announcements = NonNullable<
@@ -45,7 +41,7 @@ export function dragHandle(language: Language, hintId: string) {
 export function spokenDrags(
   language: Language,
   name: SpokenName,
-): DragDropManagerInput["plugins"] {
+): typeof defaultPreset.plugins {
   const zh = language === "zh";
   const announcements: Announcements = {
     dragstart({ operation }) {

@@ -36,7 +36,11 @@ export async function dropTaskOn(
   target: Locator,
   position: "before" | "inside" | "after" = "before",
 ) {
-  await target.scrollIntoViewIfNeeded();
+  // dnd-kit auto-scrolls the task list while the pointer is in its outer fifth, which carries a
+  // target there away from the pointer. Centre the target, even a fully visible one.
+  await target.evaluate((e) =>
+    e.scrollIntoView({ block: "center", inline: "nearest" }),
+  );
   const zone = target.locator(`:scope > .task-drop-zone.drop-${position}`);
   const destination = (await zone.count()) ? zone : target;
   const bounds = await destination.boundingBox();
@@ -45,14 +49,6 @@ export async function dropTaskOn(
     bounds.x + bounds.width / 2,
     bounds.y + bounds.height / 2,
     { steps: 8 },
-  );
-  // Auto-scroll can move a near-edge row while the pointer travels. Aim at its current bounds.
-  const current = await destination.boundingBox();
-  if (!current) throw new Error("Drop target is not visible");
-  await page.mouse.move(
-    current.x + current.width / 2,
-    current.y + current.height / 2,
-    { steps: 3 },
   );
   if ((await zone.count()) || (await target.getAttribute("role")) === "region")
     await expect(destination).toHaveClass(/is-over/);

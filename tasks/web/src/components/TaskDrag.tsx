@@ -14,7 +14,12 @@ import {
   useDraggable,
   useDroppable,
 } from "@dnd-kit/react";
-import { PointerActivationConstraints } from "@dnd-kit/dom";
+import { Plugin } from "@dnd-kit/abstract";
+import {
+  AutoScroller,
+  PointerActivationConstraints,
+  type DragDropManager,
+} from "@dnd-kit/dom";
 import { pointerIntersection } from "@dnd-kit/collision";
 import { spokenDrags } from "@ziyixi/planning-ui/drag-announcements";
 import { Circle, CornerDownRight } from "lucide-react";
@@ -22,15 +27,59 @@ import { describeError, type Task } from "../api";
 import type { TaskDrop, TaskDropPosition, TaskDropTarget } from "../task-drag";
 import "./task-drag.css";
 
-const plugins = spokenDrags("en", (data, as) => {
-  if (!data) return;
-  const { task, drop } = data as { task?: Task; drop?: TaskDrop };
-  if (as === "source") return task?.title;
-  if (drop?.kind === "row")
-    return `${drop.position === "inside" ? "Under" : drop.position} ${drop.task.title}`;
-  if (drop?.kind === "detach") return "Independent task";
-  if (drop?.kind === "category") return drop.target.page;
-});
+/**
+ * dnd-kit re-measures a drop target that scrolls under the pointer, but publishes the new collision
+ * only once the pointer moves again: after the sidebar scrolled under a still pointer, the old
+ * target stayed lit and took the drop. Re-detect whenever a target is measured. No drop highlight
+ * here changes layout, so a re-detection cannot move a target and loop.
+ */
+class MeasuredTargets extends Plugin<DragDropManager> {
+  constructor(manager: DragDropManager) {
+    super(manager);
+    this.registerEffect(() => {
+      if (!manager.dragOperation.status.dragging) return;
+      for (const droppable of manager.registry.droppables.value)
+        void droppable.shape;
+      manager.collisionObserver.forceUpdate();
+    });
+  }
+}
+
+/**
+ * dnd-kit auto-scrolls a container while the pointer is in its outer fifth. In the sidebar that is
+ * its last few visible links: the one aimed at scrolled away and the drop missed. So the sidebar
+ * holds still under a drag; a wheel scroll reaches a link out of view. The task list still
+ * auto-scrolls.
+ */
+class StillSidebar extends Plugin<DragDropManager> {
+  constructor(manager: DragDropManager) {
+    super(manager);
+    const autoScroller = manager.registry.plugins.get(AutoScroller);
+    this.registerEffect(() => {
+      const { x, y } = manager.dragOperation.position.current;
+      if (
+        manager.dragOperation.status.dragging &&
+        document.elementFromPoint(x, y)?.closest(".sidebar")
+      )
+        autoScroller?.disable();
+      else autoScroller?.enable();
+    });
+  }
+}
+
+const plugins = [
+  ...spokenDrags("en", (data, as) => {
+    if (!data) return;
+    const { task, drop } = data as { task?: Task; drop?: TaskDrop };
+    if (as === "source") return task?.title;
+    if (drop?.kind === "row")
+      return `${drop.position === "inside" ? "Under" : drop.position} ${drop.task.title}`;
+    if (drop?.kind === "detach") return "Independent task";
+    if (drop?.kind === "category") return drop.target.page;
+  }),
+  MeasuredTargets,
+  StillSidebar,
+];
 
 const sensors = [
   PointerSensor.configure({

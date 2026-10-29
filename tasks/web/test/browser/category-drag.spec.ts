@@ -1,5 +1,11 @@
-import { dragTask } from "./drag";
-import { expect, test, type APIRequestContext } from "@playwright/test";
+import { beginTaskDrag, dragTask } from "./drag";
+import {
+  expect,
+  test,
+  type APIRequestContext,
+  type Locator,
+  type Page,
+} from "@playwright/test";
 import { reachesTodofy } from "./planning-stub";
 
 async function writer(request: APIRequestContext) {
@@ -19,6 +25,19 @@ async function writer(request: APIRequestContext) {
       title: string;
     }>;
   };
+}
+
+async function bounds(link: Locator) {
+  const box = await link.boundingBox();
+  if (!box) throw new Error("Sidebar link is not visible");
+  return box;
+}
+
+/** Moves a dragged task onto a sidebar link where it is, without dropTaskOn's centring. */
+async function hoverLink(page: Page, link: Locator) {
+  const { x, y, width, height } = await bounds(link);
+  await page.mouse.move(x + width / 2, y + height / 2, { steps: 8 });
+  await expect(link).toHaveAttribute("data-task-drop", "true");
 }
 
 test("sidebar drops move a subtask family, add a label and schedule Today without changing its deadline", async ({
@@ -133,6 +152,102 @@ test("sidebar drops move a subtask family, add a label and schedule Today withou
   ).json();
   expect(descendant.project_id || "").toBe("");
   expect(descendant.parent_id).toBe(child.id);
+});
+
+test("a sidebar link wheel-scrolled under a still pointer lights and takes the drop", async ({
+  page,
+  request,
+}) => {
+  const write = await writer(request);
+  const suffix = crypto.randomUUID();
+  const source = await write("projects", {
+    title: `Synthetic source ${suffix}`,
+  });
+  // Sort orders no other project has keep the two links adjacent, upper first.
+  const sortOrder = Math.random();
+  const upper = await write("projects", {
+    title: `Synthetic upper ${suffix}`,
+    sort_order: sortOrder,
+  });
+  const lower = await write("projects", {
+    title: `Synthetic lower ${suffix}`,
+    sort_order: sortOrder + 1e-9,
+  });
+  const task = await write("tasks", {
+    title: `Synthetic wheeled ${suffix}`,
+    project_id: source.id,
+  });
+  await page.goto(`/#/project/${source.id}`);
+  const link = (project: { title: string }) =>
+    page.getByRole("link", { name: project.title, exact: true });
+  await beginTaskDrag(page, page.getByText(task.title, { exact: true }));
+  await link(lower).evaluate((e) => e.scrollIntoView({ block: "center" }));
+  await hoverLink(page, link(lower));
+  // The wheel brings the upper link under the pointer, which does not move.
+  const rise = (await bounds(link(upper))).y - (await bounds(link(lower))).y;
+  await page.mouse.wheel(0, rise);
+  await expect(link(upper)).toHaveAttribute("data-task-drop", "true");
+  await expect(link(lower)).not.toHaveAttribute("data-task-drop");
+  await page.mouse.up();
+  await expect
+    .poll(
+      async () =>
+        (await (await request.get(`/api/tasks/v1/tasks/${task.id}`)).json())
+          .project_id,
+    )
+    .toBe(upper.id);
+});
+
+test("a sidebar link in the bottom fifth holds still under the pointer and takes the drop", async ({
+  page,
+  request,
+}) => {
+  const write = await writer(request);
+  const suffix = crypto.randomUUID();
+  const source = await write("projects", {
+    title: `Synthetic source ${suffix}`,
+  });
+  const destination = await write("projects", {
+    title: `Synthetic low ${suffix}`,
+  });
+  const task = await write("tasks", {
+    title: `Synthetic dropped low ${suffix}`,
+    project_id: source.id,
+  });
+  await page.goto(`/#/project/${source.id}`);
+  const link = page.getByRole("link", { name: destination.title, exact: true });
+  const sidebar = page.locator(".sidebar");
+  // Where dnd-kit auto-scrolls a container: wholly visible in its bottom fifth, with more below.
+  const placed = await link.evaluate((e) => {
+    const sidebar = e.closest(".sidebar")!;
+    const box = sidebar.getBoundingClientRect();
+    sidebar.scrollTop += e.getBoundingClientRect().bottom - box.bottom + 4;
+    const rect = e.getBoundingClientRect();
+    return {
+      inBand:
+        rect.top >= box.bottom - box.height / 5 && rect.bottom <= box.bottom,
+      below: sidebar.scrollTop + sidebar.clientHeight < sidebar.scrollHeight,
+      scrollTop: sidebar.scrollTop,
+    };
+  });
+  expect(placed).toMatchObject({ inBand: true, below: true });
+  await beginTaskDrag(page, page.getByText(task.title, { exact: true }));
+  await hoverLink(page, link);
+  // Auto-scroll moves a container every frame: after ten, the sidebar has held still.
+  await page.evaluate(async () => {
+    for (let frame = 0; frame < 10; frame++)
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+  });
+  expect(await sidebar.evaluate((e) => e.scrollTop)).toBe(placed.scrollTop);
+  await expect(link).toHaveAttribute("data-task-drop", "true");
+  await page.mouse.up();
+  await expect
+    .poll(
+      async () =>
+        (await (await request.get(`/api/tasks/v1/tasks/${task.id}`)).json())
+          .project_id,
+    )
+    .toBe(destination.id);
 });
 
 test("planning tags come with the rows, each task's own, and never masquerade as labels", async ({

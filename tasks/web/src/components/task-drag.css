@@ -29,6 +29,7 @@
   bottom: 0;
   height: 25%;
 }
+/* Drop highlights must not change layout: TaskDrag re-detects targets whenever one moves. */
 .task-drop-zone.drop-before.is-over::before,
 .task-drop-zone.drop-after.is-over::after {
   content: "";
