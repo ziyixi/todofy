@@ -61,7 +61,7 @@ admission until it reports ready):
 3. Verify read-only: config-sync status shows this revision active and no pin; the next run's selection succeeds and
    its issue is accepted. Then move this section to the dated history.
 
-### Newsletter console (`claude/nl-console`, slices S1-S7; S2 and S3 released with this merge)
+### Newsletter console (`claude/nl-console`, slices S1-S7; S1, S2 and S3 released)
 
 Owner request 2026-10-29: a self-consistent Newsletter dashboard with each issue's full content, sources, model calls,
 runs and failures, deliveries, config revision and Notion status, where Notion is shown only as an async backup of
@@ -77,9 +77,12 @@ token or owner step exists; the Worker's owner identity is Home's (`identity_fro
   config), output changes 1 (`access_aud`), then "Infra apply" with that line; the verify plan is no-op. An anonymous
   request to the runtime path is redirected to Access; the Codex path and the daemon route are unchanged. The path
   answers an error after Access until S4's listener exists.
-- Next: S1 (engine observability gaps: per-call times, purpose, failure and Router request names; per-source feed
-  counts; Notion progress time) and S4 (the listener) release the Newsletter image after a 07:00 Los Angeles run has
-  finished; S5 deploys the console (probe that Access accepts the forwarded token for the second destination); S6
+- S1 (engine observability gaps: per-call times, purpose, failure and Router request names; per-source feed counts;
+  Notion progress time) released on 2026-10-29 after that day's run had finished; it releases the Newsletter and
+  Platform images through the paired VPS release. Old usage rows keep their totals; the email bytes are unchanged.
+  Verify after the next run: its collection and usage rows carry the new keys, and Notion rows get `progress_at`.
+- Next: "Infra apply" above (still pending), then S4 (the listener; the image bakes the console AUD, so S4, S5 and the
+  first-deploy commit land together after a 07:00 Los Angeles run has finished); S5 deploys the console (probe that Access accepts the forwarded token for the second destination); S6
   adds the remaining pages; S7 aligns Home and Fleet (engine row 「Newsletter 引擎」, no 「写入 Notion」 stage, links to the
   console) on top of the Newsletter config views already there.
 
