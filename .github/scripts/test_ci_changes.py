@@ -16,6 +16,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+import unittest.mock
 import zipfile
 from pathlib import Path
 
@@ -3066,27 +3067,32 @@ ENV = {"GITHUB_REPOSITORY": REPOSITORY, "GITHUB_RUN_ID": RUN_ID, "GH_TOKEN": "un
 
 
 def main_github(green, others=None):
-    """A fake GitHub for main(): `green` is the one commit whose push run on main succeeded (none when empty). Every
-    other read goes to `others`, by default a GitHub without a branch run of this commit to reuse."""
+    """A fake GitHub for main(): `green` is the commit (or a tuple of the commits) whose push run on main succeeded
+    (none when empty); `get.read` lists the commits whose main runs were read, in order. Every other read goes to
+    `others`, by default a GitHub without a branch run of this commit to reuse."""
+    greens = {green} if isinstance(green, str) else set(green)
 
     def get(path):
         if path == f"/repos/{REPOSITORY}/actions/runs/{RUN_ID}":
             return {"id": int(RUN_ID), "workflow_id": WORKFLOW_ID}
         runs = f"/repos/{REPOSITORY}/actions/workflows/{WORKFLOW_ID}/runs?"
         if path.startswith(runs) and "branch=main" in path:
-            found = bool(green) and f"head_sha={green}" in path
-            return {"workflow_runs": [{"head_sha": green, "conclusion": "success"}] if found else []}
+            commit = ci_changes.urllib.parse.parse_qs(path.split("?", 1)[1])["head_sha"][0]
+            get.read.append(commit)
+            return {"workflow_runs": [{"head_sha": commit, "conclusion": "success"}] if commit in greens else []}
         if others:
             return others(path)
         if path.startswith(runs):
             return {"workflow_runs": []}
         raise AssertionError(f"unexpected read {path}")
 
+    get.read = []
     return get
 
 
 class LastSuccess(unittest.TestCase):
-    """The diff base of a push to main: the newest earlier first-parent commit whose push run on main succeeded."""
+    """The diff base of a push to main: the newest earlier commit, through every parent, whose push run on main
+    succeeded."""
 
     def listing(self, runs_by_commit, workflow_id=WORKFLOW_ID, fail=()):
         calls = []
@@ -3140,6 +3146,90 @@ class LastSuccess(unittest.TestCase):
 
         self.assertEqual(ci_changes.find_last_success("HEAD", ENV, broken), "")
         self.assertEqual(ci_changes.find_last_success("HEAD", {}, None), "")
+
+
+class LastSuccessRealGit(unittest.TestCase):
+    """main()'s diff base in a real history. A landing merges main into its branch (the branch stays the first parent)
+    and fast-forwards main to the result, so the previous main head is only on a second parent."""
+
+    git, commit, run_main, setUp, tearDown = RealGit.git, RealGit.commit, RealGit.run_main, RealGit.setUp, RealGit.tearDown
+
+    def merge(self, other):
+        self.git("-c", "user.name=ci", "-c", "user.email=ci@example.org", "merge", "-q", "--no-ff", "--no-edit", other)
+        return self.git("rev-parse", "HEAD")
+
+    def push(self, after, *green):
+        """main()'s outputs for a push of `after` to main when exactly the `green` commits had a successful push run on
+        main, and the commits whose runs it read."""
+        get = main_github(green)
+        outputs = self.run_main(get, **dict(ENV, EVENT_NAME="push", REF=MAIN, AFTER=after, DISPATCH_APP=""))
+        return outputs, get.read
+
+    def test_a_landing_that_merged_main_into_its_branch_diffs_from_the_previous_main_head(self):
+        # a and x are green main heads. The branch forked at a; x landed meanwhile (a Todofy change its run deployed).
+        a = self.commit("README.md")
+        self.git("checkout", "-qb", "feature")
+        self.commit("mail-hero/web/b1.tsx")
+        self.commit("mail-hero/web/b2.tsx")
+        self.git("checkout", "-q", "-")
+        x = self.commit("todofy/worker/x.py")
+        self.git("checkout", "-q", "feature")
+        merged = self.merge(x)
+        tip = self.commit("mail-hero/web/t.tsx")
+        # Main's first-parent line runs through the branch back to a and skips x (26dab066, 2026-10-29).
+        self.assertNotIn(x, self.git("rev-list", "--first-parent", tip).split())
+        for after in (tip, merged):  # the merge itself may be the landed tip
+            with self.subTest(after=after):
+                outputs, _ = self.push(after, a, x)
+                self.assertEqual(outputs["base"], x)
+                self.assertEqual((outputs["todofy_check"], outputs["todofy_deploy"]), ("false", "false"))
+                self.assertEqual((outputs["mail_hero_check"], outputs["mail_hero_deploy"]), ("true", "true"))
+
+    def test_a_pull_request_merge_still_diffs_from_the_previous_main_head(self):
+        a = self.commit("README.md")
+        self.git("checkout", "-qb", "feature")
+        self.commit("mail-hero/web/b1.tsx")
+        self.git("checkout", "-q", "-")
+        x = self.commit("todofy/worker/x.py")
+        merged = self.merge("feature")  # main stays the first parent
+        outputs, read = self.push(merged, a, x)
+        self.assertEqual((outputs["base"], read[0]), (x, x))
+        self.assertEqual((outputs["todofy_deploy"], outputs["mail_hero_deploy"]), ("false", "true"))
+
+    def test_a_main_head_dated_before_its_parent_still_comes_first(self):
+        # x's clock ran behind: it is dated before a, which it contains, and before the branch. By date alone a
+        # would be read first; git's --date-order never lists a commit before its descendants.
+        a = self.commit("README.md")
+        self.git("checkout", "-qb", "feature")
+        self.commit("mail-hero/web/b1.tsx")
+        self.git("checkout", "-q", "-")
+        with unittest.mock.patch.dict(os.environ, GIT_COMMITTER_DATE="2001-01-01T00:00:00Z"):
+            x = self.commit("todofy/worker/x.py")
+        self.git("checkout", "-q", "feature")
+        merged = self.merge(x)
+        self.assertEqual(self.git("rev-list", f"{merged}^@").split()[-1], x)
+        self.assertEqual(self.push(merged, a, x)[0]["base"], x)
+
+    def test_no_green_commit_in_the_history_runs_everything(self):
+        everything = {key: str(value).lower() for key, value in ci_changes.everything().items()}
+        root = self.commit("README.md")
+        # The first commit has no history; a push's own run is never its base.
+        outputs, read = self.push(root, root)
+        self.assertEqual(({key: outputs[key] for key in ci_changes.KEYS}, outputs["base"], read), (everything, "", []))
+        # A green head this push does not contain (main was rewound to before it) is no base either.
+        self.git("checkout", "-qb", "abandoned")
+        abandoned = self.commit("todofy/worker/gone.py")
+        self.git("checkout", "-q", "-")
+        after = self.commit("mail-hero/web/e.tsx")
+        outputs, read = self.push(after, abandoned)
+        self.assertEqual(({key: outputs[key] for key in ci_changes.KEYS}, outputs["base"], read), (everything, "", [root]))
+
+    def test_the_search_reads_at_most_max_base_candidates_commits(self):
+        green = self.commit("README.md")
+        newer = [self.commit(f"mail-hero/web/{index}.tsx") for index in range(3)]
+        with unittest.mock.patch.object(ci_changes, "MAX_BASE_CANDIDATES", 2):
+            outputs, read = self.push(newer[-1], green)
+        self.assertEqual((outputs["base"], read), ("", [newer[1], newer[0]]))
 
 
 class Reuse(unittest.TestCase):

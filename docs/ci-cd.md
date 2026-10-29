@@ -121,9 +121,11 @@ it, so Home deploys as usual. recall left the set with its go-live commit (2026-
 | `VPS deploy` | After both image publications and the gate, when `VPS_DEPLOY_ENABLED=true`: call the daemon's shared-proto release API and verify the durable result and fresh physical provenance. See the VPS section below. |
 | `Codex gateway deploy` | After its image publication and any selected Fleet release, use one gateway target through the existing daemon API. Router waits for this executor release; the paired VPS/Newsletter release then waits for Router, so their rollouts stay ordered and do not overlap. A selected gateway release that does not succeed (with `VPS_DEPLOY_ENABLED=true`) stops Router, and a selected Router release that does not succeed stops Todofy, Mailsort, Home and the paired VPS release (and through Todofy, Tasks, Watch and Personal MCP); only an unselected one may be skipped. Verify baked source, startup identity, digest and generation; retain Newsletter admission and trigger state. The gateway releases before the paired VPS release updates the Platform renderer: when a diff changes the gateway's rendered resources or that renderer, dispatch `app=codex-gateway` once after the paired release (reconcile's plan reports the leftover difference until then). |
 
-On main, the diff base is the last successful push run of this workflow; failed/cancelled releases do not
-lose their changes. Branch checks compare with the merge base against `origin/main`. No usable base runs
-all checks and computes all releases, subject to bootstrap freezes and production enablement gates.
+On main, the diff base is the last successful push run of this workflow: the newest earlier commit, through
+every parent, whose push run succeeded (a landing that merged main into its branch still diffs from the
+last green main head, not from the branch's fork point). Failed/cancelled releases do not lose their changes.
+Branch checks compare with the merge base against `origin/main`. No usable base runs all checks and computes
+all releases, subject to bootstrap freezes and production enablement gates.
 The first full run does not override those gates.
 
 Main may reuse a green branch push run of the **same SHA** only when `Changes`, `CI gate` and every needed

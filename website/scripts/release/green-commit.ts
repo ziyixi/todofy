@@ -16,8 +16,8 @@ import { pathToFileURL } from "node:url";
 
 export const GATE_CHECK_NAME = "CI gate";
 export const CI_WORKFLOW_PATH = ".github/workflows/ci.yml";
-/** How many first-parent commits of main are searched for a passed gate. */
-export const MAX_CANDIDATES = 50;
+/** How many commits of main (mainCandidates, every merged branch's commits included) are searched. */
+export const MAX_CANDIDATES = 150;
 
 export interface GreenCommitOptions {
   apiUrl: string;
@@ -105,11 +105,14 @@ export async function newestGreenCommit(
   );
 }
 
-/** The first-parent history of the checked-out main, newest first. */
+/**
+ * The history of the checked-out main through every parent, newest first (a landing keeps the earlier
+ * main heads on second parents). --date-order lists no commit before its descendants.
+ */
 export function mainCandidates(cwd: string): string[] {
   const output = execFileSync(
     "git",
-    ["rev-list", "--first-parent", `--max-count=${MAX_CANDIDATES}`, "HEAD"],
+    ["rev-list", "--date-order", `--max-count=${MAX_CANDIDATES}`, "HEAD"],
     { cwd, encoding: "utf8" },
   );
   return output.split("\n").filter((line) => SHA.test(line));

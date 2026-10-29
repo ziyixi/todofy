@@ -20,9 +20,13 @@ blank.
 
 ## Release stages
 
-The job checks out main inside the lock, then selects its newest first-parent commit with a successful
-main-push **CI gate**. Red, running and `[skip ci]` commits cannot be installed or built. If none of the
-newest 50 candidates is green, the job fails. `context` checks the pinned commit again.
+The job checks out main inside the lock, then selects the newest commit of its history with a successful
+main-push **CI gate**. The history runs through every parent (`git rev-list --date-order`, which lists no
+commit before its descendants): a landing that merged main into its branch keeps the earlier main heads on
+second parents, where a first-parent walk would miss them and fall back to the branch's fork point, which
+can be older than what production serves. Red, running and `[skip ci]` commits cannot be installed or
+built. If none of the newest 150 candidates is green, the job fails. `context` checks the pinned commit
+again.
 
 Each stage is one `pnpm release <command>`, run from `website/`:
 

@@ -1,7 +1,13 @@
+import { execFileSync } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
   MAX_CANDIDATES,
+  mainCandidates,
   newestGreenCommit,
   passedGate,
   type GreenCommitOptions,
@@ -108,4 +114,58 @@ describe("the commit a release builds", () => {
     await expect(passedGate({ ...options, token: "" }, A)).rejects.toThrow(/GITHUB_TOKEN/);
     await expect(passedGate(options, "HEAD")).rejects.toThrow(/40 lowercase/);
   });
+});
+
+/**
+ * A landing in a throwaway repository: main is a, then x (landed while the branch was open); the branch
+ * forked at a, merged x in (the branch stays the first parent) and main was fast-forwarded to its tip.
+ */
+async function landing(xCommitterDate?: string) {
+  const root = await mkdtemp(path.join(tmpdir(), "website-green-commit-"));
+  const git = (args: string[], env: Record<string, string> = {}) =>
+    execFileSync("git", ["-c", "user.name=ci", "-c", "user.email=ci@example.org", ...args], {
+      cwd: root,
+      encoding: "utf8",
+      env: { ...process.env, ...env },
+    }).trim();
+  const commit = async (name: string, env: Record<string, string> = {}) => {
+    await writeFile(path.join(root, name), name);
+    git(["add", "-A"]);
+    git(["commit", "-qm", name], env);
+    return git(["rev-parse", "HEAD"]);
+  };
+  git(["init", "-q"]);
+  const a = await commit("a");
+  git(["checkout", "-qb", "feature"]);
+  await commit("b1");
+  git(["checkout", "-q", "-"]);
+  const x = await commit("x", xCommitterDate ? { GIT_COMMITTER_DATE: xCommitterDate } : {});
+  git(["checkout", "-q", "feature"]);
+  git(["merge", "-q", "--no-ff", "--no-edit", x]);
+  const tip = await commit("t");
+  return { root, a, x, tip, firstParents: git(["rev-list", "--first-parent", tip]).split("\n") };
+}
+
+describe("the candidates of main", () => {
+  for (const [name, date] of [
+    ["a landing that merged main into its branch", undefined],
+    ["the same landing with x dated before a (a clock that ran behind)", "2001-01-01T00:00:00Z"],
+  ] as const) {
+    it(`release the previous main head after ${name}, not the branch's fork point`, async () => {
+      const { root, a, x, tip, firstParents } = await landing(date);
+      try {
+        expect(firstParents).not.toContain(x);
+        const candidates = mainCandidates(root);
+        expect(candidates[0]).toBe(tip);
+        // The tip's CI is still running; a and x passed the gate.
+        const { options } = github([
+          { sha: a, runId: 1 },
+          { sha: x, runId: 2 },
+        ]);
+        await expect(newestGreenCommit(options, candidates)).resolves.toBe(x);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+  }
 });
