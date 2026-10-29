@@ -16,6 +16,7 @@ import {
 } from "@dnd-kit/react";
 import { Plugin } from "@dnd-kit/abstract";
 import {
+  AutoScroller,
   PointerActivationConstraints,
   type DragDropManager,
 } from "@dnd-kit/dom";
@@ -44,6 +45,28 @@ class MeasuredTargets extends Plugin<DragDropManager> {
   }
 }
 
+/**
+ * dnd-kit auto-scrolls a container while the pointer is in its outer fifth. In the sidebar that is
+ * its last few visible links: the one aimed at scrolled away and the drop missed. So the sidebar
+ * holds still under a drag; a wheel scroll reaches a link out of view. The task list still
+ * auto-scrolls.
+ */
+class StillSidebar extends Plugin<DragDropManager> {
+  constructor(manager: DragDropManager) {
+    super(manager);
+    const autoScroller = manager.registry.plugins.get(AutoScroller);
+    this.registerEffect(() => {
+      const { x, y } = manager.dragOperation.position.current;
+      if (
+        manager.dragOperation.status.dragging &&
+        document.elementFromPoint(x, y)?.closest(".sidebar")
+      )
+        autoScroller?.disable();
+      else autoScroller?.enable();
+    });
+  }
+}
+
 const plugins = [
   ...spokenDrags("en", (data, as) => {
     if (!data) return;
@@ -55,6 +78,7 @@ const plugins = [
     if (drop?.kind === "category") return drop.target.page;
   }),
   MeasuredTargets,
+  StillSidebar,
 ];
 
 const sensors = [

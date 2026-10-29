@@ -198,6 +198,58 @@ test("a sidebar link wheel-scrolled under a still pointer lights and takes the d
     .toBe(upper.id);
 });
 
+test("a sidebar link in the bottom fifth holds still under the pointer and takes the drop", async ({
+  page,
+  request,
+}) => {
+  const write = await writer(request);
+  const suffix = crypto.randomUUID();
+  const source = await write("projects", {
+    title: `Synthetic source ${suffix}`,
+  });
+  const destination = await write("projects", {
+    title: `Synthetic low ${suffix}`,
+  });
+  const task = await write("tasks", {
+    title: `Synthetic dropped low ${suffix}`,
+    project_id: source.id,
+  });
+  await page.goto(`/#/project/${source.id}`);
+  const link = page.getByRole("link", { name: destination.title, exact: true });
+  const sidebar = page.locator(".sidebar");
+  // Where dnd-kit auto-scrolls a container: wholly visible in its bottom fifth, with more below.
+  const placed = await link.evaluate((e) => {
+    const sidebar = e.closest(".sidebar")!;
+    const box = sidebar.getBoundingClientRect();
+    sidebar.scrollTop += e.getBoundingClientRect().bottom - box.bottom + 4;
+    const rect = e.getBoundingClientRect();
+    return {
+      inBand:
+        rect.top >= box.bottom - box.height / 5 && rect.bottom <= box.bottom,
+      below: sidebar.scrollTop + sidebar.clientHeight < sidebar.scrollHeight,
+      scrollTop: sidebar.scrollTop,
+    };
+  });
+  expect(placed).toMatchObject({ inBand: true, below: true });
+  await beginTaskDrag(page, page.getByText(task.title, { exact: true }));
+  await hoverLink(page, link);
+  // Auto-scroll moves a container every frame: after ten, the sidebar has held still.
+  await page.evaluate(async () => {
+    for (let frame = 0; frame < 10; frame++)
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+  });
+  expect(await sidebar.evaluate((e) => e.scrollTop)).toBe(placed.scrollTop);
+  await expect(link).toHaveAttribute("data-task-drop", "true");
+  await page.mouse.up();
+  await expect
+    .poll(
+      async () =>
+        (await (await request.get(`/api/tasks/v1/tasks/${task.id}`)).json())
+          .project_id,
+    )
+    .toBe(destination.id);
+});
+
 test("planning tags come with the rows, each task's own, and never masquerade as labels", async ({
   page,
   request,

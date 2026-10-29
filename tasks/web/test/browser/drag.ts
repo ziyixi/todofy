@@ -36,8 +36,8 @@ export async function dropTaskOn(
   target: Locator,
   position: "before" | "inside" | "after" = "before",
 ) {
-  // dnd-kit auto-scrolls a container while the pointer is in its outer fifth. A target left near
-  // an edge (a visible one is not scrolled at all) scrolls away under the pointer, so centre it.
+  // dnd-kit auto-scrolls the task list while the pointer is in its outer fifth, which carries a
+  // target there away from the pointer. Centre the target, even a fully visible one.
   await target.evaluate((e) =>
     e.scrollIntoView({ block: "center", inline: "nearest" }),
   );
