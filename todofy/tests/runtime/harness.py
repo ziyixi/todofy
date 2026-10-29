@@ -350,6 +350,8 @@ class Worker:
                     # A private dev registry: the gateway's todofy-core binding must never reach
                     # another test server's core (or a missing core must stay missing).
                     "WRANGLER_REGISTRY_PATH": str(self.persist_to / "registry"),
+                    # The Local Explorer that Worker.d1 queries through: on by default, stated so it stays on.
+                    "X_LOCAL_EXPLORER": "true",
                 },
             )
         self.base_url = f"http://127.0.0.1:{port}"
@@ -421,6 +423,7 @@ class Worker:
         """
         database, _ = _d1_database(self.d1_config)
         self.refresh_proxy()  # a POST wrangler's proxy would not resend (PROXY_IDLE_S)
+        # Not self.hooks or self.owner: miniflare answers /cdn-cgi/ requests for their Host headers with 403.
         response = httpx.post(
             f"{self.base_url}/cdn-cgi/local/explorer/api/d1/database/{database['database_id']}/raw",
             json={"sql": sql},
