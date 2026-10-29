@@ -1631,9 +1631,8 @@ class DeployConditions(unittest.TestCase):
     """
 
     # (job, need) pairs where "skipped" is as good as "success": the dashboard deploys after the app
-    # deploys (its service bindings need their Ops entrypoints), the watch app after Tasks' (its TASKS
-    # binding names Tasks' TaskInbox) and Tasks after Todofy's (its MAIL binding names Todofy's Mail entry),
-    # which do not run when nothing of that app changed.
+    # deploys (its service bindings need their Ops entrypoints), which do not run when nothing of that app
+    # changed and whose own failures stop the dashboard through its direct needs.
     SKIPPED_OK = {
         ("vps-deploy", "fleet-deploy"),
         ("codex-gateway-deploy", "fleet-deploy"),
@@ -1647,25 +1646,22 @@ class DeployConditions(unittest.TestCase):
         ("dashboard-deploy", "tasks-deploy"),
         ("dashboard-deploy", "personal-mcp-deploy"),
         ("dashboard-deploy", "website-relay-deploy"),
-        ("watch-deploy", "todofy-deploy"),
-        ("watch-deploy", "tasks-deploy"),
-        ("tasks-deploy", "todofy-deploy"),
-        ("personal-mcp-deploy", "tasks-deploy"),
-        ("personal-mcp-deploy", "todofy-deploy"),
         ("personal-mcp-deploy", "recall-deploy"),
-        ("personal-mcp-deploy", "watch-deploy"),
         # The console ships after a VPS release this run made (Newsletter answers its reads), or without one.
         ("newsletter-console-deploy", "vps-deploy"),
     }
 
-    # (job, need) pairs where the need may be skipped only when this run did not select it: a selected gateway or
-    # Router release that fails leaves the next job skipped, which must stop the jobs after it rather than let them ship.
-    # The bootstrap bundle carries the gateway image only when this run built it.
+    # (job, need) pairs where the need may be skipped only when this run did not select it: a selected gateway,
+    # Router, Todofy, Tasks or Watch release that fails leaves the next job skipped, which must stop the jobs after
+    # it rather than let them ship. The bootstrap bundle carries the gateway image only when this run built it.
     SELECTED_ONLY = {
         ("vps-bootstrap-bundle", "codex-gateway-image"): "needs.changes.outputs.codex_gateway_deploy != 'true'",
         ("model-router-deploy", "codex-gateway-deploy"): "needs.changes.outputs.codex_gateway_deploy != 'true' || vars.VPS_DEPLOY_ENABLED != 'true'",
         **{(job, "model-router-deploy"): "needs.changes.outputs.model_router_deploy != 'true'"
            for job in ("vps-deploy", "dashboard-deploy", "mailsort-deploy", "todofy-deploy")},
+        **{(job, need + "-deploy"): f"needs.changes.outputs.{need}_deploy != 'true'"
+           for job, need in (("tasks-deploy", "todofy"), ("watch-deploy", "tasks"), ("personal-mcp-deploy", "tasks"),
+                             ("personal-mcp-deploy", "todofy"), ("personal-mcp-deploy", "watch"))},
     }
 
     # Check jobs a deploy may also find skipped, but only when this push to main reuses a green branch run of
@@ -1831,8 +1827,8 @@ class DeployConditions(unittest.TestCase):
                     self.assertFalse({"--newsletter-image", "--platform-image", "--codex-gateway-image"} & set(arguments))
 
     def test_the_dashboard_deploys_after_the_apps_and_watch_after_tasks(self):
-        # Todofy too: a failed Todofy deploy leaves Tasks deploy skipped, which alone would let Watch ship.
-        self.assertLessEqual({"todofy-deploy", "tasks-deploy"}, set(self.needs(self.jobs()["watch-deploy"])))
+        # Tasks alone: a failed Todofy leaves a selected Tasks deploy skipped, which already stops Watch.
+        self.assertEqual(["tasks-deploy"], [need for need in self.needs(self.jobs()["watch-deploy"]) if need.endswith("-deploy")])
         block = self.jobs()["dashboard-deploy"]
         self.assertLessEqual({"todofy-deploy", "mail-hero-deploy", "links-deploy", "watch-deploy", "fleet-deploy", "mailsort-deploy", "recall-deploy"},
                              set(self.needs(block)))
