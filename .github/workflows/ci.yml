@@ -432,11 +432,52 @@ jobs:
         working-directory: recall/extension
         shell: bash -e {0}
         run: npm run build
+      # WebKit needs 181 Ubuntu packages this runner image lacks (GStreamer with its codecs, GTK 4, fonts): 114 MB of
+      # .debs. The Azure mirror sends them in about 13 s on most runs and at 40-350 kB/s on about one in twenty, which
+      # no bound on this step outlasts. So apt keeps its .debs in the Actions cache: a run restores the newest set saved
+      # on its branch or on main for this Playwright and runner image, and fetches only what Ubuntu has updated since.
+      # A run that restored nothing saves its set, and main also saves a set that changed, each 114 MB of the
+      # repository's cache and keyed by its files; a branch's first run before main has a set still fetches it all. A
+      # stalled restore gives up after a minute, as a miss. Playwright still chooses the packages, and apt still checks
+      # every .deb against Ubuntu's signed index.
+      - name: Read the locked Playwright version and the runner image
+        id: webkit-debs
+        working-directory: recall/extension
+        shell: bash -e {0}
+        run: |
+          version=$(npx --no-install playwright --version | awk '{print $2}')
+          echo "prefix=webkit-debs-$ImageOS-$version-" >> "$GITHUB_OUTPUT"
+      - name: Restore WebKit's system packages
+        id: webkit-debs-restore
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: 1
+        with:
+          path: ~/.cache/webkit-debs/*.deb
+          key: ${{ steps.webkit-debs.outputs.prefix }}
+          restore-keys: ${{ steps.webkit-debs.outputs.prefix }}
       - name: Install the pinned WebKit test browser
+        id: webkit-install
         working-directory: recall/extension
         timeout-minutes: 5
         shell: bash -e {0}
-        run: npx --no-install playwright install --with-deps webkit
+        env:
+          PREFIX: ${{ steps.webkit-debs.outputs.prefix }}
+        run: |
+          debs="$HOME/.cache/webkit-debs"
+          mkdir -p "$debs/partial"
+          echo "Dir::Cache::Archives \"$debs/\";" | sudo tee /etc/apt/apt.conf.d/99webkit-debs > /dev/null
+          npx --no-install playwright install --with-deps webkit
+          sudo apt-get autoclean
+          echo "key=$PREFIX$(cd "$debs" && ls *.deb | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+      - name: Keep WebKit's system packages
+        if: >-
+          steps.webkit-install.outputs.key != steps.webkit-debs-restore.outputs.cache-matched-key
+          && (steps.webkit-debs-restore.outputs.cache-matched-key == '' || github.ref == 'refs/heads/main')
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/webkit-debs/*.deb
+          key: ${{ steps.webkit-install.outputs.key }}
       - name: Test the actual Orion build in WebKit
         working-directory: recall/extension
         timeout-minutes: 5
