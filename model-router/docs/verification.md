@@ -2,7 +2,8 @@
 
 What was actually tested, by date. Acceptance uses synthetic inputs and the public `example.org` fixture. It
 reclassified no mail, recomputed no report, created no task, sent no newsletter and changed no business mode or
-budget. Provider keys are Router secrets; spending is capped at the provider. The run-by-run record this page
+existing business budget. Provider keys are Router secrets; spending controls are described in [design](design.md).
+The run-by-run record this page
 condenses is in the repository history at `4ed50919` (`docs/model-router-verification.md`).
 
 ## Initial rollout
@@ -42,6 +43,39 @@ Array-root output schemas are wrapped privately and unwrapped and validated on r
 request that failed before now succeeds; callers keep their provider-neutral contract. The gateway keeps typed SDK
 error categories and Router preserves safe upstream reasons; older generic failures were not relabelled.
 Evidence: [release of `129d5fe9`](https://github.com/ziyixi/todofy/actions/runs/40544317131).
+
+## OpenAI API and saved model choices
+
+2026-10-28 (Los Angeles). `b4990110` includes the owner's existing Newsletter changes and passed the
+[branch gate](https://github.com/ziyixi/todofy/actions/runs/40815827500),
+[main release](https://github.com/ziyixi/todofy/actions/runs/40817114662) and matching
+[Personal cloud reconcile](https://github.com/ziyixi/todofy/actions/runs/40818862546).
+
+The live owner Playground returned the exact synthetic JSON with an object Schema through all four direct API
+routes and the existing Codex subscription route. No real mail, report or newsletter was recomputed.
+
+| Router model | Billing | Input / output tokens | Estimate, USD |
+| --- | --- | --- | --- |
+| `openai/gpt-6.1-sol` | API | 56 / 20 | 0.000312 |
+| `openai/gpt-6-astra` | API | 57 / 21 | 0.001620 |
+| `openai/gpt-6.1-terra` | API | 57 / 21 | 0.000162 |
+| `openai/gpt-6-luna` | API | 57 / 21 | 0.000017 |
+| `gpt-6.1-sol` | Subscription reference | 8,801 / 23 | 0.017832, not an API charge |
+
+The four API estimates total 0.002111 USD. Sol's owner request detail separately showed the prefixed Router ID
+and the native reported model `gpt-6.1-sol`. Historical subscription rows display Codex without being rewritten.
+The production Mailsort and Todofy selectors both list separate Codex and OpenAI API choices. Read-only inspection
+confirmed the saved choices stayed Codex; Mailsort kept medium effort. Save/reload, worker restart and the next
+mail/report/recommendation using a newly selected API model were tested with synthetic workerd/SQLite fixtures,
+not by changing production business settings.
+
+OpenAI's UTC-month estimate stop reuses the request ledger. Workerd tests verify rejection before a provider call
+or request/body registration at the limit, admission below it, failed-call cost inclusion, month rollover and no
+effect on Codex or Claude. This is not a supplier invoice hard cap; unknown usage and in-flight requests can differ.
+No new dependency, queue, table or ordinary inference field was added.
+
+Home's fresh Cloudflare configuration check completed at 21:54 Los Angeles time with no configuration difference
+in any category. The prior cached Brief findings cleared through the check; alert dismissal was not used.
 
 ## Boundaries
 

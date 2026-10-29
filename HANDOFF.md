@@ -18,24 +18,6 @@ features, the FlowDay retirement), [October 20](docs/history/handoff-2026-10-20.
 
 ## Current work
 
-### OpenAI API and per-app model selection (`codex/router-openai-api`, in progress)
-
-Owner request 2026-10-28, based on `edce52cc`: distinguish the existing Codex subscription from a new direct
-OpenAI Responses API connection. Existing `gpt-6.1-sol` selections stay Codex; API choices use `openai/` model IDs.
-Provider keys stay in Router secrets. Todofy and Mailsort select a configured model from their own settings;
-changes persist without a release. Newsletter's Codex contexts and current application defaults stay as they are.
-
-- Implemented: stateless Responses calls, separate subscription/API identity and usage, Router console labels,
-  persisted Mailsort model/effort choices and provider-labelled Todofy choices. No dependency or inference field was
-  added. Credits and enforced supplier spend caps use `MODEL_SPEND_LIMIT`, separately from ordinary rate limits.
-  OpenAI also checks the existing UTC-month cost ledger against its configured estimate limit before a new call;
-  this does not reserve in-flight usage or claim a supplier invoice cap.
-- Local checks passed: Router provider/workerd and console suites, Mailsort unit/workerd/CPU/web/smoke checks,
-  Todofy saved model and synthetic email/report/recommendation scenarios, deployment-boundary tests and builds.
-- Integrated Claude's completed Brief retirement (`a7abdee0`); no source conflict, handoff sections retained by content.
-- Pending: branch CI, release through Actions and synthetic production
-  verification. Existing application defaults, modes and completed content are unchanged.
-
 ### Verify after the October 28 releases (read-only)
 
 The released notes are in the [October 28 archive](docs/history/handoff-2026-10-28.md).
@@ -80,10 +62,11 @@ admission until it reports ready):
 
 ## Latest verified release
 
-`129d5fe9`, Router cost visibility and recommendation array schemas:
-[main release](https://github.com/ziyixi/todofy/actions/runs/40544317131). Its matching Personal cloud reconcile
-passed with resolved drift, resource registration and VPS gates. Per-app identities are in GitHub production
-Deployments.
+`b4990110`, direct OpenAI API, separate Codex identity and persisted caller model selection:
+[main release](https://github.com/ziyixi/todofy/actions/runs/40817114662). Its matching Personal cloud reconcile
+passed with resolved drift, resource registration and VPS gates; Home's fresh configuration check reported no
+difference. [Verification](model-router/docs/verification.md#openai-api-and-saved-model-choices).
+Per-app identities are in GitHub production Deployments.
 
 ## Verify after deploy
 
