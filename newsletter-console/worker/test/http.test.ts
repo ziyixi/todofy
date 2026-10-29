@@ -1,7 +1,8 @@
 /**
  * The owner surface in Node with fake bindings: a synthetic Access issuer serves its keys through a stubbed fetch, so
- * the real edge-auth verifier runs. Every request needs the owner's login; reads only; every method of
- * newsletter.ui.v1 answers UNAVAILABLE/NOT_CONFIGURED until the transport to Newsletter exists.
+ * the real edge-auth verifier runs, and a fake Newsletter answers the forwarded reads. Every request needs the owner's
+ * login; reads only; every method of newsletter.ui.v1 is forwarded with the assertion that was verified, and nothing
+ * else.
  */
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../src/env.ts';
@@ -27,9 +28,14 @@ const ROUTES = [
   '/api/v1/backupStatus',
 ];
 
+const UPSTREAM = 'https://runtime.example.test';
+
 let issuer: TestIssuer;
 let certs: () => Response;
 const fetched: string[] = [];
+/** Reads that reached the fake Newsletter. */
+const forwarded: Request[] = [];
+let newsletter: (request: Request) => Response = () => new Response('{}', { headers: { 'content-type': 'application/json' } });
 
 beforeAll(async () => {
   issuer = await testIssuer();
@@ -41,7 +47,7 @@ function env(overrides: Partial<Record<keyof Env, unknown>> = {}): Env {
     PUBLIC_HOST: HOST,
     ACCESS_ISSUER: ISSUER,
     ACCESS_AUDIENCE: AUDIENCE,
-    NEWSLETTER_ORIGIN: 'https://runtime.example.test',
+    NEWSLETTER_ORIGIN: UPSTREAM,
     ACCESS_OWNER: 'owner@example.com',
     ACCESS_OWNER_ALIASES: ' ',
     ...overrides,
@@ -57,12 +63,22 @@ function assetFor(path: string): Response {
 
 function stubCerts(answer: () => Response = () => Response.json(issuer.jwks)): void {
   certs = answer;
+  forwarded.length = 0;
   vi.stubGlobal('fetch', (input: string | URL | Request) => {
     const url = input instanceof Request ? input.url : String(input);
     fetched.push(url);
     if (url === `${ISSUER}/cdn-cgi/access/certs`) return Promise.resolve(certs());
+    if (input instanceof Request && url.startsWith(`${UPSTREAM}/api/newsletter/v1/`)) {
+      forwarded.push(input);
+      return Promise.resolve(newsletter(input));
+    }
     return Promise.reject(new Error('unexpected network'));
   });
+}
+
+/** The fake Newsletter answers every read with `body` (200, JSON) until the next call. */
+function answerWith(body: string): void {
+  newsletter = () => new Response(body, { headers: { 'content-type': 'application/json' } });
 }
 
 async function token(email = 'owner@example.com', claims: Record<string, unknown> = {}): Promise<string> {
@@ -160,18 +176,74 @@ describe('authentication comes first', () => {
 });
 
 describe('the owner API', () => {
-  it('answers every method UNAVAILABLE with NOT_CONFIGURED until reads reach Newsletter', async () => {
+  it('forwards every method to Newsletter as a GET with the verified assertion only, and passes the answer through', async () => {
     stubCerts();
+    const body = '{"name":"overview","time_zone":"America/Los_Angeles","title":"合成"}';
+    answerWith(body);
     for (const path of ROUTES) {
-      const response = await call(path);
-      expect(response.status, path).toBe(503);
+      const assertion = await token();
+      const response = await call(path, { token: assertion, headers: { cookie: 'CF_Authorization=another-login; other=value', origin: 'https://evil.example.test' } });
+      expect(response.status, path).toBe(200);
       expect(response.headers.get('content-type'), path).toMatch(/^application\/json/);
-      expect(await reason(response), path).toBe('NOT_CONFIGURED');
+      expect(await response.text(), path).toBe(body);
+      expectPrivate(response);
+      const sent = forwarded.at(-1);
+      expect(sent?.url, path).toBe(`${UPSTREAM}${path.replace('/api/v1/', '/api/newsletter/v1/')}`);
+      expect(sent?.method, path).toBe('GET');
+      expect(sent?.redirect, path).toBe('manual');
+      // The header edge-auth read wins over the cookie, as it did for the verification; nothing else crosses.
+      expect([...(sent?.headers.entries() ?? [])].sort(), path).toEqual([['accept', 'application/json'], ['cf-access-token', assertion]]);
+    }
+    expect(forwarded).toHaveLength(ROUTES.length);
+  });
+
+  it('forwards the login from the Access cookie when the header is absent or empty, the last cookie as verified', async () => {
+    stubCerts();
+    const first = await token();
+    const last = await token('owner@example.com', { iat: Math.floor(Date.now() / 1000) - 5 });
+    for (const headers of [{ cookie: `CF_Authorization=${last}` }, { cookie: `CF_Authorization=${first}; CF_Authorization=${last}`, 'cf-access-jwt-assertion': '' }]) {
+      const response = await handleRequest(new Request(`https://${HOST}/api/v1/overview`, { headers }), env());
+      expect(response.status).toBe(200);
+      expect(forwarded.at(-1)?.headers.get('cf-access-token')).toBe(last);
+    }
+  });
+
+  it('answers HEAD from a forwarded GET without the body', async () => {
+    stubCerts();
+    answerWith('{"name":"overview"}');
+    const head = await call('/api/v1/overview', { method: 'HEAD' });
+    expect(head.status).toBe(200);
+    expect(await head.text()).toBe('');
+    expect(forwarded.at(-1)?.method).toBe('GET');
+  });
+
+  it("maps Newsletter's answers to the console's own Status, never echoing them", async () => {
+    stubCerts();
+    for (const [status, httpStatus, reasonCode] of [[404, 404, 'NOT_FOUND'], [400, 400, 'BAD_REQUEST'], [403, 503, 'UNAVAILABLE'], [302, 503, 'UNAVAILABLE'], [500, 503, 'UNAVAILABLE']] as const) {
+      newsletter = () => new Response('{"secret":"upstream-detail"}', { status, headers: { 'content-type': 'application/json', location: 'https://login.example.test/' } });
+      const response = await call('/api/v1/runs/run-1');
+      expect(response.status, String(status)).toBe(httpStatus);
+      const text = await response.text();
+      expect(text, String(status)).not.toContain('upstream-detail');
+      expect(response.headers.get('location'), String(status)).toBeNull();
+      expect((JSON.parse(text) as { error: { details: { reason?: string }[] } }).error.details.find((d) => d.reason)?.reason).toBe(reasonCode);
       expectPrivate(response);
     }
-    const head = await call('/api/v1/overview', { method: 'HEAD' });
-    expect(head.status).toBe(503);
-    expect(await head.text()).toBe('');
+  });
+
+  it('is NOT_CONFIGURED without a usable Newsletter origin, sending nothing', async () => {
+    stubCerts();
+    const response = await call('/api/v1/overview', {}, env({ NEWSLETTER_ORIGIN: 'http://runtime.example.test' }));
+    expect([response.status, await reason(response)]).toEqual([503, 'NOT_CONFIGURED']);
+    expect(forwarded).toEqual([]);
+  });
+
+  it('forwards nothing under the local development bypass, which has no assertion to send', async () => {
+    stubCerts();
+    fetched.length = 0;
+    const local = await handleRequest(new Request('http://127.0.0.1:8796/api/v1/overview'), env({ DEV_AUTH_BYPASS: 'true' }));
+    expect([local.status, await reason(local)]).toEqual([503, 'NOT_CONFIGURED']);
+    expect(fetched).toEqual([]);
   });
 
   it('admits reads only, answering anything else METHOD_NOT_ALLOWED on the API and the UI alike', async () => {
@@ -193,18 +265,22 @@ describe('the owner API', () => {
     expect((await call('/api/newsletter/v1/overview')).status).toBe(404);
     const bad = await call('/api/v1/runs?page_size=many');
     expect([bad.status, await reason(bad)]).toEqual([400, 'BAD_REQUEST']);
+    const unknown = await call('/api/v1/runs?filter=x');
+    expect([unknown.status, await reason(unknown)]).toEqual([400, 'BAD_REQUEST']);
+    expect(forwarded).toEqual([]);
   });
 
-  it('logs the request ID, method, status class and duration only', async () => {
+  it('logs the request ID, method, status classes and duration only', async () => {
     stubCerts();
+    newsletter = () => new Response('{"secret":"run-secret-id"}', { status: 503 });
     const lines: string[] = [];
     vi.spyOn(console, 'log').mockImplementation((line: string) => { lines.push(line); });
     const assertion = await token();
     await call('/api/v1/runs/run-secret-id/modelCalls?page_size=7', { token: assertion });
     expect(lines).toHaveLength(1);
     const entry = JSON.parse(lines[0] ?? '{}') as Record<string, unknown>;
-    expect(Object.keys(entry).sort()).toEqual(['event', 'ms', 'request_id', 'rpc', 'status_class']);
-    expect(entry).toMatchObject({ event: 'newsletter_console_request', rpc: 'ListModelCalls', status_class: '5xx' });
+    expect(Object.keys(entry).sort()).toEqual(['event', 'ms', 'request_id', 'rpc', 'status_class', 'upstream']);
+    expect(entry).toMatchObject({ event: 'newsletter_console_request', rpc: 'ListModelCalls', status_class: '5xx', upstream: '5xx' });
     for (const secret of ['run-secret-id', 'page_size', assertion, 'owner@example.com']) expect(lines[0]).not.toContain(secret);
   });
 });

@@ -9,9 +9,9 @@ it. It is read-only: no method writes, runs, sends, retries or syncs anything.
 Status: Newsletter answers every method on its console listener
 ([`newsletter/docs/console.md`](../../newsletter/docs/console.md)), and `fixtures/` holds its golden answers. The
 console Worker ([`newsletter-console/`](../../newsletter-console/README.md), on `news.<zone>`) routes it behind the
-owner's Access login and still answers every method `UNAVAILABLE` with the reason `NOT_CONFIGURED` until it forwards
-reads; its UI shows that state. A change to the IDL checks and deploys Newsletter (with the paired VPS release) and the
-console (`PROTO_PACKAGES`).
+owner's Access login and forwards every read to that listener; its UI shows the overview and the runs, and the
+issues, sources, model usage and backup pages follow. A change to the IDL checks and deploys Newsletter (with the
+paired VPS release) and the console (`PROTO_PACKAGES`).
 
 | Side | What it does |
 | --- | --- |
@@ -68,7 +68,7 @@ that login expires.
   are the bytes TypeScript's `toWire` and `JSON.stringify` write for the same message (its doubles are whole numbers
   or seconds to the millisecond, which both languages spell alike), so the Worker passes them through without
   parsing them.
-- What the Worker answers: Newsletter's `200` with `application/json`, read under a streamed 4 MiB cap, unchanged;
+- What the Worker answers: Newsletter's `200` with `application/json`, read under a streamed 2 MiB cap, unchanged;
   Newsletter's `404` as `NOT_FOUND` and `400` as `BAD_REQUEST`; anything else (a redirect, Access refusing, a `5xx`, a
   timeout, another content type, a larger body) as `UNAVAILABLE`, which a client may repeat, as for any failed
   dependency ([`proto/README.md`](../../proto/README.md#http-apis)). Its own authentication, configuration and
@@ -88,7 +88,7 @@ that login expires.
 | `SourceCatalog.config_history` | 10 revisions |
 | `FeedSource.recent` | The latest 7 scheduled runs |
 | `BackupStatus.exceptions` | 50, oldest first |
-| An answer through the Worker | 4 MiB |
+| An answer through the Worker | 2 MiB (each MiB costs the Worker up to about 3 ms of CPU; real answers are a few hundred KiB) |
 
 ## Rules that keep the console consistent
 
