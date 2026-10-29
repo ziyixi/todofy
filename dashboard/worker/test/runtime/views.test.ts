@@ -140,6 +140,8 @@ describe('GetHomeView and RefreshHomeView', () => {
       tasks: ['unknown', 'never_checked'],
       'personal-mcp': ['unknown', 'never_checked'],
       'model-router': ['unknown', 'never_checked'],
+      // The Newsletter console has no status of its own (status none): 未接入, never checked or made up.
+      'newsletter-console': ['unmonitored', null],
     });
     expect(home.cloudflare).toMatchObject({ usage_status: 'unavailable', quota: [], workers: 0, errors_today: 0 });
     expect(h.outboundLog).toEqual([]);

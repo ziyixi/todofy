@@ -108,6 +108,18 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(entry["status"], {"type": "ops_v1", "binding": "PERSONAL_MCP", "guard": False})
         self.assertEqual(entry["tile_metric"], {"kind": "counter", "name": "active_subscriptions"})
 
+    def test_newsletter_engine_row_and_console_tile_are_named_apart(self):
+        """The engine keeps its Fleet-backed services row; the console is the app tile its pages are read from. Notion is
+        named as the engine's backup, never its destination."""
+        entries = {entry["id"]: entry for entry in catalog.load_catalog().entries}
+        engine, console = entries["newsletter"], entries["newsletter-console"]
+        self.assertEqual((engine["name"], engine["group"], engine["url"], engine["access"]), ("Newsletter 引擎", "services", None, False))
+        self.assertEqual(engine["status"], {"type": "ops_v1", "provider": "fleet", "binding": "NEWSLETTER", "guard": False})
+        self.assertIn("Notion 为异步备份", engine["description"])
+        self.assertEqual((console["name"], console["group"], console["url"], console["access"]),
+                         ("Newsletter", "apps", "https://news.ziyixi.science/", True))
+        self.assertEqual(console["status"], {"type": "none"})
+
     def test_all_production_configs_and_consumer_maps_are_covered(self):
         loaded = catalog.load_catalog()
         self.assertEqual(set(loaded.worker_configs().values()), catalog.production_configs(catalog.REPO))

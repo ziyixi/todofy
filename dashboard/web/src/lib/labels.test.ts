@@ -61,6 +61,21 @@ describe('labels', () => {
     expect(signalLabel('newsletter_delivery_overdue')).toBe('Newsletter 每日投递逾期')
   })
 
+  it('sends a run or delivery question to the Newsletter console, and the host and release to Fleet', () => {
+    // The console reads Newsletter's own record (the failed node, its reason, the delivery); Fleet only counts.
+    for (const code of ['newsletter_delivery_overdue', 'newsletter_delivery_rejected', 'newsletter_side_effect_unknown', 'newsletter_unknown']) {
+      expect(alertGuidance(code, 'newsletter').next, code).toContain('Newsletter 控制台')
+    }
+    expect(alertGuidance('newsletter_delivery_overdue', 'newsletter').next).toContain('运行页')
+    for (const code of ['newsletter_unavailable', 'newsletter_paused']) {
+      expect(alertGuidance(code, 'newsletter').next, code).toContain('Fleet')
+    }
+    // Notion is the backup copy: its unknown writes are named as backup writes.
+    expect(alertGuidance('newsletter_side_effect_unknown', 'newsletter').explanation).toContain('Notion 备份写入')
+    expect(counterInfo('unknown_notion_entities').label).toBe('Notion 备份创建待核对')
+    expect(counterInfo('unknown_notion_versions').label).toBe('Notion 备份更新待核对')
+  })
+
   it('names configuration states and gives warning actions without claiming a failed daily delivery', () => {
     for (const state of ['current', 'pending', 'failed', 'stale', 'pinned', 'unobserved']) {
       const code = `newsletter_config_${state}`

@@ -26,6 +26,7 @@ describe('首页', () => {
       '打开 服务器监控（新标签页），fleet.ziyixi.science',
       '打开 邮件分拣（新标签页），sort.ziyixi.science',
       '打开 浏览记录（新标签页），recall.ziyixi.science',
+      '打开 Newsletter（新标签页），news.ziyixi.science',
       '打开 Tasks（新标签页），tasks.ziyixi.science',
       '打开 Model Router（新标签页），models.ziyixi.science',
     ])
@@ -37,7 +38,7 @@ describe('首页', () => {
     // The links tile opens its launcher, the Access-protected /_/ of the short-link host.
     expect(within(apps).getByRole('link', { name: /打开 短链接/ })).toHaveAttribute('href', 'https://s.ziyixi.science/_/')
     // Access-protected entries carry the lock with its own name; never an emoji.
-    expect(within(apps).getAllByRole('img', { name: '受 Access 保护' })).toHaveLength(9)
+    expect(within(apps).getAllByRole('img', { name: '受 Access 保护' })).toHaveLength(10)
 
     // Status lines are separate buttons (never inside the link).
     const mail = within(apps).getByRole('button', { name: 'Mail Hero 状态：正常，查看详情' })
@@ -46,7 +47,9 @@ describe('首页', () => {
     // The watch app's and Fleet's tiles have their own status buttons (their ops-v1 statuses are not in these
     // fixtures: 未知).
     // mailsort's tile has its own status button too, and so has recall's (not in these fixtures either: 未知).
-    expect(within(apps).getAllByRole('button')).toHaveLength(9)
+    expect(within(apps).getAllByRole('button')).toHaveLength(10)
+    // The Newsletter console has no status of its own (its pages read the engine below): never a made-up green.
+    expect(within(apps).getByRole('button', { name: 'Newsletter 状态：未接入监控，查看详情' })).toBeInTheDocument()
     expect(within(apps).getByRole('button', { name: '浏览记录 状态：未知，查看详情' })).toBeInTheDocument()
     expect(within(apps).getByRole('button', { name: 'Tasks 状态：未知，查看详情' })).toBeInTheDocument()
     // The links app: its probe's latency, like the website.
@@ -61,8 +64,11 @@ describe('首页', () => {
       'href',
       '#/ops',
     )
-    const newsletter = within(services).getByRole('link', { name: 'Newsletter：未接入监控，查看业务流程' })
-    expect(newsletter).toHaveAttribute('href', '#/flows/daily-newsletter')
+    // The engine's row opens the console its runs and issues are read in, as the Codex row opens Model Router's.
+    const newsletter = within(services).getByRole('link', { name: 'Newsletter 引擎：未接入监控，在 Newsletter 控制台查看运行与期刊（新标签页）' })
+    expect(newsletter).toHaveAttribute('href', 'https://news.ziyixi.science/')
+    expect(newsletter).toHaveAttribute('target', '_blank')
+    expect(newsletter).toHaveAttribute('rel', 'noreferrer noopener')
     expect(newsletter).toHaveTextContent('未接入监控')
 
     // The dashboard itself has no tile.
@@ -92,7 +98,7 @@ describe('首页', () => {
     const link = within(apps).getByRole('link', { name: '打开 Link Demo（新标签页），link-demo.ziyixi.science，未接入监控（仅链接）' })
     expect(link).toHaveAttribute('href', 'https://link-demo.ziyixi.science/')
     expect(link).toHaveAttribute('target', '_blank')
-    expect(within(apps).getAllByRole('img', { name: '受 Access 保护' })).toHaveLength(10)
+    expect(within(apps).getAllByRole('img', { name: '受 Access 保护' })).toHaveLength(11)
     expect(within(apps).queryByRole('button', { name: /Link Demo/ })).toBeNull()
   })
 
@@ -119,8 +125,8 @@ describe('首页', () => {
     const apps = within(launcher()).getByRole('region', { name: '应用' })
     expect(within(apps).getByRole('button', { name: '服务器监控 状态：正常，查看详情' })).toHaveTextContent('距主机报告 1 分钟')
     const services = within(launcher()).getByRole('region', { name: '后台服务' })
-    const newsletter = within(services).getByRole('link', { name: 'Newsletter：正常，排队 3，查看业务流程' })
-    expect(newsletter).toHaveAttribute('href', '#/flows/daily-newsletter')
+    const newsletter = within(services).getByRole('link', { name: 'Newsletter 引擎：正常，排队 3，在 Newsletter 控制台查看运行与期刊（新标签页）' })
+    expect(newsletter).toHaveAttribute('href', 'https://news.ziyixi.science/')
     expect(within(services).queryByText('邮件成功')).toBeNull()
   })
 
@@ -137,7 +143,7 @@ describe('首页', () => {
     expect(rows.map((row) => row.getAttribute('aria-label'))).toEqual([
       '邮件 → 任务：正常，端到端成功 今天 00:06，已监测 5/6',
       '网站发布：正常，内容检查 今天 00:00，已监测 2/3',
-      '每日 Newsletter：部分接入，部分阶段尚未接入，已监测 1/3',
+      '每日 Newsletter：正常，—，已监测 1/2',
       '运维摘要：正常，上次摘要 昨天 23:00 · 已在 Tasks 创建',
     ])
     expect(within(flows).getByRole('link', { name: '全部流程 →' })).toHaveAttribute('href', '#/flows')

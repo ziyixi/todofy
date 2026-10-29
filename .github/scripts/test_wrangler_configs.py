@@ -168,7 +168,6 @@ def load(path: str) -> dict:
 NO_TILE = {
     "home": "the dashboard itself (dashboard/docs/design-v2.md Q11)",
     "personal-mcp": "private MCP endpoint; monitored under services without a launcher URL",
-    "newsletter-console": "hidden until its views exist; it joins the apps when they do",
 }
 
 

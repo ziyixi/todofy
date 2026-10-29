@@ -100,13 +100,15 @@ GetRegistry (`GET /api/v1/registry`; no binding names or probe URLs), so no host
 | 网页监视 (`watch`, DO `WatchState`) | 应用 | `ops_v1` (WATCH, guard): counts and codes only, never a watch's name, URL or page text; its `status()` re-arms a missing alarm, so each tick restarts a lost scheduler | 新变化 |
 | 个人网站 (`ziyixi-website`, assets only) | 站点 | `public_http`: one GET per tick to `www…/build-info.json` (www is canonical; the apex serves the same site), status + latency only, `redirect: 'manual'`, body unread, `enabled` flag. The site's Worker (`website/`) serves static assets only, which are not Worker invocations, so analytics cannot judge it; the file is part of its static export, so the probe survives the cutover | latency |
 | Notion 发布 (`ziyixi-notion-publish`) | 后台服务 | `analytics`: error rate + 26 h idle rule | last request hour |
-| Newsletter | 后台服务 | `none` → 未接入 | — |
+| Newsletter 引擎 (`newsletter`, VPS, no Worker) | 后台服务 | `ops_v1` through Fleet (`NEWSLETTER`, no guard): process, release gate, latest delivery and unknown counts, never content. Its row opens the Newsletter console in a new tab | — |
+| Newsletter (`newsletter-console`) | 应用 | `none` → 未接入: the console has no status of its own; its pages read the engine's SQLite record, whose health is the engine's row | — |
 | 个人控制台 (`home`) | hidden | `self` (`tick_stale`) | no tile; Cloudflare row only |
 | 自托管服务器 (`self-hosted`, no Worker) | hidden | `none` | no tile; exists only to name the R2 bucket `vultr-backup` (VPS 备份: the self-hosted VPS and home server's backups, not a monorepo app), since a resource must belong to an entry |
 
 Flows: 邮件 → 任务 (来源转发 ○ → 收件与保存 → 解析 → Webhook 投递 → Todofy 摘要 → 待处理邮件, Todofy's `attention`;
 canary `mail-todofy` verifies 投递 and 摘要 only), 网站发布 (Notion ○ → 发布 → 网站可用), 每日 Newsletter
-(Todofy 报告 → 读取报告 ○ → 写入 Notion ○; partial), 网页监视 (网站 ○ → 检查 → 变化收件箱 → 交给 Tasks: the watch app's
+(Todofy 个人事项 → 采编与投递: the engine's Fleet signals at 采编与投递, whose stage links the console; Notion is
+the engine's asynchronous backup copy, not a stage), 网页监视 (网站 ○ → 检查 → 变化收件箱 → 交给 Tasks: the watch app's
 `scheduler_stale` and `watches_broken` at 检查, `notify_unsettled` at 交给 Tasks; `maintenance_mode` is app-only),
 运维摘要 (巡检 → 摘要任务, both Home's own: a failed day's task is the item `digest_task_failed`), and GTD 循环
 (收集 → 理清 → 组织 → 回顾 → 执行 ○: Todofy's `received_24h` and `carryover_open`, then Tasks' daily counts,
@@ -363,11 +365,22 @@ Newsletter's; its app details are the generic ones. Its Home service row opens t
 new tab, since the Router's request records are the one Codex usage ledger. The old `#/ops/codex-gateway`
 path opens `#/ops`.
 
+### Newsletter console
+
+The Newsletter engine (`newsletter`) keeps its Fleet-backed services row, named 「Newsletter 引擎」. Its runs,
+issues, model calls and Notion backup are read in the Newsletter console (`newsletter-console`, an 应用 tile with no
+status of its own), from the engine's own SQLite record; Notion is its asynchronous backup copy, never a source or a
+stage of the 每日 Newsletter flow. The engine's row and its 采编与投递 stage open the console in a new tab
+(`READ_IN` in `web/src/lib/registry.ts`, as the Codex row opens Model Router's). The delivery-overdue, rejected and
+unknown-record reminders point to the console's run page; unavailable, paused and configuration reminders keep
+pointing to Fleet. Fleet's Newsletter section links the console the same way.
+
 ## 8. Decisions taken (owner-approved defaults)
 
 Q1 title 个人控制台 · Q2 tile = entry's own health · Q3 home keeps one line per flow and 4 mini bars ·
 Q4 home grouped by kind, flows by business · Q5 link-only entries (思源笔记 was one until the owner retired it on 2026-09-30, so the registry has no link-only entry now and the kind stays supported; on 2026-10-02 the owner asked for the new services on 首页 as probed tiles, as the links app has) · Q6 probe the website every tick
-· Q7 Newsletter 未接入 for now · Q8 24 h sparkline later (step 3, not in scope) · Q9 registry in repo TS
+· Q7 Newsletter has its own console (2026-10-29): an 应用 tile, and the engine's row and flow stage open it; Notion
+is shown only as the engine's backup · Q8 24 h sparkline later (step 3, not in scope) · Q9 registry in repo TS
 · Q10 four tabs · Q11 no tile for this dashboard · Q12 unregistered Workers never alarm · Q13
 notion-publish idle limit 26 h.
 

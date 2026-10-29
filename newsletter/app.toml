@@ -6,8 +6,9 @@ image = "ghcr.io/ziyixi/todofy-newsletter"
 
 [[entries]]
 id = "newsletter"
-name = "Newsletter"
-description = "VPS 后台任务；每日读取 Todofy 报告写入 Notion"
+# The engine; its owner pages are the Newsletter console's (newsletter-console/app.toml), which Home's row opens.
+name = "Newsletter 引擎"
+description = "每日中文简报引擎：采编与投递；Notion 为异步备份"
 group = "services"
 icon = "newspaper"
 accent = "amber"

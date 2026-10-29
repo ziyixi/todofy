@@ -142,8 +142,8 @@ const ENTRIES: readonly EntryDef[] = [
   },
   {
     id: 'newsletter',
-    name: 'Newsletter',
-    description: 'VPS 后台任务；每日读取 Todofy 报告写入 Notion',
+    name: 'Newsletter 引擎',
+    description: '每日中文简报引擎：采编与投递；Notion 为异步备份',
     group: 'services',
     icon: 'newspaper',
     accent: 'amber',
@@ -284,7 +284,7 @@ const ENTRIES: readonly EntryDef[] = [
     id: 'newsletter-console',
     name: 'Newsletter',
     description: '期刊正文、运行、来源、模型调用与 Notion 备份',
-    group: 'hidden',
+    group: 'apps',
     icon: 'newspaper',
     accent: 'amber',
     url: 'https://news.ziyixi.science/',
@@ -496,15 +496,17 @@ const FLOWS: readonly FlowDef[] = [
     canary: null,
   },
   {
+    // Newsletter's own SQLite record is the authority (its runs, issues and deliveries are read in the Newsletter
+    // console); Notion keeps an asynchronous backup copy, so it is no stage of this flow. Stage ids stay stable for
+    // reminders already targeted at them.
     id: 'daily-newsletter',
     name: '每日 Newsletter',
     group: 'content',
-    description: 'VPS 上的 Newsletter 读取报告；进程与排空状态由主机报告，外部业务仍需单独核对。',
+    description: '每日 07:00（洛杉矶）采编并投递，可选读取 Todofy 个人事项；Notion 是异步备份，详情见 Newsletter 控制台。',
     order: 2,
     stages: [
-      { id: 'report', name: 'Todofy 报告', entry: 'todofy', workers: ['todofy'], signals: [] },
-      { id: 'fetch', name: '后台进程', entry: 'newsletter', signals: ['host_never_seen', 'host_stale', 'host_missing', 'newsletter_unavailable', 'newsletter_side_effect_unknown', 'newsletter_unknown', 'newsletter_delivery_rejected', 'newsletter_delivery_overdue', 'newsletter_delivery_accepted', 'newsletter_paused', 'deployment_pending'], hold_signals: ['newsletter_paused'], counters: ['queued_count', 'inflight_count', 'unknown_count'], note: '监督进程与发布排空，不证明采编或模型成功' },
-      { id: 'write', name: '写入 Notion', entry: null, signals: [], note: 'Notion 结果需要业务账本核对，进程健康不能代替业务验收' },
+      { id: 'report', name: 'Todofy 个人事项', entry: 'todofy', workers: ['todofy'], signals: [] },
+      { id: 'fetch', name: '采编与投递', entry: 'newsletter', signals: ['host_never_seen', 'host_stale', 'host_missing', 'newsletter_unavailable', 'newsletter_side_effect_unknown', 'newsletter_unknown', 'newsletter_delivery_rejected', 'newsletter_delivery_overdue', 'newsletter_delivery_accepted', 'newsletter_paused', 'deployment_pending'], hold_signals: ['newsletter_paused'], counters: ['queued_count', 'inflight_count', 'unknown_count'], note: '监督进程与发布排空，不证明采编或模型成功' },
     ],
     canary: null,
   },

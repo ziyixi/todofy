@@ -99,13 +99,31 @@ export function targetLabel(reg: Reg, target: Target, source: string): string {
 }
 
 /**
+ * Background services without pages of their own, read in another app's console: every Codex request is recorded by
+ * the Model Router, and the Newsletter engine's runs, issues and Notion backup are read in the Newsletter console
+ * (from the engine's own SQLite record).
+ */
+const READ_IN: Readonly<Record<string, { readonly app: string; readonly what: string }>> = {
+  'codex-gateway': { app: 'model-router', what: '在 Model Router 查看用量' },
+  newsletter: { app: 'newsletter-console', what: '在 Newsletter 控制台查看运行与期刊' },
+}
+
+/** The console an entry without a URL is read in (READ_IN), when the registry links that console. */
+export function readIn(reg: Reg, entry: RegistryEntry | undefined): { url: string; name: string; what: string } | null {
+  const target = entry && entry.url === null && Object.hasOwn(READ_IN, entry.id) ? READ_IN[entry.id] : undefined
+  const app = entryOf(reg, target?.app)
+  const url = httpsUrl(app?.url)
+  return target && app && url ? { url, name: app.name, what: target.what } : null
+}
+
+/**
  * Where a background service's row leads inside this page: its Worker (it has one), else the first
- * flow it takes part in, else 操作与记录. The Codex gateway keeps no usage of its own: its row opens the
- * Model Router console (a new tab), where every Codex request is recorded.
+ * flow it takes part in, else 操作与记录. A service read in another app's console (READ_IN) opens that console
+ * in a new tab instead.
  */
 export function entryPageHash(reg: Reg, entry: RegistryEntry): { hash: string; what: string; external?: true } {
-  const router = entry.id === 'codex-gateway' ? httpsUrl(entryOf(reg, 'model-router')?.url) : null
-  if (router) return { hash: router, what: '在 Model Router 查看用量（新标签页）', external: true }
+  const reader = readIn(reg, entry)
+  if (reader) return { hash: reader.url, what: `${reader.what}（新标签页）`, external: true }
   if (entry.id === 'notion-publish' || entry.id === 'personal-mcp') return { hash: routeHash({ view: 'ops' }), what: '查看操作与记录' }
   const script = entry.scripts[0]
   if (script !== undefined) return { hash: routeHash({ view: 'cloudflare', script }), what: '查看 Cloudflare 中的 Worker' }
