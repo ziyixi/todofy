@@ -53,6 +53,11 @@ against any mail (5 minutes doubling to an hour, or the Router's Retry-After), s
 configuration or auth failure retries hourly, or at once after a settings save; an invalid request or answer gives
 a mail three tries and a timeout seven. A mail that already failed is retried alone.
 
+Successful classification is validated independently of optional usage and cost estimates. Missing accounting
+metadata never turns a valid result into a model error or another paid retry. Unknown cost stays absent rather
+than zero. The existing Claude recorded-spend check still runs before a call; its local ledger records only
+available usage, while Model Router remains the usage record for every provider.
+
 Claude API retains the app's **$20/calendar-month recorded-usage stop**. Router owns the shared provider connection
 and its separate workspace limits. Gift-credit usage counts toward provider limits. The app records returned input/output/thinking and cache tokens and
 list-price cost, and stops new calls once its recorded monthly cost reaches $20. The console remains the billing

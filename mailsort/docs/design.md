@@ -135,6 +135,11 @@ the mail beside it. Invalid results are not partially applied. Exhausted retries
 Gmail labels. Ops keeps the selected provider's configuration, Codex capacity and availability signals apart. Historical probabilities, examples and ledger entries
 keep their original meanings; none are rewritten as judgments from the selected provider.
 
+Usage and price are optional inference metadata, not classification validity. A successful, valid result can be
+applied even when its usage or price is unavailable; it must not become `bad_answer` and trigger another paid call.
+Unknown accounting stays absent, not a zero-cost row. Claude's existing known-spend gate runs before the call;
+available known costs are still recorded even if the returned classification itself is invalid.
+
 ## 5. Cost and credentials
 
 Mailsort keeps its existing $20/calendar-month local Claude budget. All Claude callers use Router's shared key in

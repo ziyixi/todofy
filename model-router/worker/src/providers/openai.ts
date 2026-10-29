@@ -48,12 +48,14 @@ export async function generateOpenAI(request: GenerateRequest, context: Provider
   if (context.signal.aborted) return timedOut(context.signal) ? fail(4, 'openai_deadline') : fail(1, 'openai_cancelled');
   if (context.deadlineMs <= Date.now()) return fail(4, 'openai_deadline');
   const deadline = deadlineSignal(context);
+  // No retention override: Responses uses the documented 30-minute cache write default.
+  const requestedBilling = { serviceTier: 'default', cacheWriteTtl: '30m' } as const;
   try {
     const response = await context.fetcher('https://api.openai.com/v1/responses', {
       method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
       signal: deadline.signal, redirect: 'manual',
       body: JSON.stringify({
-        model: context.route.upstreamModel, input: request.input, stream: false, store: false, service_tier: 'default',
+        model: context.route.upstreamModel, input: request.input, stream: false, store: false, service_tier: requestedBilling.serviceTier,
         ...(request.instructions.length ? { instructions: request.instructions.map(block => block.text).join('\n\n') } : {}),
         ...(request.effort ? { reasoning: { effort: request.effort } } : {}),
         ...(request.maxOutputTokens ? { max_output_tokens: request.maxOutputTokens } : {}),
@@ -63,14 +65,14 @@ export async function generateOpenAI(request: GenerateRequest, context: Provider
     if (!response.ok) {
       const value = record(await readJson(response, 65_536).catch(() => null));
       base.reportedModel = typeof value?.['model'] === 'string' ? value['model'] : '';
-      base.usage = value?.['usage'] ? openaiUsage(value['usage'], base.reportedModel, value['service_tier'])
+      base.usage = value?.['usage'] ? openaiUsage(value['usage'], base.reportedModel, value['service_tier'], requestedBilling)
         : refusedBeforeGeneration(response.status) ? zeroUsage() : unknownUsage();
       return { ...base, error: responseError(value?.['error'], response.status, response.headers) };
     }
     const value = record(await readJson(response));
     if (value === null) return fail(13, 'openai_invalid_response');
     base.reportedModel = typeof value['model'] === 'string' ? value['model'] : '';
-    base.usage = openaiUsage(value['usage'], base.reportedModel, value['service_tier']);
+    base.usage = openaiUsage(value['usage'], base.reportedModel, value['service_tier'], requestedBilling);
     const output = outputText(value);
     const incomplete = record(value['incomplete_details'])?.['reason'];
     if (output.refused || incomplete === 'content_filter')

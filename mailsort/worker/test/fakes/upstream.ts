@@ -32,6 +32,7 @@ export class FakeUpstream {
     inputTokens: 1200,
     outputTokens: 120,
     thinkingTokens: 40 as number | null,
+    costAvailable: true,
   };
   readonly codex = {
     calls: [] as ClaudeEmail[][],
@@ -54,6 +55,7 @@ export class FakeUpstream {
     badItems: false,
     inputTokens: 1200,
     outputTokens: 120,
+    costAvailable: true,
   };
   /** Requests that were neither Google nor Model Router. */
   readonly strays: string[] = [];
@@ -81,6 +83,7 @@ export class FakeUpstream {
     this.claude.poison = '';
     this.claude.spendLimit = false;
     this.claude.badItems = false;
+    this.claude.costAvailable = true;
     this.codex.calls.length = 0;
     this.codex.requests.length = 0;
     this.codex.bucket = 'P2';
@@ -98,6 +101,7 @@ export class FakeUpstream {
     this.api.errorReason = '';
     this.api.errorCode = 0;
     this.api.badItems = false;
+    this.api.costAvailable = true;
     this.strays.length = 0;
   }
 
@@ -136,7 +140,7 @@ export class FakeUpstream {
         ...(reason ? { error: { code, reason, message: 'Synthetic model failure.', retryAfterSeconds: isClaude ? this.claude.retryAfterSeconds : 0 } } : {}),
         usage: { available: !reason, billingKind: isClaude || isApi ? 'api' : 'subscription', inputTokens: reason ? 0 : inputTokens, outputTokens: reason ? 0 : engine.outputTokens,
           cacheWriteTokens: cacheWrite, cachedInputTokens: cacheRead,
-          ...(isClaude || isApi ? { estimatedCostMicrousd: cost } : {}) },
+          ...((isClaude ? this.claude.costAvailable : isApi && this.api.costAvailable) ? { estimatedCostMicrousd: cost } : {}) },
       })));
     }
     // The development fetch sends the real URL in a header; without the bypass (the CPU test) the URL is Google's itself.

@@ -528,7 +528,7 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
           answer = recorded;
           transact(() => {
             if (provider === 'claude') {
-              store.addClaudeUsage(utcDay(at), recorded);
+              if (recorded.usage !== undefined) store.addClaudeUsage(utcDay(at), recorded.usage);
               store.setMeta('claude_last_request_at', String(at));
             }
             store.setMeta(`${provider}_last_success_at`, String(at));

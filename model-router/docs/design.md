@@ -91,6 +91,12 @@ API 估价与订阅的假设 API 价值分开显示。后者不会进入 Mailsor
 档位和缓存读写费用；缺少计价信息时保留用量并明确显示估价未知。
 Claude 的 native fallback 按实际 writer 和缓存 TTL 逐段估价。
 
+OpenAI 适配器固定请求 Standard，缓存沿用官方默认的 30 分钟。供应商返回的计价信息优先；
+可选档位或缓存分项缺失时，用该次请求已确定的设置估价，单项缓存写入量可由总量减去另一项得到。
+普通输入、缓存读取、缓存写入和输出分别计价，不重复加总缓存 token。
+见[官方缓存计价](https://developers.openai.com/api/docs/guides/prompt-caching)。估价缺失不改变推理成功状态，
+调用方也不能把它当作模型内容错误；预算仍在下一次调用前按各自已知账本检查。
+
 费率集中在 `worker/src/providers/pricing.ts`，注明官方来源和核对日期。Google Flash 3.8 当前优惠价到
 2026-12-31，届时更新这份小表；不增加自动计价服务。
 
