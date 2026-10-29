@@ -69,12 +69,17 @@ def expect(
     codex_gateway_deploy=False,
     model_router_check=False,
     model_router_deploy=False,
+    newsletter_console_check=False,
+    newsletter_console_deploy=False,
 ):
     # The bootstrap mask (ci_changes.outputs): an app in CHECK_ONLY never deploys, and neither does Home while an app it
     # binds is one. Mailsort was CHECK_ONLY until its Access application existed (mailsort/docs/design.md §12), recall
     # until its Access applications and bucket existed (recall/docs/design.md §11).
     if "personal-mcp" in ci_changes.CHECK_ONLY:
         personal_mcp_deploy = False
+    # The Newsletter console is CHECK_ONLY until its Access application exists and it first deploys.
+    if "newsletter-console" in ci_changes.CHECK_ONLY:
+        newsletter_console_deploy = False
     if "tasks" in ci_changes.CHECK_ONLY:
         tasks_deploy = False
     if "mailsort" in ci_changes.CHECK_ONLY:
@@ -121,13 +126,15 @@ def expect(
         "model_router_deploy": model_router_deploy,
         "personal_mcp_check": personal_mcp_check,
         "personal_mcp_deploy": personal_mcp_deploy,
+        "newsletter_console_check": newsletter_console_check,
+        "newsletter_console_deploy": newsletter_console_deploy,
     }
 
 
 # Every app checked (a contracts/ or .github/ change, the links app and the watch app included); the dashboard
 # checked and deployed; the edge-auth apps (the website compiles in no package) are todofy and mail-hero plus
 # EDGE_AUTH; every app with the website Worker (the relay Worker is added where a test expects it).
-ALL_CHECKED = {"model_router_check": True,"dashboard_check": True, "website_check": True, "links_check": True, "watch_check": True, "newsletter_check": True, "codex_gateway_check": True, "fleet_check": True, "platform_check": True, "mailsort_check": True, "recall_check": True, "tasks_check": True, "personal_mcp_check": True}
+ALL_CHECKED = {"model_router_check": True,"dashboard_check": True, "website_check": True, "links_check": True, "watch_check": True, "newsletter_check": True, "codex_gateway_check": True, "fleet_check": True, "platform_check": True, "mailsort_check": True, "recall_check": True, "tasks_check": True, "personal_mcp_check": True, "newsletter_console_check": True}
 DASH = {"dashboard_check": True, "dashboard_deploy": True}
 LINKS = {"links_check": True, "links_deploy": True}
 WATCH = {"watch_check": True, "watch_deploy": True}
@@ -140,8 +147,8 @@ VPS = {**PLATFORM, "newsletter_check": True, "newsletter_deploy": True}
 ALL = {**DASH}
 # Every app that compiles in packages/edge-auth besides Todofy and Mail Hero: the dashboard, the links app, the watch
 # app, Fleet, mailsort, recall and Tasks, each checked and deployed.
-EDGE_AUTH = {"model_router_check": True, "model_router_deploy": True,"personal_mcp_check": True, "personal_mcp_deploy": True, "tasks_check": True, "tasks_deploy": True, **ALL, **LINKS, **WATCH, **FLEET, **MAILSORT, **RECALL}
-EVERY = {"model_router_check": True, "model_router_deploy": True,"personal_mcp_check": True, "personal_mcp_deploy": True, "tasks_check": True, "tasks_deploy": True, **ALL, "website_check": True, "website_deploy": True, **LINKS, **WATCH, **FLEET, **MAILSORT, **RECALL, **PLATFORM, **CODEX_GATEWAY, "newsletter_check": True, "newsletter_deploy": True}
+EDGE_AUTH = {"newsletter_console_check": True, "newsletter_console_deploy": True, "model_router_check": True, "model_router_deploy": True,"personal_mcp_check": True, "personal_mcp_deploy": True, "tasks_check": True, "tasks_deploy": True, **ALL, **LINKS, **WATCH, **FLEET, **MAILSORT, **RECALL}
+EVERY = {"newsletter_console_check": True, "newsletter_console_deploy": True, "model_router_check": True, "model_router_deploy": True,"personal_mcp_check": True, "personal_mcp_deploy": True, "tasks_check": True, "tasks_deploy": True, **ALL, "website_check": True, "website_deploy": True, **LINKS, **WATCH, **FLEET, **MAILSORT, **RECALL, **PLATFORM, **CODEX_GATEWAY, "newsletter_check": True, "newsletter_deploy": True}
 
 
 def push(paths, ref=MAIN, last_success=BASE, ancestor=True, merge_base=BASE):
@@ -309,12 +316,26 @@ class Classify(unittest.TestCase):
         self.assertEqual(push(paths), expect(T, T, T, T, T, **DASH))
 
     def test_every_app_has_stable_check_and_deploy_outputs_during_bootstrap(self):
-        """Every app has its release prerequisites; check and deploy outputs remain explicit."""
-        self.assertEqual(ci_changes.CHECK_ONLY, set())
+        """Every app but the Newsletter console has its release prerequisites (the console's Access application comes
+        first from "Infra apply"); check and deploy outputs remain explicit."""
+        self.assertEqual(ci_changes.CHECK_ONLY, {"newsletter-console"})
         for app in ci_changes.APPS:
             with self.subTest(app=app):
                 self.assertIn(f"{ci_changes.PREFIX[app]}_check", ci_changes.KEYS)
                 self.assertIn(f"{ci_changes.PREFIX[app]}_deploy", ci_changes.KEYS)
+
+    def test_the_newsletter_console_is_checked_but_never_deployed_until_its_access_application_exists(self):
+        """CHECK_ONLY keeps its deploy output false; Home does not bind it, so Home is unaffected; newsletter.ui.v1 reaches
+        it and nothing else (Newsletter's reader does not import it yet)."""
+        self.assertNotIn("newsletter-console", ci_changes.HOME_BOUND)
+        console = {"newsletter_console_check": True, "newsletter_console_deploy": True}
+        for path in ("newsletter-console/worker/src/http.ts", "newsletter-console/web/src/App.tsx",
+                     "newsletter-console/wrangler.toml", "newsletter-console/deploy/deploy-vars.mjs"):
+            with self.subTest(path=path):
+                result = push([path])
+                self.assertEqual(result, expect(F, F, F, F, F, **console))
+                self.assertFalse(result["newsletter_console_deploy"])
+        self.assertEqual(ci_changes.proto_deploys("proto/newsletter/ui/v1/run.proto"), {"newsletter-console"})
 
     def test_fleet_publishes_bundle_changes_after_resource_bootstrap(self):
         for path in ("fleet/app.toml", "fleet/worker/src/report.ts", "fleet/web/src/App.tsx", "fleet/observer/collector.py", "fleet/wrangler.toml"):
@@ -477,7 +498,7 @@ class Classify(unittest.TestCase):
 
     def test_contract_code_the_workers_bundle_deploys_every_app_that_bundles_it(self):
         """OPS_LIMITS and friends ship inside the Workers that import them, so a change must redeploy each."""
-        bundled = expect(T, T, T, F, T, **ALL, website_check=T, links_check=T, **WATCH, newsletter_check=T, fleet_check=T, platform_check=T, mailsort_check=T, recall_check=T, proto=T, tasks_check=T, personal_mcp_check=T, model_router_check=T, codex_gateway_check=T)
+        bundled = expect(T, T, T, F, T, **ALL, website_check=T, links_check=T, **WATCH, newsletter_check=T, fleet_check=T, platform_check=T, mailsort_check=T, recall_check=T, proto=T, tasks_check=T, personal_mcp_check=T, model_router_check=T, codex_gateway_check=T, newsletter_console_check=T)
         self.assertEqual(push(["contracts/ops-v1/ops-v1.ts"]), bundled)
         self.assertEqual(
             push(["contracts/ops-v1/ops-v1.ts", "todofy/gateway/src/ops.ts"]), {**bundled, "todofy_deploy": True}
@@ -503,6 +524,7 @@ class Classify(unittest.TestCase):
             "tasks": [REPO / "tasks" / "worker" / "src", REPO / "tasks" / "web" / "src"],
             "personal-mcp": [REPO / "personal-mcp" / "worker" / "src"],
             "model-router": [REPO / "model-router" / "worker" / "src", REPO / "model-router" / "web" / "src"],
+            "newsletter-console": [REPO / "newsletter-console" / "worker" / "src", REPO / "newsletter-console" / "web" / "src"],
         }
         self.assertEqual(set(roots), set(ci_changes.APPS))
         importers = {}
@@ -576,11 +598,12 @@ class Classify(unittest.TestCase):
                 "personal-mcp": ("ts",),
                 "model-router": ("ts",),
                 "newsletter": ("python",),
+                "newsletter-console": ("ts",),
             },
         )
         # Todofy is both: todofy-core vendors the Python package, its gateway and UI bundle the TypeScript
         # (todofy.ui.v1).
-        ts, python = {"mail-hero", "dashboard", "links", "watch", "todofy", "fleet", "website", "mailsort", "recall", "tasks", "personal-mcp", "model-router"}, {"todofy", "platform", "codex-gateway", "newsletter"}
+        ts, python = {"mail-hero", "dashboard", "links", "watch", "todofy", "fleet", "website", "mailsort", "recall", "tasks", "personal-mcp", "model-router", "newsletter-console"}, {"todofy", "platform", "codex-gateway", "newsletter"}
         every, none = ts | python, set()
         cases = {
             # recommendation-v1 and summary-v1: todofy-core builds the reports, Todofy's gateway and UI read them in
@@ -624,9 +647,10 @@ class Classify(unittest.TestCase):
             # Mail Hero's owner API reaches only Mail Hero (not Todofy, which shares the mailhero/webhook package).
             "proto/mailhero/ui/v2/mail_hero_ui_service.proto": {"mail-hero"},
             "proto/mailhero/ui/v2/errors.proto": {"mail-hero"},
-            # Newsletter's owner read API before any app imports it: no Worker, no image and no VPS release.
-            "proto/newsletter/ui/v1/newsletter_ui_service.proto": set(),
-            "proto/newsletter/ui/v1/edition.proto": set(),
+            # Newsletter's owner read API: the console's Worker and UI only, until Newsletter's reader imports it (no
+            # image and no VPS release yet).
+            "proto/newsletter/ui/v1/newsletter_ui_service.proto": {"newsletter-console"},
+            "proto/newsletter/ui/v1/edition.proto": {"newsletter-console"},
             # The TypeScript runtime and generator: every TypeScript user.
             "proto/ts/wire-json.ts": ts,
             "proto/ts/wire-rules.ts": ts,
@@ -707,6 +731,8 @@ class Classify(unittest.TestCase):
                 personal_mcp_check=T, model_router_check=T,
                 personal_mcp_deploy="personal-mcp" in deployed,
                 model_router_deploy="model-router" in deployed,
+                newsletter_console_check=T,
+                newsletter_console_deploy="newsletter-console" in deployed,
             )
 
         for path, deployed in cases.items():
@@ -832,7 +858,7 @@ class Classify(unittest.TestCase):
         ]
         self.assertEqual(
             push(paths),
-            expect(T, T, T, F, F, packages=T, infra=T, proto=T, **DASH, website_check=T, links_check=T, watch_check=T, newsletter_check=T, fleet_check=T, platform_check=T, mailsort_check=T, recall_check=T, tasks_check=T, personal_mcp_check=T, model_router_check=T, codex_gateway_check=T),
+            expect(T, T, T, F, F, packages=T, infra=T, proto=T, **DASH, website_check=T, links_check=T, watch_check=T, newsletter_check=T, fleet_check=T, platform_check=T, mailsort_check=T, recall_check=T, tasks_check=T, personal_mcp_check=T, model_router_check=T, codex_gateway_check=T, newsletter_console_check=T),
         )
 
     def test_a_package_change_with_one_app_still_deploys_every_user(self):
@@ -1374,6 +1400,7 @@ class RealGit(unittest.TestCase):
         expected.update(dashboard_check="false", dashboard_deploy="false", tasks_check="false", tasks_deploy="false")
         expected.update(website_check="false", website_deploy="false", website_relay_deploy="false", personal_mcp_check="false", personal_mcp_deploy="false")
         expected.update(codex_gateway_check="false", codex_gateway_deploy="false", model_router_check="false", model_router_deploy="false")
+        expected.update(newsletter_console_check="false", newsletter_console_deploy="false")
         expected.update(links_check="false", links_deploy="false", watch_check="false", watch_deploy="false", newsletter_check="false", newsletter_deploy="false", fleet_check="false", fleet_deploy="false", platform_check="false", platform_publish="false", platform_deploy="false", mailsort_check="false", mailsort_deploy="false", recall_check="false", recall_deploy="false", recall_extension_publish="false")
         self.assertEqual(outputs, expected)
 
@@ -1627,6 +1654,8 @@ class DeployConditions(unittest.TestCase):
         ("personal-mcp-deploy", "todofy-deploy"),
         ("personal-mcp-deploy", "recall-deploy"),
         ("personal-mcp-deploy", "watch-deploy"),
+        # The console ships after a VPS release this run made (Newsletter answers its reads), or without one.
+        ("newsletter-console-deploy", "vps-deploy"),
     }
 
     # (job, need) pairs where the need may be skipped only when this run did not select it: a selected gateway or
@@ -1660,6 +1689,7 @@ class DeployConditions(unittest.TestCase):
         "recall-checks",
         "personal-mcp-checks",
         "model-router-checks",
+        "newsletter-console-checks",
     }
 
     def jobs(self):
@@ -1696,6 +1726,7 @@ class DeployConditions(unittest.TestCase):
                 "recall-extension-release",
                 "personal-mcp-deploy",
                 "model-router-deploy",
+                "newsletter-console-deploy",
                 "platform-image",
                 "vps-deploy",
                 "vps-bootstrap-bundle",
@@ -1848,6 +1879,7 @@ class DeployConditions(unittest.TestCase):
                 "recall-deploy": "recall-production",
                 "personal-mcp-deploy": "personal-mcp-production",
                 "model-router-deploy": "model-router-production",
+                "newsletter-console-deploy": "newsletter-console-production",
                 "platform-image": "platform-image-production",
                 "vps-deploy": "vps-production",
             },
@@ -3201,6 +3233,7 @@ class Reuse(unittest.TestCase):
             "Tasks checks",
             "Personal MCP checks",
             "Model Router checks",
+            "Newsletter console checks",
             "Platform checks",
             "Newsletter checks",
             "Newsletter image checks",

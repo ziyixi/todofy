@@ -6,9 +6,10 @@ the Notion backup). Source: [`proto/newsletter/ui/v1/`](../../proto/newsletter/u
 the generated Python and TypeScript types are the contract on every side, with no hand-written DTOs. Newsletter owns
 it. It is read-only: no method writes, runs, sends, retries or syncs anything.
 
-Status: the IDL only. Nothing serves or calls it yet, so a change to it deploys nothing
-(`PROTO_PACKAGES`). Newsletter's reader and listener, the console Worker (`newsletter-console`, on `news.<zone>`) and
-its UI come next, and with the reader the golden answers in `fixtures/`.
+Status: the console Worker ([`newsletter-console/`](../../newsletter-console/README.md), on `news.<zone>`) routes it
+behind the owner's Access login and answers every method `UNAVAILABLE` with the reason `NOT_CONFIGURED` until it
+forwards reads; its UI shows that state. A change to the IDL checks and deploys the console only (`PROTO_PACKAGES`).
+Newsletter's reader and listener come next, and with the reader the golden answers in `fixtures/`.
 
 | Side | What it does |
 | --- | --- |

@@ -1,5 +1,5 @@
 # One workflow for the apps (Todofy, Mail Hero, the home dashboard, the website, the links app, the watch app, Fleet,
-# Newsletter, Platform, Codex gateway, mailsort, recall and Tasks).
+# Newsletter, Platform, Codex gateway, mailsort, recall, Tasks and the Newsletter console).
 # "changes" decides what changed since a cumulative base (.github/scripts/ci_changes.py), each app's checks run
 # from its own directory, "Shared packages" checks packages/* (compiled into the apps), "Contracts" runs both
 # sides of mail.received.v1 and ops-v1 plus the dashboard's ops-v1 caller tests, "Proto checks"
@@ -22,7 +22,7 @@ on:
         description: App to check and (on main) deploy
         type: choice
         # both = Todofy and Mail Hero (as before the dashboard existed); all = every app.
-        options: [both, all, todofy, mail-hero, dashboard, website, links, watch, newsletter, fleet, platform, codex-gateway, mailsort, recall, tasks, personal-mcp, model-router]
+        options: [both, all, todofy, mail-hero, dashboard, website, links, watch, newsletter, fleet, platform, codex-gateway, mailsort, recall, tasks, personal-mcp, model-router, newsletter-console]
         default: both
       resume_vps_release:
         description: Explicitly resume a held VPS release after investigating its safe error
@@ -71,6 +71,8 @@ jobs:
       model_router_deploy: ${{ steps.decide.outputs.model_router_deploy }}
       personal_mcp_check: ${{ steps.decide.outputs.personal_mcp_check }}
       personal_mcp_deploy: ${{ steps.decide.outputs.personal_mcp_deploy }}
+      newsletter_console_check: ${{ steps.decide.outputs.newsletter_console_check }}
+      newsletter_console_deploy: ${{ steps.decide.outputs.newsletter_console_deploy }}
       tasks_deploy: ${{ steps.decide.outputs.tasks_deploy }}
       contracts: ${{ steps.decide.outputs.contracts }}
       packages: ${{ steps.decide.outputs.packages }}
@@ -496,6 +498,19 @@ jobs:
       - name: Run personal-mcp checks
         uses: ./.github/actions/check-personal-mcp
 
+  newsletter-console-checks:
+    name: Newsletter console checks
+    needs: changes
+    if: needs.changes.outputs.newsletter_console_check == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run newsletter-console checks
+        uses: ./.github/actions/check-newsletter-console
+
   contracts:
     name: Contracts
     needs: changes
@@ -627,7 +642,7 @@ jobs:
 
   gate:
     name: CI gate
-    needs: [changes, shared-packages, todofy-static, todofy-runtime, todofy-checks, mail-hero-checks, dashboard-checks, website-checks, tasks-checks, links-checks, watch-checks, fleet-checks, mailsort-checks, recall-checks, newsletter-checks, newsletter-image, platform-checks, codex-gateway-checks, personal-mcp-checks, model-router-checks, contracts, infra-checks, proto-checks]
+    needs: [changes, shared-packages, todofy-static, todofy-runtime, todofy-checks, mail-hero-checks, dashboard-checks, website-checks, tasks-checks, links-checks, watch-checks, fleet-checks, mailsort-checks, recall-checks, newsletter-checks, newsletter-image, platform-checks, codex-gateway-checks, personal-mcp-checks, model-router-checks, newsletter-console-checks, contracts, infra-checks, proto-checks]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -648,6 +663,7 @@ jobs:
           FLEET: ${{ needs.fleet-checks.result }}
           MODEL_ROUTER: ${{ needs.model-router-checks.result }}
           PERSONAL_MCP: ${{ needs.personal-mcp-checks.result }}
+          NEWSLETTER_CONSOLE: ${{ needs.newsletter-console-checks.result }}
           MAILSORT: ${{ needs.mailsort-checks.result }}
           RECALL: ${{ needs.recall-checks.result }}
           NEWSLETTER: ${{ needs.newsletter-checks.result }}
@@ -673,6 +689,7 @@ jobs:
             "Todofy runtime=$TODOFY_RUNTIME" "Todofy checks=$TODOFY" "Mail Hero checks=$MAIL_HERO" \
             "Dashboard checks=$DASHBOARD" "Website checks=$WEBSITE" "Links checks=$LINKS" "Watch checks=$WATCH" "Fleet checks=$FLEET" "Mailsort checks=$MAILSORT" \
             "Tasks checks=$TASKS" "Recall checks=$RECALL" "Personal MCP checks=$PERSONAL_MCP" "Model Router checks=$MODEL_ROUTER" \
+            "Newsletter console checks=$NEWSLETTER_CONSOLE" \
             "Newsletter checks=$NEWSLETTER" "Newsletter image checks=$NEWSLETTER_IMAGE" "Platform checks=$PLATFORM" "Codex gateway checks=$CODEX_GATEWAY" \
             "Contracts=$CONTRACTS" "Infra checks=$INFRA" "Proto checks=$PROTO"; do
             echo "$pair"
@@ -1254,6 +1271,31 @@ jobs:
     uses: ./.github/workflows/worker-release.yml
     with:
       app: personal-mcp
+      source_sha: ${{ github.sha }}
+    secrets: inherit
+
+  newsletter-console-deploy:
+    name: Newsletter console deploy
+    # After the VPS release: Newsletter answers the console's reads, so a push carrying both its read API and the
+    # console ships the Worker once the server runs the new image. A VPS release that did not run is fine; one that
+    # failed or was cancelled stops this job.
+    needs: [changes, newsletter-console-checks, gate, vps-deploy]
+    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
+    if: >-
+      ${{ !cancelled()
+      && needs.changes.result == 'success'
+      && (needs.newsletter-console-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.newsletter-console-checks.result == 'skipped'))
+      && needs.gate.result == 'success'
+      && (needs.vps-deploy.result == 'success' || needs.vps-deploy.result == 'skipped')
+      && github.ref == 'refs/heads/main'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && needs.changes.outputs.newsletter_console_deploy == 'true' }}
+    permissions:
+      contents: read
+      deployments: write
+    uses: ./.github/workflows/worker-release.yml
+    with:
+      app: newsletter-console
       source_sha: ${{ github.sha }}
     secrets: inherit
 

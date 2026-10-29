@@ -72,7 +72,7 @@ Nothing unrelated is imported, declared, read or modelled, not even read-only.
 [`test_infra_guard.py`](../.github/scripts/test_infra_guard.py) tests the guard itself against
 configurations built to slip past it.
 
-### Managed here (51 objects)
+### Managed here (52 objects)
 
 This is the maximum declared count. It includes the dedicated Codex inference token, policy and
 path application. Fresh bootstrap omits the optional legacy backup application and the mail rule
@@ -102,6 +102,7 @@ imports their actual IDs before switching to the managed references.
 | `cloudflare_zero_trust_access_application.recall_machine` | recall machine routes | Only the exact `/api/machine/v1/batches` and `/api/machine/v1/changes` and the blobs under `/api/machine/v1/blobs/*`; the Worker checks each route's own bearer token (recall/docs/design.md §2.1) |
 | `cloudflare_zero_trust_access_policy.recall_machine` | recall machine routes only | Bypass policy attached only to the machine-routes application; no owner API bypass |
 | `cloudflare_zero_trust_access_application.owner["model-router"]` | Model Router owner console | Whole configured Models host; the shared owner policies protect request history, bodies and Playground |
+| `cloudflare_zero_trust_access_application.owner["newsletter-console"]` | Access app "Newsletter" | Two destinations under one AUD and the two shared policies: the whole `news.ziyixi.science` host (the console) and the runtime host's `/api/newsletter/v1/*` (Newsletter's owner read API, which the console Worker calls with the owner's own assertion). **Created** here before the console's first deploy ([Adding an app](#adding-an-app)); no service token |
 | `cloudflare_zero_trust_access_application.model_router_inference` | Model Router machine routes | Only ModelService's catalog, generation, embedding and conversation paths; the Worker checks owner JWT or the Newsletter token |
 | `cloudflare_zero_trust_access_policy.model_router_inference` | Model Router machine-routes policy | Bypass for those exact paths; console and request-history paths retain owner Access |
 | `cloudflare_zero_trust_access_application.fleet_receipt` | Fleet machine receipt | Only the exact `/api/internal/fleet/v1/receipt` path; Worker independently validates signed POST receipts |
@@ -113,7 +114,7 @@ imports their actual IDs before switching to the managed references.
 | `cloudflare_zero_trust_access_policy.codex_gateway` | Inference machine policy | Includes only the dedicated inference token |
 | `cloudflare_zero_trust_access_application.codex_gateway` | Codex inference API | Only the existing runtime host's `/api/codex/v1/*` path; no deployment or owner access |
 | `cloudflare_zero_trust_tunnel_cloudflared.platform` | Platform connector | Dedicated tunnel; preserves the existing SSH tunnel |
-| `cloudflare_zero_trust_tunnel_cloudflared_config.platform` | Platform ingress | Exact Codex prefix to loopback 18766, daemon to loopback 18765, then 404; each validates its Access audience |
+| `cloudflare_zero_trust_tunnel_cloudflared_config.platform` | Platform ingress | Exact Codex prefix to loopback 18766, exact Newsletter read prefix to loopback 18767, daemon to loopback 18765, then 404; each validates its Access audience |
 | `cloudflare_dns_record.platform["runtime"]` | Runtime CNAME | Only this exact platform host; existing Worker and mailbox DNS remain with their current owners |
 | `cloudflare_zero_trust_access_application.mail_hero_backup` | Access app "Mail Hero backup API" | `mail-hero.ziyixi.science/api/internal/backup/*`. Used by the backup collector's machine identity (mail-hero/AGENTS.md §7). **Frozen**: an apply refuses any write to it ([Apply](#apply-p4)) |
 | `cloudflare_d1_database.app["mail-hero" \| "todofy" \| "links" \| "tasks" \| "model-router"]` | D1 databases | Existence only |
@@ -171,12 +172,17 @@ Listed by category only. These are neither declared nor read, and their values a
 
 Only the dedicated platform runtime CNAME is managed here, in [`platform.tf`](platform.tf).
 It points to the new platform tunnel and is restricted by the infrastructure guard to this exact address.
-The tunnel routes the authenticated daemon API and the exact `/api/codex/v1/.*` inference path on the
-same hostname. That path goes to loopback port 18766; the daemon uses 18765. A dedicated path Access
-application accepts only the inference service token, and its Tunnel rule validates that application's
-audience. The deployment app and token retain the daemon route. Kubernetes and the existing SSH
+The tunnel routes the authenticated daemon API and two exact paths on the same hostname, in this order:
+`/api/codex/v1/.*` (inference) to loopback port 18766 and `/api/newsletter/v1/.*` (Newsletter's owner read API) to
+18767; the daemon uses 18765. A dedicated path Access application accepts only the inference service token, and its
+Tunnel rule validates that application's audience. The Newsletter path is a second destination of the console's owner
+application (`owner["newsletter-console"]`, the shared owner policies): the console Worker forwards the owner's own
+assertion, and the Tunnel rule validates the console application's audience. No DNS record, service token or exported
+credential is added for it. The deployment app and token retain the daemon route. Kubernetes and the existing SSH
 ingress remain independent. `codex_gateway_bootstrap` is sensitive; the existing certificate handoff
 exports it as `codex-gateway-bootstrap.cms`, containing only the inference credentials and path app identity.
+[`reconcile_policy.py`](scripts/reconcile_policy.py) `PATH_RULES` lists the path rules in their order; an unattended
+repair accepts only that table, the daemon's catch-all and the 404.
 
 Worker hostnames remain Wrangler Custom Domains with read-only records. Mail Hero's receive subdomain
 MX, DKIM and SPF records remain Email Routing-owned. Apex mailbox records, third-party verification
@@ -569,6 +575,16 @@ See [OpenAI authentication](https://developers.openai.com/plugins/build/auth) an
 [Cloudflare Managed OAuth](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/managed-oauth/).
 The release probe checks the anonymous `401` OAuth challenge; an authenticated tool call and synthetic event remain
 separate acceptance checks.
+
+The Newsletter console (`newsletter-console`, `news.ziyixi.science`) follows the same sequence, `CHECK_ONLY` and with no
+`ACCESS_AUDIENCE`, with one addition: its application has a second destination, `/api/newsletter/v1/*` on the runtime
+host (the catalog's `runtime_paths`), and the platform tunnel gains the matching path rule pinned to its audience. Its
+step 2 is therefore `create: 1` (`owner["newsletter-console"]`), `update: 1`
+(`cloudflare_zero_trust_tunnel_cloudflared_config.platform`), the other 50 rows `no-op` (52 in all) and
+`output changes: 1` (`update` `access_aud`); computed from the addresses of its commit, with every optional instance
+present: `create=1,outputs=1,update=1@ab3d6240ab01`. The tunnel rule waits for the new application's AUD, so the apply
+creates the application first. Until Newsletter listens on 18767 the connector answers that path with an error after
+Access; anonymous requests get Access's login redirect either way.
 
 Between steps 3 and 5 the application gates a host that no Worker serves yet, which is harmless. Until the app's
 first deploy its Worker is also in `FIRST_DEPLOY_PENDING`

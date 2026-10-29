@@ -17,19 +17,85 @@ class Classification(unittest.TestCase):
     def test_gateway_route_keeps_the_exact_path_loopback_and_origin_access(self):
         app = {"domain": "runtime.example.invalid", "aud": "a" * 64}
         gateway_app = {"domain": app["domain"] + "/api/codex/v1/*", "aud": "b" * 64}
+        apps = {"cloudflare_zero_trust_access_application.codex_gateway": gateway_app}
         origin = {"access": {"required": True, "team_name": "synthetic", "aud_tag": [app["aud"]]}}
         gateway_origin = {"access": {"required": True, "team_name": "synthetic", "aud_tag": [gateway_app["aud"]]}}
         gateway = {"hostname": app["domain"], "path": "/api/codex/v1/.*",
                    "service": "http://127.0.0.1:18766", "origin_request": gateway_origin}
         runtime = {"hostname": app["domain"], "service": "http://127.0.0.1:18765", "origin_request": origin}
         ingress = {"ingress": [gateway, runtime, {"service": "http_status:404"}]}
-        self.assertTrue(reconcile_policy._loopback_ingress(ingress, app, "synthetic", gateway_app))
+        self.assertTrue(reconcile_policy._loopback_ingress(ingress, app, "synthetic", apps))
         self.assertFalse(reconcile_policy._loopback_ingress(ingress, app, "synthetic"))
         for field, value in (("path", "/.*"), ("service", "http://127.0.0.1:6443"),
                              ("hostname", "another.example.invalid"), ("origin_request", {})):
             with self.subTest(field=field):
                 changed = {"ingress": [{**gateway, field: value}, runtime, {"service": "http_status:404"}]}
-                self.assertFalse(reconcile_policy._loopback_ingress(changed, app, "synthetic", gateway_app))
+                self.assertFalse(reconcile_policy._loopback_ingress(changed, app, "synthetic", apps))
+
+    def path_rules(self):
+        """The runtime host's rules as infra/platform.tf declares them: Codex, Newsletter, the daemon, 404. A plan writes
+        every attribute, an unset path as null."""
+        app = {"domain": "runtime.example.invalid", "aud": "a" * 64}
+        gateway_app = {"domain": app["domain"] + "/api/codex/v1/*", "aud": "b" * 64}
+        console_app = {"domain": "news.example.invalid", "aud": "c" * 64, "destinations": [
+            {"type": "public", "uri": "news.example.invalid"},
+            {"type": "public", "uri": app["domain"] + "/api/newsletter/v1/*"}]}
+        apps = {"cloudflare_zero_trust_access_application.codex_gateway": gateway_app,
+                'cloudflare_zero_trust_access_application.owner["newsletter-console"]': console_app}
+
+        def origin(audience):
+            return {"access": {"required": True, "team_name": "synthetic", "aud_tag": [audience]}}
+
+        gateway = {"hostname": app["domain"], "path": "/api/codex/v1/.*", "service": "http://127.0.0.1:18766",
+                   "origin_request": origin(gateway_app["aud"])}
+        console = {"hostname": app["domain"], "path": "/api/newsletter/v1/.*", "service": "http://127.0.0.1:18767",
+                   "origin_request": origin(console_app["aud"])}
+        runtime = {"hostname": app["domain"], "path": None, "service": "http://127.0.0.1:18765",
+                   "origin_request": origin(app["aud"])}
+        return app, apps, gateway, console, runtime, {"hostname": None, "path": None, "service": "http_status:404"}
+
+    def test_the_newsletter_read_path_is_pinned_to_the_console_application(self):
+        app, apps, gateway, console, runtime, missing = self.path_rules()
+        check = reconcile_policy._loopback_ingress
+        self.assertTrue(check({"ingress": [gateway, console, runtime, missing]}, app, "synthetic", apps))
+        # Each path rule is optional (an older configuration), but never out of order, twice or after the catch-all.
+        self.assertTrue(check({"ingress": [console, runtime, missing]}, app, "synthetic", apps))
+        self.assertTrue(check({"ingress": [gateway, runtime, missing]}, app, "synthetic", apps))
+        for order in ([console, gateway, runtime, missing], [gateway, console, console, runtime, missing],
+                      [gateway, runtime, console, missing], [gateway, console, missing]):
+            with self.subTest(order=[rule["service"] for rule in order]):
+                self.assertFalse(check({"ingress": order}, app, "synthetic", apps))
+        codex_audience = {**console, "origin_request": gateway["origin_request"]}
+        for changed in ({**console, "service": "http://127.0.0.1:18765"}, {**console, "path": "/api/.*"},
+                        {**console, "hostname": "news.example.invalid"}, codex_audience,
+                        {**console, "origin_request": {"access": {"required": False, "team_name": "synthetic",
+                                                                  "aud_tag": ["c" * 64]}}}):
+            with self.subTest(changed=changed):
+                self.assertFalse(check({"ingress": [gateway, changed, runtime, missing]}, app, "synthetic", apps))
+        # The console's application must gate exactly that path on the runtime host.
+        console_app = apps['cloudflare_zero_trust_access_application.owner["newsletter-console"]']
+        for destinations in ([console_app["destinations"][0]], [{"type": "public", "uri": app["domain"] + "/api/*"}]):
+            with self.subTest(destinations=destinations):
+                narrowed = {**apps, 'cloudflare_zero_trust_access_application.owner["newsletter-console"]':
+                            {**console_app, "destinations": destinations}}
+                self.assertFalse(check({"ingress": [gateway, console, runtime, missing]}, app, "synthetic", narrowed))
+        # The daemon's catch-all has no path.
+        self.assertFalse(check({"ingress": [gateway, console, {**runtime, "path": "/.*"}, missing]}, app, "synthetic", apps))
+
+    def test_the_tunnel_repair_reads_the_console_application_from_the_plan(self):
+        app, apps, gateway, console, runtime, missing = self.path_rules()
+        tunnel_id = "a" * 8 + "-" + "b" * 4 + "-" + "c" * 4 + "-" + "d" * 4 + "-" + "e" * 12
+        identity = {"id": tunnel_id, "account_id": "account", "tunnel_id": tunnel_id}
+        resources = [{"address": 'cloudflare_zero_trust_access_application.platform_machine["runtime"]', "values": app}]
+        resources += [{"address": address, "values": values} for address, values in apps.items()]
+        plan = {"planned_values": {"root_module": {"resources": resources}},
+                "resource_changes": [{"address": reconcile_policy.TUNNEL_CONFIG, "mode": "managed", "change": {
+                    "actions": ["update"], "after_unknown": {"version": True},
+                    "before": {**identity, "config": {"ingress": [gateway, runtime, missing]}},
+                    "after": {**identity, "config": {"ingress": [gateway, console, runtime, missing]}}}}]}
+        self.assertEqual(reconcile_policy.manual_reasons(plan, "synthetic"), [])
+        resources.pop()
+        self.assertEqual(reconcile_policy.manual_reasons(plan, "synthetic")[0]["reason"], "CONNECTOR_TARGET_UNSAFE")
 
     def dns(self):
         tunnel = "a" * 8 + "-" + "b" * 4 + "-" + "c" * 4 + "-" + "d" * 4 + "-" + "e" * 12

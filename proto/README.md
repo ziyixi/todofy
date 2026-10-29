@@ -44,7 +44,7 @@ again strictly with the generated Python code and answers the generated response
 reads leniently and writes. Todofy's UI calls it through `ts/http-client.ts`; the hand-written OpenAPI types
 (openapi-typescript) are gone, and `todofy/api/machine-api-v1.openapi.yaml` keeps only the machine routes
 (webhook, newsletter, health), whose callers keep their exact bytes ([Cost](#http-apis) has the numbers).
-`newsletter/ui/v1` is Newsletter's owner read API, under `/api/v1/` (the IDL only so far: nothing imports it): the
+`newsletter/ui/v1` is Newsletter's owner read API, under `/api/v1/` (the console Worker and UI import it; Newsletter's reader does not yet): the
 issues with their full content, runs and their failures, model calls, sources, deliveries and the state of the
 Notion backup, read-only, with Newsletter's SQLite database as the record and Notion as its asynchronous backup. It
 is the second owner API with a Python producer, after Todofy's, and that producer serves HTTP itself, as the platform
@@ -809,7 +809,7 @@ Mail Hero's and the dashboard's UIs), the links, watch, mailsort and recall apps
 todofy-core vendors the wheel). A language's runtime and generator reach that language's users (`proto/ts/` and `buf.gen.yaml`: the
 TypeScript users; `proto/python/`, `tools/gen_py.py` and `tools/wire_rules.py`: Todofy); the wire profile's own
 options (`common/wire/`) reach both; a package reaches the apps that import it (`PROTO_PACKAGES`:
-`todofy/report/` Todofy, `todofy/ui/` Todofy, `todofy/mail/` and `tasks/inbox/` the apps that serve or call them, `mailhero/webhook/` Mail Hero and Todofy, `links/ui/` the links app, `mailhero/ui/` Mail Hero, `watch/ui/` the watch app, `mailsort/ui/` mailsort, `recall/ui/`, `recall/ingest/` and `recall/archive/` recall, `dashboard/ui/` the dashboard, `ops/` the apps with an `Ops` entrypoint or caller (Mail Hero, the dashboard, Todofy, the watch app, mailsort, recall and the website relay), `common/errors/`, `prototest/` and, until Newsletter and its console import it, `newsletter/ui/` none);
+`todofy/report/` Todofy, `todofy/ui/` Todofy, `todofy/mail/` and `tasks/inbox/` the apps that serve or call them, `mailhero/webhook/` Mail Hero and Todofy, `links/ui/` the links app, `mailhero/ui/` Mail Hero, `watch/ui/` the watch app, `mailsort/ui/` mailsort, `recall/ui/`, `recall/ingest/` and `recall/archive/` recall, `dashboard/ui/` the dashboard, `ops/` the apps with an `Ops` entrypoint or caller (Mail Hero, the dashboard, Todofy, the watch app, mailsort, recall and the website relay), `newsletter/ui/` the Newsletter console (until Newsletter's reader imports it too), `common/errors/` and `prototest/` none);
 the module and toolchain files (`buf.yaml`, `buf.lock`, the root `pnpm-lock.yaml`, `tools/ensure.mjs`) and any path
 not mapped reach every user; tests, test data, the check scripts, the wire JSON types' and JSON Schema
 generators (`tools/gen_wire_ts.py`: types only; `tools/gen_schema.py`: files under `contracts/` and `todofy/api/`,

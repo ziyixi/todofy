@@ -89,6 +89,11 @@ paths = [""]                   # host itself; "/_/*" is a path scope
 session = "24h"                # 6h, 24h or 168h
 ```
 
+An owner application may also gate paths on the platform runtime host (`vps.platform_runtime_host` in
+`config/cloud.toml`) with `runtime_paths = ["/api/<app>/v1/*"]`: the app's read path into its VPS service, which the
+platform tunnel routes with the same application's audience (`infra/platform.tf`). Only paths under `/api/`, never the
+whole host, which the platform's machine application owns. The Newsletter console is the one user.
+
 All fields are checked by [`catalog.py`](../tools/service-catalog/catalog.py); unknown fields fail at
 every level. There is no free-form configuration blob. Worker paths must be ordinary, non-symlinked
 files inside their owning application, with basename `wrangler.toml`. Test and development configs

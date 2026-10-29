@@ -124,11 +124,18 @@ def deployment_urls(profile: dict) -> dict[str, str]:
 
 
 SECRET_FIELDS = ("personal_secrets", "manual_secrets", "optional_secrets", "owner_machine_secrets")
+# The owner's Access identity: the only bindings a Worker may borrow from another Worker's map (identity_from).
+IDENTITY_SECRETS = frozenset({"ACCESS_OWNER", "ACCESS_OWNER_ALIASES"})
 
 
 def worker_secret_specs(root: Path) -> dict[str, dict]:
     """Public deploy binding declarations from app manifests (the GitHub <APP>_WORKER_SECRETS maps); never reads
-    secret values. Owner-machine secrets are left out on purpose: see owner_machine_secrets."""
+    secret values. Owner-machine secrets are left out on purpose: see owner_machine_secrets.
+
+    A Worker that declares `identity_from = "<worker>"` has no GitHub map of its own: its spec names the source
+    Worker's map and `identity_from`, and it may declare only the owner's identity (ACCESS_OWNER, optional
+    ACCESS_OWNER_ALIASES). The deploy takes exactly those keys from the source map (worker-secrets.mjs), so no other
+    binding of the source can reach it, and bootstrap never writes a map for it (github_secrets.py)."""
     return {name: declared["spec"] for name, declared in _worker_secret_declarations(root).items()}
 
 
@@ -163,11 +170,28 @@ def _worker_secret_declarations(root: Path) -> dict[str, dict]:
                     and not owner_machine & (personal | manual), "worker secret declarations")
             prefix = {"home": "DASHBOARD", "ziyixi-website": "WEBSITE",
                       "ziyixi-notion-publish": "WEBSITE_RELAY"}.get(name, name.upper().replace("-", "_"))
+            source = worker.get("identity_from")
+            if source is not None:
+                require(isinstance(source, str) and re.fullmatch(r"[a-z][a-z0-9-]{0,63}", source) is not None
+                        and source != name and "ACCESS_OWNER" in personal and personal <= IDENTITY_SECRETS
+                        and optional <= {"ACCESS_OWNER_ALIASES"} and not manual and not owner_machine,
+                        "worker.identity_from")
             result[name] = {
                 "spec": {"github_secret": prefix + "_WORKER_SECRETS",
                          "required": sorted((personal | manual) - optional), "optional": sorted(optional)},
                 "owner_machine": sorted(owner_machine),
+                "identity_from": source,
             }
+    # A borrowed identity names its source's map; the source must hold its own map with that identity.
+    borrowed = {name: declared.pop("identity_from") for name, declared in result.items()}
+    for name, source in borrowed.items():
+        if source is None:
+            continue
+        origin = result.get(source)
+        require(origin is not None and borrowed[source] is None and "ACCESS_OWNER" in origin["spec"]["required"]
+                and set(result[name]["spec"]["optional"]) <= set(origin["spec"]["optional"]), "worker.identity_from")
+        result[name]["spec"] = {**result[name]["spec"], "github_secret": origin["spec"]["github_secret"],
+                                "identity_from": source}
     return result
 
 

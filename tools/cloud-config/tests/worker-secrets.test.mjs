@@ -168,3 +168,22 @@ test('the relay wrapper uploads one complete map and propagates the deployed sou
     for (const result of [prepare, deploy, refused]) assert.ok(!(result.stdout + result.stderr).includes(privateValue))
   } finally { rmSync(directory, { recursive: true, force: true }) }
 })
+
+test('a borrowed owner identity takes only the identity from its source map, which must be valid for the source', () => {
+  const spec = workerSecretSpec('newsletter-console')
+  assert.equal(spec.identity_from, 'home')
+  assert.equal(spec.github_secret, workerSecretSpec('home').github_secret)
+  const home = { ACCESS_OWNER: 'owner@example.test', ACCESS_OWNER_ALIASES: 'alias@example.test', CF_ANALYTICS_TOKEN: privateValue, CSRF_SIGNING_KEY: privateValue }
+  const env = { [spec.github_secret]: JSON.stringify(home) }
+  assert.deepEqual(mergeWorkerSecrets('newsletter-console', env, {}, SettingError),
+    { ACCESS_OWNER: 'owner@example.test', ACCESS_OWNER_ALIASES: 'alias@example.test' })
+  // Identity secrets win over the map, as they do for the source itself; a partial source map is fine.
+  assert.deepEqual(mergeWorkerSecrets('newsletter-console', { [spec.github_secret]: JSON.stringify({ CF_ANALYTICS_TOKEN: privateValue }) },
+    { ACCESS_OWNER: 'other@example.test' }, SettingError), { ACCESS_OWNER: 'other@example.test' })
+  assert.deepEqual(JSON.parse(env[spec.github_secret]), home)
+  for (const input of [{ ...home, UNDECLARED: privateValue }, { ...home, CF_ANALYTICS_TOKEN: 7 }, { CF_ANALYTICS_TOKEN: privateValue }]) {
+    assert.throws(() => mergeWorkerSecrets('newsletter-console', { [spec.github_secret]: JSON.stringify(input) }, {}, SettingError),
+      (error) => error.setting === spec.github_secret && !error.message.includes(privateValue))
+  }
+  assert.equal(validWorkerSecrets('newsletter-console', { CF_ANALYTICS_TOKEN: privateValue }, false), false)
+})

@@ -75,6 +75,7 @@ WRAPPERS = {
     "mailsort": ("mailsort/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["mailsort"]),
     "recall": ("recall/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["recall"]),
     "personal-mcp": ("personal-mcp/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["personal-mcp"]),
+    "newsletter-console": ("newsletter-console/deploy/deploy-vars.mjs", r"deploy-vars\.mjs (exec|secrets)\b", ["newsletter-console"]),
 }
 # Worker vars that must never be committed: personal values (GitHub environment secrets) ...
 PERSONAL_VARS = {
@@ -106,6 +107,8 @@ PERSONAL_INPUTS = {
     "RECALL_ACCESS_OWNER_ALIASES",
     "PERSONAL_MCP_ACCESS_OWNER",
     "PERSONAL_MCP_ACCESS_OWNER_ALIASES",
+    "NEWSLETTER_CONSOLE_ACCESS_OWNER",
+    "NEWSLETTER_CONSOLE_ACCESS_OWNER_ALIASES",
 }
 # Personal inputs a deploy job reads from another app's secret: the owner of the links app, the watch app, mailsort
 # and recall is the dashboard's owner (one person, the same Access identities), so their deploys read the
@@ -121,6 +124,8 @@ SHARED_SECRETS = {
     "RECALL_ACCESS_OWNER_ALIASES": "DASHBOARD_ACCESS_OWNER_ALIASES",
     "PERSONAL_MCP_ACCESS_OWNER": "DASHBOARD_ACCESS_OWNER",
     "PERSONAL_MCP_ACCESS_OWNER_ALIASES": "DASHBOARD_ACCESS_OWNER_ALIASES",
+    "NEWSLETTER_CONSOLE_ACCESS_OWNER": "DASHBOARD_ACCESS_OWNER",
+    "NEWSLETTER_CONSOLE_ACCESS_OWNER_ALIASES": "DASHBOARD_ACCESS_OWNER_ALIASES",
 }
 # The only GitHub variables CI reads: the operational switches, stated at every deploy (mail-hero AGENTS.md §8).
 TOGGLES = {
@@ -134,7 +139,7 @@ TOGGLES = {
     # mailsort's ceiling (live, shadow or off): the emergency switch of mailsort/docs/design.md section 10.
     "MAILSORT_MODE",
 }
-DEPLOY_JOBS = ("todofy-deploy", "mail-hero-deploy", "dashboard-deploy", "links-deploy", "watch-deploy", "fleet-deploy", "mailsort-deploy", "recall-deploy", "personal-mcp-deploy", "model-router-deploy")
+DEPLOY_JOBS = ("todofy-deploy", "mail-hero-deploy", "dashboard-deploy", "links-deploy", "watch-deploy", "fleet-deploy", "mailsort-deploy", "recall-deploy", "personal-mcp-deploy", "model-router-deploy", "newsletter-console-deploy")
 # The retired generators' required GitHub variables, still set in production: a revert of the committed-config
 # layout needs them (README "Rolling back the committed-config layout"), and nothing may read them now.
 LEGACY_VARIABLES = {
@@ -168,6 +173,7 @@ def load(path: str) -> dict:
 NO_TILE = {
     "home": "the dashboard itself (dashboard/docs/design-v2.md Q11)",
     "personal-mcp": "private MCP endpoint; monitored under services without a launcher URL",
+    "newsletter-console": "hidden until its views exist; it joins the apps when they do",
 }
 
 
@@ -1028,13 +1034,42 @@ class Workflow(unittest.TestCase):
         """The same secrets feed these wrappers: their owner and alias rules must be the same lines, or a valid
         dashboard value could stop Links deploy or Watch deploy, or the reverse. Here, in Changes, a change to any one wrapper runs this comparison, whichever app's checks it runs."""
         rules = r"^(?:const ACCESS_EMAIL|const MAX_ALIASES|const MAX_LIST_CHARS) = .+$"
-        dashboard, links, watch = (
+        dashboard, links, watch, console = (
             re.findall(rules, (REPO / app / "deploy" / "deploy-vars.mjs").read_text(), re.M)
-            for app in ("dashboard", "links", "watch")
+            for app in ("dashboard", "links", "watch", "newsletter-console")
         )
         self.assertEqual(len(dashboard), 3)
         self.assertEqual(links, dashboard)
         self.assertEqual(watch, dashboard)
+        self.assertEqual(console, dashboard)
+
+    def test_the_newsletter_console_takes_only_homes_owner_identity_and_probes_both_hosts(self):
+        """The console has no secret of its own: its deploy reads Home's identity secrets and Home's map (which the wrapper
+        filters to the identity), never Home's analytics token; it guards the host, deploys, checks the version, then
+        probes Access on the console's host and on Newsletter's read path; and it ships after the VPS release."""
+        job = self.jobs["newsletter-console-deploy"]
+        deploy_steps = steps(job)
+        [secret] = [step for step in deploy_steps if "deploy-vars.mjs secrets" in step["run"]]
+        self.assertEqual(secret["env"], {
+            "NEWSLETTER_CONSOLE_ACCESS_OWNER": "${{ secrets.DASHBOARD_ACCESS_OWNER }}",
+            "NEWSLETTER_CONSOLE_ACCESS_OWNER_ALIASES": "${{ secrets.DASHBOARD_ACCESS_OWNER_ALIASES }}",
+            "DASHBOARD_WORKER_SECRETS": "${{ secrets.DASHBOARD_WORKER_SECRETS }}",
+        })
+        self.assertNotIn("CF_ANALYTICS_TOKEN", job)
+        self.assertNotIn("NEWSLETTER_CONSOLE_WORKER_SECRETS", effective_ci())
+        runs = "\n".join(step["run"] for step in deploy_steps)
+        guard = runs.index("cf-guard.mjs --config newsletter-console/wrangler.toml")
+        deploy = runs.index("wrangler deploy --config ../wrangler.toml")
+        version = runs.index("production.sh")
+        probe = runs.index("access.sh\" / /api/v1/overview")
+        self.assertLess(guard, deploy)
+        self.assertLess(deploy, version)
+        self.assertLess(version, probe)
+        self.assertIn('PUBLIC_HOST="$NEWSLETTER_HOST" bash', runs)
+        self.assertIn("access.sh\" /api/newsletter/v1/overview", runs)
+        self.assertNotIn("--remote", runs)
+        self.assertIn("vps-deploy", needs(job))
+        self.assertNotIn("newsletter-console-deploy", needs(self.jobs["dashboard-deploy"]))
 
     def test_deploy_jobs_pass_values_through_env_only(self):
         """No ${{ }} inside a deploy job's scripts (values reach them through env:), no account variable

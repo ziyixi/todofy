@@ -31,6 +31,7 @@ What they keep true (infra/README.md):
 """
 
 import importlib.util
+import json
 import os
 import re
 import sys
@@ -55,6 +56,7 @@ INFRA = REPO / "infra"
 sys.path.insert(0, str(INFRA / "scripts"))
 import bootstrap_state  # noqa: E402
 import infra_state  # noqa: E402
+import reconcile_policy  # noqa: E402
 
 # Production Workers whose D1 database and Access applications are not adopted into infra/ yet. Empty since IaC P4
 # adopted the links app. A new app's Worker goes here until a change writes its import blocks and, in the
@@ -76,6 +78,7 @@ PRODUCTION = {
     "recall": "recall/wrangler.toml",
     "tasks": "tasks/wrangler.toml",
     "model-router": "model-router/wrangler.toml",
+    "newsletter-console": "newsletter-console/wrangler.toml",
 }
 from cloud_profile import load_profile, load_resources  # noqa: E402
 
@@ -97,6 +100,12 @@ if "personal-mcp" in test_wrangler_configs.ci_changes.CHECK_ONLY:
 
 if "model-router" in test_wrangler_configs.ci_changes.CHECK_ONLY:
     AHEAD_OF_DEPLOY["model-router"] = "models." + load_profile(REPO)["zone"]
+if "newsletter-console" in test_wrangler_configs.ci_changes.CHECK_ONLY:
+    AHEAD_OF_DEPLOY["newsletter-console"] = "news." + load_profile(REPO)["zone"]
+# Owner applications that also gate a path of the platform runtime host (the catalog's runtime_paths): the console's
+# read path into Newsletter, which the platform tunnel routes to a loopback port with that application's audience.
+RUNTIME_HOST = load_profile(REPO)["vps"]["platform_runtime_host"]
+RUNTIME_PATHS = {"newsletter-console": {f"{RUNTIME_HOST}/api/newsletter/v1/*": ("/api/newsletter/v1/.*", "http://127.0.0.1:18767")}}
 
 
 def uncommented(text: str) -> str:
@@ -271,7 +280,7 @@ class MatchesTheApps(unittest.TestCase):
             + re.findall(r'"([^"]+)"', re.search(r"more\s*=\s*\[(.*?)\]", value).group(1))
             for key, value in owner.items()
         }
-        self.assertEqual(set(owner), {"mail-hero", "todofy", "home", "links", "watch", "fleet", "mailsort", "recall", "tasks", "personal-mcp", "model-router"})
+        self.assertEqual(set(owner), {"mail-hero", "todofy", "home", "links", "watch", "fleet", "mailsort", "recall", "tasks", "personal-mcp", "model-router", "newsletter-console"})
         for worker, uris in destinations.items():
             if worker in AHEAD_OF_DEPLOY:
                 hosts = {AHEAD_OF_DEPLOY[worker]}  # no Custom Domain before the first deploy
@@ -280,8 +289,8 @@ class MatchesTheApps(unittest.TestCase):
             with self.subTest(app=worker):
                 self.assertTrue(uris)
                 self.assertIn(uris[0].split("/")[0], hosts, "the first destination is the app's own host")
-                for uri in uris:
-                    self.assertIn(uri.split("/")[0], hosts)
+                # Any other host is the platform runtime host, at exactly a declared path (never the whole host).
+                self.assertEqual({uri for uri in uris if uri.split("/")[0] not in hosts}, set(RUNTIME_PATHS.get(worker, {})))
         backup = re.search(r'resource "cloudflare_zero_trust_access_application" "mail_hero_backup" \{(.*?)^\}', code, re.DOTALL | re.MULTILINE)
         self.assertIn('domain                      = "mail-hero.ziyixi.science/api/internal/backup/*"', backup.group(1))
 
@@ -339,7 +348,8 @@ class MatchesTheApps(unittest.TestCase):
                 self.assertEqual(planned["vars"]["PUBLIC_HOST"], host)
                 self.assertFalse(planned["vars"].get("ACCESS_AUDIENCE"))
                 self.assertEqual(planned["routes"], [{"pattern": host, "custom_domain": True}])
-                self.assertIn(f'domain = "{host}", more = []', owner[worker])
+                more = sorted(RUNTIME_PATHS.get(worker, {}))
+                self.assertIn(f'domain = "{host}", more = {json.dumps(more)}', owner[worker])
                 outputs = [f"{test_wrangler_configs.ci_changes.PREFIX[worker]}_deploy"]
                 if worker in test_wrangler_configs.ci_changes.HOME_BOUND:
                     outputs.append("dashboard_deploy")
@@ -398,6 +408,31 @@ class MatchesTheApps(unittest.TestCase):
         self.assertIn('path     = "/api/codex/v1/.*"', code)
         self.assertIn('service  = "http://127.0.0.1:18766"', code)
         self.assertIn('aud_tag   = [cloudflare_zero_trust_access_application.codex_gateway.aud]', code)
+
+    def test_each_runtime_path_of_an_owner_application_has_its_pinned_tunnel_rule(self):
+        """An owner application's destination on the platform runtime host (the console's read path into Newsletter)
+        is routed by exactly one tunnel rule: that path, its own loopback port, and the connector requiring that same
+        application's audience, ordered before the daemon's catch-all (which keeps the whole host's machine
+        application). reconcile_policy.PATH_RULES lists the same rules in the same order."""
+        owner = hcl_map((INFRA / "access.tf").read_text(), "owner_apps")
+        code = (INFRA / "platform.tf").read_text()
+        ingress = re.search(r"ingress = \[\n(.*?)^    \]", code, re.S | re.M).group(1)
+        rules = re.findall(r"^      \{\n(.*?)^      \},?$", ingress, re.S | re.M)
+        paths = [re.search(r'path     = "([^"]+)"', rule) for rule in rules]
+        catch_all = next(index for index, path in enumerate(paths) if path is None)
+        for worker, routes in RUNTIME_PATHS.items():
+            for destination, (path, service) in routes.items():
+                with self.subTest(worker=worker, destination=destination):
+                    self.assertIn(f'"{destination}"', owner[worker])
+                    [index] = [i for i, found in enumerate(paths) if found and found.group(1) == path]
+                    self.assertLess(index, catch_all)
+                    self.assertIn(f'service  = "{service}"', rules[index])
+                    self.assertIn(f'aud_tag   = [cloudflare_zero_trust_access_application.owner["{worker}"].aud]', rules[index])
+                    self.assertIn("required  = true", rules[index])
+                    self.assertEqual(code.count(f'service  = "{service}"'), 1)
+        self.assertEqual([found.group(1) for found in paths if found], [rule[0] for rule in reconcile_policy.PATH_RULES])
+        services = re.findall(r'service  = "([^"]+)"', ingress)
+        self.assertEqual(services[:len(reconcile_policy.PATH_RULES)], [rule[1] for rule in reconcile_policy.PATH_RULES])
 
     def test_every_worker_that_checks_access_has_an_application_of_its_name(self):
         """The access_aud output is keyed by Worker name; a Worker whose ACCESS_AUDIENCE no application key matches

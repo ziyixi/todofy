@@ -139,6 +139,30 @@ class GitHub(unittest.TestCase):
             github_secrets.worker_secret_values({"worker_secrets": {"links": {"KEY": 7}}}, {}, specs)
         self.assertEqual(str(caught.exception), "WORKER_SECRET_VALUE_INVALID")
 
+    def test_a_borrowed_owner_identity_never_writes_or_replaces_a_map(self):
+        """The Newsletter console borrows Home's owner identity (cloud_profile identity_from): bootstrap writes Home's
+        map as before and none for the console, so the console never gets a GitHub secret and Home's map is never
+        replaced by the identity alone."""
+        import cloud_profile
+
+        specs = cloud_profile.worker_secret_specs(ROOT)
+        self.assertEqual(specs["newsletter-console"]["github_secret"], specs["home"]["github_secret"])
+        scalar = {"DASHBOARD_ACCESS_OWNER": "owner@example.test", "DASHBOARD_CF_ANALYTICS_TOKEN": "synthetic-analytics"}
+        maps, missing = github_secrets.worker_secret_values({}, scalar, specs, complete=False)
+        self.assertEqual(maps, {})
+        maps, missing = github_secrets.worker_secret_values({"worker_secrets": {"home": {}}}, scalar, specs, complete=False)
+        self.assertEqual(json.loads(maps["DASHBOARD_WORKER_SECRETS"]),
+                         {"ACCESS_OWNER": "owner@example.test", "CF_ANALYTICS_TOKEN": "synthetic-analytics"})
+        self.assertNotIn("NEWSLETTER_CONSOLE_WORKER_SECRETS", maps)
+        maps, missing = github_secrets.worker_secret_values({}, scalar, specs)
+        self.assertNotIn("NEWSLETTER_CONSOLE_WORKER_SECRETS", maps)
+        self.assertFalse([name for name in missing if name.startswith("newsletter-console.")])
+        with self.assertRaises(BootstrapError) as caught:
+            github_secrets.worker_secret_values({"worker_secrets": {"newsletter-console": {"ACCESS_OWNER": "synthetic-private"}}},
+                                                scalar, specs, complete=False)
+        self.assertEqual(str(caught.exception), "WORKER_SECRETS_INVALID")
+        self.assertNotIn("synthetic-private", str(caught.exception))
+
     def test_owner_machine_secrets_never_reach_github(self):
         specs = {"app": {"github_secret": "APP_WORKER_SECRETS", "required": ["KEY"], "optional": []}}
         owner_machine = {"app": ["GRANT_TOKEN"]}

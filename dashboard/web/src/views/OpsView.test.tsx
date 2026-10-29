@@ -82,6 +82,8 @@ describe('操作与记录', () => {
       '个人控制台',
       '自托管服务器',
       '平台运行时',
+      // The Newsletter console, hidden until its views exist (its engine keeps the services row above).
+      'Newsletter',
     ])
     expect(rows[1]).toHaveTextContent('ops-v1 状态接口')
     // The links app: its Ops entrypoint (the database and the daily backup).

@@ -280,6 +280,20 @@ const ENTRIES: readonly EntryDef[] = [
     app_only_signals: ['model_execution_unknown', 'backup_stale'],
     order: 31,
   },
+  {
+    id: 'newsletter-console',
+    name: 'Newsletter',
+    description: '期刊正文、运行、来源、模型调用与 Notion 备份',
+    group: 'hidden',
+    icon: 'newspaper',
+    accent: 'amber',
+    url: 'https://news.ziyixi.science/',
+    access: true,
+    status: { type: 'none' },
+    tile_metric: null,
+    app_only_signals: [],
+    order: 11,
+  },
   // END service-catalog entries
   {
     // Not a monorepo app: the self-hosted VPS and home server keep their backups in the account's R2
@@ -316,6 +330,7 @@ const WORKERS: readonly WorkerDef[] = [
   { script: 'tasks', entry: 'tasks', role: '任务存储与桌面规划' },
   { script: 'personal-mcp', entry: 'personal-mcp', role: '私有工具与事件订阅' },
   { script: 'model-router', entry: 'model-router', role: '统一模型推理与私有控制台' },
+  { script: 'newsletter-console', entry: 'newsletter-console', role: '每日简报的只读控制台' },
   // END service-catalog workers
 ];
 

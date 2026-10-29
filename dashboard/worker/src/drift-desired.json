@@ -648,6 +648,60 @@
       ],
       "personal": []
     },
+    "newsletter-console": {
+      "config": "newsletter-console/wrangler.toml",
+      "workers_dev": false,
+      "preview_urls": false,
+      "custom_domains": [
+        "news.ziyixi.science"
+      ],
+      "routes": [],
+      "crons": [],
+      "bindings": [
+        {
+          "name": "ACCESS_ISSUER",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "ACCESS_OWNER",
+          "type": "secret_text",
+          "source": "deploy"
+        },
+        {
+          "name": "ACCESS_OWNER_ALIASES",
+          "type": "secret_text",
+          "source": "deploy",
+          "optional": true
+        },
+        {
+          "name": "ASSETS",
+          "type": "assets",
+          "source": "config"
+        },
+        {
+          "name": "BUILD_SHA",
+          "type": "plain_text",
+          "source": "deploy"
+        },
+        {
+          "name": "HOME_URL",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "NEWSLETTER_ORIGIN",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "PUBLIC_HOST",
+          "type": "plain_text",
+          "source": "config"
+        }
+      ],
+      "personal": []
+    },
     "personal-mcp": {
       "config": "personal-mcp/wrangler.toml",
       "workers_dev": false,

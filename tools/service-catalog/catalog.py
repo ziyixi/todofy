@@ -173,7 +173,7 @@ def load_catalog(root: Path = REPO, *, bootstrap: bool = False) -> Catalog:
         require(isinstance(data["entries"], list) and bool(data["entries"]), f"{app}.entries")
         apps[app] = data
         for raw in data.get("workers", []):
-            worker = fields(raw, {"config", "hosts", "entry", "role", "position", "personal_secrets", "manual_secrets", "optional_secrets", "owner_machine_secrets"},
+            worker = fields(raw, {"config", "hosts", "entry", "role", "position", "personal_secrets", "manual_secrets", "optional_secrets", "owner_machine_secrets", "identity_from"},
                             {"config", "hosts", "entry", "role", "position"}, f"{app}.worker")
             config_path = file_path(root, worker["config"], app, f"{app}.config")
             require(config_path.name == "wrangler.toml" and worker["config"] not in paths, f"{app}.config")
@@ -285,7 +285,8 @@ def load_catalog(root: Path = REPO, *, bootstrap: bool = False) -> Catalog:
             entry["status"] = status
             entries.append(entry)
         for raw in data.get("access", []):
-            rule = fields(raw, {"key", "kind", "worker", "name", "paths", "session"}, {"key", "kind", "worker", "name", "paths", "session"}, f"{app}.access rule")
+            rule = fields(raw, {"key", "kind", "worker", "name", "paths", "session", "runtime_paths"},
+                          {"key", "kind", "worker", "name", "paths", "session"}, f"{app}.access rule")
             rule = dict(rule)
             identifier(rule["key"], f"{app}.access key")
             require(not any(old["key"] == rule["key"] for old in access), f"{app}.access key")
@@ -299,6 +300,16 @@ def load_catalog(root: Path = REPO, *, bootstrap: bool = False) -> Catalog:
             host = primary_host(configs[rule["worker"]], f"{app}.access host", zone)
             require(host is not None, f"{app}.access host")
             rule["destinations"] = [host + route_path(p, f"{app}.access path", wildcard=True) for p in rule["paths"]]
+            # Paths on the platform runtime host (config/cloud.toml) that the same owner application also gates: an
+            # app's read path into its VPS service, which the platform tunnel routes (infra/platform.tf). Only under
+            # /api/, never the whole host, which the platform's machine application owns.
+            runtime = rule.pop("runtime_paths", [])
+            require(isinstance(runtime, list) and all(isinstance(p, str) for p in runtime)
+                    and len(set(runtime)) == len(runtime), f"{app}.access runtime paths")
+            for path in runtime:
+                require(route_path(path, f"{app}.access runtime path", wildcard=True).startswith("/api/"),
+                        f"{app}.access runtime path")
+                rule["destinations"].append(profile["vps"]["platform_runtime_host"] + path)
             access.append(rule)
     require(paths == production_configs(root), "production config coverage")
     entry_ids = {entry["id"] for entry in entries}
