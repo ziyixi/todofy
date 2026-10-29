@@ -1,10 +1,11 @@
 # Handoff
 
-Updated 2026-10-28 UTC. Current work describes in-flight and unreleased work in detail; released work moves to a
+Updated 2026-10-29 UTC. Current work describes in-flight and unreleased work in detail; released work moves to a
 dated record under `docs/history/` and is linked here, without run-ID ledgers. Rules are in [AGENTS](AGENTS.md);
 entry points in [README](README.md). Never put private content, credentials or raw production output here.
 
-Archives (their waiting lists are not instructions): [October 28](docs/history/handoff-2026-10-28.md) (the review
+Archives (their waiting lists are not instructions): [October 29](docs/history/handoff-2026-10-29.md) (business
+prompt clarity), [October 28](docs/history/handoff-2026-10-28.md) (the review
 cleanup wave, the fixed K3s node address and DNS, the backups wave, Fleet node telemetry, the Newsletter researcher,
 Brief's retirement),
 [October 27](docs/history/handoff-2026-10-27.md) (Model Router
@@ -17,20 +18,6 @@ features, the FlowDay retirement), [October 20](docs/history/handoff-2026-10-20.
 [October 11](docs/history/handoff-2026-10-11.md).
 
 ## Current work
-
-### Business prompt clarity (`codex/prompt-quality`, in progress)
-
-Owner request 2026-10-28, from `a96663d5`: use Mailsort's clear task, decision rules, examples and output contract
-as a reference for the other actual model callers. Mailsort's effective prompt stays unchanged. Todofy keeps plain
-text email/daily summaries and the recommendation JSON array; Newsletter keeps its current schemas, evidence
-requirements, editorial policy and workflow. No provider, budget, scheduler or completed result changes.
-
-- Done locally: clear task/input/decision/output instructions and synthetic examples for email summaries, digests,
-  recommendations (including carryover) and the active discovery/selection/writer/repair/reviewer prompts. Current
-  prompt snapshots changed intentionally; historical contracts and fixtures remain intact. Examples pass the
-  existing schemas and readers; Todofy's 1,058 unit tests and Newsletter's 2,388 tests pass.
-- Pending: synthetic live-model checks, branch CI, integration with newer Claude commits if any, and release through the existing
-  application publication paths. No real mail, Notion material or newsletter is regenerated for acceptance.
 
 ### Verify after the October 28 releases (read-only)
 
@@ -76,14 +63,17 @@ admission until it reports ready):
 
 ## Latest verified release
 
-`b4990110`, direct OpenAI API, separate Codex identity and persisted caller model selection:
-[main release](https://github.com/ziyixi/todofy/actions/runs/40817114662). Its matching Personal cloud reconcile
-passed with resolved drift, resource registration and VPS gates; Home's fresh configuration check reported no
-difference. [Verification](model-router/docs/verification.md#openai-api-and-saved-model-choices).
+`61e4206d`, clearer Todofy/Newsletter business prompts and schema-checked synthetic examples:
+[main release](https://github.com/ziyixi/todofy/actions/runs/40826685310). Its matching Personal cloud reconcile
+passed with resolved drift, resource registration and VPS gates. Seven live synthetic Todofy prompt checks passed;
+Newsletter's image and separate content bundle were published. [Verification](todofy/docs/verification.md#business-prompt-checks-2026-10-28).
 Per-app identities are in GitHub production Deployments.
 
 ## Verify after deploy
 
+- Newsletter's new prompt bundle: confirm config-sync's active revision and digest match the published bundle,
+  with no pin or error. Publication and VPS readiness passed; actual activation has not yet been observed. The next
+  natural edition's editorial quality remains unverified; no real edition was regenerated for these checks.
 - Model Router's daily 04:47 UTC backup: the next natural run. A fresh-account cloud restore is a separate exercise
   ([backup](model-router/docs/backup.md)).
 - Mail Hero's daily 04:17 UTC backup after the write reduction (`d1a6e526`): the next natural run and its daily

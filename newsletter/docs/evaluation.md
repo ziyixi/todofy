@@ -91,3 +91,14 @@ uv run --locked python scripts/evaluate_prompts.py \
 [tests/fixtures/editorial/](../tests/fixtures/editorial/) 保存三份仍用于回归的提示词基准，不是待上线配置。历史试验报告和淘汰的候选版本可从 Git 历史查看，不再放在现行目录中。
 
 内容对比结束后不自动部署或发邮件。真实来源访问、模型输出格式以及收件效果，分别按 [接入指南](live-acceptance.md) 和 [供应商兼容检查](provider-acceptance.md) 验证。
+
+## 2026-10-28 提示示例验收
+
+`61e4206d` 的 11 份合成输出通过完整 Schema 校验，当前候选、选题、正文和审校 reader
+也接受对应示例。2,388 项测试、mypy、Ruff、结构检查、配置包验证、模拟 HTTP 投递和 wheel 冒烟均通过。
+已构建 wheel 中的示例模块与源码一致，内置配置包含相同的发现与选题示例。
+
+同一通过分支 CI 的提交已完成镜像发布与 VPS 就绪核验；独立
+[配置包发布](https://github.com/ziyixi/todofy/actions/runs/40827033478)也成功。
+同步器实际激活版本尚待只读确认。这次没有调用真实来源或重新生成、发送真实简报，
+因此不把这些离线结果当作采编质量提高的证据。
