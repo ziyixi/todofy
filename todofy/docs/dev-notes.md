@@ -253,6 +253,16 @@ Local runtime quirks (not production behaviour)
   as `headers_only_status` does too; the request then reuses the connection that GET left. Never retry the
   request itself: a real Durable Object call that drops reads the same. Remove the workaround once wrangler
   resends a request with a body (workers-sdk #16348) or expires its pool before workerd closes (#14641).
+- Local D1 is a SQLite file in the persist directory, and after every D1 query, a SELECT too, workerd writes
+  an ersatz session bookmark into it (`ActorSqlite::getCurrentBookmark`), with no busy timeout. So a second
+  process on the file (`wrangler d1 execute --local` beside a running server) fails whichever side asks for
+  the write lock while the other holds it: SQLITE_BUSY, which a Worker's D1 call sees as `internal error;
+  reference = ...` at miniflare's `database.worker.ts:233` (workerd `--verbose`: `database is locked:
+  SQLITE_BUSY`). A report tick that hits it runs again after `TICK_RETRY` (10 min), far past any test wait.
+  Locally a Worker reading D1 in a loop failed 2 of 6,935 reads in 60 s beside the tests' 0.5 s `wrangler d1
+  execute` poll, and none of 6,953 with the same poll through the server. `Worker.d1` therefore runs its SQL
+  in the server, through wrangler dev's Local Explorer (`POST /cdn-cgi/local/explorer/api/d1/database/<id>/raw`),
+  in turn with the Worker's queries; run wrangler's own D1 commands only against a stopped server.
 - wrangler's local proxy passes a chunked upload on only in large pieces (1.1 MiB unterminated never
   reached the object in a probe; 3.2 MiB did) and may add a length, so an HTTP test cannot prove that the
   object stops reading early. `test_owner_body_limit.py` proves the early stop on `interop.read_capped`

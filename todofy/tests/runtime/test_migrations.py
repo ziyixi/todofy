@@ -47,7 +47,12 @@ def test_the_retired_and_copied_tables_are_dropped(worker: Worker) -> None:
 def test_worker_writes_land_in_the_persisted_d1_that_wrangler_reads(worker: Worker) -> None:
     event_id, body = mail_event()
     assert worker.post_event(body).status_code == 204
-    rows = worker.d1(f"SELECT source_id, imported FROM mail_events WHERE event_id = '{event_id}'")
+    # Stopped first: wrangler is a second process on the SQLite file, which would race the server (Worker.d1).
+    worker.stop()
+    args = ("d1", "execute", "DB", "--local", "--persist-to", str(worker.persist_to), "--config", worker.d1_config)
+    sql = f"SELECT source_id, imported FROM mail_events WHERE event_id = '{event_id}'"
+    rows = json.loads(_wrangler(*args, "--json", "--command", sql).stdout)[-1]["results"]
+    worker.start()
     assert rows == [{"source_id": "mail-hero-personal", "imported": 0}]
 
 
