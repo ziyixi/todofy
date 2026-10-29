@@ -371,9 +371,10 @@ The Newsletter engine (`newsletter`) keeps its Fleet-backed services row, named 
 issues, model calls and Notion backup are read in the Newsletter console (`newsletter-console`, an 应用 tile with no
 status of its own), from the engine's own SQLite record; Notion is its asynchronous backup copy, never a source or a
 stage of the 每日 Newsletter flow. The engine's row and its 采编与投递 stage open the console in a new tab
-(`READ_IN` in `web/src/lib/registry.ts`, as the Codex row opens Model Router's). The delivery-overdue, rejected and
-unknown-record reminders point to the console's run page; unavailable, paused and configuration reminders keep
-pointing to Fleet. Fleet's Newsletter section links the console the same way.
+(`READ_IN` in `web/src/lib/registry.ts`, as the Codex row opens Model Router's). The delivery-overdue reminder points
+to the console's run page (where the latest run stopped), the rejected one to that issue's delivery record (its
+error code), and the unknown-record ones to the issues' deliveries and Notion backup there; unavailable, paused and
+configuration reminders keep pointing to Fleet. Fleet's Newsletter section links the console the same way.
 
 ## 8. Decisions taken (owner-approved defaults)
 

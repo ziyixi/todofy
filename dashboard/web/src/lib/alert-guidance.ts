@@ -31,7 +31,7 @@ export function alertGuidance(code: string, source?: string): AlertGuidance {
     case 'newsletter_side_effect_unknown':
       return {
         explanation: '一些发信、采编或 Notion 备份写入记录缺少最终结果，邮件或 Notion 副本可能已经产生。计数可能重叠；它不等于失败邮件数。',
-        next: '先在 Newsletter 控制台核对运行的投递记录与备份页，再核对实际邮件，避免重复发送；不打算核对这批记录时，可以关闭本次提醒，出现新记录会再次提醒。',
+        next: '先在 Newsletter 控制台核对相关期刊的投递记录与 Notion 备份状态，再核对实际邮件，避免重复发送；不打算核对这批记录时，可以关闭本次提醒，出现新记录会再次提醒。',
       }
     case 'newsletter_unknown':
       return {
@@ -44,7 +44,7 @@ export function alertGuidance(code: string, source?: string): AlertGuidance {
         next: '打开 Newsletter 控制台的运行页，查看最近一次运行停在哪个节点及原因；需要补发时先核对实际邮件，避免重复发送。',
       }
     case 'newsletter_delivery_rejected':
-      return { explanation: '最近一条投递记录显示邮件服务拒绝发送。后台进程健康并不代表这次投递成功。', next: '打开 Newsletter 控制台的运行页查看投递错误码并处理发信配置；需要重发时先核对该邮件的结果，避免重复发送。' }
+      return { explanation: '最近一条投递记录显示邮件服务拒绝发送。后台进程健康并不代表这次投递成功。', next: '打开 Newsletter 控制台，在这一期的投递记录中查看错误码并处理发信配置；需要重发时先核对该邮件的结果，避免重复发送。' }
     case 'newsletter_delivery_accepted':
       return { explanation: '最近一次邮件已被邮件服务接管。', next: '无需操作。' }
     case 'newsletter_paused':

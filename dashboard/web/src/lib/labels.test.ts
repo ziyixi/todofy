@@ -67,6 +67,8 @@ describe('labels', () => {
       expect(alertGuidance(code, 'newsletter').next, code).toContain('Newsletter 控制台')
     }
     expect(alertGuidance('newsletter_delivery_overdue', 'newsletter').next).toContain('运行页')
+    // A run shows its delivery's state only; the provider's error code is on that issue's delivery record.
+    expect(alertGuidance('newsletter_delivery_rejected', 'newsletter').next).toContain('这一期的投递记录中查看错误码')
     for (const code of ['newsletter_unavailable', 'newsletter_paused']) {
       expect(alertGuidance(code, 'newsletter').next, code).toContain('Fleet')
     }

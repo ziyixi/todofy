@@ -869,10 +869,6 @@ export function canaryFailed(): Scenario {
 }
 
 /**
- * Healthy, plus a synthetic link-only app tile (the registry has had none since 2026-09-30): an
- * Access-protected host shown as a link, never probed.
- */
-/**
  * 网站发布 seeing one of its three stages: the website's probe switched off (`enabled: false`) and no content check
  * recorded yet, so it is partial (fewer than half its stages seen) and has no freshness.
  */
@@ -894,6 +890,10 @@ export function withPartialSite(patch: Partial<FlowState> = {}): Scenario {
   return { ...base, flows: { ...base.flows, flows }, home: { ...base.home, flows: summaries } }
 }
 
+/**
+ * Healthy, plus a synthetic link-only app tile (the registry has had none since 2026-09-30): an
+ * Access-protected host shown as a link, never probed.
+ */
 export function withLinkOnly(): Scenario {
   const base = healthy()
   const linkOnly = {

@@ -108,7 +108,7 @@ describe('owner reminder actions', () => {
     serve(scenario, () => apiError(404, 'not_found'))
     renderApp()
     expect(await screen.findByRole('button', { name: '不再提醒这批 32 条记录' })).toBeInTheDocument()
-    expect(screen.getAllByText(/先在 Newsletter 控制台核对运行的投递记录与备份页，再核对实际邮件，避免重复发送/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/先在 Newsletter 控制台核对相关期刊的投递记录与 Notion 备份状态，再核对实际邮件，避免重复发送/).length).toBeGreaterThan(0)
   })
 
   it('counts an older Fleet newsletter_unknown batch by unknown_count', async () => {
