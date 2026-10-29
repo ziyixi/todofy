@@ -54,13 +54,10 @@ RETIRED_WEBSITE_BINDINGS = {
 # Its direct Gemini URL and model-chain variables move to Model Router.
 # Mailsort replaces Workers AI with its native Claude API client (2026-10-24).
 # Model Router owns the migrated caller connections: Mailsort's direct executor URL retires.
-# Home's BRIEF service binding goes with the Brief Worker (2026-10-28); drop it once the Worker is deleted
-# (infra/README "Retiring an app").
 # Secrets never go here: deploy keeps unnamed secrets, so retire those separately before release.
 RETIRED_BINDINGS: dict[str, set[str]] = {
     "todofy": {"TASKS", "GEMINI_API_BASE", "GEMINI_EMAIL_MODELS", "GEMINI_MODELS"},
     "mailsort": {"AI", "CODEX_ENDPOINT_URL"},
-    "dashboard": {"BRIEF"},
 }
 
 

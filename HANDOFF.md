@@ -5,7 +5,8 @@ dated record under `docs/history/` and is linked here, without run-ID ledgers. R
 entry points in [README](README.md). Never put private content, credentials or raw production output here.
 
 Archives (their waiting lists are not instructions): [October 28](docs/history/handoff-2026-10-28.md) (the review
-cleanup wave, the fixed K3s node address and DNS, the backups wave, Fleet node telemetry, the Newsletter researcher),
+cleanup wave, the fixed K3s node address and DNS, the backups wave, Fleet node telemetry, the Newsletter researcher,
+Brief's retirement),
 [October 27](docs/history/handoff-2026-10-27.md) (Model Router
 cutover, Codex gateway and 6.1 runtime, shared workspaces, Mailsort providers and intake, Tasks planning, GTD and
 Goals, Mail Hero backup writes, the configuration-drift fix, Watch evidence),
@@ -32,47 +33,6 @@ changes persist without a release. Newsletter's Codex contexts and current appli
 - Pending: branch CI, integration with newer Claude commits, release through Actions and synthetic production
   verification. Existing application defaults, modes and completed content are unchanged.
 
-### Brief retirement (`claude/retire-brief`, released with this merge; teardown waits for the owner)
-
-Owner decision 2026-10-28: Brief is removed from the repository and taken off Cloudflare (PR 2 of the researcher
-plan). Branch from `origin/main` `c928f889`, the last commit with `brief/` (recorded in
-[history](docs/history/brief.md); if the branch is rebased onto a newer `main`, record that base instead).
-
-- Done (one `refactor!: retire Brief` commit and a docs commit): `brief/`, `proto/brief/` (`brief.ui.v1` and the
-  `brief` guard value in `proto/retired.json`), its CI jobs and actions, every `ci_changes.py` entry, tool maps and
-  bootstrap defaults, Home's `BRIEF` binding, tile and labels, Model Router's caller entry (its request history
-  stays), the ops-v1 fixtures, and the infra objects: the owner application moves to `retired_brief`, the feedback
-  application and its policy leave with their blocks (managed count 54 → 51). `RETIRED_BINDINGS` names
-  `dashboard: {BRIEF}` so Home's normal release drops the live binding. Nothing under `newsletter/` changed.
-- Local checks passed: `.github/scripts` and tool tests, every generator `--check`, `tofu fmt`, the infra guard and
-  tests (not `tofu validate`, which needs the provider download), proto lint/API lint/breaking/self-test/
-  deterministic generation/schema/tests, the Contracts suite, Home worker/runtime/web/deploy tests with the
-  production dry run, Model Router worker/web tests with its dry run.
-- Expected selection (`ci_changes.py` on `origin/main...HEAD`): checks for every app (a `.github/` change), deploys
-  only Model Router, Home and Personal MCP; Newsletter, Platform and the VPS release stay off.
-
-Release and teardown, in order:
-
-1. Push, full green `CI gate`, fast-forward `main` to that SHA. Model Router, Home and Personal MCP deploy; Home's
-   release reports `RETIRED_BINDING` for `BRIEF` and removes it. Until step 3 these are red or noisy by design:
-   "Infra drift" (three deletes), the account-inventory check (the `brief` Worker and its namespace unregistered) and
-   Home's 配置漂移 (the `brief` script and custom domain as `extra`). The stopped Brief Worker gets
-   `CALLER_NOT_CONFIGURED` from Router meanwhile; it sends nothing.
-2. Owner, after Home's deploy succeeded: delete the Worker `brief` in the Cloudflare dashboard (this deletes the
-   `BriefState` namespace and its data for good). Agent then checks read-only that the Worker, namespace, custom domain
-   and its DNS record are gone.
-3. "Infra drift" must show exactly `delete: 3` (`cloudflare_zero_trust_access_application.retired_brief`,
-   `cloudflare_zero_trust_access_application.brief_feedback`, `cloudflare_zero_trust_access_policy.brief_feedback`),
-   every other row `no-op` and `output changes: 1` (`access_aud`); then the owner (or the agent with the owner's
-   explicit OK) dispatches "Infra apply" on `main` with that expect line and `confirm_destructive=delete-replace-forget`. Done when its verify plan says "No changes" and the
-   next drift run is green.
-4. Owner: delete the GitHub `BRIEF_*` secrets and the `BRIEF_MODE` variable (repository and environment level) and
-   Brief's entries in the private bootstrap input. Leave the shared Claude workspace, Newsletter's Resend and the
-   `DASHBOARD_*` secrets alone. Public notes record the outcome only.
-5. Agent follow-up commit: remove the `moved` block in `infra/retired.tf`, its `RETIRED` pair in `infra_guard.py`,
-   `dashboard: {BRIEF}` in `RETIRED_BINDINGS`, and `BRIEF` from `private_input.py`'s retired-key filter; then move
-   this section to the dated history and wait for green reconcile and drift.
-
 ### Verify after the October 28 releases (read-only)
 
 The released notes are in the [October 28 archive](docs/history/handoff-2026-10-28.md).
@@ -85,8 +45,8 @@ The released notes are in the [October 28 archive](docs/history/handoff-2026-10-
   `backups/<start>/manifest.json` in each bucket, keys only); Home's tiles show `backup_age_seconds` with no
   `backup_stale` or `backup_failed`; the links Worker has no schedule and its `LinksBackup` Alarm runs at 05:25 UTC.
   After a day, each app's next natural run and Workers Free usage.
-- Inventory: with `LinksBackup` recorded (`FIRST_DEPLOY_PENDING` is empty), the account-inventory check and the
-  Personal cloud reconcile report only Brief's leftovers until its teardown above.
+- Inventory and drift: with `LinksBackup` recorded and Brief torn down, the next "Infra drift" run, the
+  account-inventory check, the Personal cloud reconcile and Home's 配置漂移 should all be clean.
 - Fleet: the per-workload charts fill in now that the RBAC rule is applied, and the PID 1 `net/dev` mount keeps
   reporting the host's interfaces.
 
@@ -153,8 +113,9 @@ Deployments.
 - Home host, whenever convenient (it runs headless; no login screen):
   `sudo systemctl set-default multi-user.target`, `sudo systemctl stop gdm`, `sudo systemctl restart polkit`. Then
   Fleet's memory reading and swap use should drop.
-- Brief is retired (2026-10-28); Newsletter is the one daily briefing. The Cloudflare and GitHub teardown steps are
-  in Current work.
+- Brief is retired (2026-10-28); Newsletter is the one daily briefing. If the private bootstrap input still holds
+  `worker_secrets.brief` or `BRIEF_*` entries, delete them before the next bootstrap (a leftover
+  `worker_secrets.brief` makes it fail); `private_input.py` keeps ignoring an old `BRIEF_CSRF_SIGNING_KEY`.
 
 ## Operating boundaries
 
