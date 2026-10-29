@@ -77,6 +77,26 @@ No new dependency, queue, table or ordinary inference field was added.
 Home's fresh Cloudflare configuration check completed at 21:54 Los Angeles time with no configuration difference
 in any category. The prior cached Brief findings cleared through the check; alert dismissal was not used.
 
+## OpenAI default billing metadata (2026-10-29)
+
+`f72e447e` uses the adapter's actual Standard/default-30-minute request settings when optional response billing
+metadata is missing; reported values still take precedence. Synthetic tests reproduce the former dropped price
+and verify cache counts, returned estimates, D1 persistence and usage buckets. Unknown fees remain absent,
+without changing rates, limits, public contracts or historical records.
+
+[Main publication](https://github.com/ziyixi/todofy/actions/runs/40909752359) and
+[matching reconcile](https://github.com/ziyixi/todofy/actions/runs/40910801785) passed. The owner Playground then ran
+one real `openai/gpt-6.1-sol` medium request containing only synthetic records; it returned `READY` and:
+
+| Input | Output | Cache reads | Cache writes | API estimate |
+| --- | --- | --- | --- | --- |
+| 3,439 | 5 | 0 | 3,436 | 8,646 micro-USD / USD 0.008646 |
+
+The estimate counts three ordinary input tokens, 3,436 default-cache writes and five output tokens exactly once.
+It agrees with the current [official cache pricing](https://developers.openai.com/api/docs/guides/prompt-caching).
+No private mail, prompt override, provider credential or business action was used. This validates the native price
+path; Mailsort's actual next Gmail write is separate acceptance in its own verification record.
+
 ## Boundaries
 
 Local and CI suites cover provider failures, retries, cancellation, replay, unknown usage and body expiry.
