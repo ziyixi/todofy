@@ -7,10 +7,10 @@ timezone semantics. It owns no storage, network calls or scheduler.
 `previewDate` produces an explicit date, optional instant/timezone and recurrence; `nextOccurrence` advances
 that schedule after completion. Unsupported rules reject instead of silently changing a task's meaning.
 The imported rules include fixed annual dates such as `every 1st Jan` and named biweekly dates such as
-`every 2 weeks Tue`. Per the owner's choice, `every 30th` uses February's last day (28 or 29), then returns
+`every 2 weeks Tue`. `every 30th` uses February's last day (28 or 29), then returns
 to the 30th in March; completing it late skips past occurrences and keeps the fixed monthly schedule.
 `clampMonthEnd` gives typed or imported monthly and yearly interval rules (`every month`, `quarterly`,
 `every year`) anchored after the 28th the same last-day behaviour, so a rule on the 31st or on Feb 29 never
 skips a month or a year. `daysBetween` lets the Worker move a deadline with its occurrence.
 Run `bazel test //packages/task-dates:check` for acceptance and `bazel build //packages/task-dates` for the package.
-The `check` script uses that suite; typecheck/test scripts delegate to Bazel as well; a frozen pnpm workspace install supports source-level development.
+Package scripts delegate to Bazel; a frozen pnpm workspace install links the source exports for development.

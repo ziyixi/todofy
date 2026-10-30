@@ -16,7 +16,7 @@ import urllib.parse as parse
 
 import tests.support.workflows as workflows
 
-ROOT = pathlib.Path(__file__).resolve().parents[1]
+ROOT = pathlib.Path(__file__).absolute().parents[1]
 WORKSPACE = ROOT.parent
 
 

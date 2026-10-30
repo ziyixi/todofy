@@ -48,7 +48,7 @@ bazel build //mail-hero
 - `cloudflare/src/native/`：收信、解析、持久调度、webhook 与管理 API。
 - `cloudflare/migrations/`、`cloudflare/test/`：D1 schema 与原生运行环境测试。
 - `web/`：React UI；构建资源输出到 `uiassets/dist/`。
-- `deploy/`：账户辅助工具、CI 配置生成与备份工具；工作流在单仓库根目录的 `.github/workflows/`。
+- `deploy/`：账户辅助、发布校验与备份恢复工具；工作流在单仓库根目录的 `.github/workflows/`。
 - `docs/`：接入、部署和恢复说明。通用事件合同在单仓库根目录的 [`contracts/mail-received-v1/`](../contracts/mail-received-v1/)。
 
 以下命令都在 `mail-hero/` 目录运行。

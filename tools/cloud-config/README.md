@@ -5,14 +5,13 @@ and `vps.platform_runtime_host`. The VPS section also declares its namespace, st
 expected system daemons. `config/resources.toml` records the account, zone and provider-issued resource IDs.
 Neither file may hold credentials, owner emails, mailbox addresses, private node IPs or business data.
 
-Python 3.12 is enough for generation; it needs no package, account or network access:
+Use the repository Python 3.14 runtime for generation; it needs no account or network access:
 
 ```sh
-python3.12 tools/cloud-config/generate.py
-python3.12 tools/service-catalog/catalog.py
-python3.12 tools/cloud-config/generate.py --check
-python3.12 -m unittest discover -s tools/cloud-config/tests
-node --test tools/cloud-config/tests/worker-secrets.test.mjs tools/cloud-config/tests/worker-deploy.test.mjs
+python3.14 tools/cloud-config/generate.py
+python3.14 tools/service-catalog/catalog.py
+python3.14 tools/cloud-config/generate.py --check
+bazel test //tools/cloud-config:check
 ```
 
 Each app manifest's `workers.hosts` declares relative host labels. An empty label means the zone itself; an
@@ -47,8 +46,8 @@ observer sequence or provider state.
 ## Public CI outputs
 
 ```sh
-python3.12 tools/cloud-config/outputs.py
-python3.12 tools/cloud-config/outputs.py --github-output "$GITHUB_OUTPUT"
+python3.14 tools/cloud-config/outputs.py
+python3.14 tools/cloud-config/outputs.py --github-output "$GITHUB_OUTPUT"
 ```
 
 These commands return `website_url` and `relay_url` derived from the same validated profile. They do not look
@@ -78,8 +77,8 @@ Both the normal release and a repair can therefore report the exact source they 
 (the options listed in `worker-deploy.mjs`: its Worker secret entry, the vars it injects, its owner and other personal
 inputs, owner-only secrets, and how each committed AUD or D1 id gates a deploy). It re-exports the core's functions
 under its usual names, so CI, the app's tests and `drift_desired.py` still use the app's own `deploy/deploy-vars.mjs`.
-A change to the core deploys no app: each app's checks run its wrapper's tests (and, for all but Tasks, a dry run
-through it), and the real deploy path is proven at each app's next release.
+The Bazel graph connects this shared core to the wrappers and release inputs that consume it. A change selects
+those consumers' checks/publications; compiled artifacts and real provider readback remain separate release gates.
 
 A Worker whose owner is another Worker's declares `identity_from = "<worker>"` and only `ACCESS_OWNER` (and optional
 `ACCESS_OWNER_ALIASES`). It has no map of its own: its spec names the source's map and `identity_from`, the deploy

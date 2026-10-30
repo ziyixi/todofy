@@ -9,7 +9,7 @@ bazel build //platform --platforms=//tools/bazel/images:linux_amd64 --embed_labe
 bazel test //platform:check
 ```
 
-`//platform:bootstrap_bundle` prepares the separate public installer input. Normal publication and deployment stay in Actions. Linux checks require Docker for the declared offline container probe; the image job also verifies isolated K3s SSA and compiles the reviewed AppArmor policy using the Ubuntu host parser.
+`//platform:bootstrap_bundle` prepares the separate public installer input. Normal publication and deployment stay in Actions. Linux checks require Docker for the offline image probe and a separate privileged, API-only k3s fixture on loopback port 6443. The native k3s test runs the original SSA assertions and removes its unique container and volume. The image job compiles the reviewed AppArmor policy using the Ubuntu host parser.
 
 ```mermaid
 flowchart LR

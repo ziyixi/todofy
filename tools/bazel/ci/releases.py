@@ -8,12 +8,24 @@ import os
 import re
 import subprocess
 import urllib.parse
+import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 
-from plan import github_get
-
 Release = dict[str, str]
+
+
+def github_get(path: str) -> dict:
+    request = urllib.request.Request(
+        os.environ.get("GITHUB_API_URL", "https://api.github.com") + path,
+        headers={
+            "Authorization": "Bearer " + os.environ["GH_TOKEN"],
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=20) as response:
+        return json.load(response)
 
 
 def select(

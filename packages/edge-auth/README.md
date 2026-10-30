@@ -29,8 +29,9 @@ bazel test //packages/edge-auth:check
 bazel build //packages/edge-auth
 ```
 
-The package `check` script invokes the same suite. The typecheck and test scripts also delegate to Bazel. A frozen pnpm workspace install supports source-level development. A consumer declares its package dependency in its BUILD file; public `:check` and `:release`
-facades expose those edges to CI. No manual consumer map is maintained.
+Package scripts delegate to these Bazel checks. A frozen pnpm workspace install supports source development.
+Consumers declare the package in their BUILD files; public `:check` and `:release` facades expose those edges to CI.
+No manual consumer map is maintained.
 
 Source rules (every app's toolchain compiles it, SPEC §6): relative imports end in `.ts`; erasable
 TypeScript only (no `enum`, `namespace` or parameter properties); no DOM-only type names; no `Buffer`

@@ -14,6 +14,7 @@ filegroup(
     name = "release",
     srcs = [
         ":platform",
+        "//:.github/actions/check-platform/action.yml",
         "//:.github/actions/publish-platform/action.yml",
         "//tools/container-release:release_inputs",
     ],
@@ -499,14 +500,14 @@ py_test(
 
 py_test(
     name = "tests_deployment_test_k3s_acceptance",
-    size = "small",
+    size = "large",
     srcs = [
+        "tests/deployment/k3s_acceptance_main.py",
         "tests/deployment/test_k3s_acceptance.py",
-        "//tools/bazel/python:unittest_main.py",
     ],
-    args = ["tests.deployment.test_k3s_acceptance"],
     data = [
         "pyproject.toml",
+        "versions.json",
         ":manifests",
     ],
     imports = [
@@ -516,7 +517,18 @@ py_test(
         "tests/status_daemon",
     ],
     legacy_create_init = False,
-    main = "//tools/bazel/python:unittest_main.py",
+    main = "tests/deployment/k3s_acceptance_main.py",
+    tags = [
+        "container",
+        "exclusive",
+        "local",
+        "no-cache",
+        "no-sandbox",
+    ],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
     deps = [
         ":deployment_kubernetes",
         ":deployment_reconcile",

@@ -1,4 +1,5 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
 load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
 package(default_visibility = ["//visibility:public"])
@@ -25,5 +26,57 @@ filegroup(
         ],
         allow_empty = True,
     ),
+    visibility = ["//visibility:public"],
+)
+
+py_library(
+    name = "legacy_restore",
+    srcs = ["mailhero_backup.py"],
+    imports = ["."],
+)
+
+py_library(
+    name = "native_restore",
+    srcs = ["native_backup.py"],
+    imports = ["."],
+    deps = [":legacy_restore"],
+)
+
+py_library(
+    name = "synthetic_snapshot",
+    srcs = ["test_backup.py"],
+    imports = ["."],
+    deps = [":legacy_restore"],
+)
+
+[
+    py_test(
+        name = "restore_" + module + "_test",
+        srcs = [
+            module + ".py",
+            "//tools/bazel/python:unittest_main.py",
+        ],
+        args = [module],
+        data = ["//mail-hero/cloudflare:migrations"],
+        imports = ["."],
+        legacy_create_init = False,
+        main = "//tools/bazel/python:unittest_main.py",
+        deps = [
+            ":legacy_restore",
+            ":native_restore",
+        ] + ([":synthetic_snapshot"] if module == "test_native_backup" else []),
+    )
+    for module in [
+        "test_backup",
+        "test_native_backup",
+    ]
+]
+
+test_suite(
+    name = "check",
+    tests = [
+        ":restore_test_backup_test",
+        ":restore_test_native_backup_test",
+    ],
     visibility = ["//visibility:public"],
 )

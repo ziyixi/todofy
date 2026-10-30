@@ -38,18 +38,6 @@ runs:
       with:
         root: .release-source
         filters: 'todofy... todofy-gateway... todofy-web...'
-    - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-      if: inputs.required == 'true'
-      with:
-        version: '0.12.10'
-        cache-dependency-glob: |
-          uv.lock
-          pyproject.toml
-          .python-version
-          **/pyproject.toml
-          todofy/pylock.toml
-        working-directory: .release-source
-        enable-cache: true
     # Every static production value (account, D1, hosts, Access, limits) is committed in wrangler.toml
     # (todofy-core) and gateway/wrangler.toml; the environment URL and the probes read the hosts there.
     - name: Read the hosts from the committed gateway config

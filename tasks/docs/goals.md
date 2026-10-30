@@ -56,14 +56,9 @@ four for the exact lookup. The seeded GetPlan remains three statements/nine rows
 KR, progress page and linked-task CPU checks remain under Workers Free's request budget. Actual measurements and
 release conclusions are in [verification](verification.md#goals-october-24).
 
-The Goal CPU test uses the existing profiler with five independent cold workerd isolates. It compares the median
-first authenticated catalog request with the unchanged 10 ms budget; each sample includes Access key import and
-catalog encoding, with no warm-up request or retry. The isolate's startup warm-up (`worker/src/startup.ts`) runs the
-catalog's read, mapping and codec once over a stub D1, as it does the task page's: measured 2026-10-29 in two
-series of four alternating runs, the first read's median went from about 8.0 to about 7.5 reference ms (0.5 and 0.6
-less in the two series), and the warm-up's own first run rose by about 2, to about 22 against its bound of 30. Warm
-endpoint bounds and worst-case fixtures are unchanged.
-These calibrated local profiles detect regressions; they do not guarantee production latency or CPU use.
+The Goal CPU test uses independent cold workerd isolates and the unchanged request budget, without a warm-up request
+or retry. Startup warming is measured separately. Local calibrated profiles detect regressions; current limits live
+in the tests and do not promise production latency.
 
 ## Annual Notion import
 

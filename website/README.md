@@ -1,90 +1,61 @@
 # ziyixi.science
 
-Personal academic and engineering website for Ziyi Xi: Next.js App Router, built as a **static export**
-from a validated, immutable content snapshot. Blog posts come from a Notion data source; visitor requests
-never reach Notion or any Worker code.
+Ziyi Xi's academic and engineering website. Next.js exports static pages from a validated content snapshot;
+visitor requests never read Notion. `ziyixi-website` serves the site at `www.ziyixi.science` and `ziyixi.science`,
+with `www` canonical. The separate relay dispatches content checks and holds no Notion credentials.
 
-| Part        | What it is                                                                                                                                                                                                                   | Docs                                           |
-| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| The site    | `next build` with `output: "export"` → `out/`, served by the assets-only Worker **`ziyixi-website`** ([`wrangler.toml`](wrangler.toml)) on its Custom Domains `www.ziyixi.science` (canonical) and the apex `ziyixi.science` | [`docs/architecture.md`](docs/architecture.md) |
-| The release | `.github/workflows/website-release.yml` (repository root): Notion sync, build, verify, Worker version upload/deploy, live check, rollback and content-check receipts                                                         | [`docs/release.md`](docs/release.md)           |
-| The relay   | Worker **`ziyixi-notion-publish`** ([`relay/`](relay/)): daily content sync and Home manual sync, without reading Notion                                                                                                     | [`relay/README.md`](relay/README.md)           |
-| The cutover | Vercel → Cloudflare (2026-09-29/30), historical; the hostnames changed again on 2026-10-01                                                                                                                                   | [`docs/cutover.md`](docs/cutover.md)           |
+- [Architecture and route behavior](docs/architecture.md)
+- [Release, recovery and receipt contract](docs/release.md)
+- [Notion fields and local content setup](doc/setup-checklist.md)
+- [Content-sync relay](relay/README.md), [verification limits](docs/verification.md)
+- [Publication sources](doc/publication-sources.md), [imported commit map](docs/history-map.md)
 
-This directory is one app of the monorepo (root [`README.md`](../README.md), [`AGENTS.md`](../AGENTS.md)). It
-was the separate repository `ziyixi/ziyixi.science` until 2026-09-30; its history is kept
-(`git log --follow website/<file>`, old commit IDs in [`docs/history-map.md`](docs/history-map.md)). The
-Chinese planning and operations notes in [`doc/`](doc/) describe the Vercel era where they mention Vercel;
-the files in `docs/` supersede them.
+## Build and check
 
-## Bazel checks
+From the repository root:
 
-Run `bazel test //website:check` and `bazel build //website` from the repository workspace.
-The root target packages the application; `:check` collects its declared checks. Package build, test, type and lint scripts
-delegate to the corresponding Bazel targets. Interactive Vite/Wrangler commands remain available for local development;
-their no-argument proto hook materializes Bazel outputs into the existing development imports.
-See [workspace dependencies](../docs/dependencies.md) for the Bazel prerequisite and installation commands.
-
-## Local development
-
-Use Node 26 and pnpm 11.25.0, declared in the root `package.json`. The root workspace catalog and
-`pnpm-lock.yaml` are shared by every Node project. Run `make install` once; it discovers that workspace.
-`make` can select an existing Homebrew `node@26` for its child processes.
-
-For your real Notion articles, configure `NOTION_TOKEN` and `NOTION_DATA_SOURCE_ID` in `.env.local`, then:
-
-```bash
-make preview        # sync Notion, then the Next dev server on http://localhost:3000
+```sh
+bazel test //website:check
+bazel build //website:relay
 ```
 
-| Command             | What it does                                                                                   |
-| ------------------- | ---------------------------------------------------------------------------------------------- |
-| `make preview`      | Sync Notion, then start the development server                                                 |
-| `make sync`         | Sync Notion without starting a server                                                          |
-| `make dev`          | Start the development server on the existing snapshot                                          |
-| `make build-export` | Build the static export `out/` from the existing snapshot                                      |
-| `make serve-export` | Build `out/` and serve it exactly as production does (`wrangler dev`, <http://127.0.0.1:4173>) |
-| `make check`        | Formatting, lint, type checks and unit tests                                                   |
+`:check` runs units, formatting, ESLint, real type checks and the empty/fixture Chromium suites. The relay builds
+independently of site content. `bazel build //website` requires an explicitly prepared `website_content` repository;
+without one it fails. It never substitutes an empty blog for missing production content. The release workflow
+captures Notion first and gives that snapshot to the same Bazel site target.
 
-The content step (`make sync`, `pnpm content:prepare*`) writes `.generated/content/`, `public/media/` and the
-responsive image variants `public/_img/` with their map `.generated/images.json`. Every Next.js command
-needs a prepared snapshot. Without Notion credentials use the empty blog or the synthetic fixture:
+Package test/build/type/lint scripts delegate to Bazel. Tool versions come from the root workspace; see
+[dependencies](../docs/dependencies.md) and [Bazel](../docs/bazel.md). Raw interactive Next/Wrangler development uses
+pnpm dependencies and the no-argument proto materializer.
 
-```bash
-pnpm content:prepare:fixture   # or content:prepare:empty
+## Local content and preview
+
+From `website/`, run `make install` once. For authorized real-content preview, configure `NOTION_TOKEN` and
+`NOTION_DATA_SOURCE_ID` in ignored `.env.local`, then run `make preview`. This syncs content before opening the
+Next development server. `make dev` uses the existing snapshot; `make sync` only synchronizes it.
+
+Without Notion access, explicitly prepare synthetic or empty content:
+
+```sh
+pnpm content:prepare:fixture  # or content:prepare:empty
 make dev
 ```
 
-For bilingual articles, give the English and Chinese pages the same optional `TranslationKey`, distinct
-slugs and `Language` `en` / `zh-CN` ([Notion setup](doc/setup-checklist.md#11-创建专用-blog-数据库),
-[publication sources](doc/publication-sources.md)).
+The content step writes `.generated/content/`, `public/media/`, `public/_img/` and `.generated/images.json`.
+`make build-export` stages that prepared snapshot into Bazel and copies the static output to `out/`;
+`make serve-export` serves it locally with Wrangler. Content capture and publication remain explicit operator
+commands. They do not run in ordinary unit checks.
 
-## Checks
-
-What `Website checks` runs in CI, without any secret:
-
-```bash
-pnpm content:prepare:empty && pnpm check
-for mode in empty fixture; do
-  pnpm content:prepare:$mode && pnpm content:validate --source=$mode
-  pnpm build:site                 # next build + out/_headers, out/_redirects, asset limits
-  CI=1 CONTENT_MODE=$mode pnpm test:e2e   # Playwright against `pnpm start` (wrangler dev on out/)
-done
-pnpm exec wrangler deploy --dry-run --config wrangler.toml
-pnpm exec wrangler deploy --dry-run --config relay/wrangler.toml
-```
-
-`pnpm test:deployment` (the release's route contract) needs `DEPLOYMENT_BASE_URL` and an expected
-`build-info.json`; fixture content is allowed only against a local server with
-`ALLOW_FIXTURE_DEPLOYMENT_TESTS=true`.
+English and Chinese versions use distinct slugs and `Language` values, with the same optional `TranslationKey`.
+[Notion setup](doc/setup-checklist.md#blog-fields) defines the publication fields and withdrawal rules.
 
 ## Production
 
-Deploys run only from GitHub Actions on `main`. A website code push dispatches `website-release.yml`
-after the CI gate. The relay dispatches the same workflow daily, and Home offers **立即同步** for manual
-updates. Each release builds the newest main commit that passed the CI gate, checks the full Notion
-snapshot, and skips deployment when its identity is unchanged. GitHub receipts and live verification
-provide the status shown in Home ([release details](docs/release.md)).
+Only main Actions publishes the site. Code changes, daily relay checks and Home's **立即同步** use the same release
+lock and identity checks. A matching code/content/config identity records a successful check without uploading.
+Changed releases verify the complete route contract before and after publication; failure follows the recorded
+rollback path. Live deployment verification is the uncached `bazel run //website:verify_deployment` operator and
+requires an explicit URL and expected build identity.
 
-The GitHub `production` environment holds `WEBSITE_NOTION_TOKEN`, `WEBSITE_NOTION_DATA_SOURCE_ID` and
-`CF_API_TOKEN`. Notion is read only; the old publish buttons and status write-back are retired.
+Notion is read only. Public Notion buttons and status write-back are retired. The production environment supplies
+the website reader and Cloudflare credentials; neither snapshots nor credentials are committed.

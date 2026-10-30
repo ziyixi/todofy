@@ -5,7 +5,7 @@ from typing import Any
 
 import yaml
 
-ROOT = pathlib.Path(__file__).resolve().parents[3]
+ROOT = pathlib.Path(__file__).absolute().parents[3]
 
 
 def load(name: str) -> dict[str, Any]:

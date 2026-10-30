@@ -15,6 +15,7 @@ filegroup(
     name = "release",
     srcs = [
         ":newsletter",
+        "//:.github/actions/check-newsletter-image/action.yml",
         "//:.github/actions/publish-newsletter/action.yml",
         "//tools/container-release:release_inputs",
     ],
@@ -2926,8 +2927,7 @@ py_test(
         "tests/conftest.py",
         ":build_test_data",
         ":test_fixtures",
-        "//:python_repository_test_data",
-        "//:toolchain_version_inputs",
+        "//:newsletter_ci_test_inputs",
         "//tools/bazel/python:noto_cjk_font",
     ],
     env = {
@@ -5074,11 +5074,11 @@ py_test(
     ],
     data = [
         "pyproject.toml",
+        "scripts/smoke_image_probe.py",
         "tests/conftest.py",
         ":build_test_data",
         ":test_fixtures",
-        "//:python_repository_test_data",
-        "//:toolchain_version_inputs",
+        "//:newsletter_ci_test_inputs",
         "//tools/bazel/python:noto_cjk_font",
     ],
     env = {

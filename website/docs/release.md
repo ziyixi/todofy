@@ -31,15 +31,14 @@ again.
 Each stage is one `pnpm release <command>`, run from `website/`:
 
 1. `context` validates main, workflow dispatch, confirmation, request UUID and green commit.
-2. `code-sha` identifies the newest commit that touched `website/` or its shared build inputs (the root
-   workspace files and `proto/` without other apps' packages); unrelated service changes do not change the
-   website's code identity.
+2. `code-sha` queries the declared source and BUILD-file closure of `//website:release`, then finds its newest
+   Git commit. Shared inputs follow the same dependency graph as the build.
 3. `gate` reads the existing `website-release` records. Ordinary release needs a successful baseline;
    a failed/interrupted release needs recovery. No baseline requires bootstrap and produces a blocked
    content-sync receipt.
 4. `recover` (recovery) or `check-baseline` (ordinary release) verifies the recorded Worker version and
    live identity before reading content.
-5. Empty-snapshot checks run without secrets. `prepare` then reads the complete Notion snapshot and
+5. The selected source must already have a successful main CI gate. `prepare` reads the complete Notion snapshot and
    media, using the baseline registry for slug history and feed GUIDs. A previously non-empty collection
    becoming empty is automatic only when every previously public source identity is positively Draft
    or archived in the configured data source, with complete pagination and a stable reread. Missing
@@ -48,8 +47,10 @@ Each stage is one `pnpm release <command>`, run from `website/`:
 6. `decide` compares code SHA, content hash, config hash and schema version. Only after both prepare and
    decide complete is the actual `checked_at` saved. `sync-record` creates a content-sync receipt:
    unchanged is successful with no build/deploy; changed is in progress.
-7. A changed identity builds the static export and verifies its identity and complete route contract under
-   `wrangler dev`. The hostname guard rejects unapproved hostname removal or takeover before upload.
+7. A changed identity stages the complete prepared content as an explicit `website_content` repository and builds
+   the static export with Bazel. There is no missing-snapshot fallback. The release verifies identity and the full
+   route contract under `wrangler dev`, using the locked Bazel Chromium tool. The hostname guard rejects unapproved
+   hostname removal or takeover before upload. Publication consumes that compiled export without rebuilding it.
 8. `upload` creates a Worker version after checking the baseline again. The first bootstrap uses
    `wrangler deploy`, because the Worker may not exist yet. `record` writes the existing release ledger
    entry with its rollback target and route contract.

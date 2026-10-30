@@ -2,6 +2,8 @@
 
 This tool prepares the public, immutable input to the existing one-time installer. Normal releases use the daemon API through Actions. Configuration and recovery limits are documented in [rebuild](../../docs/rebuild.md).
 
+<a id="prepare-locally"></a>
+
 ## Build the public bundle
 
 From the repository root, use the exact tested source SHA and published image digests:
@@ -37,6 +39,8 @@ A matching retry verifies existing state. The explicit rollback restores the pri
 ## Recovery boundaries
 
 A completion marker binds one exact public bundle. Repeating that completed bundle reports `already_initialized`; a different bundle uses the normal release path. An incomplete retry keeps the same input and checkpoint. Neither path forces unknown deliveries complete, deletes old state, reopens admission or starts a retired Compose stack.
+
+<a id="initial-client-repair"></a>
 
 The bounded `repair.py` compatibility path is for the original bootstrap client and an empty API release ledger. It accepts only a reviewed replacement with unchanged host/foundation configuration, preserves queued and unknown business records, and finishes held. It is not a general second installer or an API resume. Host-address migration remains a separate operation.
 

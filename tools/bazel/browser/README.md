@@ -1,26 +1,26 @@
-# Tasks browser tests
+# Browser checks
 
-The browser toolchains use the official Playwright 1.63.0 headless shell: Chrome 153.0.8010.12,
-revision 1243, with separate SHA-256 pins for macOS arm64 and Linux amd64. The URLs were checked with
-the locked Playwright CLI's `install chromium-headless-shell --dry-run`, including its Linux platform
-selection. No browser install runs as part of a test.
-
-The bootstrap sets `PLAYWRIGHT_BROWSERS_PATH` to the declared archive before importing Playwright.
-This also covers specs that call `chromium.launchPersistentContext` directly. A Playwright version
-change requires updating the corresponding archive pins. Each browser profile is temporary.
-
-Tasks' original `playwright.config.ts` supplies the tests' settings. The Bazel adapter selects the
-registered Node executable for its synthetic backend and puts test artifacts in Bazel's output
-directory. Playwright's file discovery skips symlinks, so the adapter canonicalizes the original
-test directory and each declared spec into the same output tree. Native Node and esbuild use their
-normal filesystem canonicalization; Bazel's operating-system sandbox remains active.
-The frontend comes from `//tasks/web:bundle`; the backend is the original ephemeral D1
-harness with declared migrations and generated proto dependencies.
-
-Each spec has its own `browser_<spec>_test` target. They have `browser` and `exclusive` tags because
-the original server and fixtures share local ports. The CI browser group also sets
-`--local_test_jobs=1`. Run the suite with:
+The toolchains provide official Playwright 1.63.0 browser archives with SHA-256 pins for macOS arm64 and Linux amd64:
+Chromium headless shell revision 1243 (Chrome 153.0.8010.12), and WebKit revision 2359 (26.6). Repository definitions
+record the platform URLs and hashes. A Playwright update must update and validate the matching browser inputs.
+Tests select their own declared registry before importing Playwright; no test downloads a browser or uses an owner's
+normal browser cache/profile.
 
 ```sh
 bazel test //tasks/web:browser_tests
+bazel test //website:browser_tests
+bazel test //recall/extension:browser_tests
 ```
+
+Tasks keeps its original spec/config and ephemeral D1 backend. Website checks its explicit empty/fixture exports and
+route contracts. Recall runs the built options/background/probe code with real WebKit DOM, IndexedDB, image encoding
+and gzip behind a synthetic extension API bridge. The latter does not establish Orion iOS API or suspension behavior.
+
+Adapters canonicalize declared specs because Playwright discovery skips symlinks, use the registered Node/tool inputs
+and put traces/reports in test outputs. Browser profiles are temporary. Shared-port Tasks cases are exclusive and CI
+runs its browser group with `--local_test_jobs=1`.
+
+Ephemeral Linux CI prepares OS libraries with `bazel run //tools/bazel/browser:install_dependencies` using that same
+locked Playwright CLI. The website release needs only `:install_chromium_dependencies`. These are explicit host
+preparation operators, separate from the pinned browser archives and ordinary checks. They are not installation
+commands for the owner's Chrome or phone.

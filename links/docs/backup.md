@@ -100,7 +100,7 @@ npx wrangler d1 time-travel restore DB --timestamp <RFC 3339 time> --config ../w
 ## Full restore into a new database
 
 `PRIV` is a private directory outside the repository, for example
-`mkdir -m 700 ~/.local/share/links-restore && PRIV=$_`. The files written there hold every link; delete them
+an owner-controlled isolated recovery location. The files written there hold every link; delete them
 afterwards.
 
 1. Do not edit in the launcher until step 6. Redirects keep working from the old database meanwhile; nothing else
@@ -156,7 +156,7 @@ afterwards.
    - Push the commit to `main`. Its preflight now finds the binding it expects and releases the same code.
    - `infra/` still holds the old database as `cloudflare_d1_database.app["links"]`, so "Infra drift" and the
      reconcile report the id difference, and the new database as unregistered, until the infra state is moved to
-     it ([import notes](../../infra/README.md#import-notes)). Keep the old database until then.
+     it ([import notes](../../infra/README.md#scope)). Keep the old database until then.
 6. Open the launcher (`https://s.ziyixi.science/_/`): it lists the restored links, 显示已删除 the deleted ones, and a
    link's history its kept revisions. A public link redirects anonymously.
 
@@ -183,4 +183,6 @@ The same commands work on a local copy: pass `--local --persist-to "$PRIV/d1"` i
 `migrations apply`, `execute` and `verify`, and any new UUID as the database id; `download --local --persist-to <dir>`
 reads a local bucket. `worker/test/runtime/backup.test.ts` runs the backup from the object's Alarm on real D1 and R2,
 downloads it with wrangler, restores it into a new local D1, verifies it and compares every table of the restored
-database with the original row for row; `node --test tools/test/*.test.mjs` covers the tool on synthetic data.
+database with the original row for row; `bazel test //links/tools:check` covers the tool on synthetic data.
+
+The committed synthetic build/test path is `bazel test //links:check`. Runtime backup/restore tests and tool checks are selected as leaves from that facade; remote recovery commands above are separate authorized operator work.

@@ -1,71 +1,28 @@
-# P1–P4 reading priorities
+# P1–P4 初始化与未读整理
 
-Owner approved replacing the old topic labels and removing Mailsort's own phishing/trust review on 2026-10-23.
-P1 is a real label and stays in Inbox; P2-P4 are real labels and archive. Valid uncertainty goes to P1.
+四个 Gmail 阅读标签替代旧主题分类：P1 留在 Inbox，P2–P4 归档。邮件、已读状态、星标和无关标签保留。
+当前分类规则和运行边界见 [design](design.md)，实际切换记录见 [verification](verification.md#priority-labels-and-cutover)。
 
-## Cutover
+## 首次初始化
 
-1. Release the exact green branch SHA through main Actions, preserving Gmail secrets/mode/budgets.
-2. Open 分级 and choose 启用 P1–P4 分级. The explanation identifies old managed Gmail labels and old learning as the
-   removal scope; existing mail, read/unread, star and Inbox positions remain. Review that scope before acting.
-3. If a bounded step is incomplete, use 继续设置. A failed call preserves progress; an uncertain response can retry
-   the same request identity. Do not start a second migration.
-4. Verify P1-P4 all linked by actual Gmail IDs with the fixed policies, then verify the preserved owner mode/budgets.
-5. Natural new mail uses the new scheme. Old archived mail remains searchable in All Mail without topic labels;
-   it is not automatically placed in new priorities or sent back to Inbox.
+1. 通过分支检查并以同 SHA 经 main 发布，保留 Gmail 授权、模式和预算。
+2. 在“分级”选择“启用 P1–P4 分级”，核对说明中的旧自有标签与旧学习数据移除范围，再确认。
+3. 中断后用“继续设置”接续原任务。结果不明时复用原 request ID，不另开迁移。
+4. 核对 P1–P4 的实际 Gmail ID、固定 Inbox 策略以及保留的模式和预算。
 
-The API is `InitializePriorities` (`POST /api/v2/labels:initializePriorities`) on the existing owner API. It needs
-only the existing Gmail write grant. It does not delete messages, read their bodies or call a model.
+`InitializePriorities` 使用现有 Gmail grant，不读邮件正文、不调用模型、不删除邮件。
+代码发布本身不会运行初始化。旧归档邮件留在 All Mail，不自动重分类或回到 Inbox。
 
-## Explicit unread batch
+## 显式整理当前未读
 
-After setup, open **分级** and choose **开始整理** under **整理当前未读邮件**. This explicitly authorizes the deployed app to process private
-unread mail of any age, including archived mail, using the existing masked model path. Ordinary new-mail processing
-keeps its receipt cutoff. No private content or model request belongs in rollout evidence, logs or fixtures.
+“分级 → 整理当前未读邮件 → 开始整理”处理当前未读，可含较旧和已归档的邮件；这比日常自动处理的
+“最近 48 小时、Inbox、无 P 标签”范围更广。它先收集固定 ID，再由现有 Alarm 分批推进。
 
-`StartUnreadClassification` (`POST /api/v2/unreadClassification:start`) first collects unread IDs across folders,
-excluding Spam/Trash, before classification begins. The existing Alarm continues the same batch after interruptions.
-Already P1-P4-graded, no-longer-unread, gone and other normal incoming-mail exclusions are skipped. Only these batch
-members may replace their latest stored decision; earlier Gmail write ledgers remain. P1 puts an archived message in
-Inbox; ordinary undo restores its original Inbox position. Mail is never deleted or marked read.
+- 已有 P 标签、不再未读、已消失和普通收件排除项会跳过；邮件不标已读、不删除。
+- 有效结果按同一 Gmail 写入账本执行，P1 可回 Inbox，普通撤销恢复原位置。
+- 模式、模型额度和 Gmail 写入上限保持。限额等待、跳过、失败与已应用分别计数；完成不保证全部应用。
+- 刷新进度只读状态。中断继续原批次，不重提另一个范围相同的任务。
 
-Modes and write caps stay unchanged. A model failure follows the shared Model Router error contract
-([design](design.md)); an exhausted daily write allowance waits until the next UTC day. A paused mode leaves the batch waiting. Check applied, skipped, failed and
-pending/deferred counts in that card; **刷新进度** reads current status. A completed batch may include skips and failures. The newest batch's IDs,
-state, ledger links and scan progress contain no mail content and remain until the next batch or deletion of app data.
-Production batch results must be recorded separately from the initializer and synthetic checks below.
-
-The one-time follow-up rechecks (**重判保底 P1**, **重判最初100封**) are retired: their request fields answer
-RELOAD_REQUIRED, and a stored recheck batch still reports its unchanged results. Their history is in the
-[verification record](verification.md#original-100-and-workers-ai-calibration).
-
-## Local verification (2026-10-24 UTC)
-
-- Worker lint/types and 124 unit tests passed.
-- The complete real-SQLite/workerd suite passed 69 cases, including the existing CPU budget. Its CPU fixture
-  explicitly exercises 2,000 current-priority examples and both model views for six messages.
-- UI lint/types, 62 tests and build passed. JavaScript is 56.8 KiB gzip under the unchanged 67 KiB budget.
-- The local production-config Worker bundle is 137.1 KiB gzip under its unchanged 140 KiB budget.
-- 26 deployment/config/credential-preservation tests passed. Proto lint/API lint, additive compatibility and
-  generated-schema checks passed; 437 CI/config/proto guards passed with one existing skip.
-- Real local Wrangler smoke passed all priority, fallback, correction/replay, undo, flash, quota, CSRF and auth
-  scenarios. All 62 synthetic Google requests matched the independent operation table. It made no external request.
-- Setup tests verify unchanged mail bodies/read/star/Inbox/other labels, historical decision preservation,
-  interruption continuation, external-name refusal and a recheck before freezing IDs. A recorded arrival during
-  setup proves the established Gmail history cursor is retained and the new message is later classified.
-- Known daily model-quota refusal now suppresses further classification/embedding calls that UTC day; a
-  reproduced workerd and smoke regression verifies idle/new-arrival suppression and next-day recovery.
-- Reloading the UI after Gmail identities link but before setup verification retains the setup action through
-  the real `ServiceStatus.priorities_initialized` field; linked Gmail IDs alone do not prove setup complete.
-
-## Release evidence
-
-Implementation `a70ff257526e8baa3d47e783da1980fff9d9ce11` passed the complete
-[branch gate](https://github.com/ziyixi/todofy/actions/runs/40051440933) and
-[same-SHA production release](https://github.com/ziyixi/todofy/actions/runs/40052652580).
-Only Mailsort and the matching website privacy page uploaded. The initializer remains a separate explicit owner
-operation; a code release never proves the old Gmail labels have been removed.
-
-The [current production verification](verification.md#priority-labels-and-cutover) records the actual cutover
-state, source read-back and any still-pending owner action. Its metadata-only evidence is separate from the local
-synthetic tests above. Real Chrome also completed setup and reload against the isolated empty fake mailbox.
+两个一次性重判入口（保底 P1、最初 100 封）已退役，旧请求提示刷新；原结果继续可读，不能恢复已取消条目。
+其证据在[历史核验](verification.md#original-100-and-workers-ai-calibration)。真实分类效果、模型请求和 Gmail
+实际变更分别核验，生产证据只记录计数与安全状态。

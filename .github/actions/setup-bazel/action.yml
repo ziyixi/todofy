@@ -1,5 +1,5 @@
 name: setup-bazel
-description: Install the repository's fixed Bazel binary for Linux image builds.
+description: Install the repository's fixed Bazel binary for Linux checks and builds.
 runs:
   using: composite
   steps:

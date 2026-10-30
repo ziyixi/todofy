@@ -206,6 +206,7 @@ class DispatchTest(unittest.TestCase):
         }
         self.common = [
             "//proto:check",
+            "//contracts:check",
             "//packages/new-lib:check",
             "//tools/bazel/ci:check",
             "//.github/scripts:check",
@@ -519,68 +520,31 @@ class ReleaseTest(unittest.TestCase):
 
 
 class BaselineTest(unittest.TestCase):
-    def test_git_order_and_check_gate_evidence_win_over_release_outcome(self):
-        def get(path):
-            if path.endswith("/runs/99"):
-                return {"workflow_id": 7}
-            if "/workflows/7/runs?" in path:
-                return {
-                    "workflow_runs": [
-                        {
-                            "id": 10,
-                            "head_sha": "older",
-                            "workflow_id": 7,
-                            "head_branch": "main",
-                            "event": "push",
-                            "conclusion": "success",
-                        },
-                        {
-                            "id": 11,
-                            "head_sha": "newer",
-                            "workflow_id": 7,
-                            "head_branch": "main",
-                            "event": "push",
-                            "conclusion": "failure",
-                        },
-                    ]
-                }
-            return {
-                "jobs": [
-                    {"name": plan.GATE, "status": "completed", "conclusion": "success"}
-                ]
-            }
+    def test_main_and_dispatch_without_explicit_base_check_the_complete_graph(self):
+        for env in (
+            {"GITHUB_REF": "refs/heads/main"},
+            {"GITHUB_EVENT_NAME": "workflow_dispatch"},
+        ):
+            with (
+                patch.dict(plan.os.environ, env, clear=True),
+                patch.object(plan.subprocess, "run") as git,
+            ):
+                self.assertEqual(plan.baseline()[0], "")
+            git.assert_not_called()
 
+    def test_local_branch_uses_its_merge_base(self):
+        with (
+            patch.dict(plan.os.environ, {"GITHUB_SHA": "head"}, clear=True),
+            patch.object(
+                plan.subprocess,
+                "run",
+                return_value=subprocess.CompletedProcess([], 0, "base\n"),
+            ) as git,
+        ):
+            self.assertEqual(plan.baseline()[0], "base")
         self.assertEqual(
-            plan.last_checked_main(["newer", "older"], "owner/repo", "99", get), "newer"
+            git.call_args.args[0], ["git", "merge-base", "origin/main", "head"]
         )
-
-    def test_failed_or_pending_gate_does_not_establish_a_baseline(self):
-        for state in ("failure", "cancelled", None):
-
-            def get(path, state=state):
-                if path.endswith("/runs/99"):
-                    return {"workflow_id": 7}
-                if "/workflows/7/runs?" in path:
-                    return {
-                        "workflow_runs": [
-                            {
-                                "id": 11,
-                                "head_sha": "newer",
-                                "workflow_id": 7,
-                                "head_branch": "main",
-                                "event": "push",
-                            }
-                        ]
-                    }
-                return {
-                    "jobs": [
-                        {"name": plan.GATE, "status": "completed", "conclusion": state}
-                    ]
-                }
-
-            self.assertEqual(
-                plan.last_checked_main(["newer"], "owner/repo", "99", get), ""
-            )
 
 
 if __name__ == "__main__":

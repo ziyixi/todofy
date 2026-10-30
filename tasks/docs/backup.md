@@ -22,6 +22,7 @@ bucket (`infra/storage.tf`).
   (`task_dependencies`), the weekly goals (`weekly_bets`) and Plan's lane orders (`plan_board`); and since
   `0008_mail_gtd_inbox.sql`, the mail categories (`mail_settings`), the GTD days (`gtd_days`), the weekly reviews
   (`weekly_reviews`), TaskInbox's routes (`task_inbox_routes`) and its daily counts (`task_inbox_days`).
+  Goals' Objective/KR/progress tables and Task/Bet references are included as well; older backups restore them empty.
   `task_labels` and the change feed are left out, because inserts rebuild them.
 - A job runs in steps a second apart, each bounded for Workers Free: the plan (one batch), then at most 30 D1
   statements of pages (15 pages of at most 100 rows and half a MiB) stored as one part per table, then the manifest.
@@ -97,15 +98,21 @@ afterwards.
    the release's preflight finds the live `DB` binding on the old id and stops (`STATEFUL_BINDING_CHANGED`
    needs a manual change).
    - Set the `tasks` entry of `[d1_databases]` in `config/resources.toml` to the new id, run
-     `python3.12 tools/cloud-config/generate.py` (it rewrites `tasks/wrangler.toml`) and commit without pushing.
+     `python3 tools/cloud-config/generate.py` (it rewrites `tasks/wrangler.toml`) and commit without pushing.
      The committed `database_name` stays `tasks`, because wrangler binds the database by its id.
    - From a clean checkout of that commit, deploy Tasks once by hand as `.github/actions/release-tasks` does,
      but without `--secrets-file`, so the Worker keeps its secrets:
      ```sh
-     pnpm install --frozen-lockfile
-     pnpm --dir tasks/web run build
-     (cd tasks/worker && GITHUB_SHA=$(git rev-parse HEAD) node ../deploy/deploy-vars.mjs exec -- \
-       npx --no-install wrangler deploy --config ../wrangler.toml)
+     pnpm install --frozen-lockfile --ignore-scripts
+     source_sha=$(git rev-parse HEAD)
+     bazel build //tasks --stamp --embed_label="$source_sha"
+     archive=$(bazel cquery //tasks --stamp --embed_label="$source_sha" --output=files)
+     mkdir "$PRIV/compiled-tasks"
+     tar -xzf "$archive" -C "$PRIV/compiled-tasks"
+     node tools/cf-guard/cf-guard.mjs --config tasks/wrangler.toml
+     (cd tasks/worker && GITHUB_SHA="$source_sha" node ../deploy/deploy-vars.mjs exec -- \
+       npx --no-install wrangler deploy "$PRIV/compiled-tasks/worker/index.js" --no-bundle \
+       --config ../wrangler.toml --assets "$PRIV/compiled-tasks/web/dist")
      ```
      From `tasks/worker`, `npx wrangler deployments status --config ../wrangler.toml` names the version, and
      `npx wrangler versions view <that version> --config ../wrangler.toml` lists `DB` with the new id. Go on
@@ -113,7 +120,7 @@ afterwards.
    - Push the commit to `main`. Its preflight now finds the binding it expects and releases the same code.
    - `infra/` still holds the old database as `cloudflare_d1_database.app["tasks"]`, so "Infra drift" and the
      reconcile report the id difference, and the new database as unregistered, until the infra state is moved
-     to it ([import notes](../../infra/README.md#import-notes)). Keep the old database until then.
+     to it ([import notes](../../infra/README.md#outputs)). Keep the old database until then.
 6. Open Plan: the restored tasks carry their planning facts and dependencies. Mail links of tasks created after
    the backup point at tasks the restored database lacks; converting such a Mail item creates a new Inbox task.
 7. Open Mail and GTD: Mail lists the pending mail and the categories, and GTD the restored completions and time.
@@ -131,8 +138,7 @@ A Todoist re-import ([import.md](import.md)) is not a recovery path. It only reb
 The same commands work on a local copy: pass `--local --persist-to "$PRIV/d1"` in place of `--remote` to
 `migrations apply`, `execute` and `verify`, and any new UUID as the database id; `download --local --persist-to <dir>`
 reads a local bucket. `tasks/worker/test/runtime/backup-runner.test.ts` runs a real backup from the jobs object,
-downloads it with wrangler, restores it into a new local D1 and verifies it; `node --test
-tasks/tools/test/backup-restore.test.mjs` covers the tool on synthetic data, in both manifest formats.
+downloads it with wrangler, restores it into a new local D1 and verifies it; `bazel test //tasks/tools:backup_restore_test` covers the tool on synthetic data, in both manifest formats.
 
 ## One-time planning import
 

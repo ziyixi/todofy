@@ -1,8 +1,7 @@
 # links: design
 
-The owner's short links on `s.ziyixi.science`, decided by the owner on 2026-10-01 (all recommended defaults of the
-research report). This document is the reference for the code under `links/` and `proto/links/ui/v1`; section numbers
-are cited from the code.
+Personal short links, backed by one Worker and D1. This document describes `links/` and `proto/links/ui/v1`;
+section numbers are cited from the code. Deployment hosts come from the public cloud configuration.
 
 ## 1. Scope
 
@@ -151,8 +150,8 @@ imports) and in each field's comment.
 
 `packages/edge-auth` with the dashboard's parameters (SPEC §5.4): Access JWT (RS256, the issuer's keys cached 10
 minutes), the owner and aliases matched case-insensitively. Under `/_/` every request must be the owner; every method
-but GET also needs the same-origin `Origin` (`https://s.ziyixi.science`) and the signed double-submit CSRF token (cookie
-`links_csrf`, header `X-CSRF-Token`), checked by the transcoder's `authorize` hook before the body is read.
+but GET also needs the exact configured same-origin `Origin`, fixed `X-CSRF-Token: 1` and JSON media type,
+checked by the transcoder's `authorize` hook before the body is read. No CSRF secret or cookie is required.
 
 The Access application (created in L2) is path-scoped: `s.ziyixi.science/_/*` plus the exact `s.ziyixi.science/_`, the
 owner's identities only, a 7-day session. Short links are outside it; the Worker reads the Access cookie there itself
@@ -165,31 +164,14 @@ on a short link only a request that carries a token is checked, so `curl` withou
 
 ## 8. Workers Free
 
-Measured in workerd with `tools/workerd-cpu` (reference machine, 2026-10-01, `test/runtime/cpu.test.ts`, no dev
-bypass): the isolate's first request (a redirect) 1.25-1.56 ms, a warm redirect 0-0.4 ms (the sampler's resolution),
-the owner's private redirect with the cookie verified 0.4 ms warm (1.95 ms for its first RS256 verification). The
-isolate's first owner API request (a one-link list page, the transcoder's, codec's and handlers' first run) is measured
-on its own: 3.3-4.5 ms (five runs, 2026-10-01). After it, first runs and warm medians: a full list page of 100 links
-2.5-3.0 / 1.4-1.9 ms, a filter over 1,000 links 1.6-2.5 / 1.4-1.6 ms, an export page of 250 links 2.2-2.8 / 2.0-2.2 ms,
-an import of 100 lines 3.7-4.4 / 1.7-2.0 ms (its first run is also the isolate's first mutation: the CSRF check and the
-first request body). The test holds redirects to 3 ms first and 1.5 ms warm, the isolate's first API request to 9 ms,
-every other API path to 7 ms first and 5 ms warm: reference milliseconds, the medians of three fresh isolates measured
-one after another, each isolate's numbers divided by its own measured speed (`tools/workerd-cpu` and its README;
-GitHub runners read the first request 1.0-1.7 ms and the first API request 3.2-4.3 ms, single isolates). Before the
-first API request was measured apart, the full list page carried it (4.9-5.3 ms against 7 ms) and failed once of ten
-runs on a machine loaded with nine busy processes; measured apart, eight such loaded runs passed (speed 2.4-2.8). An
-export of all 1,000 links in one answer measured about 5 ms, which is why it is paged.
+The redirect performs one indexed D1 read and zero writes. Owner list/export/import paths stay paged and bounded;
+backup exports advance in 128 KiB steps. The real workerd CPU suite measures first and warm requests, including
+JWT verification and actual D1/R2 backup work. Its committed limits remain authoritative; historical measurements
+are not a guarantee for every host.
 
-The daily backup's steps (cron ticks then, Alarm runs since 2026-10-28; an Alarm may use 30 s, the steps kept their
-size), measured the same way on `LINKS_MAX` links with three revisions each (2026-10-28):
-the plan about 1 ms, an export step of 128 KiB of rows (D1's JSON, gzip and SHA-256) 3.4-4.3 ms first and 3.8 ms warm
-(256 KiB steps measured 5-7 ms, hence 128), the last step (the parts checked, the manifest, retention) 1.5-3.1 ms, an
-idle run that only reads `state.json` under 1 ms; the test holds them to the owner API's bounds.
-
-Bundles: the Worker 324 KiB raw, 81.1 KiB gzip (budget 90 KiB, set at 67.5 KiB and raised for the backup and the
-ops-v1 entrypoint, `deploy/bundle-size.mjs`; 71.9 KiB before them); the
-launcher's JavaScript 37.5 KiB gzip (budget 45 KiB, `web/scripts/js-budget.mjs`): the protobuf-es runtime and the
-embedded `links.ui.v1` descriptors are most of both.
+Bundle checks enforce 90 KiB gzip for the Worker and 45 KiB for launcher JavaScript. `bazel test //links:check`
+runs these checks with the unit, runtime, UI and deployment tests; `bazel build //links` produces the compiled
+Worker, launcher, configuration and migrations in one archive.
 
 ## 9. Tests
 
@@ -210,7 +192,7 @@ embedded `links.ui.v1` descriptors are most of both.
   served by the same shared transcoder, and the no-external-request rules.
 - `deploy/test/*.test.mjs`: the committed config (assets, observability, the one Custom Domain, the real D1 id and
   AUD) and the deploy wrapper (it still refuses a real deploy with an all-zeros id or AUD).
-- `.github/scripts/test_ci_changes.py` runs the `Links deploy` checks of production against a stubbed `npx` and
+- `.github/scripts/test_release_probes.py` runs the publication probes against a stubbed `npx` and
   `curl` (`LinksProductionCheck`, `AccessProbe`, `LinksWorkerProbe`).
 
 All data is synthetic.
@@ -225,55 +207,12 @@ offered as 新建. Every change shows a toast with 撤销. 显示已删除 lists
 page of ExportLinks as one `.jsonl` file; 导入 sends a file in requests of at most 100 lines and names the skipped lines
 of the file. The page's text is Chinese; the short-link side's own pages (preview, refusals) are English.
 
-## 11. Steps
+## 11. Publication and recovery
 
-- **L1 (done):** the Worker, D1 schema, launcher, `links.ui.v1`, tests, `Links checks` in CI (`CHECK_ONLY`: no deploy
-  output), the deploy wrapper refusing anything but `--dry-run` while the D1 id and Access AUD were all-zeros
-  placeholders.
-- **L2 (first deploy; steps 1-4 done in the commit "Deploy links on s.ziyixi.science (L2)", step 5 after its first
-  `Links deploy`):** the lead created the D1 database `links` (WNAM), the Access application `links` (self-hosted,
-  `s.ziyixi.science/_/*` and the exact `s.ziyixi.science/_`, the two shared owner policies, session 168 h) and
-  the original, now retired CSRF signing secret; `s.ziyixi.science` had no DNS record, so the Custom Domain attaches
-  without a cf-guard allowance. The commit made every edit of step 4 except the `infra/` adoption: the dashboard
-  registry names the Worker and the D1 database under a hidden entry 短链接 (no tile, status `none`), and the
-  `Links deploy` job also checks the Worker's own anonymous answers (`/robots.txt`, and an unknown key's 302 to
-  `/_/k/<key>`, both no-store and noindex). **Adopted by IaC P4:** the D1 database and the Access application are in
-  `infra/` (`import {}` blocks, applied by "Infra apply"; `infra/README.md`); they were managed by hand until then.
-  The steps as planned:
-  1. Create the D1 database `links` (`wrangler d1 create links`, Workers Free) and commit its id as `database_id` in
-     `wrangler.toml`.
-  2. Create the Access application for `s.ziyixi.science/_/*` with an extra destination for the exact
-     `s.ziyixi.science/_`, a policy allowing exactly the owner's identities (the dashboard's), session duration 7 days;
-     commit its AUD as `ACCESS_AUDIENCE`. The rest of the host stays outside Access.
-  3. The keyless owner API needs no CSRF secret. The owner values come from the dashboard's `DASHBOARD_ACCESS_OWNER` and `DASHBOARD_ACCESS_OWNER_ALIASES`.
-  4. In one commit:
-     - `routes = [{ pattern = "s.ziyixi.science", custom_domain = true }]` in `wrangler.toml`.
-     - `.github/scripts/test_wrangler_configs.py`: move `links` from `UNDEPLOYED` to `PRODUCTION` and `WRAPPERS` (with
-       `LINKS_ACCESS_OWNER*` in `PERSONAL_INPUTS` and `SHARED_SECRETS`), and add `links` to the routed Workers of
-       `LocalDev.test_the_production_configs_with_routes_are_the_ones_dev_runs`.
-     - `.github/scripts/ci_changes.py`: drop `links` from `CHECK_ONLY` and add the `links_deploy` output.
-     - `.github/workflows/ci.yml`: a `Links deploy` job shaped like `Dashboard deploy` (secrets file, dry-run with the
-       bundle budget, `tools/cf-guard` on the config, `wrangler d1 migrations apply DB --remote`, the wrapper's deploy,
-       the production check of the live version and the migrations, then an Access probe that `GET /_` (the exact
-       destination), `GET /_/` and `GET /_/api/v1/links` each answer with Access's login redirect while
-       `GET /robots.txt` answers the Worker's own text).
-     - `tools/cf-guard/test/cf-guard.test.mjs`: `"links/wrangler.toml": ["links", ["s.ziyixi.science"]]` in the
-       committed configs' expected hosts.
-     - The drift check's desired state: `links` in `.github/scripts/drift_desired.py` `WORKERS` (test_drift_desired
-       holds it equal to `PRODUCTION`) and in `WRAPPERS` as `{"language": "js", "file": "links/deploy/deploy-vars.mjs",
-       "vars": "links", "secrets": "links"}` (without it `BUILD_SHA`, `ACCESS_OWNER` and `ACCESS_OWNER_ALIASES` would be missing from the desired state and the daily check would report them;
-       `test_drift_desired.py` now checks all three); regenerate `dashboard/worker/src/drift-desired.json` (`python3 .github/scripts/drift_desired.py`); the
-       9 Workers in `dashboard/worker/test/drift.test.ts` ("names every production Worker") and in
-       `dashboard/docs/design-v2.md` (the drift check's "8 Workers ... three ticks": 9 still take three ticks, 3 + 4 + 2).
-     - The dashboard registry (`dashboard/worker/src/registry.ts` `WORKERS` and `RESOURCES`: the Worker `links` and the
-       D1 database `links` by id) and a visible `ENTRIES` row; `test_wrangler_configs.py` enforces both
-       (`dashboard/docs/design-v2.md` §3).
-     - Adopt the D1 database and the Access application into `infra/` as for the other apps (done by IaC P4, above).
-  5. Verify with synthetic links only: a public and a private link, anonymous and logged in, the continuation, and
-     that nothing is logged.
-- **L3:** the owner's own links, through 导入 or the launcher; the Chrome site search and the home-screen bookmark
-  (README "Using it").
+The root [CI/CD](../../docs/ci-cd.md) workflow checks the affected targets, publishes the exact compiled artifact
+from the same green SHA, applies declared migrations and verifies provider identity, redirects and Access paths.
+[Infrastructure](../../infra/README.md) owns Access and storage existence; Wrangler owns the Worker/domain.
 
-Rollback: detach the Custom Domain by hand (a deploy without `routes` leaves an existing one attached), then revert the
-L2 commit (its wrapper then refuses a real deploy again: the placeholders are back); the D1 database and the Access
-application can stay or be deleted by hand (README.md "Rollback").
+A failed upload, live provider identity and authenticated owner behavior are separate observations. Keep recovery
+on the verified release path. Database recovery uses [backup and restore](backup.md); source rollback alone does
+not restore deleted data or change a persistent resource identity. The original L1–L3 rollout remains in Git history.

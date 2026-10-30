@@ -1,106 +1,42 @@
 # Mail Hero → Todofy
 
-Mail Hero 的 Todofy 目标为 `https://daily.ziyixi.science/hooks/mail`，Bearer 认证，发送通用 `mail.received.v1`。Todofy 是这个 webhook 的独立消费者：与 Mail Hero 同在单仓库（`todofy/`）和同一 Cloudflare 账户，但不导入 Mail Hero 的代码，不读它的 D1、R2 或 DO，独立发布。双方只共享 [`contracts/mail-received-v1`](../../contracts/mail-received-v1/mail-received-v1.md) 和一个 Bearer 认证值；两者共用账户级 Workers Free/D1 免费额度。
+Mail Hero 通过 `/hooks/mail` 发送冻结的 `mail.received.v1`。Todofy 是独立消费者：不读取 Mail Hero 的 D1/R2/DO，也不导入其源码；共享内容只有根合同、IDL和获准的包。当前主机与允许列表以两端提交配置为准。
 
-## Todofy 现在是什么
+## 接管边界
 
-2026-09-29 起 Todofy 全部运行在 Cloudflare Workers Free 上（旧 Go 服务、gRPC 容器与 CloudMailin 接口已退役）：
+Todofy 的 TypeScript 网关先验证主机、机器 Bearer、维护和正文头部，再把请求交给 Python core。core 持久保存来源、event_id 和 bytes 摘要后返回204；真正摘要由自己的账本与 Alarm 推进。模型调用经 Router；Tasks 再从 Todofy 的私有 Mail 入口读取摘要并处理任务。
 
-- Worker `todofy`：TypeScript 网关，负责主机、认证、静态资源和 cron。收到 webhook 时只做认证与头部检查，把未读的请求体通过 JS RPC 交给 core。
-- Worker `todofy-core`：Python，承载唯一的 SQLite Durable Object `TodofyCore`（实例 `inbox-v1`），它是账本唯一写入者和调度者，负责 D1 与 Gemini 摘要。2026-10-21 起 Todofy 不再写任何任务：Tasks 通过 Todofy 的私有 `Mail` 入口读取摘要并自己建任务。
-- D1 数据库 `todofy`，以及保存每周 D1 备份的私有 R2 桶 `todofy-backups`。
+| 响应 | Mail Hero 的处理 |
+| --- | --- |
+| 204 | 消费者已持久接管，同ID同bytes重放也成功；不代表模型或任务完成 |
+| 400/409/413/415 | 合同、身份冲突或大小/类型错误；不靠自动重试修复 |
+| 401/403 | 阻断该revision，等待明确凭据/配置处理 |
+| 404/405/重定向 | 沿用有界路由宽限与阻断复查；达到上限后保持阻断 |
+| 408/429/5xx或网络结果不明 | 同一event_id、目标revision和bytes持久退避，尊重Retry-After及原窗口 |
 
-架构与状态说明见 [Todofy README](../../todofy/README.md)。Mail Hero 调用的机器接口以 [`machine-api-v1.openapi.yaml`](../../todofy/api/machine-api-v1.openapi.yaml) 和 [`gateway/src/hooks.ts`](../../todofy/gateway/src/hooks.ts) 为准；Todofy 的 owner UI 接口由 [`proto/todofy/ui/v1`](../../proto/todofy/ui/v1/) 定义，使用共享 HTTP 转码器与类型化客户端。
+事件唯一键是稳定来源与event_id；同ID不同bytes必须冲突。源邮件重放、备份恢复和凭据轮换都不能改写已冻结事件。只有明确“重新发送为新事件”才产生新ID，也可能再次触发业务。
 
-## 投递目标与认证
+## 合同检查
 
-- `POST /hooks/mail` 在 `TODOFY_HOOKS_HOSTS` 的每个主机上提供；这些主机都是网关 `todofy` 的 Custom Domain，行为相同。2026-09-29 已确认 `daily.ziyixi.science`（Mail Hero 现有目标）是其中之一；Todofy 部署说明中的 `todofy-hooks.ziyixi.science` 是否在生产列表里，本文未核实。hooks 主机只提供 `POST /hooks/mail`、newsletter 的 `GET /api/summary` 与 `GET /api/recommendation` 和 `GET /health`，其他请求一律 404。
-- hooks 主机不在 Cloudflare Access 之后，Mail Hero 发往它不需要 `ACCESS_SERVICE_ORIGIN`/`ACCESS_CLIENT_*`。
-- 网关只保存 Bearer 值的 SHA-256（gateway secret `MAIL_WEBHOOK_TOKEN_SHA256`，轮换期间可加 `MAIL_WEBHOOK_TOKEN_SHA256_PREVIOUS`），以常数时间比较；Todofy 不保存认证值本身。按 Todofy 部署说明，认证值只在 Mail Hero 目标（加密）和 owner 的密码管理器里。
-- 轮换顺序：Todofy 先把新摘要设为当前、旧摘要设为 `_PREVIOUS`，再在 Mail Hero 目标页“轮换凭据”（它重新加密该目标下同源、同认证类型的全部 revision 的凭据，并清除认证阻断），最后删除 `_PREVIOUS`。此流程未在生产演练。
-- 若把目标改为 `todofy-hooks.ziyixi.science`：先确认它在 Todofy 的 `TODOFY_HOOKS_HOSTS` 中，且 `MAIL_HERO_WEBHOOK_ALLOWED_HOSTS` 包含它（两者的当前值本文均未核实）。改 URL 会生成新 revision，已冻结的事件仍发往原 revision 的 URL。
+结构与规则由 [`mail_received.proto`](../../proto/mailhero/webhook/v1/mail_received.proto)和[合同说明](../../contracts/mail-received-v1/mail-received-v1.md)维护。Mail Hero 的真实 builder/codec产生golden，Todofy真实parser消费；legacy fixture保持原字节。IDL不能表达的UTF-8字节和大小一致性规则仍由代码检查。
 
-## Todofy 的响应与 Mail Hero 的处理
+```sh
+bazel test //mail-hero:check //todofy:check //proto:check
+```
 
-网关依次检查：是否已配置摘要 secret → Bearer → 维护开关 → `Content-Type` → 声明的 `Content-Length`；之后 DO 读取请求体（上限 1 MiB）、按合同解析、核对 `Idempotency-Key`，写入 D1 后才回 204。Mail Hero 的分类见 [`pipeline.ts`](../cloudflare/src/native/pipeline.ts) 的 `deliverJob` 和合同的“响应处理”一节。
+有意修改IDL或builder时按根proto/合同工具更新生成Schema和golden，同提交审阅并检查所有使用者。Bazel依赖显式声明，不自行推断合同语义。已冻结到R2的事件不重新序列化。
 
-| Todofy 返回 | 含义（错误码） | Mail Hero 行为 |
-| --- | --- | --- |
-| 204 | 新事件已提交 D1；或相同 `event_id` 与相同 bytes 的重放，不做新工作 | 已交付；清除该 revision 的可复查阻断 |
-| 400 | `invalid_payload`：不符合合同，或 `Idempotency-Key` 缺失/重复/不等于 `event_id` | 其他 4xx：投递失败，不自动重试，UI 显示 `http_400` |
-| 401 | `unauthorized`：Bearer 缺失或摘要不符（维护期间也先返回它） | 立即阻断目标 revision，不自动复查；轮换凭据或 owner 解除阻断 |
-| 404 | `not_found`：主机不在 `TODOFY_HOOKS_HOSTS` 或路径不对 | 路由类：30 分钟宽限，之后阻断并每 6 小时复查，最多 8 次 |
-| 409 | `event_conflict`：同一 `event_id` 已存有不同 bytes | 其他 4xx：失败，不自动重试 |
-| 413 | `payload_too_large`：超过 1 MiB（合同同样限制整个 JSON 1 MiB） | 其他 4xx：失败 |
-| 415 | `unsupported_media_type`：不是 `application/json` | 其他 4xx：失败 |
-| 503 | `maintenance`（带 `Retry-After: 600`）、`not_configured`（未设置摘要 secret）、`unavailable`（DO 或 D1 失败） | 暂时失败：同一 bytes 持久退避（30 秒起倍增，上限 6 小时），尊重 `Retry-After`；自动最多 48 次或事件创建后 7 天，之后需手动重试（30 天内） |
+## canary 与测试事件
 
-网络错误、超时和响应丢失同样按暂时失败重试。400、409、413、415 不应出现在正常流量中：Mail Hero 总是发送 `application/json`、`Idempotency-Key` 等于 `event_id`，且 `Contracts` CI 证明 Todofy 接受每个 golden fixture。若出现：
+Ops canary带顶层run_id标记，稳定幂等，沿用真实接管路径。消费者需声明支持，且不能创建真实任务等副作用；仅记录合成处理结果。owner普通“发送测试事件”会实际POST并可能像普通邮件一样处理，不能混同canary。
 
-- 400：重试复用冻结 bytes，因此应修 Todofy 使其接受这些 bytes（`fixtures/legacy/` 就是为此保留的旧字节），再在 Mail Hero 手动重试。
-- 409：Mail Hero 不会改写已冻结的 bytes，冲突说明 Todofy 账本里有同 ID 的不同内容（例如恢复或导入的问题）。先核对，不要反复重试；确需重新处理时用“重新发送为新事件”，它生成新 `event_id`，会作为一封新邮件再次摘要。
+## 暂停与恢复
 
-## 幂等与去重
+- Mail Hero目标暂停、全局send_paused或FORCE_SEND_PAUSED：继续收件解析，暂不发出消费者请求。
+- Mail Hero维护模式还停止新入站、管理修改和Alarm，不能用来代替普通投递暂停。
+- Todofy PROCESSING_PAUSED：仍持久接管并回204，处理留在Todofy账本。
+- Todofy维护：回503并带Retry-After，Mail Hero在原窗口内退避；长维护前可暂停目标。
 
-- Todofy 的唯一键是 `(source_id, event_id)`，`source_id` 为 `TODOFY_MAIL_SOURCE_ID`（默认 `mail-hero-personal`），与认证值无关，轮换不改变它。每行保存请求 bytes 的 SHA-256。
-- 同 ID 同 bytes 返回 204 且不唤醒处理；同 ID 不同 bytes 返回 409。从旧 Go 服务导入的账本行同样适用。
-- Todofy 的保留清理不删除 `mail_events` 账本行（完成后只清空正文），满足合同至少 90 天的去重要求。
-- Mail Hero 的所有重试（包括响应丢失后的 `result_unknown`）复用同一 `event_id` 与 bytes；“重新发送为新事件”才会生成新 ID。
+暂停不延长原重试窗口。unknown或冲突必须按原身份与消费者账本对账，不能换键重发。Mail Hero显示“已交付”后的摘要问题由Todofy/Tasks的只读状态与明确动作处理，不回写为Mail Hero投递失败。
 
-## 共享合同
-
-两个应用共享的合同有两部分。IDL 的改动检查并发布 Mail Hero 与 Todofy（两者都打包由它生成的代码）；`contracts/` 的改动检查所有应用、不发布任何应用：
-
-- **IDL [`proto/mailhero/webhook/v1/mail_received.proto`](../../proto/mailhero/webhook/v1/mail_received.proto)** 是事件结构与取值规则的唯一描述。Mail Hero 的 `buildPayload` 用由它生成的消息和 wire 编解码器写出事件字节（先检查每条规则）；Todofy 的 `todofy.core.contract.parse_mail_event` 用生成的 Python 编解码器宽松读取（忽略未知字段，检查每条规则），IDL 无法表达的规则（UTF-8 字节上限、大小一致性等）仍由各自代码检查。
-- **[`contracts/mail-received-v1/`](../../contracts/mail-received-v1/)**：语义说明 `mail-received-v1.md`、由 IDL 生成的 JSON Schema（在 `proto/` 运行 `npm run schema`，不得手改；Todofy 的机器 OpenAPI 按相对路径引用，owner UI 类型直接由 proto 生成）、冻结的手写 Schema `legacy/`、`fixtures/*.json` golden 请求体（由 Mail Hero 真实的 `parseMail` + `buildPayload` 从合成邮件生成，逐字节固定、无结尾换行）和 `fixtures/legacy/` 冻结旧字节（两侧测试固定其 SHA-256）。
-
-- Mail Hero 拥有该合同。修改 IDL 或构建器后在 `mail-hero/cloudflare` 运行 `npm run contract:update`，检查 fixture diff，并与 `proto/`、`contracts/` 的变更放在同一提交。已冻结在 R2 的事件字节永不重新序列化：重试原样重发。
-- 根 CI 的 `Contracts` job：Mail Hero 逐字节重建每个 fixture，`contract-schema-dialect.test.mjs` 核对生成的 Schema 在 ECMAScript 方言（有无 `u` 标志）下只在 IDL 写明的字符上与手写 Schema 不同；Todofy 用 Schema 校验并用生成的编解码器解析每个 fixture（含 legacy），`test_mail_received_schema_legacy.py` 与 `test_mail_received_parser_legacy.py` 在每个 fixture 与约 9,000 个变体上核对生成的 Schema 与手写 Schema、新解析器与迁移前解析器的判定相同（唯一已知差别是大于 2^31 − 1 的整数，Todofy 现在拒绝）；两侧都检查所有 fixture 的 `event_id`、`message.id` 互不重复。`Proto checks` 运行 IDL 的 lint、breaking 检查与两种语言的编解码测试。另外 `Todofy runtime` 分片 job 的 runtime 测试（`contracts/` 改动时也会运行）把它们 POST 到真实 workerd 网关，`Todofy checks` 再核对每个收集到的 runtime 测试都恰好运行一次并通过。不兼容的改动在合并前失败。详见 [`contracts/README.md`](../../contracts/README.md)。
-
-## 金丝雀事件（ops-v1）
-
-`Ops.startCanary` 发出的事件带顶层 `canary: {"run_id"}`（golden 字节见 `contracts/mail-received-v1/fixtures/canary_event.json`），走与真实邮件相同的冻结字节、认证、退避重试与去重。合同要求消费者不对它产生外部副作用。Todofy（`status().capabilities` 含 `canary_consumer` 的版本）正常接管并调用 Gemini、校验结果，只记录金丝雀结果；不进入 Tasks 的邮件列表、newsletter 报告、关注列表或真实邮件指标。结果由面板经 Todofy 的 `Ops.canaryResult` 读取。在 Todofy 的支持版本上线前不要发起金丝雀。
-
-## 接管之后：在 Todofy 对账
-
-Mail Hero 的“已交付”只表示 Todofy 已把事件提交到 D1。之后的摘要失败不回写 Mail Hero，也不出现在 Mail Hero 的提醒里。
-
-- owner 在 Todofy UI `https://todofy.ziyixi.science` 处理（Cloudflare Access 保护整个主机，网关另行验证 JWT；写操作按 `todofy.ui.v1` 使用 CSRF、`request_id` 与资源 etag）。`/attention` 列出需要处理的事件：`failed_summary` 立即列入，其他进行中状态超过 6 小时列入。
-- 事件详情只显示该事件允许的动作：`retry_summary`（`failed_summary`，`mail_needs_review` 除外）、`dismiss`（事件变为 `ignored`）。每个动作对所见 version 做比较交换。
-- Mail Hero 标记 `needs_review` 的邮件被接管后停在 `failed_summary / mail_needs_review`，不调用 Gemini。
-- 每日提醒由 Home 在 Tasks 中创建（2026-10-21 起），Todofy 不再发送。
-- 旧的 BasicAuth `/api/v1/mail_inbox` 接口和 `X-Todofy-Admin-Action` header 已不存在。
-- Mail Hero 目标页的“发送测试事件”会真实 POST 到 Todofy。Todofy 不区分测试事件，会像普通邮件一样摘要，并出现在 Tasks 的邮件列表里。
-
-## 暂停投递
-
-先决定要在哪一侧停：Mail Hero 侧停止发送，事件留在 Mail Hero；Todofy 侧照常接收（或让 Mail Hero 重试），事件留在 Todofy D1。
-
-| 开关 | 位置 | 效果 |
-| --- | --- | --- |
-| 目标暂停 | Mail Hero 目标页 | 只停止发往该目标；收件、解析、归档继续，事件在 Mail Hero 等待 |
-| 暂停投递（`send_paused`） | Mail Hero 设置页 | 停止所有消费者投递，其他同上 |
-| `FORCE_SEND_PAUSED=true` | GitHub variable `MAIL_HERO_FORCE_SEND_PAUSED` + Mail Hero 发布 | 部署级强制暂停，UI 无法解除；同步 GitHub variable，否则下次发布会覆盖 |
-| `TODOFY_PROCESSING_PAUSED=true` | Todofy GitHub variable + Todofy 发布 | 仍回 204（Mail Hero 显示已交付）；不做摘要 |
-| `TODOFY_MAINTENANCE_MODE=true` | Todofy GitHub variable + Todofy 发布 | webhook 回 503 + `Retry-After: 600`，Mail Hero 持久退避重试；owner 写入被拒，alarm 停止 |
-
-- 暂停和阻断都不延长 Mail Hero 的重试窗口（自动 7 天、手动 30 天，见合同）；超过窗口的事件转为失败，需在窗口内手动重试。Todofy 维护会消耗重试次数，预计较长时先在 Mail Hero 暂停目标。
-- 不要用 Mail Hero 的 `MAINTENANCE_MODE` 暂停投递：它同时停止入站、管理写入和 Alarm。
-- Todofy 每周备份期间 webhook 照常接收，不需要暂停 Mail Hero。
-
-## 发布
-
-两个应用都由根目录 `.github/workflows/ci.yml` 发布：`Mail Hero deploy` 只在 `mail-hero/` 改动时运行，`Todofy deploy` 只在 `todofy/` 改动时运行，两者共同编译进的鉴权包 `packages/edge-auth/` 改动时两者都发布，都等待 `CI gate`（`main` 的 required check）；只改 `contracts/` 时两边重新检查但都不发布。详见根 [README](../../README.md) 与 [CI/CD](ci-cd.md)。
-
-## 切换记录（2026-09-29 UTC）
-
-Mail Hero 的目标配置没有改动：目标仍是 `https://daily.ziyixi.science/hooks/mail`，Bearer 认证值不变。
-
-- 07:49–08:10：停止旧 Go 容器，离线制作一致快照并导出旧数据（`mail_events` 142 行：complete 141、ignored 1；summaries 13,263；legacy_mail_text 13,262，SQL 约 44 MB；0 warnings）。先用真实导出在本地 D1 演练，`verify_d1` 全表通过；再导入远程 D1 `todofy`，`verify_d1 --remote` 每张表 PASS。D1 Free 每天账户共享 10 万行写入（Mail Hero 同样使用），导入含索引约 7.5 万行，因此当天只做了一次远程导入。
-- `daily.ziyixi.science` 由 owner 删除 Tunnel CNAME 后改为 Worker `todofy` 的 Custom Domain（当时 `todofy` 还是单个 Python Worker，当天稍后由 TypeScript 网关替换，域名随脚本保留），anycast IP 不变。
-- 生产冒烟（真实认证值）：webhook 依次得到 401/415/413/400/204/204（重放）/409，通过。冒烟不覆盖 503 路径。
-- Mail Hero“发送测试事件”经真实 Worker 到 Worker 路径到达 Todofy 并 `complete`。真实邮件也已完成，例如事件 `e4a57d8e…`（13:55，经 TypeScript 网关）和 `b3407aca…`（19:29，网关经 RPC 调用 DO）。当天 Todofy 内部从单个 Python Worker 拆为 TypeScript 网关 + Python core，随后改用 RPC；对 Mail Hero 的响应合同不变。
-- 旧栈已退役：容器与镜像、Compose 配置块（self-host-on-vultr `00f23f8`）、数据目录和 env 文件均已删除；快照保留在主机 `~/todofy-legacy-2026-09-29`，至 2026-10-29。旧 CloudMailin 接口已随 Go 服务删除；来源邮箱的转发设置本文未核实。
-- 单仓库 `55d2d40` 起两个应用都从 `ziyixi/todofy` 发布；Mail Hero Worker 版本 `fc04e12b` 于 21:08 从单仓库部署。原 `ziyixi/mail-hero` 仓库的 workflow 已停用，备份收集器镜像改为发布到 `ghcr.io/ziyixi/mail-hero-backup-collector`。
-
-尚未验证：两个应用共用 Free 额度的一周用量核查（Workers、DO、D1 读写）；Todofy 侧的 newsletter 首次经 RPC 的定时运行和首条 `daily_metrics` 记录。Mail Hero 自身的验收证据见 [验收记录](verification-native.md)。
+两端独立提升已验证的Bazel发布归档，等待同一main SHA门禁；共享使用者按实际依赖闭包选择。当前认证与部署责任见 [Mail Hero CI](ci-cd.md)及[Todofy README](../../todofy/README.md)。历史2026-09-29切换保留原目标/事件身份，不作为当前线上状态证明；日期证据见[历史摘要](verification-native.md)。

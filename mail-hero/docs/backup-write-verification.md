@@ -27,11 +27,11 @@ DO 数值包含 SQLite `rowsWritten`（已含索引修改）及每次 `setAlarm`
 1,000 对象重复备份的 SQL 写入由 6,361 降为 80，Alarm 写入仍为 73。
 D1 仍为一次 freshness 写入；总 R2 调用增加不到 1%，没有把节省的 DO 写入变成逐对象 R2 进度文件。
 
-复现命令（在 `mail-hero/cloudflare`）：
+复现合成配额审计：
 
 ```sh
-MAILHERO_BACKUP_QUOTA_AUDIT=1 node --test \
-  --test-name-pattern='quota audit' test/native-backup-runner-runtime.test.mjs
+bazel test //mail-hero/cloudflare:native-backup-runner-runtime_test \
+  --test_env=MAILHERO_BACKUP_QUOTA_AUDIT=1
 ```
 
 同一测试固定了 DO 写入上限，并检查新备份不向三个旧逐对象 SQL 账本写入，
@@ -48,18 +48,8 @@ MAILHERO_BACKUP_QUOTA_AUDIT=1 node --test \
 另验证复制中断后重启继续同一备份、删除清单页中断不重复登记、marker 失败不提前更新时间、
 新入站不混入旧 cut、25 MiB 流式复制，以及 2,500 对象在原租约内完成。
 
-## 发布核对
+## 2026-10-26 发布证据
 
-本次源码 `d1a6e526c7e5de5138ef750a13decd8b439db9c6` 已通过
-[分支 CI40283095333](https://github.com/ziyixi/todofy/actions/runs/40283095333)、
-[同 SHA main40283588911](https://github.com/ziyixi/todofy/actions/runs/40283588911) 和
-[对账40283801879](https://github.com/ziyixi/todofy/actions/runs/40283801879)。
-Mail Hero Deployment7326047450 在 2026-10-26 07:06:50 UTC 验证成功，Worker 版本
-`ce420e14-42d2-4716-a9ea-f92cc1b74326`，实际 BUILD_SHA 与源码一致。
-每日04:17 UTC开关、5GiB上限、维护和投递开关均保持原值。
-Home 的 2026-10-26 07:30:56 UTC 应用状态为正常，无活动信号、无待处理或解析/投递失败。
+`d1a6e526c7e5de5138ef750a13decd8b439db9c6` 完成分支/main检查与对账，07:06:50 UTC的发布回执验证源码一致；07:30:56 UTC Home只读状态正常。每日时间、容量和运维开关保持原值。
 
-本次未额外触发生产备份，避免手动副本触发原有轮转；已有备份和邮件未清理。
-新版后的下一次自然备份及其生产用量尚待发生。
-线上验收只读取构建、备份时间、运行阶段和对象计数，不下载真实邮件或备份内容。
-本表是合成存储实测，不将整个账户的混合用量当作单次生产备份的精确统计。
+当次没有额外触发生产备份或清理邮件；该表是合成存储实测，不能推作整账户账单或后续自然备份结论。生产观察只取构建、阶段、时间和计数，不下载邮件/备份内容。

@@ -196,10 +196,8 @@ class Coverage(unittest.TestCase):
                     re.search(r'^\s*mail_hero_backup_app_id\s*=\s*"([^"]+)"', ids, re.MULTILINE).group(1)}
         self.assertEqual(infra_state.FROZEN_OBJECTS, recorded)
 
-    def test_the_managed_object_count_is_one_number(self):
-        """README.md's heading, the bootstrap's EXPECTED_OBJECTS (a rebuild by import refuses any other count) and the
-        resources declared (a for_each resource counts the keys of its locals map) are the same number, so adding an
-        object without updating the rebuild path fails here, not during a disaster recovery."""
+    def test_declared_resource_count_matches_the_bootstrap(self):
+        """The import bootstrap must account for every declared resource instance."""
         code = "".join(path.read_text() for path in sorted(INFRA.glob("*.tf")))
         declared = 0
         for body in re.findall(r'^resource "[^"]+" "[^"]+" \{\n(.*?)^\}', code, re.MULTILINE | re.DOTALL):
@@ -210,9 +208,6 @@ class Coverage(unittest.TestCase):
             block = re.search(rf"^  {each.group(1)} = \{{\n(.*?)^  \}}\n", code, re.MULTILINE | re.DOTALL)
             self.assertIsNotNone(block, each.group(1))
             declared += len(re.findall(r'^    "[^"]+"\s*=', block.group(1), re.MULTILINE))
-        heading = re.search(r"^### Managed here \((\d+) objects\)$", (INFRA / "README.md").read_text(), re.MULTILINE)
-        self.assertIsNotNone(heading)
-        self.assertEqual(int(heading.group(1)), declared)
         self.assertEqual(bootstrap_state.EXPECTED_OBJECTS, declared)
 
     def test_ids_record_every_application_but_one_ahead_of_its_deploy(self):

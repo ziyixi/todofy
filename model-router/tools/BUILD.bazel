@@ -1,6 +1,7 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library", "js_test")
 load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
 load("@npm//website:tsx/package_json.bzl", tsx = "bin")
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
 load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
 package(default_visibility = ["//model-router:__subpackages__"])
@@ -63,6 +64,7 @@ test_suite(
         ":bundle_budget_test",
         ":deploy-vars_test",
         ":restore_types_typecheck_test",
+        ":test_connections",
     ],
 )
 
@@ -107,4 +109,27 @@ filegroup(
         allow_empty = True,
     ),
     visibility = ["//visibility:public"],
+)
+
+py_library(
+    name = "connections",
+    srcs = ["check_connections.py"],
+    imports = ["."],
+    deps = ["//tools/cloud-release:api"],
+)
+
+py_test(
+    name = "test_connections",
+    srcs = [
+        "test/test_connections.py",
+        "//tools/bazel/python:unittest_main.py",
+    ],
+    args = ["test_connections"],
+    imports = [
+        ".",
+        "test",
+    ],
+    legacy_create_init = False,
+    main = "//tools/bazel/python:unittest_main.py",
+    deps = [":connections"],
 )

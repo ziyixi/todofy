@@ -109,7 +109,7 @@ runs:
         bash "$GITHUB_WORKSPACE/.release-source/tools/deploy-probes/production.sh" watch ../wrangler.toml
     # Cloudflare Access ("watch", the whole host) must answer every unauthenticated request with a 302 to its login
     # page for this host: the inbox /, the owner API and the add-from-phone page /new, exactly as the dashboard's
-    # probe checks (same script; test_ci_changes.py runs it). /health is behind Access too (no bypass application),
+    # probe checks (same script; test_release_probes.py runs it). /health is behind Access too (no bypass application),
     # so no anonymous request reaches the Worker. Whether WatchState's alarm is armed cannot be seen from here: the
     # first owner API call and the dashboard's status() arm it (watch/README.md "Deploy", the post-deploy check).
     - name: Check that Access answers unauthenticated requests

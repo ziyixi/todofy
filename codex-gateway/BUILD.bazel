@@ -13,6 +13,7 @@ filegroup(
     name = "release",
     srcs = [
         ":codex-gateway",
+        "//:.github/actions/check-codex-gateway/action.yml",
         "//:.github/actions/publish-codex-gateway/action.yml",
         "//tools/container-release:release_inputs",
     ],

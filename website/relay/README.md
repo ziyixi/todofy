@@ -20,10 +20,6 @@ The only Worker secret is `GITHUB_DISPATCH_TOKEN`: a fine-grained GitHub token s
 repository with **Actions: read and write** and **Deployments: read**. Set credentials through the
 [bootstrap inputs](../../tools/cloud-bootstrap/README.md); do not put them in committed configuration.
 
-The deployment retires only the old `NOTION_TOKEN`, `NOTION_DATA_SOURCE_ID` and
-`NOTION_WEBHOOK_SECRET` Worker secrets. The Actions content reader keeps its own Notion token and data
-source input.
-
 ## Status and requests
 
 The root [sync proto](../../proto/website/sync/v1/sync.proto) defines the internal contract:
@@ -45,12 +41,15 @@ lookup reads 50 runs so an older request ID stays findable.
 
 ## Checks and release
 
-From `website/`:
+From the workspace root:
 
 ```sh
-pnpm check
-pnpm exec wrangler deploy --dry-run --config relay/wrangler.toml
+bazel test //website:check
+bazel build //website:relay
 ```
+
+The relay archive contains `relay/wrangler.toml` and the compiled `worker/` modules. It has no site snapshot
+dependency. Actions publishes that checked archive through the deploy wrapper without rebuilding it.
 
 [CI](../../.github/workflows/ci.yml) deploys the relay from the checked main SHA before deploying Home.
 [Website release](../docs/release.md) retains the publication lock, identity verification and rollback.

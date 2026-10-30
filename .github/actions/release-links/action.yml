@@ -110,7 +110,7 @@ runs:
         bash "$GITHUB_WORKSPACE/.release-source/tools/deploy-probes/production.sh" links ../wrangler.toml DB
     # Cloudflare Access ("links", path-scoped) must answer every unauthenticated request for the owner's half with a
     # 302 to its login page for this host: its exact destination /_, the launcher /_/ and the owner API, exactly as
-    # the dashboard's probe checks (same script; test_ci_changes.py runs it).
+    # the dashboard's probe checks (same script; test_release_probes.py runs it).
     - name: Check that Access answers unauthenticated requests
       if: inputs.required == 'true'
       env:

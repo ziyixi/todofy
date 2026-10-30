@@ -17,7 +17,8 @@ The workflow holds the app's `*-production` concurrency group throughout these s
 3. `preflight` reads Cloudflare and reports `clean`, `repairable`, or `manual_required` using
    binding names and fixed reason codes. It compares public variables, service targets,
    schedules, exposure, routes, D1/R2 identity, and recorded Durable Object namespace IDs.
-4. When `required=true`, build the selected revision, validate its bundles, run the hostname guard,
+4. When `required=true`, download and verify the same-SHA compiled archive from its successful producer; a repair
+   rebuilds its recorded source with Bazel. Stage the compiled Worker/UI without a publisher build, run the hostname guard,
    apply the existing app migrations, deploy, and run its production probes. The deploy wrappers
    use `BUILD_SOURCE_SHA` for build identity; a repair can therefore build an older app revision
    while the workflow runs from a newer main revision. A Worker this workflow releases with static
@@ -102,8 +103,7 @@ source SHA, release/request IDs, and ETag. Its receipt does not prove restoratio
 ## Verification
 
 ```sh
-python3 -m unittest discover -s tools/cloud-release/tests
-uv run --locked --only-group ci python -m unittest discover -s .github/scripts -p test_worker_release_workflow.py
+bazel test //tools/cloud-release:check //.github/scripts:check
 ```
 
 The independent workflow tests read the real CI caller and reusable recipe separately, including

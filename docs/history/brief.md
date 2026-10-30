@@ -21,4 +21,4 @@ source and documents is `c928f889` (`git show c928f889:brief/README.md`); its ow
 | `Brief checks`, `Brief deploy` and Home's 简报 tile, Ops binding and guard | Nothing |
 | Brief as a Model Router caller | Nothing; its recorded requests stay in Router's history |
 | The Access applications `brief` and `brief-feedback` and the feedback policy | Deleted by "Infra apply" through `infra/retired.tf` ([Retiring an app](../../infra/README.md#retiring-an-app)) |
-| The Worker script with its Durable Object and Custom Domain, and the GitHub `BRIEF_*` settings | Deleted by hand, as the release's HANDOFF steps say |
+| The Worker script with its Durable Object and Custom Domain, and the GitHub `BRIEF_*` settings | Retired in the authorized October 29 teardown; no data export |

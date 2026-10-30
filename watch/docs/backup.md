@@ -90,24 +90,9 @@ capture Watch has pruned stays only as long as a kept backup names it, at most 3
   backup for 3 days, counted from the first step while there is none) and `backup_failed` (warning: the last job
   failed). Both are app-only signals (`app.toml`).
 
-## Cost and storage
+## Storage and execution bounds
 
-Expected for the owner's store (tens of watches, a few changes a day), not measured in production yet:
-
-- Tables: every row read once a day (a few thousand SQLite rows; about 15,000 at every bound), one meta row written a
-  step; a few MiB of gzip parts a day, tens of MiB for the 30 kept. At every bound at once (50 watches, each with 200
-  changes of 32 KiB diffs and 22 snapshots of 64 KiB) a backup would be about 175 MiB and 30 of them about 5 GiB,
-  half of the account's free R2 storage: far beyond the store's real size, so watch the bucket's size after the first
-  weeks.
-- Evidence: one copy of each capture (at most 256 KiB of text, usually tens of KiB) and each screenshot (at most
-  1 MiB) made in the last 30 days or still named: a few to a few hundred MiB, most of it screenshots of browser
-  watches.
-- R2 operations a day: one PUT per part (about 15), per new evidence object, for the manifest and `latest.json`, and
-  one LIST of prefixes (Class A, well under 100); a HEAD of `latest.json` and about 30 manifest GETs (Class B); deletes
-  are free. Free tier: 1 million Class A and 10 million Class B a month, shared by the account.
-- Owner writes wait for the seconds a daily job runs (`BACKUP_RUNNING`, worth repeating).
-- A restore writes every row once (a few thousand SQLite rows; about 15,000 and their indexes at every bound, against
-  the account's 100,000 a day shared with Mail Hero) and one PUT per evidence object the evidence bucket lacks.
+Backup/restore step limits and retained evidence are enforced by the code and runtime tests. Account quotas are shared; observed storage and step counts determine recovery planning. A stopped job keeps its last good copies. No unmeasured size estimate is a billing or recovery guarantee.
 
 ## Restore
 
@@ -177,8 +162,7 @@ path today: a recent mistake is restored from the daily backup like anything els
 ### On the owner's machine
 
 `tools/backup-restore.ts` (Node, no dependencies) works on a private directory outside the repository, owner-only, and
-never prints row or page content. `PRIV` is such a directory, for example `mkdir -m 700 ~/.local/share/watch-restore &&
-PRIV=$_`; delete it afterwards. From `watch/`:
+never prints row or page content. `PRIV` names that isolated recovery directory; handle its contents through the existing controlled recovery process. From `watch/`:
 
 ```sh
 node tools/backup-restore.ts download --out "$PRIV/restore" --remote                      # the newest backup
@@ -224,3 +208,5 @@ parts first and the manifest last, never `latest.json`: name the backup when res
 - `tools/test/backup-restore.test.mjs`: the tool against a stand-in for wrangler.
 
 None of this is a production restore yet.
+
+The committed synthetic build/test path is `bazel test //watch:check`. Runtime backup/restore tests and tool checks are selected as leaves from that facade; remote recovery commands above are separate authorized operator work.

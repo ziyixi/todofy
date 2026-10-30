@@ -28,7 +28,7 @@ from typing import Any
 
 import jwt
 
-# The policy file the image build writes (Dockerfile) from config/.
+# The policy file the declared OCI image copies from config/.
 POLICY_FILE = pathlib.Path("/opt/newsletter/console-access.json")
 # The console's Access application in config/resources.toml access_audiences.
 AUDIENCE_KEY = "newsletter-console"

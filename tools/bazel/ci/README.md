@@ -33,8 +33,11 @@ python3 tools/bazel/ci/plan.py --output /tmp/bazel-plan.json
 python3 tools/bazel/ci/run.py --plan /tmp/bazel-plan.json --group python
 ```
 
+Without `--base`, a local branch compares against its merge base with `origin/main`. Main and manual dispatch
+check the complete graph; cumulative main evidence is resolved only by `releases.py baseline` in CI.
+
 Manual dispatch uses `--app all`, `--app both` (Todofy and Mail Hero), or one catalog app. Its checks include that
-application's public root plus shared proto/package/tool/audit/infra roots. Newsletter and Platform retain paired
+application's public root plus shared proto/contract/package/tool/audit/infra roots. Newsletter and Platform retain paired
 checks; a Codex gateway resume also checks Platform source. `--resume-vps-release` excludes container tests and image
 release facades before the TD comparison, so continuing a held release builds no replacement image. The full release
 catalog remains available to the publication helper.

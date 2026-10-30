@@ -48,7 +48,7 @@ bazel test //packages/planning-ui:check
 bazel build //packages/planning-ui
 ```
 
-The package `check` script uses the same suite. The typecheck and test scripts also delegate to Bazel. A frozen pnpm workspace install supports source-level development. Unit tests cover components, domain rules and API mapping over a fake transport; Tasks' browser
+Package scripts delegate to these Bazel checks. A frozen pnpm workspace install supports source development. Unit tests cover components, domain rules and API mapping over a fake transport; Tasks' browser
 journeys in `tasks/web/test/browser/planning-*.spec.ts` cover the complete interaction.
 
 [Interface behavior](docs/interface.md) defines Plan/Focus layout, execution kinds, readiness and dependencies,

@@ -17,7 +17,7 @@ public key in `src/manifest.json`; the private half was never kept).
 | `src/upload.ts` | Batches, gzip, every answer (an `unsupported_item` held for a newer recall, not lost), the heartbeat, the badge (§3.8, §3.9) |
 | `src/update.ts` | The self-update check through `BUILD` (§3.10) |
 | `src/options.*`, `src/settings.ts` | The options page: server, token, device label, the upload's state |
-| `scripts/build.mjs`, `scripts/install.mjs` | `npm run build`, `npm run install-extension` |
+| `scripts/build.mjs`, `scripts/install.mjs` | Bazel build action, explicit `npm run install-extension` operator |
 
 The uploads are `recall.ingest.v1` wire JSON, typed by the generated `ingest_wire.ts` (types only, nothing in the
 bundle); `test/contract.test.ts` reads what the extension builds with the generated strict codec, as the Worker does.
@@ -66,14 +66,17 @@ gh release download recall-extension-v<version> --repo ziyixi/todofy --dir <a ne
 npm run install-extension -- <that folder>/recall-extension-v<version>.zip
 ```
 
-or build it locally from the repository root:
+or explicitly build and install locally:
 
 ```sh
-pnpm install --frozen-lockfile
+bazel build //recall/extension:extension_artifact
 cd recall/extension
-npm run build                 # desktop folder/ZIP, plus dist/orion/ and dist/recall-orion-<commit>.zip
-npm run install-extension     # into ~/recall-extension (or: -- <folder or zip> [--target <folder>])
+npm run install-extension  # uses the Bazel desktop output; this changes the installed extension
 ```
+
+The output is `bazel-bin/recall/extension/dist/`, containing desktop/Orion folders and ZIPs. Plain local builds use
+a stable development identity; the release build stamps the selected source SHA. Do not run installation merely
+to verify a build. [Workspace setup](../../docs/dependencies.md) describes the pinned Bazel prerequisite.
 
 `install-extension` takes this package's build, a build folder or zip, a release's zip or the CI artifact
 `recall-extension-<sha>.zip` as downloaded; it needs no dependency installation. It unpacks beside the target, checks the files, the
@@ -92,9 +95,15 @@ The owner's part, clicks only and once, after the first install:
 
 ## Checks
 
+From the workspace root:
+
 ```sh
-npm run lint && npm run typecheck && npm test
+bazel test //recall/extension:check
+bazel test //recall/extension:browser_tests
 ```
+
+Package lint/type/unit/build/browser scripts delegate to those Bazel targets. The browser check uses a pinned
+WebKit archive and its own temporary profile; it does not change an installed Chrome or phone extension.
 
 The tests run in Node over a hand-written fake of the `chrome.*` APIs and a fake clock (`test/fake-chrome.ts`) and
 fake-indexeddb, all with synthetic pages and tokens. `test/smoke-upload.ts` is the extension's part of recall's smoke

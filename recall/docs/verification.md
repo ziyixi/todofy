@@ -42,9 +42,9 @@ matched the tested CI files byte for byte:
   (content after about 70 seconds instead of 12). Focus asks the existing listener first.
 
 The one-shot diagnostic sends only closed stages, counts and fixed reason codes; its receipt is not capture
-success. Its extra plumbing was retired after the phone check (`2026.1013.654`). On macOS, an API permission grant
-did not change Orion's per-site access: scripts ran only after the toolbar's grant. The permission-request
-experiment stays unmerged on `codex/recall-permission-setup`, and no iOS menu path is prescribed.
+success. The current phone build retains that optional diagnostic. On macOS, an API permission grant did not change
+Orion's per-site access: scripts ran only after the toolbar's grant. That observation does not establish an iOS
+permission flow.
 Evidence: [`451` release](https://github.com/ziyixi/todofy/actions/runs/38684233200).
 
 ## Phone evidence
@@ -58,3 +58,10 @@ Evidence: [`451` release](https://github.com/ziyixi/todofy/actions/runs/38684233
   malformed reply is not established.
 
 iOS background and suspension behaviour is not established; mobile recording is foreground-only.
+
+## Build-migration checks
+
+The Bazel extension units, real typecheck, ESLint and pinned WebKit options/capture check passed locally with
+synthetic input. The Worker smoke chain also passed against local workerd and fake Dropbox. This confirms the
+local build/test path, without installing an extension or reading real browsing data. Final Linux CI and main
+publication remain [current handoff](../../HANDOFF.md) acceptance. Phone acceptance remains paused by the owner.

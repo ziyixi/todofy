@@ -1,18 +1,12 @@
-# Home dashboard: Workers Free limits
+# Home quota configuration and budgets
 
-The allowances the dashboard measures and guards, and the platform limits its design relies on. Every
-value was checked against the linked Cloudflare page on **2026-09-29** (Workers Free plan); the Workers
-AI row on **2026-09-30**. Re-check
-the pages before changing a value; `worker/src/limits.ts` holds the same numbers, and
-`worker/test/limits.test.ts` fails when a row below and `limits.ts` disagree (value or source).
+These are the dashboard's configured Workers Free reference allowances, mirrored from `worker/src/limits.ts`.
+They are account-wide observations, shared with every Worker, database and bucket in the account. The numeric
+values, guard flags and source links below are executable documentation: `worker/test/limits.test.ts` checks them
+against the implementation. Changing a configured allowance requires reviewing the provider's current primary
+documentation and the code together; this page is not a live billing or account verification.
 
-**Account-wide.** Every total is for the whole Cloudflare account: Mail Hero, Todofy, this dashboard
-and any other Worker, database or bucket in the account count toward the same allowance. The quota
-section of the page therefore shows account totals, with the largest contributors where the dataset
-has a breakdown. "GB" is taken as 10⁹ bytes (the pages do not say; decimal is the smaller, more
-cautious limit).
-
-## 1. Allowances shown as quota rows
+## 1. Configured quota rows
 
 | Resource id | Period | Allowance | `limits.ts` value | Guard trigger | Source |
 | --- | --- | --- | --- | --- | --- |
@@ -31,94 +25,35 @@ cautious limit).
 | `do_storage` | total | 5 GB (SQLite-backed objects) | 5000000000 | no | [DO limits](https://developers.cloudflare.com/durable-objects/platform/limits/) |
 | `r2_storage` | total (GB-month) | 10 GB-month (Standard storage only) | 10000000000 | no | [R2 pricing](https://developers.cloudflare.com/r2/pricing/) |
 
-What the pages say about periods and overruns:
+The dashboard uses decimal GB (10⁹ bytes). Usage/storage samples and their freshness come from their respective
+provider datasets; an absent dataset is unknown, not zero. Storage references and straight-line projections do not
+establish a bill or a hard spending cap. R2 operation classification follows `worker/src/usage.ts`: unclassified
+actions are conservatively counted as Class A and remain explicitly unclassified in the view.
 
-- Workers: the daily request limit resets at midnight UTC; above it requests fail with error 1027.
-- D1 and Durable Objects: "Free limits reset daily at 00:00 UTC"; above any one free limit "further
-  operations of that type will fail with an error" (DO pricing).
-- Workers AI (pricing page, checked 2026-09-30): "Our free allocation allows anyone to use a total of
-  10,000 Neurons per day at no charge"; for Workers Free the table lists "10,000 Neurons per day" and,
-  above it, "N/A - Upgrade to Workers Paid"; "All limits reset daily at 00:00 UTC. If you exceed any
-  one of the above limits, further operations will fail with an error." So on Free an overrun is no
-  bill: AI calls fail until 00:00 UTC. The dashboard reads `aiInferenceAdaptiveGroups`
-  `sum.totalNeurons` for the UTC day so far, by `modelId` (the 主要来源), in the same single GraphQL
-  query, and states the remaining neurons (`10,000 − used`) on the page. An answered `[]` is 0 used
-  (the live account answered `[]` on 2026-09-30: no AI calls yet).
-- DO duration is wall-clock active time × 128 MB. The DO pricing page computes "1,000,000 seconds * 128
-  MB / 1 GB = 128,000 GB-s", so the dashboard converts `activeTime` (µs) as `activeTime / 1e6 × 0.128`.
-- R2: the free tier is monthly and applies to Standard storage only. "A GB-month is calculated by
-  averaging the *peak* storage per day over a billing period (30 days)." The dashboard compares the
-  current stored bytes with 10 GB and uses the UTC calendar month to date for operations: an
-  approximation of Cloudflare's billing period.
-- R2 operation classes, as the dashboard counts them. Class A: `ListBuckets`, `PutBucket`, `ListObjects`, `PutObject`, `CopyObject`, `CompleteMultipartUpload`, `CreateMultipartUpload`, `LifecycleStorageTierTransition`, `ListMultipartUploads`, `UploadPart`, `UploadPartCopy`, `ListParts`, `PutBucketEncryption`, `PutBucketCors`, `PutBucketLifecycleConfiguration`. Class B: `HeadBucket`, `HeadObject`, `GetObject`, `UsageSummary`, `GetBucketEncryption`, `GetBucketLocation`, `GetBucketCors`, `GetBucketLifecycleConfiguration`. Free: `DeleteObject`, `DeleteBucket`, `AbortMultipartUpload`.
-  Also counted as Class A, on purpose: `DeleteObjects` (the bulk delete of a Worker's
-  `bucket.delete([...])`), which the live account returns (sample of 2026-09-30) but the R2 pricing page
-  lists in no class (it names only the single `DeleteObject` as free); counting it as Class A is the
-  cautious choice and it is not reported as unclassified. Any other `actionType` also counts as Class A
-  (cautious) and is reported as unclassified.
+## 2. Guard and projection rules
 
-**Guard rule** (owner rule "pause non-critical jobs above 80 %"): a daily resource or a monthly R2
-operation class at ≥ 80 % of its allowance puts both apps into `shed` until the next UTC midnight + 60
-min (renewed while still ≥ 70 % that day; the hour covers one failed or late renewal at the 00:00
-tick). The thresholds compare the measured value with the allowance (`used ≥ 0.8 × allowance`), not the
-percent shown, which is rounded to 0.1 (79.95 % shows as 80.0 % and does not shed); storage never triggers, because `shed` defers cleanup,
-which would make storage worse. Workers AI neurons never trigger either, although daily: `shed` only
-defers Mail Hero's and Todofy's cleanup and safety nets, none of which calls Workers AI (neither app
-binds it), so shedding them could not lower neuron use, and on Free exceeding the allocation only makes
-further AI calls fail until 00:00 UTC; it stops nothing else and bills nothing. The row still reports
-`ai_neurons_high` at ≥ 80 % (warning) and ≥ 95 % (critical) like every quota row. Details:
-[`design.md`](design.md) §5.3.
+Only configured trigger rows can enter automatic shed, at measured usage of at least 80%, held at least 70% on the
+same UTC day. Display rounding cannot trigger it. Storage and Workers AI do not trigger; per-service capability and
+acknowledgement still gate writes. Unknown usage cannot start a new shed, and an existing one expires rather than
+being renewed without evidence. See [guard behavior](design.md#53-per-service-guard).
 
-**Projection** ("按当前速度线性估算"): daily `used × 86400 / elapsed seconds` of the UTC day (none
-during the first 3 hours, where one early job would dominate); monthly `used × days in month / elapsed
-days` (none during the first day); none for storage. It is a straight-line estimate, not a forecast,
-and the page says so.
+Daily projection is `used × 86400 / elapsed_seconds`, suppressed during the first three UTC hours. Monthly
+projection is `used × days_in_month / elapsed_days`, suppressed during the first day. Storage is not projected.
+The UI labels this a straight-line estimate.
 
-## 2. Platform limits the design relies on
+## 3. Executable resource bounds
 
-| Limit | Value (Free) | Where it matters | Source |
-| --- | --- | --- | --- |
-| CPU per HTTP request and per Cron Trigger invocation | 10 ms | the fetch and scheduled handlers only authenticate, route and make one RPC to `HomeState` | [Workers limits](https://developers.cloudflare.com/workers/platform/limits/) |
-| CPU per Durable Object invocation | 30 s (default) | all GraphQL parsing, aggregation, guard, canary and digest work runs in `HomeState` | [DO limits](https://developers.cloudflare.com/durable-objects/platform/limits/) |
-| Subrequests | 50 per request | a tick makes at most `outboundPerTick()` outbound calls, computed from the registry (one `status` per ops_v1 entry and the website relay's `getSyncStatus`, one GET per probe, ≤ 1 `setGuard` per guarded entry, ≤ 2 canary calls, ≤ 1 `createInboxTask`, 1 GraphQL, ≤ `DRIFT_CALLS_PER_TICK` read-only drift calls) and tested ≤ `MAX_OUTBOUND_PER_TICK`, a fixed margin under 50. Only the entries the registry guards receive `setGuard`. | [Workers limits](https://developers.cloudflare.com/workers/platform/limits/) |
-| Worker invocations per request | 32; each service-binding call counts, and counts as a subrequest | same bound as above | [Service bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/service-bindings/) |
-| Service-binding request fees | "do not incur additional request fees" | the `Ops` calls | [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/) |
-| Static assets | free and not counted only when served without invoking the Worker; with `run_worker_first` every asset request invokes the Worker and counts as a Worker request (above the daily limit it gets a 429, no fallback to free asset serving) | the UI (`ASSETS`): `run_worker_first = true` (Access check and private headers on every path), so each HTML, JS, CSS and icon fetch counts in `workers_requests`, and once the account reaches 100,000 requests a day the page itself is unavailable until 00:00 UTC | [Static assets billing](https://developers.cloudflare.com/workers/static-assets/billing-and-limitations/) |
-| Cron Triggers | 5 per account | one trigger `*/30 * * * *`; the account uses 4 (Home, Todofy's gateway, Model Router, the website relay). The links app's backup runs on a Durable Object Alarm instead, so one stays free | [Workers limits](https://developers.cloudflare.com/workers/platform/limits/) |
-| Memory | 128 MB per isolate | GraphQL answers over 1 MB are refused | [Workers limits](https://developers.cloudflare.com/workers/platform/limits/) |
-| GraphQL Analytics API | 300 queries per 5 min; account-scoped queries cover 1 account | one query per tick, owner refreshes ≤ 1 per minute | [GraphQL limits](https://developers.cloudflare.com/analytics/graphql-api/limits/) |
-| Token permission for account analytics | "Account Analytics: Read" | `CF_ANALYTICS_TOKEN` ([`setup.md`](setup.md) §4) | [API token auth](https://developers.cloudflare.com/analytics/graphql-api/getting-started/authentication/api-token-auth/) |
-| Token permissions for the drift check | "Workers Scripts: Read" and "Account Settings: Read" (account; the audit log) and "Workers Routes: Read" (zone) | `CF_ANALYTICS_TOKEN` ([`setup.md`](setup.md) §4, [`design-v2.md`](design-v2.md) §10) | [API token permissions](https://developers.cloudflare.com/fundamentals/api/reference/permissions/) |
+- The edge handler authenticates/routes; aggregate work runs in HomeState. CPU regression thresholds live in
+  `worker/test/runtime/cpu.test.ts` and `api-cpu.test.ts` and run without cached CPU results.
+- `outboundPerTick()` derives the allowed call count from registered statuses/probes, guarded producers, the canary,
+  digest and bounded drift steps. Tests pin it below `MAX_OUTBOUND_PER_TICK`; adding an app must preserve that bound.
+- GraphQL responses are capped at one megabyte; fetches have deadlines. Usage refresh attempts are at most one per
+  minute. Scheduled ticks are half-hourly; every producer status is attempted at most once per ten minutes.
+- View sizes and actual SQLite reads are checked separately for ordinary fixtures and retained-decision stress.
+  `VIEW_ROWS_READ_MAX` is a regression bound, not a universal billing or object-size limit.
+- Home's assets pass through its Worker for authentication/private headers. Page polling, probes, Ops calls,
+  analytics, drift and manual refreshes all consume their relevant resources; no fixed daily cost estimate covers
+  every registered producer or owner session.
 
-## 3. What the dashboard itself uses per day
-
-48 cron ticks: 48 Worker requests and 48 Durable Object requests; at most 624 `status()` calls across 13 apps (Mail
-Hero ≤ 6 and Todofy ≤ 5 indexed D1 statements each, contracts/ops-v1); at most 48 GraphQL queries; a
-few `setGuard` and canary calls, at most 6 `createInboxTask` calls a day; one canary a day (one synthetic message stored in Mail
-Hero's R2 and D1 and normally one Gemini call in Todofy, up to 3 when a transient failure is retried),
-up to 3 more when the owner runs it by hand; one public GET per tick, plus owner refreshes (≥ 10 min apart, so at
-most 144 a day): the website's `build-info.json` (a static asset, outside Cloudflare's allowances) and the links
-app's `robots.txt` (one Worker request each, no D1 read). The links app also answers through its Ops binding (one D1
-row and one R2 read of its backup state per `status()`). Each tick writes about 10–40 SQLite rows in `HomeState` (v2 adds two: `cf_scripts` and one
-`probe:<entry>` per probe). With durable reminder controls, the ordinary workerd fixtures read
-40–41 rows per rebuilt view (44-row regression budget). A 101-item synthetic warning case reads 110–111;
-retained-decision stress cases use a separate 320-row test budget. These are measured examples and test
-budgets, not an account-wide or universal per-view limit; see [`design-v2.md`](design-v2.md) §5. Each owner page load
-counts one Worker request per fetched file (HTML, scripts, styles, icon: `run_worker_first`, §2) plus one
-per API call, and a DO request per API call. All of this is far below every allowance in §1.
-
-## 4. Not yet verified
-
-To be checked in production and recorded in [`verification.md`](verification.md):
-
-- whether an app's `Ops` calls appear in `workersInvocationsAdaptive` for `mail-hero`/`todofy` (they
-  are service-binding calls, which carry no request fee);
-- that `ai_neurons` matches the Workers AI dashboard's daily Neurons figure once the account makes AI
-  calls (on 2026-09-30 the dataset answered `[]`, so only the empty case was seen live);
-- whether R2 `actionType` values beyond the lists above occur (they would show as unclassified).
-  `DeleteObjects` did (live sample of 2026-09-30) and is now counted as Class A (§1); the other values
-  of that sample (`PutObject`, `CompleteMultipartUpload`, `GetBucketLifecycleConfiguration`,
-  `PutBucket`) are on the lists;
-- how far the analytics datasets lag behind a tick (a late dataset under-reports the day so far);
-- `durableObjectsStorageGroups` returned no rows on this account when the query was verified, so
-  `do_storage` shows "无数据" until it does.
+Run `bazel test //dashboard:check` for acceptance. Historical measurements and live checks are scoped and dated in
+[verification.md](verification.md); current configuration ownership is in [setup.md](setup.md).

@@ -36,6 +36,7 @@ test_suite(
     tests = [
         "//mail-hero/cloudflare:check",
         "//mail-hero/deploy:check",
+        "//mail-hero/deploy/backup:check",
         "//mail-hero/web:check",
     ],
     visibility = ["//visibility:public"],

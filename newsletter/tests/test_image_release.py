@@ -12,7 +12,7 @@ import pytest
 
 import tests.support.workflows as workflows
 
-ROOT = pathlib.Path(__file__).resolve().parents[1]
+ROOT = pathlib.Path(__file__).absolute().parents[1]
 IMAGE_ID = "sha256:" + "a" * 64
 HEALTHCHECK = json.loads((ROOT / "container-healthcheck.json").read_text())
 
@@ -341,7 +341,9 @@ def test_daily_workflow_never_schedules_or_sends():
     )
 
 
-def test_git_ignore_protects_variants_but_keeps_blank_templates():
+def test_git_ignore_protects_variants_but_keeps_blank_templates(tmp_path):
+    (tmp_path / ".gitignore").write_bytes((ROOT / ".gitignore").read_bytes())
+    subprocess.run(["git", "init", "--quiet", str(tmp_path)], check=True)
     ignored = [
         ".env",
         ".env.local",
@@ -358,7 +360,7 @@ def test_git_ignore_protects_variants_but_keeps_blank_templates():
     allowed = [".env.example", ".env.production.example", "nested/.env.example"]
     result = subprocess.run(
         ["git", "check-ignore", "--no-index", "--stdin"],
-        cwd=ROOT,
+        cwd=tmp_path,
         input="\n".join(ignored + allowed) + "\n",
         text=True,
         capture_output=True,

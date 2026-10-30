@@ -21,7 +21,8 @@ Implemented:
 - Compiled Worker upload with no publisher rebuild; exact OCI/ZIP promotion; explicit prepared-content Website build;
   Bazel VPS bootstrap/operator entrypoints. Root CI now has check/artifact matrices and the existing production jobs.
 - Old path classifier, application check Actions, separate validation workflow, duplicate generators, custom pytest
-  shards/merger and Dockerfile build paths are replaced. Final Node/Makefile aliases and documentation are being checked.
+  shards/merger and Dockerfile build paths are replaced. Node/Makefile aliases use the canonical targets; native
+  Linux container tests include the original isolated real-k3s SSA assertions, not a skipped fixture placeholder.
 
 Local evidence so far:
 
@@ -34,18 +35,23 @@ Local evidence so far:
 - All 13 Worker application archives build together from a new output base. Three Linux OCI archives pass the original
   offline probes. Bootstrap outputs match the original renderer byte-for-byte, including the empty gateway case.
 - Native repository/config/pipeline audits pass locally. Real Git/Bazel graph comparisons prove source-only,
-  unconsumed-document and release-input-only selection. Third-party version-change reachability still needs its
-  isolated final check.
+  unconsumed-document and release-input-only selection. An isolated, frozen-lock Notion SDK upgrade selected only
+  Website and shared audits, with no unrelated application tests or release; its synthetic unit tests also ran.
+- All 558 original Node test/spec files and 258 Python test files map to actual runner invocations. All 930 current
+  non-manual test targets are reachable from public check facades. Runtime prompts, frozen fixtures and limits stay.
+- All 233 original doc/note/README entries were reviewed. Current runbooks and app READMEs are condensed, retired
+  instructions removed, and dated evidence links to fixed originals. File and heading links and command labels were checked.
+- The full native Linux run for the preceding core snapshot passed all eight check groups, seventeen artifacts and
+  CI gate. Final cleanup, source-coverage fixes and the native k3s fixture still require the final branch gate.
 
 Still required before completion:
 
-1. Finish the current helper/script/container-test slice and all-file doc audit; verify relative links and current
-   commands. Keep runtime prompts, frozen fixtures, data migration bytes and recovery contracts intact.
-2. Run the complete final native Linux CI for the final branch SHA; fix genuine failures. Inspect the resulting graph
-   and artifact identities. Local tests do not substitute for this run.
-3. Merge the same green source, wait for every selected main publication and matching Personal cloud reconcile,
-   and verify resolved drift. Do not claim the migration deployed from a branch build or old main run.
-4. Archive completed migration detail only after the above. The goal remains active until the full scope is verified.
+1. Run native Linux CI on the final branch SHA, including the independent real-k3s fixture; fix genuine failures.
+   The earlier green snapshot does not prove these last changes.
+2. Merge the checked source, wait for all selected main publications and matching Personal cloud reconcile, and
+   verify resolved drift. During this first cutover, old last-good revisions lack Bazel archives: if an app has not
+   completed its first native publication, continue that normal release rather than rebuilding the old revision.
+3. Archive completed migration detail only after acceptance. The goal remains active until the full scope is verified.
 
 No installed Chrome/phone extension, private content, model selection, budget, operational switch or credential is
 changed by this migration. Use synthetic fixtures; do not manually recompute business content for acceptance.

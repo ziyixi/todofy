@@ -21,15 +21,15 @@ Building a configuration target never applies infrastructure or changes a runnin
 
 The Changes job discovers public `:check` facades and tagged release inputs. Fixed Target Determinator compares their
 Bazel dependency graphs with the selected Git base. CI runs the affected **leaf tests**, grouped by Node, Python,
-Go, browser, workerd, CPU and generic checks. It does not run an entire app because one test file changed.
+Go, browser, workerd, CPU, container and generic checks. It does not run an entire app because one test file changed.
 
 Release targets include their production code, assets, static configuration and the publication scripts they use.
 A test-only change does not publish the app. A deployment-script change selects its actual users. Independent units,
 including Recall's ZIP and Website's relay, remain separate. There is no second path-to-application dependency map.
 
 A branch compares with its merge base against `origin/main`. A `main` push compares with the newest successful main
-workflow ancestor, so a failed publication remains in the next cumulative release diff. A manual dispatch checks the
-full check graph and selects the requested publications. `both` means Todofy and Mail Hero; `all` means all declared
+workflow ancestor, so a failed publication remains in the next cumulative release diff. A manual dispatch checks the requested applications plus shared contract/tool/infrastructure roots, then selects
+the requested publications. `all` checks the full graph. `both` means Todofy and Mail Hero; `all` means all declared
 releases. Newsletter and Platform keep their paired image publication and VPS rollout.
 
 Tests use Bazel's cache. CPU checks always execute when selected. Container probes, provider verification and live

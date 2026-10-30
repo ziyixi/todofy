@@ -227,3 +227,19 @@ filegroup(
 exports_files(["pyproject.toml"])
 
 exports_files([".python-version"])
+
+filegroup(
+    name = "newsletter_ci_test_inputs",
+    srcs = [
+        ".python-version",
+        "MODULE.bazel",
+        "pyproject.toml",
+        "uv.lock",
+    ] + glob([
+        ".github/workflows/ci.yml",
+        ".github/workflows/worker-release.yml",
+        ".github/workflows/newsletter-daily.yml",
+        ".github/actions/*/action.yml",
+    ]),
+    visibility = ["//visibility:public"],
+)
