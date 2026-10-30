@@ -19,6 +19,20 @@ features, the FlowDay retirement), [October 20](docs/history/handoff-2026-10-20.
 
 ## Current work
 
+### Bazel migration (`codex/bazel-migration`, in progress)
+
+Owner approved the staged migration of all builds, tests, generation and packaging to Bazel. Actions retains
+credentials, production publication, deployment ordering and reconcile. Existing pnpm/uv locks remain the application
+dependency source; third-party source is downloaded with pinned integrity rather than vendored into this repository.
+
+- Starting from `2c445ab4`; work is isolated from the owner's main checkout and Claude's worktrees.
+- First: validate pinned toolchains and dependency imports, then package-scoped proto generation and shared libraries,
+  followed by Tasks' real library/unit/runtime/browser/bundle targets. Remaining apps, website/extensions, Python and
+  OCI packaging follow before obsolete check/build paths are removed.
+- No production behavior, model settings, data or credentials change as part of build migration. Each application
+  changes check entrypoints only after its Bazel checks and existing release contracts are verified.
+- Pending: toolchain compatibility, real Bazel targets, affected-target/cache evidence, branch CI and staged release.
+
 ### Verify after the October 28 releases (read-only)
 
 The released notes are in the [October 28 archive](docs/history/handoff-2026-10-28.md).
