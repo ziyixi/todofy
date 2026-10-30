@@ -11,6 +11,7 @@ import pathlib
 import secrets
 import shutil
 import socket
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -21,9 +22,11 @@ import urllib.request as urllib_request
 
 import newsletter.collection.instructions as instructions
 import newsletter.console_access as console_access
+import newsletter.console_read as console_read
 import newsletter.contracts as contracts
 import newsletter.preflight as preflight
 import newsletter.rendering as rendering
+import newsletter.settings as settings
 import newsletter.types as types
 
 
@@ -84,6 +87,40 @@ def check_console_policy(audience: str | None) -> None:
         assert not console_access.POLICY_FILE.exists() and verifier is None
     else:
         assert verifier is not None and verifier.audience == audience
+
+
+def check_console_snapshot(root: pathlib.Path) -> None:
+    """Exercise the image's SQLite json_each reader and write restrictions."""
+    data = root / "console-data"
+    data.mkdir()
+    path = data / "newsletter.sqlite3"
+    with sqlite3.connect(path) as database:
+        database.execute("CREATE TABLE synthetic (body TEXT NOT NULL)")
+        database.execute(
+            "INSERT INTO synthetic VALUES (?)", ('{"synthetic":1}',)
+        )
+    database.close()
+    before = path.read_bytes()
+    reader = console_read.ConsoleReader(settings.Settings(data_dir=data))
+    with reader.snapshot() as snapshot:
+        row = snapshot.one(
+            "SELECT n.value FROM synthetic s, json_each(s.body) n"
+        )
+        assert row is not None and row[0] == 1
+        for statement in (
+            "INSERT INTO synthetic VALUES ('{}')",
+            "UPDATE synthetic SET body='{}'",
+            "DELETE FROM synthetic",
+            "CREATE TABLE forbidden (value INTEGER)",
+            "PRAGMA query_only=OFF",
+            "ATTACH DATABASE ':memory:' AS other",
+        ):
+            try:
+                snapshot.db.execute(statement)
+            except sqlite3.DatabaseError:
+                continue
+            raise AssertionError("The console snapshot accepted a write")
+    assert path.read_bytes() == before
 
 
 def check_console(port: int, token: str, configured: bool) -> None:
@@ -266,6 +303,7 @@ def main(payload: ProbeInput) -> None:
         prefix="newsletter-image-probe-"
     ) as temporary:
         root = pathlib.Path(temporary)
+        check_console_snapshot(root)
         startup = root / "startup.py"
         startup.write_text(payload["startup_source"])
         subprocess.run(
@@ -295,6 +333,7 @@ def main(payload: ProbeInput) -> None:
                 "model_router_client_checks": 2,
                 "mock_http": "ready/preview",
                 "console": "refuses without login",
+                "console_snapshot": "json_each/read-only",
                 "mail_files": 0,
                 "external_network": False,
                 "rootfs_read_only": True,

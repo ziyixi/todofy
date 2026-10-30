@@ -1208,10 +1208,12 @@ py_library(
         ":cli",
         ":collection_instructions",
         ":console_access",
+        ":console_read",
         ":contracts",
         ":package",
         ":preflight",
         ":rendering",
+        ":settings",
         ":types",
     ],
 )
