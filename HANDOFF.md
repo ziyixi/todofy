@@ -5,22 +5,17 @@ Documentation entrypoints are in [docs/README](docs/README.md). Historical waiti
 
 ## Current work
 
-`codex/newsletter-format-recovery` adds one same-context correction for a completed model response rejected by its
-JSON Schema. It shares the existing second-turn opportunity with provenance correction and preserves original
-deadlines, observations, usage and independent review. The Gateway keeps only this recoverable context open.
-An exhausted deep-article technical failure retains the approved brief and reports partial failure through existing
-run/console fields. Local Newsletter/Gateway checks passed (101 targets; the two Linux image probes await Actions).
-Not yet released. Do not recompute or resend the completed morning edition. Merge after branch CI, then verify both
-VPS images and matching reconciliation.
+No implementation in this handoff is awaiting release. Check current Git status and open pull requests before starting
+independent work. The completed morning Newsletter remains frozen; do not recompute or resend it for verification.
 
 ## Latest verified release
 
-Newsletter console `5db4f86e`: related branch/main checks, actual Linux image regression, VPS readiness and matching
-Personal cloud reconciliation passed. Authenticated production overview/run reads and the actual console UI recovered.
-The morning failure was a deep writer's invalid output; all five topics published as independently reviewed briefs.
-The planned deep article was not delivered. No completed content was recomputed or resent.
+Newsletter/Gateway `8525c64e`: one same-context format correction shares the existing second-turn opportunity with source
+verification. Independent review, deadlines and usage remain. Exhausted technical deep failures retain the approved brief
+and report partial failure. Branch/main checks, actual Linux image probes, runtime readiness and matching reconciliation
+passed. No real model call, completed-content recomputation or resend was used for acceptance.
 
-See the [October 30 record](docs/history/handoff-2026-10-30.md#newsletter-console-sqlite-and-morning-model-failure).
+See the [October 30 record](docs/history/handoff-2026-10-30.md#newsletter-bounded-format-correction).
 The earlier full Bazel migration and Website acceptance are in the same archive; per-application source identities remain independent.
 
 ## Separate acceptance and follow-ups
