@@ -35,6 +35,9 @@ dependency source; third-party source is downloaded with pinned integrity rather
   retains existing bytes, and all 37 proto targets pass. Shared JS libraries and 142 offline Python file targets
   execute in Bazel. Tasks' seven Worker unit targets, 25 UI file targets and the 16-case D1 CRUD target pass;
   repeated representative targets report cached results with zero tests executed.
+- The first Linux Python run's 19 failures all came from the host's missing CJK font. Newsletter's 85 test targets
+  now declare the pinned Debian Noto font and pass its absolute path to rendering; all 85 pass locally with that
+  same font, including missing-font and unsafe-file negative cases. A fresh Linux run still needs verification.
 - In progress: complete Tasks type/runtime/browser/bundle coverage, the remaining Worker checks and all three OCI
   images. The first gateway OCI archive passes its Linux offline container probe and exact SDK-version check.
 - The independent, credential-free Bazel workflow uses fixed Target Determinator and groups actual affected targets.

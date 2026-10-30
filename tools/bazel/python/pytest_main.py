@@ -9,6 +9,8 @@ from pathlib import Path
 import pytest
 
 if __name__ == "__main__":
+    if font := os.environ.get("NEWSLETTER_CHART_FONT"):
+        os.environ["NEWSLETTER_CHART_FONT"] = str(Path(font).absolute())
     if os.environ.get("BAZEL_COPY_WORKSPACE") == "1":
         workspace = Path(os.environ["TEST_SRCDIR"]) / os.environ["TEST_WORKSPACE"]
         copied = Path(os.environ["TEST_TMPDIR"]).resolve() / "workspace"
