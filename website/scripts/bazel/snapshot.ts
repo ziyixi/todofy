@@ -27,4 +27,5 @@ export async function stagePreparedSnapshot(root: string, destination: string): 
     path.join(destination, "BUILD.bazel"),
     'filegroup(name="files",srcs=glob([".generated/**","public/media/**","public/_img/**"],allow_empty=True),visibility=["//visibility:public"])\n',
   );
+  await writeFile(path.join(destination, "REPO.bazel"), "");
 }

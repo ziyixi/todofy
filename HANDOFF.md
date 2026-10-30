@@ -1,12 +1,14 @@
 # Handoff
 
 Updated 2026-10-30 UTC. Read [AGENTS](AGENTS.md), then the target application's README/rules.
-Current work is unreleased; historical waiting lists are not instructions. Documentation entrypoints are in
+The build migration is being released; historical waiting lists are not instructions. Documentation entrypoints are in
 [docs/README](docs/README.md).
 
 ## Current work: Bazel migration
 
-Branch `codex/bazel-app-entrypoints`, [PR #10](https://github.com/ziyixi/todofy/pull/10).
+[PR #10](https://github.com/ziyixi/todofy/pull/10) is merged as `eee152de`; its source tree equals the fully checked
+branch `14569175`. Main's complete check gate, Worker/VPS publications and matching full reconciliation passed. Follow-up branch `codex/bazel-release-fixes` fixes the Website
+prepared-content repository marker found by the actual publication, before completing release acceptance.
 The owner requested the entire monorepo's generation, builds, tests and packaging in Bazel, affected-target CI,
 removal of superseded build/check code, and a concise audit of every doc/note/README. Application root BUILD files
 must expose their complete final artifact. Do not narrow completion to the already released foundation.
@@ -45,15 +47,17 @@ Local evidence so far:
   CI gate. The native real-k3s leaf also passed on Linux. Final cleanup exposed Home's old document-bound assertions
   and an incorrectly timed Vite postbuild hook; their focused checks pass. UI terminals now consume their existing
   library closures: action-input inspection caught and corrected previously hidden cross-Worker source inputs.
-  Standalone UI, full Links archive and the other Vite terminals pass locally; the final Linux gate is still required.
+  Standalone UI, full Links archive and the other Vite terminals pass locally. The final branch and main Linux gates
+  passed all eight groups and seventeen compiled artifact producers.
 
 Still required before completion:
 
-1. Run native Linux CI on the final branch SHA, including the independent real-k3s fixture; fix genuine failures.
-   The earlier green snapshot does not prove these last changes.
-2. Merge the checked source, wait for all selected main publications and matching Personal cloud reconcile, and
-   verify resolved drift. During this first cutover, old last-good revisions lack Bazel archives: if an app has not
-   completed its first native publication, continue that normal release rather than rebuilding the old revision.
+1. The Website bridge now adds the repository marker required by Bazel 9. Actual synthetic staging reproduced the
+   original query failure, then passed query and a full stamped site build with unchanged content/config hashes.
+   Pass the affected branch gate and verify the normal main Website publication; the first failed build kept the old site intact.
+2. After the Website fix, require its verified static-site identity and the matching current-main reconciliation.
+   All thirteen Worker applications now have verified native release records; both VPS release receipts are ready,
+   and complete resource registration and resolved infrastructure drift passed for the core migration.
 3. Archive completed migration detail only after acceptance. The goal remains active until the full scope is verified.
 
 No installed Chrome/phone extension, private content, model selection, budget, operational switch or credential is
@@ -61,9 +65,10 @@ changed by this migration. Use synthetic fixtures; do not manually recompute bus
 
 ## Latest verified release
 
-Bazel foundation `6368d063`: both check workflows and the matching main Personal cloud reconcile succeeded.
-This verifies the foundation, not the unreleased full migration above. Earlier business releases and their dated
-acceptance are in [October 29](docs/history/handoff-2026-10-29.md) and [history](docs/history.md).
+Native build migration `eee152de`: complete main checks, all Worker/VPS publications and matching Personal cloud
+reconcile succeeded, including complete resource registration and resolved drift. The separate static Website
+publication still needs the prepared-content marker fix above. Earlier business releases and their dated acceptance
+are in [October 29](docs/history/handoff-2026-10-29.md) and [history](docs/history.md).
 
 ## Separate acceptance and follow-ups
 

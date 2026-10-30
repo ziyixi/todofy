@@ -47,6 +47,7 @@ test("Bazel receives the complete validated public snapshot, without private cap
     await expect(readFile(path.join(destination, "BUILD.bazel"), "utf8")).resolves.toContain(
       "filegroup",
     );
+    await expect(readFile(path.join(destination, "REPO.bazel"), "utf8")).resolves.toBe("");
     await writeFile(snapshotFile, "{}");
     await expect(stagePreparedSnapshot(source, path.join(temporary, "invalid"))).rejects.toThrow();
   } finally {
