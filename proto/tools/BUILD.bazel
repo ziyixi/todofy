@@ -99,3 +99,12 @@ filegroup(
     ),
     visibility = ["//visibility:public"],
 )
+
+py_test(
+    name = "generated_identity_test",
+    srcs = ["generated_identity_test.py"],
+    main = "generated_identity_test.py",
+    legacy_create_init = False,
+    args = ['$(locations //proto/ts:todofy_ui_v1_ts_generate)', '$(locations //proto/ts:modelrouter_inference_v1_ts_generate)', '$(locations //proto/python/src/ziyixi_proto:todofy_ui_v1_py_generate)', '$(locations //proto/python/src/ziyixi_proto:modelrouter_inference_v1_py_generate)'],
+    data = ['//proto/ts:todofy_ui_v1_ts_generate', '//proto/ts:modelrouter_inference_v1_ts_generate', '//proto/python/src/ziyixi_proto:todofy_ui_v1_py_generate', '//proto/python/src/ziyixi_proto:modelrouter_inference_v1_py_generate'],
+)
