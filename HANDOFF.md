@@ -19,11 +19,10 @@ features, the FlowDay retirement), [October 20](docs/history/handoff-2026-10-20.
 
 ## Current work
 
-### Mailsort recovery acceptance (`codex/mailsort-cost-verification`, awaiting new mail)
+### Mailsort residual failure recovery (`codex/mailsort-failed-recovery`, in progress)
 
-Owner reports successful Router requests without corresponding Gmail classification. Diagnose only bounded
-operational metadata; no mail content, automatic recheck or budget/mode changes. Work from current main in an
-isolated checkout; Claude's Newsletter console and CI ancestry work stay separate.
+Owner still sees unclassified recent mail after the optional-accounting repair. Use bounded operational and Gmail
+ID/label metadata only; no mail content or budget/mode changes. Work stays isolated from Claude's changes.
 
 - Observed: production is live, Gmail auth/write scope are valid, and the selected OpenAI classifier reports
   `openai_bad_answer`. Five successful Router metadata records have complete tokens but no price. Mailsort was
@@ -34,9 +33,15 @@ isolated checkout; Claude's Newsletter console and CI ancestry work stay separat
 - Checks passed: Mailsort worker/UI/type/lint/runtime/smoke and targeted Claude-budget regressions; Router worker,
   real-workerd persistence, type/lint and targeted request-default pricing tests. Branch/main CI and matching
   reconcile passed. A real synthetic API call with cache writes returned a nonzero cost estimate.
-- Pending only: a new eligible message to verify actual Gmail application. The latest observation had no pending
-  or deferred mail; the owner has been asked for one synthetic message from another account. Do not replay old
-  decisions or clear errors to simulate recovery. Read only counts, classifier result/time and deployment identity.
+- New diagnosis: the Gmail and app priority label IDs match. Twelve recent Inbox messages have no P label; all
+  precede the accounting repair, with eight unread and four read. Newer mail has actual successful application,
+  but old terminal model failures are excluded by ordinary decision deduplication and the queue stays empty.
+- Done locally: a one-time recovery in the existing filtered recent Inbox catch-up requeues only prior
+  `model_unavailable` items with no model label or owner verdict. It preserves existing pending waits, valid
+  decisions and Gmail checks, and uses the current queue/limits. No new API, schema, table, service or scheduler.
+- Checks passed: Worker unit/type/lint and real-workerd legacy recovery, read/unread, archive/P-label/owner-verdict
+  exclusions, existing waits, single execution, budgets, failures and interval tests. Pending: branch CI and normal
+  release, then compare the selected Gmail ID sets and actual labels without asking for another test email.
 
 ### Verify after the October 28 releases (read-only)
 
