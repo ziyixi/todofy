@@ -17,6 +17,7 @@ exports_files([
 ])
 
 exports_files(glob([
+    ".github/actions/check-*/action.yml",
     ".github/actions/release-*/action.yml",
     ".github/actions/publish-*/action.yml",
     ".github/workflows/worker-release.yml",
