@@ -1,6 +1,6 @@
 # Handoff
 
-Updated 2026-10-29 UTC. Current work describes in-flight and unreleased work in detail; released work moves to a
+Updated 2026-10-30 UTC. Current work describes in-flight and unreleased work in detail; released work moves to a
 dated record under `docs/history/` and is linked here, without run-ID ledgers. Rules are in [AGENTS](AGENTS.md);
 entry points in [README](README.md). Never put private content, credentials or raw production output here.
 
@@ -18,30 +18,6 @@ features, the FlowDay retirement), [October 20](docs/history/handoff-2026-10-20.
 [October 11](docs/history/handoff-2026-10-11.md).
 
 ## Current work
-
-### Mailsort residual failure recovery (`codex/mailsort-failed-recovery`, in progress)
-
-Owner still sees unclassified recent mail after the optional-accounting repair. Use bounded operational and Gmail
-ID/label metadata only; no mail content or budget/mode changes. Work stays isolated from Claude's changes.
-
-- Observed: production is live, Gmail auth/write scope are valid, and the selected OpenAI classifier reports
-  `openai_bad_answer`. Five successful Router metadata records have complete tokens but no price. Mailsort was
-  rejecting that optional price before reading the classification. Synthetic unit and workerd cases reproduced it.
-- Released `f72e447e`: valid classifications no longer depend on optional accounting, for every provider; unknown usage
-  stays absent and Claude's existing pre-call known-spend gate stays intact. Router uses its known Standard/default
-  cache request settings when optional response billing metadata is missing; reported information still wins.
-- Checks passed: Mailsort worker/UI/type/lint/runtime/smoke and targeted Claude-budget regressions; Router worker,
-  real-workerd persistence, type/lint and targeted request-default pricing tests. Branch/main CI and matching
-  reconcile passed. A real synthetic API call with cache writes returned a nonzero cost estimate.
-- New diagnosis: the Gmail and app priority label IDs match. Twelve recent Inbox messages have no P label; all
-  precede the accounting repair, with eight unread and four read. Newer mail has actual successful application,
-  but old terminal model failures are excluded by ordinary decision deduplication and the queue stays empty.
-- Done locally: a one-time recovery in the existing filtered recent Inbox catch-up requeues only prior
-  `model_unavailable` items with no model label or owner verdict. It preserves existing pending waits, valid
-  decisions and Gmail checks, and uses the current queue/limits. No new API, schema, table, service or scheduler.
-- Checks passed: Worker unit/type/lint and real-workerd legacy recovery, read/unread, archive/P-label/owner-verdict
-  exclusions, existing waits, single execution, budgets, failures and interval tests. Pending: branch CI and normal
-  release, then compare the selected Gmail ID sets and actual labels without asking for another test email.
 
 ### Verify after the October 28 releases (read-only)
 
@@ -178,11 +154,12 @@ the first attempts of reruns, found these causes, all now fixed at their root:
 
 ## Latest verified release
 
-`7f8f4c3b`, Newsletter configuration activation visible through Fleet and Home:
-[main release](https://github.com/ziyixi/todofy/actions/runs/40835158998). Its matching Personal cloud reconcile
-passed with resolved drift, resource registration and VPS gates. A fresh new observer report carried real
-configuration identities and source poll times; Fleet and Home showed the same times through existing read-only
-interfaces. [Acceptance](docs/history/handoff-2026-10-29.md#newsletter-configuration-visibility-released-7f8f4c3b).
+`84e64144`, Mailsort's one-time recovery of mail stranded by the optional-accounting failure:
+[main release](https://github.com/ziyixi/todofy/actions/runs/40986530938). Its matching Personal cloud reconcile
+passed with resolved drift, resource registration and VPS gates. The existing Alarm classified all 12 selected
+recent Inbox messages; Gmail P-label membership and the eight unchanged unread flags were checked by message ID.
+The queue is empty and both real model batches have cost estimates.
+[Acceptance](mailsort/docs/verification.md#optional-accounting-and-recovery-2026-10-29).
 Per-app identities are in GitHub production Deployments.
 
 ## Verify after deploy
@@ -194,9 +171,8 @@ Per-app identities are in GitHub production Deployments.
 - Sunday backups: Tasks' weekly backup now holding the GTD and Goals tables, and Todofy's first Sunday backup after
   Boundary B and the FlowDay release (its health page shows it complete with no `tasks` section).
 - Merged ahead of the Router releases without a publication record of their own: Tasks' Sunday-first week and shared
-  estimate editing (`a048ba34` to `f5cd8bbe`), Mailsort's recent read Inbox intake (`7427565d`). Confirm the `deploy:tasks` and
-  `deploy:mailsort` Deployments are at or after those commits and check the behaviour read-only. A natural Mailsort
-  batch through the Router has not been observed.
+  estimate editing (`a048ba34` to `f5cd8bbe`). Confirm the `deploy:tasks` Deployment is at or after those commits and
+  check the behaviour read-only. Mailsort's recent read Inbox intake has since been observed in the recovery above.
 - Native hourly Work review: catalog refresh and Work event continuation passed in the owner's existing Dot
   ([evidence](docs/work-memory-verification.md)); the first natural run of the
   saved shared review is unverified (the host's next-run field is null). Do not substitute a Codex heartbeat, an

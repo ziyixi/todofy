@@ -87,8 +87,34 @@ Worker/UI/type/lint/runtime/smoke checks passed. [Main release](https://github.c
 and [matching reconcile](https://github.com/ziyixi/todofy/actions/runs/40910801785) passed for both repaired Workers.
 
 Router's real synthetic pricing acceptance is [recorded separately](../../model-router/docs/verification.md#openai-default-billing-metadata-2026-10-29).
-Actual post-release Gmail application remains pending a new eligible message: the observed queue was empty.
-No old decision was replayed, no mail was sent by the test tooling, and no settings, model, prompt or budget changed.
+The initial post-release check found an empty queue; subsequent bounded Gmail ID/label queries found 12 recent
+Inbox messages without P labels, all received before the repair. Eight were unread and four read. The P-label IDs
+matched Mailsort's mapping. These old terminal `model_unavailable` decisions were excluded by ordinary enqueue
+deduplication, although newer mail already had successful Gmail applications.
+
+`84e64144` adds a one-time requeue to the existing filtered recent Inbox catch-up, limited to those failed decisions
+without a model label or owner verdict. Valid decisions, existing pending waits, current Gmail eligibility and the
+usual write limits remain. It adds no API, schema, table, service or schedule. Real-workerd regression reproduced
+the stranded state before the change, then verified read/unread recovery, valid-decision and owner-verdict exclusion,
+preserved waits, resync ordering and single execution; later genuine failures are not automatically revived.
+Worker unit/type/lint and runtime budget/failure/interval tests passed. The
+[branch gate](https://github.com/ziyixi/todofy/actions/runs/40985783767),
+[main release](https://github.com/ziyixi/todofy/actions/runs/40986530938) and
+[matching reconcile](https://github.com/ziyixi/todofy/actions/runs/40986942881) all passed.
+
+Production acceptance on 2026-10-30 UTC used the existing Alarm, with no manual classification trigger or test mail:
+
+- Two real Mailsort requests at 01:46:08 and 01:46:53 succeeded through `openai/gpt-6.1-sol`. Both reported complete
+  token usage and nonzero estimates: 33,181 and 3,811 microUSD, respectively ($0.036992 combined list-price estimate).
+  Only content-free Router list metadata was read; no retained model request or answer body was opened.
+- Gmail message-ID set comparisons confirmed all 12 original messages acquired exactly one P label: P1 2, P2 1,
+  P3 3 and P4 6. None remained in the recent unclassified Inbox query. All eight original unread messages retained
+  their unread flags; the other four stayed read.
+- Mailsort's daily decided/applied counts rose from 2 to 14, with pending/deferred/unsure all zero. The served build
+  matched `84e64144`; live mode, saved model/effort, five-minute interval, prompt and budgets were unchanged.
+
+This verifies actual Gmail application and optional accounting independently. No message content was read for the
+acceptance, and no mail was sent, deleted, marked read or reclassified from a valid historical verdict.
 
 ## History
 
