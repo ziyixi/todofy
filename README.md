@@ -1,98 +1,44 @@
 # Personal Cloud · 个人云
 
-把收邮件、邮件分拣、任务、网页监视、浏览记录、每日简报和个人网站放在一个仓库里维护。
-Home 是日常入口；各服务独立运行、独立发布，共享接口和必要的基础代码。
+我日常使用的一组应用，用来规划工作、整理邮件、保存浏览记录和跟进信息。
+应用、接口和基础设施放在同一个仓库中维护。
 
-One repository for personal mail, mail sorting, tasks, web watches, a browsing record, a daily newsletter and the website.
-Home is the daily starting point. Services run and release independently, sharing contracts and a small runtime.
+[English](README.en.md) · [文档](docs/README.md) · [部署与重建](docs/rebuild.md)
 
-## 服务 · Services
+## 日常使用
 
-| 服务 / Service | 用途 / Purpose | 运行环境 / Runs on | 开发入口 / Start here |
-| --- | --- | --- | --- |
-| Home | 查看服务、业务链路和配额 / Service health, flows and quotas | Cloudflare Worker + DO | [dashboard/](dashboard/README.md) |
-| Mail Hero | 收件箱与可靠 webhook / Inbox and reliable webhooks | Cloudflare Worker + D1 + R2 + DO | [mail-hero/](mail-hero/README.md) |
-| Todofy | 邮件摘要与每日提醒 / Mail summaries and daily reminders | Cloudflare TS gateway + Python core + D1/DO | [todofy/](todofy/README.md) |
-| Tasks | 主任务库、子任务与 Plan/Focus / Primary task store, subtasks and Plan/Focus | Cloudflare Worker + D1, desktop PWA | [tasks/](tasks/README.md) |
-| Links | 私人短链接 / Personal short links | Cloudflare Worker + D1 | [links/](links/README.md) |
-| Watch | 网页变化收件箱 / Web change inbox | Cloudflare Worker + DO | [watch/](watch/README.md) |
-| Mailsort | Gmail 自动分拣 / Gmail priority sorting | Cloudflare Worker + DO, Model Router | [mailsort/](mailsort/README.md) |
-| Model Router | 统一推理、用量与请求详情 / Unified inference, usage and request details | Cloudflare Worker + DO + D1 + R2 | [model-router/](model-router/README.md) |
-| Codex Gateway | 私有结构化推理 / Private structured inference | VPS k3s, independent image | [codex-gateway/](codex-gateway/README.md) |
-| Recall | 浏览记录、全文搜索与 Dropbox 归档 / Browsing record, full-text search and an archive in Dropbox (synced to the NAS) | Cloudflare Worker + DO + R2, Chrome extension | [recall/](recall/README.md) |
-| Website | Notion 驱动的个人网站 / Personal website from Notion | Cloudflare static assets + relay | [website/](website/README.md) |
-| Newsletter | 生成并发送简报 / Build and send the newsletter | VPS k3s, separate image | [newsletter/](newsletter/README.md) |
-| Fleet | VPS、daemon 与发布状态 / VPS, daemons and release status | Cloudflare Worker + DO | [fleet/](fleet/README.md) |
-| Personal MCP | Dots 工具、工作记录与订阅 / Dots tools, work memory and events | Cloudflare Worker + DO | [personal-mcp/](personal-mcp/README.md) |
-| Newsletter 控制台 / Newsletter console | 简报的只读控制台 / Read-only newsletter console | Cloudflare Worker, reads from Newsletter | [newsletter-console/](newsletter-console/README.md) |
+| 应用 | 用来做什么 |
+| --- | --- |
+| [Tasks](tasks/README.md) | 把 Goals 关联到任务，用 Plan 安排本周工作、Focus 执行与计时、GTD 回顾完成和耗时。 |
+| 邮件 | [Mail Hero](mail-hero/README.md) 收件，[Mailsort](mailsort/README.md) 按优先级分拣 Gmail，[Todofy](todofy/README.md) 生成摘要。邮件在 Tasks 的 Mail 中查看，由我决定是否收进 Inbox 创建任务。 |
+| [Recall](recall/README.md) | 保存浏览活动、网页文字和截图，按时间线或全文搜索找回；旧内容归档到 Dropbox 后仍可读取。 |
+| [Watch](watch/README.md) | 监视网页变化，保存正文和截图证据，供自己或代理继续判断、跟进。 |
+| [Newsletter](newsletter/README.md) | 搜集和审校公开资料，生成并发送每日简报；在[控制台](newsletter-console/README.md)查看刊期和运行记录。 |
+| 网站与链接 | 从 Notion 发布[个人网站](website/README.md)，用 [Links](links/README.md) 管理短链接。 |
 
-Tasks 是任务与规划入口，也保存 Focus 的每日队列与计时；Todofy 处理邮件和每日提醒。Todoist 只是 2026-10-17 的一次性迁移来源，现在没有代码读写它。
+## 代理与监控
 
-Tasks is the task and planning app and owns Focus's daily queues and timers. Todofy handles mail and daily reminders.
-Todoist was the one-time migration source of 2026-10-17; no code reads or writes it now.
+- [Personal MCP](personal-mcp/README.md) 让 Dots 使用 Tasks、Mail、Recall 和 Watch，通过工作记录与事件订阅继续跟进。
+- [Home](dashboard/README.md) 查看服务、用量和异常；[Fleet](fleet/README.md) 查看 VPS、后台服务和实际发布状态。
 
-Cloudflare 托管日常应用；VPS 的 k3s 运行 Newsletter、Codex Gateway 和独立的部署 daemon。
-GitHub Actions 主动通过鉴权 API 更新经测试的镜像，Fleet 和 Home 查看实际运行状态。
-发布状态、业务健康和观察数据的新鲜度分别显示。首次安装和数据恢复见 [重建说明](docs/rebuild.md)。
+## 如何运行
 
-Cloudflare hosts the daily applications. VPS k3s runs Newsletter, Codex Gateway and an independent deployment daemon.
-Actions pushes tested images through an authenticated API; Fleet and Home show observed runtime state.
-Release progress, business health and observation freshness stay separate. See [rebuild](docs/rebuild.md).
+日常应用托管在 Cloudflare。VPS 的 k3s 运行 Newsletter、[Codex Gateway](codex-gateway/README.md) 和[部署服务](platform/README.md)。
+[Model Router](model-router/README.md) 为应用提供统一的模型调用、请求记录和用量统计。
 
-## 构建与开发 · Build and develop
+应用各自管理数据和发布，共享接口与必要的基础代码。[Bazel](docs/bazel.md) 固定工具链并按依赖构建、检查；
+GitHub Actions 发布受影响的服务，Home 和 Fleet 核对实际运行状态。
 
-先读 [HANDOFF](HANDOFF.md) 和目标应用的规则。Bazel 固定工具链并按真实依赖构建、检查，不需要先安装每个应用。
-Read HANDOFF and the target application's rules. Bazel supplies pinned toolchains and follows declared dependencies.
+服务边界见[架构](docs/architecture.md)，完整开发入口见[服务目录](docs/service-catalog.md)。
+
+## 开发
+
+先读 [HANDOFF](HANDOFF.md)、[协作规则](AGENTS.md) 和目标应用的 README；工具安装见[开发环境](docs/dependencies.md)。
 
 ```sh
-bazel build //tasks        # 完整 Worker/UI/config archive
-bazel test //tasks:check   # 该应用的检查 / application checks
-bazel test //...           # 全仓检查 / repository checks
+bazel build //tasks
+bazel test //tasks:check
 ```
 
-每个应用根 BUILD 提供最终产物、`:check`、`:config` 和独立发布输入。交互式开发仍可用各应用脚本，
-Node 26/pnpm 与 Python 3.14/uv 分别共享一份锁文件；生成代码不提交。本地只使用合成数据和本地绑定。
-
-Application roots expose final artifacts, checks, configuration and release inputs. Interactive development keeps
-app scripts and shared pnpm/uv locks. Generated code stays uncommitted; local development uses synthetic data.
-See [Bazel](docs/bazel.md) and [dependencies](docs/dependencies.md).
-
-## 仓库地图 · Repository map
-
-| 目录 / Directory | 责任 / Responsibility |
-| --- | --- |
-| [proto/](proto/README.md) | 接口定义、固定工具链、JSON 编解码与 HTTP 客户端 / IDL, pinned tooling, JSON codecs and HTTP runtime |
-| [contracts/](contracts/README.md) | 跨服务语义、Schema、固定字节测试样本 / Cross-service semantics, schemas and golden payloads |
-| [packages/](packages/) | 共享鉴权、规划 UI 与日期规则 / Shared authentication, planning UI and date rules |
-| [infra/](infra/README.md) | Cloudflare 资源与权限 / Cloudflare resources and permissions |
-| [platform/](platform/README.md) | VPS 发布 daemon、k3s 清单和监控 / VPS deployment daemon, k3s manifests and monitoring |
-| [config/](config/) | 可迁移的公开配置 / Portable public configuration |
-| [tools/](tools/) | 测试、构建和部署工具 / Test, build and deployment tools |
-| [.github/workflows/](.github/workflows/) | 检查、独立发布与基础设施流程 / Checks, independent releases and infrastructure workflows |
-
-应用不互相导入代码。邮件接管、任务创建、部署成功是不同阶段，Home 分别呈现它们的证据。
-
-Applications do not import one another. Mail acceptance, task creation and a successful deployment
-are separate stages; Home shows their evidence separately.
-
-## 发布 · Releases
-
-在分支完成检查，合并同一个通过 `CI gate` 的提交，再由 GitHub Actions 发布受影响的服务。
-部署权限、生产配置、回退和镜像更新见 [CI/CD](docs/ci-cd.md)。
-
-Check a branch, merge that exact green SHA, and let GitHub Actions release the affected services.
-See CI/CD for deployment permissions, production configuration, rollback and image updates.
-
-## 文档 · Documentation
-
-- [导航 / Documentation guide](docs/README.md)：按任务找文档 / Find the right document for the job.
-- [架构 / Architecture](docs/architecture.md)：服务和数据边界 / Service and data boundaries.
-- [服务目录 / Service catalog](docs/service-catalog.md)：可校验的服务声明 / Validated service declarations.
-- [发布 / CI/CD](docs/ci-cd.md)：检查、发布和生产配置 / Checks, releases and production settings.
-- [历史 / History](docs/history.md)：迁移记录、兼容期限与不能丢的证据 / Migrations, compatibility dates and retained evidence.
-- [交接 / HANDOFF](HANDOFF.md)：当前工作与实际验收 / Current work and recorded verification.
-
-这是公开仓库。密钥、私人邮箱、真实邮件、Notion 内容与个人任务不进入代码、测试样本或日志。
-
-This repository is public. Keep secrets, private addresses, real mail, Notion content and personal tasks
-out of source, fixtures and logs.
+其他应用同样使用 `//应用名` 和 `//应用名:check` 作为构建、检查入口。
+发布流程见 [CI/CD](docs/ci-cd.md)，其余说明从[文档导航](docs/README.md)查找。
