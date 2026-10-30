@@ -855,6 +855,7 @@ proto_vitest_test(
     data = [
         "package.json",
         "test/cloudflare-workers.ts",
+        "test/fixtures/usage-query-reviewed.graphql",
         "test/graphql-fixture.ts",
         ":node_modules/vitest",
     ],
@@ -866,7 +867,6 @@ proto_vitest_test(
         ":idl",
         ":limits",
         ":usage",
-        "//dashboard/docs:design",
         "//dashboard/docs:limits",
     ],
 )
@@ -908,7 +908,7 @@ proto_vitest_test(
         "//contracts:ops-v1/fixtures/OpsStatus/tasks-ok.json_data",
         "//contracts:ops-v1/fixtures/OpsStatus/todofy-ok.json_data",
         "//contracts:ops-v1/fixtures/OpsStatus/watch-ok.json_data",
-        "//dashboard/docs:design-v2",
+        "//dashboard/docs:design",
         "//proto/dashboard/ui/v1:ts",
         "//proto/ts:protobuf",
         "//proto/ts:wire-json",

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import designV2 from '../../docs/design-v2.md?raw';
+import design from '../../docs/design.md?raw';
 import apiTypesSource from '../src/api-types.ts?raw';
 import type { OpsReportItem, OpsSignal } from '../src/api-types.ts';
 import { CANARY_MANUAL_PER_DAY, type CanaryState, type Digest, type GuardView } from '../src/api-types.ts';
@@ -296,8 +296,8 @@ describe('documented budgets', () => {
     }
   });
 
-  it('the route table of docs/design-v2.md states VIEW_BODY_BUDGET', () => {
-    const rows = documented(designV2.split('\n| Route | Served by | Budget |', 2)[1]?.split('\n\n', 1)[0] ?? '');
+  it('the route table of current docs/design.md states VIEW_BODY_BUDGET', () => {
+    const rows = documented(design.split('\n| Route | Served by | Budget |', 2)[1]?.split('\n\n', 1)[0] ?? '');
     expect([...rows.keys()].sort()).toEqual(Object.keys(VIEW_BODY_BUDGET).sort());
     for (const [view, budget] of Object.entries(VIEW_BODY_BUDGET)) expect({ view, kib: rows.get(view)?.kib }).toEqual({ view, kib: budget / 1024 });
   });

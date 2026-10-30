@@ -42,7 +42,8 @@ Local evidence so far:
 - All 233 original doc/note/README entries were reviewed. Current runbooks and app READMEs are condensed, retired
   instructions removed, and dated evidence links to fixed originals. File and heading links and command labels were checked.
 - The full native Linux run for the preceding core snapshot passed all eight check groups, seventeen artifacts and
-  CI gate. Final cleanup, source-coverage fixes and the native k3s fixture still require the final branch gate.
+  CI gate. The native real-k3s leaf also passed on Linux. Final cleanup exposed Home's old document-bound assertions
+  and an incorrectly timed Vite postbuild hook; their focused checks pass, but the final Linux gate is still required.
 
 Still required before completion:
 

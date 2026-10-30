@@ -30,6 +30,21 @@ provider datasets; an absent dataset is unknown, not zero. Storage references an
 establish a bill or a hard spending cap. R2 operation classification follows `worker/src/usage.ts`: unclassified
 actions are conservatively counted as Class A and remain explicitly unclassified in the view.
 
+### R2 operation classification
+
+The dashboard's accounting policy classifies the following `actionType` values from the usage dataset.
+`usage.test.ts` requires every explicitly classified operation to remain documented.
+
+| Class | Operations |
+| --- | --- |
+| A | `ListBuckets`, `PutBucket`, `ListObjects`, `PutObject`, `CopyObject`, `CompleteMultipartUpload`, `CreateMultipartUpload`, `LifecycleStorageTierTransition`, `ListMultipartUploads`, `UploadPart`, `UploadPartCopy`, `ListParts`, `PutBucketEncryption`, `PutBucketCors`, `PutBucketLifecycleConfiguration` |
+| B | `HeadBucket`, `HeadObject`, `GetObject`, `UsageSummary`, `GetBucketEncryption`, `GetBucketLocation`, `GetBucketCors`, `GetBucketLifecycleConfiguration` |
+| Free | `DeleteObject`, `DeleteBucket`, `AbortMultipartUpload` |
+| Assumed A | `DeleteObjects` (the explicitly reviewed conservative bulk-delete classification) |
+
+Other operations are conservatively counted as A and reported as unclassified. This mapping describes the
+implemented observation policy, not a promise of provider billing behavior.
+
 ## 2. Guard and projection rules
 
 Only configured trigger rows can enter automatic shed, at measured usage of at least 80%, held at least 70% on the

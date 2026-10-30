@@ -199,7 +199,7 @@ export default async env => {
         if (check.status !== 0) throw new Error('Postbuild check failed: ' + %s);""" % (json.encode(postbuild_path), json.encode(postbuild_path))
         content += """  result.plugins = [...(config.plugins ?? []), {
     name: 'bazel-postbuild-checks',
-    async closeBundle() {
+    async writeBundle() {
         %s
     },
   }];

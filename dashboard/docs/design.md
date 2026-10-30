@@ -83,6 +83,11 @@ unknown open-list codes remain readable, while invalid values and unknown closed
 `invalid_output`. Inputs are checked strictly before transmission. Failures become bounded codes, never remote
 text. One failed source does not erase another source's evidence.
 
+The frozen [reviewed query](../worker/test/fixtures/usage-query-reviewed.graphql) preserves the September 29
+field/filter baseline, the September 30 Workers AI dataset addition and the reviewed Worker row cap of 50 from the
+original design. `usage.test.ts` compares the runtime query with it verbatim after whitespace normalization.
+This preserves a reviewed reference, not a new live-account verification; current execution is in `usage.ts`.
+
 Usage is one GraphQL query per tick, and at most once per minute on an owner refresh. Non-200/error/malformed,
 oversized or timed-out answers retain the previous successful rows and record failure separately. Usage is fresh
 only for the current UTC day and within 90 minutes. A missing credential is `not_configured`, not zero usage.
@@ -156,6 +161,19 @@ key is involved. Details and per-app policy are in [edge-auth](../../packages/ed
 | Guard override and canary run | Serialized, UUID-identified actions with explicit receipts |
 | Attention dismiss/restore | Occurrence etag plus UUID; stale conditions return `ATTENTION_CHANGED` |
 | Website sync request | Permanent first receipt; repeat looks up the same request, never dispatches twice |
+
+The ordinary-view regression budgets are documented separately from larger stress cases and platform limits:
+
+| Route | Served by | Budget |
+| --- | --- | --- |
+| `GET /api/v1/registry` | Worker, no object call | ≤ 20 KiB |
+| `GET /api/v1/homeView` | HomeState, one object call | ≤ 10 KiB; ≤ 44 rows read |
+| `GET /api/v1/flowsView` | HomeState, one object call | ≤ 20 KiB; ≤ 44 rows read |
+| `GET /api/v1/cloudflareView` | HomeState, one object call | ≤ 24 KiB; ≤ 44 rows read |
+| `GET /api/v1/opsView` | HomeState, one object call | ≤ 24 KiB; ≤ 44 rows read |
+
+`views.test.ts` keeps this table and the `api-types.ts` header equal to `VIEW_BODY_BUDGET`; actual constructed
+answers remain subject to the existing body/read assertions and the separate stress bounds.
 
 `/health` and static CSRF compatibility are transport paths. Legacy owner paths retain the dates and reload behavior
 in the [compatibility table](../../docs/history.md#owner-api-compatibility); those deadlines are not advanced here.
