@@ -30,7 +30,7 @@ runs:
           echo "::error::email addresses come from sensitive variables, never from files in infra/"; failed=1
         fi
         # An allowlist of committed file kinds: a state, plan, values or log file fails whatever its name.
-        if git ls-files -- . | grep -vE '^([A-Za-z0-9_-]+\.tf|\.terraform\.lock\.hcl|\.gitignore|README\.md|local\.tfvars\.example|(scripts|tests)/[A-Za-z0-9_]+\.py)$'; then
+        if git ls-files -- . | grep -vE '^([A-Za-z0-9_-]+\.tf|\.terraform\.lock\.hcl|\.gitignore|README\.md|BUILD\.bazel|local\.tfvars\.example|(scripts|tests)/[A-Za-z0-9_]+\.py)$'; then
           echo "::error::only *.tf, the lock file, docs, the example values and the scripts are committed in infra/"; failed=1
         fi
         python3 ../.github/scripts/infra_guard.py . || failed=1

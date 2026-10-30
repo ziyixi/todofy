@@ -41,7 +41,7 @@ import sys
 import tomllib
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).absolute().parents[2]
 OUTPUT = REPO / "dashboard" / "worker" / "src" / "drift-desired.json"
 VERSION = 1
 

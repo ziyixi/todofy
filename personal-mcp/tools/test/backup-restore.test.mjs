@@ -12,6 +12,9 @@ import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 import { FORMAT, readBackup } from '../backup-restore.ts';
 
+// CLI children keep their minimal environment and use the pinned interpreter directly.
+const NODE_EXECUTABLE = process.env.JS_BINARY__NODE_BINARY ?? process.execPath
+
 const TOOL = fileURLToPath(new URL('../backup-restore.ts', import.meta.url));
 const BACKUP = 'backups/2026-10-28T052300Z/';
 const BUCKET = 'personal-mcp-backups';
@@ -62,7 +65,7 @@ try {
   if (args[2] === 'get') copyFileSync(object, file);
   else { mkdirSync(dirname(object), { recursive: true }); copyFileSync(file, object); }
 } catch { process.exit(1); }`);
-  const run = (...args) => spawnSync('node', [TOOL, ...args, '--local', '--persist-to', '/unused', '--wrangler', `node ${stub}`], {
+  const run = (...args) => spawnSync(NODE_EXECUTABLE, ['--preserve-symlinks-main', TOOL, ...args, '--local', '--persist-to', '/unused', '--wrangler', `node ${stub}`], {
     encoding: 'utf8', env: { ...process.env, MCP_BUCKET: store, MCP_CALLS: join(root, 'calls.jsonl') },
   });
   const calls = () => existsSync(join(root, 'calls.jsonl'))
@@ -82,7 +85,7 @@ test('verify reads every part against the manifest and counts each table and the
     assert.equal(backup.prefix, BACKUP);
     assert.deepEqual(backup.families.map((family) => [family.name, family.rows, family.parts.length]),
       [['work', 2, 2], ['work_links', 1, 1], ['kv', 2, 1]]);
-    const verified = spawnSync('node', [TOOL, 'verify', '--in', p.source], { encoding: 'utf8' });
+    const verified = spawnSync(NODE_EXECUTABLE, ['--preserve-symlinks-main', TOOL, 'verify', '--in', p.source], { encoding: 'utf8' });
     assert.equal(verified.status, 0, verified.stderr);
     assert.equal(verified.stdout, `backup ${BACKUP} schema_version=1 created_at=2026-10-28T05:23:02Z\n` +
       'PASS work rows=2\nPASS work_links rows=1\nPASS kv rows=2\nverify PASS\n');
@@ -108,7 +111,7 @@ test('verify refuses a changed part, a wrong row count or width, and another for
     const data = readFileSync(file);
     data[data.length >> 1] ^= 1;
     writeFileSync(file, data);
-    const failed = spawnSync('node', [TOOL, 'verify', '--in', p.source], { encoding: 'utf8' });
+    const failed = spawnSync(NODE_EXECUTABLE, ['--preserve-symlinks-main', TOOL, 'verify', '--in', p.source], { encoding: 'utf8' });
     assert.equal(failed.status, 1);
     assert.match(failed.stderr, /work_links\/00001\.ndjson\.gz: SHA-256 differs from the manifest/);
   } finally {

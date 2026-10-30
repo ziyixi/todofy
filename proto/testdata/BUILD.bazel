@@ -1,7 +1,28 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
 package(default_visibility = ["//visibility:public"])
 
 exports_files(glob(["*.json"]))
 
-[js_library(name = path + "_data", srcs = [path]) for path in glob(["*.json"])]
+[js_library(
+    name = path + "_data",
+    srcs = [path],
+) for path in glob(["*.json"])]
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["*"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)

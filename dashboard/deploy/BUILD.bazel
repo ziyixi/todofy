@@ -1,0 +1,107 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library", "js_test")
+load("@npm//website:tsx/package_json.bzl", tsx = "bin")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//dashboard:__subpackages__"])
+
+tsx.tsx_test(
+    name = "deploy-vars_test",
+    args = [
+        "--test",
+        "test/deploy-vars.test.mjs",
+    ],
+    chdir = "dashboard/deploy",
+    data = [
+        "test/deploy-vars.test.mjs",
+        ":source_deploy_vars_mjs",
+        "//dashboard:config",
+        "//dashboard/worker:package_metadata",
+    ],
+)
+
+tsx.tsx_test(
+    name = "wrangler-config_test",
+    args = [
+        "--test",
+        "test/wrangler-config.test.mjs",
+    ],
+    chdir = "dashboard/deploy",
+    data = [
+        "test/wrangler-config.test.mjs",
+        ":source_deploy_vars_mjs",
+        "//dashboard:config",
+        "//dashboard/worker:entry_metadata",
+        "//dashboard/worker:env_metadata",
+        "//dashboard/worker:node_modules/wrangler",
+        "//dashboard/worker:package_metadata",
+        "//dashboard/worker:runtime_metadata",
+    ],
+)
+
+tsx.tsx_test(
+    name = "bundle-size_test",
+    args = [
+        "--test",
+        "test/bundle-size.test.mjs",
+    ],
+    chdir = "dashboard/deploy",
+    data = [
+        "test/bundle-size.test.mjs",
+        ":source_bundle_size_mjs",
+        "//dashboard/worker:package_metadata",
+        "//tools/bundle-size:library",
+    ],
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        ":bundle-size_test",
+        ":bundle_budget_test",
+        ":deploy-vars_test",
+        ":wrangler-config_test",
+    ],
+)
+
+js_test(
+    name = "bundle_budget_test",
+    args = ["$(rootpath //dashboard:worker_bundle)"],
+    data = [
+        ":source_bundle_size_mjs",
+        "//dashboard:worker_bundle",
+    ],
+    entry_point = "bundle-size.mjs",
+    preserve_symlinks_main = False,
+)
+
+js_library(
+    name = "source_deploy_vars_mjs",
+    srcs = ["deploy-vars.mjs"],
+    deps = ["//tools/cloud-config:worker-secrets"],
+)
+
+js_library(
+    name = "source_bundle_size_mjs",
+    srcs = ["bundle-size.mjs"],
+    deps = ["//tools/bundle-size:library"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        [
+            "*",
+            "test/**",
+        ],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)

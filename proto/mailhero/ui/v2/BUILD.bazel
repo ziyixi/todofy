@@ -1,14 +1,57 @@
 load("@protobuf//bazel:proto_library.bzl", "proto_library")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
 package(default_visibility = ["//visibility:public"])
 
 proto_library(
     name = "proto",
-    srcs = ["delivery.proto", "endpoint.proto", "errors.proto", "mail_hero_ui_service.proto", "message.proto", "settings.proto"],
+    srcs = [
+        "delivery.proto",
+        "endpoint.proto",
+        "errors.proto",
+        "mail_hero_ui_service.proto",
+        "message.proto",
+        "settings.proto",
+    ],
     strip_import_prefix = "/proto",
-    deps = ["@googleapis//:google_api_annotations_proto", "@googleapis//:google_api_client_proto", "@googleapis//:google_api_field_behavior_proto", "@googleapis//:google_api_field_info_proto", "@googleapis//:google_api_resource_proto", "@protobuf//:field_mask_proto", "@protobuf//:timestamp_proto"],
+    deps = [
+        "@googleapis//:google_api_annotations_proto",
+        "@googleapis//:google_api_client_proto",
+        "@googleapis//:google_api_field_behavior_proto",
+        "@googleapis//:google_api_field_info_proto",
+        "@googleapis//:google_api_resource_proto",
+        "@protobuf//:field_mask_proto",
+        "@protobuf//:timestamp_proto",
+    ],
 )
 
-alias(name = "ts", actual = "//proto/ts:mailhero_ui_v2_ts")
+alias(
+    name = "ts",
+    actual = "//proto/ts:mailhero_ui_v2_ts",
+)
 
-exports_files(['delivery.proto', 'endpoint.proto', 'errors.proto', 'mail_hero_ui_service.proto', 'message.proto', 'settings.proto'])
+exports_files([
+    "delivery.proto",
+    "endpoint.proto",
+    "errors.proto",
+    "mail_hero_ui_service.proto",
+    "message.proto",
+    "settings.proto",
+])
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["*"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)

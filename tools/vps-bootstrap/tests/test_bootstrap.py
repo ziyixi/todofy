@@ -18,7 +18,7 @@ from personal_cloud.deployment.resources import Renderer
 from personal_cloud.status_daemon.config import configuration
 from ziyixi_proto.platform.runtime.v1 import runtime_pb as pb
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).absolute().parents[3]
 sys.path.insert(0, str(ROOT / "tools/vps-bootstrap"))
 
 import binaries

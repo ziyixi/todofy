@@ -1,15 +1,62 @@
 load("@protobuf//bazel:proto_library.bzl", "proto_library")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
 package(default_visibility = ["//visibility:public"])
 
 proto_library(
     name = "proto",
-    srcs = ["backup_status.proto", "edition.proto", "model_call.proto", "newsletter_ui_service.proto", "overview.proto", "run.proto", "source_catalog.proto"],
+    srcs = [
+        "backup_status.proto",
+        "edition.proto",
+        "model_call.proto",
+        "newsletter_ui_service.proto",
+        "overview.proto",
+        "run.proto",
+        "source_catalog.proto",
+    ],
     strip_import_prefix = "/proto",
-    deps = ["@googleapis//:google_api_annotations_proto", "@googleapis//:google_api_client_proto", "@googleapis//:google_api_field_behavior_proto", "@googleapis//:google_api_resource_proto", "@protobuf//:timestamp_proto"],
+    deps = [
+        "@googleapis//:google_api_annotations_proto",
+        "@googleapis//:google_api_client_proto",
+        "@googleapis//:google_api_field_behavior_proto",
+        "@googleapis//:google_api_resource_proto",
+        "@protobuf//:timestamp_proto",
+    ],
 )
 
-alias(name = "ts", actual = "//proto/ts:newsletter_ui_v1_ts")
-alias(name = "python", actual = "//proto/python/src/ziyixi_proto:newsletter_ui_v1_py")
+alias(
+    name = "ts",
+    actual = "//proto/ts:newsletter_ui_v1_ts",
+)
 
-exports_files(['backup_status.proto', 'edition.proto', 'model_call.proto', 'newsletter_ui_service.proto', 'overview.proto', 'run.proto', 'source_catalog.proto'])
+alias(
+    name = "python",
+    actual = "//proto/python/src/ziyixi_proto:newsletter_ui_v1_py",
+)
+
+exports_files([
+    "backup_status.proto",
+    "edition.proto",
+    "model_call.proto",
+    "newsletter_ui_service.proto",
+    "overview.proto",
+    "run.proto",
+    "source_catalog.proto",
+])
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["*"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)

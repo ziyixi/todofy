@@ -1,0 +1,74 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@npm//website:tsx/package_json.bzl", tsx = "bin")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//personal-mcp:__subpackages__"])
+
+tsx.tsx_test(
+    name = "check-access_test",
+    args = [
+        "--test",
+        "test/check-access.test.mjs",
+    ],
+    chdir = "personal-mcp/deploy",
+    data = [
+        "test/check-access.test.mjs",
+        ":source_check_access_mjs",
+        "//personal-mcp/worker:package_metadata",
+    ],
+)
+
+tsx.tsx_test(
+    name = "deploy-vars_test",
+    args = [
+        "--test",
+        "test/deploy-vars.test.mjs",
+    ],
+    chdir = "personal-mcp/deploy",
+    data = [
+        "test/deploy-vars.test.mjs",
+        ":source_deploy_vars_mjs",
+        "//personal-mcp:config",
+        "//personal-mcp/worker:package_metadata",
+    ],
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        ":check-access_test",
+        ":deploy-vars_test",
+    ],
+)
+
+js_library(
+    name = "source_check_access_mjs",
+    srcs = ["check-access.mjs"],
+    deps = [],
+)
+
+js_library(
+    name = "source_deploy_vars_mjs",
+    srcs = ["deploy-vars.mjs"],
+    deps = ["//tools/cloud-config:worker-deploy"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        [
+            "*",
+            "test/**",
+        ],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)

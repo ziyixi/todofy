@@ -80,7 +80,7 @@ NEVER_NESTED = frozenset({"provisioner", "connection", "data", "module", "resour
 # Committed files under infra/, relative to it. Anything else (a plan named tfplan or plan.out, a .tofu
 # file, a log) fails, whatever its name.
 ALLOWED_FILES = re.compile(
-    r"^(?:[A-Za-z0-9_-]+\.tf|\.terraform\.lock\.hcl|\.gitignore|README\.md|local\.tfvars\.example"
+    r"^(?:[A-Za-z0-9_-]+\.tf|\.terraform\.lock\.hcl|\.gitignore|README\.md|BUILD\.bazel|local\.tfvars\.example"
     r"|scripts/[A-Za-z0-9_]+\.py|tests/[A-Za-z0-9_]+\.py)$"
 )
 OTHER_CONFIG = ("*.tofu", "*.tf.json", "*.tofu.json")
@@ -395,7 +395,7 @@ def check(infra: Path) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
-    infra = Path(argv[1] if len(argv) > 1 else Path(__file__).resolve().parents[2] / "infra")
+    infra = Path(argv[1] if len(argv) > 1 else Path(__file__).absolute().parents[2] / "infra")
     problems = check(infra)
     for problem in problems:
         print(f"infra_guard: {problem}", file=sys.stderr)

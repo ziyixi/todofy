@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+SCRIPTS = Path(__file__).absolute().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 import apply_diagnostics as parser
 import infra_state

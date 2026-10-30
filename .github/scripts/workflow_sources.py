@@ -8,7 +8,7 @@ permissions and concurrency remain in the real workflow and are tested separatel
 import re
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).absolute().parents[2]
 
 
 def workflow_data(path):

@@ -4,12 +4,14 @@
  * step shows exactly one stage. No command prints a secret, a response body or Notion content.
  */
 import { execFile } from "node:child_process";
-import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 import { siteConfig } from "../../content/site.config";
+import { stagePreparedSnapshot } from "../bazel/snapshot";
 import { PublicationIdentitySchema } from "../../src/lib/content/publication-state";
 import { readContentBundle } from "../../src/lib/content/reader";
 import { ContentRegistrySchema } from "../../src/lib/content/schema";
@@ -179,6 +181,39 @@ async function verifyRecorded(payload: {
 }
 
 const commands: Record<string, () => Promise<void>> = {
+  async build() {
+    const snapshot = await mkdtemp(path.join(tmpdir(), "website-bazel-content-"));
+    const workspace = path.resolve(root, "..");
+    const options = [
+      "--override_repository=website_content=" + snapshot,
+      "--stamp",
+      "--embed_label=" + env("CODE_SHA"),
+    ];
+    try {
+      await stagePreparedSnapshot(root, snapshot);
+      if (
+        (await run("bazel", ["build", "//website", ...options], {
+          cwd: workspace,
+          env: process.env,
+        })) !== 0
+      ) {
+        throw new ReleaseError("The Bazel website build failed.");
+      }
+      const output = await execFileAsync(
+        "bazel",
+        ["cquery", "//website:site", ...options, "--output=files"],
+        { cwd: workspace },
+      );
+      const outputs = output.stdout.trim().split("\n");
+      const [site] = outputs;
+      if (outputs.length !== 1 || !site)
+        throw new ReleaseError("Bazel must return one static export.");
+      await rm(path.join(root, "out"), { recursive: true, force: true });
+      await cp(path.resolve(workspace, site), path.join(root, "out"), { recursive: true });
+    } finally {
+      await rm(snapshot, { recursive: true, force: true });
+    }
+  },
   /** The operation, and the checked-out commit is one whose push run passed the CI gate. */
   async context() {
     const op = operation();

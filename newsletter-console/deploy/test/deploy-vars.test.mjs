@@ -7,6 +7,9 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { CONFIG, INJECTED, SettingError, generateSecrets, injectedVars, placeholderIn, refusal, wranglerArgs } from '../deploy-vars.mjs'
 
+// CLI children keep their minimal environment and use the pinned interpreter directly.
+const NODE_EXECUTABLE = process.env.JS_BINARY__NODE_BINARY ?? process.execPath
+
 const WRAPPER = fileURLToPath(new URL('../deploy-vars.mjs', import.meta.url))
 const WORKER = fileURLToPath(new URL('../../worker/', import.meta.url))
 const PRIVATE = 'synthetic-private-token'
@@ -26,7 +29,7 @@ function temporary(check) {
 }
 
 function invoke(args, env = environment(), cwd = WORKER) {
-  return spawnSync(process.execPath, [WRAPPER, ...args], {
+  return spawnSync(NODE_EXECUTABLE, ['--preserve-symlinks-main', WRAPPER, ...args], {
     cwd, env: { PATH: process.env.PATH, ...env }, encoding: 'utf8', timeout: 10_000,
   })
 }
@@ -133,11 +136,11 @@ test('exec appends the build var and passes the exit status through', () => {
     const stub = join(directory, 'stub.mjs')
     const output = join(directory, 'args.json')
     writeFileSync(stub, `import { writeFileSync } from 'node:fs'\nwriteFileSync(${JSON.stringify(output)}, JSON.stringify(process.argv.slice(2)))\n`)
-    const result = invoke(['exec', '--', process.execPath, stub, 'deploy', '--dry-run', '--config', '../wrangler.toml'])
+    const result = invoke(['exec', '--', NODE_EXECUTABLE, stub, 'deploy', '--dry-run', '--config', '../wrangler.toml'])
     assert.equal(result.status, 0, result.stderr)
     assert.deepEqual(JSON.parse(readFileSync(output, 'utf8')).slice(-2), ['--var', `BUILD_SHA:${'c'.repeat(40)}`])
     // A real deploy runs only once the committed config holds the real AUD (the refusals themselves: the test above).
-    const real = invoke(['exec', '--', process.execPath, stub, 'deploy', '--config', '../wrangler.toml'])
+    const real = invoke(['exec', '--', NODE_EXECUTABLE, stub, 'deploy', '--config', '../wrangler.toml'])
     if (placeholderIn(readFileSync(CONFIG, 'utf8')) === null) assert.equal(real.status, 0, real.stderr)
     else {
       assert.equal(real.status, 2)

@@ -3,8 +3,12 @@ import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+const PYTHON = process.env.MAILHERO_TEST_PYTHON
+  ? resolve(process.env.TEST_SRCDIR ?? '', process.env.TEST_WORKSPACE ?? '', process.env.MAILHERO_TEST_PYTHON)
+  : 'python3'
 
 const ADMIN = fileURLToPath(new URL('../cloudflare-admin.py', import.meta.url))
 
@@ -24,7 +28,7 @@ function run(args) {
     const token = join(root, 'token')
     writeFileSync(token, 'synthetic_token_0000000000\n', { mode: 0o600 })
     chmodSync(token, 0o600)
-    const result = spawnSync('python3', [join(root, 'deploy/cloudflare-admin.py'), '--token-file', token, 'wrangler', '--', ...args],
+    const result = spawnSync(PYTHON, [join(root, 'deploy/cloudflare-admin.py'), '--token-file', token, 'wrangler', '--', ...args],
       { encoding: 'utf8' })
     return { status: result.status, stderr: result.stderr, ran: existsSync(marker) ? readFileSync(marker, 'utf8').trim() : null }
   } finally {

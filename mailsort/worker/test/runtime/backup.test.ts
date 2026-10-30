@@ -9,7 +9,7 @@
 import { spawnSync } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -28,6 +28,9 @@ import { checkGoogleCalls, deliver, modifies, setMode } from './helpers.ts';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SECOND = 1000;
 const TOOL = join(HERE, '../../../tools/backup-restore.ts');
+const WRANGLER = process.env.BAZEL_WRANGLER
+  ? resolve(process.env.TEST_SRCDIR ?? '', process.env.TEST_WORKSPACE ?? '', process.env.BAZEL_WRANGLER)
+  : undefined;
 /** The first backup's clock: the object has no backup state, so its job starts at once. */
 const AT = T0 + 2 * DAY_MS;
 const mail = (i: number): SyntheticMail => ({ ...MAILS.bankEn, id: `abc${i.toString(16).padStart(13, '0')}` });
@@ -267,7 +270,7 @@ describe('a populated store backs itself up and restores into an empty one', () 
   it('tools/backup-restore.ts downloads it with wrangler, checks every part and loads it into SQLite', async () => {
     const work = await mkdtemp(join(tmpdir(), 'mailsort-restore-'));
     try {
-      const tool = (...args: string[]) => spawnSync('node', [TOOL, ...args], { encoding: 'utf8' });
+      const tool = (...args: string[]) => spawnSync(process.execPath, [TOOL, ...args, ...(WRANGLER && process.env.BAZEL_WRANGLER && ['download', 'upload', 'verify'].includes(args[0] ?? '') ? ['--wrangler', WRANGLER] : [])], { encoding: 'utf8' });
       const downloaded = tool('download', '--out', join(work, 'restore'), '--local', '--persist-to', source.persistTo);
       expect(downloaded.status, downloaded.stderr).toBe(0);
       expect(downloaded.stdout).toContain(`backup ${prefix}\n`);

@@ -1,0 +1,435 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@npm//watch/web:eslint/package_json.bzl", eslint = "bin")
+load("@npm//watch/web:vite/package_json.bzl", vite = "bin")
+load("@npm//watch/web:vitest/package_json.bzl", vitest = "bin")
+load("//proto/bazel:ts_package.bzl", "proto_package")
+load("//tools/bazel:js.bzl", "proto_vitest_test", "vite_bundle", "workspace_link", "workspace_package_link")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/lint:defs.bzl", "eslint_test")
+
+package(default_visibility = ["//watch:__subpackages__"])
+
+npm_link_all_packages(name = "node_modules")
+
+js_library(
+    name = "src__api",
+    srcs = ["src/api.ts"],
+    types = ["src/api.ts"],
+    deps = [
+        "//proto/common/errors/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:rpc-status",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+js_library(
+    name = "src__dom",
+    srcs = ["src/dom.ts"],
+    types = ["src/dom.ts"],
+    deps = [],
+)
+
+js_library(
+    name = "src__format",
+    srcs = ["src/format.ts"],
+    types = ["src/format.ts"],
+    deps = [
+        "//proto/ts:protobuf-wkt",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+js_library(
+    name = "src__settings",
+    srcs = ["src/settings.ts"],
+    types = ["src/settings.ts"],
+    deps = [
+        ":src__dom",
+        ":src__format",
+        "//proto/ts:protobuf",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+js_library(
+    name = "src__evidence",
+    srcs = ["src/evidence.ts"],
+    types = ["src/evidence.ts"],
+    deps = [
+        ":src__api",
+        ":src__dom",
+        ":src__format",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+js_library(
+    name = "src__app",
+    srcs = [
+        "src/app.ts",
+        "src/views/add.ts",
+        "src/views/changes.ts",
+        "src/views/detail.ts",
+        "src/views/health.ts",
+        "src/views/inbox.ts",
+        "src/views/watches.ts",
+    ],
+    types = [
+        "src/app.ts",
+        "src/views/add.ts",
+        "src/views/changes.ts",
+        "src/views/detail.ts",
+        "src/views/health.ts",
+        "src/views/inbox.ts",
+        "src/views/watches.ts",
+    ],
+    deps = [
+        ":src__api",
+        ":src__dom",
+        ":src__evidence",
+        ":src__format",
+        ":src__settings",
+        "//proto/ts:filter",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+js_library(
+    name = "src__main",
+    srcs = [
+        "src/main.ts",
+        "src/styles.css",
+    ],
+    types = ["src/main.ts"],
+    deps = [":src__app"],
+)
+
+js_library(
+    name = "lib",
+    deps = [
+        ":src__api",
+        ":src__app",
+        ":src__dom",
+        ":src__evidence",
+        ":src__format",
+        ":src__main",
+        ":src__settings",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__api_test",
+    data = [
+        "package.json",
+        "src/test/setup.ts",
+        "vite.config.ts",
+        ":node_modules/jsdom",
+        ":node_modules/vite",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["src/api.test.ts"],
+    deps = [
+        ":node_modules/vitest",
+        ":src__api",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__app_test",
+    data = [
+        "package.json",
+        "src/test/fakeServer.ts",
+        "src/test/setup.ts",
+        "vite.config.ts",
+        ":node_modules/jsdom",
+        ":node_modules/vite",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["src/app.test.ts"],
+    deps = [
+        ":node_modules/vitest",
+        ":src__api",
+        ":src__app",
+        ":src__dom",
+        ":src__evidence",
+        ":src__format",
+        ":src__settings",
+        "//proto/ts:field-mask",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+        "//proto/ts:wire-json",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__evidence_test",
+    data = [
+        "package.json",
+        "src/test/fakeServer.ts",
+        "src/test/setup.ts",
+        "vite.config.ts",
+        ":node_modules/jsdom",
+        ":node_modules/vite",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["src/evidence.test.ts"],
+    deps = [
+        ":node_modules/vitest",
+        ":src__api",
+        ":src__app",
+        ":src__dom",
+        ":src__evidence",
+        ":src__format",
+        ":src__settings",
+        "//proto/ts:field-mask",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+        "//proto/ts:wire-json",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__format_test",
+    data = [
+        "package.json",
+        "src/test/fakeServer.ts",
+        "src/test/setup.ts",
+        "vite.config.ts",
+        ":node_modules/jsdom",
+        ":node_modules/vite",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["src/format.test.ts"],
+    deps = [
+        ":node_modules/vitest",
+        ":src__format",
+        "//proto/ts:field-mask",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+        "//proto/ts:wire-json",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__owner-flows_test",
+    data = [
+        "package.json",
+        "src/test/fakeServer.ts",
+        "src/test/setup.ts",
+        "vite.config.ts",
+        ":node_modules/jsdom",
+        ":node_modules/vite",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["src/owner-flows.test.ts"],
+    deps = [
+        ":node_modules/vitest",
+        ":src__api",
+        ":src__app",
+        ":src__dom",
+        ":src__evidence",
+        ":src__format",
+        ":src__settings",
+        "//proto/ts:field-mask",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+        "//proto/ts:wire-json",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__test__no-external_test",
+    data = [
+        "index.html",
+        "package.json",
+        "src/test/setup.ts",
+        "vite.config.ts",
+        ":application_sources",
+        ":node_modules/jsdom",
+        ":node_modules/vite",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["src/test/no-external.test.ts"],
+    deps = [":node_modules/vitest"],
+)
+
+js_library(
+    name = "application_sources",
+    srcs = glob(
+        [
+            "src/**",
+            "public/**",
+            "index.html",
+            "_headers",
+            "_redirects",
+        ],
+        allow_empty = True,
+    ),
+)
+
+js_library(
+    name = "build_checks",
+    srcs = [
+        "scripts/finish-dist.mjs",
+        "scripts/js-budget.mjs",
+    ],
+    deps = ["//tools/bundle-size:library"],
+)
+
+proto_package(
+    name = "bundle_proto",
+    deps = [
+        ":lib",
+        "//proto/common/errors/v1:ts",
+        "//proto/ts:field-mask",
+        "//proto/ts:filter",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+        "//proto/ts:wire-json",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+workspace_package_link(
+    name = "bundle_proto_link",
+    src = ":bundle_proto",
+    runtime_dependencies = ["@bufbuild/protobuf"],
+)
+
+vite.vite_binary(name = "vite")
+
+vite_bundle(
+    name = "bundle",
+    out_dir = "dist",
+    postbuild = "scripts/finish-dist.mjs",
+    tool = ":vite",
+    deps = [
+        ":application_sources",
+        ":build_checks",
+        ":bundle_proto_link",
+        ":node_modules/vite",
+        ":node_modules/vitest",
+    ],
+)
+
+ts_project(
+    name = "typecheck_project",
+    srcs = [
+        "src/api.test.ts",
+        "src/api.ts",
+        "src/app.test.ts",
+        "src/app.ts",
+        "src/dom.ts",
+        "src/evidence.test.ts",
+        "src/evidence.ts",
+        "src/format.test.ts",
+        "src/format.ts",
+        "src/main.ts",
+        "src/owner-flows.test.ts",
+        "src/settings.ts",
+        "src/test/fakeServer.ts",
+        "src/test/no-external.test.ts",
+        "src/test/setup.ts",
+        "src/views/add.ts",
+        "src/views/changes.ts",
+        "src/views/detail.ts",
+        "src/views/health.ts",
+        "src/views/inbox.ts",
+        "src/views/watches.ts",
+        "vite.config.ts",
+        ":bundle_proto_wire_types",
+    ],
+    extends = "tsconfig.json",
+    no_emit = True,
+    resolve_json_module = True,
+    tsconfig = {
+        "compilerOptions": {"noEmit": True},
+        "include": [],
+        "exclude": [],
+    },
+    deps = [
+        ":bundle_proto_link",
+        ":node_modules/@types/node",
+        ":node_modules/vite",
+        ":node_modules/vitest",
+    ],
+)
+
+alias(
+    name = "typecheck",
+    actual = ":typecheck_project_typecheck",
+)
+
+test_suite(name = "check")
+
+eslint_test(
+    name = "lint",
+    data = [
+        "package.json",
+        "tsconfig.json",
+        ":application_sources",
+        ":build_checks",
+        ":bundle_proto_link",
+        ":node_modules/@eslint/js",
+        ":node_modules/@types/node",
+        ":node_modules/eslint",
+        ":node_modules/jsdom",
+        ":node_modules/typescript",
+        ":node_modules/typescript-eslint",
+        ":node_modules/vite",
+        ":node_modules/vitest",
+    ],
+    runner = eslint.eslint_test,
+    sources = glob(
+        [
+            "src/**/*.ts",
+            "src/**/*.tsx",
+            "test/**/*.ts",
+            "test/**/*.mts",
+            "scripts/**/*.mjs",
+            "*.js",
+            "*.ts",
+        ],
+        allow_empty = True,
+    ),
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        [
+            "*",
+            "scripts/**",
+            "src/**",
+        ],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)

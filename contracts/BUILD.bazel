@@ -1,13 +1,25 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library")
 load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
 package(default_visibility = ["//visibility:public"])
 
 # Each consumer depends on the exact schema/fixture it reads.
-_ASSETS = glob(["**/*.json", "**/*.yaml", "**/fixtures/**"], allow_empty = True)
+_ASSETS = glob(
+    [
+        "**/*.json",
+        "**/*.yaml",
+        "**/fixtures/**",
+    ],
+    allow_empty = True,
+)
 
 exports_files(_ASSETS)
-exports_files(["ops-v1/ops-v1.ts", "ops-v1/validate.mjs"])
+
+exports_files([
+    "ops-v1/ops-v1.ts",
+    "ops-v1/validate.mjs",
+])
 
 ts_project(
     name = "ops_v1_types",
@@ -30,17 +42,62 @@ js_library(
     srcs = ["ops-v1/ops-v1.ts"],
     deps = [":ops_v1_types"],
 )
-js_library(name = "ops-v1/validate", srcs = ["ops-v1/validate.mjs"])
-js_library(name = "ops-v1/readme", srcs = ["ops-v1/README.md"])
-js_library(name = "ops-v1/fixtures", srcs = glob(["ops-v1/fixtures/**"]))
-js_library(name = "ops-v1/invalid", srcs = glob(["ops-v1/fixtures/invalid/*/*.json"]))
+
+js_library(
+    name = "ops-v1/validate",
+    srcs = ["ops-v1/validate.mjs"],
+)
+
+js_library(
+    name = "ops-v1/readme",
+    srcs = ["ops-v1/README.md"],
+)
+
+js_library(
+    name = "ops-v1/fixtures",
+    srcs = glob(["ops-v1/fixtures/**"]),
+)
+
+js_library(
+    name = "ops-v1/invalid",
+    srcs = glob(["ops-v1/fixtures/invalid/*/*.json"]),
+)
 
 [
-    js_library(name = asset + "_data", srcs = [asset], types = [asset] if asset.endswith(".json") else [])
+    js_library(
+        name = asset + "_data",
+        srcs = [asset],
+        types = [asset] if asset.endswith(".json") else [],
+    )
     for asset in _ASSETS
 ]
 
 filegroup(
     name = "fixtures",
     srcs = _ASSETS,
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        [
+            "*",
+            "fleet-report-v1/**",
+            "mail-received-v1/**",
+            "newsletter-ui-v1/**",
+            "ops-v1/**",
+            "platform-runtime-v1/**",
+            "recall-archive-v1/**",
+        ],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
 )

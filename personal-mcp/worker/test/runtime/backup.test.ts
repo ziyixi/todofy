@@ -22,7 +22,8 @@ const runtimes: Miniflare[] = [];
 afterEach(async () => { await Promise.all(runtimes.splice(0).map(runtime => runtime.dispose())); });
 
 async function start() {
-  const bundle = await build({ entryPoints: ['test/runtime/test-store.ts'], bundle: true, format: 'esm', platform: 'browser',
+  const bundle = await build({
+    ...(process.env.TEST_SRCDIR ? { nodePaths: [`${process.cwd()}/node_modules`] } : {}), entryPoints: ['test/runtime/test-store.ts'], bundle: true, format: 'esm', platform: 'browser',
     conditions: ['workerd', 'worker', 'browser'], target: 'es2024', external: ['cloudflare:workers', 'node:*'], write: false,
     logLevel: 'silent' });
   const output = bundle.outputFiles[0];

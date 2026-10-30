@@ -1,0 +1,108 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library", "js_run_binary")
+load("@rules_pkg//pkg:mappings.bzl", "pkg_files", "strip_prefix")
+load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//visibility:private"])
+
+js_library(
+    name = "config",
+    srcs = [
+        "app.toml",
+        "wrangler.toml",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        "//watch/deploy:check",
+        "//watch/tools:check",
+        "//watch/web:check",
+        "//watch/worker:check",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+js_run_binary(
+    name = "worker_bundle",
+    srcs = [
+        ":config",
+        "//watch/web:bundle",
+        "//watch/worker:application_sources",
+        "//watch/worker:edge_auth_types_link",
+        "//watch/worker:lib",
+        "//watch/worker:proto_types_link",
+    ],
+    args = [
+        "deploy",
+        "--dry-run",
+        "--config",
+        "wrangler.toml",
+        "--outdir",
+        "worker_bundle",
+    ],
+    chdir = "watch",
+    env = {
+        "CI": "true",
+        "WRANGLER_SEND_METRICS": "false",
+    },
+    include_transitive_types = True,
+    include_types = True,
+    out_dirs = ["worker_bundle"],
+    tool = "//watch/worker:wrangler",
+    visibility = ["//watch:__subpackages__"],
+)
+
+pkg_files(
+    name = "worker_files",
+    srcs = [":worker_bundle"],
+    prefix = "worker",
+    strip_prefix = strip_prefix.from_pkg("worker_bundle"),
+)
+
+pkg_files(
+    name = "config_files",
+    srcs = [":config"],
+    strip_prefix = strip_prefix.from_pkg(),
+)
+
+pkg_files(
+    name = "web_files",
+    srcs = ["//watch/web:bundle"],
+    prefix = "web/dist",
+    strip_prefix = strip_prefix.from_root("watch/web/dist"),
+)
+
+pkg_tar(
+    name = "watch",
+    srcs = [
+        ":config_files",
+        ":web_files",
+        ":worker_files",
+    ],
+    extension = "tar.gz",
+    stamp = 0,
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        [
+            "*",
+            "docs/**",
+        ],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)

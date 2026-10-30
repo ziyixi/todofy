@@ -23,7 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 import ci_changes  # noqa: E402
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).absolute().parents[2]
 
 SHA = "a" * 40
 BASE = "b" * 40
@@ -1547,7 +1547,8 @@ class ToolsTests(unittest.TestCase):
             if test_dir.parent.name == "bazel":
                 # These run in declared Bazel toolchains, rather than the Changes job's host Node.
                 planner = (REPO / "tools/bazel/ci/plan.py").read_text()
-                self.assertIn("//tools/bazel/...", planner)
+                self.assertIn('filter(":check$", //...)', planner)
+                self.assertIn('name = "check"', (REPO / "tools/bazel/BUILD.bazel").read_text())
                 self.assertIn("python3 tools/bazel/ci/run.py", (REPO / ".github/workflows/bazel.yml").read_text())
                 continue
             kinds = sorted({path.name.split(".test.", 1)[1] for path in test_dir.glob("*.test.*")})
@@ -1796,10 +1797,10 @@ class DeployConditions(unittest.TestCase):
             with self.subTest(job=name):
                 self.assertIn(guard, self.condition(jobs[name]))
         platform = jobs["platform-checks"]
-        self.assertEqual(platform.count("if: ${{ " + guard + " }}"), 2)
-        self.assertIn("pytest platform/tests tools/platform-build/tests tools/vps-release/tests", platform)
+        self.assertEqual(platform.count("if: ${{ " + guard + " }}"), 3)
+        self.assertIn("pytest platform/tests tools/vps-release/tests", platform)
         gateway = jobs["codex-gateway-checks"]
-        self.assertEqual(gateway.count("if: ${{ " + guard + " }}"), 2)
+        self.assertEqual(gateway.count("if: ${{ " + guard + " }}"), 3)
         release = jobs["vps-deploy"]
         self.assertIn('if [ "$RESUME_RELEASE" = true ]; then\n            args+=(--resume)', release)
         self.assertIn('if [ "$GATEWAY_ONLY" = true ]; then args+=(--gateway-only); fi', release)

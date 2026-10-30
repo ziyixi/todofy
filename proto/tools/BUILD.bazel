@@ -1,24 +1,35 @@
 load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
 package(default_visibility = ["//visibility:public"])
 
 py_test(
     name = "bazel_inputs_test",
-    srcs = ["test_bazel_inputs.py", "bazel_codegen.py"],
-    main = "test_bazel_inputs.py",
+    srcs = [
+        "bazel_codegen.py",
+        "test_bazel_inputs.py",
+    ],
+    data = ["//proto:buf.gen.yaml"],
     imports = ["."],
     legacy_create_init = False,
-    data = ["//proto:buf.gen.yaml"],
+    main = "test_bazel_inputs.py",
     deps = ["@python_deps//pyyaml"],
 )
 
-exports_files(["schema_golden.py", "bazel_checks.py", "bazel_breaking.py"])
+exports_files([
+    "schema_golden.py",
+    "bazel_checks.py",
+    "bazel_breaking.py",
+])
 
 py_library(
     name = "breaking_rules",
-    srcs = ["profile_breaking.py", "retired.py"],
-    imports = ["."],
+    srcs = [
+        "profile_breaking.py",
+        "retired.py",
+    ],
     data = ["//proto:reviewed-rules.json"],
+    imports = ["."],
     deps = [":wire_rules"],
 )
 
@@ -30,7 +41,11 @@ py_binary(
 
 py_library(
     name = "generators",
-    deps = [":python_generator", ":schema_generator", ":ts_generator"],
+    deps = [
+        ":python_generator",
+        ":schema_generator",
+        ":ts_generator",
+    ],
 )
 
 py_library(
@@ -46,16 +61,41 @@ py_library(
         imports = ["."],
         deps = [":wire_rules"],
     )
-    for language, source in [("ts", "gen_wire_ts.py"), ("python", "gen_py.py"), ("schema", "gen_schema.py")]
+    for language, source in [
+        ("ts", "gen_wire_ts.py"),
+        ("python", "gen_py.py"),
+        ("schema", "gen_schema.py"),
+    ]
 ]
 
 [
     py_binary(
         name = "bazel_" + language + "_codegen",
         srcs = ["bazel_codegen.py"],
-        main = "bazel_codegen.py",
         legacy_create_init = False,
+        main = "bazel_codegen.py",
         deps = [":" + language + "_generator"] + (["@python_deps//pyyaml"] if language == "ts" else []),
     )
-    for language in ["ts", "python", "schema"]
+    for language in [
+        "ts",
+        "python",
+        "schema",
+    ]
 ]
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["*"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)

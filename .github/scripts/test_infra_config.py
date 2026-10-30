@@ -51,7 +51,7 @@ except ModuleNotFoundError:
 import infra_guard  # noqa: E402  (same directory; unittest discover puts it on sys.path)
 import test_wrangler_configs  # noqa: E402
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).absolute().parents[2]
 INFRA = REPO / "infra"
 sys.path.insert(0, str(INFRA / "scripts"))
 import bootstrap_state  # noqa: E402

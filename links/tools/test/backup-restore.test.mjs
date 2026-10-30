@@ -14,6 +14,9 @@ import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 import { RESTORE_ORDER, RestoreError, VERIFY_ROWS, readBackup, restoreConfig, restoreSql } from '../backup-restore.ts';
 
+// CLI children keep their minimal environment and use the pinned interpreter directly.
+const NODE_EXECUTABLE = process.env.JS_BINARY__NODE_BINARY ?? process.execPath
+
 const TOOL = fileURLToPath(new URL('../backup-restore.ts', import.meta.url));
 const MIGRATIONS = fileURLToPath(new URL('../../migrations/', import.meta.url));
 const FILES = readdirSync(MIGRATIONS)
@@ -162,7 +165,7 @@ test('the config names only a new database, outside the repository, and never ov
   try {
     const out = join(directory, 'restore.toml');
     const run = (target) =>
-      spawnSync('node', [TOOL, 'config', '--database-name', 'links-restore', '--database-id', id, '--out', target], {
+      spawnSync(NODE_EXECUTABLE, ['--preserve-symlinks-main', TOOL, 'config', '--database-name', 'links-restore', '--database-id', id, '--out', target], {
         encoding: 'utf8',
       });
     assert.equal(run(out).status, 0);
@@ -194,7 +197,7 @@ console.log(JSON.stringify([{ results: db.prepare(args[args.indexOf('--command')
   );
   const calls = join(root, 'calls.jsonl');
   const verify = () =>
-    spawnSync('node', [TOOL, 'verify', '--in', root, '--config', 'unused.toml', '--local', '--wrangler', `node ${wrangler}`], {
+    spawnSync(NODE_EXECUTABLE, ['--preserve-symlinks-main', TOOL, 'verify', '--in', root, '--config', 'unused.toml', '--local', '--wrangler', `node ${wrangler}`], {
       encoding: 'utf8',
       env: { ...process.env, LINKS_TARGET: file, LINKS_CALLS: calls },
     });
@@ -205,7 +208,7 @@ test('the CLI writes the SQL owner-only, warns about a moving snapshot, and veri
   withBackup(
     (root) => {
       const out = join(root, 'restore.sql');
-      const written = execFileSync('node', [TOOL, 'sql', '--in', root, '--out', out], { encoding: 'utf8' });
+      const written = execFileSync(NODE_EXECUTABLE, ['--preserve-symlinks-main', TOOL, 'sql', '--in', root, '--out', out], { encoding: 'utf8' });
       assert.equal(statSync(out).mode & 0o777, 0o600);
       assert.match(written, /^WARN the links changed while the backup ran/);
       assert.match(written, /PASS link_revisions rows=1200\nPASS request_log rows=1\nstatements=1601\nsql PASS\n$/);
@@ -242,7 +245,7 @@ test('a revision its link row does not reach (an edit during the backup) is left
     revision.run('k0400', 1);
     backupOf(source, root, { mark: { start: 2401, end: 2402 } });
     const out = join(root, 'restore.sql');
-    const written = execFileSync('node', [TOOL, 'sql', '--in', root, '--out', out], { encoding: 'utf8' });
+    const written = execFileSync(NODE_EXECUTABLE, ['--preserve-symlinks-main', TOOL, 'sql', '--in', root, '--out', out], { encoding: 'utf8' });
     assert.match(written, /^WARN the links changed while the backup ran.*\nWARN 2 revisions newer than their link \(edits during the backup\) are left out\n/);
     assert.match(written, /statements=1601\nsql PASS\n$/);
     const { file, verify } = loaded(root, out);
@@ -289,7 +292,7 @@ catch { process.exit(1); }`,
   return {
     store,
     download: (out, ...extra) =>
-      spawnSync('node', [TOOL, 'download', '--out', out, '--local', '--persist-to', '/unused', '--wrangler', `node ${stub}`, ...extra], {
+      spawnSync(NODE_EXECUTABLE, ['--preserve-symlinks-main', TOOL, 'download', '--out', out, '--local', '--persist-to', '/unused', '--wrangler', `node ${stub}`, ...extra], {
         encoding: 'utf8',
         env: { ...process.env, LINKS_BUCKET: store, LINKS_CALLS: join(store, 'calls.jsonl') },
       }),

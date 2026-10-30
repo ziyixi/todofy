@@ -1,11 +1,16 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library")
-load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
 load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@npm//recall/worker:eslint/package_json.bzl", eslint = "bin")
 load("@npm//recall/worker:vitest/package_json.bzl", vitest = "bin")
+load("@npm//recall/worker:wrangler/package_json.bzl", wrangler = "bin")
+load("@npm//website:tsx/package_json.bzl", tsx = "bin")
 load("//proto/bazel:ts_package.bzl", "proto_package")
-load("//tools/bazel:js.bzl", "proto_vitest_test", "workspace_link", "workspace_package_link")
+load("//tools/bazel:js.bzl", "proto_vitest_test", "workerd_vitest_test", "workspace_link", "workspace_package_link")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/lint:defs.bzl", "eslint_test")
 
-package(default_visibility = ["//visibility:public"])
+package(default_visibility = ["//recall:__subpackages__"])
 
 npm_link_all_packages(name = "node_modules")
 
@@ -13,14 +18,21 @@ js_library(
     name = "reasons",
     srcs = ["src/reasons.ts"],
     types = ["src/reasons.ts"],
-    deps = ["//proto/common/errors/v1:ts", "//proto/recall/ui/v1:ts", "//proto/ts:rpc-status"],
+    deps = [
+        "//proto/common/errors/v1:ts",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:rpc-status",
+    ],
 )
 
 js_library(
     name = "answers",
     srcs = ["src/answers.ts"],
     types = ["src/answers.ts"],
-    deps = ["//proto/ts:rpc-status", ":reasons"],
+    deps = [
+        ":reasons",
+        "//proto/ts:rpc-status",
+    ],
 )
 
 js_library(
@@ -48,14 +60,31 @@ js_library(
     name = "feed",
     srcs = ["src/feed.ts"],
     types = ["src/feed.ts"],
-    deps = ["//proto/recall/archive/v1:ts", "//proto/ts:protobuf", "//proto/ts:protobuf-wkt", "//proto/ts:wire-json", ":answers", ":blobs", ":limits", ":store"],
+    deps = [
+        ":answers",
+        ":blobs",
+        ":limits",
+        ":store",
+        "//proto/recall/archive/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+    ],
 )
 
 js_library(
     name = "archive",
     srcs = ["src/archive.ts"],
     types = ["src/archive.ts"],
-    deps = ["//proto/recall/archive/v1:ts", "//proto/ts:protobuf", "//proto/ts:protobuf-wkt", "//proto/ts:wire-json", ":feed", ":limits", ":store"],
+    deps = [
+        ":feed",
+        ":limits",
+        ":store",
+        "//proto/recall/archive/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+    ],
 )
 
 js_library(
@@ -69,28 +98,55 @@ js_library(
     name = "dropbox",
     srcs = ["src/dropbox.ts"],
     types = ["src/dropbox.ts"],
-    deps = [":blobs", ":limits"],
+    deps = [
+        ":blobs",
+        ":limits",
+    ],
 )
 
 js_library(
     name = "model",
     srcs = ["src/model.ts"],
     types = ["src/model.ts"],
-    deps = ["//proto/recall/ui/v1:ts", "//proto/ts:protobuf", "//proto/ts:protobuf-wkt", ":blobs", ":feed", ":limits", ":store"],
+    deps = [
+        ":blobs",
+        ":feed",
+        ":limits",
+        ":store",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+    ],
 )
 
 js_library(
     name = "backup",
     srcs = ["src/backup.ts"],
     types = ["src/backup.ts"],
-    deps = ["//packages/edge-auth:lib", "//proto/recall/ui/v1:ts", "//proto/ts:protobuf", ":archive", ":blobs", ":dropbox", ":feed", ":limits", ":model", ":store"],
+    deps = [
+        ":archive",
+        ":blobs",
+        ":dropbox",
+        ":feed",
+        ":limits",
+        ":model",
+        ":store",
+        "//packages/edge-auth:lib",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:protobuf",
+    ],
 )
 
 js_library(
     name = "fts",
     srcs = ["src/fts.ts"],
     types = ["src/fts.ts"],
-    deps = ["//recall/shared:segment", "//recall/shared:url", ":limits", ":store"],
+    deps = [
+        ":limits",
+        ":store",
+        "//recall/shared:segment",
+        "//recall/shared:url",
+    ],
 )
 
 js_library(
@@ -104,243 +160,1267 @@ js_library(
     name = "settings",
     srcs = ["src/settings.ts"],
     types = ["src/settings.ts"],
-    deps = ["//recall/shared:denylist", ":ids", ":limits", ":store"],
+    deps = [
+        ":ids",
+        ":limits",
+        ":store",
+        "//recall/shared:denylist",
+    ],
 )
 
 js_library(
     name = "retention",
     srcs = ["src/retention.ts"],
     types = ["src/retention.ts"],
-    deps = [":backup", ":blobs", ":fts", ":limits", ":settings", ":store"],
+    deps = [
+        ":backup",
+        ":blobs",
+        ":fts",
+        ":limits",
+        ":settings",
+        ":store",
+    ],
 )
 
 js_library(
     name = "search",
     srcs = ["src/search.ts"],
     types = ["src/search.ts"],
-    deps = ["//recall/shared:segment", ":limits", ":store"],
+    deps = [
+        ":limits",
+        ":store",
+        "//recall/shared:segment",
+    ],
 )
 
 js_library(
     name = "diagnostic",
     srcs = ["src/diagnostic.ts"],
     types = ["src/diagnostic.ts"],
-    deps = ["//proto/recall/ingest/v1:ts", "//proto/recall/ui/v1:ts", "//proto/ts:protobuf", "//proto/ts:protobuf-wkt", "//proto/ts:wire-json", ":store"],
+    deps = [
+        ":store",
+        "//proto/recall/ingest/v1:ts",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+    ],
 )
 
 js_library(
     name = "tokens",
     srcs = ["src/tokens.ts"],
     types = ["src/tokens.ts"],
-    deps = ["//proto/recall/ui/v1:ts", "//proto/ts:protobuf", ":blobs", ":limits", ":model", ":store"],
+    deps = [
+        ":blobs",
+        ":limits",
+        ":model",
+        ":store",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:protobuf",
+    ],
 )
 
 js_library(
     name = "status",
     srcs = ["src/status.ts"],
     types = ["src/status.ts"],
-    deps = ["//proto/recall/ui/v1:ts", "//proto/ts:protobuf", ":backup", ":diagnostic", ":feed", ":limits", ":model", ":settings", ":store", ":tokens"],
+    deps = [
+        ":backup",
+        ":diagnostic",
+        ":feed",
+        ":limits",
+        ":model",
+        ":settings",
+        ":store",
+        ":tokens",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:protobuf",
+    ],
 )
 
 js_library(
     name = "timeline",
     srcs = ["src/timeline.ts"],
     types = ["src/timeline.ts"],
-    deps = [":limits", ":store"],
+    deps = [
+        ":limits",
+        ":store",
+    ],
 )
 
 js_library(
     name = "api",
     srcs = ["src/api.ts"],
     types = ["src/api.ts"],
-    deps = ["//proto/recall/ui/v1:ts", "//proto/ts:field-mask", "//proto/ts:filter", "//proto/ts:http-transcoder", "//proto/ts:page-token", "//proto/ts:protobuf", "//proto/ts:protobuf-wkt", "//proto/ts:wire-json", "//recall/shared:denylist", "//recall/shared:url", ":archive", ":backup", ":blobs", ":dropbox", ":limits", ":model", ":reasons", ":retention", ":screenshot", ":search", ":settings", ":status", ":store", ":timeline", ":tokens"],
+    deps = [
+        ":archive",
+        ":backup",
+        ":blobs",
+        ":dropbox",
+        ":limits",
+        ":model",
+        ":reasons",
+        ":retention",
+        ":screenshot",
+        ":search",
+        ":settings",
+        ":status",
+        ":store",
+        ":timeline",
+        ":tokens",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:field-mask",
+        "//proto/ts:filter",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:page-token",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+        "//recall/shared:denylist",
+        "//recall/shared:url",
+    ],
 )
 
 js_library(
     name = "ingest",
     srcs = ["src/ingest.ts"],
     types = ["src/ingest.ts"],
-    deps = ["//proto/recall/archive/v1:ts", "//proto/recall/ingest/v1:ts", "//proto/ts:protobuf", "//proto/ts:protobuf-wkt", "//proto/ts:wire-json", "//recall/shared:denylist", "//recall/shared:scrub", "//recall/shared:url", ":answers", ":blobs", ":diagnostic", ":feed", ":fts", ":limits", ":screenshot", ":settings", ":store"],
+    deps = [
+        ":answers",
+        ":blobs",
+        ":diagnostic",
+        ":feed",
+        ":fts",
+        ":limits",
+        ":screenshot",
+        ":settings",
+        ":store",
+        "//proto/recall/archive/v1:ts",
+        "//proto/recall/ingest/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
 )
 
 js_library(
     name = "ops-status",
     srcs = ["src/ops-status.ts"],
     types = ["src/ops-status.ts"],
-    deps = ["//proto/ops/v1:ts", "//proto/ts:protobuf", "//proto/ts:wire-json", ":backup", ":ingest", ":limits", ":status", ":store"],
+    deps = [
+        ":backup",
+        ":ingest",
+        ":limits",
+        ":status",
+        ":store",
+        "//proto/ops/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
 )
 
 js_library(
     name = "module_group_23",
-    srcs = ["src/env.ts", "src/state.ts"],
-    types = ["src/env.ts", "src/state.ts"],
-    deps = ["//proto/ops/v1:ts", "//proto/recall/ui/v1:ts", "//proto/ts:http-transcoder", "//proto/ts:rpc-status", "//recall/shared:denylist", ":answers", ":api", ":archive", ":backup", ":blobs", ":dropbox", ":feed", ":ingest", ":limits", ":ops-status", ":reasons", ":retention", ":search", ":store", ":tokens"],
+    srcs = [
+        "src/env.ts",
+        "src/state.ts",
+    ],
+    types = [
+        "src/env.ts",
+        "src/state.ts",
+    ],
+    deps = [
+        ":answers",
+        ":api",
+        ":archive",
+        ":backup",
+        ":blobs",
+        ":dropbox",
+        ":feed",
+        ":ingest",
+        ":limits",
+        ":ops-status",
+        ":reasons",
+        ":retention",
+        ":search",
+        ":store",
+        ":tokens",
+        "//proto/ops/v1:ts",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:rpc-status",
+        "//recall/shared:denylist",
+    ],
 )
 
-alias(name = "env", actual = ":module_group_23")
-alias(name = "state", actual = ":module_group_23")
+alias(
+    name = "env",
+    actual = ":module_group_23",
+)
+
+alias(
+    name = "state",
+    actual = ":module_group_23",
+)
+
 js_library(
     name = "auth",
     srcs = ["src/auth.ts"],
     types = ["src/auth.ts"],
-    deps = ["//packages/edge-auth:lib", ":module_group_23"],
+    deps = [
+        ":module_group_23",
+        "//packages/edge-auth:lib",
+    ],
 )
 
 js_library(
     name = "machine",
     srcs = ["src/machine.ts"],
     types = ["src/machine.ts"],
-    deps = ["//packages/edge-auth:lib", ":answers", ":blobs", ":limits", ":module_group_23", ":tokens"],
+    deps = [
+        ":answers",
+        ":blobs",
+        ":limits",
+        ":module_group_23",
+        ":tokens",
+        "//packages/edge-auth:lib",
+    ],
 )
 
 js_library(
     name = "http",
     srcs = ["src/http.ts"],
     types = ["src/http.ts"],
-    deps = ["//packages/edge-auth:lib", "//proto/ts:rpc-status", ":answers", ":auth", ":backup", ":ids", ":limits", ":machine", ":module_group_23", ":reasons"],
+    deps = [
+        ":answers",
+        ":auth",
+        ":backup",
+        ":ids",
+        ":limits",
+        ":machine",
+        ":module_group_23",
+        ":reasons",
+        "//packages/edge-auth:lib",
+        "//proto/ts:rpc-status",
+    ],
 )
 
 js_library(
     name = "ops",
     srcs = ["src/ops.ts"],
     types = ["src/ops.ts"],
-    deps = ["//proto/ops/v1:ts", ":module_group_23"],
+    deps = [
+        ":module_group_23",
+        "//proto/ops/v1:ts",
+    ],
 )
 
 js_library(
     name = "service",
     srcs = ["src/service.ts"],
     types = ["src/service.ts"],
-    deps = ["//packages/edge-auth:lib", "//proto/ts:rpc-status", ":ids", ":module_group_23", ":reasons"],
+    deps = [
+        ":ids",
+        ":module_group_23",
+        ":reasons",
+        "//packages/edge-auth:lib",
+        "//proto/ts:rpc-status",
+    ],
 )
 
 js_library(
     name = "index",
     srcs = ["src/index.ts"],
     types = ["src/index.ts"],
-    deps = [":http", ":module_group_23", ":ops", ":service"],
+    deps = [
+        ":http",
+        ":module_group_23",
+        ":ops",
+        ":service",
+    ],
 )
 
-js_library(name = "lib", deps = [":answers", ":api", ":archive", ":auth", ":backup", ":blobs", ":diagnostic", ":dropbox", ":feed", ":fts", ":http", ":ids", ":index", ":ingest", ":limits", ":machine", ":model", ":module_group_23", ":ops", ":ops-status", ":reasons", ":retention", ":screenshot", ":search", ":service", ":settings", ":status", ":store", ":timeline", ":tokens"])
+js_library(
+    name = "lib",
+    deps = [
+        ":answers",
+        ":api",
+        ":archive",
+        ":auth",
+        ":backup",
+        ":blobs",
+        ":diagnostic",
+        ":dropbox",
+        ":feed",
+        ":fts",
+        ":http",
+        ":ids",
+        ":index",
+        ":ingest",
+        ":limits",
+        ":machine",
+        ":model",
+        ":module_group_23",
+        ":ops",
+        ":ops-status",
+        ":reasons",
+        ":retention",
+        ":screenshot",
+        ":search",
+        ":service",
+        ":settings",
+        ":status",
+        ":store",
+        ":timeline",
+        ":tokens",
+    ],
+)
 
-proto_package(name = "proto_types_package", deps = ["//proto/common/errors/v1:ts", "//proto/ops/v1:ts", "//proto/recall/archive/v1:ts", "//proto/recall/ingest/v1:ts", "//proto/recall/ui/v1:ts", "//proto/ts:field-mask", "//proto/ts:filter", "//proto/ts:http-transcoder", "//proto/ts:page-token", "//proto/ts:protobuf", "//proto/ts:protobuf-wkt", "//proto/ts:rpc-status", "//proto/ts:wire-json", ":lib"])
-workspace_package_link(name = "proto_types_link", src = ":proto_types_package", runtime_dependencies = ["@bufbuild/protobuf"])
-workspace_package_link(name = "edge_auth_types_link", src = "//packages/edge-auth:pkg")
-workspace_link(name = "api-tokens_test_edge_auth_link", src = "//packages/edge-auth:pkg")
+proto_package(
+    name = "proto_types_package",
+    deps = [
+        ":lib",
+        "//proto/common/errors/v1:ts",
+        "//proto/ops/v1:ts",
+        "//proto/recall/archive/v1:ts",
+        "//proto/recall/ingest/v1:ts",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:field-mask",
+        "//proto/ts:filter",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:page-token",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+        "//proto/ts:wire-json",
+    ],
+)
+
+workspace_package_link(
+    name = "proto_types_link",
+    src = ":proto_types_package",
+    runtime_dependencies = ["@bufbuild/protobuf"],
+)
+
+workspace_package_link(
+    name = "edge_auth_types_link",
+    src = "//packages/edge-auth:pkg",
+)
+
+workspace_link(
+    name = "api-tokens_test_edge_auth_link",
+    src = "//packages/edge-auth:pkg",
+)
+
 proto_vitest_test(
     name = "api-tokens_test",
+    data = [
+        "package.json",
+        "test/sqlite.ts",
+        ":api-tokens_test_edge_auth_link",
+        ":node_modules/vitest",
+    ],
     runner = vitest.vitest_test,
     tests = ["test/api-tokens.test.ts"],
-    deps = ["//proto/recall/ui/v1:ts", "//proto/ts:protobuf", ":api", ":store", ":tokens"],
-    data = [":api-tokens_test_edge_auth_link", ":node_modules/vitest", "package.json", "test/sqlite.ts"],
+    deps = [
+        ":api",
+        ":store",
+        ":tokens",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:protobuf",
+    ],
 )
 
 proto_vitest_test(
     name = "archive_test",
+    data = [
+        "package.json",
+        "test/sqlite.ts",
+        ":node_modules/vitest",
+        "//contracts:recall-archive-v1/fixtures/ArchiveState/synced.json_data",
+        "//contracts:recall-archive-v1/fixtures/Change/document.json_data",
+        "//contracts:recall-archive-v1/fixtures/Change/tombstone.json_data",
+        "//contracts:recall-archive-v1/fixtures/Change/visit.json_data",
+        "//contracts:recall-archive-v1/fixtures/ChangePage/caught-up.json_data",
+        "//contracts:recall-archive-v1/fixtures/ChangePage/first-page.json_data",
+        "//contracts:recall-archive-v1/fixtures/archive/VERSION_data",
+        "//contracts:recall-archive-v1/fixtures/archive/blobs/2026/10/7c2e9f41-3b6a-4d5e-8f10-2a9b4c6d8e01.txt.gz_data",
+        "//contracts:recall-archive-v1/fixtures/archive/changes/2026/10/10.jsonl_data",
+        "//contracts:recall-archive-v1/fixtures/archive/state.json_data",
+        "//contracts:recall-archive-v1/fixtures/future/Change/star.json_data",
+        "//contracts:recall-archive-v1/fixtures/future/blobs/2026/11/0d1e2f3a-4b5c-4d6e-8f70-819203a4b5c6.html.gz_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/ArchiveState/negative-seq.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/ArchiveState/without-feed-id.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/Change/blob-other-encoding.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/Change/blob-path-traversal.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/Change/sha256-upper-case.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/Change/tombstone-bad-target.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/Change/visit-non-http-url.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/Change/visit-with-blob.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/Change/visit-without-body.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/Change/visit-without-page-id.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/ChangePage/other-version.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/ChangePage/without-feed-id.json_data",
+    ],
     runner = vitest.vitest_test,
     tests = ["test/archive.test.ts"],
-    deps = [":archive", ":store"],
-    data = ["//contracts:recall-archive-v1/fixtures/ArchiveState/synced.json_data", "//contracts:recall-archive-v1/fixtures/Change/document.json_data", "//contracts:recall-archive-v1/fixtures/Change/tombstone.json_data", "//contracts:recall-archive-v1/fixtures/Change/visit.json_data", "//contracts:recall-archive-v1/fixtures/ChangePage/caught-up.json_data", "//contracts:recall-archive-v1/fixtures/ChangePage/first-page.json_data", "//contracts:recall-archive-v1/fixtures/archive/VERSION_data", "//contracts:recall-archive-v1/fixtures/archive/blobs/2026/10/7c2e9f41-3b6a-4d5e-8f10-2a9b4c6d8e01.txt.gz_data", "//contracts:recall-archive-v1/fixtures/archive/changes/2026/10/10.jsonl_data", "//contracts:recall-archive-v1/fixtures/archive/state.json_data", "//contracts:recall-archive-v1/fixtures/future/Change/star.json_data", "//contracts:recall-archive-v1/fixtures/future/blobs/2026/11/0d1e2f3a-4b5c-4d6e-8f70-819203a4b5c6.html.gz_data", "//contracts:recall-archive-v1/fixtures/invalid/ArchiveState/negative-seq.json_data", "//contracts:recall-archive-v1/fixtures/invalid/ArchiveState/without-feed-id.json_data", "//contracts:recall-archive-v1/fixtures/invalid/Change/blob-other-encoding.json_data", "//contracts:recall-archive-v1/fixtures/invalid/Change/blob-path-traversal.json_data", "//contracts:recall-archive-v1/fixtures/invalid/Change/sha256-upper-case.json_data", "//contracts:recall-archive-v1/fixtures/invalid/Change/tombstone-bad-target.json_data", "//contracts:recall-archive-v1/fixtures/invalid/Change/visit-non-http-url.json_data", "//contracts:recall-archive-v1/fixtures/invalid/Change/visit-with-blob.json_data", "//contracts:recall-archive-v1/fixtures/invalid/Change/visit-without-body.json_data", "//contracts:recall-archive-v1/fixtures/invalid/Change/visit-without-page-id.json_data", "//contracts:recall-archive-v1/fixtures/invalid/ChangePage/other-version.json_data", "//contracts:recall-archive-v1/fixtures/invalid/ChangePage/without-feed-id.json_data", ":node_modules/vitest", "package.json", "test/sqlite.ts"],
+    deps = [
+        ":archive",
+        ":store",
+    ],
 )
 
 proto_vitest_test(
     name = "denylist_test",
+    data = [
+        "package.json",
+        ":node_modules/vitest",
+    ],
     runner = vitest.vitest_test,
     tests = ["test/denylist.test.ts"],
     deps = ["//recall/shared:denylist"],
-    data = [":node_modules/vitest", "package.json"],
 )
 
 proto_vitest_test(
     name = "devices_test",
+    data = [
+        "package.json",
+        "test/sqlite.ts",
+        ":node_modules/vitest",
+    ],
     runner = vitest.vitest_test,
     tests = ["test/devices.test.ts"],
     deps = [":store"],
-    data = [":node_modules/vitest", "package.json", "test/sqlite.ts"],
 )
 
 proto_vitest_test(
     name = "dropbox_test",
+    data = [
+        "package.json",
+        ":node_modules/vitest",
+    ],
     runner = vitest.vitest_test,
     tests = ["test/dropbox.test.ts"],
     deps = [":dropbox"],
-    data = [":node_modules/vitest", "package.json"],
 )
 
 proto_vitest_test(
     name = "feed_test",
+    data = [
+        "package.json",
+        ":node_modules/vitest",
+        "//contracts:recall-archive-v1/fixtures/ArchiveState/synced.json_data",
+        "//contracts:recall-archive-v1/fixtures/Change/document.json_data",
+        "//contracts:recall-archive-v1/fixtures/Change/tombstone.json_data",
+        "//contracts:recall-archive-v1/fixtures/Change/visit.json_data",
+        "//contracts:recall-archive-v1/fixtures/ChangePage/caught-up.json_data",
+        "//contracts:recall-archive-v1/fixtures/ChangePage/first-page.json_data",
+        "//contracts:recall-archive-v1/fixtures/archive/VERSION_data",
+        "//contracts:recall-archive-v1/fixtures/archive/blobs/2026/10/7c2e9f41-3b6a-4d5e-8f10-2a9b4c6d8e01.txt.gz_data",
+        "//contracts:recall-archive-v1/fixtures/archive/changes/2026/10/10.jsonl_data",
+        "//contracts:recall-archive-v1/fixtures/archive/state.json_data",
+        "//contracts:recall-archive-v1/fixtures/future/Change/star.json_data",
+        "//contracts:recall-archive-v1/fixtures/future/blobs/2026/11/0d1e2f3a-4b5c-4d6e-8f70-819203a4b5c6.html.gz_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/ArchiveState/negative-seq.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/ArchiveState/without-feed-id.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/Change/blob-other-encoding.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/Change/blob-path-traversal.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/Change/sha256-upper-case.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/Change/tombstone-bad-target.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/Change/visit-non-http-url.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/Change/visit-with-blob.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/Change/visit-without-body.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/Change/visit-without-page-id.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/ChangePage/other-version.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/ChangePage/without-feed-id.json_data",
+    ],
     runner = vitest.vitest_test,
     tests = ["test/feed.test.ts"],
-    deps = ["//proto/recall/archive/v1:ts", "//proto/ts:protobuf", "//proto/ts:wire-json", ":blobs", ":feed", ":store"],
-    data = ["//contracts:recall-archive-v1/fixtures/ArchiveState/synced.json_data", "//contracts:recall-archive-v1/fixtures/Change/document.json_data", "//contracts:recall-archive-v1/fixtures/Change/tombstone.json_data", "//contracts:recall-archive-v1/fixtures/Change/visit.json_data", "//contracts:recall-archive-v1/fixtures/ChangePage/caught-up.json_data", "//contracts:recall-archive-v1/fixtures/ChangePage/first-page.json_data", "//contracts:recall-archive-v1/fixtures/archive/VERSION_data", "//contracts:recall-archive-v1/fixtures/archive/blobs/2026/10/7c2e9f41-3b6a-4d5e-8f10-2a9b4c6d8e01.txt.gz_data", "//contracts:recall-archive-v1/fixtures/archive/changes/2026/10/10.jsonl_data", "//contracts:recall-archive-v1/fixtures/archive/state.json_data", "//contracts:recall-archive-v1/fixtures/future/Change/star.json_data", "//contracts:recall-archive-v1/fixtures/future/blobs/2026/11/0d1e2f3a-4b5c-4d6e-8f70-819203a4b5c6.html.gz_data", "//contracts:recall-archive-v1/fixtures/invalid/ArchiveState/negative-seq.json_data", "//contracts:recall-archive-v1/fixtures/invalid/ArchiveState/without-feed-id.json_data", "//contracts:recall-archive-v1/fixtures/invalid/Change/blob-other-encoding.json_data", "//contracts:recall-archive-v1/fixtures/invalid/Change/blob-path-traversal.json_data", "//contracts:recall-archive-v1/fixtures/invalid/Change/sha256-upper-case.json_data", "//contracts:recall-archive-v1/fixtures/invalid/Change/tombstone-bad-target.json_data", "//contracts:recall-archive-v1/fixtures/invalid/Change/visit-non-http-url.json_data", "//contracts:recall-archive-v1/fixtures/invalid/Change/visit-with-blob.json_data", "//contracts:recall-archive-v1/fixtures/invalid/Change/visit-without-body.json_data", "//contracts:recall-archive-v1/fixtures/invalid/Change/visit-without-page-id.json_data", "//contracts:recall-archive-v1/fixtures/invalid/ChangePage/other-version.json_data", "//contracts:recall-archive-v1/fixtures/invalid/ChangePage/without-feed-id.json_data", ":node_modules/vitest", "package.json"],
+    deps = [
+        ":blobs",
+        ":feed",
+        ":store",
+        "//proto/recall/archive/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
 )
 
-workspace_link(name = "ops-golden_test_edge_auth_link", src = "//packages/edge-auth:pkg")
+workspace_link(
+    name = "ops-golden_test_edge_auth_link",
+    src = "//packages/edge-auth:pkg",
+)
+
 proto_vitest_test(
     name = "ops-golden_test",
+    data = [
+        "package.json",
+        "test/golden/ops-v1.json",
+        "test/sqlite.ts",
+        ":node_modules/vitest",
+        ":ops-golden_test_edge_auth_link",
+        "//contracts:ops-v1/fixtures/OpsStatus/recall-degraded.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/recall-ok.json_data",
+        "//contracts:ops-v1/ops-v1.schema.json_data",
+    ],
     runner = vitest.vitest_test,
     tests = ["test/ops-golden.test.ts"],
-    deps = ["//contracts:ops-v1/validate", ":limits", ":ops-status", ":store"],
-    data = ["test/golden/ops-v1.json", "//contracts:ops-v1/fixtures/OpsStatus/recall-degraded.json_data", "//contracts:ops-v1/fixtures/OpsStatus/recall-ok.json_data", "//contracts:ops-v1/ops-v1.schema.json_data", ":node_modules/vitest", ":ops-golden_test_edge_auth_link", "package.json", "test/sqlite.ts"],
+    deps = [
+        ":limits",
+        ":ops-status",
+        ":store",
+        "//contracts:ops-v1/validate",
+    ],
 )
 
-workspace_link(name = "retention_test_edge_auth_link", src = "//packages/edge-auth:pkg")
+workspace_link(
+    name = "retention_test_edge_auth_link",
+    src = "//packages/edge-auth:pkg",
+)
+
 proto_vitest_test(
     name = "retention_test",
+    data = [
+        "package.json",
+        "test/sqlite.ts",
+        ":node_modules/vitest",
+        ":retention_test_edge_auth_link",
+    ],
     runner = vitest.vitest_test,
     tests = ["test/retention.test.ts"],
-    deps = [":fts", ":limits", ":retention", ":settings", ":store"],
-    data = [":node_modules/vitest", ":retention_test_edge_auth_link", "package.json", "test/sqlite.ts"],
+    deps = [
+        ":fts",
+        ":limits",
+        ":retention",
+        ":settings",
+        ":store",
+    ],
 )
 
 proto_vitest_test(
     name = "screenshot_test",
+    data = [
+        "package.json",
+        "test/fixtures/screenshot-1x1.jpg",
+        ":node_modules/vitest",
+    ],
     runner = vitest.vitest_test,
     tests = ["test/screenshot.test.ts"],
-    deps = ["//recall/shared:url", ":screenshot"],
-    data = ["test/fixtures/screenshot-1x1.jpg", ":node_modules/vitest", "package.json"],
+    deps = [
+        ":screenshot",
+        "//recall/shared:url",
+    ],
 )
 
 proto_vitest_test(
     name = "scrub_test",
+    data = [
+        "package.json",
+        ":node_modules/vitest",
+    ],
     runner = vitest.vitest_test,
     tests = ["test/scrub.test.ts"],
     deps = ["//recall/shared:scrub"],
-    data = [":node_modules/vitest", "package.json"],
 )
 
 proto_vitest_test(
     name = "search_test",
+    data = [
+        "package.json",
+        ":node_modules/vitest",
+    ],
     runner = vitest.vitest_test,
     tests = ["test/search.test.ts"],
-    deps = ["//recall/shared:segment", ":search"],
-    data = [":node_modules/vitest", "package.json"],
+    deps = [
+        ":search",
+        "//recall/shared:segment",
+    ],
 )
 
-workspace_link(name = "tokens_test_edge_auth_link", src = "//packages/edge-auth:pkg")
+workspace_link(
+    name = "tokens_test_edge_auth_link",
+    src = "//packages/edge-auth:pkg",
+)
+
 proto_vitest_test(
     name = "tokens_test",
+    data = [
+        "package.json",
+        "test/sqlite.ts",
+        ":node_modules/vitest",
+        ":tokens_test_edge_auth_link",
+    ],
     runner = vitest.vitest_test,
     tests = ["test/tokens.test.ts"],
-    deps = [":limits", ":machine", ":module_group_23", ":store", ":tokens"],
-    data = [":node_modules/vitest", ":tokens_test_edge_auth_link", "package.json", "test/sqlite.ts"],
+    deps = [
+        ":limits",
+        ":machine",
+        ":module_group_23",
+        ":store",
+        ":tokens",
+    ],
 )
 
 proto_vitest_test(
     name = "url_test",
+    data = [
+        "package.json",
+        ":node_modules/vitest",
+    ],
     runner = vitest.vitest_test,
     tests = ["test/url.test.ts"],
     deps = ["//recall/shared:url"],
-    data = [":node_modules/vitest", "package.json"],
 )
 
 ts_project(
     name = "types",
-    srcs = ["src/answers.ts", "src/api.ts", "src/archive.ts", "src/auth.ts", "src/backup.ts", "src/blobs.ts", "src/diagnostic.ts", "src/dropbox.ts", "src/env.ts", "src/feed.ts", "src/fts.ts", "src/http.ts", "src/ids.ts", "src/index.ts", "src/ingest.ts", "src/limits.ts", "src/machine.ts", "src/model.ts", "src/ops-status.ts", "src/ops.ts", "src/reasons.ts", "src/retention.ts", "src/screenshot.ts", "src/search.ts", "src/service.ts", "src/settings.ts", "src/state.ts", "src/status.ts", "src/store.ts", "src/timeline.ts", "src/tokens.ts", "test/api-tokens.test.ts", "test/archive.test.ts", "test/denylist.test.ts", "test/devices.test.ts", "test/dropbox.test.ts", "test/feed.test.ts", "test/golden/ops-v1.json", "test/jwt.ts", "test/ops-golden.test.ts", "test/retention.test.ts", "test/screenshot.test.ts", "test/scrub.test.ts", "test/search.test.ts", "test/smoke/tsconfig.json", "test/sqlite.ts", "test/tokens.test.ts", "test/url.test.ts", "test/validate.d.ts", "vitest.config.ts", "vitest.runtime.config.ts"],
+    srcs = [
+        "src/answers.ts",
+        "src/api.ts",
+        "src/archive.ts",
+        "src/auth.ts",
+        "src/backup.ts",
+        "src/blobs.ts",
+        "src/diagnostic.ts",
+        "src/dropbox.ts",
+        "src/env.ts",
+        "src/feed.ts",
+        "src/fts.ts",
+        "src/http.ts",
+        "src/ids.ts",
+        "src/index.ts",
+        "src/ingest.ts",
+        "src/limits.ts",
+        "src/machine.ts",
+        "src/model.ts",
+        "src/ops.ts",
+        "src/ops-status.ts",
+        "src/reasons.ts",
+        "src/retention.ts",
+        "src/screenshot.ts",
+        "src/search.ts",
+        "src/service.ts",
+        "src/settings.ts",
+        "src/state.ts",
+        "src/status.ts",
+        "src/store.ts",
+        "src/timeline.ts",
+        "src/tokens.ts",
+        "test/api-tokens.test.ts",
+        "test/archive.test.ts",
+        "test/denylist.test.ts",
+        "test/devices.test.ts",
+        "test/dropbox.test.ts",
+        "test/feed.test.ts",
+        "test/golden/ops-v1.json",
+        "test/jwt.ts",
+        "test/ops-golden.test.ts",
+        "test/retention.test.ts",
+        "test/screenshot.test.ts",
+        "test/scrub.test.ts",
+        "test/search.test.ts",
+        "test/smoke/tsconfig.json",
+        "test/sqlite.ts",
+        "test/tokens.test.ts",
+        "test/url.test.ts",
+        "test/validate.d.ts",
+        "vitest.config.ts",
+        "vitest.runtime.config.ts",
+    ],
+    data = [
+        "vitest.config.ts",
+        "vitest.runtime.config.ts",
+    ],
     no_emit = True,
     resolve_json_module = True,
-    data = ["vitest.config.ts", "vitest.runtime.config.ts"],
-    deps = ["//contracts:ops-v1/validate", "//recall/shared:denylist", "//recall/shared:scrub", "//recall/shared:segment", "//recall/shared:url", ":edge_auth_types_link", ":lib", ":node_modules/@cloudflare/workers-types", ":node_modules/@types/node", ":node_modules/vitest", ":proto_types_link"],
+    deps = [
+        ":edge_auth_types_link",
+        ":lib",
+        ":node_modules/@cloudflare/workers-types",
+        ":node_modules/@types/node",
+        ":node_modules/vitest",
+        ":proto_types_link",
+        "//contracts:ops-v1/validate",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:segment",
+        "//recall/shared:url",
+    ],
 )
 
-alias(name = "typecheck", actual = ":types_typecheck")
+alias(
+    name = "typecheck",
+    actual = ":types_typecheck",
+)
+
+wrangler.wrangler_binary(name = "wrangler")
+
+js_library(
+    name = "application_sources",
+    srcs = glob([
+        "src/**",
+        "package.json",
+        "tsconfig.json",
+    ]),
+)
+
+test_suite(name = "check")
+
+js_library(
+    name = "runtime_helpers",
+    srcs = [
+        "test/runtime/data.ts",
+        "test/runtime/fake-dropbox.ts",
+        "test/runtime/harness.ts",
+        "test/runtime/tsconfig.json",
+    ],
+    types = glob(
+        ["test/runtime/**/*.ts"],
+        exclude = ["**/*.test.ts"],
+    ),
+)
+
+workerd_vitest_test(
+    name = "runtime_api_test",
+    data = [
+        "test/jwt.ts",
+        ":runtime_fixture_data",
+        ":test_support",
+        "//recall/shared:url",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/api.test.ts"],
+    deps = [
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_archive_test",
+    data = [
+        ":runtime_fixture_data",
+        ":test_support",
+        "//contracts:recall-archive-v1/fixtures/ArchiveState/synced.json_data",
+        "//contracts:recall-archive-v1/fixtures/Change/document.json_data",
+        "//contracts:recall-archive-v1/fixtures/Change/tombstone.json_data",
+        "//contracts:recall-archive-v1/fixtures/Change/visit.json_data",
+        "//contracts:recall-archive-v1/fixtures/ChangePage/caught-up.json_data",
+        "//contracts:recall-archive-v1/fixtures/ChangePage/first-page.json_data",
+        "//contracts:recall-archive-v1/fixtures/archive/VERSION_data",
+        "//contracts:recall-archive-v1/fixtures/archive/blobs/2026/10/7c2e9f41-3b6a-4d5e-8f10-2a9b4c6d8e01.txt.gz_data",
+        "//contracts:recall-archive-v1/fixtures/archive/changes/2026/10/10.jsonl_data",
+        "//contracts:recall-archive-v1/fixtures/archive/state.json_data",
+        "//contracts:recall-archive-v1/fixtures/future/Change/star.json_data",
+        "//contracts:recall-archive-v1/fixtures/future/blobs/2026/11/0d1e2f3a-4b5c-4d6e-8f70-819203a4b5c6.html.gz_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/ArchiveState/negative-seq.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/ArchiveState/without-feed-id.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/Change/blob-other-encoding.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/Change/blob-path-traversal.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/Change/sha256-upper-case.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/Change/tombstone-bad-target.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/Change/visit-non-http-url.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/Change/visit-with-blob.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/Change/visit-without-body.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/Change/visit-without-page-id.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/ChangePage/other-version.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/ChangePage/without-feed-id.json_data",
+        "//recall/shared:url",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/archive.test.ts"],
+    deps = [
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_budget_test",
+    data = [
+        ":runtime_fixture_data",
+        ":test_support",
+        "//recall/shared:url",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/budget.test.ts"],
+    deps = [
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_connections_test",
+    data = [
+        ":runtime_fixture_data",
+        ":test_support",
+        "//recall/shared:url",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/connections.test.ts"],
+    deps = [
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_cpu_test",
+    data = [
+        "test/jwt.ts",
+        ":runtime_fixture_data",
+        ":test_support",
+        "//recall/shared:segment",
+        "//recall/shared:url",
+        "//tools/workerd-cpu:lib",
+    ],
+    runner = vitest.vitest_test,
+    tags = [
+        "cpu",
+        "exclusive",
+        "workerd",
+    ],
+    tests = ["test/runtime/cpu.test.ts"],
+    deps = [
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_devices_test",
+    data = [
+        ":runtime_fixture_data",
+        ":test_support",
+        "//recall/shared:url",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/devices.test.ts"],
+    deps = [
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_diagnostic_test",
+    data = [
+        ":runtime_fixture_data",
+        ":test_support",
+        "//recall/shared:url",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/diagnostic.test.ts"],
+    deps = [
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf-wkt",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_feed_test",
+    data = [
+        ":runtime_fixture_data",
+        ":test_support",
+        "//recall/shared:url",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/feed.test.ts"],
+    deps = [
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_ingest_test",
+    data = [
+        ":runtime_fixture_data",
+        ":test_support",
+        "//contracts:recall-archive-v1/fixtures/ArchiveState/synced.json_data",
+        "//contracts:recall-archive-v1/fixtures/Change/document.json_data",
+        "//contracts:recall-archive-v1/fixtures/Change/tombstone.json_data",
+        "//contracts:recall-archive-v1/fixtures/Change/visit.json_data",
+        "//contracts:recall-archive-v1/fixtures/ChangePage/caught-up.json_data",
+        "//contracts:recall-archive-v1/fixtures/ChangePage/first-page.json_data",
+        "//contracts:recall-archive-v1/fixtures/archive/VERSION_data",
+        "//contracts:recall-archive-v1/fixtures/archive/blobs/2026/10/7c2e9f41-3b6a-4d5e-8f10-2a9b4c6d8e01.txt.gz_data",
+        "//contracts:recall-archive-v1/fixtures/archive/changes/2026/10/10.jsonl_data",
+        "//contracts:recall-archive-v1/fixtures/archive/state.json_data",
+        "//contracts:recall-archive-v1/fixtures/future/Change/star.json_data",
+        "//contracts:recall-archive-v1/fixtures/future/blobs/2026/11/0d1e2f3a-4b5c-4d6e-8f70-819203a4b5c6.html.gz_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/ArchiveState/negative-seq.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/ArchiveState/without-feed-id.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/Change/blob-other-encoding.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/Change/blob-path-traversal.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/Change/sha256-upper-case.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/Change/tombstone-bad-target.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/Change/visit-non-http-url.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/Change/visit-with-blob.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/Change/visit-without-body.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/Change/visit-without-page-id.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/ChangePage/other-version.json_data",
+        "//contracts:recall-archive-v1/fixtures/invalid/ChangePage/without-feed-id.json_data",
+        "//recall/shared:url",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/ingest.test.ts"],
+    deps = [
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_retention_test",
+    data = [
+        ":runtime_fixture_data",
+        ":test_support",
+        "//recall/shared:url",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/retention.test.ts"],
+    deps = [
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_scale_test",
+    data = [
+        ":runtime_fixture_data",
+        ":test_support",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/scale.test.ts"],
+    deps = [
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_search_test",
+    data = [
+        ":runtime_fixture_data",
+        ":test_support",
+        "//recall/shared:url",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/search.test.ts"],
+    deps = [
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf-wkt",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_service_test",
+    data = [
+        ":runtime_fixture_data",
+        ":test_support",
+        "//recall/shared:url",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/service.test.ts"],
+    deps = [
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_snapshots_test",
+    data = [
+        ":runtime_fixture_data",
+        ":test_support",
+        "//recall/shared:url",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/snapshots.test.ts"],
+    deps = [
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_tokens_test",
+    data = [
+        ":runtime_fixture_data",
+        ":test_support",
+        "//recall/shared:url",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/tokens.test.ts"],
+    deps = [
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+    ],
+)
+
+js_library(
+    name = "runtime_fixture_data",
+    srcs = glob(["test/fixtures/**"]),
+)
+
+ts_config(
+    name = "worker_config",
+    src = "tsconfig.json",
+)
+
+ts_config(
+    name = "runtime_config",
+    src = "test/runtime/tsconfig.json",
+    deps = [":worker_config"],
+)
+
+ts_project(
+    name = "runtime_types",
+    srcs = [":proto_types_package_wire_types"] + glob(
+        [
+            "test/runtime/**/*.ts",
+            "test/runtime/**/*.mts",
+        ],
+        allow_empty = True,
+    ),
+    extends = ":runtime_config",
+    no_emit = True,
+    resolve_json_module = True,
+    tsconfig = {
+        "compilerOptions": {"noEmit": True},
+        "include": [],
+        "exclude": [],
+    },
+    deps = [
+        ":edge_auth_types_link",
+        ":lib",
+        ":node_modules/@cloudflare/workers-types",
+        ":node_modules/@types/node",
+        ":node_modules/esbuild",
+        ":node_modules/miniflare",
+        ":node_modules/vitest",
+        ":proto_types_link",
+        ":test_support",
+        "//:node_modules/@cloudflare/workers-types",
+        "//contracts:ops-v1/validate",
+        "//recall/shared:denylist",
+        "//recall/shared:diagnostic_types",
+        "//recall/shared:scrub",
+        "//recall/shared:segment",
+        "//recall/shared:segment_types",
+        "//recall/shared:url",
+        "//recall/shared:url_types",
+        "//tools/workerd-cpu:types",
+    ],
+)
+
+ts_config(
+    name = "smoke_config",
+    src = "test/smoke/tsconfig.json",
+    deps = [":worker_config"],
+)
+
+ts_project(
+    name = "smoke_types",
+    srcs = [":proto_types_package_wire_types"] + glob(
+        [
+            "test/smoke/**/*.ts",
+            "test/smoke/**/*.mts",
+        ],
+        allow_empty = True,
+    ),
+    extends = ":smoke_config",
+    no_emit = True,
+    resolve_json_module = True,
+    tsconfig = {
+        "compilerOptions": {"noEmit": True},
+        "include": [],
+        "exclude": [],
+    },
+    deps = [
+        ":edge_auth_types_link",
+        ":lib",
+        ":node_modules/@cloudflare/workers-types",
+        ":node_modules/@types/node",
+        ":node_modules/esbuild",
+        ":node_modules/miniflare",
+        ":node_modules/vitest",
+        ":proto_types_link",
+        ":runtime_helpers",
+        ":test_support",
+        "//:node_modules/@cloudflare/workers-types",
+        "//contracts:ops-v1/validate",
+        "//recall/shared:denylist",
+        "//recall/shared:diagnostic_types",
+        "//recall/shared:scrub",
+        "//recall/shared:segment",
+        "//recall/shared:segment_types",
+        "//recall/shared:url",
+        "//recall/shared:url_types",
+        "//tools/workerd-cpu:types",
+    ],
+)
+
+js_library(
+    name = "test_support",
+    srcs = glob(
+        ["test/**"],
+        exclude = [
+            "test/runtime/**",
+            "test/smoke/**",
+            "**/*.test.ts",
+        ],
+    ),
+    types = glob(
+        ["test/**/*.ts"],
+        exclude = [
+            "test/runtime/**",
+            "test/smoke/**",
+            "**/*.test.ts",
+        ],
+    ),
+)
+
+eslint_test(
+    name = "lint",
+    data = [
+        "package.json",
+        "test/runtime/tsconfig.json",
+        "test/smoke/tsconfig.json",
+        "tsconfig.json",
+        ":application_sources",
+        ":edge_auth_types_link",
+        ":lib",
+        ":node_modules/@cloudflare/workers-types",
+        ":node_modules/@eslint/js",
+        ":node_modules/@types/node",
+        ":node_modules/esbuild",
+        ":node_modules/eslint",
+        ":node_modules/miniflare",
+        ":node_modules/typescript",
+        ":node_modules/typescript-eslint",
+        ":node_modules/vitest",
+        ":node_modules/wrangler",
+        ":proto_types_link",
+        ":runtime_fixture_data",
+        ":runtime_helpers",
+        ":test_support",
+        "//:node_modules/@cloudflare/workers-types",
+        "//contracts:ops-v1/validate",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:segment",
+        "//recall/shared:url",
+        "//tools/workerd-cpu:types",
+    ],
+    runner = eslint.eslint_test,
+    sources = glob(
+        [
+            "src/**/*.ts",
+            "src/**/*.tsx",
+            "test/**/*.ts",
+            "test/**/*.mts",
+            "scripts/**/*.mjs",
+            "*.js",
+            "*.ts",
+        ],
+        allow_empty = True,
+    ),
+)
+
+js_library(
+    name = "smoke_support",
+    srcs = glob(["test/smoke/**"]),
+)
+
+tsx.tsx_test(
+    name = "smoke_test",
+    size = "large",
+    args = ["test/smoke/smoke.mts"],
+    chdir = "recall/worker",
+    data = [
+        "package.json",
+        ":application_sources",
+        ":edge_auth_types_link",
+        ":lib",
+        ":proto_types_link",
+        ":runtime_helpers",
+        ":smoke_support",
+        ":test_support",
+        ":wrangler",
+        "//recall:test_config",
+        "//recall/extension:smoke_sources",
+        "//recall/web:bundle",
+    ],
+    env = {"BAZEL_WRANGLER": "$(rootpath :wrangler)"},
+    tags = [
+        "smoke",
+        "workerd",
+    ],
+)
+
+js_library(
+    name = "package_metadata",
+    srcs = ["package.json"],
+)
+
+js_library(
+    name = "entry_metadata",
+    srcs = ["src/index.ts"],
+)
+
+js_library(
+    name = "runtime_metadata",
+    srcs = ["test/runtime/harness.ts"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        [
+            "*",
+            "src/**",
+            "test/**",
+        ],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)

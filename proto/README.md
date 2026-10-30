@@ -25,6 +25,9 @@ execution time, so this command runs independently of Bazel's test-result cache.
 generation lifecycle, determinism and mutation self-tests remain in the pnpm checks during migration.
 VPS image builds can use `bazel build //proto:python_wheel`, the reproducible stdlib-only wheel of the shipped
 Python packages. It includes neither the test-only modules nor their namespace files.
+Recall's cross-package type consumers can use `//proto/ts:recall_ingest_v1_types`. It compiles the
+`recall.ingest.v1` files and their wire-codec type closure into nine declaration files under the
+existing module paths, using the shared strict compiler configuration.
 
 
 Newsletter retains its locked external `ziyixi-protos` dependency during its VPS engine import; its internal

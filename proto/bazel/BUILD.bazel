@@ -1,1 +1,24 @@
-exports_files(["codegen.bzl", "repositories.bzl", "ts_package.bzl"])
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+exports_files([
+    "codegen.bzl",
+    "repositories.bzl",
+    "ts_package.bzl",
+])
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["*"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)

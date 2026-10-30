@@ -19,32 +19,37 @@ features, the FlowDay retirement), [October 20](docs/history/handoff-2026-10-20.
 
 ## Current work
 
-### Bazel migration (`codex/bazel-migration`, in progress)
+### Bazel migration (`codex/bazel-app-entrypoints`, in progress)
 
 Owner approved the staged migration of all builds, tests, generation and packaging to Bazel. Actions retains
 credentials, production publication, deployment ordering and reconcile. Existing pnpm/uv locks remain the application
 dependency source; third-party source is downloaded with pinned integrity rather than vendored into this repository.
 
-- Starting from `2c445ab4`; work is isolated from the owner's main checkout and Claude's worktrees.
-- First: validate pinned toolchains and dependency imports, then package-scoped proto generation and shared libraries,
-  followed by Tasks' real library/unit/runtime/browser/bundle targets. Remaining apps, website/extensions, Python and
-  OCI packaging follow before obsolete check/build paths are removed.
-- No production behavior, model settings, data or credentials change as part of build migration. Each application
-  changes check entrypoints only after its Bazel checks and existing release contracts are verified.
-- Verified locally: the existing pnpm/uv resolutions and Python 3.14.7 toolchain; package-scoped proto generation
-  retains existing bytes, and all 37 proto targets pass. Shared JS libraries and 142 offline Python file targets
-  execute in Bazel. Tasks' seven Worker unit targets, 25 UI file targets and the 16-case D1 CRUD target pass;
-  repeated representative targets report cached results with zero tests executed.
-- The first Linux Python run's 19 failures all came from the host's missing CJK font. Newsletter's 85 test targets
-  now declare the pinned Debian Noto font and pass its absolute path to rendering; all 85 pass locally with that
-  same font, including missing-font and unsafe-file negative cases. A fresh Linux run still needs verification.
-- In progress: complete Tasks type/runtime/browser/bundle coverage, the remaining Worker checks and all three OCI
-  images. The first gateway OCI archive passes its Linux offline container probe and exact SDK-version check.
-- The independent, credential-free Bazel workflow uses fixed Target Determinator and groups actual affected targets.
-  The legacy selector ignores Bazel-only metadata so BUILD changes alone do not publish apps; real source/generator
-  edits retain their checks and release selection. Legacy checks remain active until each replacement is complete.
-- Pending: full Bazel and legacy branch CI, application check cutovers, exact-artifact publication and matching
-  production reconcile. Do not infer full migration or production acceptance from the current local foundation.
+- Foundation released as `6368d063`: both branch check workflows and the matching main checks passed; the same
+  main revision's Personal cloud reconcile succeeded. This establishes toolchains, generation and affected checks,
+  not the completed migration.
+- Canonical application roots now expose the same-name release archive, `:check` closure and `:config` inputs.
+  Internal libraries follow imports; CI still selects affected test leaves. Recall keeps independent Worker and
+  extension archives, and the website keeps its content snapshot separate from its relay Worker.
+- Local verification: all 38 proto checks, the 142 original offline Python file targets, the full 37-spec / 158-case
+  Tasks browser suite, 111 other Web unit/type targets, 68 other Worker runtime targets, 14 CPU/teardown targets,
+  18 ESLint targets and 34 original Node tooling test targets passed. The 10 Worker bundle budgets were rerun with
+  their actual CLI assertions and measured output. These local results do not replace the next branch's Linux CI.
+- All three VPS applications build Linux amd64 OCI archives with the original offline probes, content-config
+  validation and exact save/verify promotion contract. Newsletter's healthcheck and the pinned Python Worker SDK
+  are preserved. The image check actions now use the shared Bazel builder; original main publishers remain.
+- Tasks' stamped full archive builds with Worker, UI and migrations. Other Worker archives build from their original
+  configs. Local Wrangler dry-runs accept the precompiled Tasks, Mailsort (including both text modules), Watch and
+  Todofy Python output without recompilation. The new artifact staging tests check identity, exact bytes and config.
+- The website's root build requires a complete prepared snapshot. Missing input fails; an explicit synthetic snapshot
+  builds the static export. Its release staging copies only validated public snapshot/media files, excluding private
+  capture inputs. The new synthetic staging test passed. Production publication is not switched yet.
+- In progress: complete website and extension browser/lint checks, Todofy's real Python workerd coverage, repository
+  audits and root-check discovery. Then replace the old CI checks and connect exact-artifact publication before
+  removing obsolete build/check scripts and documentation.
+- No product behavior, installed extension, model setting, private content, operational switch or credential is
+  changed by the migration. Branch CI must pass before merging the same revision; every cutover also requires
+  matching main publication and Personal cloud reconcile. Do not infer those from local build results.
 
 ### Verify after the October 28 releases (read-only)
 

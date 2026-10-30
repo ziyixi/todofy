@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import urlsplit
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).absolute().parents[1]))
 from api import Api, ReleaseError
 import control
 from control import ROOT, preflight, record, release_inputs

@@ -5,8 +5,9 @@ load("@npm//:defs.bzl", "npm_link_all_packages")
 load("@npm//packages/model-router-client:vitest/package_json.bzl", vitest = "bin")
 load("//proto/bazel:ts_package.bzl", "proto_package")
 load("//tools/bazel:js.bzl", "vitest_test", "workspace_link", "workspace_package_link")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
-package(default_visibility = ["//visibility:public"])
+package(default_visibility = ["//visibility:private"])
 
 npm_link_all_packages(name = "node_modules")
 
@@ -14,13 +15,22 @@ js_library(
     name = "lib",
     srcs = ["src/index.ts"],
     types = ["src/index.ts"],
-    deps = ["//proto/ts:http-client", "//proto/ts:protobuf", "//proto/modelrouter/inference/v1:ts"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//proto/modelrouter/inference/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:protobuf",
+    ],
 )
 
 npm_package(
     name = "pkg",
-    srcs = [":lib", "package.json"],
+    srcs = [
+        "package.json",
+        ":lib",
+    ],
     package = "@ziyixi/model-router-client",
+    visibility = ["//visibility:public"],
 )
 
 proto_package(
@@ -41,16 +51,62 @@ workspace_link(
 
 ts_project(
     name = "types",
-    srcs = ["src/index.ts", "test/index.test.ts"],
+    srcs = [
+        "src/index.ts",
+        "test/index.test.ts",
+    ],
     no_emit = True,
-    deps = [":proto_typecheck_link", ":node_modules/@cloudflare/workers-types", ":node_modules/vitest"],
+    deps = [
+        ":node_modules/@cloudflare/workers-types",
+        ":node_modules/vitest",
+        ":proto_typecheck_link",
+    ],
 )
 
 vitest_test(
     name = "client_test",
+    data = [
+        "package.json",
+        ":lib",
+        ":proto_test_link",
+    ],
     runner = vitest.vitest_test,
     tests = ["test/index.test.ts"],
-    data = [":lib", ":proto_test_link", "package.json"],
 )
 
-alias(name = "typecheck", actual = ":types_typecheck")
+alias(
+    name = "typecheck",
+    actual = ":types_typecheck",
+)
+
+test_suite(
+    name = "check",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "model-router-client",
+    actual = ":lib",
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        [
+            "*",
+            "src/**",
+            "test/**",
+        ],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)

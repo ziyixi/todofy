@@ -15,7 +15,7 @@ from subprocess import CompletedProcess
 from types import SimpleNamespace
 from unittest.mock import patch
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).absolute().parents[3]
 sys.path.insert(0, str(ROOT / "tools/vps-bootstrap"))
 
 import reader

@@ -28,6 +28,7 @@ export interface Harness {
 }
 export async function startHarness(options: { bindings?: Record<string, string>; outbound?: (request: Request) => Response } = {}): Promise<Harness> {
   const result = await build({
+    ...(process.env.TEST_SRCDIR ? { nodePaths: [`${process.cwd()}/node_modules`] } : {}),
     entryPoints: [resolve('src/index.ts')], bundle: true, format: 'esm',
     platform: 'neutral', external: ['cloudflare:workers'], write: false,
   });

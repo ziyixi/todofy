@@ -40,6 +40,7 @@ let evidence: R2Bucket;
 beforeAll(async () => {
   persistence = await mkdtemp(join(tmpdir(), 'watch-backup-'));
   const bundle = await build({
+    ...(process.env.TEST_SRCDIR ? { nodePaths: [`${process.cwd()}/node_modules`] } : {}),
     stdin: {
       resolveDir: process.cwd(),
       contents: `

@@ -1,0 +1,225 @@
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//visibility:public"])
+
+py_library(
+    name = "api",
+    srcs = ["api.py"],
+    imports = ["."],
+)
+
+py_library(
+    name = "cloudflare",
+    srcs = ["cloudflare.py"],
+    imports = ["."],
+    deps = ["//tools/cloud-release:api"],
+)
+
+py_library(
+    name = "control",
+    srcs = ["control.py"],
+    imports = ["."],
+    deps = [
+        "//tools/cloud-release:api",
+        "//tools/cloud-release:cloudflare",
+        "//tools/cloud-release:deployments",
+    ],
+)
+
+py_library(
+    name = "deployments",
+    srcs = ["deployments.py"],
+    imports = ["."],
+    deps = ["//tools/cloud-release:api"],
+)
+
+py_library(
+    name = "vps_record",
+    srcs = ["vps_record.py"],
+    imports = ["."],
+    deps = [
+        "//tools/cloud-release:api",
+        "//tools/cloud-release:deployments",
+    ],
+)
+
+py_test(
+    name = "test_assets_session_retry_test",
+    srcs = [
+        "tests/test_assets_session_retry.py",
+        "//tools/bazel/python:unittest_main.py",
+    ],
+    args = ["test_assets_session_retry"],
+    data = [
+        ":python_sources",
+        "//tools:repository_test_data",
+    ],
+    imports = [
+        ".",
+        "tests",
+    ],
+    legacy_create_init = False,
+    main = "//tools/bazel/python:unittest_main.py",
+    deps = [],
+)
+
+py_test(
+    name = "test_drift_acceptance_test",
+    srcs = [
+        "tests/test_drift_acceptance.py",
+        "//tools/bazel/python:unittest_main.py",
+    ],
+    args = ["test_drift_acceptance"],
+    data = [
+        ":python_sources",
+        "//tools:repository_test_data",
+    ],
+    imports = [
+        ".",
+        "tests",
+    ],
+    legacy_create_init = False,
+    main = "//tools/bazel/python:unittest_main.py",
+    deps = [
+        "//tools/cloud-release:api",
+        "//tools/cloud-release:control",
+    ],
+)
+
+py_test(
+    name = "test_release_test",
+    srcs = [
+        "tests/test_release.py",
+        "//tools/bazel/python:unittest_main.py",
+    ],
+    args = ["test_release"],
+    data = [
+        ":python_sources",
+        "//tools:repository_test_data",
+    ],
+    imports = [
+        ".",
+        "tests",
+    ],
+    legacy_create_init = False,
+    main = "//tools/bazel/python:unittest_main.py",
+    deps = [
+        "//tools/cloud-release:api",
+        "//tools/cloud-release:cloudflare",
+        "//tools/cloud-release:control",
+        "//tools/cloud-release:deployments",
+    ],
+)
+
+py_test(
+    name = "test_vps_record_test",
+    srcs = [
+        "tests/test_vps_record.py",
+        "//tools/bazel/python:unittest_main.py",
+    ],
+    args = ["test_vps_record"],
+    data = [
+        ":python_sources",
+        "//tools:repository_test_data",
+    ],
+    imports = [
+        ".",
+        "tests",
+    ],
+    legacy_create_init = False,
+    main = "//tools/bazel/python:unittest_main.py",
+    deps = [
+        "//tools/cloud-release:api",
+        "//tools/cloud-release:vps_record",
+    ],
+)
+
+py_test(
+    name = "test_website_retirement_test",
+    srcs = [
+        "tests/test_website_retirement.py",
+        "//tools/bazel/python:unittest_main.py",
+    ],
+    args = ["test_website_retirement"],
+    data = [
+        ":python_sources",
+        "//tools:repository_test_data",
+    ],
+    imports = [
+        ".",
+        "tests",
+    ],
+    legacy_create_init = False,
+    main = "//tools/bazel/python:unittest_main.py",
+    deps = ["//tools/cloud-release:api"],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        [
+            "*.py",
+            "*.sh",
+            "*.mjs",
+            "*.json",
+            "tests/*.py",
+        ],
+        allow_empty = True,
+    ),
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        ":test_artifact_test",
+        ":test_assets_session_retry_test",
+        ":test_drift_acceptance_test",
+        ":test_release_test",
+        ":test_vps_record_test",
+        ":test_website_retirement_test",
+    ],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        [
+            "*",
+            "tests/**",
+        ],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+py_library(
+    name = "artifact",
+    srcs = ["artifact.py"],
+    imports = ["."],
+    deps = [":control"],
+)
+
+py_test(
+    name = "test_artifact_test",
+    srcs = [
+        "tests/test_artifact.py",
+        "//tools/bazel/python:unittest_main.py",
+    ],
+    args = ["test_artifact"],
+    imports = [
+        ".",
+        "tests",
+    ],
+    legacy_create_init = False,
+    main = "//tools/bazel/python:unittest_main.py",
+    deps = [":artifact"],
+)

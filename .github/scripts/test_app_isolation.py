@@ -37,7 +37,7 @@ except ModuleNotFoundError:
         "uv run --locked --only-group ci python -m unittest discover -s .github/scripts"
     ) from None
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).absolute().parents[2]
 sys.path.insert(0, str(REPO / "tools" / "service-catalog"))
 from catalog import load_catalog  # noqa: E402
 from ci_changes import APP_TEST_DIRECTORIES  # noqa: E402
@@ -89,7 +89,7 @@ PARAMETER, OPAQUE = object(), object()
 def python_paths(source: str, file: Path) -> list[Path]:
     """Every path a module adds to sys.path or loads with spec_from_file_location.
 
-    Names are followed in source order within their scope (ROOT = Path(__file__).resolve().parents[2], or
+    Names are followed in source order within their scope (ROOT = Path(__file__).absolute().parents[2], or
     ROOT: Path = ..., then path /= "x"). A path built from a function parameter (pytest's tmp_path) is not the
     module's own reach and is skipped. Any other form, a name bound by a tuple, for, with or import among them, raises
     Unresolved, so a new way of reaching another directory is looked at instead of passing silently.
@@ -406,9 +406,9 @@ class Rules(unittest.TestCase):
         source = (
             "import importlib.util, os, sys\n"
             "from pathlib import Path\n"
-            "ROOT = Path(__file__).resolve().parents[3]\n"
+            "ROOT = Path(__file__).absolute().parents[3]\n"
             "sys.path.insert(0, str(ROOT / 'tools/cloud-release'))\n"
-            "TYPED: Path = Path(__file__).resolve().parents[3]\n"
+            "TYPED: Path = Path(__file__).absolute().parents[3]\n"
             "sys.path.insert(0, str(TYPED / 'todofy' / 'core'))\n"
             "sys.path.append(os.path.join(os.path.dirname(__file__), 'lib'))\n"
             "importlib.util.spec_from_file_location('m', Path(__file__).with_name('m.py'))\n"
@@ -430,7 +430,7 @@ class Rules(unittest.TestCase):
         )
         # Bindings the reader does not follow fail loudly instead of passing as if they were a parameter.
         for binding in (
-            "ROOT, HERE = Path(__file__).resolve().parents[3], Path(__file__).parent",
+            "ROOT, HERE = Path(__file__).absolute().parents[3], Path(__file__).parent",
             "from paths import ROOT",
             "for ROOT in [Path(__file__).parents[3]]: pass",
             "with open(__file__) as ROOT: pass",

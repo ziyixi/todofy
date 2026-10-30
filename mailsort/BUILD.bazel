@@ -1,0 +1,114 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library", "js_run_binary")
+load("@rules_pkg//pkg:mappings.bzl", "pkg_files", "strip_prefix")
+load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//visibility:private"])
+
+js_library(
+    name = "config",
+    srcs = [
+        "app.toml",
+        "wrangler.toml",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        "//mailsort/deploy:check",
+        "//mailsort/tools:check",
+        "//mailsort/web:check",
+        "//mailsort/worker:check",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+js_run_binary(
+    name = "worker_bundle",
+    srcs = [
+        ":config",
+        "//mailsort/prompts:personal-rules",
+        "//mailsort/prompts:priority-classification",
+        "//mailsort/web:bundle",
+        "//mailsort/worker:application_sources",
+        "//mailsort/worker:edge_auth_types_link",
+        "//mailsort/worker:lib",
+        "//mailsort/worker:model_router_client_types_link",
+        "//mailsort/worker:proto_types_link",
+    ],
+    args = [
+        "deploy",
+        "--dry-run",
+        "--config",
+        "wrangler.toml",
+        "--outdir",
+        "worker_bundle",
+    ],
+    chdir = "mailsort",
+    env = {
+        "CI": "true",
+        "WRANGLER_SEND_METRICS": "false",
+    },
+    include_transitive_types = True,
+    include_types = True,
+    out_dirs = ["worker_bundle"],
+    tool = "//mailsort/worker:wrangler",
+    visibility = ["//mailsort:__subpackages__"],
+)
+
+pkg_files(
+    name = "worker_files",
+    srcs = [":worker_bundle"],
+    prefix = "worker",
+    strip_prefix = strip_prefix.from_pkg("worker_bundle"),
+)
+
+pkg_files(
+    name = "config_files",
+    srcs = [":config"],
+    strip_prefix = strip_prefix.from_pkg(),
+)
+
+pkg_files(
+    name = "web_files",
+    srcs = ["//mailsort/web:bundle"],
+    prefix = "web/dist",
+    strip_prefix = strip_prefix.from_root("mailsort/web/dist"),
+)
+
+pkg_tar(
+    name = "mailsort",
+    srcs = [
+        ":config_files",
+        ":web_files",
+        ":worker_files",
+    ],
+    extension = "tar.gz",
+    stamp = 0,
+    visibility = ["//visibility:public"],
+)
+
+js_library(
+    name = "test_config",
+    srcs = ["wrangler.test.toml"],
+    visibility = ["//mailsort:__subpackages__"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["*"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)

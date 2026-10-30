@@ -1,9 +1,15 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library")
 load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
 package(default_visibility = ["//visibility:public"])
 
-_MODULES = ["url", "scrub", "segment", "denylist"]
+_MODULES = [
+    "url",
+    "scrub",
+    "segment",
+    "denylist",
+]
 
 [
     ts_project(
@@ -14,7 +20,10 @@ _MODULES = ["url", "scrub", "segment", "denylist"]
         tsconfig = {
             "compilerOptions": {
                 "target": "ES2024",
-                "lib": ["ES2024", "DOM"],
+                "lib": [
+                    "ES2024",
+                    "DOM",
+                ],
                 "module": "ESNext",
                 "moduleResolution": "Bundler",
                 "strict": True,
@@ -26,6 +35,29 @@ _MODULES = ["url", "scrub", "segment", "denylist"]
     for name in _MODULES
 ]
 
+ts_project(
+    name = "diagnostic_types",
+    srcs = ["diagnostic.ts"],
+    declaration = True,
+    emit_declaration_only = True,
+    extends = "//proto:compiler_config",
+    tsconfig = {
+        "compilerOptions": {
+            "noEmit": False,
+            "types": [],
+        },
+        "include": [],
+        "exclude": [],
+    },
+    deps = ["//proto/ts:recall_ingest_v1_types"],
+)
+
+js_library(
+    name = "diagnostic",
+    srcs = ["diagnostic.ts"],
+    deps = [":diagnostic_types"],
+)
+
 [
     js_library(
         name = name,
@@ -34,3 +66,25 @@ _MODULES = ["url", "scrub", "segment", "denylist"]
     )
     for name in _MODULES
 ]
+
+js_library(
+    name = "notice",
+    srcs = ["NOTICE"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["*"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)

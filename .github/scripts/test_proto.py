@@ -53,7 +53,7 @@ except ModuleNotFoundError:
 sys.path.insert(0, str(Path(__file__).parent))
 import ci_changes  # noqa: E402
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).absolute().parents[2]
 PROTO = REPO / "proto"
 TOOLCHAIN = ("@bufbuild/buf", "@bufbuild/protoc-gen-es", "@bufbuild/protobuf")
 RUNTIME = "@bufbuild/protobuf"
@@ -337,7 +337,7 @@ class ApiLinter(unittest.TestCase):
     def test_nothing_else_installs_it(self):
         offenders = []
         for path in tracked("*"):
-            skipped = path.is_relative_to(LINTER_MODULE) or path == Path(__file__).resolve()
+            skipped = path.is_relative_to(LINTER_MODULE) or path == Path(__file__).absolute()
             if skipped or path.suffix in {".md", ".sum"} or not path.is_file():
                 continue
             text = path.read_text(errors="ignore")

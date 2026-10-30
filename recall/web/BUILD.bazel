@@ -1,0 +1,791 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@npm//recall/web:eslint/package_json.bzl", eslint = "bin")
+load("@npm//recall/web:vite/package_json.bzl", vite = "bin")
+load("@npm//recall/web:vitest/package_json.bzl", vitest = "bin")
+load("//proto/bazel:ts_package.bzl", "proto_package")
+load("//tools/bazel:js.bzl", "proto_vitest_test", "vite_bundle", "workspace_link", "workspace_package_link")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/lint:defs.bzl", "eslint_test")
+
+package(default_visibility = ["//recall:__subpackages__"])
+
+npm_link_all_packages(name = "node_modules")
+
+js_library(
+    name = "src__api",
+    srcs = ["src/api.ts"],
+    types = ["src/api.ts"],
+    deps = [
+        "//proto/common/errors/v1:ts",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:http-client",
+    ],
+)
+
+js_library(
+    name = "src__dom",
+    srcs = ["src/dom.ts"],
+    types = ["src/dom.ts"],
+    deps = [],
+)
+
+js_library(
+    name = "src__components",
+    srcs = ["src/components.ts"],
+    types = ["src/components.ts"],
+    deps = [":src__dom"],
+)
+
+js_library(
+    name = "src__day",
+    srcs = ["src/day.ts"],
+    types = ["src/day.ts"],
+    deps = [],
+)
+
+js_library(
+    name = "src__format",
+    srcs = ["src/format.ts"],
+    types = ["src/format.ts"],
+    deps = [
+        ":src__day",
+        "//proto/ts:protobuf-wkt",
+    ],
+)
+
+js_library(
+    name = "src__health",
+    srcs = ["src/health.ts"],
+    types = ["src/health.ts"],
+    deps = [
+        ":src__dom",
+        ":src__format",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:protobuf-wkt",
+    ],
+)
+
+js_library(
+    name = "src__marks",
+    srcs = ["src/marks.ts"],
+    types = ["src/marks.ts"],
+    deps = [
+        ":src__dom",
+        "//recall/shared:segment",
+    ],
+)
+
+js_library(
+    name = "src__views__common",
+    srcs = ["src/views/common.ts"],
+    types = ["src/views/common.ts"],
+    deps = [
+        ":src__api",
+        ":src__components",
+        ":src__dom",
+    ],
+)
+
+js_library(
+    name = "src__query",
+    srcs = ["src/query.ts"],
+    types = ["src/query.ts"],
+    deps = [
+        ":src__day",
+        ":src__format",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+    ],
+)
+
+js_library(
+    name = "src__sessions",
+    srcs = ["src/sessions.ts"],
+    types = ["src/sessions.ts"],
+    deps = [
+        ":src__day",
+        ":src__format",
+        "//proto/recall/ui/v1:ts",
+    ],
+)
+
+js_library(
+    name = "src__views__diagnostic",
+    srcs = ["src/views/diagnostic.ts"],
+    types = ["src/views/diagnostic.ts"],
+    deps = [
+        ":src__components",
+        ":src__dom",
+        ":src__format",
+        "//proto/recall/ingest/v1:ts",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:wire-json",
+        "//recall/shared:diagnostic",
+    ],
+)
+
+js_library(
+    name = "src__app",
+    srcs = [
+        "src/app.ts",
+        "src/views/devices.ts",
+        "src/views/page.ts",
+        "src/views/search.ts",
+        "src/views/settings.ts",
+        "src/views/snapshots.ts",
+        "src/views/timeline.ts",
+        "src/views/tokens.ts",
+    ],
+    types = [
+        "src/app.ts",
+        "src/views/devices.ts",
+        "src/views/page.ts",
+        "src/views/search.ts",
+        "src/views/settings.ts",
+        "src/views/snapshots.ts",
+        "src/views/timeline.ts",
+        "src/views/tokens.ts",
+    ],
+    deps = [
+        ":src__api",
+        ":src__components",
+        ":src__day",
+        ":src__dom",
+        ":src__format",
+        ":src__health",
+        ":src__marks",
+        ":src__query",
+        ":src__sessions",
+        ":src__views__common",
+        ":src__views__diagnostic",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:filter",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//recall/shared:diagnostic",
+    ],
+)
+
+js_library(
+    name = "src__main",
+    srcs = [
+        "src/main.ts",
+        "src/styles.css",
+    ],
+    types = ["src/main.ts"],
+    deps = [":src__app"],
+)
+
+js_library(
+    name = "lib",
+    deps = [
+        ":src__api",
+        ":src__app",
+        ":src__components",
+        ":src__day",
+        ":src__dom",
+        ":src__format",
+        ":src__health",
+        ":src__main",
+        ":src__marks",
+        ":src__query",
+        ":src__sessions",
+        ":src__views__common",
+        ":src__views__diagnostic",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__app_test",
+    data = [
+        "package.json",
+        "src/test/fakeServer.ts",
+        "src/test/helpers.ts",
+        "src/test/setup.ts",
+        "vite.config.ts",
+        ":node_modules/jsdom",
+        ":node_modules/vite",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["src/app.test.ts"],
+    deps = [
+        ":node_modules/vitest",
+        ":src__api",
+        ":src__app",
+        ":src__components",
+        ":src__day",
+        ":src__dom",
+        ":src__format",
+        ":src__health",
+        ":src__marks",
+        ":src__query",
+        ":src__sessions",
+        ":src__views__common",
+        ":src__views__diagnostic",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:field-mask",
+        "//proto/ts:filter",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+        "//recall/shared:segment",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__check-layout_test",
+    data = [
+        "package.json",
+        "src/test/fakeServer.ts",
+        "src/test/helpers.ts",
+        "src/test/setup.ts",
+        "vite.config.ts",
+        ":application_sources",
+        ":node_modules/jsdom",
+        ":node_modules/vite",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["src/check-layout.test.ts"],
+    deps = [
+        ":node_modules/vitest",
+        ":src__api",
+        ":src__app",
+        ":src__components",
+        ":src__day",
+        ":src__dom",
+        ":src__format",
+        ":src__health",
+        ":src__marks",
+        ":src__query",
+        ":src__sessions",
+        ":src__views__common",
+        ":src__views__diagnostic",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:field-mask",
+        "//proto/ts:filter",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+        "//recall/shared:segment",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__devices_test",
+    data = [
+        "package.json",
+        "src/test/fakeServer.ts",
+        "src/test/helpers.ts",
+        "src/test/setup.ts",
+        "vite.config.ts",
+        ":node_modules/jsdom",
+        ":node_modules/vite",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["src/devices.test.ts"],
+    deps = [
+        ":node_modules/vitest",
+        ":src__api",
+        ":src__app",
+        ":src__components",
+        ":src__day",
+        ":src__dom",
+        ":src__format",
+        ":src__health",
+        ":src__marks",
+        ":src__query",
+        ":src__sessions",
+        ":src__views__common",
+        ":src__views__diagnostic",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:field-mask",
+        "//proto/ts:filter",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+        "//recall/shared:segment",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__diagnostic_test",
+    data = [
+        "package.json",
+        "src/test/setup.ts",
+        "vite.config.ts",
+        ":node_modules/jsdom",
+        ":node_modules/vite",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["src/diagnostic.test.ts"],
+    deps = [
+        ":node_modules/vitest",
+        ":src__components",
+        ":src__day",
+        ":src__dom",
+        ":src__format",
+        ":src__views__diagnostic",
+        "//proto/recall/ingest/v1:ts",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__page_test",
+    data = [
+        "package.json",
+        "src/test/fakeServer.ts",
+        "src/test/helpers.ts",
+        "src/test/setup.ts",
+        "vite.config.ts",
+        ":node_modules/jsdom",
+        ":node_modules/vite",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["src/page.test.ts"],
+    deps = [
+        ":node_modules/vitest",
+        ":src__api",
+        ":src__app",
+        ":src__components",
+        ":src__day",
+        ":src__dom",
+        ":src__format",
+        ":src__health",
+        ":src__marks",
+        ":src__query",
+        ":src__sessions",
+        ":src__views__common",
+        ":src__views__diagnostic",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:field-mask",
+        "//proto/ts:filter",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+        "//recall/shared:segment",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__query_test",
+    data = [
+        "package.json",
+        "src/test/fakeServer.ts",
+        "src/test/setup.ts",
+        "vite.config.ts",
+        ":node_modules/jsdom",
+        ":node_modules/vite",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["src/query.test.ts"],
+    deps = [
+        ":node_modules/vitest",
+        ":src__day",
+        ":src__dom",
+        ":src__format",
+        ":src__marks",
+        ":src__query",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:field-mask",
+        "//proto/ts:filter",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+        "//recall/shared:segment",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__search_test",
+    data = [
+        "package.json",
+        "src/test/fakeServer.ts",
+        "src/test/helpers.ts",
+        "src/test/setup.ts",
+        "vite.config.ts",
+        ":node_modules/jsdom",
+        ":node_modules/vite",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["src/search.test.ts"],
+    deps = [
+        ":node_modules/vitest",
+        ":src__api",
+        ":src__app",
+        ":src__components",
+        ":src__day",
+        ":src__dom",
+        ":src__format",
+        ":src__health",
+        ":src__marks",
+        ":src__query",
+        ":src__sessions",
+        ":src__views__common",
+        ":src__views__diagnostic",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:field-mask",
+        "//proto/ts:filter",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+        "//recall/shared:segment",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__sessions_test",
+    data = [
+        "package.json",
+        "src/test/fakeServer.ts",
+        "src/test/setup.ts",
+        "vite.config.ts",
+        ":node_modules/jsdom",
+        ":node_modules/vite",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["src/sessions.test.ts"],
+    deps = [
+        ":node_modules/vitest",
+        ":src__day",
+        ":src__dom",
+        ":src__format",
+        ":src__marks",
+        ":src__sessions",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:field-mask",
+        "//proto/ts:filter",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+        "//recall/shared:segment",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__settings_test",
+    data = [
+        "package.json",
+        "src/test/fakeServer.ts",
+        "src/test/helpers.ts",
+        "src/test/setup.ts",
+        "vite.config.ts",
+        ":node_modules/jsdom",
+        ":node_modules/vite",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["src/settings.test.ts"],
+    deps = [
+        ":node_modules/vitest",
+        ":src__api",
+        ":src__app",
+        ":src__components",
+        ":src__day",
+        ":src__dom",
+        ":src__format",
+        ":src__health",
+        ":src__marks",
+        ":src__query",
+        ":src__sessions",
+        ":src__views__common",
+        ":src__views__diagnostic",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:field-mask",
+        "//proto/ts:filter",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+        "//recall/shared:segment",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__timeline_test",
+    data = [
+        "package.json",
+        "src/test/fakeServer.ts",
+        "src/test/helpers.ts",
+        "src/test/setup.ts",
+        "vite.config.ts",
+        ":node_modules/jsdom",
+        ":node_modules/vite",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["src/timeline.test.ts"],
+    deps = [
+        ":node_modules/vitest",
+        ":src__api",
+        ":src__app",
+        ":src__components",
+        ":src__day",
+        ":src__dom",
+        ":src__format",
+        ":src__health",
+        ":src__marks",
+        ":src__query",
+        ":src__sessions",
+        ":src__views__common",
+        ":src__views__diagnostic",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:field-mask",
+        "//proto/ts:filter",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+        "//recall/shared:segment",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__tokens_test",
+    data = [
+        "package.json",
+        "src/test/fakeServer.ts",
+        "src/test/helpers.ts",
+        "src/test/setup.ts",
+        "vite.config.ts",
+        ":node_modules/jsdom",
+        ":node_modules/vite",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["src/tokens.test.ts"],
+    deps = [
+        ":node_modules/vitest",
+        ":src__api",
+        ":src__app",
+        ":src__components",
+        ":src__day",
+        ":src__dom",
+        ":src__format",
+        ":src__health",
+        ":src__marks",
+        ":src__query",
+        ":src__sessions",
+        ":src__views__common",
+        ":src__views__diagnostic",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:field-mask",
+        "//proto/ts:filter",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+        "//recall/shared:segment",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__test__no-external_test",
+    data = [
+        "index.html",
+        "package.json",
+        "src/test/setup.ts",
+        "vite.config.ts",
+        ":application_sources",
+        ":node_modules/jsdom",
+        ":node_modules/vite",
+        "//recall/shared:diagnostic",
+        "//recall/shared:segment",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["src/test/no-external.test.ts"],
+    deps = [":node_modules/vitest"],
+)
+
+js_library(
+    name = "application_sources",
+    srcs = glob(
+        [
+            "src/**",
+            "public/**",
+            "index.html",
+            "_headers",
+            "_redirects",
+        ],
+        allow_empty = True,
+    ),
+)
+
+js_library(
+    name = "build_checks",
+    srcs = [
+        "scripts/finish-dist.mjs",
+        "scripts/js-budget.mjs",
+    ],
+    deps = ["//tools/bundle-size:library"],
+)
+
+proto_package(
+    name = "bundle_proto",
+    deps = [
+        ":lib",
+        "//proto/common/errors/v1:ts",
+        "//proto/recall/ingest/v1:ts",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:field-mask",
+        "//proto/ts:filter",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+        "//proto/ts:wire-json",
+    ],
+)
+
+workspace_package_link(
+    name = "bundle_proto_link",
+    src = ":bundle_proto",
+    runtime_dependencies = ["@bufbuild/protobuf"],
+)
+
+vite.vite_binary(name = "vite")
+
+vite_bundle(
+    name = "bundle",
+    out_dir = "dist",
+    postbuild = "scripts/finish-dist.mjs",
+    tool = ":vite",
+    deps = [
+        ":application_sources",
+        ":build_checks",
+        ":bundle_proto_link",
+        ":node_modules/vite",
+        ":node_modules/vitest",
+    ],
+)
+
+ts_project(
+    name = "typecheck_project",
+    srcs = [
+        "src/api.ts",
+        "src/app.test.ts",
+        "src/app.ts",
+        "src/check-layout.test.ts",
+        "src/components.ts",
+        "src/day.ts",
+        "src/devices.test.ts",
+        "src/diagnostic.test.ts",
+        "src/dom.ts",
+        "src/format.ts",
+        "src/health.ts",
+        "src/main.ts",
+        "src/marks.ts",
+        "src/page.test.ts",
+        "src/query.test.ts",
+        "src/query.ts",
+        "src/search.test.ts",
+        "src/sessions.test.ts",
+        "src/sessions.ts",
+        "src/settings.test.ts",
+        "src/test/fakeServer.ts",
+        "src/test/helpers.ts",
+        "src/test/no-external.test.ts",
+        "src/test/setup.ts",
+        "src/timeline.test.ts",
+        "src/tokens.test.ts",
+        "src/views/common.ts",
+        "src/views/devices.ts",
+        "src/views/diagnostic.ts",
+        "src/views/page.ts",
+        "src/views/search.ts",
+        "src/views/settings.ts",
+        "src/views/snapshots.ts",
+        "src/views/timeline.ts",
+        "src/views/tokens.ts",
+        "vite.config.ts",
+        ":bundle_proto_wire_types",
+    ],
+    extends = "tsconfig.json",
+    no_emit = True,
+    resolve_json_module = True,
+    tsconfig = {
+        "compilerOptions": {"noEmit": True},
+        "include": [],
+        "exclude": [],
+    },
+    deps = [
+        ":bundle_proto_link",
+        ":node_modules/@types/node",
+        ":node_modules/vite",
+        ":node_modules/vitest",
+        "//recall/shared:diagnostic",
+        "//recall/shared:segment",
+    ],
+)
+
+alias(
+    name = "typecheck",
+    actual = ":typecheck_project_typecheck",
+)
+
+test_suite(name = "check")
+
+eslint_test(
+    name = "lint",
+    data = [
+        "package.json",
+        "tsconfig.json",
+        ":application_sources",
+        ":build_checks",
+        ":bundle_proto_link",
+        ":node_modules/@eslint/js",
+        ":node_modules/@types/node",
+        ":node_modules/eslint",
+        ":node_modules/jsdom",
+        ":node_modules/typescript",
+        ":node_modules/typescript-eslint",
+        ":node_modules/vite",
+        ":node_modules/vitest",
+        "//recall/shared:diagnostic",
+        "//recall/shared:segment",
+    ],
+    runner = eslint.eslint_test,
+    sources = glob(
+        [
+            "src/**/*.ts",
+            "src/**/*.tsx",
+            "test/**/*.ts",
+            "test/**/*.mts",
+            "scripts/**/*.mjs",
+            "*.js",
+            "*.ts",
+        ],
+        allow_empty = True,
+    ),
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        [
+            "*",
+            "scripts/**",
+            "src/**",
+        ],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)

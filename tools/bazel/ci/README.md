@@ -1,15 +1,16 @@
 # Bazel migration validation
 
-The independent `Bazel migration validation` workflow checks `proto/`, shared packages, Tasks, the verified offline
-Python suites of Todofy, Codex Gateway, Platform and Newsletter, and the Bazel tool tests. Apps continue through their
-existing CI until their complete Bazel checks replace it.
+The planner discovers every public `:check` facade through Bazel visibility, covering app and package roots,
+proto, tools and infra. Private worker/web suites stay behind their app's facade. It expands these roots to leaf
+test targets before asking Target Determinator which leaves changed. CI runs only those affected leaves.
+Apps continue through their existing CI until their complete Bazel checks replace it.
 `ci.yml`, production credentials, tested release artifacts, deployment ordering and reconcile are unchanged.
 The owner waits for both `CI gate` and `Bazel migration gate` during this stage.
 
 `plan.py` delegates graph comparison to the fixed [Target Determinator v0.34.0](https://github.com/bazel-contrib/target-determinator/tree/v0.34.0)
 binary. It does not maintain a path-to-application impact map. A branch uses its merge base with `origin/main`;
 main uses the newest ancestor whose own Bazel check gate passed. A failed release does not invalidate that check
-evidence. Missing evidence, dispatch, or a baseline without `MODULE.bazel` selects every current foundation test.
+evidence. Missing evidence, dispatch, or a baseline without `MODULE.bazel` selects every current check leaf.
 If the baseline query predates a newly added suite, Target Determinator also selects all checks. A current-graph
 or comparison failure fails planning. Manual tests stay outside this workflow.
 

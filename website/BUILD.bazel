@@ -1,0 +1,3090 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library", "js_run_binary")
+load("@bazel_lib//lib:copy_to_directory.bzl", "copy_to_directory")
+load("@bazel_lib//lib:expand_template.bzl", "expand_template")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@npm//website:eslint/package_json.bzl", eslint = "bin")
+load("@npm//website:prettier/package_json.bzl", prettier = "bin")
+load("@npm//website:tsx/package_json.bzl", tsx = "bin")
+load("@npm//website:vitest/package_json.bzl", vitest = "bin")
+load("@npm//website:wrangler/package_json.bzl", wrangler = "bin")
+load("@rules_pkg//pkg:mappings.bzl", "pkg_files", "strip_prefix")
+load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
+load("//proto/bazel:ts_package.bzl", "proto_package")
+load("//tools/bazel:js.bzl", "proto_vitest_test", "vitest_test", "workspace_link", "workspace_package_link")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/lint:defs.bzl", "eslint_test")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files([
+    "relay/deploy/retire-secrets.py",
+    "content/site.config.ts",
+])
+
+npm_link_all_packages(name = "node_modules")
+
+js_library(
+    name = "src__lib__content__errors",
+    srcs = [
+        "src/lib/content/errors.ts",
+    ],
+    deps = [
+    ],
+)
+
+js_library(
+    name = "src__lib__content__date",
+    srcs = [
+        "src/lib/content/date.ts",
+    ],
+    deps = [
+        ":src__lib__content__errors",
+    ],
+)
+
+js_library(
+    name = "src__lib__content__equation",
+    srcs = [
+        "src/lib/content/equation.ts",
+    ],
+    deps = [
+        ":node_modules/katex",
+        ":src__lib__content__errors",
+    ],
+)
+
+js_library(
+    name = "src__lib__content__redirect-path",
+    srcs = [
+        "src/lib/content/redirect-path.ts",
+    ],
+    deps = [
+        ":src__lib__content__errors",
+    ],
+)
+
+js_library(
+    name = "src__lib__content__slug",
+    srcs = [
+        "src/lib/content/slug.ts",
+    ],
+    deps = [
+        ":src__lib__content__errors",
+    ],
+)
+
+js_library(
+    name = "src__lib__content__url",
+    srcs = [
+        "src/lib/content/url.ts",
+    ],
+    deps = [
+        ":src__lib__content__errors",
+    ],
+)
+
+js_library(
+    name = "src__lib__content__schema",
+    srcs = [
+        "src/lib/content/schema.ts",
+    ],
+    deps = [
+        ":node_modules/zod",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__slug",
+        ":src__lib__content__url",
+    ],
+)
+
+js_library(
+    name = "src__lib__content__stable-json",
+    srcs = [
+        "src/lib/content/stable-json.ts",
+    ],
+    deps = [
+    ],
+)
+
+js_library(
+    name = "src__lib__content__hash",
+    srcs = [
+        "src/lib/content/hash.ts",
+    ],
+    deps = [
+        ":src__lib__content__schema",
+        ":src__lib__content__stable-json",
+    ],
+)
+
+js_library(
+    name = "src__lib__content__publication-state",
+    srcs = [
+        "src/lib/content/publication-state.ts",
+    ],
+    deps = [
+        ":node_modules/zod",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__schema",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+    ],
+)
+
+js_library(
+    name = "src__lib__content__heading",
+    srcs = [
+        "src/lib/content/heading.ts",
+    ],
+    deps = [
+        ":src__lib__content__schema",
+    ],
+)
+
+js_library(
+    name = "src__lib__content__translations",
+    srcs = [
+        "src/lib/content/translations.ts",
+    ],
+    deps = [
+        ":src__lib__content__errors",
+        ":src__lib__content__schema",
+    ],
+)
+
+js_library(
+    name = "src__lib__content__validate",
+    srcs = [
+        "src/lib/content/validate.ts",
+    ],
+    deps = [
+        ":src__lib__content__date",
+        ":src__lib__content__errors",
+        ":src__lib__content__heading",
+        ":src__lib__content__schema",
+        ":src__lib__content__translations",
+    ],
+)
+
+js_library(
+    name = "src__lib__content__reader",
+    srcs = [
+        "src/lib/content/reader.ts",
+    ],
+    deps = [
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__schema",
+        ":src__lib__content__validate",
+    ],
+)
+
+js_library(
+    name = "src__lib__content__registry",
+    srcs = [
+        "src/lib/content/registry.ts",
+    ],
+    deps = [
+        ":src__lib__content__errors",
+        ":src__lib__content__schema",
+        ":src__lib__content__url",
+    ],
+)
+
+js_library(
+    name = "content__site_config",
+    srcs = [
+        "content/site.config.ts",
+    ],
+    deps = [
+    ],
+)
+
+js_library(
+    name = "src__lib__content__site-data",
+    srcs = [
+        "src/lib/content/site-data.ts",
+    ],
+    deps = [
+        ":content__site_config",
+        ":src__lib__content__schema",
+    ],
+)
+
+js_library(
+    name = "src__lib__content__index",
+    srcs = [
+        "src/lib/content/index.ts",
+    ],
+    deps = [
+        ":src__lib__content__date",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__publication-state",
+        ":src__lib__content__reader",
+        ":src__lib__content__registry",
+        ":src__lib__content__schema",
+        ":src__lib__content__site-data",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__translations",
+        ":src__lib__content__url",
+        ":src__lib__content__validate",
+    ],
+)
+
+js_library(
+    name = "src__app___build-identity",
+    srcs = [
+        "src/app/_build-identity.ts",
+    ],
+    deps = [
+        ":src__lib__content__index",
+    ],
+)
+
+js_library(
+    name = "src__app___site-data",
+    srcs = [
+        "src/app/_site-data.ts",
+    ],
+    deps = [
+        ":node_modules/react",
+        ":src__lib__content__index",
+    ],
+)
+
+js_library(
+    name = "src__components__ExpandableArticleImage",
+    srcs = [
+        "src/components/ExpandableArticleImage.tsx",
+        "src/styles/article.module.css",
+    ],
+    deps = [
+        ":node_modules/next",
+        ":node_modules/photoswipe",
+        ":node_modules/react-photoswipe-gallery",
+    ],
+)
+
+js_library(
+    name = "src__lib__content__video-embed",
+    srcs = [
+        "src/lib/content/video-embed.ts",
+    ],
+    deps = [
+    ],
+)
+
+js_library(
+    name = "src__components__ArticleToc",
+    srcs = [
+        "src/components/ArticleToc.tsx",
+        "src/styles/site.module.css",
+    ],
+    deps = [
+        ":src__lib__content__index",
+    ],
+)
+
+js_library(
+    name = "src__components__ArticleBody",
+    srcs = [
+        "src/components/ArticleBody.tsx",
+        "src/styles/article.module.css",
+    ],
+    deps = [
+        ":node_modules/katex",
+        ":node_modules/react",
+        ":node_modules/shiki",
+        ":src__components__ArticleToc",
+        ":src__components__ExpandableArticleImage",
+        ":src__lib__content__equation",
+        ":src__lib__content__index",
+        ":src__lib__content__video-embed",
+    ],
+)
+
+js_library(
+    name = "src__components__ArticleLanguages",
+    srcs = [
+        "src/components/ArticleLanguages.tsx",
+        "src/styles/site.module.css",
+    ],
+    deps = [
+        ":node_modules/next",
+        ":src__lib__content__index",
+    ],
+)
+
+js_library(
+    name = "src__components__BlogList",
+    srcs = [
+        "src/components/BlogList.tsx",
+        "src/styles/site.module.css",
+    ],
+    deps = [
+        ":node_modules/next",
+        ":src__components__ArticleLanguages",
+        ":src__lib__content__index",
+    ],
+)
+
+js_library(
+    name = "src__components__JsonLd",
+    srcs = [
+        "src/components/JsonLd.tsx",
+    ],
+    deps = [
+    ],
+)
+
+js_library(
+    name = "src__components__SiteHeader",
+    srcs = [
+        "src/components/SiteHeader.tsx",
+        "src/styles/site.module.css",
+    ],
+    deps = [
+        ":node_modules/next",
+    ],
+)
+
+js_library(
+    name = "src__components__PageShell",
+    srcs = [
+        "src/components/PageShell.tsx",
+        "src/styles/site.module.css",
+    ],
+    deps = [
+        ":node_modules/react",
+        ":src__app___site-data",
+        ":src__components__SiteHeader",
+    ],
+)
+
+js_library(
+    name = "src__lib__metadata",
+    srcs = [
+        "src/lib/metadata.ts",
+    ],
+    deps = [
+        ":node_modules/next",
+        ":src__lib__content__index",
+    ],
+)
+
+js_library(
+    name = "src__app__blog__[slug]__page",
+    srcs = [
+        "src/app/blog/[slug]/page.tsx",
+        "src/styles/site.module.css",
+    ],
+    deps = [
+        ":node_modules/next",
+        ":src__app___site-data",
+        ":src__components__ArticleBody",
+        ":src__components__ArticleLanguages",
+        ":src__components__ArticleToc",
+        ":src__components__BlogList",
+        ":src__components__JsonLd",
+        ":src__components__PageShell",
+        ":src__lib__content__index",
+        ":src__lib__metadata",
+    ],
+)
+
+js_library(
+    name = "src__app__blog__page",
+    srcs = [
+        "src/app/blog/page.tsx",
+        "src/styles/site.module.css",
+    ],
+    deps = [
+        ":node_modules/next",
+        ":src__app___site-data",
+        ":src__components__BlogList",
+        ":src__components__PageShell",
+        ":src__lib__metadata",
+    ],
+)
+
+js_library(
+    name = "src__app__build-info_json__route",
+    srcs = [
+        "src/app/build-info.json/route.ts",
+    ],
+    deps = [
+        ":src__app___build-identity",
+        ":src__app___site-data",
+    ],
+)
+
+js_library(
+    name = "src__app__feed_xml__route",
+    srcs = [
+        "src/app/feed.xml/route.ts",
+    ],
+    deps = [
+        ":src__app___site-data",
+    ],
+)
+
+js_library(
+    name = "src__app__layout",
+    srcs = [
+        "src/app/layout.tsx",
+        "src/styles/globals.css",
+    ],
+    deps = [
+        ":node_modules/katex",
+        ":node_modules/next",
+        ":node_modules/photoswipe",
+        ":node_modules/react",
+        ":src__app___site-data",
+    ],
+)
+
+js_library(
+    name = "src__app__not-found",
+    srcs = [
+        "src/app/not-found.tsx",
+        "src/styles/site.module.css",
+    ],
+    deps = [
+        ":node_modules/next",
+        ":src__components__PageShell",
+    ],
+)
+
+js_library(
+    name = "src__components__ProfileIntro",
+    srcs = [
+        "src/components/ProfileIntro.tsx",
+        "src/styles/site.module.css",
+    ],
+    deps = [
+        ":node_modules/next",
+        ":src__lib__content__index",
+    ],
+)
+
+js_library(
+    name = "src__components__PublicationList",
+    srcs = [
+        "src/components/PublicationList.tsx",
+        "src/styles/site.module.css",
+    ],
+    deps = [
+        ":src__lib__content__index",
+    ],
+)
+
+js_library(
+    name = "src__app__page",
+    srcs = [
+        "src/app/page.tsx",
+        "src/styles/site.module.css",
+    ],
+    deps = [
+        ":node_modules/next",
+        ":src__app___site-data",
+        ":src__components__BlogList",
+        ":src__components__JsonLd",
+        ":src__components__PageShell",
+        ":src__components__ProfileIntro",
+        ":src__components__PublicationList",
+        ":src__lib__metadata",
+    ],
+)
+
+js_library(
+    name = "src__app__privacy__mailsort__page",
+    srcs = [
+        "src/app/privacy/mailsort/page.tsx",
+        "src/styles/article.module.css",
+        "src/styles/site.module.css",
+    ],
+    deps = [
+        ":node_modules/next",
+        ":src__app___site-data",
+        ":src__components__PageShell",
+        ":src__lib__metadata",
+    ],
+)
+
+js_library(
+    name = "src__app__publication-state_json__route",
+    srcs = [
+        "src/app/publication-state.json/route.ts",
+    ],
+    deps = [
+        ":src__app___build-identity",
+        ":src__app___site-data",
+        ":src__lib__content__index",
+    ],
+)
+
+js_library(
+    name = "src__app__publications__page",
+    srcs = [
+        "src/app/publications/page.tsx",
+        "src/styles/site.module.css",
+    ],
+    deps = [
+        ":node_modules/next",
+        ":src__app___site-data",
+        ":src__components__PageShell",
+        ":src__components__PublicationList",
+        ":src__lib__metadata",
+    ],
+)
+
+js_library(
+    name = "src__app__robots",
+    srcs = [
+        "src/app/robots.ts",
+    ],
+    deps = [
+        ":node_modules/next",
+        ":src__app___site-data",
+    ],
+)
+
+js_library(
+    name = "src__app__sitemap",
+    srcs = [
+        "src/app/sitemap.ts",
+    ],
+    deps = [
+        ":node_modules/next",
+        ":src__app___site-data",
+        ":src__lib__metadata",
+    ],
+)
+
+js_library(
+    name = "src__lib__images__config",
+    srcs = [
+        "src/lib/images/config.ts",
+    ],
+    deps = [
+    ],
+)
+
+js_library(
+    name = "src__lib__images__loader",
+    srcs = [
+        ".generated/images.json",
+        "src/lib/images/loader.ts",
+    ],
+    deps = [
+        ":src__lib__images__config",
+    ],
+)
+
+js_library(
+    name = "scripts__images__prepare",
+    srcs = [
+        "scripts/images/prepare.ts",
+    ],
+    deps = [
+        ":node_modules/sharp",
+        ":src__lib__content__hash",
+        ":src__lib__content__reader",
+        ":src__lib__content__schema",
+        ":src__lib__content__site-data",
+        ":src__lib__images__config",
+    ],
+)
+
+js_library(
+    name = "scripts__content__args",
+    srcs = [
+        "scripts/content/args.ts",
+    ],
+    deps = [
+        ":src__lib__content__errors",
+    ],
+)
+
+js_library(
+    name = "scripts__content__types",
+    srcs = [
+        "scripts/content/types.ts",
+    ],
+    deps = [
+        ":node_modules/zod",
+        ":src__lib__content__schema",
+    ],
+)
+
+js_library(
+    name = "scripts__content__mode",
+    srcs = [
+        "scripts/content/mode.ts",
+    ],
+    deps = [
+        ":scripts__content__types",
+        ":src__lib__content__errors",
+        ":src__lib__content__schema",
+    ],
+)
+
+js_library(
+    name = "scripts__content__redirects",
+    srcs = [
+        "scripts/content/redirects.ts",
+    ],
+    deps = [
+        ":src__lib__content__errors",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__schema",
+    ],
+)
+
+js_library(
+    name = "scripts__content__adapters__empty",
+    srcs = [
+        "scripts/content/adapters/empty.ts",
+    ],
+    deps = [
+        ":scripts__content__types",
+    ],
+)
+
+js_library(
+    name = "scripts__content__adapters__fixture",
+    srcs = [
+        "scripts/content/adapters/fixture.ts",
+    ],
+    deps = [
+        ":node_modules/sharp",
+        ":scripts__content__types",
+        ":src__lib__content__date",
+        ":src__lib__content__hash",
+        ":src__lib__content__schema",
+    ],
+)
+
+js_library(
+    name = "scripts__content__notion__types",
+    srcs = [
+        "scripts/content/notion/types.ts",
+    ],
+    deps = [
+        ":scripts__content__types",
+    ],
+)
+
+js_library(
+    name = "scripts__content__notion__media",
+    srcs = [
+        "scripts/content/notion/media.ts",
+    ],
+    deps = [
+        ":node_modules/sharp",
+        ":scripts__content__notion__types",
+        ":scripts__content__types",
+        ":src__lib__content__errors",
+    ],
+)
+
+js_library(
+    name = "scripts__content__notion__convert",
+    srcs = [
+        "scripts/content/notion/convert.ts",
+    ],
+    deps = [
+        ":node_modules/zod",
+        ":scripts__content__notion__media",
+        ":scripts__content__notion__types",
+        ":scripts__content__types",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__heading",
+        ":src__lib__content__schema",
+        ":src__lib__content__url",
+    ],
+)
+
+js_library(
+    name = "scripts__content__notion__pagination",
+    srcs = [
+        "scripts/content/notion/pagination.ts",
+    ],
+    deps = [
+        ":scripts__content__notion__types",
+        ":src__lib__content__errors",
+    ],
+)
+
+js_library(
+    name = "scripts__content__notion__withdrawal",
+    srcs = [
+        "scripts/content/notion/withdrawal.ts",
+    ],
+    deps = [
+        ":scripts__content__notion__pagination",
+        ":scripts__content__notion__types",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+    ],
+)
+
+js_library(
+    name = "scripts__content__adapters__notion",
+    srcs = [
+        "scripts/content/adapters/notion.ts",
+    ],
+    deps = [
+        ":node_modules/@notionhq/client",
+        ":scripts__content__notion__convert",
+        ":scripts__content__notion__media",
+        ":scripts__content__notion__pagination",
+        ":scripts__content__notion__types",
+        ":scripts__content__notion__withdrawal",
+        ":scripts__content__types",
+        ":src__lib__content__date",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__schema",
+        ":src__lib__content__slug",
+        ":src__lib__content__translations",
+    ],
+)
+
+js_library(
+    name = "scripts__content__prepare",
+    srcs = [
+        "scripts/content/prepare.ts",
+    ],
+    deps = [
+        ":scripts__content__adapters__empty",
+        ":scripts__content__adapters__fixture",
+        ":scripts__content__adapters__notion",
+        ":scripts__content__args",
+        ":scripts__content__mode",
+        ":scripts__content__redirects",
+        ":scripts__content__types",
+        ":scripts__images__prepare",
+        ":src__lib__content__date",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__registry",
+        ":src__lib__content__schema",
+        ":src__lib__content__site-data",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__validate",
+    ],
+)
+
+js_library(
+    name = "scripts__bazel__prepare-empty",
+    srcs = [
+        "scripts/bazel/prepare-empty.ts",
+    ],
+    deps = [
+        ":scripts__content__prepare",
+    ],
+)
+
+js_library(
+    name = "scripts__content__validate",
+    srcs = [
+        "scripts/content/validate.ts",
+    ],
+    deps = [
+        ":scripts__content__args",
+        ":scripts__content__mode",
+        ":scripts__content__types",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__reader",
+        ":src__lib__content__schema",
+        ":src__lib__content__site-data",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__validate",
+    ],
+)
+
+js_library(
+    name = "scripts__export__site-files",
+    srcs = [
+        "scripts/export/site-files.ts",
+    ],
+    deps = [
+        ":src__lib__content__redirect-path",
+    ],
+)
+
+js_library(
+    name = "scripts__export__finalize",
+    srcs = [
+        "scripts/export/finalize.ts",
+    ],
+    deps = [
+        ":scripts__export__site-files",
+        ":src__lib__content__reader",
+        ":src__lib__content__slug",
+    ],
+)
+
+js_library(
+    name = "scripts__release__payload",
+    srcs = [
+        "scripts/release/payload.ts",
+    ],
+    deps = [
+        ":node_modules/zod",
+        ":src__lib__content__publication-state",
+        ":src__lib__content__schema",
+    ],
+)
+
+js_library(
+    name = "scripts__release__worker-config",
+    srcs = [
+        "scripts/release/worker-config.ts",
+    ],
+    deps = [
+        ":node_modules/smol-toml",
+    ],
+)
+
+js_library(
+    name = "scripts__release__cloudflare",
+    srcs = [
+        "scripts/release/cloudflare.ts",
+    ],
+    deps = [
+        ":scripts__release__payload",
+        ":scripts__release__worker-config",
+    ],
+)
+
+js_library(
+    name = "scripts__release__content-sync",
+    srcs = [
+        "scripts/release/content-sync.ts",
+        "scripts/release/github.ts",
+    ],
+    deps = [
+        ":node_modules/zod",
+        ":scripts__release__payload",
+        ":src__lib__content__publication-state",
+    ],
+)
+
+js_library(
+    name = "scripts__release__green-commit",
+    srcs = [
+        "scripts/release/green-commit.ts",
+    ],
+    deps = [
+    ],
+)
+
+js_library(
+    name = "scripts__release__steps",
+    srcs = [
+        "scripts/release/steps.ts",
+    ],
+    deps = [
+        ":scripts__release__cloudflare",
+        ":scripts__release__content-sync",
+        ":scripts__release__payload",
+        ":scripts__release__worker-config",
+        ":src__lib__content__registry",
+        ":src__lib__content__schema",
+    ],
+)
+
+js_library(
+    name = "scripts__release__verify",
+    srcs = [
+        "scripts/release/verify.ts",
+    ],
+    deps = [
+        ":scripts__release__payload",
+        ":src__lib__content__publication-state",
+    ],
+)
+
+js_library(
+    name = "scripts__release__cli",
+    srcs = [
+        "scripts/release/cli.ts",
+    ],
+    deps = [
+        ":content__site_config",
+        ":scripts__release__cloudflare",
+        ":scripts__release__content-sync",
+        ":scripts__release__green-commit",
+        ":scripts__release__payload",
+        ":scripts__release__steps",
+        ":scripts__release__verify",
+        ":scripts__release__worker-config",
+        ":src__lib__content__publication-state",
+        ":src__lib__content__reader",
+        ":src__lib__content__schema",
+    ],
+)
+
+proto_package(
+    name = "tests__unit__article-body_test_proto",
+    deps = [
+        ":content__site_config",
+        ":node_modules/katex",
+        ":node_modules/next",
+        ":node_modules/photoswipe",
+        ":node_modules/react",
+        ":node_modules/react-dom",
+        ":node_modules/react-photoswipe-gallery",
+        ":node_modules/shiki",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":src__components__ArticleBody",
+        ":src__components__ArticleToc",
+        ":src__components__ExpandableArticleImage",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__heading",
+        ":src__lib__content__index",
+        ":src__lib__content__publication-state",
+        ":src__lib__content__reader",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__registry",
+        ":src__lib__content__schema",
+        ":src__lib__content__site-data",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__translations",
+        ":src__lib__content__url",
+        ":src__lib__content__validate",
+        ":src__lib__content__video-embed",
+    ],
+)
+
+workspace_link(
+    name = "tests__unit__article-body_test_proto_link",
+    src = ":tests__unit__article-body_test_proto",
+)
+
+vitest_test(
+    name = "tests__unit__article-body_test",
+    data = [
+        "package.json",
+        "src/styles/article.module.css",
+        "src/styles/site.module.css",
+        "vitest.config.ts",
+        ":content__site_config",
+        ":content_data",
+        ":node_modules/katex",
+        ":node_modules/next",
+        ":node_modules/photoswipe",
+        ":node_modules/react",
+        ":node_modules/react-dom",
+        ":node_modules/react-photoswipe-gallery",
+        ":node_modules/shiki",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":src__components__ArticleBody",
+        ":src__components__ArticleToc",
+        ":src__components__ExpandableArticleImage",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__heading",
+        ":src__lib__content__index",
+        ":src__lib__content__publication-state",
+        ":src__lib__content__reader",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__registry",
+        ":src__lib__content__schema",
+        ":src__lib__content__site-data",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__translations",
+        ":src__lib__content__url",
+        ":src__lib__content__validate",
+        ":src__lib__content__video-embed",
+        ":tests__unit__article-body_test_proto_link",
+        "//:node_modules/react",
+        "//:node_modules/react-dom",
+    ],
+    patch_node_fs = False,
+    runner = vitest.vitest_test,
+    tests = ["tests/unit/article-body.test.ts"],
+)
+
+proto_package(
+    name = "tests__unit__blog-translations-ui_test_proto",
+    deps = [
+        ":content__site_config",
+        ":node_modules/katex",
+        ":node_modules/next",
+        ":node_modules/react",
+        ":node_modules/react-dom",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":src__components__ArticleLanguages",
+        ":src__components__BlogList",
+        ":src__components__PublicationList",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__heading",
+        ":src__lib__content__index",
+        ":src__lib__content__publication-state",
+        ":src__lib__content__reader",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__registry",
+        ":src__lib__content__schema",
+        ":src__lib__content__site-data",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__translations",
+        ":src__lib__content__url",
+        ":src__lib__content__validate",
+        ":src__lib__metadata",
+    ],
+)
+
+workspace_link(
+    name = "tests__unit__blog-translations-ui_test_proto_link",
+    src = ":tests__unit__blog-translations-ui_test_proto",
+)
+
+vitest_test(
+    name = "tests__unit__blog-translations-ui_test",
+    data = [
+        "package.json",
+        "src/styles/site.module.css",
+        "vitest.config.ts",
+        ":content__site_config",
+        ":content_data",
+        ":node_modules/katex",
+        ":node_modules/next",
+        ":node_modules/react",
+        ":node_modules/react-dom",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":src__components__ArticleLanguages",
+        ":src__components__BlogList",
+        ":src__components__PublicationList",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__heading",
+        ":src__lib__content__index",
+        ":src__lib__content__publication-state",
+        ":src__lib__content__reader",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__registry",
+        ":src__lib__content__schema",
+        ":src__lib__content__site-data",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__translations",
+        ":src__lib__content__url",
+        ":src__lib__content__validate",
+        ":src__lib__metadata",
+        ":tests__unit__blog-translations-ui_test_proto_link",
+        "//:node_modules/react",
+        "//:node_modules/react-dom",
+    ],
+    patch_node_fs = False,
+    runner = vitest.vitest_test,
+    tests = ["tests/unit/blog-translations-ui.test.ts"],
+)
+
+proto_package(
+    name = "tests__unit__content-block-validation_test_proto",
+    deps = [
+        ":node_modules/katex",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__heading",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__schema",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__translations",
+        ":src__lib__content__url",
+        ":src__lib__content__validate",
+    ],
+)
+
+workspace_link(
+    name = "tests__unit__content-block-validation_test_proto_link",
+    src = ":tests__unit__content-block-validation_test_proto",
+)
+
+vitest_test(
+    name = "tests__unit__content-block-validation_test",
+    data = [
+        "package.json",
+        "vitest.config.ts",
+        ":content_data",
+        ":node_modules/katex",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__heading",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__schema",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__translations",
+        ":src__lib__content__url",
+        ":src__lib__content__validate",
+        ":tests__unit__content-block-validation_test_proto_link",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["tests/unit/content-block-validation.test.ts"],
+)
+
+proto_package(
+    name = "tests__unit__content-media-transaction_test_proto",
+    deps = [
+        ":content__site_config",
+        ":node_modules/@notionhq/client",
+        ":node_modules/katex",
+        ":node_modules/sharp",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":scripts__content__adapters__empty",
+        ":scripts__content__adapters__fixture",
+        ":scripts__content__adapters__notion",
+        ":scripts__content__args",
+        ":scripts__content__mode",
+        ":scripts__content__notion__convert",
+        ":scripts__content__notion__media",
+        ":scripts__content__notion__pagination",
+        ":scripts__content__notion__types",
+        ":scripts__content__notion__withdrawal",
+        ":scripts__content__prepare",
+        ":scripts__content__redirects",
+        ":scripts__content__types",
+        ":scripts__content__validate",
+        ":scripts__images__prepare",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__heading",
+        ":src__lib__content__reader",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__registry",
+        ":src__lib__content__schema",
+        ":src__lib__content__site-data",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__translations",
+        ":src__lib__content__url",
+        ":src__lib__content__validate",
+        ":src__lib__images__config",
+    ],
+)
+
+workspace_link(
+    name = "tests__unit__content-media-transaction_test_proto_link",
+    src = ":tests__unit__content-media-transaction_test_proto",
+)
+
+vitest_test(
+    name = "tests__unit__content-media-transaction_test",
+    data = [
+        "package.json",
+        "vitest.config.ts",
+        ":content__site_config",
+        ":content_data",
+        ":node_modules/@notionhq/client",
+        ":node_modules/katex",
+        ":node_modules/sharp",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":scripts__content__adapters__empty",
+        ":scripts__content__adapters__fixture",
+        ":scripts__content__adapters__notion",
+        ":scripts__content__args",
+        ":scripts__content__mode",
+        ":scripts__content__notion__convert",
+        ":scripts__content__notion__media",
+        ":scripts__content__notion__pagination",
+        ":scripts__content__notion__types",
+        ":scripts__content__notion__withdrawal",
+        ":scripts__content__prepare",
+        ":scripts__content__redirects",
+        ":scripts__content__types",
+        ":scripts__content__validate",
+        ":scripts__images__prepare",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__heading",
+        ":src__lib__content__reader",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__registry",
+        ":src__lib__content__schema",
+        ":src__lib__content__site-data",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__translations",
+        ":src__lib__content__url",
+        ":src__lib__content__validate",
+        ":src__lib__images__config",
+        ":tests__unit__content-media-transaction_test_proto_link",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["tests/unit/content-media-transaction.test.ts"],
+)
+
+proto_package(
+    name = "tests__unit__content-mode_test_proto",
+    deps = [
+        ":node_modules/katex",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":scripts__content__mode",
+        ":scripts__content__types",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__schema",
+        ":src__lib__content__slug",
+        ":src__lib__content__url",
+    ],
+)
+
+workspace_link(
+    name = "tests__unit__content-mode_test_proto_link",
+    src = ":tests__unit__content-mode_test_proto",
+)
+
+vitest_test(
+    name = "tests__unit__content-mode_test",
+    data = [
+        "package.json",
+        "vitest.config.ts",
+        ":content_data",
+        ":node_modules/katex",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":scripts__content__mode",
+        ":scripts__content__types",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__schema",
+        ":src__lib__content__slug",
+        ":src__lib__content__url",
+        ":tests__unit__content-mode_test_proto_link",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["tests/unit/content-mode.test.ts"],
+)
+
+proto_package(
+    name = "tests__unit__content-prepare_test_proto",
+    deps = [
+        ":content__site_config",
+        ":node_modules/@notionhq/client",
+        ":node_modules/katex",
+        ":node_modules/sharp",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":scripts__content__adapters__empty",
+        ":scripts__content__adapters__fixture",
+        ":scripts__content__adapters__notion",
+        ":scripts__content__args",
+        ":scripts__content__mode",
+        ":scripts__content__notion__convert",
+        ":scripts__content__notion__media",
+        ":scripts__content__notion__pagination",
+        ":scripts__content__notion__types",
+        ":scripts__content__notion__withdrawal",
+        ":scripts__content__prepare",
+        ":scripts__content__redirects",
+        ":scripts__content__types",
+        ":scripts__content__validate",
+        ":scripts__images__prepare",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__heading",
+        ":src__lib__content__reader",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__registry",
+        ":src__lib__content__schema",
+        ":src__lib__content__site-data",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__translations",
+        ":src__lib__content__url",
+        ":src__lib__content__validate",
+        ":src__lib__images__config",
+    ],
+)
+
+workspace_link(
+    name = "tests__unit__content-prepare_test_proto_link",
+    src = ":tests__unit__content-prepare_test_proto",
+)
+
+vitest_test(
+    name = "tests__unit__content-prepare_test",
+    data = [
+        "package.json",
+        "vitest.config.ts",
+        ":content__site_config",
+        ":content_data",
+        ":node_modules/@notionhq/client",
+        ":node_modules/katex",
+        ":node_modules/sharp",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":scripts__content__adapters__empty",
+        ":scripts__content__adapters__fixture",
+        ":scripts__content__adapters__notion",
+        ":scripts__content__args",
+        ":scripts__content__mode",
+        ":scripts__content__notion__convert",
+        ":scripts__content__notion__media",
+        ":scripts__content__notion__pagination",
+        ":scripts__content__notion__types",
+        ":scripts__content__notion__withdrawal",
+        ":scripts__content__prepare",
+        ":scripts__content__redirects",
+        ":scripts__content__types",
+        ":scripts__content__validate",
+        ":scripts__images__prepare",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__heading",
+        ":src__lib__content__reader",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__registry",
+        ":src__lib__content__schema",
+        ":src__lib__content__site-data",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__translations",
+        ":src__lib__content__url",
+        ":src__lib__content__validate",
+        ":src__lib__images__config",
+        ":tests__unit__content-prepare_test_proto_link",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["tests/unit/content-prepare.test.ts"],
+)
+
+proto_package(
+    name = "tests__unit__content-primitives_test_proto",
+    deps = [
+        ":node_modules/katex",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__heading",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__schema",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__translations",
+        ":src__lib__content__url",
+        ":src__lib__content__validate",
+    ],
+)
+
+workspace_link(
+    name = "tests__unit__content-primitives_test_proto_link",
+    src = ":tests__unit__content-primitives_test_proto",
+)
+
+vitest_test(
+    name = "tests__unit__content-primitives_test",
+    data = [
+        "package.json",
+        "vitest.config.ts",
+        ":content_data",
+        ":node_modules/katex",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__heading",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__schema",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__translations",
+        ":src__lib__content__url",
+        ":src__lib__content__validate",
+        ":tests__unit__content-primitives_test_proto_link",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["tests/unit/content-primitives.test.ts"],
+)
+
+proto_package(
+    name = "tests__unit__content-redirects_test_proto",
+    deps = [
+        ":node_modules/katex",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":scripts__content__redirects",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__schema",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__url",
+    ],
+)
+
+workspace_link(
+    name = "tests__unit__content-redirects_test_proto_link",
+    src = ":tests__unit__content-redirects_test_proto",
+)
+
+vitest_test(
+    name = "tests__unit__content-redirects_test",
+    data = [
+        "package.json",
+        "vitest.config.ts",
+        ":content_data",
+        ":node_modules/katex",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":scripts__content__redirects",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__schema",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__url",
+        ":tests__unit__content-redirects_test_proto_link",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["tests/unit/content-redirects.test.ts"],
+)
+
+proto_package(
+    name = "tests__unit__content-registry-hash_test_proto",
+    deps = [
+        ":node_modules/katex",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__registry",
+        ":src__lib__content__schema",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__url",
+    ],
+)
+
+workspace_link(
+    name = "tests__unit__content-registry-hash_test_proto_link",
+    src = ":tests__unit__content-registry-hash_test_proto",
+)
+
+vitest_test(
+    name = "tests__unit__content-registry-hash_test",
+    data = [
+        "package.json",
+        "vitest.config.ts",
+        ":content_data",
+        ":node_modules/katex",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__registry",
+        ":src__lib__content__schema",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__url",
+        ":tests__unit__content-registry-hash_test_proto_link",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["tests/unit/content-registry-hash.test.ts"],
+)
+
+proto_package(
+    name = "tests__unit__content-translations_test_proto",
+    deps = [
+        ":node_modules/@notionhq/client",
+        ":node_modules/katex",
+        ":node_modules/sharp",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":scripts__content__adapters__notion",
+        ":scripts__content__notion__convert",
+        ":scripts__content__notion__media",
+        ":scripts__content__notion__pagination",
+        ":scripts__content__notion__types",
+        ":scripts__content__notion__withdrawal",
+        ":scripts__content__types",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__heading",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__registry",
+        ":src__lib__content__schema",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__translations",
+        ":src__lib__content__url",
+        ":src__lib__content__validate",
+    ],
+)
+
+workspace_link(
+    name = "tests__unit__content-translations_test_proto_link",
+    src = ":tests__unit__content-translations_test_proto",
+)
+
+vitest_test(
+    name = "tests__unit__content-translations_test",
+    data = [
+        "package.json",
+        "vitest.config.ts",
+        ":content_data",
+        ":node_modules/@notionhq/client",
+        ":node_modules/katex",
+        ":node_modules/sharp",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":scripts__content__adapters__notion",
+        ":scripts__content__notion__convert",
+        ":scripts__content__notion__media",
+        ":scripts__content__notion__pagination",
+        ":scripts__content__notion__types",
+        ":scripts__content__notion__withdrawal",
+        ":scripts__content__types",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__heading",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__registry",
+        ":src__lib__content__schema",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__translations",
+        ":src__lib__content__url",
+        ":src__lib__content__validate",
+        ":tests__unit__content-translations_test_proto_link",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["tests/unit/content-translations.test.ts"],
+)
+
+proto_package(
+    name = "tests__unit__deployment-contract_test_proto",
+    deps = [
+        ":node_modules/vitest",
+    ],
+)
+
+workspace_link(
+    name = "tests__unit__deployment-contract_test_proto_link",
+    src = ":tests__unit__deployment-contract_test_proto",
+)
+
+vitest_test(
+    name = "tests__unit__deployment-contract_test",
+    data = [
+        "package.json",
+        "tests/support/deployment-contract.ts",
+        "vitest.config.ts",
+        ":content_data",
+        ":node_modules/vitest",
+        ":tests__unit__deployment-contract_test_proto_link",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["tests/unit/deployment-contract.test.ts"],
+)
+
+proto_package(
+    name = "tests__unit__metadata_test_proto",
+    deps = [
+        ":content__site_config",
+        ":node_modules/katex",
+        ":node_modules/next",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__heading",
+        ":src__lib__content__index",
+        ":src__lib__content__publication-state",
+        ":src__lib__content__reader",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__registry",
+        ":src__lib__content__schema",
+        ":src__lib__content__site-data",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__translations",
+        ":src__lib__content__url",
+        ":src__lib__content__validate",
+        ":src__lib__metadata",
+    ],
+)
+
+workspace_link(
+    name = "tests__unit__metadata_test_proto_link",
+    src = ":tests__unit__metadata_test_proto",
+)
+
+vitest_test(
+    name = "tests__unit__metadata_test",
+    data = [
+        "package.json",
+        "vitest.config.ts",
+        ":content__site_config",
+        ":content_data",
+        ":node_modules/katex",
+        ":node_modules/next",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__heading",
+        ":src__lib__content__index",
+        ":src__lib__content__publication-state",
+        ":src__lib__content__reader",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__registry",
+        ":src__lib__content__schema",
+        ":src__lib__content__site-data",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__translations",
+        ":src__lib__content__url",
+        ":src__lib__content__validate",
+        ":src__lib__metadata",
+        ":tests__unit__metadata_test_proto_link",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["tests/unit/metadata.test.ts"],
+)
+
+proto_package(
+    name = "tests__unit__notion-convert_test_proto",
+    deps = [
+        ":node_modules/@notionhq/client",
+        ":node_modules/katex",
+        ":node_modules/sharp",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":scripts__content__adapters__notion",
+        ":scripts__content__notion__convert",
+        ":scripts__content__notion__media",
+        ":scripts__content__notion__pagination",
+        ":scripts__content__notion__types",
+        ":scripts__content__notion__withdrawal",
+        ":scripts__content__types",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__heading",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__schema",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__translations",
+        ":src__lib__content__url",
+    ],
+)
+
+workspace_link(
+    name = "tests__unit__notion-convert_test_proto_link",
+    src = ":tests__unit__notion-convert_test_proto",
+)
+
+vitest_test(
+    name = "tests__unit__notion-convert_test",
+    data = [
+        "package.json",
+        "tests/fixtures/notion-blocks.json",
+        "tests/fixtures/notion-pages.json",
+        "vitest.config.ts",
+        ":content_data",
+        ":node_modules/@notionhq/client",
+        ":node_modules/katex",
+        ":node_modules/sharp",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":scripts__content__adapters__notion",
+        ":scripts__content__notion__convert",
+        ":scripts__content__notion__media",
+        ":scripts__content__notion__pagination",
+        ":scripts__content__notion__types",
+        ":scripts__content__notion__withdrawal",
+        ":scripts__content__types",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__heading",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__schema",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__translations",
+        ":src__lib__content__url",
+        ":tests__unit__notion-convert_test_proto_link",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["tests/unit/notion-convert.test.ts"],
+)
+
+proto_package(
+    name = "tests__unit__notion-media_test_proto",
+    deps = [
+        ":node_modules/katex",
+        ":node_modules/sharp",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":scripts__content__notion__media",
+        ":scripts__content__notion__types",
+        ":scripts__content__types",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__schema",
+        ":src__lib__content__slug",
+        ":src__lib__content__url",
+    ],
+)
+
+workspace_link(
+    name = "tests__unit__notion-media_test_proto_link",
+    src = ":tests__unit__notion-media_test_proto",
+)
+
+vitest_test(
+    name = "tests__unit__notion-media_test",
+    data = [
+        "package.json",
+        "vitest.config.ts",
+        ":content_data",
+        ":node_modules/katex",
+        ":node_modules/sharp",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":scripts__content__notion__media",
+        ":scripts__content__notion__types",
+        ":scripts__content__types",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__schema",
+        ":src__lib__content__slug",
+        ":src__lib__content__url",
+        ":tests__unit__notion-media_test_proto_link",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["tests/unit/notion-media.test.ts"],
+)
+
+proto_package(
+    name = "tests__unit__notion-pagination_test_proto",
+    deps = [
+        ":node_modules/katex",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":scripts__content__notion__pagination",
+        ":scripts__content__notion__types",
+        ":scripts__content__types",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__schema",
+        ":src__lib__content__slug",
+        ":src__lib__content__url",
+    ],
+)
+
+workspace_link(
+    name = "tests__unit__notion-pagination_test_proto_link",
+    src = ":tests__unit__notion-pagination_test_proto",
+)
+
+vitest_test(
+    name = "tests__unit__notion-pagination_test",
+    data = [
+        "package.json",
+        "vitest.config.ts",
+        ":content_data",
+        ":node_modules/katex",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":scripts__content__notion__pagination",
+        ":scripts__content__notion__types",
+        ":scripts__content__types",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__schema",
+        ":src__lib__content__slug",
+        ":src__lib__content__url",
+        ":tests__unit__notion-pagination_test_proto_link",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["tests/unit/notion-pagination.test.ts"],
+)
+
+proto_package(
+    name = "tests__unit__notion-withdrawal_test_proto",
+    deps = [
+        ":content__site_config",
+        ":node_modules/@notionhq/client",
+        ":node_modules/katex",
+        ":node_modules/sharp",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":scripts__content__adapters__empty",
+        ":scripts__content__adapters__fixture",
+        ":scripts__content__adapters__notion",
+        ":scripts__content__args",
+        ":scripts__content__mode",
+        ":scripts__content__notion__convert",
+        ":scripts__content__notion__media",
+        ":scripts__content__notion__pagination",
+        ":scripts__content__notion__types",
+        ":scripts__content__notion__withdrawal",
+        ":scripts__content__prepare",
+        ":scripts__content__redirects",
+        ":scripts__content__types",
+        ":scripts__images__prepare",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__heading",
+        ":src__lib__content__reader",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__registry",
+        ":src__lib__content__schema",
+        ":src__lib__content__site-data",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__translations",
+        ":src__lib__content__url",
+        ":src__lib__content__validate",
+        ":src__lib__images__config",
+    ],
+)
+
+workspace_link(
+    name = "tests__unit__notion-withdrawal_test_proto_link",
+    src = ":tests__unit__notion-withdrawal_test_proto",
+)
+
+vitest_test(
+    name = "tests__unit__notion-withdrawal_test",
+    data = [
+        "package.json",
+        "vitest.config.ts",
+        ":content__site_config",
+        ":content_data",
+        ":node_modules/@notionhq/client",
+        ":node_modules/katex",
+        ":node_modules/sharp",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":scripts__content__adapters__empty",
+        ":scripts__content__adapters__fixture",
+        ":scripts__content__adapters__notion",
+        ":scripts__content__args",
+        ":scripts__content__mode",
+        ":scripts__content__notion__convert",
+        ":scripts__content__notion__media",
+        ":scripts__content__notion__pagination",
+        ":scripts__content__notion__types",
+        ":scripts__content__notion__withdrawal",
+        ":scripts__content__prepare",
+        ":scripts__content__redirects",
+        ":scripts__content__types",
+        ":scripts__images__prepare",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__heading",
+        ":src__lib__content__reader",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__registry",
+        ":src__lib__content__schema",
+        ":src__lib__content__site-data",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__translations",
+        ":src__lib__content__url",
+        ":src__lib__content__validate",
+        ":src__lib__images__config",
+        ":tests__unit__notion-withdrawal_test_proto_link",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["tests/unit/notion-withdrawal.test.ts"],
+)
+
+proto_package(
+    name = "tests__unit__playwright-config_test_proto",
+    deps = [
+        ":node_modules/@playwright/test",
+        ":node_modules/vitest",
+    ],
+)
+
+workspace_link(
+    name = "tests__unit__playwright-config_test_proto_link",
+    src = ":tests__unit__playwright-config_test_proto",
+)
+
+vitest_test(
+    name = "tests__unit__playwright-config_test",
+    data = [
+        "package.json",
+        "playwright.config.ts",
+        "vitest.config.ts",
+        ":content_data",
+        ":node_modules/@playwright/test",
+        ":node_modules/vitest",
+        ":tests__unit__playwright-config_test_proto_link",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["tests/unit/playwright-config.test.ts"],
+)
+
+proto_package(
+    name = "tests__unit__publication-schema_test_proto",
+    deps = [
+        ":node_modules/katex",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__schema",
+        ":src__lib__content__slug",
+        ":src__lib__content__url",
+    ],
+)
+
+workspace_link(
+    name = "tests__unit__publication-schema_test_proto_link",
+    src = ":tests__unit__publication-schema_test_proto",
+)
+
+vitest_test(
+    name = "tests__unit__publication-schema_test",
+    data = [
+        "package.json",
+        "vitest.config.ts",
+        ":content_data",
+        ":node_modules/katex",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__schema",
+        ":src__lib__content__slug",
+        ":src__lib__content__url",
+        ":tests__unit__publication-schema_test_proto_link",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["tests/unit/publication-schema.test.ts"],
+)
+
+proto_package(
+    name = "tests__unit__publication-state-route_test_proto",
+    deps = [
+        ":content__site_config",
+        ":node_modules/katex",
+        ":node_modules/react",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":src__app___build-identity",
+        ":src__app___site-data",
+        ":src__app__build-info_json__route",
+        ":src__app__publication-state_json__route",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__heading",
+        ":src__lib__content__index",
+        ":src__lib__content__publication-state",
+        ":src__lib__content__reader",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__registry",
+        ":src__lib__content__schema",
+        ":src__lib__content__site-data",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__translations",
+        ":src__lib__content__url",
+        ":src__lib__content__validate",
+    ],
+)
+
+workspace_link(
+    name = "tests__unit__publication-state-route_test_proto_link",
+    src = ":tests__unit__publication-state-route_test_proto",
+)
+
+vitest_test(
+    name = "tests__unit__publication-state-route_test",
+    data = [
+        "package.json",
+        "vitest.config.ts",
+        ":content__site_config",
+        ":content_data",
+        ":node_modules/katex",
+        ":node_modules/react",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":src__app___build-identity",
+        ":src__app___site-data",
+        ":src__app__build-info_json__route",
+        ":src__app__publication-state_json__route",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__heading",
+        ":src__lib__content__index",
+        ":src__lib__content__publication-state",
+        ":src__lib__content__reader",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__registry",
+        ":src__lib__content__schema",
+        ":src__lib__content__site-data",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__translations",
+        ":src__lib__content__url",
+        ":src__lib__content__validate",
+        ":tests__unit__publication-state-route_test_proto_link",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["tests/unit/publication-state-route.test.ts"],
+)
+
+proto_package(
+    name = "tests__unit__publication-state_test_proto",
+    deps = [
+        ":node_modules/katex",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__heading",
+        ":src__lib__content__publication-state",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__schema",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__translations",
+        ":src__lib__content__url",
+        ":src__lib__content__validate",
+    ],
+)
+
+workspace_link(
+    name = "tests__unit__publication-state_test_proto_link",
+    src = ":tests__unit__publication-state_test_proto",
+)
+
+vitest_test(
+    name = "tests__unit__publication-state_test",
+    data = [
+        "package.json",
+        "vitest.config.ts",
+        ":content_data",
+        ":node_modules/katex",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__heading",
+        ":src__lib__content__publication-state",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__schema",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__translations",
+        ":src__lib__content__url",
+        ":src__lib__content__validate",
+        ":tests__unit__publication-state_test_proto_link",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["tests/unit/publication-state.test.ts"],
+)
+
+proto_package(
+    name = "tests__unit__relay-sync_test_proto",
+    deps = [
+        ":node_modules/vitest",
+        "//proto/ops/v1:ts",
+        "//proto/ts:wire-json",
+        "//proto/website/sync/v1:ts",
+    ],
+)
+
+workspace_link(
+    name = "tests__unit__relay-sync_test_proto_link",
+    src = ":tests__unit__relay-sync_test_proto",
+)
+
+vitest_test(
+    name = "tests__unit__relay-sync_test",
+    data = [
+        "package.json",
+        "relay/src/env.ts",
+        "relay/src/github.ts",
+        "relay/src/request.ts",
+        "relay/src/status.ts",
+        "vitest.config.ts",
+        ":content_data",
+        ":node_modules/vitest",
+        ":tests__unit__relay-sync_test_proto_link",
+        "//proto/ops/v1:ts",
+        "//proto/ts:wire-json",
+        "//proto/website/sync/v1:ts",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["tests/unit/relay-sync.test.ts"],
+)
+
+proto_package(
+    name = "tests__unit__release-content-sync_test_proto",
+    deps = [
+        ":node_modules/katex",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":scripts__release__content-sync",
+        ":scripts__release__payload",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__publication-state",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__schema",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__url",
+    ],
+)
+
+workspace_link(
+    name = "tests__unit__release-content-sync_test_proto_link",
+    src = ":tests__unit__release-content-sync_test_proto",
+)
+
+vitest_test(
+    name = "tests__unit__release-content-sync_test",
+    data = [
+        "package.json",
+        "vitest.config.ts",
+        ":content_data",
+        ":node_modules/katex",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":scripts__release__content-sync",
+        ":scripts__release__payload",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__publication-state",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__schema",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__url",
+        ":tests__unit__release-content-sync_test_proto_link",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["tests/unit/release-content-sync.test.ts"],
+)
+
+proto_package(
+    name = "tests__unit__release-green-commit_test_proto",
+    deps = [
+        ":node_modules/vitest",
+        ":scripts__release__green-commit",
+    ],
+)
+
+workspace_link(
+    name = "tests__unit__release-green-commit_test_proto_link",
+    src = ":tests__unit__release-green-commit_test_proto",
+)
+
+vitest_test(
+    name = "tests__unit__release-green-commit_test",
+    data = [
+        "package.json",
+        "vitest.config.ts",
+        ":content_data",
+        ":node_modules/vitest",
+        ":scripts__release__green-commit",
+        ":tests__unit__release-green-commit_test_proto_link",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["tests/unit/release-green-commit.test.ts"],
+)
+
+proto_package(
+    name = "tests__unit__release-hostname-guard_test_proto",
+    deps = [
+        ":node_modules/katex",
+        ":node_modules/smol-toml",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":scripts__release__cloudflare",
+        ":scripts__release__payload",
+        ":scripts__release__worker-config",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__publication-state",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__schema",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__url",
+    ],
+)
+
+workspace_link(
+    name = "tests__unit__release-hostname-guard_test_proto_link",
+    src = ":tests__unit__release-hostname-guard_test_proto",
+)
+
+vitest_test(
+    name = "tests__unit__release-hostname-guard_test",
+    data = [
+        "package.json",
+        "vitest.config.ts",
+        ":content_data",
+        ":node_modules/katex",
+        ":node_modules/smol-toml",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":scripts__release__cloudflare",
+        ":scripts__release__payload",
+        ":scripts__release__worker-config",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__publication-state",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__schema",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__url",
+        ":tests__unit__release-hostname-guard_test_proto_link",
+        "//tools/cf-guard:cli",
+    ],
+    patch_node_fs = False,
+    runner = vitest.vitest_test,
+    tests = ["tests/unit/release-hostname-guard.test.ts"],
+)
+
+proto_package(
+    name = "tests__unit__release-steps_test_proto",
+    deps = [
+        ":node_modules/katex",
+        ":node_modules/smol-toml",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":scripts__release__cloudflare",
+        ":scripts__release__content-sync",
+        ":scripts__release__payload",
+        ":scripts__release__steps",
+        ":scripts__release__worker-config",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__publication-state",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__registry",
+        ":src__lib__content__schema",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__url",
+    ],
+)
+
+workspace_link(
+    name = "tests__unit__release-steps_test_proto_link",
+    src = ":tests__unit__release-steps_test_proto",
+)
+
+vitest_test(
+    name = "tests__unit__release-steps_test",
+    data = [
+        "package.json",
+        "vitest.config.ts",
+        ":content_data",
+        ":node_modules/katex",
+        ":node_modules/smol-toml",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":scripts__release__cloudflare",
+        ":scripts__release__content-sync",
+        ":scripts__release__payload",
+        ":scripts__release__steps",
+        ":scripts__release__worker-config",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__publication-state",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__registry",
+        ":src__lib__content__schema",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__url",
+        ":tests__unit__release-steps_test_proto_link",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["tests/unit/release-steps.test.ts"],
+)
+
+proto_package(
+    name = "tests__unit__release-verify_test_proto",
+    deps = [
+        ":node_modules/katex",
+        ":node_modules/smol-toml",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":scripts__release__cloudflare",
+        ":scripts__release__payload",
+        ":scripts__release__verify",
+        ":scripts__release__worker-config",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__publication-state",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__schema",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__url",
+    ],
+)
+
+workspace_link(
+    name = "tests__unit__release-verify_test_proto_link",
+    src = ":tests__unit__release-verify_test_proto",
+)
+
+vitest_test(
+    name = "tests__unit__release-verify_test",
+    data = [
+        "package.json",
+        "vitest.config.ts",
+        ":content_data",
+        ":node_modules/katex",
+        ":node_modules/smol-toml",
+        ":node_modules/vitest",
+        ":node_modules/wrangler",
+        ":node_modules/zod",
+        ":public_config",
+        ":scripts__release__cloudflare",
+        ":scripts__release__payload",
+        ":scripts__release__verify",
+        ":scripts__release__worker-config",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__publication-state",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__schema",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__url",
+        ":tests__unit__release-verify_test_proto_link",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["tests/unit/release-verify.test.ts"],
+)
+
+proto_package(
+    name = "tests__unit__static-export_test_proto",
+    deps = [
+        ":content__site_config",
+        ":node_modules/katex",
+        ":node_modules/sharp",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":scripts__export__site-files",
+        ":scripts__images__prepare",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__heading",
+        ":src__lib__content__reader",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__schema",
+        ":src__lib__content__site-data",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__translations",
+        ":src__lib__content__url",
+        ":src__lib__content__validate",
+        ":src__lib__images__config",
+    ],
+)
+
+workspace_link(
+    name = "tests__unit__static-export_test_proto_link",
+    src = ":tests__unit__static-export_test_proto",
+)
+
+vitest_test(
+    name = "tests__unit__static-export_test",
+    data = [
+        "package.json",
+        "vitest.config.ts",
+        ":content__site_config",
+        ":content_data",
+        ":node_modules/katex",
+        ":node_modules/sharp",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":scripts__export__site-files",
+        ":scripts__images__prepare",
+        ":src__lib__content__date",
+        ":src__lib__content__equation",
+        ":src__lib__content__errors",
+        ":src__lib__content__hash",
+        ":src__lib__content__heading",
+        ":src__lib__content__reader",
+        ":src__lib__content__redirect-path",
+        ":src__lib__content__schema",
+        ":src__lib__content__site-data",
+        ":src__lib__content__slug",
+        ":src__lib__content__stable-json",
+        ":src__lib__content__translations",
+        ":src__lib__content__url",
+        ":src__lib__content__validate",
+        ":src__lib__images__config",
+        ":tests__unit__static-export_test_proto_link",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["tests/unit/static-export.test.ts"],
+)
+
+proto_package(
+    name = "tests__unit__video-embed_test_proto",
+    deps = [
+        ":node_modules/vitest",
+        ":src__lib__content__video-embed",
+    ],
+)
+
+workspace_link(
+    name = "tests__unit__video-embed_test_proto_link",
+    src = ":tests__unit__video-embed_test_proto",
+)
+
+vitest_test(
+    name = "tests__unit__video-embed_test",
+    data = [
+        "package.json",
+        "vitest.config.ts",
+        ":content_data",
+        ":node_modules/vitest",
+        ":src__lib__content__video-embed",
+        ":tests__unit__video-embed_test_proto_link",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["tests/unit/video-embed.test.ts"],
+)
+
+js_library(
+    name = "content_data",
+    srcs = glob(
+        [
+            "content/**",
+            "public/**",
+            "tests/fixtures/**",
+        ],
+        exclude = [
+            "public/media/**",
+            "public/_img/**",
+        ],
+    ),
+)
+
+tsx.tsx_binary(name = "tsx")
+
+js_run_binary(
+    name = "prepare_empty",
+    srcs = [
+        "package.json",
+        "tsconfig.json",
+        ":content_data",
+        ":scripts__bazel__prepare-empty",
+    ],
+    outs = [".generated/images.json"],
+    args = ["scripts/bazel/prepare-empty.ts"],
+    chdir = "website",
+    env = {"NEXT_TELEMETRY_DISABLED": "1"},
+    include_transitive_types = True,
+    include_types = True,
+    out_dirs = [
+        ".generated/content",
+        "public/media",
+        "public/_img",
+    ],
+    tool = ":tsx",
+)
+
+js_library(
+    name = "public_config",
+    srcs = ["wrangler.toml"],
+)
+
+js_library(
+    name = "application_sources",
+    srcs = glob(
+        [
+            "src/**",
+            "scripts/**",
+            "content/**",
+            "public/**",
+        ],
+        exclude = [
+            "public/media/**",
+            "public/_img/**",
+        ],
+    ),
+)
+
+js_run_binary(
+    name = "empty_site",
+    srcs = [
+        "next.config.ts",
+        "next-env.d.ts",
+        "package.json",
+        "tsconfig.json",
+        ":application_sources",
+        ":content_data",
+        ":node_modules/@axe-core/playwright",
+        ":node_modules/@cloudflare/workers-types",
+        ":node_modules/@notionhq/client",
+        ":node_modules/@playwright/test",
+        ":node_modules/@types/katex",
+        ":node_modules/@types/node",
+        ":node_modules/@types/react",
+        ":node_modules/@types/react-dom",
+        ":node_modules/eslint",
+        ":node_modules/eslint-config-next",
+        ":node_modules/eslint-config-prettier",
+        ":node_modules/katex",
+        ":node_modules/next",
+        ":node_modules/photoswipe",
+        ":node_modules/prettier",
+        ":node_modules/react",
+        ":node_modules/react-dom",
+        ":node_modules/react-photoswipe-gallery",
+        ":node_modules/sharp",
+        ":node_modules/shiki",
+        ":node_modules/smol-toml",
+        ":node_modules/tsx",
+        ":node_modules/typescript",
+        ":node_modules/vitest",
+        ":node_modules/wrangler",
+        ":node_modules/zod",
+        ":prepare_empty",
+        "//:node_modules/@types/react",
+    ],
+    args = ["scripts/bazel/build-site.ts"],
+    chdir = "website",
+    env = {
+        "NEXT_TELEMETRY_DISABLED": "1",
+        "CI": "true",
+    },
+    include_transitive_types = True,
+    include_types = True,
+    out_dirs = [
+        ".next",
+        "out",
+    ],
+    tool = ":tsx",
+    use_execroot_entry_point = True,
+)
+
+copy_to_directory(
+    name = "prepared_snapshot",
+    srcs = ["@website_content//:files"],
+    include_external_repositories = ["*"],
+    root_paths = ["."],
+)
+
+js_run_binary(
+    name = "site",
+    srcs = [
+        "next.config.ts",
+        "next-env.d.ts",
+        "package.json",
+        "tsconfig.json",
+        ":application_sources",
+        ":content_data",
+        ":node_modules/@axe-core/playwright",
+        ":node_modules/@cloudflare/workers-types",
+        ":node_modules/@notionhq/client",
+        ":node_modules/@playwright/test",
+        ":node_modules/@types/katex",
+        ":node_modules/@types/node",
+        ":node_modules/@types/react",
+        ":node_modules/@types/react-dom",
+        ":node_modules/eslint",
+        ":node_modules/eslint-config-next",
+        ":node_modules/eslint-config-prettier",
+        ":node_modules/katex",
+        ":node_modules/next",
+        ":node_modules/photoswipe",
+        ":node_modules/prettier",
+        ":node_modules/react",
+        ":node_modules/react-dom",
+        ":node_modules/react-photoswipe-gallery",
+        ":node_modules/sharp",
+        ":node_modules/shiki",
+        ":node_modules/smol-toml",
+        ":node_modules/tsx",
+        ":node_modules/typescript",
+        ":node_modules/vitest",
+        ":node_modules/wrangler",
+        ":node_modules/zod",
+        ":prepared_snapshot",
+        ":site_identity",
+        "//:node_modules/@types/react",
+    ],
+    args = [
+        "scripts/bazel/build-prepared.ts",
+        "$(location :prepared_snapshot)",
+    ],
+    chdir = "website",
+    env = {
+        "NEXT_TELEMETRY_DISABLED": "1",
+        "CI": "true",
+    },
+    include_transitive_types = True,
+    include_types = True,
+    out_dirs = ["site"],
+    tool = ":tsx",
+    use_execroot_entry_point = True,
+)
+
+filegroup(
+    name = "config",
+    srcs = [
+        "app.toml",
+        "relay/wrangler.toml",
+        "wrangler.toml",
+    ],
+)
+
+pkg_tar(
+    name = "website",
+    srcs = [
+        ":config",
+        ":site",
+    ],
+    extension = "tar.gz",
+    stamp = 0,
+)
+
+test_suite(name = "check")
+
+expand_template(
+    name = "site_identity",
+    out = "site_identity.json",
+    stamp = -1,
+    stamp_substitutions = {"__CODE_SHA__": "{{BUILD_EMBED_LABEL}}"},
+    substitutions = {"__CODE_SHA__": "local-development"},
+    template = ['{"code_sha":"__CODE_SHA__"}'],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        [
+            "*",
+            "content/**",
+            "doc/**",
+            "docs/**",
+            "public/**",
+            "relay/**",
+            "scripts/**",
+            "src/**",
+            "tests/**",
+        ],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES + [
+            "public/media/**",
+            "public/_img/**",
+        ],
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+js_library(
+    name = "scripts__bazel__snapshot",
+    srcs = ["scripts/bazel/snapshot.ts"],
+    deps = [":scripts__content__validate"],
+)
+
+proto_vitest_test(
+    name = "tests__unit__bazel-snapshot_test",
+    data = [
+        "package.json",
+        "vitest.config.ts",
+        ":content_data",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["tests/unit/bazel-snapshot.test.ts"],
+    deps = [
+        ":scripts__bazel__snapshot",
+        ":scripts__content__prepare",
+        ":src__lib__content__hash",
+    ],
+)
+
+js_library(
+    name = "relay_env",
+    srcs = ["relay/src/env.ts"],
+    types = ["relay/src/env.ts"],
+)
+
+js_library(
+    name = "relay_github",
+    srcs = ["relay/src/github.ts"],
+    types = ["relay/src/github.ts"],
+    deps = [":relay_env"],
+)
+
+js_library(
+    name = "relay_status",
+    srcs = ["relay/src/status.ts"],
+    types = ["relay/src/status.ts"],
+    deps = [
+        ":relay_env",
+        ":relay_github",
+        "//proto/ops/v1:ts",
+        "//proto/ts:wire-json",
+        "//proto/website/sync/v1:ts",
+    ],
+)
+
+js_library(
+    name = "relay_request",
+    srcs = ["relay/src/request.ts"],
+    types = ["relay/src/request.ts"],
+    deps = [
+        ":relay_env",
+        ":relay_github",
+        "//proto/ts:wire-json",
+        "//proto/website/sync/v1:ts",
+    ],
+)
+
+js_library(
+    name = "relay_index",
+    srcs = ["relay/src/index.ts"],
+    types = ["relay/src/index.ts"],
+    deps = [
+        ":relay_env",
+        ":relay_request",
+        ":relay_status",
+        "//proto/website/sync/v1:ts",
+    ],
+)
+
+proto_package(
+    name = "relay_proto",
+    deps = [":relay_index"],
+)
+
+workspace_package_link(
+    name = "relay_proto_link",
+    src = ":relay_proto",
+    runtime_dependencies = ["@bufbuild/protobuf"],
+)
+
+wrangler.wrangler_binary(
+    name = "wrangler",
+    env = {
+        "CI": "true",
+        "WRANGLER_SEND_METRICS": "false",
+    },
+)
+
+js_library(
+    name = "relay_sources",
+    srcs = glob([
+        "relay/src/**",
+        "relay/wrangler.toml",
+    ]),
+)
+
+js_run_binary(
+    name = "relay_bundle",
+    srcs = [
+        "package.json",
+        "scripts/bazel/build-relay.ts",
+        ":node_modules/wrangler",
+        ":relay_index",
+        ":relay_proto_link",
+        ":relay_sources",
+    ],
+    args = ["scripts/bazel/build-relay.ts"],
+    chdir = "website",
+    env = {
+        "CI": "true",
+        "WRANGLER_SEND_METRICS": "false",
+    },
+    out_dirs = ["relay_bundle"],
+    tool = ":tsx",
+)
+
+pkg_files(
+    name = "relay_worker_files",
+    srcs = [":relay_bundle"],
+    prefix = "worker",
+    strip_prefix = strip_prefix.from_pkg("relay_bundle"),
+)
+
+pkg_files(
+    name = "relay_config_files",
+    srcs = ["relay/wrangler.toml"],
+    strip_prefix = strip_prefix.from_pkg(),
+)
+
+pkg_tar(
+    name = "relay_artifact",
+    srcs = [
+        ":relay_config_files",
+        ":relay_worker_files",
+    ],
+    extension = "tar.gz",
+    stamp = 0,
+)
+
+alias(
+    name = "relay",
+    actual = ":relay_artifact",
+)
+
+js_library(
+    name = "check_sources",
+    srcs = glob(
+        [
+            "src/**",
+            "scripts/**",
+            "tests/**",
+            "relay/**",
+            "content/**",
+            "*.ts",
+            "*.mjs",
+            "*.json",
+        ],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES + ["tests/fixtures/bazel-snapshot-unconfigured/**"],
+    ),
+)
+
+eslint_test(
+    name = "lint",
+    config = "eslint.config.mjs",
+    data = [
+        "package.json",
+        "tsconfig.json",
+        ":check_sources",
+        ":content_data",
+        ":node_modules/eslint",
+        ":node_modules/eslint-config-next",
+        ":node_modules/eslint-config-prettier",
+        ":node_modules/next",
+        ":node_modules/typescript",
+        ":relay_proto_link",
+        "//:node_modules/next",
+    ],
+    runner = eslint.eslint_test,
+    sources = glob(
+        [
+            "**/*.ts",
+            "**/*.tsx",
+            "**/*.mts",
+            "**/*.mjs",
+        ],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+)
+
+tsx.tsx_test(
+    name = "types_test",
+    size = "large",
+    args = ["scripts/bazel/typecheck.ts"],
+    chdir = "website",
+    data = [
+        ":check_sources",
+        ":content_data",
+        ":node_modules/@axe-core/playwright",
+        ":node_modules/@cloudflare/workers-types",
+        ":node_modules/@notionhq/client",
+        ":node_modules/@playwright/test",
+        ":node_modules/@types/katex",
+        ":node_modules/@types/node",
+        ":node_modules/@types/react",
+        ":node_modules/@types/react-dom",
+        ":node_modules/katex",
+        ":node_modules/next",
+        ":node_modules/photoswipe",
+        ":node_modules/react",
+        ":node_modules/react-dom",
+        ":node_modules/react-photoswipe-gallery",
+        ":node_modules/sharp",
+        ":node_modules/shiki",
+        ":node_modules/smol-toml",
+        ":node_modules/tsx",
+        ":node_modules/typescript",
+        ":node_modules/vitest",
+        ":node_modules/zod",
+        ":prepare_empty",
+        ":relay_proto_link",
+        "//:node_modules/@types/react",
+    ],
+    env = {
+        "CI": "true",
+        "NEXT_TELEMETRY_DISABLED": "1",
+    },
+    tags = ["typecheck"],
+)
+
+prettier.prettier_test(
+    name = "format_test",
+    size = "large",
+    args = [
+        "--check",
+        "--ignore-unknown",
+    ] + glob(
+        [
+            "*.ts",
+            "*.mjs",
+            "*.json",
+            "*.md",
+            "src/**",
+            "scripts/**",
+            "tests/**",
+            "content/**",
+            "doc/**",
+            "docs/**",
+            "relay/**",
+        ],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    chdir = "website",
+    data = [
+        ".prettierignore",
+        "package.json",
+        "prettier.config.mjs",
+        ":check_sources",
+        ":content_data",
+        ":source_audit_files",
+    ],
+    tags = [
+        "format",
+        "manual",
+    ],
+)
+
+prettier.prettier_binary(name = "prettier")

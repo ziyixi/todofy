@@ -14,7 +14,8 @@ afterEach(async () => {
 });
 
 async function start(persist: string) {
-  const bundle = await build({ stdin: { resolveDir: process.cwd(), contents: `
+  const bundle = await build({
+    ...(process.env.TEST_SRCDIR ? { nodePaths: [`${process.cwd()}/node_modules`] } : {}), stdin: { resolveDir: process.cwd(), contents: `
     import { DurableObject } from 'cloudflare:workers';
     import { WorkStore } from './src/work-store.ts';
     export class WorkRuntime extends DurableObject {

@@ -1,0 +1,95 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("@npm//website:tsx/package_json.bzl", tsx = "bin")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//personal-mcp:__subpackages__"])
+
+ts_project(
+    name = "restore_types",
+    srcs = ["backup-restore.ts"],
+    declaration = True,
+    emit_declaration_only = True,
+    tsconfig = {"compilerOptions": {
+        "target": "ES2024",
+        "module": "ESNext",
+        "moduleResolution": "Bundler",
+        "strict": True,
+        "allowImportingTsExtensions": True,
+        "skipLibCheck": True,
+        "types": ["node"],
+        "typeRoots": ["../worker/node_modules/@types"],
+    }},
+    deps = ["//personal-mcp/worker:node_modules/@types/node"],
+)
+
+js_library(
+    name = "backup-restore",
+    srcs = ["backup-restore.ts"],
+    deps = [":restore_types"],
+)
+
+tsx.tsx_test(
+    name = "backup-restore_test",
+    args = [
+        "--test",
+        "test/backup-restore.test.mjs",
+    ],
+    chdir = "personal-mcp/tools",
+    data = [
+        "test/backup-restore.test.mjs",
+        ":source_backup_restore_ts",
+        "//personal-mcp:config",
+        "//personal-mcp/worker:package_metadata",
+    ],
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        ":backup-restore_test",
+        ":types_typecheck_test",
+    ],
+)
+
+js_library(
+    name = "source_backup_restore_ts",
+    srcs = ["backup-restore.ts"],
+    deps = [],
+)
+
+ts_project(
+    name = "types",
+    srcs = ["backup-restore.ts"],
+    extends = "//personal-mcp/worker:worker_config",
+    no_emit = True,
+    tsconfig = {
+        "compilerOptions": {
+            "types": ["node"],
+            "typeRoots": ["../worker/node_modules/@types"],
+        },
+        "include": [],
+        "exclude": [],
+    },
+    deps = ["//personal-mcp/worker:node_modules/@types/node"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        [
+            "*",
+            "test/**",
+        ],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)

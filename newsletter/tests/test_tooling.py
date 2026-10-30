@@ -197,7 +197,7 @@ def test_docker_context_only_allows_build_inputs():
     assert "**/__pycache__/" in rules and "**/*.pyc" in rules
 
 
-def test_image_job_generates_shared_proto_before_python_only_builder():
+def test_image_job_generates_shared_proto_before_bazel_builder():
     steps = workflows.load("ci.yml")["jobs"]["newsletter-image"]["steps"]
     setup = next(
         index
@@ -212,7 +212,8 @@ def test_image_job_generates_shared_proto_before_python_only_builder():
     build = next(
         index
         for index, step in enumerate(steps)
-        if "docker build" in step.get("run", "")
+        if "container-release/build.py --service newsletter"
+        in step.get("run", "")
     )
     assert setup < generate < build
 

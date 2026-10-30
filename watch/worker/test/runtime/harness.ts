@@ -61,6 +61,7 @@ function workerBundle(entry = 'src/index.ts'): Promise<string> {
   const cached = bundles.get(entry);
   if (cached !== undefined) return cached;
   const bundle = build({
+    ...(process.env.TEST_SRCDIR ? { nodePaths: [`${process.cwd()}/node_modules`] } : {}),
     entryPoints: [join(ROOT, entry)],
     bundle: true,
     format: 'esm',

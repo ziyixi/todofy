@@ -35,7 +35,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import ci_changes  # noqa: E402
 import drift_desired  # noqa: E402
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).absolute().parents[2]
 WORKFLOW = REPO / ".github" / "workflows" / "ci.yml"
 
 # Worker/config identity comes from the per-app catalog; hosts remain Wrangler-owned.

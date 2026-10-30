@@ -11,6 +11,9 @@ import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { CONFIG, INJECTED, OWNER_ONLY_SECRETS, SettingError, generateSecrets, injectedVars, placeholderIn, refusal, run, wranglerArgs } from '../deploy-vars.mjs'
 
+// CLI children keep their minimal environment and use the pinned interpreter directly.
+const NODE_EXECUTABLE = process.env.JS_BINARY__NODE_BINARY ?? process.execPath
+
 const WRAPPER = fileURLToPath(new URL('../deploy-vars.mjs', import.meta.url))
 const WORKER = fileURLToPath(new URL('../../worker/', import.meta.url))
 
@@ -98,13 +101,13 @@ test('exec runs the deploy (or dry-run) unchanged plus the --var flag; secrets w
     writeFileSync(stub, `import { writeFileSync } from 'node:fs'\nwriteFileSync(${JSON.stringify(out)}, JSON.stringify(process.argv.slice(2)))\n`)
     const config = relative(WORKER, CONFIG)
     const env = { PATH: process.env.PATH, ...environment() }
-    const result = spawnSync(process.execPath, [WRAPPER, 'exec', '--', process.execPath, stub, 'deploy', '--dry-run', '--config', config], { cwd: WORKER, env, encoding: 'utf8' })
+    const result = spawnSync(NODE_EXECUTABLE, ['--preserve-symlinks-main', WRAPPER, 'exec', '--', NODE_EXECUTABLE, stub, 'deploy', '--dry-run', '--config', config], { cwd: WORKER, env, encoding: 'utf8' })
     assert.equal(result.status, 0, result.stderr)
     assert.deepEqual(JSON.parse(readFileSync(out, 'utf8')), ['deploy', '--dry-run', '--config', config, ...wranglerArgs(environment())])
     // A real deploy runs the stub (in place of wrangler) with the committed AUD, and is refused before it would run
     // while the config has none (before "Infra apply" creates the Access application).
     rmSync(out)
-    const refused = spawnSync(process.execPath, [WRAPPER, 'exec', '--', process.execPath, stub, 'deploy', '--config', config], { cwd: WORKER, env, encoding: 'utf8' })
+    const refused = spawnSync(NODE_EXECUTABLE, ['--preserve-symlinks-main', WRAPPER, 'exec', '--', NODE_EXECUTABLE, stub, 'deploy', '--config', config], { cwd: WORKER, env, encoding: 'utf8' })
     if (placeholderIn(readFileSync(CONFIG, 'utf8')) === null) {
       assert.equal(refused.status, 0, refused.stderr)
       assert.deepEqual(JSON.parse(readFileSync(out, 'utf8')), ['deploy', '--config', config, ...wranglerArgs(environment())])
@@ -114,13 +117,13 @@ test('exec runs the deploy (or dry-run) unchanged plus the --var flag; secrets w
     }
 
     const secrets = join(dir, 'secrets.json')
-    const written = spawnSync(process.execPath, [WRAPPER, 'secrets', secrets], { env, encoding: 'utf8' })
+    const written = spawnSync(NODE_EXECUTABLE, ['--preserve-symlinks-main', WRAPPER, 'secrets', secrets], { env, encoding: 'utf8' })
     assert.equal(written.status, 0, written.stderr)
     assert.equal(statSync(secrets).mode & 0o777, 0o600)
-    const again = spawnSync(process.execPath, [WRAPPER, 'secrets', secrets], { env, encoding: 'utf8' })
+    const again = spawnSync(NODE_EXECUTABLE, ['--preserve-symlinks-main', WRAPPER, 'secrets', secrets], { env, encoding: 'utf8' })
     assert.equal(again.status, 1)
     const bad = join(dir, 'bad.json')
-    const invalid = spawnSync(process.execPath, [WRAPPER, 'secrets', bad], { env: { ...env, RECALL_ACCESS_OWNER: 'secret-looking-value' }, encoding: 'utf8' })
+    const invalid = spawnSync(NODE_EXECUTABLE, ['--preserve-symlinks-main', WRAPPER, 'secrets', bad], { env: { ...env, RECALL_ACCESS_OWNER: 'secret-looking-value' }, encoding: 'utf8' })
     assert.equal(invalid.stderr.trim(), 'Invalid or missing deploy setting: RECALL_ACCESS_OWNER')
     assert.ok(!existsSync(bad))
 

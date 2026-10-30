@@ -14,7 +14,7 @@ import yaml
 import ci_changes
 from workflow_sources import workflow_data
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).absolute().parents[2]
 
 
 def reader(before=None):

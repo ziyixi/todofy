@@ -286,12 +286,12 @@ def test_ci_smokes_native_amd64_before_publish_without_rebuild():
     assert image["runs-on"] == "ubuntu-24.04"
     assert "newsletter-checks" in image["needs"]
     commands = "\n".join(step.get("run", "") for step in image["steps"])
-    assert commands.count("docker build") == 1
+    builder = "container-release/build.py --service newsletter"
+    assert commands.count(builder) == 1
+    assert "docker build" not in commands
     assert "--platform linux/amd64" in commands
-    assert commands.index("--audit-source") < commands.index("docker build")
-    assert commands.index("docker build") < commands.index(
-        "smoke_image.py --image"
-    )
+    assert commands.index("--audit-source") < commands.index(builder)
+    assert commands.index(builder) < commands.index("smoke_image.py --image")
     assert commands.index("smoke_image.py --image") < commands.index(
         "image.py save"
     )

@@ -135,10 +135,10 @@ import urllib.request
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools" / "service-catalog"))
+sys.path.insert(0, str(Path(__file__).absolute().parents[2] / "tools" / "service-catalog"))
 from catalog import load_catalog  # noqa: E402
 
-APPS = tuple(load_catalog(Path(__file__).resolve().parents[2]).apps)
+APPS = tuple(load_catalog(Path(__file__).absolute().parents[2]).apps)
 # The output key prefix of each app ("<prefix>_check", "<prefix>_deploy").
 PREFIX = {app: app.replace("-", "_") for app in APPS}
 # A new app is checked but its deploy output stays false until its Cloudflare resources are ready. Keep its output
@@ -508,7 +508,7 @@ def document_readers(path: str) -> set[str]:
     return {app for prefix, apps in TESTED_DOCUMENTS.items() if path.startswith(prefix) for app in apps}
 
 
-def retired_packages(root: Path = Path(__file__).resolve().parents[2]) -> tuple[str, ...]:
+def retired_packages(root: Path = Path(__file__).absolute().parents[2]) -> tuple[str, ...]:
     """The directories of the proto packages proto/retired.json lists, as proto/ paths. Deleting one reaches no bundle:
     every importer stopped importing it in the same change (its own directory deploys it), so the deletion alone
     deploys nothing. A missing or unreadable list retires nothing (fail safe)."""

@@ -9,7 +9,7 @@ import tomllib
 import unittest
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).absolute().parents[2]
 WORKFLOW = REPO / ".github/workflows/personal-cloud-reconcile.yml"
 
 

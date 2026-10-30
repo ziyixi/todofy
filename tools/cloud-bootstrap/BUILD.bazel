@@ -1,0 +1,222 @@
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//visibility:public"])
+
+py_library(
+    name = "adopt_metadata",
+    srcs = ["adopt_metadata.py"],
+    imports = ["."],
+    deps = [
+        "//tools/cloud-bootstrap:cloud_api",
+        "//tools/cloud-bootstrap:private_input",
+    ],
+)
+
+py_library(
+    name = "bootstrap",
+    srcs = ["bootstrap.py"],
+    imports = ["."],
+    deps = [
+        "//infra:infra_state",
+        "//tools/cloud-bootstrap:bootstrap_inventory",
+        "//tools/cloud-bootstrap:finalize",
+        "//tools/cloud-bootstrap:github_config",
+        "//tools/cloud-bootstrap:github_secrets",
+        "//tools/cloud-bootstrap:inventory_pr",
+        "//tools/cloud-bootstrap:private_input",
+        "//tools/cloud-bootstrap:tofu_bootstrap",
+        "//tools/cloud-config:cloud_profile",
+        "//tools/cloud-config:generate",
+        "//tools/service-catalog:catalog",
+    ],
+)
+
+py_library(
+    name = "bootstrap_inventory",
+    srcs = ["bootstrap_inventory.py"],
+    imports = ["."],
+    deps = ["//tools/cloud-bootstrap:private_input"],
+)
+
+py_library(
+    name = "cloud_api",
+    srcs = ["cloud_api.py"],
+    imports = ["."],
+    deps = ["//tools/cloud-bootstrap:private_input"],
+)
+
+py_library(
+    name = "finalize",
+    srcs = ["finalize.py"],
+    imports = ["."],
+    deps = [
+        "//tools/cloud-bootstrap:private_input",
+        "//tools/cloud-release:api",
+        "//tools/cloud-release:cloudflare",
+        "//tools/cloud-release:control",
+        "//tools/cloud-release:deployments",
+    ],
+)
+
+py_library(
+    name = "fresh_collisions",
+    srcs = ["fresh_collisions.py"],
+    imports = ["."],
+    deps = [
+        "//tools/cloud-bootstrap:cloud_api",
+        "//tools/cloud-bootstrap:private_input",
+    ],
+)
+
+py_library(
+    name = "github_config",
+    srcs = ["github_config.py"],
+    imports = ["."],
+    deps = ["//tools/cloud-bootstrap:private_input"],
+)
+
+py_library(
+    name = "github_secrets",
+    srcs = ["github_secrets.py"],
+    imports = ["."],
+    deps = ["//tools/cloud-bootstrap:private_input"],
+)
+
+py_library(
+    name = "inventory_pr",
+    srcs = ["inventory_pr.py"],
+    imports = ["."],
+    deps = ["//tools/cloud-bootstrap:private_input"],
+)
+
+py_library(
+    name = "private_input",
+    srcs = ["private_input.py"],
+    imports = ["."],
+)
+
+py_library(
+    name = "state_imports",
+    srcs = ["state_imports.py"],
+    imports = ["."],
+    deps = [
+        "//infra:infra_state",
+        "//tools/cloud-bootstrap:private_input",
+    ],
+)
+
+py_library(
+    name = "tofu_bootstrap",
+    srcs = ["tofu_bootstrap.py"],
+    imports = ["."],
+    deps = [
+        "//infra:bootstrap_state",
+        "//infra:infra_state",
+        "//tools/cloud-bootstrap:adopt_metadata",
+        "//tools/cloud-bootstrap:bootstrap_inventory",
+        "//tools/cloud-bootstrap:cloud_api",
+        "//tools/cloud-bootstrap:fresh_collisions",
+        "//tools/cloud-bootstrap:private_input",
+        "//tools/cloud-bootstrap:state_imports",
+        "//tools/cloud-config:generate",
+    ],
+)
+
+py_test(
+    name = "test_bootstrap_test",
+    srcs = [
+        "tests/test_bootstrap.py",
+        "//tools/bazel/python:unittest_main.py",
+    ],
+    args = ["test_bootstrap"],
+    data = [
+        ":python_sources",
+        "//tools:repository_test_data",
+    ],
+    env = {"BAZEL_COPY_WORKSPACE": "1"},
+    imports = [
+        ".",
+        "tests",
+    ],
+    legacy_create_init = False,
+    main = "//tools/bazel/python:unittest_main.py",
+    deps = [
+        "//tools/cloud-bootstrap:adopt_metadata",
+        "//tools/cloud-bootstrap:bootstrap_inventory",
+        "//tools/cloud-bootstrap:cloud_api",
+        "//tools/cloud-bootstrap:finalize",
+        "//tools/cloud-bootstrap:github_config",
+        "//tools/cloud-bootstrap:github_secrets",
+        "//tools/cloud-bootstrap:private_input",
+        "//tools/cloud-bootstrap:state_imports",
+        "//tools/cloud-bootstrap:tofu_bootstrap",
+        "//tools/cloud-config:cloud_profile",
+        "//tools/cloud-release:control",
+    ],
+)
+
+py_test(
+    name = "test_fresh_collisions_test",
+    srcs = [
+        "tests/test_fresh_collisions.py",
+        "//tools/bazel/python:unittest_main.py",
+    ],
+    args = ["test_fresh_collisions"],
+    data = [
+        ":python_sources",
+        "//tools:repository_test_data",
+    ],
+    imports = [
+        ".",
+        "tests",
+    ],
+    legacy_create_init = False,
+    main = "//tools/bazel/python:unittest_main.py",
+    deps = [
+        "//tools/cloud-bootstrap:fresh_collisions",
+        "//tools/cloud-bootstrap:private_input",
+    ],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        [
+            "*.py",
+            "*.sh",
+            "*.mjs",
+            "*.json",
+            "tests/*.py",
+        ],
+        allow_empty = True,
+    ),
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        ":test_bootstrap_test",
+        ":test_fresh_collisions_test",
+    ],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        [
+            "*",
+            "tests/**",
+        ],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)

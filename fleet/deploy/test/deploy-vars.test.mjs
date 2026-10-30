@@ -7,6 +7,9 @@ import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { INJECTED, SettingError, generateSecrets, injectedVars, placeholderIn, refusal, wranglerArgs } from '../deploy-vars.mjs'
 
+// CLI children keep their minimal environment and use the pinned interpreter directly.
+const NODE_EXECUTABLE = process.env.JS_BINARY__NODE_BINARY ?? process.execPath
+
 const WRAPPER = fileURLToPath(new URL('../deploy-vars.mjs', import.meta.url))
 const WORKER = fileURLToPath(new URL('../../worker/', import.meta.url))
 
@@ -26,7 +29,7 @@ function temporary(check) {
 }
 
 function invoke(args, env = environment(), cwd = WORKER, wrapper = WRAPPER) {
-  return spawnSync(process.execPath, [wrapper, ...args], {
+  return spawnSync(NODE_EXECUTABLE, ['--preserve-symlinks-main', wrapper, ...args], {
     cwd, env: { PATH: process.env.PATH, ...env }, encoding: 'utf8', timeout: 10_000,
   })
 }
@@ -102,7 +105,7 @@ test('a missing AUD permits only dry runs; real, zero and malformed AUD cases ca
         + (aud === null ? '' : `ACCESS_AUDIENCE = "${aud}"\n`)
       writeFileSync(join(directory, 'wrangler.toml'), text)
       rmSync(output, { force: true })
-      const command = [process.execPath, stub, 'deploy', '--config', '../wrangler.toml']
+      const command = [NODE_EXECUTABLE, stub, 'deploy', '--config', '../wrangler.toml']
       if (dry) command.push('--dry-run')
       const result = invoke(['exec', '--', ...command], environment(), worker, wrapper)
       assert.equal(result.status, accepted ? 0 : 2, `${aud === null ? 'missing' : 'present'} AUD; dry=${dry}: ${result.stderr}`)
@@ -146,7 +149,7 @@ test('exec propagates a failed child rather than reporting a successful deployme
   temporary((directory) => {
     const stub = join(directory, 'fail.mjs')
     writeFileSync(stub, 'process.exitCode = 7\n')
-    const result = invoke(['exec', '--', process.execPath, stub, 'deploy', '--dry-run', '--config', '../wrangler.toml'])
+    const result = invoke(['exec', '--', NODE_EXECUTABLE, stub, 'deploy', '--dry-run', '--config', '../wrangler.toml'])
     assert.equal(result.status, 7, result.stderr)
     assert.ok(!result.stdout.includes(environment().GITHUB_SHA))
     assert.ok(!result.stdout.includes(environment().FLEET_REPORT_HMAC_KEY))

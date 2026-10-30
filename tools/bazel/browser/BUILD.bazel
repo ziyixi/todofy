@@ -1,0 +1,62 @@
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load(":defs.bzl", "browser_toolchain")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files([
+    "defs.bzl",
+    "repositories.bzl",
+])
+
+toolchain_type(name = "toolchain_type")
+
+browser_toolchain(
+    name = "chromium_mac_arm64",
+    executable = "@playwright_chromium_mac_arm64//:chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+    files = ["@playwright_chromium_mac_arm64//:files"],
+    playwright_version = "1.63.0",
+)
+
+toolchain(
+    name = "chromium_mac_arm64_toolchain",
+    exec_compatible_with = [
+        "@platforms//os:macos",
+        "@platforms//cpu:aarch64",
+    ],
+    toolchain = ":chromium_mac_arm64",
+    toolchain_type = ":toolchain_type",
+)
+
+browser_toolchain(
+    name = "chromium_linux_amd64",
+    executable = "@playwright_chromium_linux_amd64//:chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell",
+    files = ["@playwright_chromium_linux_amd64//:files"],
+    playwright_version = "1.63.0",
+)
+
+toolchain(
+    name = "chromium_linux_amd64_toolchain",
+    exec_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+    toolchain = ":chromium_linux_amd64",
+    toolchain_type = ":toolchain_type",
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["*"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)

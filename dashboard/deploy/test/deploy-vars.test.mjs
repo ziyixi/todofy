@@ -7,6 +7,9 @@ import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { CONFIG, INJECTED, SettingError, deployTokenReused, generateSecrets, injectedVars, refusal, run, wranglerArgs } from '../deploy-vars.mjs'
 
+// CLI children keep their minimal environment and use the pinned interpreter directly.
+const NODE_EXECUTABLE = process.env.JS_BINARY__NODE_BINARY ?? process.execPath
+
 const WRAPPER = fileURLToPath(new URL('../deploy-vars.mjs', import.meta.url))
 const WORKER = fileURLToPath(new URL('../../worker/', import.meta.url))
 
@@ -116,21 +119,21 @@ test('exec runs the command unchanged plus the --var flags; secrets writes 0600 
     writeFileSync(stub, `import { writeFileSync } from 'node:fs'\nwriteFileSync(${JSON.stringify(out)}, JSON.stringify(process.argv.slice(2)))\n`)
     const config = relative(WORKER, CONFIG)
     const env = { PATH: process.env.PATH, ...environment() }
-    const result = spawnSync(process.execPath, [WRAPPER, 'exec', '--', process.execPath, stub, 'deploy', '--config', config], { cwd: WORKER, env, encoding: 'utf8' })
+    const result = spawnSync(NODE_EXECUTABLE, ['--preserve-symlinks-main', WRAPPER, 'exec', '--', NODE_EXECUTABLE, stub, 'deploy', '--config', config], { cwd: WORKER, env, encoding: 'utf8' })
     assert.equal(result.status, 0, result.stderr)
     assert.deepEqual(JSON.parse(readFileSync(out, 'utf8')), ['deploy', '--config', config, ...wranglerArgs(environment())])
 
     const secrets = join(dir, 'secrets.json')
-    const written = spawnSync(process.execPath, [WRAPPER, 'secrets', secrets], { env, encoding: 'utf8' })
+    const written = spawnSync(NODE_EXECUTABLE, ['--preserve-symlinks-main', WRAPPER, 'secrets', secrets], { env, encoding: 'utf8' })
     assert.equal(written.status, 0, written.stderr)
     assert.equal(statSync(secrets).mode & 0o777, 0o600)
     assert.deepEqual(JSON.parse(readFileSync(secrets, 'utf8')), generateSecrets(environment()))
-    const again = spawnSync(process.execPath, [WRAPPER, 'secrets', secrets], { env, encoding: 'utf8' })
+    const again = spawnSync(NODE_EXECUTABLE, ['--preserve-symlinks-main', WRAPPER, 'secrets', secrets], { env, encoding: 'utf8' })
     assert.equal(again.status, 1)
     assert.match(again.stderr, /already exists/)
 
     const bad = join(dir, 'bad.json')
-    const invalid = spawnSync(process.execPath, [WRAPPER, 'secrets', bad], { env: { ...env, DASHBOARD_ACCESS_OWNER: 'secret-looking-value' }, encoding: 'utf8' })
+    const invalid = spawnSync(NODE_EXECUTABLE, ['--preserve-symlinks-main', WRAPPER, 'secrets', bad], { env: { ...env, DASHBOARD_ACCESS_OWNER: 'secret-looking-value' }, encoding: 'utf8' })
     assert.equal(invalid.status, 1)
     assert.equal(invalid.stderr.trim(), 'Invalid or missing deploy setting: DASHBOARD_ACCESS_OWNER')
     assert.ok(!existsSync(bad))

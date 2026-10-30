@@ -1,11 +1,15 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library")
-load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
 load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@npm//watch/worker:eslint/package_json.bzl", eslint = "bin")
 load("@npm//watch/worker:vitest/package_json.bzl", vitest = "bin")
+load("@npm//watch/worker:wrangler/package_json.bzl", wrangler = "bin")
 load("//proto/bazel:ts_package.bzl", "proto_package")
-load("//tools/bazel:js.bzl", "proto_vitest_test", "workspace_package_link")
+load("//tools/bazel:js.bzl", "proto_vitest_test", "workerd_vitest_test", "workspace_package_link")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/lint:defs.bzl", "eslint_test")
 
-package(default_visibility = ["//visibility:public"])
+package(default_visibility = ["//watch:__subpackages__"])
 
 npm_link_all_packages(name = "node_modules")
 
@@ -34,14 +38,24 @@ js_library(
     name = "url-policy",
     srcs = ["src/url-policy.ts"],
     types = ["src/url-policy.ts"],
-    deps = [":deployment", ":limits"],
+    deps = [
+        ":deployment",
+        ":limits",
+    ],
 )
 
 js_library(
     name = "config",
     srcs = ["src/config.ts"],
     types = ["src/config.ts"],
-    deps = ["//proto/ts:protobuf", "//proto/ts:wire-json", "//proto/watch/ui/v1:ts", ":extract_jsonpath", ":limits", ":url-policy"],
+    deps = [
+        ":extract_jsonpath",
+        ":limits",
+        ":url-policy",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+        "//proto/watch/ui/v1:ts",
+    ],
 )
 
 js_library(
@@ -69,21 +83,30 @@ js_library(
     name = "extract_html",
     srcs = ["src/extract/html.ts"],
     types = ["src/extract/html.ts"],
-    deps = [":extract_entities", ":limits"],
+    deps = [
+        ":extract_entities",
+        ":limits",
+    ],
 )
 
 js_library(
     name = "health",
     srcs = ["src/health.ts"],
     types = ["src/health.ts"],
-    deps = [":config", ":limits"],
+    deps = [
+        ":config",
+        ":limits",
+    ],
 )
 
 js_library(
     name = "extract_feed",
     srcs = ["src/extract/feed.ts"],
     types = ["src/extract/feed.ts"],
-    deps = [":extract_entities", ":limits"],
+    deps = [
+        ":extract_entities",
+        ":limits",
+    ],
 )
 
 js_library(
@@ -97,21 +120,39 @@ js_library(
     name = "extract_structured",
     srcs = ["src/extract/structured.ts"],
     types = ["src/extract/structured.ts"],
-    deps = [":extract_jsonpath", ":limits"],
+    deps = [
+        ":extract_jsonpath",
+        ":limits",
+    ],
 )
 
 js_library(
     name = "extract_index",
     srcs = ["src/extract/index.ts"],
     types = ["src/extract/index.ts"],
-    deps = [":config", ":extract_charset", ":extract_feed", ":extract_html", ":extract_markdown", ":extract_structured", ":health"],
+    deps = [
+        ":config",
+        ":extract_charset",
+        ":extract_feed",
+        ":extract_html",
+        ":extract_markdown",
+        ":extract_structured",
+        ":health",
+    ],
 )
 
 js_library(
     name = "evidence-extract",
     srcs = ["src/evidence-extract.ts"],
     types = ["src/evidence-extract.ts"],
-    deps = [":config", ":extract_charset", ":extract_entities", ":extract_html", ":extract_index", ":limits"],
+    deps = [
+        ":config",
+        ":extract_charset",
+        ":extract_entities",
+        ":extract_html",
+        ":extract_index",
+        ":limits",
+    ],
 )
 
 js_library(
@@ -132,7 +173,17 @@ js_library(
     name = "evidence",
     srcs = ["src/evidence.ts"],
     types = ["src/evidence.ts"],
-    deps = ["//proto/ts:protobuf", "//proto/ts:protobuf-wkt", "//proto/watch/ui/v1:ts", ":config", ":evidence-extract", ":ids", ":limits", ":normalize", ":store"],
+    deps = [
+        ":config",
+        ":evidence-extract",
+        ":ids",
+        ":limits",
+        ":normalize",
+        ":store",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/watch/ui/v1:ts",
+    ],
 )
 
 js_library(
@@ -146,35 +197,59 @@ js_library(
     name = "content",
     srcs = ["src/content.ts"],
     types = ["src/content.ts"],
-    deps = [":config", ":extract_index", ":extract_number", ":normalize"],
+    deps = [
+        ":config",
+        ":extract_index",
+        ":extract_number",
+        ":normalize",
+    ],
 )
 
 js_library(
     name = "snapshot",
     srcs = ["src/snapshot.ts"],
     types = ["src/snapshot.ts"],
-    deps = [":content", ":limits"],
+    deps = [
+        ":content",
+        ":limits",
+    ],
 )
 
 js_library(
     name = "backup",
     srcs = ["src/backup.ts"],
     types = ["src/backup.ts"],
-    deps = ["//proto/ops/v1:ts", ":config", ":limits", ":snapshot", ":store"],
+    deps = [
+        ":config",
+        ":limits",
+        ":snapshot",
+        ":store",
+        "//proto/ops/v1:ts",
+    ],
 )
 
 js_library(
     name = "fetcher",
     srcs = ["src/fetcher.ts"],
     types = ["src/fetcher.ts"],
-    deps = [":limits", ":url-policy"],
+    deps = [
+        ":limits",
+        ":url-policy",
+    ],
 )
 
 js_library(
     name = "browser",
     srcs = ["src/browser.ts"],
     types = ["src/browser.ts"],
-    deps = [":config", ":evidence-extract", ":fetcher", ":limits", ":node_modules/@cloudflare/puppeteer", ":url-policy"],
+    deps = [
+        ":config",
+        ":evidence-extract",
+        ":fetcher",
+        ":limits",
+        ":node_modules/@cloudflare/puppeteer",
+        ":url-policy",
+    ],
 )
 
 js_library(
@@ -188,7 +263,14 @@ js_library(
     name = "model",
     srcs = ["src/model.ts"],
     types = ["src/model.ts"],
-    deps = ["//proto/ts:protobuf", "//proto/ts:protobuf-wkt", "//proto/watch/ui/v1:ts", ":config", ":health", ":store"],
+    deps = [
+        ":config",
+        ":health",
+        ":store",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/watch/ui/v1:ts",
+    ],
 )
 
 js_library(
@@ -209,7 +291,19 @@ js_library(
     name = "obtain",
     srcs = ["src/obtain.ts"],
     types = ["src/obtain.ts"],
-    deps = [":browser", ":config", ":etiquette", ":evidence-extract", ":fetcher", ":health", ":host-locks", ":limits", ":robots", ":store", ":url-policy"],
+    deps = [
+        ":browser",
+        ":config",
+        ":etiquette",
+        ":evidence-extract",
+        ":fetcher",
+        ":health",
+        ":host-locks",
+        ":limits",
+        ":robots",
+        ":store",
+        ":url-policy",
+    ],
 )
 
 js_library(
@@ -223,35 +317,88 @@ js_library(
     name = "triggers",
     srcs = ["src/triggers.ts"],
     types = ["src/triggers.ts"],
-    deps = [":config", ":content", ":diff", ":extract_structured", ":limits"],
+    deps = [
+        ":config",
+        ":content",
+        ":diff",
+        ":extract_structured",
+        ":limits",
+    ],
 )
 
 js_library(
     name = "preview",
     srcs = ["src/preview.ts"],
     types = ["src/preview.ts"],
-    deps = ["//proto/ts:protobuf", "//proto/ts:protobuf-wkt", "//proto/watch/ui/v1:ts", ":config", ":content", ":etiquette", ":extract_index", ":extract_number", ":limits", ":model", ":normalize", ":obtain", ":snapshot", ":store", ":triggers"],
+    deps = [
+        ":config",
+        ":content",
+        ":etiquette",
+        ":extract_index",
+        ":extract_number",
+        ":limits",
+        ":model",
+        ":normalize",
+        ":obtain",
+        ":snapshot",
+        ":store",
+        ":triggers",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/watch/ui/v1:ts",
+    ],
 )
 
 js_library(
     name = "reasons",
     srcs = ["src/reasons.ts"],
     types = ["src/reasons.ts"],
-    deps = ["//proto/common/errors/v1:ts", "//proto/ts:rpc-status", "//proto/watch/ui/v1:ts"],
+    deps = [
+        "//proto/common/errors/v1:ts",
+        "//proto/ts:rpc-status",
+        "//proto/watch/ui/v1:ts",
+    ],
 )
 
 js_library(
     name = "restore",
     srcs = ["src/restore.ts"],
     types = ["src/restore.ts"],
-    deps = [":backup", ":config", ":snapshot", ":store"],
+    deps = [
+        ":backup",
+        ":config",
+        ":snapshot",
+        ":store",
+    ],
 )
 
 js_library(
     name = "api",
     srcs = ["src/api.ts"],
     types = ["src/api.ts"],
-    deps = ["//proto/ts:field-mask", "//proto/ts:filter", "//proto/ts:http-transcoder", "//proto/ts:page-token", "//proto/ts:protobuf", "//proto/ts:protobuf-wkt", "//proto/ts:rpc-status", "//proto/ts:wire-json", "//proto/watch/ui/v1:ts", ":backup", ":browser", ":config", ":etiquette", ":evidence", ":ids", ":limits", ":model", ":preview", ":reasons", ":restore", ":store"],
+    deps = [
+        ":backup",
+        ":browser",
+        ":config",
+        ":etiquette",
+        ":evidence",
+        ":ids",
+        ":limits",
+        ":model",
+        ":preview",
+        ":reasons",
+        ":restore",
+        ":store",
+        "//proto/ts:field-mask",
+        "//proto/ts:filter",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:page-token",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+        "//proto/ts:wire-json",
+        "//proto/watch/ui/v1:ts",
+    ],
 )
 
 js_library(
@@ -272,138 +419,888 @@ js_library(
     name = "pipeline",
     srcs = ["src/pipeline.ts"],
     types = ["src/pipeline.ts"],
-    deps = [":config", ":content", ":etiquette", ":evidence", ":evidence-extract", ":extract_index", ":health", ":ids", ":judge", ":limits", ":obtain", ":snapshot", ":store", ":triggers"],
+    deps = [
+        ":config",
+        ":content",
+        ":etiquette",
+        ":evidence",
+        ":evidence-extract",
+        ":extract_index",
+        ":health",
+        ":ids",
+        ":judge",
+        ":limits",
+        ":obtain",
+        ":snapshot",
+        ":store",
+        ":triggers",
+    ],
 )
 
 js_library(
     name = "tasks",
     srcs = ["src/tasks.ts"],
     types = ["src/tasks.ts"],
-    deps = ["//proto/tasks/inbox/v1:ts", "//proto/ts:wire-json", ":config", ":etiquette", ":limits", ":notify", ":store"],
+    deps = [
+        ":config",
+        ":etiquette",
+        ":limits",
+        ":notify",
+        ":store",
+        "//proto/tasks/inbox/v1:ts",
+        "//proto/ts:wire-json",
+    ],
 )
 
 js_library(
     name = "module_group_39",
-    srcs = ["src/env.ts", "src/ops-status.ts", "src/scheduler.ts", "src/state.ts"],
-    types = ["src/env.ts", "src/ops-status.ts", "src/scheduler.ts", "src/state.ts"],
-    deps = ["//contracts:ops-v1/runtime", "//proto/ops/v1:ts", "//proto/ts:http-transcoder", "//proto/ts:protobuf", "//proto/ts:rpc-status", "//proto/ts:wire-json", "//proto/watch/ui/v1:ts", ":api", ":backup", ":browser", ":etiquette", ":evidence", ":extract_html", ":fetcher", ":host-locks", ":judge", ":limits", ":notify", ":obtain", ":pipeline", ":preview", ":reasons", ":restore", ":store", ":tasks"],
+    srcs = [
+        "src/env.ts",
+        "src/ops-status.ts",
+        "src/scheduler.ts",
+        "src/state.ts",
+    ],
+    types = [
+        "src/env.ts",
+        "src/ops-status.ts",
+        "src/scheduler.ts",
+        "src/state.ts",
+    ],
+    deps = [
+        ":api",
+        ":backup",
+        ":browser",
+        ":etiquette",
+        ":evidence",
+        ":extract_html",
+        ":fetcher",
+        ":host-locks",
+        ":judge",
+        ":limits",
+        ":notify",
+        ":obtain",
+        ":pipeline",
+        ":preview",
+        ":reasons",
+        ":restore",
+        ":store",
+        ":tasks",
+        "//contracts:ops-v1/runtime",
+        "//proto/ops/v1:ts",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
+        "//proto/ts:wire-json",
+        "//proto/watch/ui/v1:ts",
+    ],
 )
 
-alias(name = "env", actual = ":module_group_39")
-alias(name = "ops-status", actual = ":module_group_39")
-alias(name = "scheduler", actual = ":module_group_39")
-alias(name = "state", actual = ":module_group_39")
+alias(
+    name = "env",
+    actual = ":module_group_39",
+)
+
+alias(
+    name = "ops-status",
+    actual = ":module_group_39",
+)
+
+alias(
+    name = "scheduler",
+    actual = ":module_group_39",
+)
+
+alias(
+    name = "state",
+    actual = ":module_group_39",
+)
+
 js_library(
     name = "auth",
     srcs = ["src/auth.ts"],
     types = ["src/auth.ts"],
-    deps = ["//packages/edge-auth:lib", ":module_group_39"],
+    deps = [
+        ":module_group_39",
+        "//packages/edge-auth:lib",
+    ],
 )
 
 js_library(
     name = "http",
     srcs = ["src/http.ts"],
     types = ["src/http.ts"],
-    deps = ["//packages/edge-auth:lib", "//proto/ts:rpc-status", ":auth", ":limits", ":module_group_39", ":reasons"],
+    deps = [
+        ":auth",
+        ":limits",
+        ":module_group_39",
+        ":reasons",
+        "//packages/edge-auth:lib",
+        "//proto/ts:rpc-status",
+    ],
 )
 
 js_library(
     name = "service",
     srcs = ["src/service.ts"],
     types = ["src/service.ts"],
-    deps = ["//packages/edge-auth:lib", "//proto/ts:rpc-status", ":http", ":module_group_39", ":reasons"],
+    deps = [
+        ":http",
+        ":module_group_39",
+        ":reasons",
+        "//packages/edge-auth:lib",
+        "//proto/ts:rpc-status",
+    ],
 )
 
 js_library(
     name = "ops",
     srcs = ["src/ops.ts"],
     types = ["src/ops.ts"],
-    deps = ["//proto/ops/v1:ts", ":module_group_39"],
+    deps = [
+        ":module_group_39",
+        "//proto/ops/v1:ts",
+    ],
 )
 
 js_library(
     name = "index",
     srcs = ["src/index.ts"],
     types = ["src/index.ts"],
-    deps = [":http", ":module_group_39", ":ops", ":service"],
+    deps = [
+        ":http",
+        ":module_group_39",
+        ":ops",
+        ":service",
+    ],
 )
 
-js_library(name = "lib", deps = [":api", ":auth", ":backup", ":browser", ":config", ":content", ":deployment", ":diff", ":etiquette", ":evidence", ":evidence-extract", ":extract_charset", ":extract_entities", ":extract_feed", ":extract_html", ":extract_index", ":extract_jsonpath", ":extract_markdown", ":extract_number", ":extract_structured", ":fetcher", ":health", ":host-locks", ":http", ":ids", ":index", ":judge", ":limits", ":model", ":module_group_39", ":normalize", ":notify", ":obtain", ":ops", ":pipeline", ":preview", ":reasons", ":restore", ":robots", ":service", ":snapshot", ":store", ":tasks", ":triggers", ":url-policy"])
+js_library(
+    name = "lib",
+    deps = [
+        ":api",
+        ":auth",
+        ":backup",
+        ":browser",
+        ":config",
+        ":content",
+        ":deployment",
+        ":diff",
+        ":etiquette",
+        ":evidence",
+        ":evidence-extract",
+        ":extract_charset",
+        ":extract_entities",
+        ":extract_feed",
+        ":extract_html",
+        ":extract_index",
+        ":extract_jsonpath",
+        ":extract_markdown",
+        ":extract_number",
+        ":extract_structured",
+        ":fetcher",
+        ":health",
+        ":host-locks",
+        ":http",
+        ":ids",
+        ":index",
+        ":judge",
+        ":limits",
+        ":model",
+        ":module_group_39",
+        ":normalize",
+        ":notify",
+        ":obtain",
+        ":ops",
+        ":pipeline",
+        ":preview",
+        ":reasons",
+        ":restore",
+        ":robots",
+        ":service",
+        ":snapshot",
+        ":store",
+        ":tasks",
+        ":triggers",
+        ":url-policy",
+    ],
+)
 
-proto_package(name = "proto_types_package", deps = ["//proto/common/errors/v1:ts", "//proto/ops/v1:ts", "//proto/tasks/inbox/v1:ts", "//proto/ts:field-mask", "//proto/ts:filter", "//proto/ts:http-transcoder", "//proto/ts:page-token", "//proto/ts:protobuf", "//proto/ts:protobuf-wkt", "//proto/ts:rpc-status", "//proto/ts:wire-json", "//proto/watch/ui/v1:ts", ":lib"])
-workspace_package_link(name = "proto_types_link", src = ":proto_types_package", runtime_dependencies = ["@bufbuild/protobuf"])
-workspace_package_link(name = "edge_auth_types_link", src = "//packages/edge-auth:pkg")
+proto_package(
+    name = "proto_types_package",
+    deps = [
+        ":lib",
+        "//proto/common/errors/v1:ts",
+        "//proto/ops/v1:ts",
+        "//proto/tasks/inbox/v1:ts",
+        "//proto/ts:field-mask",
+        "//proto/ts:filter",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:page-token",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+        "//proto/ts:wire-json",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+workspace_package_link(
+    name = "proto_types_link",
+    src = ":proto_types_package",
+    runtime_dependencies = ["@bufbuild/protobuf"],
+)
+
+workspace_package_link(
+    name = "edge_auth_types_link",
+    src = "//packages/edge-auth:pkg",
+)
+
 proto_vitest_test(
     name = "config_test",
+    data = [
+        "package.json",
+        ":node_modules/vitest",
+    ],
     runner = vitest.vitest_test,
     tests = ["test/config.test.ts"],
-    deps = ["//proto/ts:protobuf", "//proto/watch/ui/v1:ts", ":config", ":fetcher", ":module_group_39"],
-    data = [":node_modules/vitest", "package.json"],
+    deps = [
+        ":config",
+        ":fetcher",
+        ":module_group_39",
+        "//proto/ts:protobuf",
+        "//proto/watch/ui/v1:ts",
+    ],
 )
 
 proto_vitest_test(
     name = "fetch_test",
+    data = [
+        "package.json",
+        ":node_modules/vitest",
+    ],
     runner = vitest.vitest_test,
     tests = ["test/fetch.test.ts"],
-    deps = [":browser", ":fetcher", ":host-locks", ":limits"],
-    data = [":node_modules/vitest", "package.json"],
+    deps = [
+        ":browser",
+        ":fetcher",
+        ":host-locks",
+        ":limits",
+    ],
 )
 
 proto_vitest_test(
     name = "normalize_test",
+    data = [
+        "package.json",
+        ":node_modules/vitest",
+    ],
     runner = vitest.vitest_test,
     tests = ["test/normalize.test.ts"],
     deps = [":normalize"],
-    data = [":node_modules/vitest", "package.json"],
 )
 
 proto_vitest_test(
     name = "ops-golden_test",
+    data = [
+        "package.json",
+        "test/golden/ops-v1.json",
+        ":node_modules/vitest",
+        "//contracts:ops-v1/fixtures/GuardState/shed-watch.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/watch-degraded.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/watch-ok.json_data",
+        "//contracts:ops-v1/ops-v1.schema.json_data",
+    ],
     runner = vitest.vitest_test,
     tests = ["test/ops-golden.test.ts"],
-    deps = ["//contracts:ops-v1/validate", ":module_group_39", ":store"],
-    data = ["//contracts:ops-v1/fixtures/GuardState/shed-watch.json_data", "//contracts:ops-v1/fixtures/OpsStatus/watch-degraded.json_data", "//contracts:ops-v1/fixtures/OpsStatus/watch-ok.json_data", "//contracts:ops-v1/ops-v1.schema.json_data", ":node_modules/vitest", "package.json", "test/golden/ops-v1.json"],
+    deps = [
+        ":module_group_39",
+        ":store",
+        "//contracts:ops-v1/validate",
+    ],
 )
 
 proto_vitest_test(
     name = "rules_test",
+    data = [
+        "package.json",
+        ":node_modules/vitest",
+    ],
     runner = vitest.vitest_test,
     tests = ["test/rules.test.ts"],
-    deps = [":diff", ":etiquette", ":extract_charset", ":extract_entities", ":extract_feed", ":extract_jsonpath", ":extract_markdown", ":extract_number", ":extract_structured", ":health", ":limits", ":robots", ":snapshot", ":url-policy"],
-    data = [":node_modules/vitest", "package.json"],
+    deps = [
+        ":diff",
+        ":etiquette",
+        ":extract_charset",
+        ":extract_entities",
+        ":extract_feed",
+        ":extract_jsonpath",
+        ":extract_markdown",
+        ":extract_number",
+        ":extract_structured",
+        ":health",
+        ":limits",
+        ":robots",
+        ":snapshot",
+        ":url-policy",
+    ],
 )
 
 proto_vitest_test(
     name = "store_test",
+    data = [
+        "package.json",
+        ":node_modules/vitest",
+    ],
     runner = vitest.vitest_test,
     tests = ["test/store.test.ts"],
-    deps = [":model", ":store"],
-    data = [":node_modules/vitest", "package.json"],
+    deps = [
+        ":model",
+        ":store",
+    ],
 )
 
 proto_vitest_test(
     name = "tasks_test",
+    data = [
+        "package.json",
+        ":node_modules/vitest",
+    ],
     runner = vitest.vitest_test,
     tests = ["test/tasks.test.ts"],
-    deps = ["//proto/tasks/inbox/v1:ts", "//proto/ts:wire-json", ":config", ":limits", ":tasks"],
-    data = [":node_modules/vitest", "package.json"],
+    deps = [
+        ":config",
+        ":limits",
+        ":tasks",
+        "//proto/tasks/inbox/v1:ts",
+        "//proto/ts:wire-json",
+    ],
 )
 
 proto_vitest_test(
     name = "triggers_test",
+    data = [
+        "package.json",
+        ":node_modules/vitest",
+    ],
     runner = vitest.vitest_test,
     tests = ["test/triggers.test.ts"],
-    deps = [":config", ":content", ":limits", ":triggers"],
-    data = [":node_modules/vitest", "package.json"],
+    deps = [
+        ":config",
+        ":content",
+        ":limits",
+        ":triggers",
+    ],
 )
 
 ts_project(
     name = "types",
-    srcs = ["vitest.config.ts", "vitest.runtime.config.ts", "src/api.ts", "src/auth.ts", "src/backup.ts", "src/browser.ts", "src/config.ts", "src/content.ts", "src/deployment.ts", "src/diff.ts", "src/env.ts", "src/etiquette.ts", "src/evidence-extract.ts", "src/evidence.ts", "src/extract/charset.ts", "src/extract/entities.ts", "src/extract/feed.ts", "src/extract/html.ts", "src/extract/index.ts", "src/extract/jsonpath.ts", "src/extract/markdown.ts", "src/extract/number.ts", "src/extract/structured.ts", "src/fetcher.ts", "src/health.ts", "src/host-locks.ts", "src/http.ts", "src/ids.ts", "src/index.ts", "src/judge.ts", "src/limits.ts", "src/model.ts", "src/normalize.ts", "src/notify.ts", "src/obtain.ts", "src/ops-status.ts", "src/ops.ts", "src/pipeline.ts", "src/preview.ts", "src/reasons.ts", "src/restore.ts", "src/robots.ts", "src/scheduler.ts", "src/service.ts", "src/snapshot.ts", "src/state.ts", "src/store.ts", "src/tasks.ts", "src/triggers.ts", "src/url-policy.ts", "test/config.test.ts", "test/fake-sites.ts", "test/fetch.test.ts", "test/jwt.ts", "test/normalize.test.ts", "test/ops-golden.test.ts", "test/rules.test.ts", "test/store.test.ts", "test/stubs/browser-state.ts", "test/stubs/evidence-probe.ts", "test/stubs/tasks-stub.ts", "test/tasks.test.ts", "test/triggers.test.ts", "test/validate.d.ts"],
+    srcs = [
+        "src/api.ts",
+        "src/auth.ts",
+        "src/backup.ts",
+        "src/browser.ts",
+        "src/config.ts",
+        "src/content.ts",
+        "src/deployment.ts",
+        "src/diff.ts",
+        "src/env.ts",
+        "src/etiquette.ts",
+        "src/evidence.ts",
+        "src/evidence-extract.ts",
+        "src/extract/charset.ts",
+        "src/extract/entities.ts",
+        "src/extract/feed.ts",
+        "src/extract/html.ts",
+        "src/extract/index.ts",
+        "src/extract/jsonpath.ts",
+        "src/extract/markdown.ts",
+        "src/extract/number.ts",
+        "src/extract/structured.ts",
+        "src/fetcher.ts",
+        "src/health.ts",
+        "src/host-locks.ts",
+        "src/http.ts",
+        "src/ids.ts",
+        "src/index.ts",
+        "src/judge.ts",
+        "src/limits.ts",
+        "src/model.ts",
+        "src/normalize.ts",
+        "src/notify.ts",
+        "src/obtain.ts",
+        "src/ops.ts",
+        "src/ops-status.ts",
+        "src/pipeline.ts",
+        "src/preview.ts",
+        "src/reasons.ts",
+        "src/restore.ts",
+        "src/robots.ts",
+        "src/scheduler.ts",
+        "src/service.ts",
+        "src/snapshot.ts",
+        "src/state.ts",
+        "src/store.ts",
+        "src/tasks.ts",
+        "src/triggers.ts",
+        "src/url-policy.ts",
+        "test/config.test.ts",
+        "test/fake-sites.ts",
+        "test/fetch.test.ts",
+        "test/jwt.ts",
+        "test/normalize.test.ts",
+        "test/ops-golden.test.ts",
+        "test/rules.test.ts",
+        "test/store.test.ts",
+        "test/stubs/browser-state.ts",
+        "test/stubs/evidence-probe.ts",
+        "test/stubs/tasks-stub.ts",
+        "test/tasks.test.ts",
+        "test/triggers.test.ts",
+        "test/validate.d.ts",
+        "vitest.config.ts",
+        "vitest.runtime.config.ts",
+    ],
+    data = [
+        "vitest.config.ts",
+        "vitest.runtime.config.ts",
+    ],
     no_emit = True,
     resolve_json_module = True,
-    data = ["vitest.config.ts", "vitest.runtime.config.ts"],
-    deps = [":edge_auth_types_link", ":lib", ":node_modules/@cloudflare/puppeteer", ":node_modules/@cloudflare/workers-types", ":node_modules/@types/node", ":node_modules/vitest", ":proto_types_link"],
+    deps = [
+        ":edge_auth_types_link",
+        ":lib",
+        ":node_modules/@cloudflare/puppeteer",
+        ":node_modules/@cloudflare/workers-types",
+        ":node_modules/@types/node",
+        ":node_modules/vitest",
+        ":proto_types_link",
+    ],
 )
 
-alias(name = "typecheck", actual = ":types_typecheck")
+alias(
+    name = "typecheck",
+    actual = ":types_typecheck",
+)
+
+ts_project(
+    name = "web_limits_types",
+    srcs = ["src/limits.ts"],
+    declaration = True,
+    emit_declaration_only = True,
+    extends = "tsconfig.json",
+    resolve_json_module = True,
+    tsconfig = {
+        "compilerOptions": {"noEmit": False},
+        "include": [],
+        "exclude": [],
+    },
+    deps = [":node_modules/@cloudflare/workers-types"],
+)
+
+js_library(
+    name = "limits_web",
+    srcs = ["src/limits.ts"],
+    deps = [":web_limits_types"],
+)
+
+wrangler.wrangler_binary(name = "wrangler")
+
+js_library(
+    name = "application_sources",
+    srcs = glob([
+        "src/**",
+        "package.json",
+        "tsconfig.json",
+    ]),
+)
+
+test_suite(name = "check")
+
+js_library(
+    name = "runtime_helpers",
+    srcs = [
+        "test/runtime/fake-net.ts",
+        "test/runtime/harness.ts",
+        "test/runtime/serve-fake-sites.ts",
+        "test/runtime/tsconfig.json",
+    ],
+    types = glob(
+        ["test/runtime/**/*.ts"],
+        exclude = ["**/*.test.ts"],
+    ),
+)
+
+workerd_vitest_test(
+    name = "runtime_alarm_test",
+    data = [
+        "test/fake-sites.ts",
+        ":test_support",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/alarm.test.ts"],
+    deps = [
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_api_test",
+    data = [
+        "test/fake-sites.ts",
+        ":test_support",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/api.test.ts"],
+    deps = [
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:rpc-status",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_backup_test",
+    data = [":test_support"],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/backup.test.ts"],
+)
+
+workerd_vitest_test(
+    name = "runtime_browser_test",
+    data = [
+        "test/fake-sites.ts",
+        ":test_support",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/browser.test.ts"],
+    deps = [
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_cpu_test",
+    data = [
+        "test/fake-sites.ts",
+        "test/jwt.ts",
+        ":test_support",
+        "//tools/workerd-cpu:lib",
+    ],
+    runner = vitest.vitest_test,
+    tags = [
+        "cpu",
+        "exclusive",
+        "workerd",
+    ],
+    tests = ["test/runtime/cpu.test.ts"],
+    deps = [
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_etiquette_test",
+    data = [
+        "test/fake-sites.ts",
+        ":test_support",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/etiquette.test.ts"],
+    deps = [
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_evidence-extract_test",
+    data = [":test_support"],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/evidence-extract.test.ts"],
+)
+
+workerd_vitest_test(
+    name = "runtime_evidence_test",
+    data = [
+        "test/fake-sites.ts",
+        ":test_support",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/evidence.test.ts"],
+    deps = [
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:wire-json",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_fake-net_test",
+    data = [":test_support"],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/fake-net.test.ts"],
+)
+
+workerd_vitest_test(
+    name = "runtime_notify_test",
+    data = [
+        "test/fake-sites.ts",
+        ":test_support",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/notify.test.ts"],
+    deps = [
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_ops_test",
+    data = [
+        "test/fake-sites.ts",
+        ":test_support",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/ops.test.ts"],
+    deps = [
+        "//proto/ops/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:wire-json",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_pipeline_test",
+    data = [
+        "test/fake-sites.ts",
+        ":test_support",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/pipeline.test.ts"],
+    deps = [
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_preview_test",
+    data = [
+        "test/fake-sites.ts",
+        ":test_support",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/preview.test.ts"],
+    deps = [
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_restore_test",
+    data = [
+        "test/fake-sites.ts",
+        ":test_support",
+        ":wrangler",
+        "//watch:config",
+        "//watch/tools:backup-restore",
+    ],
+    env = {"BAZEL_WRANGLER": "$(rootpath :wrangler)"},
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/restore.test.ts"],
+    deps = [
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_rows_test",
+    data = [
+        "test/fake-sites.ts",
+        ":test_support",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/rows.test.ts"],
+    deps = [
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_service_test",
+    data = [
+        "test/fake-sites.ts",
+        ":test_support",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/service.test.ts"],
+    deps = [
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+ts_config(
+    name = "worker_config",
+    src = "tsconfig.json",
+)
+
+ts_config(
+    name = "runtime_config",
+    src = "test/runtime/tsconfig.json",
+    deps = [":worker_config"],
+)
+
+ts_project(
+    name = "runtime_types",
+    srcs = [":proto_types_package_wire_types"] + glob(
+        [
+            "test/runtime/**/*.ts",
+            "test/runtime/**/*.mts",
+        ],
+        allow_empty = True,
+    ),
+    extends = ":runtime_config",
+    no_emit = True,
+    resolve_json_module = True,
+    tsconfig = {
+        "compilerOptions": {"noEmit": True},
+        "include": [],
+        "exclude": [],
+    },
+    deps = [
+        ":edge_auth_types_link",
+        ":lib",
+        ":node_modules/@cloudflare/puppeteer",
+        ":node_modules/@cloudflare/workers-types",
+        ":node_modules/@types/node",
+        ":node_modules/esbuild",
+        ":node_modules/miniflare",
+        ":node_modules/vitest",
+        ":proto_types_link",
+        ":test_support",
+        "//:node_modules/@cloudflare/workers-types",
+        "//tools/workerd-cpu:types",
+    ],
+)
+
+js_library(
+    name = "test_support",
+    srcs = glob(
+        ["test/**"],
+        exclude = [
+            "test/runtime/**",
+            "test/smoke/**",
+            "**/*.test.ts",
+        ],
+    ),
+    types = glob(
+        ["test/**/*.ts"],
+        exclude = [
+            "test/runtime/**",
+            "test/smoke/**",
+            "**/*.test.ts",
+        ],
+    ),
+)
+
+eslint_test(
+    name = "lint",
+    data = [
+        "package.json",
+        "test/runtime/tsconfig.json",
+        "tsconfig.json",
+        ":application_sources",
+        ":edge_auth_types_link",
+        ":lib",
+        ":node_modules/@cloudflare/puppeteer",
+        ":node_modules/@cloudflare/workers-types",
+        ":node_modules/@eslint/js",
+        ":node_modules/@types/node",
+        ":node_modules/esbuild",
+        ":node_modules/eslint",
+        ":node_modules/miniflare",
+        ":node_modules/typescript",
+        ":node_modules/typescript-eslint",
+        ":node_modules/vitest",
+        ":node_modules/wrangler",
+        ":proto_types_link",
+        ":runtime_helpers",
+        ":test_support",
+        "//:node_modules/@cloudflare/workers-types",
+        "//tools/workerd-cpu:types",
+    ],
+    runner = eslint.eslint_test,
+    sources = glob(
+        [
+            "src/**/*.ts",
+            "src/**/*.tsx",
+            "test/**/*.ts",
+            "test/**/*.mts",
+            "scripts/**/*.mjs",
+            "*.js",
+            "*.ts",
+        ],
+        allow_empty = True,
+    ),
+)
+
+js_library(
+    name = "package_metadata",
+    srcs = ["package.json"],
+)
+
+js_library(
+    name = "entry_metadata",
+    srcs = ["src/index.ts"],
+)
+
+js_library(
+    name = "runtime_metadata",
+    srcs = ["test/runtime/harness.ts"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        [
+            "*",
+            "src/**",
+            "test/**",
+        ],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)

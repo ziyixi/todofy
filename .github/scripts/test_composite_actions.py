@@ -124,9 +124,11 @@ class CompositeActions(unittest.TestCase):
                         self.assertTrue(step["working-directory"])
                     if "uses" in step:
                         if step["uses"].startswith("./"):
-                            self.assertEqual(step["uses"], "./.github/actions/setup-workspace")
+                            self.assertIn(step["uses"], {
+                                "./.github/actions/setup-workspace", "./.github/actions/setup-bazel",
+                            })
                             installer = workflow_data(ROOT / step["uses"] / "action.yml")
-                            self.assertEqual(set(step["with"]), set(installer["inputs"]))
+                            self.assertEqual(set(step.get("with", {})), set(installer.get("inputs", {})))
                         else:
                             self.assertRegex(step["uses"], r"^[\w./-]+@[0-9a-f]{40}$")
                     self.assertNotEqual(
@@ -224,7 +226,7 @@ class CompositeActions(unittest.TestCase):
                 step.get("if") == "${{ fromJSON(inputs.build-image) }}"
                 for step in action["runs"]["steps"]
             ),
-            2,
+            3,
         )
         for job_name in ("newsletter-deploy", "platform-image"):
             job = ci[job_name]

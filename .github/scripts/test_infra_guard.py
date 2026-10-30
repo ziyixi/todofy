@@ -72,6 +72,10 @@ class Guard(unittest.TestCase):
     def test_the_base_fixture_passes(self):
         self.assertEqual(run(), [])
 
+    def test_bazel_metadata_is_not_an_opentofu_input(self):
+        self.assertEqual(run({"BUILD.bazel": 'filegroup(name = "config", srcs = ["versions.tf"])\n'}), [])
+        self.assert_flags({"values.bazel": "sensitive values\n"}, "not a file kind")
+
     def test_bare_labels_are_read_like_quoted_ones(self):
         self.assert_flags({"extra.tf": TERRAFORM_DATA}, "resource type outside the monorepo boundary")
         self.assert_flags({"extra.tf": TERRAFORM_DATA}, "nested provisioner block")
@@ -246,7 +250,7 @@ class Guard(unittest.TestCase):
 
 class TheRealConfiguration(unittest.TestCase):
     def test_infra_is_within_the_boundary(self):
-        self.assertEqual(infra_guard.check(Path(__file__).resolve().parents[2] / "infra"), [])
+        self.assertEqual(infra_guard.check(Path(__file__).absolute().parents[2] / "infra"), [])
 
 
 if __name__ == "__main__":

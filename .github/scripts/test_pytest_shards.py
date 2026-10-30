@@ -13,7 +13,7 @@ import pytest_shards
 
 DURATIONS = Path(__file__).with_name("todofy-runtime-durations.json")
 SERIAL_LIST = Path(__file__).with_name("todofy-runtime-serial.txt")
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).absolute().parents[2]
 
 
 def ids(files, per_file=2):

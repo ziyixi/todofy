@@ -4,7 +4,7 @@ import sys
 import unittest
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).absolute().parents[3]
 sys.path.insert(0, str(ROOT / "tools/cloud-bootstrap"))
 from fresh_collisions import ENDPOINTS, MAX_PAGES, PAGE_SIZE, refuse_conflicts  # noqa: E402
 from private_input import BootstrapError  # noqa: E402

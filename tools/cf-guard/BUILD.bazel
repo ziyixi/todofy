@@ -1,0 +1,37 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+js_library(
+    name = "toml",
+    srcs = ["toml.mjs"],
+    visibility = ["//visibility:public"],
+)
+
+js_library(
+    name = "cli",
+    srcs = [
+        "cf-guard.mjs",
+        "toml.mjs",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        [
+            "*",
+            "test/**",
+        ],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)

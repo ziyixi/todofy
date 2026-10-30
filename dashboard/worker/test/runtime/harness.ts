@@ -81,6 +81,7 @@ let bundled: Promise<string> | undefined;
 /** The real Worker, bundled once per test file. */
 export function bundle(): Promise<string> {
   bundled ??= build({
+    ...(process.env.TEST_SRCDIR ? { nodePaths: [`${process.cwd()}/node_modules`] } : {}),
     entryPoints: [join(ROOT, 'src/index.ts')],
     bundle: true,
     format: 'esm',

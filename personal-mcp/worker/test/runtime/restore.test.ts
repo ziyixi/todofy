@@ -8,7 +8,7 @@
 import { spawnSync } from 'node:child_process';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { build } from 'esbuild';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { Webhook } from 'standardwebhooks';
@@ -21,6 +21,9 @@ import { WORK_SEQ_GAP } from '../../src/restore.ts';
 import { ListChangesResponseSchema, TaskChangeSchema, type TaskChange } from '@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb';
 
 const TOOL = join(import.meta.dirname, '../../../tools/backup-restore.ts');
+const WRANGLER = process.env.BAZEL_WRANGLER
+  ? resolve(process.env.TEST_SRCDIR ?? '', process.env.TEST_WORKSPACE ?? '', process.env.BAZEL_WRANGLER)
+  : undefined;
 const secret = `whsec_${btoa('s'.repeat(32))}`;
 const callback = { mode: 'webhook', url: 'https://receiver.example.org/callback', secret };
 const runtimes: Miniflare[] = [];
@@ -80,7 +83,8 @@ function sources() {
 type Sources = ReturnType<typeof sources>;
 
 async function start(root: string, received: unknown[], fixture: Sources, backups: boolean) {
-  const bundle = await build({ entryPoints: ['src/index.ts'], bundle: true, format: 'esm', platform: 'browser',
+  const bundle = await build({
+    ...(process.env.TEST_SRCDIR ? { nodePaths: [`${process.cwd()}/node_modules`] } : {}), entryPoints: ['src/index.ts'], bundle: true, format: 'esm', platform: 'browser',
     conditions: ['workerd', 'worker', 'browser'], target: 'es2024', external: ['cloudflare:workers', 'node:*'], write: false, logLevel: 'silent' });
   const output = bundle.outputFiles[0];
   if (!output) throw new Error('No bundled Worker');
@@ -159,7 +163,7 @@ async function ops(mf: Miniflare) {
 }
 
 function run(...args: string[]) {
-  return spawnSync('node', [TOOL, ...args], { encoding: 'utf8' });
+  return spawnSync(process.execPath, [TOOL, ...args, ...(WRANGLER && process.env.BAZEL_WRANGLER && ['download', 'upload', 'verify'].includes(args[0] ?? '') ? ['--wrangler', WRANGLER] : [])], { encoding: 'utf8' });
 }
 
 it('backs a filled store up, restores it through the owner call into a new environment and resumes its work', async () => {

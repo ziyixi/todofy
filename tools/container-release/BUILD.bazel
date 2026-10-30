@@ -1,0 +1,39 @@
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+py_library(
+    name = "build",
+    srcs = ["build.py"],
+    imports = ["."],
+)
+
+py_test(
+    name = "build_identity_test",
+    srcs = [
+        "test_build.py",
+        "//tools/bazel/python:unittest_main.py",
+    ],
+    args = ["test_build"],
+    imports = ["."],
+    legacy_create_init = False,
+    main = "//tools/bazel/python:unittest_main.py",
+    visibility = ["//visibility:public"],
+    deps = [":build"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["*"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)

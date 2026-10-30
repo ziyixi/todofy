@@ -1,8 +1,9 @@
+import { realpathSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { HostnameGuardCli } from "../../scripts/release/cloudflare";
 
@@ -10,7 +11,13 @@ import { HostnameGuardCli } from "../../scripts/release/cloudflare";
 // need no network: a config without routes sends no request, and one with routes stops at the missing
 // token before any request.
 describe("hostname guard (tools/cf-guard) from the release", () => {
-  const cwd = path.resolve(__dirname, "../..");
+  const cwd = path.dirname(realpathSync(path.resolve(__dirname, "../../package.json")));
+  const executable = process.execPath;
+  beforeAll(() => {
+    // The guard deliberately clears its child's environment; use the declared Node binary, not Bazel's shell shim.
+    if (process.env.JS_BINARY__NODE_BINARY) process.execPath = process.env.JS_BINARY__NODE_BINARY;
+  });
+  afterAll(() => { process.execPath = executable; });
 
   async function withConfig(body: string, run: (file: string) => Promise<void>) {
     const directory = await mkdtemp(path.join(tmpdir(), "website-guard-"));

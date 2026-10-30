@@ -1,15 +1,52 @@
 load("@protobuf//bazel:proto_library.bzl", "proto_library")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
 package(default_visibility = ["//visibility:public"])
 
 proto_library(
     name = "proto",
-    srcs = ["console.proto", "inference.proto"],
+    srcs = [
+        "console.proto",
+        "inference.proto",
+    ],
     strip_import_prefix = "/proto",
-    deps = ["@googleapis//:google_api_annotations_proto", "@googleapis//:google_api_client_proto", "@googleapis//:google_api_field_behavior_proto", "@protobuf//:empty_proto", "@protobuf//:timestamp_proto"],
+    deps = [
+        "@googleapis//:google_api_annotations_proto",
+        "@googleapis//:google_api_client_proto",
+        "@googleapis//:google_api_field_behavior_proto",
+        "@protobuf//:empty_proto",
+        "@protobuf//:timestamp_proto",
+    ],
 )
 
-alias(name = "ts", actual = "//proto/ts:modelrouter_inference_v1_ts")
-alias(name = "python", actual = "//proto/python/src/ziyixi_proto:modelrouter_inference_v1_py")
+alias(
+    name = "ts",
+    actual = "//proto/ts:modelrouter_inference_v1_ts",
+)
 
-exports_files(['console.proto', 'inference.proto'])
+alias(
+    name = "python",
+    actual = "//proto/python/src/ziyixi_proto:modelrouter_inference_v1_py",
+)
+
+exports_files([
+    "console.proto",
+    "inference.proto",
+])
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["*"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)

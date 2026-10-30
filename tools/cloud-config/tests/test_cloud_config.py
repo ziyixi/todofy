@@ -8,7 +8,7 @@ import tomllib
 import unittest
 from pathlib import Path
 
-TOOL = Path(__file__).resolve().parents[1]
+TOOL = Path(__file__).absolute().parents[1]
 sys.path.insert(0, str(TOOL))
 import cloud_profile  # noqa: E402
 

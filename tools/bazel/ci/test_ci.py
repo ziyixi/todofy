@@ -81,7 +81,12 @@ class SelectionTest(unittest.TestCase):
             patch.object(plan, "run") as run,
         ):
             targets, why = plan.affected_targets(
-                "old", "bazel", "target-determinator", [], {"//a:one"}
+                "old",
+                "bazel",
+                "target-determinator",
+                [],
+                {"//a:one"},
+                "tests(//a:check)",
             )
         self.assertEqual(targets, {"//a:one"})
         self.assertIn("no MODULE.bazel", why)
@@ -105,13 +110,14 @@ class SelectionTest(unittest.TestCase):
                 "target-determinator",
                 ["--output_user_root=/tmp/cache"],
                 {"//a:one", "//a:two"},
+                "tests(//a:check)",
             )
         self.assertEqual(targets, {"//a:two"})
         command = run.call_args.args[0]
         self.assertEqual(command[-1], "base")
         self.assertIn("--nocache_results", command)
         self.assertIn("--before-query-error-behavior=ignore-and-build-all", command)
-        self.assertIn("--targets=" + plan.QUERY, command)
+        self.assertIn("--targets=tests(//a:check)", command)
         self.assertIn("v0.34.0", why)
 
     def test_wrong_determinator_version_fails(self):
@@ -122,7 +128,55 @@ class SelectionTest(unittest.TestCase):
             patch.object(plan, "run", return_value="target-determinator v0.33.2"),
             self.assertRaisesRegex(RuntimeError, "v0.34.0"),
         ):
-            plan.affected_targets("base", "bazel", "td", [], set())
+            plan.affected_targets("base", "bazel", "td", [], set(), "tests(//a:check)")
+
+    def test_no_affected_leaves_produces_no_runner_work(self):
+        xml = '<query><rule name="//new-app:leaf_test" class="js_test"/></query>'
+        with (
+            patch.object(
+                plan.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)
+            ),
+            patch.object(plan.shutil, "which", return_value="/bin/bazel"),
+            patch.object(plan, "run", side_effect=[plan.TD_VERSION, ""]),
+        ):
+            selected, _ = plan.affected_targets(
+                "base",
+                "bazel",
+                "td",
+                [],
+                {"//new-app:leaf_test"},
+                "tests(//new-app:check)",
+            )
+        self.assertEqual(plan.target_groups(xml, selected), {})
+
+
+class ScopeTest(unittest.TestCase):
+    def test_new_public_app_and_package_roots_drive_the_leaf_scope(self):
+        roots = [
+            "//new-service:check",
+            "//packages/new-lib:check",
+            "//proto:check",
+            "//tools:check",
+            "//infra:check",
+        ]
+        xml = '<query><rule name="//new-service/private:leaf_test" class="js_test"/></query>'
+        with patch.object(plan, "run", side_effect=["\n".join(roots), xml]) as run:
+            found, query, result = plan.check_scope("bazel", [])
+        self.assertEqual(found, sorted(roots))
+        self.assertEqual(result, xml)
+        self.assertIn(plan.ROOTS_QUERY, run.call_args_list[0].args[0])
+        self.assertIn(query, run.call_args_list[1].args[0])
+        for root in roots:
+            self.assertIn(root, query)
+        self.assertNotIn("visible(", query)
+        self.assertNotIn("//tasks/...", query)
+
+    def test_missing_facades_fail_instead_of_reporting_a_vacuous_green(self):
+        with (
+            patch.object(plan, "run", return_value=""),
+            self.assertRaisesRegex(RuntimeError, "No public :check"),
+        ):
+            plan.check_scope("bazel", [])
 
 
 class BaselineTest(unittest.TestCase):

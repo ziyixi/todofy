@@ -25,6 +25,7 @@ def _name(path):
 
 def _googleapis_impl(repository_ctx):
     lock = repository_ctx.path(repository_ctx.attr.buf_lock)
+
     # Reading the label's contents makes lock changes invalidate the fetched repository.
     repository_ctx.read(lock)
     system = "darwin" if repository_ctx.os.name == "mac os x" else repository_ctx.os.name

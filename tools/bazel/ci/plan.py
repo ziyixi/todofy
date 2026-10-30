@@ -1,4 +1,4 @@
-"""Select foundation checks with Target Determinator and group compatible tests for CI."""
+"""Select affected leaves of public check facades and group compatible tests for CI."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from pathlib import Path
 
-QUERY = 'tests(//proto/... union //packages/... union //tasks/... union //todofy:tests union //codex-gateway:tests union //platform:tests union //newsletter:tests union //tools/bazel/...) except attr("tags", "manual", //...)'
+ROOTS_QUERY = 'visible(//:package.json, filter(":check$", //...))'
 GATE = "Bazel migration gate"
 GROUPS = ("node", "python", "go", "browser", "workerd", "cpu", "check")
 TD_VERSION = "target-determinator v0.34.0"
@@ -143,8 +143,45 @@ def target_groups(xml: str, selected: set[str]) -> dict[str, list[str]]:
     return {group: sorted(targets) for group, targets in sorted(groups.items())}
 
 
+def leaf_query(roots: list[str]) -> str:
+    leaves = "tests(set(" + " ".join(sorted(set(roots))) + "))"
+    return leaves + ' except attr("tags", "manual", ' + leaves + ")"
+
+
+def check_scope(bazel: str, startup: list[str]) -> tuple[list[str], str, str]:
+    repository_cache = "--repository_cache=" + str(
+        Path.home() / ".cache/personal-cloud-bazel/repository"
+    )
+    roots = sorted(
+        set(
+            run(
+                [
+                    bazel,
+                    *startup,
+                    "query",
+                    ROOTS_QUERY,
+                    "--output=label",
+                    repository_cache,
+                ]
+            ).splitlines()
+        )
+    )
+    if not roots:
+        raise RuntimeError("No public :check facades were found")
+    # visible() is an unconfigured query operation. Target Determinator's cquery
+    # receives the concrete public roots and computes the affected leaf tests.
+    query = leaf_query(roots)
+    xml = run([bazel, *startup, "query", query, "--output=xml", repository_cache])
+    return roots, query, xml
+
+
 def affected_targets(
-    base: str, bazel: str, determinator: str, startup: list[str], candidates: set[str]
+    base: str,
+    bazel: str,
+    determinator: str,
+    startup: list[str],
+    candidates: set[str],
+    query: str,
 ) -> tuple[set[str], str]:
     if not base:
         return candidates, "all"
@@ -164,7 +201,7 @@ def affected_targets(
     command = [
         determinator,
         "--bazel=" + executable,
-        "--targets=" + QUERY,
+        "--targets=" + query,
         "--nocache_results",
         "--before-query-error-behavior=ignore-and-build-all",
         "--bazel-opts=--repository_cache=" + repository_cache,
@@ -187,23 +224,24 @@ def main() -> None:
     base, reason = (
         (args.base, "explicit baseline") if args.base is not None else baseline()
     )
-    xml = run(
-        [
-            args.bazel,
-            *args.bazel_startup_option,
-            "query",
-            QUERY,
-            "--output=xml",
-            "--repository_cache="
-            + str(Path.home() / ".cache/personal-cloud-bazel/repository"),
-        ]
-    )
+    roots, query, xml = check_scope(args.bazel, args.bazel_startup_option)
     candidates = {rule.attrib["name"] for rule in ET.fromstring(xml).findall("rule")}
     selected, selector = affected_targets(
-        base, args.bazel, args.determinator, args.bazel_startup_option, candidates
+        base,
+        args.bazel,
+        args.determinator,
+        args.bazel_startup_option,
+        candidates,
+        query,
     )
     groups = target_groups(xml, selected)
-    plan = {"base": base, "reason": reason, "selector": selector, "groups": groups}
+    plan = {
+        "base": base,
+        "reason": reason,
+        "selector": selector,
+        "check_roots": roots,
+        "groups": groups,
+    }
     args.output.write_text(json.dumps(plan, indent=2) + "\n", encoding="utf-8")
     matrix = {"include": [{"group": group} for group in groups]}
     if output := os.environ.get("GITHUB_OUTPUT"):

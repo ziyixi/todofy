@@ -38,7 +38,8 @@ function emptyHome(): ReadHomeResponse {
 }
 
 async function start(persist: string, received: unknown[], options: RuntimeOptions = {}) {
-  const bundle = await build({ entryPoints: ['src/index.ts'], bundle: true, format: 'esm', platform: 'browser',
+  const bundle = await build({
+    ...(process.env.TEST_SRCDIR ? { nodePaths: [`${process.cwd()}/node_modules`] } : {}), entryPoints: ['src/index.ts'], bundle: true, format: 'esm', platform: 'browser',
     conditions: ['workerd', 'worker', 'browser'], target: 'es2024', external: ['cloudflare:workers', 'node:*'], write: false, logLevel: 'silent' });
   const output = bundle.outputFiles[0];
   if (!output) throw new Error('No bundled Worker');

@@ -45,7 +45,7 @@ from ziyixi_proto.wire_json import from_wire
 from tests.fakes.server import FakeServer, Reply
 
 ROOT = Path(__file__).resolve().parents[2]
-WRANGLER = ROOT / "node_modules" / ".bin" / "wrangler"
+WRANGLER = Path(os.environ.get("BAZEL_WRANGLER", ROOT / "node_modules" / ".bin" / "wrangler"))
 PROTO_ENSURE = ROOT.parent / "proto" / "tools" / "ensure.mjs"
 PYODIDE_CACHE = ROOT / ".wrangler" / "pyodide-cache"
 STARTUP_TIMEOUT_S = 120
@@ -147,6 +147,12 @@ def _ensure_synced() -> None:
     pywrangler builds ziyixi-proto inside Pyodide, which cannot run the generator, from proto/'s source
     tree, so that tree's generated code is made current first (a no-op in ~0.1 s when it is): uv may have
     installed the package from its wheel cache without touching the tree (proto/README.md)."""
+    if os.environ.get("BAZEL_WRANGLER"):
+        if not _vendored_proto_is_current() or not (ROOT / "python_modules/workers").is_dir():
+            raise RuntimeError("The declared Worker vendor must match the generated host proto package")
+        if not _pyodide_cached():
+            raise RuntimeError("The fixed Pyodide bundle must be declared before a Bazel runtime test starts")
+        return
     with _checkout_lock("pywrangler-sync"):
         subprocess.run(
             ["node", str(PROTO_ENSURE)],
@@ -205,9 +211,11 @@ def _cached_workerd() -> Path:
     binary named by MINIFLARE_WORKERD_PATH.
     """
     # The same platform binary miniflare would pick.
-    workerd = subprocess.run(
-        ["node", "-p", "require('workerd').default"], cwd=ROOT, capture_output=True, text=True, check=True
-    ).stdout.strip()
+    workerd = os.environ.get("BAZEL_WORKERD")
+    if not workerd:
+        workerd = subprocess.run(
+            ["node", "-p", "require('workerd').default"], cwd=ROOT, capture_output=True, text=True, check=True
+        ).stdout.strip()
     PYODIDE_CACHE.mkdir(parents=True, exist_ok=True)
     cache = shlex.quote(str(PYODIDE_CACHE))
     script = (

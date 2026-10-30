@@ -5,7 +5,7 @@ import tomllib
 import unittest
 
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).absolute().parents[2]
 
 
 class CodexVersions(unittest.TestCase):

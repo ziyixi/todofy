@@ -12,6 +12,8 @@ runs:
       with:
         root: .
         filters: ''
+    - uses: ./.github/actions/setup-bazel
+      if: ${{ fromJSON(inputs.build-image) }}
     - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       with:
         version: '0.12.10'
@@ -53,16 +55,13 @@ runs:
       run: |
         uv run --package todofy-personal-cloud --locked ruff check platform/src platform/tests tools/platform-build tools/vps-release tools/vps-bootstrap
         uv run --package todofy-personal-cloud --locked ruff format --check platform/src platform/tests tools/platform-build tools/vps-release tools/vps-bootstrap
-        uv run --package todofy-personal-cloud --locked pytest platform/tests tools/platform-build/tests tools/vps-release/tests tools/vps-bootstrap/tests
+        uv run --package todofy-personal-cloud --locked pytest platform/tests tools/vps-release/tests tools/vps-bootstrap/tests
     - name: Build and verify the independent runtime image
       if: ${{ fromJSON(inputs.build-image) }}
       working-directory: .
       shell: bash -e {0}
       run: |
-        uv run --package todofy-personal-cloud --locked python tools/platform-build/build.py --sha "$GITHUB_SHA" --output "$RUNNER_TEMP/platform-build"
-        docker build --platform linux/amd64 --build-arg BUILD_SHA="$GITHUB_SHA" \
-          --build-arg SOURCE_REPOSITORY="https://github.com/$GITHUB_REPOSITORY" \
-          --tag "platform-ci:$GITHUB_SHA" "$RUNNER_TEMP/platform-build"
+        python3 tools/container-release/build.py --service platform --sha "$GITHUB_SHA"
         tested_image=$(docker image inspect --format '{{.Id}}' "platform-ci:$GITHUB_SHA")
         docker run --rm --network none "$tested_image" identity | python3 -c 'import json, os, sys; assert json.load(sys.stdin)["source_sha"] == os.environ["GITHUB_SHA"]'
         docker run --rm --network none --entrypoint python "$tested_image" \

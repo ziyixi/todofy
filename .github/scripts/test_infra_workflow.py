@@ -15,7 +15,7 @@ import sys
 import unittest
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).absolute().parents[2]
 sys.path.insert(0, str(REPO / "infra" / "scripts"))
 import infra_state  # noqa: E402  (standard library only)
 

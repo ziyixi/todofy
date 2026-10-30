@@ -1,0 +1,74 @@
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "repository_test_sources",
+    srcs = [
+        "//tools/cloud-release:python_sources",
+        "//tools/vps-bootstrap:python_sources",
+        "//tools/vps-release:python_sources",
+    ],
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        "//tools/cloud-bootstrap:check",
+        "//tools/cloud-config:check",
+        "//tools/cloud-release:check",
+        "//tools/container-release:build_identity_test",
+        "//tools/infra-plan-summary:check",
+        "//tools/service-catalog:check",
+        "//tools/vps-bootstrap:check",
+        "//tools/vps-release:check",
+    ],
+)
+
+filegroup(
+    name = "repository_test_data",
+    srcs = [
+        "//:python_repository_test_data",
+        "//codex-gateway:config",
+        "//dashboard:config",
+        "//dashboard/worker:catalog_inputs",
+        "//fleet:config",
+        "//infra:config",
+        "//links:config",
+        "//mail-hero:config",
+        "//mailsort:config",
+        "//model-router:config",
+        "//newsletter:config",
+        "//newsletter:python_sources",
+        "//newsletter-console:config",
+        "//personal-mcp:config",
+        "//platform:static_deployment_inputs",
+        "//recall:config",
+        "//tasks:config",
+        "//todofy:config",
+        "//watch:config",
+        "//website:config",
+        "//website:content/site.config.ts",
+        "//website:relay/deploy/retire-secrets.py",
+    ],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        [
+            "*",
+            "deploy-probes/**",
+        ],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)

@@ -5,7 +5,8 @@ import type { CaptureDocument } from '../../src/evidence-extract.ts';
 
 let mf: Miniflare;
 beforeAll(async () => {
-  const bundle = await build({ entryPoints: ['test/stubs/evidence-probe.ts'], bundle: true, write: false, format: 'esm',
+  const bundle = await build({
+    ...(process.env.TEST_SRCDIR ? { nodePaths: [`${process.cwd()}/node_modules`] } : {}), entryPoints: ['test/stubs/evidence-probe.ts'], bundle: true, write: false, format: 'esm',
     platform: 'browser', target: 'es2024', mainFields: ['browser', 'module', 'main'], external: ['node:buffer'], logLevel: 'silent' });
   const script = bundle.outputFiles[0]?.text;
   if (!script) throw new Error('missing evidence test bundle');

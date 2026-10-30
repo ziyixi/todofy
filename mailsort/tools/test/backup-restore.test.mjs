@@ -14,6 +14,9 @@ import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 import { FORMAT, RestoreError, readBackup } from '../backup-restore.ts';
 
+// CLI children keep their minimal environment and use the pinned interpreter directly.
+const NODE_EXECUTABLE = process.env.JS_BINARY__NODE_BINARY ?? process.execPath
+
 const TOOL = fileURLToPath(new URL('../backup-restore.ts', import.meta.url));
 const BACKUP = 'backups/2026-10-28T114100Z/';
 const BLOB = Buffer.from(Array.from({ length: 256 }, (_, i) => i));
@@ -94,7 +97,7 @@ function setup(change = (manifest, parts) => ({ manifest, parts })) {
   writeFileSync(join(bucket, 'mailsort-backups', 'latest.json'), JSON.stringify({ key: BACKUP }));
   const fake = join(root, 'fake-wrangler.mjs');
   writeFileSync(fake, FAKE_WRANGLER);
-  const tool = (...args) => spawnSync('node', [TOOL, ...args, '--wrangler', `node ${fake} ${bucket}`], { encoding: 'utf8' });
+  const tool = (...args) => spawnSync(NODE_EXECUTABLE, ['--preserve-symlinks-main', TOOL, ...args, '--wrangler', `node ${fake} ${bucket}`], { encoding: 'utf8' });
   return { root, bucket, tool, cleanup: () => rmSync(root, { recursive: true, force: true }) };
 }
 
