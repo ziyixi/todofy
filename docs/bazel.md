@@ -61,4 +61,5 @@ Host integration prerequisites, including Docker and the CI runner's kernel-poli
 cache. Provider credentials, deployment locks, infrastructure apply, production verification and repair remain
 Actions/operator operations. A successful build does not prove a live rollout.
 
-During migration, [HANDOFF](../HANDOFF.md) records which local/Linux/publication evidence has actually completed.
+Migration and release acceptance are recorded in [October 30 history](history/handoff-2026-10-30.md#full-bazel-migration).
+[HANDOFF](../HANDOFF.md) tracks current work and separate business/recovery checks.
