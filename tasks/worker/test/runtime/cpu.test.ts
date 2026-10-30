@@ -536,6 +536,7 @@ test(
   async () => {
     const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
     const bundled = await build({
+      ...(process.env.TEST_SRCDIR ? { nodePaths: [resolve(root, 'node_modules')] } : {}),
       stdin: {
         contents: `import { warmUp } from './src/startup.ts';
           export default { async fetch(request) { if (new URL(request.url).pathname === '/warm') await warmUp('US/Pacific'); return new Response(null, { status: 204 }); } };`,

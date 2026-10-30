@@ -36,7 +36,7 @@ import { measuredReads, startHarness, type Harness } from './harness.ts';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const TOOL = join(HERE, '../../../tools/backup-restore.ts');
 const WRANGLER = process.env.BAZEL_WRANGLER
-  ? resolve(process.env.TEST_SRCDIR!, process.env.TEST_WORKSPACE!, process.env.BAZEL_WRANGLER)
+  ? resolve(process.env.TEST_SRCDIR ?? '', process.env.TEST_WORKSPACE ?? '', process.env.BAZEL_WRANGLER)
   : join(HERE, '../../node_modules/.bin/wrangler');
 const DAY = 86_400_000;
 /** A Sunday at 10:00 UTC, the weekly slot. */
@@ -287,10 +287,10 @@ test("the jobs object runs the first backup from Home's status, Ops reports it, 
   // with the migrations applied, and verify the row counts.
   const work = await mkdtemp(join(tmpdir(), 'tasks-restore-'));
   try {
-    const tool = (...args: string[]) => {
-      const executable = process.env.BAZEL_WRANGLER && ['download', 'verify'].includes(args[0]!)
+    const tool = (command: string, ...args: string[]) => {
+      const executable = process.env.BAZEL_WRANGLER && ['download', 'verify'].includes(command)
         ? ['--wrangler', WRANGLER] : [];
-      return spawnSync('node', [TOOL, ...args, ...executable], { encoding: 'utf8' });
+      return spawnSync('node', [TOOL, command, ...args, ...executable], { encoding: 'utf8' });
     };
     const wrangler = (...args: string[]) =>
       execFileSync(WRANGLER, args, { env: { ...process.env, CI: 'true', WRANGLER_SEND_METRICS: 'false' }, stdio: 'pipe' });
