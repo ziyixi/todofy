@@ -274,13 +274,15 @@ class FileWriter:
         )
 
 
-def generate(image: dict[str, Any]) -> dict[str, str]:
-    """Relative output path -> source, for every file of WIRE_PACKAGES."""
+def generate(image: dict[str, Any], packages: set[str] | None = None) -> dict[str, str]:
+    """Relative output path -> source, optionally restricting output while indexing the full import closure."""
     enums = wire_rules.enum_index(image)
     files = [f for f in sorted(image["file"], key=lambda f: f["name"]) if f.get("package") in WIRE_PACKAGES]
     names_of = {file["name"]: type_names(file) for file in files}
     out: dict[str, str] = {}
     for file in files:
+        if packages is not None and file.get("package") not in packages:
+            continue
         others = {
             full: (other["name"][: -len(".proto")] + "_wire.ts", name)
             for other in files

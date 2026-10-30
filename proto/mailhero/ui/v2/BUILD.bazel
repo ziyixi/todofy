@@ -1,0 +1,14 @@
+load("@protobuf//bazel:proto_library.bzl", "proto_library")
+
+package(default_visibility = ["//visibility:public"])
+
+proto_library(
+    name = "proto",
+    srcs = ["delivery.proto", "endpoint.proto", "errors.proto", "mail_hero_ui_service.proto", "message.proto", "settings.proto"],
+    strip_import_prefix = "/proto",
+    deps = ["@googleapis//:google_api_annotations_proto", "@googleapis//:google_api_client_proto", "@googleapis//:google_api_field_behavior_proto", "@googleapis//:google_api_field_info_proto", "@googleapis//:google_api_resource_proto", "@protobuf//:field_mask_proto", "@protobuf//:timestamp_proto"],
+)
+
+alias(name = "ts", actual = "//proto/ts:mailhero_ui_v2_ts")
+
+exports_files(['delivery.proto', 'endpoint.proto', 'errors.proto', 'mail_hero_ui_service.proto', 'message.proto', 'settings.proto'])

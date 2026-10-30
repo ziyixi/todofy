@@ -1,0 +1,30 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+
+package(default_visibility = ["//visibility:public"])
+
+ts_project(
+    name = "restore_types",
+    srcs = ["backup-restore.ts"],
+    declaration = True,
+    emit_declaration_only = True,
+    tsconfig = {
+        "compilerOptions": {
+            "target": "ES2024",
+            "module": "ESNext",
+            "moduleResolution": "Bundler",
+            "strict": True,
+            "allowImportingTsExtensions": True,
+            "skipLibCheck": True,
+            "types": ["node"],
+            "typeRoots": ["../worker/node_modules/@types"],
+        },
+    },
+    deps = ["//model-router/worker:backup_types", "//model-router/worker:node_modules/@types/node"],
+)
+
+js_library(
+    name = "backup-restore",
+    srcs = ["backup-restore.ts"],
+    deps = [":restore_types", "//model-router/worker:backup"],
+)

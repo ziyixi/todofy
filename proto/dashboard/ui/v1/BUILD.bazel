@@ -1,0 +1,14 @@
+load("@protobuf//bazel:proto_library.bzl", "proto_library")
+
+package(default_visibility = ["//visibility:public"])
+
+proto_library(
+    name = "proto",
+    srcs = ["attention.proto", "canary.proto", "cloudflare_view.proto", "dashboard_ui_service.proto", "errors.proto", "flows_view.proto", "guard.proto", "home_view.proto", "ops_view.proto", "registry.proto", "usage.proto"],
+    strip_import_prefix = "/proto",
+    deps = ["//proto/common/wire/v1:proto", "//proto/ops/v1:proto", "//proto/website/sync/v1:proto", "@googleapis//:google_api_annotations_proto", "@googleapis//:google_api_client_proto", "@googleapis//:google_api_field_behavior_proto", "@googleapis//:google_api_field_info_proto", "@googleapis//:google_api_resource_proto"],
+)
+
+alias(name = "ts", actual = "//proto/ts:dashboard_ui_v1_ts")
+
+exports_files(['attention.proto', 'canary.proto', 'cloudflare_view.proto', 'dashboard_ui_service.proto', 'errors.proto', 'flows_view.proto', 'guard.proto', 'home_view.proto', 'ops_view.proto', 'registry.proto', 'usage.proto'])

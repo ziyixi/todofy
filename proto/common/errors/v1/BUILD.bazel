@@ -1,0 +1,15 @@
+load("@protobuf//bazel:proto_library.bzl", "proto_library")
+
+package(default_visibility = ["//visibility:public"])
+
+proto_library(
+    name = "proto",
+    srcs = ["errors.proto"],
+    strip_import_prefix = "/proto",
+    deps = [],
+)
+
+alias(name = "ts", actual = "//proto/ts:common_errors_v1_ts")
+alias(name = "python", actual = "//proto/python/src/ziyixi_proto:common_errors_v1_py")
+
+exports_files(['errors.proto'])

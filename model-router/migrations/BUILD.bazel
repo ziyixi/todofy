@@ -1,0 +1,10 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+
+package(default_visibility = ["//visibility:public"])
+
+js_library(name = "all", srcs = glob(["*.sql"]))
+
+[
+    js_library(name = source + "_data", srcs = [source])
+    for source in glob(["*.sql"])
+]

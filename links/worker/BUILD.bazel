@@ -1,0 +1,182 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@npm//links/worker:vitest/package_json.bzl", vitest = "bin")
+load("//proto/bazel:ts_package.bzl", "proto_package")
+load("//tools/bazel:js.bzl", "proto_vitest_test", "workspace_package_link")
+
+package(default_visibility = ["//visibility:public"])
+
+npm_link_all_packages(name = "node_modules")
+
+js_library(
+    name = "backup",
+    srcs = ["src/backup.ts"],
+    types = ["src/backup.ts"],
+    deps = [],
+)
+
+js_library(
+    name = "module_group_1",
+    srcs = ["src/backup-alarm.ts", "src/backup-runner.ts", "src/env.ts"],
+    types = ["src/backup-alarm.ts", "src/backup-runner.ts", "src/env.ts"],
+    deps = ["//proto/ops/v1:ts", ":backup"],
+)
+
+alias(name = "backup-alarm", actual = ":module_group_1")
+alias(name = "backup-runner", actual = ":module_group_1")
+alias(name = "env", actual = ":module_group_1")
+js_library(
+    name = "limits",
+    srcs = ["src/limits.ts"],
+    types = ["src/limits.ts"],
+    deps = [],
+)
+
+js_library(
+    name = "keys",
+    srcs = ["src/keys.ts"],
+    types = ["src/keys.ts"],
+    deps = [":limits"],
+)
+
+js_library(
+    name = "targets",
+    srcs = ["src/targets.ts"],
+    types = ["src/targets.ts"],
+    deps = [":keys", ":limits"],
+)
+
+js_library(
+    name = "model",
+    srcs = ["src/model.ts"],
+    types = ["src/model.ts"],
+    deps = ["//proto/links/ui/v1:ts", "//proto/ts:protobuf", "//proto/ts:protobuf-wkt", "//proto/ts:wire-json", ":targets"],
+)
+
+js_library(
+    name = "store",
+    srcs = ["src/store.ts"],
+    types = ["src/store.ts"],
+    deps = [":limits", ":model"],
+)
+
+js_library(
+    name = "api",
+    srcs = ["src/api.ts"],
+    types = ["src/api.ts"],
+    deps = ["//proto/common/errors/v1:ts", "//proto/links/ui/v1:ts", "//proto/ts:field-mask", "//proto/ts:filter", "//proto/ts:http-transcoder", "//proto/ts:page-token", "//proto/ts:protobuf", "//proto/ts:protobuf-wkt", "//proto/ts:rpc-status", "//proto/ts:wire-json", ":keys", ":limits", ":model", ":module_group_1", ":store", ":targets"],
+)
+
+js_library(
+    name = "auth",
+    srcs = ["src/auth.ts"],
+    types = ["src/auth.ts"],
+    deps = ["//packages/edge-auth:lib", ":module_group_1"],
+)
+
+js_library(
+    name = "resolve",
+    srcs = ["src/resolve.ts"],
+    types = ["src/resolve.ts"],
+    deps = [":keys", ":model", ":targets"],
+)
+
+js_library(
+    name = "pages",
+    srcs = ["src/pages.ts"],
+    types = ["src/pages.ts"],
+    deps = [":resolve", ":targets"],
+)
+
+js_library(
+    name = "http",
+    srcs = ["src/http.ts"],
+    types = ["src/http.ts"],
+    deps = ["//packages/edge-auth:lib", "//proto/links/ui/v1:ts", "//proto/ts:http-transcoder", "//proto/ts:rpc-status", ":api", ":auth", ":keys", ":limits", ":module_group_1", ":pages", ":resolve"],
+)
+
+js_library(
+    name = "ops-status",
+    srcs = ["src/ops-status.ts"],
+    types = ["src/ops-status.ts"],
+    deps = ["//proto/ops/v1:ts", "//proto/ts:protobuf", "//proto/ts:wire-json", ":module_group_1"],
+)
+
+js_library(
+    name = "ops",
+    srcs = ["src/ops.ts"],
+    types = ["src/ops.ts"],
+    deps = ["//proto/ops/v1:ts", ":module_group_1", ":ops-status"],
+)
+
+js_library(
+    name = "index",
+    srcs = ["src/index.ts"],
+    types = ["src/index.ts"],
+    deps = [":http", ":module_group_1", ":ops"],
+)
+
+js_library(name = "lib", deps = [":api", ":auth", ":backup", ":http", ":index", ":keys", ":limits", ":model", ":module_group_1", ":ops", ":ops-status", ":pages", ":resolve", ":store", ":targets"])
+
+proto_package(name = "proto_types_package", deps = ["//proto/common/errors/v1:ts", "//proto/links/ui/v1:ts", "//proto/ops/v1:ts", "//proto/ts:field-mask", "//proto/ts:filter", "//proto/ts:http-transcoder", "//proto/ts:page-token", "//proto/ts:protobuf", "//proto/ts:protobuf-wkt", "//proto/ts:rpc-status", "//proto/ts:wire-json", ":lib"])
+workspace_package_link(name = "proto_types_link", src = ":proto_types_package", runtime_dependencies = ["@bufbuild/protobuf"])
+workspace_package_link(name = "edge_auth_types_link", src = "//packages/edge-auth:pkg")
+proto_vitest_test(
+    name = "keys_test",
+    runner = vitest.vitest_test,
+    tests = ["test/keys.test.ts"],
+    deps = [":keys", ":limits"],
+    data = [":node_modules/vitest", "package.json"],
+)
+
+proto_vitest_test(
+    name = "model_test",
+    runner = vitest.vitest_test,
+    tests = ["test/model.test.ts"],
+    deps = ["//proto/links/ui/v1:ts", "//proto/ts:wire-json", ":model"],
+    data = [":node_modules/vitest", "package.json"],
+)
+
+proto_vitest_test(
+    name = "ops-status_test",
+    runner = vitest.vitest_test,
+    tests = ["test/ops-status.test.ts"],
+    deps = ["//contracts:ops-v1/validate", ":ops-status"],
+    data = ["//contracts:ops-v1/fixtures/OpsStatus/links-degraded.json_data", "//contracts:ops-v1/fixtures/OpsStatus/links-ok.json_data", "//contracts:ops-v1/ops-v1.schema.json_data", ":node_modules/vitest", "package.json"],
+)
+
+proto_vitest_test(
+    name = "pages_test",
+    runner = vitest.vitest_test,
+    tests = ["test/pages.test.ts"],
+    deps = [":pages"],
+    data = [":node_modules/vitest", "package.json"],
+)
+
+proto_vitest_test(
+    name = "resolve_test",
+    runner = vitest.vitest_test,
+    tests = ["test/resolve.test.ts"],
+    deps = [":keys", ":resolve"],
+    data = [":node_modules/vitest", "package.json"],
+)
+
+proto_vitest_test(
+    name = "targets_test",
+    runner = vitest.vitest_test,
+    tests = ["test/targets.test.ts"],
+    deps = [":limits", ":targets"],
+    data = [":node_modules/vitest", "package.json"],
+)
+
+ts_project(
+    name = "types",
+    srcs = ["vitest.config.ts", "vitest.runtime.config.ts", "src/api.ts", "src/auth.ts", "src/backup-alarm.ts", "src/backup-runner.ts", "src/backup.ts", "src/env.ts", "src/http.ts", "src/index.ts", "src/keys.ts", "src/limits.ts", "src/model.ts", "src/ops-status.ts", "src/ops.ts", "src/pages.ts", "src/resolve.ts", "src/store.ts", "src/targets.ts", "test/jwt.ts", "test/keys.test.ts", "test/model.test.ts", "test/ops-status.test.ts", "test/pages.test.ts", "test/resolve.test.ts", "test/targets.test.ts", "test/validate.d.ts"],
+    no_emit = True,
+    resolve_json_module = True,
+    data = ["vitest.config.ts", "vitest.runtime.config.ts"],
+    deps = [":edge_auth_types_link", ":lib", ":node_modules/@cloudflare/workers-types", ":node_modules/@types/node", ":node_modules/vitest", ":proto_types_link"],
+)
+
+alias(name = "typecheck", actual = ":types_typecheck")

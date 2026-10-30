@@ -1,0 +1,21 @@
+load("@rules_python//python:defs.bzl", "py_binary")
+
+exports_files([
+    "pytest_main.py",
+    "unittest_main.py",
+], visibility = ["//visibility:public"])
+
+py_binary(
+    name = "extract_test_font",
+    srcs = ["extract_test_font.py"],
+    legacy_create_init = False,
+)
+
+genrule(
+    name = "noto_cjk_font",
+    srcs = ["@newsletter_fonts//:data.tar.xz"],
+    outs = ["NotoSansCJK-Regular.ttc"],
+    tools = [":extract_test_font"],
+    cmd = "$(location :extract_test_font) $(location @newsletter_fonts//:data.tar.xz) $@",
+    visibility = ["//visibility:public"],
+)

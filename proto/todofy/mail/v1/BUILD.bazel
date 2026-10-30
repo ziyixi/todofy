@@ -1,0 +1,15 @@
+load("@protobuf//bazel:proto_library.bzl", "proto_library")
+
+package(default_visibility = ["//visibility:public"])
+
+proto_library(
+    name = "proto",
+    srcs = ["mail_service.proto"],
+    strip_import_prefix = "/proto",
+    deps = ["@googleapis//:google_api_annotations_proto", "@googleapis//:google_api_client_proto", "@googleapis//:google_api_field_behavior_proto", "@googleapis//:google_api_resource_proto", "@protobuf//:timestamp_proto"],
+)
+
+alias(name = "ts", actual = "//proto/ts:todofy_mail_v1_ts")
+alias(name = "python", actual = "//proto/python/src/ziyixi_proto:todofy_mail_v1_py")
+
+exports_files(['mail_service.proto'])

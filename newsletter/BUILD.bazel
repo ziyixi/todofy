@@ -1,0 +1,2026 @@
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+load("@rules_python//python:packaging.bzl", "py_package", "py_wheel")
+load("@rules_python//python:pip.bzl", "whl_filegroup")
+load("@rules_pkg//pkg:mappings.bzl", "REMOVE_BASE_DIRECTORY", "pkg_attributes", "pkg_files", "pkg_mkdirs", "strip_prefix")
+load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
+load("//tools/bazel/images:images.bzl", "newsletter_healthcheck", "newsletter_image_identity", "python_runtime_tree")
+
+package(default_visibility = ["//visibility:public"])
+
+py_library(
+    name = "adapters",
+    srcs = ["src/newsletter/adapters.py"],
+    imports = ["src"],
+    deps = [":contracts", ":package", ":types", "@python_deps//httpx", "@python_deps//protobuf"],
+)
+
+py_library(
+    name = "admin",
+    srcs = ["src/newsletter/admin.py"],
+    imports = ["src"],
+    deps = [":adapters", ":contracts", ":delivery", ":deployment_client", ":drain", ":ownership", ":package", ":settings", ":types", ":workflow_story_replay", "@python_deps//ziyixi_protos"],
+)
+
+py_library(
+    name = "app",
+    srcs = ["src/newsletter/app.py"],
+    imports = ["src"],
+    deps = [":adapters", ":collection_collector", ":collection_instructions", ":collection_repository", ":contracts", ":delivery", ":deployment_api", ":drain", ":editor", ":lifecycle", ":monitoring_api", ":package", ":rendering", ":settings", ":todofy", ":types", ":worker", ":workflow_definition", ":workflow_pipeline", "@python_deps//fastapi", "@python_deps//protobuf", "@python_deps//starlette", "@python_deps//ziyixi_protos"],
+)
+
+py_library(
+    name = "charts",
+    srcs = ["src/newsletter/charts.py"],
+    imports = ["src"],
+    deps = [":package", ":types", "@python_deps//pillow"],
+)
+
+py_library(
+    name = "cli",
+    srcs = ["src/newsletter/cli.py"],
+    imports = ["src"],
+    data = [":package_resources"],
+    deps = [":adapters", ":admin", ":contracts", ":drain", ":editor", ":package", ":rendering", ":todofy", ":worker", "@python_deps//uvicorn", "@python_deps//ziyixi_protos"],
+)
+
+py_library(
+    name = "collection",
+    srcs = ["src/newsletter/collection/__init__.py"],
+    imports = ["src"],
+    deps = [":package"],
+)
+
+py_library(
+    name = "collection_collector",
+    srcs = ["src/newsletter/collection/collector.py"],
+    imports = ["src"],
+    deps = [":collection", ":collection_instructions", ":types"],
+)
+
+py_library(
+    name = "collection_instructions",
+    srcs = ["src/newsletter/collection/instructions.py"],
+    imports = ["src"],
+    data = [":discovery_instructions"],
+    deps = [":collection", ":contracts"],
+)
+
+py_library(
+    name = "collection_pipeline",
+    srcs = ["src/newsletter/collection/pipeline.py"],
+    imports = ["src"],
+    deps = [":collection", ":collection_collector", ":collection_repository", ":contracts", ":diagnostics", ":drain", ":errors", "@python_deps//ziyixi_protos"],
+)
+
+py_library(
+    name = "collection_repository",
+    srcs = ["src/newsletter/collection/repository.py"],
+    imports = ["src"],
+    deps = [":collection", ":collection_instructions", ":contracts", ":drain", ":types"],
+)
+
+py_library(
+    name = "collection_source_guides",
+    srcs = ["src/newsletter/collection/source_guides.py"],
+    imports = ["src"],
+    deps = [":collection", ":collection_instructions", ":contracts"],
+)
+
+py_library(
+    name = "config_cli",
+    srcs = ["src/newsletter/config_cli.py"],
+    imports = ["src"],
+    deps = [":content_config", ":package"],
+)
+
+py_library(
+    name = "config_sync",
+    srcs = ["src/newsletter/config_sync.py"],
+    imports = ["src"],
+    deps = [":content_config", ":files", ":package", "@python_deps//httpx"],
+)
+
+py_library(
+    name = "console_access",
+    srcs = ["src/newsletter/console_access.py"],
+    imports = ["src"],
+    deps = [":package", "@python_deps//cryptography", "@python_deps//pyjwt"],
+)
+
+py_library(
+    name = "console_api",
+    srcs = ["src/newsletter/console_api.py"],
+    imports = ["src"],
+    deps = ["//proto/newsletter/ui/v1:python", "//proto:python_runtime", ":console_access", ":console_read", ":diagnostics", ":package", "@python_deps//fastapi", "@python_deps//starlette"],
+)
+
+py_library(
+    name = "console_read",
+    srcs = ["src/newsletter/console_read.py"],
+    imports = ["src"],
+    deps = ["//proto/newsletter/ui/v1:python", ":config_sync", ":console_views", ":content_config", ":monitoring_api", ":monitoring_status", ":package", ":provenance", ":rendering", ":settings", ":workflow_researcher"],
+)
+
+py_library(
+    name = "console_views",
+    srcs = ["src/newsletter/console_views.py"],
+    imports = ["src"],
+    deps = ["//proto/newsletter/ui/v1:python", ":package", ":workflow_researcher"],
+)
+
+py_library(
+    name = "content_config",
+    srcs = ["src/newsletter/content_config.py"],
+    imports = ["src"],
+    data = [":package_resources"],
+    deps = [":collection_instructions", ":contracts", ":email_templates", ":files", ":package", ":types", ":workflow_content", ":workflow_definition", ":workflow_researcher", ":workflow_story_recipe", "@python_deps//pyyaml"],
+)
+
+py_library(
+    name = "contracts",
+    srcs = ["src/newsletter/contracts.py"],
+    imports = ["src"],
+    deps = [":package", "@python_deps//protobuf", "@python_deps//ziyixi_protos"],
+)
+
+py_library(
+    name = "delivery",
+    srcs = ["src/newsletter/delivery.py"],
+    imports = ["src"],
+    deps = [":adapters", ":contracts", ":diagnostics", ":drain", ":package", ":types", "@python_deps//ziyixi_protos"],
+)
+
+py_library(
+    name = "deployment_api",
+    srcs = ["src/newsletter/deployment_api.py"],
+    imports = ["src"],
+    deps = [":drain", ":package", "@python_deps//fastapi"],
+)
+
+py_library(
+    name = "deployment_client",
+    srcs = ["src/newsletter/deployment_client.py"],
+    imports = ["src"],
+    deps = [":package"],
+)
+
+py_library(
+    name = "diagnostics",
+    srcs = ["src/newsletter/diagnostics.py"],
+    imports = ["src"],
+    deps = [":package"],
+)
+
+py_library(
+    name = "drain",
+    srcs = ["src/newsletter/drain.py", "src/newsletter/store.py"],
+    imports = ["src"],
+    deps = ["//packages/model-router-client/python:package", ":contracts", ":package", ":types"],
+)
+
+py_library(
+    name = "editor",
+    srcs = ["src/newsletter/editor.py", "src/newsletter/schema_compat.py", "src/newsletter/workflow/story_editor.py"],
+    imports = ["src"],
+    data = [":package_resources"],
+    deps = ["//packages/model-router-client/python:package", ":contracts", ":diagnostics", ":drain", ":errors", ":model_io", ":model_schema", ":package", ":settings", ":types", ":usage", ":workflow", ":workflow_components", ":workflow_prompt_examples", ":workflow_publication", ":workflow_review", ":workflow_schema", ":workflow_types", "@python_deps//protobuf", "@python_deps//ziyixi_protos"],
+)
+
+py_library(
+    name = "email_templates",
+    srcs = ["src/newsletter/email_templates.py"],
+    imports = ["src"],
+    data = [":templates"],
+    deps = [":contracts", ":diagnostics", ":package", "@python_deps//jinja2", "@python_deps//markupsafe"],
+)
+
+py_library(
+    name = "errors",
+    srcs = ["src/newsletter/errors.py"],
+    imports = ["src"],
+    deps = [":package"],
+)
+
+py_library(
+    name = "files",
+    srcs = ["src/newsletter/files.py"],
+    imports = ["src"],
+    deps = [":package"],
+)
+
+py_library(
+    name = "lifecycle",
+    srcs = ["src/newsletter/lifecycle.py"],
+    imports = ["src"],
+    deps = [":adapters", ":collection_collector", ":collection_instructions", ":collection_pipeline", ":collection_repository", ":console_access", ":console_api", ":console_read", ":diagnostics", ":drain", ":editor", ":model_client", ":notion_api", ":notion_journal", ":notion_sync", ":ownership", ":package", ":preflight", ":settings", ":todofy", ":worker", ":workflow_pipeline", ":workflow_state", "@python_deps//fastapi", "@python_deps//uvicorn"],
+)
+
+py_library(
+    name = "model_client",
+    srcs = ["src/newsletter/model_client.py"],
+    imports = ["src"],
+    deps = ["//packages/model-router-client/python:package", ":package", ":settings", "@python_deps//httpx"],
+)
+
+py_library(
+    name = "model_io",
+    srcs = ["src/newsletter/model_io.py"],
+    imports = ["src"],
+    deps = [":errors", ":package", ":types"],
+)
+
+py_library(
+    name = "model_schema",
+    srcs = ["src/newsletter/model_schema.py"],
+    imports = ["src"],
+    deps = [":contracts", ":package", ":types", "@python_deps//protobuf", "@python_deps//ziyixi_protos"],
+)
+
+py_library(
+    name = "monitoring_api",
+    srcs = ["src/newsletter/monitoring_api.py"],
+    imports = ["src"],
+    deps = [":config_sync", ":drain", ":monitoring_status", ":package", ":provenance", "@python_deps//fastapi"],
+)
+
+py_library(
+    name = "monitoring_status",
+    srcs = ["src/newsletter/monitoring_status.py"],
+    imports = ["src"],
+    deps = [":drain", ":package"],
+)
+
+py_library(
+    name = "notion_api",
+    srcs = ["src/newsletter/notion_api.py"],
+    imports = ["src"],
+    deps = [":adapters", ":contracts", ":package", ":types", "@python_deps//httpx"],
+)
+
+py_library(
+    name = "notion_cli",
+    srcs = ["src/newsletter/notion_cli.py"],
+    imports = ["src"],
+    deps = [":adapters", ":notion_api", ":package"],
+)
+
+py_library(
+    name = "notion_content",
+    srcs = ["src/newsletter/notion_content.py"],
+    imports = ["src"],
+    deps = [":charts", ":contracts", ":package", ":types", ":usage", ":workflow_sources", "@python_deps//ziyixi_protos"],
+)
+
+py_library(
+    name = "notion_intake",
+    srcs = ["src/newsletter/notion_intake.py"],
+    imports = ["src"],
+    deps = [":contracts", ":diagnostics", ":notion_content", ":notion_journal", ":package", ":types"],
+)
+
+py_library(
+    name = "notion_journal",
+    srcs = ["src/newsletter/notion_journal.py"],
+    imports = ["src"],
+    deps = [":contracts", ":drain", ":notion_content", ":package", ":types", ":workflow_sources"],
+)
+
+py_library(
+    name = "notion_sync",
+    srcs = ["src/newsletter/notion_sync.py"],
+    imports = ["src"],
+    deps = [":adapters", ":contracts", ":diagnostics", ":notion_api", ":notion_intake", ":notion_journal", ":package", ":types"],
+)
+
+py_library(
+    name = "ownership",
+    srcs = ["src/newsletter/ownership.py"],
+    imports = ["src"],
+    deps = [":package"],
+)
+
+py_library(
+    name = "package",
+    srcs = ["src/newsletter/__init__.py"],
+    imports = ["src"],
+)
+
+py_library(
+    name = "personal",
+    srcs = ["src/newsletter/personal.py"],
+    imports = ["src"],
+    deps = [":package", ":types"],
+)
+
+py_library(
+    name = "preflight",
+    srcs = ["src/newsletter/preflight.py"],
+    imports = ["src"],
+    data = [":package_resources"],
+    deps = ["//packages/model-router-client/python:package", ":adapters", ":charts", ":diagnostics", ":drain", ":editor", ":model_client", ":notion_api", ":package", ":rendering", ":settings", ":todofy", ":types", "@python_deps//httpx", "@python_deps//ziyixi_protos"],
+)
+
+py_library(
+    name = "provenance",
+    srcs = ["src/newsletter/provenance.py"],
+    imports = ["src"],
+    deps = [":package"],
+)
+
+py_library(
+    name = "rendering",
+    srcs = ["src/newsletter/rendering.py"],
+    imports = ["src"],
+    data = [":templates"],
+    deps = [":charts", ":contracts", ":email_templates", ":package", ":types", ":usage", "@python_deps//jinja2", "@python_deps//ziyixi_protos"],
+)
+
+py_library(
+    name = "schema_smoke",
+    srcs = ["src/newsletter/schema_smoke.py"],
+    imports = ["src"],
+    deps = [":contracts", ":editor", ":errors", ":model_client", ":package", ":settings", ":types", ":usage", ":workflow_components"],
+)
+
+py_library(
+    name = "settings",
+    srcs = ["src/newsletter/settings.py"],
+    imports = ["src"],
+    data = [":package_resources"],
+    deps = [":package"],
+)
+
+py_library(
+    name = "todofy",
+    srcs = ["src/newsletter/todofy.py"],
+    imports = ["src"],
+    deps = [":contracts", ":package", ":personal", ":types", "@python_deps//httpx"],
+)
+
+py_library(
+    name = "trigger",
+    srcs = ["src/newsletter/trigger.py"],
+    imports = ["src"],
+    deps = [":package"],
+)
+
+py_library(
+    name = "types",
+    srcs = ["src/newsletter/types.py"],
+    imports = ["src"],
+    deps = [":package", ":usage"],
+)
+
+py_library(
+    name = "usage",
+    srcs = ["src/newsletter/usage.py"],
+    imports = ["src"],
+    deps = ["//packages/model-router-client/python:package", ":diagnostics", ":package"],
+)
+
+py_library(
+    name = "worker",
+    srcs = ["src/newsletter/worker.py"],
+    imports = ["src"],
+    deps = [":adapters", ":contracts", ":diagnostics", ":drain", ":editor", ":email_templates", ":errors", ":package", ":rendering", ":todofy", ":types", ":usage", ":workflow_repository", ":workflow_state", "@python_deps//ziyixi_protos"],
+)
+
+py_library(
+    name = "workflow",
+    srcs = ["src/newsletter/workflow/__init__.py"],
+    imports = ["src"],
+    deps = [":package"],
+)
+
+py_library(
+    name = "workflow_components",
+    srcs = ["src/newsletter/workflow/components.py"],
+    imports = ["src"],
+    deps = [":types", ":workflow"],
+)
+
+py_library(
+    name = "workflow_content",
+    srcs = ["src/newsletter/workflow/content.py"],
+    imports = ["src"],
+    deps = [":collection_instructions", ":contracts", ":errors", ":model_io", ":types", ":usage", ":workflow", ":workflow_prompt_examples", ":workflow_schema", ":workflow_sources", "@python_deps//ziyixi_protos"],
+)
+
+py_library(
+    name = "workflow_definition",
+    srcs = ["src/newsletter/workflow/definition.py"],
+    imports = ["src"],
+    data = [":workflows"],
+    deps = [":contracts", ":workflow", "@python_deps//pyyaml"],
+)
+
+py_library(
+    name = "workflow_engine",
+    srcs = ["src/newsletter/workflow/engine.py"],
+    imports = ["src"],
+    deps = [":diagnostics", ":workflow", ":workflow_definition", ":workflow_repository", ":workflow_types"],
+)
+
+py_library(
+    name = "workflow_nodes",
+    srcs = ["src/newsletter/workflow/nodes.py"],
+    imports = ["src"],
+    deps = [":collection_instructions", ":contracts", ":drain", ":editor", ":errors", ":model_io", ":types", ":usage", ":workflow", ":workflow_content", ":workflow_definition", ":workflow_engine", ":workflow_researcher", ":workflow_sources", ":workflow_state", "@python_deps//ziyixi_protos"],
+)
+
+py_library(
+    name = "workflow_pipeline",
+    srcs = ["src/newsletter/workflow/pipeline.py"],
+    imports = ["src"],
+    data = [":package_resources"],
+    deps = [":collection_instructions", ":collection_repository", ":collection_source_guides", ":content_config", ":contracts", ":diagnostics", ":drain", ":editor", ":settings", ":types", ":workflow", ":workflow_definition", ":workflow_engine", ":workflow_publication", ":workflow_repository", ":workflow_sources", ":workflow_state", ":workflow_story_nodes", ":workflow_story_recipe", ":workflow_types"],
+)
+
+py_library(
+    name = "workflow_prompt_examples",
+    srcs = ["src/newsletter/workflow/prompt_examples.py"],
+    imports = ["src"],
+    data = [":workflows"],
+    deps = [":types", ":workflow"],
+)
+
+py_library(
+    name = "workflow_publication",
+    srcs = ["src/newsletter/workflow/publication.py"],
+    imports = ["src"],
+    deps = [":contracts", ":drain", ":types", ":workflow", ":workflow_components", "@python_deps//ziyixi_protos"],
+)
+
+py_library(
+    name = "workflow_repository",
+    srcs = ["src/newsletter/workflow/repository.py"],
+    imports = ["src"],
+    deps = [":contracts", ":drain", ":types", ":workflow", ":workflow_definition", ":workflow_types"],
+)
+
+py_library(
+    name = "workflow_researcher",
+    srcs = ["src/newsletter/workflow/researcher.py"],
+    imports = ["src"],
+    deps = [":contracts", ":errors", ":types", ":workflow", ":workflow_content", ":workflow_sources", "@python_deps//httpx", "@python_deps//pyyaml"],
+)
+
+py_library(
+    name = "workflow_review",
+    srcs = ["src/newsletter/workflow/review.py"],
+    imports = ["src"],
+    deps = [":contracts", ":errors", ":model_io", ":types", ":workflow", ":workflow_components", ":workflow_types"],
+)
+
+py_library(
+    name = "workflow_schema",
+    srcs = ["src/newsletter/workflow/schema.py"],
+    imports = ["src"],
+    deps = [":contracts", ":types", ":workflow"],
+)
+
+py_library(
+    name = "workflow_sources",
+    srcs = ["src/newsletter/workflow/sources.py"],
+    imports = ["src"],
+    deps = [":contracts", ":types", ":workflow"],
+)
+
+py_library(
+    name = "workflow_state",
+    srcs = ["src/newsletter/workflow/state.py"],
+    imports = ["src"],
+    deps = [":contracts", ":drain", ":types", ":usage", ":workflow"],
+)
+
+py_library(
+    name = "workflow_story_nodes",
+    srcs = ["src/newsletter/workflow/story_nodes.py"],
+    imports = ["src"],
+    deps = [":editor", ":types", ":workflow", ":workflow_content", ":workflow_engine", ":workflow_nodes", ":workflow_publication", ":workflow_sources", ":workflow_story_replay"],
+)
+
+py_library(
+    name = "workflow_story_recipe",
+    srcs = ["src/newsletter/workflow/story_recipe.py"],
+    imports = ["src"],
+    deps = [":workflow", ":workflow_definition"],
+)
+
+py_library(
+    name = "workflow_story_replay",
+    srcs = ["src/newsletter/workflow/story_replay.py"],
+    imports = ["src"],
+    deps = [":collection_instructions", ":collection_repository", ":contracts", ":drain", ":errors", ":types", ":workflow", ":workflow_content", ":workflow_definition", ":workflow_engine", ":workflow_publication", ":workflow_repository", ":workflow_state", ":workflow_story_recipe", ":workflow_story_replay_repository", ":workflow_types", "@python_deps//ziyixi_protos"],
+)
+
+py_library(
+    name = "workflow_story_replay_repository",
+    srcs = ["src/newsletter/workflow/story_replay_repository.py"],
+    imports = ["src"],
+    deps = [":contracts", ":drain", ":types", ":workflow"],
+)
+
+py_library(
+    name = "workflow_types",
+    srcs = ["src/newsletter/workflow/types.py"],
+    imports = ["src"],
+    deps = [":types", ":workflow"],
+)
+
+py_library(
+    name = "library",
+    deps = [":adapters", ":admin", ":app", ":charts", ":cli", ":collection", ":collection_collector", ":collection_instructions", ":collection_pipeline", ":collection_repository", ":collection_source_guides", ":config_cli", ":config_sync", ":console_access", ":console_api", ":console_read", ":console_views", ":content_config", ":contracts", ":delivery", ":deployment_api", ":deployment_client", ":diagnostics", ":drain", ":editor", ":email_templates", ":errors", ":files", ":lifecycle", ":model_client", ":model_io", ":model_schema", ":monitoring_api", ":monitoring_status", ":notion_api", ":notion_cli", ":notion_content", ":notion_intake", ":notion_journal", ":notion_sync", ":ownership", ":package", ":personal", ":preflight", ":provenance", ":rendering", ":schema_smoke", ":settings", ":todofy", ":trigger", ":types", ":usage", ":worker", ":workflow", ":workflow_components", ":workflow_content", ":workflow_definition", ":workflow_engine", ":workflow_nodes", ":workflow_pipeline", ":workflow_prompt_examples", ":workflow_publication", ":workflow_repository", ":workflow_researcher", ":workflow_review", ":workflow_schema", ":workflow_sources", ":workflow_state", ":workflow_story_nodes", ":workflow_story_recipe", ":workflow_story_replay", ":workflow_story_replay_repository", ":workflow_types"],
+)
+
+py_library(
+    name = "helper_scripts_check_python_structure",
+    srcs = ["scripts/check_python_structure.py"],
+    imports = ["."],
+    deps = [":app", ":cli"],
+)
+
+py_library(
+    name = "helper_scripts_console_fixtures",
+    srcs = ["scripts/console_fixtures.py"],
+    imports = ["."],
+    deps = ["//proto/newsletter/ui/v1:python", ":console_api", ":console_read", ":helper_tests_support_console_world"],
+)
+
+py_library(
+    name = "helper_scripts_evaluate_prompts",
+    srcs = ["scripts/evaluate_prompts.py"],
+    imports = ["."],
+    deps = ["//packages/model-router-client/python:package", ":contracts", ":diagnostics", ":editor", ":errors", ":model_client", ":model_io", ":settings", ":types", ":usage", ":workflow_content", "@python_deps//ziyixi_protos"],
+)
+
+py_library(
+    name = "helper_scripts_publish_content_config",
+    srcs = ["scripts/publish_content_config.py"],
+    imports = ["."],
+    deps = [":config_cli"],
+)
+
+py_library(
+    name = "helper_scripts_smoke_codex_startup",
+    srcs = ["scripts/smoke_codex_startup.py"],
+    imports = ["."],
+    deps = ["//packages/model-router-client/python:package", ":model_client", "@python_deps//httpx"],
+)
+
+py_library(
+    name = "helper_scripts_smoke_http",
+    srcs = ["scripts/smoke_http.py"],
+    imports = ["."],
+    deps = [":cli"],
+)
+
+py_library(
+    name = "helper_scripts_smoke_image",
+    srcs = ["scripts/smoke_image.py"],
+    imports = ["."],
+    deps = [":helper_scripts_smoke_codex_startup", ":helper_scripts_smoke_image_probe"],
+)
+
+py_library(
+    name = "helper_scripts_smoke_image_probe",
+    srcs = ["scripts/smoke_image_probe.py"],
+    imports = ["."],
+    deps = [":cli", ":collection_instructions", ":console_access", ":contracts", ":package", ":preflight", ":rendering", ":types"],
+)
+
+py_library(
+    name = "helper_scripts_smoke_wheel",
+    srcs = ["scripts/smoke_wheel.py"],
+    imports = ["."],
+    deps = [":cli"],
+)
+
+py_library(
+    name = "helper_scripts_trigger_run",
+    srcs = ["scripts/trigger_run.py"],
+    imports = ["."],
+)
+
+py_library(
+    name = "helper_tests",
+    srcs = ["tests/__init__.py"],
+    imports = ["."],
+)
+
+py_library(
+    name = "helper_tests_support",
+    srcs = ["tests/support/__init__.py"],
+    imports = ["."],
+    deps = [":helper_tests"],
+)
+
+py_library(
+    name = "helper_tests_support_charts",
+    srcs = ["tests/support/charts.py"],
+    imports = ["."],
+    deps = [":helper_tests_support", "@python_deps//pillow", "@python_deps//pytest"],
+)
+
+py_library(
+    name = "helper_tests_support_console_auth",
+    srcs = ["tests/support/console_auth.py"],
+    imports = ["."],
+    deps = [":console_access", ":helper_tests_support", "@python_deps//cryptography", "@python_deps//pyjwt"],
+)
+
+py_library(
+    name = "helper_tests_support_console_world",
+    srcs = ["tests/support/console_world.py"],
+    imports = ["."],
+    deps = [":collection_repository", ":console_read", ":content_config", ":contracts", ":drain", ":helper_tests_support", ":notion_journal", ":package", ":settings", ":workflow_definition", ":workflow_publication", ":workflow_repository", ":workflow_state", ":workflow_story_replay_repository"],
+)
+
+py_library(
+    name = "helper_tests_support_editor",
+    srcs = ["tests/support/editor.py"],
+    imports = ["."],
+    deps = ["//packages/model-router-client/python:package", ":contracts", ":editor", ":helper_tests_support", ":model_client", ":settings", ":types", "@python_deps//pytest"],
+)
+
+py_library(
+    name = "helper_tests_support_news_first_policy",
+    srcs = ["tests/support/news_first_policy.py"],
+    imports = ["."],
+    deps = [":helper_tests_support", ":helper_tests_support_workflow_content", ":types"],
+)
+
+py_library(
+    name = "helper_tests_support_notion_content",
+    srcs = ["tests/support/notion_content.py"],
+    imports = ["."],
+    deps = [":contracts", ":helper_tests_support", ":helper_tests_support_rendering", ":notion_content", ":types"],
+)
+
+py_library(
+    name = "helper_tests_support_publication",
+    srcs = ["tests/support/publication.py"],
+    imports = ["."],
+    deps = [":contracts", ":helper_tests_support", ":rendering", ":types", ":workflow_components", ":workflow_publication"],
+)
+
+py_library(
+    name = "helper_tests_support_publication_delivery",
+    srcs = ["tests/support/publication_delivery.py"],
+    imports = ["."],
+    deps = [":drain", ":helper_tests_support", ":types"],
+)
+
+py_library(
+    name = "helper_tests_support_rendering",
+    srcs = ["tests/support/rendering.py"],
+    imports = ["."],
+    deps = [":helper_tests_support", ":types"],
+)
+
+py_library(
+    name = "helper_tests_support_researcher",
+    srcs = ["tests/support/researcher.py"],
+    imports = ["."],
+    deps = [":helper_tests_support", "@python_deps//httpx", "@python_deps//pyyaml"],
+)
+
+py_library(
+    name = "helper_tests_support_story_editor",
+    srcs = ["tests/support/story_editor.py"],
+    imports = ["."],
+    deps = [":contracts", ":editor", ":helper_tests_support", ":model_client", ":settings", ":types", ":workflow_components", "@python_deps//pytest"],
+)
+
+py_library(
+    name = "helper_tests_support_story_pipeline",
+    srcs = ["tests/support/story_pipeline.py"],
+    imports = ["."],
+    deps = [":adapters", ":collection_collector", ":collection_instructions", ":collection_repository", ":contracts", ":drain", ":editor", ":helper_tests_support", ":helper_tests_support_publication", ":model_client", ":package", ":settings", ":types", ":worker", ":workflow_definition", ":workflow_pipeline", ":workflow_publication", "@python_deps//protobuf", "@python_deps//pytest"],
+)
+
+py_library(
+    name = "helper_tests_support_usage",
+    srcs = ["tests/support/usage.py"],
+    imports = ["."],
+    deps = ["//packages/model-router-client/python:package", ":helper_tests_support", ":usage"],
+)
+
+py_library(
+    name = "helper_tests_support_workflow_content",
+    srcs = ["tests/support/workflow_content.py"],
+    imports = ["."],
+    deps = [":helper_tests_support", ":types", ":workflow_schema"],
+)
+
+py_library(
+    name = "helper_tests_support_workflow_state",
+    srcs = ["tests/support/workflow_state.py"],
+    imports = ["."],
+    deps = [":drain", ":helper_tests_support", ":types"],
+)
+
+py_library(
+    name = "helper_tests_support_workflows",
+    srcs = ["tests/support/workflows.py"],
+    imports = ["."],
+    deps = [":helper_tests_support", "@python_deps//pyyaml"],
+)
+
+py_test(
+    name = "tests_test_adapters",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_adapters.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_adapters.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":adapters", ":contracts", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", "@python_deps//httpx", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_admin",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_admin.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_admin.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":adapters", ":admin", ":cli", ":delivery", ":drain", ":editor", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":ownership", ":package", ":settings", ":worker", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)", "BAZEL_CHILD_PYTHON": "1"},
+)
+
+py_test(
+    name = "tests_test_adopted_packets",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_adopted_packets.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_adopted_packets.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":workflow_pipeline", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_api_surface",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_api_surface.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_api_surface.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":app", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":settings", "@python_deps//fastapi", "@python_deps//pytest", "@python_deps//pytest_asyncio", "@python_deps//ziyixi_protos"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)", "BAZEL_COPY_WORKSPACE": "1"},
+)
+
+py_test(
+    name = "tests_test_attempt_settlement",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_attempt_settlement.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_attempt_settlement.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":drain", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":monitoring_status", ":package", ":workflow_definition", ":workflow_engine", ":workflow_repository", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_candidate_pooling",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_candidate_pooling.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_candidate_pooling.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":contracts", ":drain", ":editor", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":package", ":workflow_definition", ":workflow_engine", ":workflow_nodes", ":workflow_story_nodes", "@python_deps//pytest", "@python_deps//pytest_asyncio", "@python_deps//ziyixi_protos"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)", "BAZEL_COPY_WORKSPACE": "1"},
+)
+
+py_test(
+    name = "tests_test_charts",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_charts.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_charts.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":charts", ":helper_tests", ":helper_tests_support_charts", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", "@python_deps//pillow", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_collection",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_collection.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_collection.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":adapters", ":app", ":collection_collector", ":collection_instructions", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":preflight", ":settings", "@python_deps//fastapi", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_collection_edges",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_collection_edges.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_collection_edges.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":collection_collector", ":collection_instructions", ":collection_pipeline", ":collection_repository", ":contracts", ":drain", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":package", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_config_sync",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_config_sync.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_config_sync.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":config_sync", ":content_config", ":contracts", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", "@python_deps//httpx", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_configured_story_pipeline",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_configured_story_pipeline.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_configured_story_pipeline.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":app", ":collection_collector", ":collection_repository", ":content_config", ":drain", ":editor", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_news_first_policy", ":helper_tests_support_publication", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":helper_tests_support_workflow_content", ":preflight", ":settings", ":worker", ":workflow_pipeline", ":workflow_researcher", "@python_deps//fastapi", "@python_deps//pytest", "@python_deps//pytest_asyncio", "@python_deps//pyyaml"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_console_access",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_console_access.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_console_access.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":console_access", ":console_api", ":console_read", ":helper_tests", ":helper_tests_support_console_auth", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":settings", "@python_deps//cryptography", "@python_deps//fastapi", "@python_deps//pyjwt", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_console_api_surface",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_console_api_surface.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_console_api_surface.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = ["//proto/newsletter/ui/v1:python", ":console_api", ":console_read", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":settings", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)", "BAZEL_CHILD_PYTHON": "1"},
+)
+
+py_test(
+    name = "tests_test_console_contract",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_console_contract.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_console_contract.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = ["//proto/newsletter/ui/v1:python", "//proto:python_runtime", ":console_api", ":helper_scripts_console_fixtures", ":helper_tests", ":helper_tests_support_console_world", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_console_listener",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_console_listener.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_console_listener.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":app", ":cli", ":console_access", ":drain", ":helper_tests", ":helper_tests_support_console_auth", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":lifecycle", ":settings", "@python_deps//fastapi", "@python_deps//httpx", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)", "BAZEL_COPY_WORKSPACE": "1"},
+)
+
+py_test(
+    name = "tests_test_console_read",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_console_read.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_console_read.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = ["//proto/newsletter/ui/v1:python", ":console_read", ":console_views", ":drain", ":helper_tests", ":helper_tests_support_console_world", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":monitoring_status", ":notion_journal", ":package", ":settings", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_console_readonly",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_console_readonly.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_console_readonly.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = ["//proto/newsletter/ui/v1:python", ":helper_tests", ":helper_tests_support_console_world", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":package", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_console_views",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_console_views.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_console_views.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = ["//proto/newsletter/ui/v1:python", ":console_views", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_content_config",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_content_config.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_content_config.py)"],
+    legacy_create_init = False,
+    data = [":build_test_data", "//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":collection_repository", ":config_cli", ":content_config", ":contracts", ":drain", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_researcher", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":settings", ":workflow_pipeline", ":workflow_researcher", ":workflow_state", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)", "BAZEL_COPY_WORKSPACE": "1"},
+)
+
+py_test(
+    name = "tests_test_content_config_workflow",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_content_config_workflow.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_content_config_workflow.py)"],
+    legacy_create_init = False,
+    data = ["//:python_repository_test_data", ":build_test_data", "//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":config_cli", ":helper_scripts_publish_content_config", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":helper_tests_support_workflows", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_contracts",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_contracts.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_contracts.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":contracts", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":package", "@python_deps//pytest", "@python_deps//pytest_asyncio", "@python_deps//ziyixi_protos"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_deployment_drain",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_deployment_drain.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_deployment_drain.py)"],
+    legacy_create_init = False,
+    data = ["//:python_repository_test_data", "//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":adapters", ":app", ":delivery", ":deployment_client", ":drain", ":editor", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":notion_journal", ":notion_sync", ":ownership", ":package", ":settings", ":worker", "@python_deps//fastapi", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)", "BAZEL_COPY_WORKSPACE": "1"},
+)
+
+py_test(
+    name = "tests_test_editor",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_editor.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_editor.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":collection_instructions", ":contracts", ":editor", ":errors", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":workflow_content", ":workflow_schema", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_editor_correction",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_editor_correction.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_editor_correction.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":editor", ":errors", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_editor_provenance",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_editor_provenance.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_editor_provenance.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = ["//packages/model-router-client/python:package", ":editor", ":errors", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_editor_schema",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_editor_schema.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_editor_schema.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":contracts", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":model_schema", "@python_deps//pytest", "@python_deps//pytest_asyncio", "@python_deps//ziyixi_protos"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_editor_usage",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_editor_usage.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_editor_usage.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = ["//packages/model-router-client/python:package", ":errors", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":usage", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_editorial_policy",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_editorial_policy.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_editorial_policy.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_email_design",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_email_design.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_email_design.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":adapters", ":contracts", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_rendering", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":rendering", ":todofy", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_email_templates",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_email_templates.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_email_templates.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":adapters", ":drain", ":editor", ":email_templates", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_publication_delivery", ":helper_tests_support_rendering", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":helper_tests_support_usage", ":package", ":rendering", ":todofy", ":usage", ":worker", ":workflow_definition", ":workflow_repository", "@python_deps//jinja2", "@python_deps//pytest", "@python_deps//pytest_asyncio", "@python_deps//pyyaml"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_image_release",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_image_release.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_image_release.py)"],
+    legacy_create_init = False,
+    data = ["//:python_repository_test_data", ":build_test_data", "//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":helper_scripts_smoke_codex_startup", ":helper_scripts_smoke_image", ":helper_scripts_smoke_image_probe", ":helper_scripts_trigger_run", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":helper_tests_support_workflows", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_legacy_retirement",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_legacy_retirement.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_legacy_retirement.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":adapters", ":collection_repository", ":drain", ":editor", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":settings", ":worker", ":workflow_pipeline", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_lifecycle",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_lifecycle.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_lifecycle.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":app", ":drain", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":preflight", ":settings", ":worker", "@python_deps//fastapi", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)", "BAZEL_COPY_WORKSPACE": "1"},
+)
+
+py_test(
+    name = "tests_test_maintenance_safety",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_maintenance_safety.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_maintenance_safety.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":adapters", ":admin", ":app", ":collection_repository", ":contracts", ":delivery", ":drain", ":helper_scripts_check_python_structure", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":helper_tests_support_workflow_state", ":ownership", ":package", ":settings", ":worker", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_model_io",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_model_io.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_model_io.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":errors", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":model_io", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_model_router",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_model_router.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_model_router.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = ["//packages/model-router-client/python:package", ":drain", ":errors", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":package", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_module_boundaries",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_module_boundaries.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_module_boundaries.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":app", ":charts", ":cli", ":console_access", ":console_views", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":model_io", ":model_schema", ":rendering", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)", "BAZEL_CHILD_PYTHON": "1"},
+)
+
+py_test(
+    name = "tests_test_monitoring_api",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_monitoring_api.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_monitoring_api.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":app", ":config_sync", ":content_config", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":settings", "@python_deps//fastapi", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)", "BAZEL_COPY_WORKSPACE": "1"},
+)
+
+py_test(
+    name = "tests_test_monitoring_status",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_monitoring_status.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_monitoring_status.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":drain", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":monitoring_status", ":workflow_definition", ":workflow_engine", ":workflow_repository", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_news_first_policy",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_news_first_policy.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_news_first_policy.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":collection_instructions", ":content_config", ":contracts", ":drain", ":errors", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_news_first_policy", ":helper_tests_support_publication", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":helper_tests_support_workflow_content", ":workflow_content", ":workflow_definition", ":workflow_engine", ":workflow_publication", ":workflow_schema", ":workflow_story_nodes", "@python_deps//pytest", "@python_deps//pytest_asyncio", "@python_deps//ziyixi_protos"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_newsroom_config",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_newsroom_config.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_newsroom_config.py)"],
+    legacy_create_init = False,
+    data = [":build_test_data", "//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":content_config", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_publication", ":helper_tests_support_rendering", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":helper_tests_support_usage", ":rendering", ":todofy", ":usage", ":workflow_publication", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_notion_api",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_notion_api.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_notion_api.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":adapters", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":notion_api", "@python_deps//httpx", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_notion_content",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_notion_content.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_notion_content.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_notion_content", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":notion_content", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_notion_intake",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_notion_intake.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_notion_intake.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":contracts", ":drain", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_notion_content", ":helper_tests_support_researcher", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":helper_tests_support_workflow_content", ":notion_content", ":notion_intake", ":notion_journal", ":package", ":workflow_definition", ":workflow_engine", ":workflow_researcher", ":workflow_sources", ":workflow_story_nodes", "@python_deps//pytest", "@python_deps//pytest_asyncio", "@python_deps//ziyixi_protos"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)", "BAZEL_COPY_WORKSPACE": "1"},
+)
+
+py_test(
+    name = "tests_test_notion_lifecycle",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_notion_lifecycle.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_notion_lifecycle.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":adapters", ":collection_instructions", ":drain", ":editor", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":lifecycle", ":notion_cli", ":notion_sync", ":package", ":preflight", ":settings", ":worker", ":workflow_definition", ":workflow_pipeline", ":workflow_state", "@python_deps//fastapi", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)", "BAZEL_COPY_WORKSPACE": "1"},
+)
+
+py_test(
+    name = "tests_test_notion_settings",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_notion_settings.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_notion_settings.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":settings", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_notion_sync",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_notion_sync.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_notion_sync.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":adapters", ":contracts", ":drain", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_notion_content", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":notion_content", ":notion_journal", ":notion_sync", ":package", ":workflow_definition", ":workflow_repository", "@python_deps//httpx", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)", "BAZEL_COPY_WORKSPACE": "1"},
+)
+
+py_test(
+    name = "tests_test_preflight",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_preflight.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_preflight.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = ["//packages/model-router-client/python:package", ":drain", ":editor", ":errors", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":model_client", ":notion_api", ":package", ":preflight", ":settings", "@python_deps//httpx", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_prompt_evaluation",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_prompt_evaluation.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_prompt_evaluation.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":contracts", ":errors", ":helper_scripts_evaluate_prompts", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_publication", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":helper_tests_support_usage", ":usage", ":workflow_schema", "@python_deps//httpx", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_prompt_examples",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_prompt_examples.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_prompt_examples.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":content_config", ":contracts", ":editor", ":errors", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":workflow_components", ":workflow_content", ":workflow_prompt_examples", ":workflow_review", ":workflow_schema", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_proto_dependency",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_proto_dependency.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_proto_dependency.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":package", ":preflight", "@python_deps//pytest", "@python_deps//pytest_asyncio", "@python_deps//ziyixi_protos"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_publication",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_publication.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_publication.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":contracts", ":drain", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_publication", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":package", ":workflow_components", ":workflow_publication", ":workflow_story_nodes", "@python_deps//pytest", "@python_deps//pytest_asyncio", "@python_deps//ziyixi_protos"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_publication_delivery",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_publication_delivery.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_publication_delivery.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":adapters", ":collection_pipeline", ":contracts", ":drain", ":editor", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_publication_delivery", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":worker", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_python_structure",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_python_structure.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_python_structure.py)"],
+    legacy_create_init = False,
+    data = [":python_sources", "//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":adapters", ":admin", ":app", ":charts", ":cli", ":collection", ":collection_collector", ":collection_instructions", ":collection_pipeline", ":collection_repository", ":collection_source_guides", ":config_cli", ":config_sync", ":console_access", ":console_api", ":console_read", ":console_views", ":content_config", ":contracts", ":delivery", ":deployment_api", ":deployment_client", ":diagnostics", ":drain", ":editor", ":email_templates", ":errors", ":files", ":helper_scripts_check_python_structure", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":lifecycle", ":model_client", ":model_io", ":model_schema", ":monitoring_api", ":monitoring_status", ":notion_api", ":notion_cli", ":notion_content", ":notion_intake", ":notion_journal", ":notion_sync", ":ownership", ":package", ":personal", ":preflight", ":provenance", ":rendering", ":schema_smoke", ":settings", ":todofy", ":trigger", ":types", ":usage", ":worker", ":workflow", ":workflow_components", ":workflow_content", ":workflow_definition", ":workflow_engine", ":workflow_nodes", ":workflow_pipeline", ":workflow_prompt_examples", ":workflow_publication", ":workflow_repository", ":workflow_researcher", ":workflow_review", ":workflow_schema", ":workflow_sources", ":workflow_state", ":workflow_story_nodes", ":workflow_story_recipe", ":workflow_story_replay", ":workflow_story_replay_repository", ":workflow_types", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_readability_boundaries",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_readability_boundaries.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_readability_boundaries.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":contracts", ":diagnostics", ":drain", ":editor", ":files", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_notion_content", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":notion_intake", ":notion_journal", ":package", ":worker", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_reader_acceptance",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_reader_acceptance.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_reader_acceptance.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":adapters", ":drain", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_publication", ":helper_tests_support_rendering", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":helper_tests_support_usage", ":rendering", ":todofy", ":usage", ":workflow_publication", "@python_deps//httpx", "@python_deps//pillow", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_rendering",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_rendering.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_rendering.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":adapters", ":charts", ":contracts", ":helper_tests", ":helper_tests_support_charts", ":helper_tests_support_editor", ":helper_tests_support_rendering", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":rendering", ":todofy", "@python_deps//pillow", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_researcher",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_researcher.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_researcher.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":contracts", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_researcher", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":workflow_content", ":workflow_researcher", ":workflow_sources", "@python_deps//httpx", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_researcher_nodes",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_researcher_nodes.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_researcher_nodes.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":drain", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_researcher", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":helper_tests_support_workflow_content", ":workflow_content", ":workflow_definition", ":workflow_engine", ":workflow_researcher", ":workflow_sources", ":workflow_story_nodes", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)", "BAZEL_COPY_WORKSPACE": "1"},
+)
+
+py_test(
+    name = "tests_test_schema_compat",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_schema_compat.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_schema_compat.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":editor", ":errors", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":usage", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_schema_smoke",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_schema_smoke.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_schema_smoke.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":editor", ":errors", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":schema_smoke", ":settings", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_service",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_service.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_service.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":app", ":cli", ":drain", ":editor", ":errors", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":rendering", ":settings", "@python_deps//fastapi", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)", "BAZEL_COPY_WORKSPACE": "1"},
+)
+
+py_test(
+    name = "tests_test_settings_numeric_errors",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_settings_numeric_errors.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_settings_numeric_errors.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":settings", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_source_guides",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_source_guides.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_source_guides.py)"],
+    legacy_create_init = False,
+    data = [":build_test_data", "//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":collection_instructions", ":collection_repository", ":collection_source_guides", ":contracts", ":drain", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":package", ":settings", ":workflow_pipeline", ":workflow_state", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)", "BAZEL_COPY_WORKSPACE": "1"},
+)
+
+py_test(
+    name = "tests_test_sql_boundaries",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_sql_boundaries.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_sql_boundaries.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":collection_repository", ":contracts", ":drain", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":types", ":workflow_story_replay_repository", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_story_editor",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_story_editor.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_story_editor.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":contracts", ":editor", ":errors", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":usage", ":workflow_components", ":workflow_publication", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_story_pipeline",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_story_pipeline.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_story_pipeline.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":contracts", ":drain", ":editor", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_publication", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":helper_tests_support_workflow_content", ":settings", ":todofy", ":worker", ":workflow_content", ":workflow_engine", ":workflow_nodes", ":workflow_pipeline", ":workflow_publication", ":workflow_sources", ":workflow_story_nodes", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)", "BAZEL_COPY_WORKSPACE": "1"},
+)
+
+py_test(
+    name = "tests_test_story_recipe",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_story_recipe.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_story_recipe.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":workflow_definition", ":workflow_story_recipe", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)", "BAZEL_COPY_WORKSPACE": "1"},
+)
+
+py_test(
+    name = "tests_test_story_replay",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_story_replay.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_story_replay.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":admin", ":app", ":contracts", ":drain", ":editor", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_publication", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":helper_tests_support_usage", ":helper_tests_support_workflow_content", ":package", ":settings", ":workflow_engine", ":workflow_nodes", ":workflow_story_replay", "@python_deps//fastapi", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)", "BAZEL_COPY_WORKSPACE": "1"},
+)
+
+py_test(
+    name = "tests_test_todofy",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_todofy.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_todofy.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":contracts", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":todofy", "@python_deps//httpx", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_todofy_integration",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_todofy_integration.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_todofy_integration.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":app", ":contracts", ":editor", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":rendering", ":settings", ":todofy", "@python_deps//fastapi", "@python_deps//httpx", "@python_deps//pytest", "@python_deps//pytest_asyncio", "@python_deps//ziyixi_protos"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)", "BAZEL_COPY_WORKSPACE": "1"},
+)
+
+py_test(
+    name = "tests_test_todofy_selection",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_todofy_selection.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_todofy_selection.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":personal", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_tooling",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_tooling.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_tooling.py)"],
+    legacy_create_init = False,
+    data = ["//:python_repository_test_data", ":build_test_data", "//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":helper_tests_support_workflows", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_trigger_run",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_trigger_run.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_trigger_run.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":trigger", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_trigger_send",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_trigger_send.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_trigger_send.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":helper_scripts_trigger_run", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":trigger", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_typing",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_typing.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_typing.py)"],
+    config_settings = {"@rules_python//python/config_settings:venvs_site_packages": "yes"},
+    legacy_create_init = False,
+    data = [":python_sources", "//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":adapters", ":admin", ":app", ":charts", ":cli", ":collection", ":collection_collector", ":collection_instructions", ":collection_pipeline", ":collection_repository", ":collection_source_guides", ":config_cli", ":config_sync", ":console_access", ":console_api", ":console_read", ":console_views", ":content_config", ":contracts", ":delivery", ":deployment_api", ":deployment_client", ":diagnostics", ":drain", ":editor", ":email_templates", ":errors", ":files", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":lifecycle", ":model_client", ":model_io", ":model_schema", ":monitoring_api", ":monitoring_status", ":notion_api", ":notion_cli", ":notion_content", ":notion_intake", ":notion_journal", ":notion_sync", ":ownership", ":package", ":personal", ":preflight", ":provenance", ":rendering", ":schema_smoke", ":settings", ":todofy", ":trigger", ":types", ":usage", ":worker", ":workflow", ":workflow_components", ":workflow_content", ":workflow_definition", ":workflow_engine", ":workflow_nodes", ":workflow_pipeline", ":workflow_prompt_examples", ":workflow_publication", ":workflow_repository", ":workflow_researcher", ":workflow_review", ":workflow_schema", ":workflow_sources", ":workflow_state", ":workflow_story_nodes", ":workflow_story_recipe", ":workflow_story_replay", ":workflow_story_replay_repository", ":workflow_types", "@python_deps//mypy", "@python_deps//pytest", "@python_deps//pytest_asyncio", "@python_deps//types_protobuf", "@python_deps//types_pyyaml"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)", "BAZEL_CHILD_PYTHON": "1"},
+)
+
+py_test(
+    name = "tests_test_usage",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_usage.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_usage.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = ["//packages/model-router-client/python:package", ":errors", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":helper_tests_support_usage", ":usage", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_usage_rendering",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_usage_rendering.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_usage_rendering.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_rendering", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":helper_tests_support_usage", ":rendering", ":todofy", ":usage", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_verification_send",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_verification_send.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_verification_send.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":app", ":contracts", ":delivery", ":drain", ":editor", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":settings", "@python_deps//fastapi", "@python_deps//httpx", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)", "BAZEL_COPY_WORKSPACE": "1"},
+)
+
+py_test(
+    name = "tests_test_worker_edges",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_worker_edges.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_worker_edges.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":adapters", ":app", ":drain", ":editor", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":package", ":settings", ":worker", "@python_deps//fastapi", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)", "BAZEL_COPY_WORKSPACE": "1"},
+)
+
+py_test(
+    name = "tests_test_workflow_content",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_workflow_content.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_workflow_content.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":collection_instructions", ":contracts", ":drain", ":errors", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":helper_tests_support_workflow_content", ":settings", ":usage", ":workflow_content", ":workflow_definition", ":workflow_engine", ":workflow_schema", ":workflow_sources", ":workflow_story_nodes", "@python_deps//pytest", "@python_deps//pytest_asyncio", "@python_deps//ziyixi_protos"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_workflow_engine",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_workflow_engine.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_workflow_engine.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":drain", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":workflow_definition", ":workflow_engine", ":workflow_repository", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_workflow_repairs",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_workflow_repairs.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_workflow_repairs.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":collection_repository", ":contracts", ":drain", ":editor", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":helper_tests_support_usage", ":workflow_definition", ":workflow_pipeline", ":workflow_repository", ":workflow_state", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)", "BAZEL_COPY_WORKSPACE": "1"},
+)
+
+py_test(
+    name = "tests_test_workflow_sources",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_workflow_sources.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_workflow_sources.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":workflow_sources", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+py_test(
+    name = "tests_test_workflow_state",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/test_workflow_state.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "$(rootpath tests/test_workflow_state.py)"],
+    legacy_create_init = False,
+    data = ["//tools/bazel/python:noto_cjk_font", ":test_fixtures", "pyproject.toml", "tests/conftest.py"],
+    deps = [":collection_repository", ":drain", ":editor", ":helper_tests", ":helper_tests_support_editor", ":helper_tests_support_story_editor", ":helper_tests_support_story_pipeline", ":helper_tests_support_usage", ":helper_tests_support_workflow_state", ":workflow_pipeline", ":workflow_state", "@python_deps//pytest", "@python_deps//pytest_asyncio"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)"},
+)
+
+test_suite(
+    name = "tests",
+    tests = [":tests_test_adapters", ":tests_test_admin", ":tests_test_adopted_packets", ":tests_test_api_surface", ":tests_test_attempt_settlement", ":tests_test_candidate_pooling", ":tests_test_charts", ":tests_test_collection", ":tests_test_collection_edges", ":tests_test_config_sync", ":tests_test_configured_story_pipeline", ":tests_test_console_access", ":tests_test_console_api_surface", ":tests_test_console_contract", ":tests_test_console_listener", ":tests_test_console_read", ":tests_test_console_readonly", ":tests_test_console_views", ":tests_test_content_config", ":tests_test_content_config_workflow", ":tests_test_contracts", ":tests_test_deployment_drain", ":tests_test_editor", ":tests_test_editor_correction", ":tests_test_editor_provenance", ":tests_test_editor_schema", ":tests_test_editor_usage", ":tests_test_editorial_policy", ":tests_test_email_design", ":tests_test_email_templates", ":tests_test_image_release", ":tests_test_legacy_retirement", ":tests_test_lifecycle", ":tests_test_maintenance_safety", ":tests_test_model_io", ":tests_test_model_router", ":tests_test_module_boundaries", ":tests_test_monitoring_api", ":tests_test_monitoring_status", ":tests_test_news_first_policy", ":tests_test_newsroom_config", ":tests_test_notion_api", ":tests_test_notion_content", ":tests_test_notion_intake", ":tests_test_notion_lifecycle", ":tests_test_notion_settings", ":tests_test_notion_sync", ":tests_test_preflight", ":tests_test_prompt_evaluation", ":tests_test_prompt_examples", ":tests_test_proto_dependency", ":tests_test_publication", ":tests_test_publication_delivery", ":tests_test_python_structure", ":tests_test_readability_boundaries", ":tests_test_reader_acceptance", ":tests_test_rendering", ":tests_test_researcher", ":tests_test_researcher_nodes", ":tests_test_schema_compat", ":tests_test_schema_smoke", ":tests_test_service", ":tests_test_settings_numeric_errors", ":tests_test_source_guides", ":tests_test_sql_boundaries", ":tests_test_story_editor", ":tests_test_story_pipeline", ":tests_test_story_recipe", ":tests_test_story_replay", ":tests_test_todofy", ":tests_test_todofy_integration", ":tests_test_todofy_selection", ":tests_test_tooling", ":tests_test_trigger_run", ":tests_test_trigger_send", ":tests_test_typing", ":tests_test_usage", ":tests_test_usage_rendering", ":tests_test_verification_send", ":tests_test_worker_edges", ":tests_test_workflow_content", ":tests_test_workflow_engine", ":tests_test_workflow_repairs", ":tests_test_workflow_sources", ":tests_test_workflow_state"],
+)
+
+filegroup(
+    name = "discovery_instructions",
+    srcs = glob(["src/newsletter/instructions/**/*.md"], allow_empty = True),
+)
+
+filegroup(
+    name = "templates",
+    srcs = glob(["src/newsletter/templates/**"], allow_empty = True),
+)
+
+filegroup(
+    name = "workflows",
+    srcs = glob(["src/newsletter/workflows/**"], allow_empty = True),
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(["src/**/*.py", "scripts/*.py", "tests/**/*.py"], allow_empty = True),
+)
+
+filegroup(
+    name = "build_test_data",
+    srcs = glob(["content-config/**", "Dockerfile", "Dockerfile.dockerignore", ".dockerignore", ".gitignore", "Makefile", "MANIFEST.in"], allow_empty = True),
+)
+
+filegroup(
+    name = "test_fixtures",
+    srcs = glob(["tests/fixtures/**"], allow_empty = True),
+)
+
+filegroup(
+    name = "package_resources",
+    srcs = glob(["src/newsletter/instructions/**/*.md", "src/newsletter/templates/**", "src/newsletter/workflows/**", "src/newsletter/policy/**", "src/newsletter/fixtures/*.json"], allow_empty = True),
+)
+
+py_package(
+    name = "image_dependencies",
+    tags = ["manual"],
+    deps = [":library"],
+    packages = ["site-packages"],
+)
+
+pkg_files(
+    name = "image_dependency_files",
+    tags = ["manual"],
+    srcs = [":image_dependencies"],
+    prefix = "opt/newsletter/.venv/lib/python3.14/site-packages",
+    strip_prefix = strip_prefix.from_root("site-packages"),
+)
+
+pkg_tar(
+    name = "image_dependency_layer",
+    tags = ["manual"],
+    srcs = [":image_dependency_files"],
+)
+
+py_package(
+    name = "wheel_files",
+    tags = ["manual"],
+    deps = [":library"],
+    packages = ["newsletter/src"],
+)
+
+py_wheel(
+    name = "wheel",
+    tags = ["manual"],
+    distribution = "personal-newsletter",
+    version = "0.1.0",
+    python_requires = ">=3.14",
+    requires = ["fastapi", "uvicorn", "httpx", "protobuf", "jinja2", "pillow", "pyyaml", "PyJWT", "cryptography", "ziyixi-protos", "ziyixi-proto", "ziyixi-model-router-client"],
+    deps = [":wheel_files"],
+    strip_path_prefixes = ["newsletter/src"],
+    entry_points = {"console_scripts": ["newsletter = newsletter.cli:main", "newsletter-trigger = newsletter.trigger:main"]},
+    stamp = 0,
+)
+
+whl_filegroup(
+    name = "image_source",
+    tags = ["manual"],
+    whl = ":wheel",
+)
+
+pkg_files(
+    name = "image_source_files",
+    tags = ["manual"],
+    srcs = [":image_source"],
+    prefix = "opt/newsletter/.venv/lib/python3.14/site-packages",
+    renames = {":image_source": REMOVE_BASE_DIRECTORY},
+)
+
+whl_filegroup(
+    name = "image_client",
+    tags = ["manual"],
+    whl = "//packages/model-router-client/python:wheel",
+)
+
+pkg_files(
+    name = "image_client_files",
+    tags = ["manual"],
+    srcs = [":image_client"],
+    prefix = "opt/newsletter/.venv/lib/python3.14/site-packages",
+    renames = {":image_client": REMOVE_BASE_DIRECTORY},
+)
+
+whl_filegroup(
+    name = "image_proto",
+    tags = ["manual"],
+    whl = "//proto:python_wheel",
+)
+
+pkg_files(
+    name = "image_proto_files",
+    tags = ["manual"],
+    srcs = [":image_proto"],
+    prefix = "opt/newsletter/.venv/lib/python3.14/site-packages",
+    renames = {":image_proto": REMOVE_BASE_DIRECTORY},
+)
+
+pkg_files(
+    name = "image_public_config",
+    tags = ["manual"],
+    srcs = ["//:config/cloud.toml", "//:config/resources.toml"],
+    prefix = "opt/newsletter/public-build-config",
+    strip_prefix = strip_prefix.from_root("config"),
+)
+
+pkg_tar(
+    name = "image_source_layer",
+    tags = ["manual"],
+    srcs = [":image_source_files", ":image_public_config"],
+)
+
+pkg_tar(
+    name = "image_proto_layer",
+    tags = ["manual"],
+    srcs = [":image_proto_files"],
+)
+
+pkg_tar(
+    name = "image_client_layer",
+    tags = ["manual"],
+    srcs = [":image_client_files"],
+)
+
+pkg_tar(
+    name = "image_font_layer",
+    tags = ["manual"],
+    deps = ["@newsletter_fonts//:data.tar.xz"],
+)
+
+python_runtime_tree(
+    name = "image_runtime",
+    tags = ["manual"],
+    base = "@python_base_linux_amd64",
+    service = "newsletter",
+)
+
+pkg_files(
+    name = "image_runtime_files",
+    tags = ["manual"],
+    srcs = [":image_runtime"],
+    renames = {":image_runtime": REMOVE_BASE_DIRECTORY},
+)
+
+pkg_files(
+    name = "image_entrypoints",
+    tags = ["manual"],
+    srcs = ["//tools/bazel/images:newsletter-entrypoint", "//tools/bazel/images:newsletter-trigger-entrypoint"],
+    prefix = "opt/newsletter/.venv/bin",
+    renames = {
+        "//tools/bazel/images:newsletter-entrypoint": "newsletter",
+        "//tools/bazel/images:newsletter-trigger-entrypoint": "newsletter-trigger",
+    },
+    attributes = pkg_attributes(mode = "0755"),
+)
+
+pkg_mkdirs(
+    name = "image_directories",
+    tags = ["manual"],
+    dirs = ["home/newsletter", "var/lib/newsletter"],
+    attributes = pkg_attributes(mode = "0755", uid = 10001, gid = 10001),
+)
+
+pkg_tar(
+    name = "image_runtime_layer",
+    tags = ["manual"],
+    srcs = [":image_runtime_files", ":image_entrypoints", ":image_directories"],
+    symlinks = {
+        "opt/newsletter/.venv/bin/python": "/usr/local/bin/python3.14",
+        "opt/newsletter/.venv/bin/python3": "python",
+        "opt/newsletter/.venv/bin/python3.14": "python",
+    },
+)
+
+newsletter_image_identity(
+    name = "image_identity",
+    tags = ["manual"],
+    profile = "//:config/cloud.toml",
+    resources = "//:config/resources.toml",
+)
+
+pkg_files(
+    name = "image_identity_files",
+    tags = ["manual"],
+    srcs = [":image_identity"],
+    renames = {":image_identity": REMOVE_BASE_DIRECTORY},
+)
+
+pkg_tar(
+    name = "image_identity_layer",
+    tags = ["manual"],
+    srcs = [":image_identity_files"],
+)
+
+filegroup(
+    name = "image_labels",
+    tags = ["manual"],
+    srcs = [":image_identity"],
+    output_group = "labels",
+)
+
+oci_image(
+    name = "image_raw",
+    tags = ["manual"],
+    target_compatible_with = ["@platforms//os:linux", "@platforms//cpu:x86_64"],
+    base = "@python_base_linux_amd64",
+    tars = [":image_runtime_layer", ":image_font_layer", ":image_dependency_layer", ":image_proto_layer", ":image_client_layer", ":image_source_layer", ":image_identity_layer"],
+    entrypoint = ["newsletter"],
+    cmd = ["serve", "--host", "0.0.0.0", "--port", "8080"],
+    env = {
+        "PYTHONUNBUFFERED": "1",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PATH": "/opt/newsletter/.venv/bin:$PATH",
+        "NEWSLETTER_DATA_DIR": "/var/lib/newsletter",
+        "NEWSLETTER_CHART_FONT": "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    },
+    labels = ":image_labels",
+    user = "newsletter",
+    workdir = "/opt/newsletter",
+    exposed_ports = ["8080", "8081"],
+)
+
+newsletter_healthcheck(
+    name = "image",
+    tags = ["manual"],
+    base = ":image_raw",
+    dockerfile = "Dockerfile",
+    target_compatible_with = ["@platforms//os:linux", "@platforms//cpu:x86_64"],
+)
+
+filegroup(
+    name = "image.digest",
+    tags = ["manual"],
+    srcs = [":image"],
+    output_group = "digest",
+)
+
+oci_load(
+    name = "image_load",
+    tags = ["manual"],
+    image = ":image",
+    repo_tags = ["todofy-newsletter:bazel"],
+)
+
+filegroup(
+    name = "image_tar",
+    tags = ["manual"],
+    srcs = [":image_load"],
+    output_group = "tarball",
+)

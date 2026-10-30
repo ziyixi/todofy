@@ -1,0 +1,36 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+
+package(default_visibility = ["//visibility:public"])
+
+_MODULES = ["url", "scrub", "segment", "denylist"]
+
+[
+    ts_project(
+        name = name + "_types",
+        srcs = [name + ".ts"],
+        declaration = True,
+        emit_declaration_only = True,
+        tsconfig = {
+            "compilerOptions": {
+                "target": "ES2024",
+                "lib": ["ES2024", "DOM"],
+                "module": "ESNext",
+                "moduleResolution": "Bundler",
+                "strict": True,
+                "noUncheckedIndexedAccess": True,
+                "skipLibCheck": True,
+            },
+        },
+    )
+    for name in _MODULES
+]
+
+[
+    js_library(
+        name = name,
+        srcs = [name + ".ts"],
+        deps = [":" + name + "_types"],
+    )
+    for name in _MODULES
+]

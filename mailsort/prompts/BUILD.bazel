@@ -1,0 +1,6 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+
+package(default_visibility = ["//visibility:public"])
+
+js_library(name = "priority-classification", srcs = ["priority-classification.txt"])
+js_library(name = "personal-rules", srcs = ["personal-rules.txt"])

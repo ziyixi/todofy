@@ -4,6 +4,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
@@ -496,7 +497,7 @@ it("keeps the mini timer and nothing else in the background, and reports the ses
   const page = mount(data());
   page.rerender({ onSession });
   await screen.findByRole("button", { name: "Mini timer" });
-  expect(onSession).toHaveBeenLastCalledWith(true);
+  await waitFor(() => expect(onSession).toHaveBeenLastCalledWith(true));
   const { pip, mini } = await open(stub);
   page.rerender({ onSession, background: true });
   expect(document.querySelector(".plus-root")).toBeNull();

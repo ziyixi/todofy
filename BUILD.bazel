@@ -1,0 +1,32 @@
+load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+
+exports_files([
+    "package.json",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+    "uv.lock",
+    "config/cloud.toml",
+    "config/resources.toml",
+])
+
+npm_link_all_packages(name = "node_modules")
+
+js_library(
+    name = "toolchain_version_inputs",
+    srcs = ["MODULE.bazel", "pnpm-workspace.yaml", "package.json", ".python-version"],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "python_repository_test_data",
+    srcs = glob([
+        ".github/workflows/*.yml",
+        ".github/actions/**",
+        "config/*.toml",
+        "tools/cloud-release/*.py",
+        "tools/vps-release/*.py",
+        "tools/vps-bootstrap/*.py",
+    ], allow_empty = True) + ["//contracts:fixtures", "pyproject.toml", "uv.lock", ".python-version", ".gitignore"],
+    visibility = ["//visibility:public"],
+)

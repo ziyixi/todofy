@@ -469,11 +469,13 @@ def format_schema(fmt: wire_rules.Format, described: bool) -> dict[str, Any]:
     return entry
 
 
-def generate(image: dict[str, Any]) -> dict[str, str]:
-    """Schema path (relative to proto/) -> JSON text, for every target of SCHEMAS."""
+def generate(image: dict[str, Any], packages: set[str] | None = None) -> dict[str, str]:
+    """Schema path (relative to proto/) -> JSON text, optionally restricted to selected packages."""
     wire_rules.check_image(image)
     out = {}
     for target in SCHEMAS:
+        if packages is not None and target.package not in packages:
+            continue
         if target.root:
             schema = Package(image, target.package, inline=True, open=target.open).root(target)
         else:

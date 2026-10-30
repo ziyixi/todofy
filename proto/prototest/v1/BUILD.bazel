@@ -1,0 +1,15 @@
+load("@protobuf//bazel:proto_library.bzl", "proto_library")
+
+package(default_visibility = ["//visibility:public"])
+
+proto_library(
+    name = "proto",
+    srcs = ["intent.proto", "prototest.proto", "rules.proto"],
+    strip_import_prefix = "/proto",
+    deps = ["//proto/common/wire/v1:proto", "@googleapis//:google_api_annotations_proto", "@googleapis//:google_api_field_behavior_proto", "@googleapis//:google_api_field_info_proto", "@protobuf//:empty_proto", "@protobuf//:field_mask_proto", "@protobuf//:timestamp_proto"],
+)
+
+alias(name = "ts", actual = "//proto/ts:prototest_v1_ts")
+alias(name = "python", actual = "//proto/python/src/ziyixi_proto:prototest_v1_py")
+
+exports_files(['intent.proto', 'prototest.proto', 'rules.proto'])

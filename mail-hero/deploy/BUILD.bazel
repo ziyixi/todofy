@@ -1,0 +1,19 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+
+package(default_visibility = ["//visibility:public"])
+
+js_library(
+    name = "configure-webhook",
+    srcs = ["configure-webhook.mjs"],
+    deps = [
+        "//mail-hero/cloudflare:native_api-endpoints",
+        "//mail-hero/cloudflare:native_api-common",
+        "//mail-hero/cloudflare:native_security",
+    ],
+)
+
+js_library(
+    name = "vars",
+    srcs = ["deploy-vars.mjs"],
+    deps = ["//tools/cloud-config:worker-deploy"],
+)

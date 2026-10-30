@@ -1,0 +1,53 @@
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+load("@rules_python//python:packaging.bzl", "py_package", "py_wheel")
+
+package(default_visibility = ["//visibility:public"])
+
+py_library(
+    name = "package",
+    srcs = ["src/model_router_client/__init__.py"],
+    imports = ["src"],
+    data = ["src/model_router_client/py.typed"],
+    deps = ["//proto/modelrouter/inference/v1:python", "//proto:python_runtime"],
+)
+
+py_library(
+    name = "library",
+    deps = [":package"],
+)
+
+py_test(
+    name = "tests_test_client",
+    srcs = ["//tools/bazel/python:unittest_main.py", "tests/test_client.py"],
+    main = "//tools/bazel/python:unittest_main.py",
+    imports = [".", "src", "tests"],
+    args = ["tests.test_client"],
+    legacy_create_init = False,
+    data = ["pyproject.toml"],
+    deps = [":package"],
+    size = "small",
+)
+
+test_suite(
+    name = "tests",
+    tests = [":tests_test_client"],
+)
+
+py_package(
+    name = "wheel_files",
+    tags = ["manual"],
+    deps = [":package"],
+    packages = ["packages/model-router-client/python/src"],
+)
+
+py_wheel(
+    name = "wheel",
+    tags = ["manual"],
+    distribution = "ziyixi-model-router-client",
+    version = "0.1.0",
+    python_requires = ">=3.14",
+    requires = ["ziyixi-proto"],
+    deps = [":wheel_files"],
+    strip_path_prefixes = ["packages/model-router-client/python/src"],
+    stamp = 0,
+)

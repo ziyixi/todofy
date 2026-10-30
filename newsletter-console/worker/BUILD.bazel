@@ -1,0 +1,80 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@npm//newsletter-console/worker:vitest/package_json.bzl", vitest = "bin")
+load("//proto/bazel:ts_package.bzl", "proto_package")
+load("//tools/bazel:js.bzl", "proto_vitest_test", "workspace_link", "workspace_package_link")
+
+package(default_visibility = ["//visibility:public"])
+
+npm_link_all_packages(name = "node_modules")
+
+js_library(
+    name = "env",
+    srcs = ["src/env.ts"],
+    types = ["src/env.ts"],
+    deps = [],
+)
+
+js_library(
+    name = "upstream",
+    srcs = ["src/upstream.ts"],
+    types = ["src/upstream.ts"],
+    deps = ["//proto/ts:http-transcoder", "//proto/ts:rpc-status"],
+)
+
+js_library(
+    name = "http",
+    srcs = ["src/http.ts"],
+    types = ["src/http.ts"],
+    deps = ["//packages/edge-auth:lib", "//proto/newsletter/ui/v1:ts", "//proto/ts:http-transcoder", "//proto/ts:rpc-status", ":env", ":upstream"],
+)
+
+js_library(
+    name = "index",
+    srcs = ["src/index.ts"],
+    types = ["src/index.ts"],
+    deps = [":env", ":http"],
+)
+
+js_library(name = "lib", deps = [":env", ":http", ":index", ":upstream"])
+
+proto_package(name = "proto_types_package", deps = ["//proto/newsletter/ui/v1:ts", "//proto/ts:http-client", "//proto/ts:http-transcoder", "//proto/ts:rpc-status", "//proto/ts:wire-json", ":lib"])
+workspace_package_link(name = "proto_types_link", src = ":proto_types_package", runtime_dependencies = ["@bufbuild/protobuf"])
+workspace_package_link(name = "edge_auth_types_link", src = "//packages/edge-auth:pkg")
+workspace_link(name = "http_test_edge_auth_link", src = "//packages/edge-auth:pkg")
+proto_vitest_test(
+    name = "http_test",
+    runner = vitest.vitest_test,
+    tests = ["test/http.test.ts"],
+    deps = [":env", ":http"],
+    data = [":http_test_edge_auth_link", ":node_modules/vitest", "package.json", "test/jwt.ts"],
+)
+
+proto_vitest_test(
+    name = "upstream_test",
+    runner = vitest.vitest_test,
+    tests = ["test/upstream.test.ts"],
+    deps = ["//proto/ts:http-transcoder", "//proto/ts:rpc-status", ":upstream"],
+    data = [":node_modules/vitest", "package.json"],
+)
+
+workspace_link(name = "wire-conformance_test_edge_auth_link", src = "//packages/edge-auth:pkg")
+proto_vitest_test(
+    name = "wire-conformance_test",
+    runner = vitest.vitest_test,
+    tests = ["test/wire-conformance.test.ts"],
+    deps = ["//proto/newsletter/ui/v1:ts", "//proto/ts:http-client", "//proto/ts:wire-json", ":env", ":http"],
+    data = ["//contracts:newsletter-ui-v1/fixtures/backup-status.json_data", "//contracts:newsletter-ui-v1/fixtures/edition-rendering.json_data", "//contracts:newsletter-ui-v1/fixtures/edition.json_data", "//contracts:newsletter-ui-v1/fixtures/editions.json_data", "//contracts:newsletter-ui-v1/fixtures/model-calls.json_data", "//contracts:newsletter-ui-v1/fixtures/model-usage-30d.json_data", "//contracts:newsletter-ui-v1/fixtures/overview.json_data", "//contracts:newsletter-ui-v1/fixtures/run-blocked-selection-timeout.json_data", "//contracts:newsletter-ui-v1/fixtures/run-ready.json_data", "//contracts:newsletter-ui-v1/fixtures/runs.json_data", "//contracts:newsletter-ui-v1/fixtures/source-catalog.json_data", ":node_modules/vitest", ":wire-conformance_test_edge_auth_link", "package.json", "test/jwt.ts"],
+)
+
+ts_project(
+    name = "types",
+    srcs = ["src/env.ts", "src/http.ts", "src/index.ts", "src/upstream.ts", "test/http.test.ts", "test/jwt.ts", "test/upstream.test.ts", "test/wire-conformance.test.ts", "vitest.config.ts", "vitest.runtime.config.ts"],
+    no_emit = True,
+    resolve_json_module = True,
+    data = ["vitest.config.ts", "vitest.runtime.config.ts"],
+    deps = [":edge_auth_types_link", ":lib", ":node_modules/@cloudflare/workers-types", ":node_modules/@types/node", ":node_modules/vitest", ":proto_types_link"],
+)
+
+alias(name = "typecheck", actual = ":types_typecheck")

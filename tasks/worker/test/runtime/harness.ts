@@ -13,6 +13,8 @@ function bundle() {
     bundle: true,
     format: 'esm',
     platform: 'neutral',
+    // Bazel supplies workspace packages in this test's declared runfiles tree.
+    ...(process.env.TEST_SRCDIR ? { nodePaths: [join(ROOT, 'node_modules')] } : {}),
     target: 'es2024',
     mainFields: ['module', 'main'],
     conditions: ['workerd', 'worker', 'import'],

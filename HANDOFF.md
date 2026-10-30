@@ -19,6 +19,33 @@ features, the FlowDay retirement), [October 20](docs/history/handoff-2026-10-20.
 
 ## Current work
 
+### Bazel migration (`codex/bazel-migration`, in progress)
+
+Owner approved the staged migration of all builds, tests, generation and packaging to Bazel. Actions retains
+credentials, production publication, deployment ordering and reconcile. Existing pnpm/uv locks remain the application
+dependency source; third-party source is downloaded with pinned integrity rather than vendored into this repository.
+
+- Starting from `2c445ab4`; work is isolated from the owner's main checkout and Claude's worktrees.
+- First: validate pinned toolchains and dependency imports, then package-scoped proto generation and shared libraries,
+  followed by Tasks' real library/unit/runtime/browser/bundle targets. Remaining apps, website/extensions, Python and
+  OCI packaging follow before obsolete check/build paths are removed.
+- No production behavior, model settings, data or credentials change as part of build migration. Each application
+  changes check entrypoints only after its Bazel checks and existing release contracts are verified.
+- Verified locally: the existing pnpm/uv resolutions and Python 3.14.7 toolchain; package-scoped proto generation
+  retains existing bytes, and all 37 proto targets pass. Shared JS libraries and 142 offline Python file targets
+  execute in Bazel. Tasks' seven Worker unit targets, 25 UI file targets and the 16-case D1 CRUD target pass;
+  repeated representative targets report cached results with zero tests executed.
+- The first Linux Python run's 19 failures all came from the host's missing CJK font. Newsletter's 85 test targets
+  now declare the pinned Debian Noto font and pass its absolute path to rendering; all 85 pass locally with that
+  same font, including missing-font and unsafe-file negative cases. A fresh Linux run still needs verification.
+- In progress: complete Tasks type/runtime/browser/bundle coverage, the remaining Worker checks and all three OCI
+  images. The first gateway OCI archive passes its Linux offline container probe and exact SDK-version check.
+- The independent, credential-free Bazel workflow uses fixed Target Determinator and groups actual affected targets.
+  The legacy selector ignores Bazel-only metadata so BUILD changes alone do not publish apps; real source/generator
+  edits retain their checks and release selection. Legacy checks remain active until each replacement is complete.
+- Pending: full Bazel and legacy branch CI, application check cutovers, exact-artifact publication and matching
+  production reconcile. Do not infer full migration or production acceptance from the current local foundation.
+
 ### Verify after the October 28 releases (read-only)
 
 The released notes are in the [October 28 archive](docs/history/handoff-2026-10-28.md).

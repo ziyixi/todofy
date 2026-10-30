@@ -23,10 +23,15 @@ interface ImageFile {
   sourceCodeInfo?: { location: { path?: number[]; leadingComments?: string }[] };
 }
 
-let work: string;
+let work: string | undefined;
 let files: ImageFile[];
 
 beforeAll(() => {
+  const image = process.env['PROTO_TEST_IMAGE'];
+  if (image) {
+    files = (JSON.parse(readFileSync(image, 'utf8')) as { file: ImageFile[] }).file;
+    return;
+  }
   // A throwaway module that imports the google.rpc files, with this module's buf.lock: the same googleapis.
   work = mkdtempSync(join(tmpdir(), 'rpc-status-'));
   writeFileSync(join(work, 'buf.yaml'), 'version: v2\ndeps:\n  - buf.build/googleapis/googleapis\n');
@@ -42,7 +47,7 @@ beforeAll(() => {
 }, 120_000);
 
 afterAll(() => {
-  rmSync(work, { recursive: true, force: true });
+  if (work) rmSync(work, { recursive: true, force: true });
 });
 
 describe('the tables match googleapis', () => {

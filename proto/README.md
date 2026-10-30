@@ -1,5 +1,31 @@
 # `proto/`: protobuf as the IDL of the cross-app contracts and the apps' UI APIs
 
+The Bazel targets compile each IDL package as a `proto_library` with its declared imports. For example,
+`bazel build //proto/tasks/ui/v1:ts //proto/platform/runtime/v1:python //proto:schemas` generates only the
+selected packages and their dependencies. `//proto:ts` and `//proto:python` aggregate the TypeScript and shipped
+Python packages; the test-only Python package is `//proto/prototest/v1:python`. Generated files stay under
+`bazel-out`, with the same module paths and bytes as the existing generators.
+
+Bazel generation uses the pinned Buf and protobuf-es tools and each package's descriptor closure. It does not
+read a developer's `node_modules`, install dependencies or run the whole-module `ensure.mjs` entrypoint.
+The Google APIs source archive is pinned to the same BSR commit as `buf.lock`, with a SHA-256 check.
+The repository rule parses that lock and refuses a commit or digest without a matching verified archive pin.
+TypeScript actions read `buf.gen.yaml` as an input and preserve its plugin options and import setting; the
+adapter only changes the executable and output path for the sandbox and checks the supported plugin identity.
+`//proto/bazel:ts_package.bzl` exposes `proto_package(name, deps)` to assemble the runtime and generated packages
+a consumer imports. Handwritten TypeScript files have individual targets such as `//proto/ts:rpc-status`;
+`//proto/ts:runtime` aggregates them. Existing pnpm/uv checks continue to use `tools/ensure.mjs` during migration.
+
+`bazel test //proto:tests` runs both codecs, cross-language round trips, the published schema byte checks,
+Buf lint and formatting, Google's API linter and its pinned-googleapis check, and the existing strict TypeScript
+typecheck. `bazel build //proto:typecheck` selects the compiler's typecheck output group; the underlying no-emit
+project alone does not request that action. `bazel run //proto:breaking -- BASE` compares the generated current
+image with the same Git-base, retirement and wire-profile rules as the existing gate. It reads Git history at
+execution time, so this command runs independently of Bazel's test-result cache. The existing whole-module
+generation lifecycle, determinism and mutation self-tests remain in the pnpm checks during migration.
+VPS image builds can use `bazel build //proto:python_wheel`, the reproducible stdlib-only wheel of the shipped
+Python packages. It includes neither the test-only modules nor their namespace files.
+
 
 Newsletter retains its locked external `ziyixi-protos` dependency during its VPS engine import; its internal
 versioned JSON deployment control is documented in `newsletter/docs/deployment-drain.md`. The rules below apply

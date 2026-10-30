@@ -1,0 +1,737 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@aspect_rules_js//npm:defs.bzl", "npm_package")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@npm//packages/planning-ui:vitest/package_json.bzl", vitest = "bin")
+load("//proto/bazel:ts_package.bzl", "proto_package")
+load("//tools/bazel:js.bzl", "proto_vitest_test", "workspace_package_link")
+
+package(default_visibility = ["//visibility:public"])
+
+npm_link_all_packages(name = "node_modules")
+
+js_library(
+    name = "announce",
+    srcs = ["src/announce.ts"],
+    types = ["src/announce.ts"],
+    deps = [":node_modules/react"],
+)
+
+js_library(
+    name = "model",
+    srcs = ["src/model.ts"],
+    types = ["src/model.ts"],
+    deps = [":node_modules/react"],
+)
+
+js_library(
+    name = "domain",
+    srcs = ["src/domain.ts"],
+    types = ["src/domain.ts"],
+    deps = [":model"],
+)
+
+js_library(
+    name = "i18n",
+    srcs = ["src/i18n.ts"],
+    types = ["src/i18n.ts"],
+    deps = [":model"],
+)
+
+js_library(
+    name = "StatusMarks",
+    srcs = ["src/StatusMarks.tsx"],
+    types = ["src/StatusMarks.tsx"],
+    deps = [":domain",":i18n",":model",":node_modules/lucide-react",":node_modules/react"],
+)
+
+js_library(
+    name = "AddStep",
+    srcs = ["src/AddStep.tsx"],
+    types = ["src/AddStep.tsx"],
+    deps = [":StatusMarks",":announce",":domain",":i18n",":model",":node_modules/lucide-react",":node_modules/react"],
+)
+
+js_library(
+    name = "drag-announcements",
+    srcs = ["src/drag-announcements.ts"],
+    types = ["src/drag-announcements.ts"],
+    deps = [":model",":node_modules/@dnd-kit/dom"],
+)
+
+js_library(
+    name = "planning-outcomes",
+    srcs = ["src/planning-outcomes.ts"],
+    types = ["src/planning-outcomes.ts"],
+    deps = [":domain",":model"],
+)
+
+js_library(
+    name = "bets",
+    srcs = ["src/bets.ts"],
+    types = ["src/bets.ts"],
+    deps = [":model"],
+)
+
+js_library(
+    name = "mail",
+    srcs = ["src/mail.ts"],
+    types = ["src/mail.ts"],
+    deps = [":model"],
+)
+
+js_library(
+    name = "weekly-review",
+    srcs = ["src/weekly-review.ts"],
+    types = ["src/weekly-review.ts"],
+    deps = [":domain",":mail",":model",":planning-outcomes"],
+)
+
+js_library(
+    name = "plan-updates",
+    srcs = ["src/plan-updates.ts"],
+    types = ["src/plan-updates.ts"],
+    deps = [":bets",":domain",":model",":planning-outcomes",":weekly-review"],
+)
+
+js_library(
+    name = "CompleteTaskButton",
+    srcs = ["src/CompleteTaskButton.tsx"],
+    types = ["src/CompleteTaskButton.tsx"],
+    deps = [":domain",":i18n",":model",":node_modules/lucide-react",":node_modules/react"],
+)
+
+js_library(
+    name = "PlanningCalendar",
+    srcs = ["src/PlanningCalendar.tsx"],
+    types = ["src/PlanningCalendar.tsx"],
+    deps = [":CompleteTaskButton",":StatusMarks",":domain",":drag-announcements",":i18n",":model",":node_modules/@dnd-kit/react",":node_modules/lucide-react",":node_modules/react",":plan-updates",":planning-outcomes",":weekly-review"],
+)
+
+js_library(
+    name = "module_group_14",
+    srcs = ["src/deadlines.ts", "src/dependencies.ts"],
+    types = ["src/deadlines.ts", "src/dependencies.ts"],
+    deps = [":PlanningCalendar",":domain",":i18n",":model",":weekly-review"],
+)
+
+alias(name = "deadlines", actual = ":module_group_14")
+alias(name = "dependencies", actual = ":module_group_14")
+js_library(
+    name = "plan-visibility",
+    srcs = ["src/plan-visibility.ts"],
+    types = ["src/plan-visibility.ts"],
+    deps = [":domain",":model",":module_group_14"],
+)
+
+js_library(
+    name = "review-lanes",
+    srcs = ["src/review-lanes.ts"],
+    types = ["src/review-lanes.ts"],
+    deps = [":model",":module_group_14",":plan-visibility",":planning-outcomes",":weekly-review"],
+)
+
+js_library(
+    name = "lane-reorder",
+    srcs = ["src/lane-reorder.ts"],
+    types = ["src/lane-reorder.ts"],
+    deps = [":model",":node_modules/react",":plan-updates",":planning-outcomes"],
+)
+
+js_library(
+    name = "row-drag",
+    srcs = ["src/row-drag.ts"],
+    types = ["src/row-drag.ts"],
+    deps = [":node_modules/@dnd-kit/dom"],
+)
+
+js_library(
+    name = "FullTitle",
+    srcs = ["src/FullTitle.tsx"],
+    types = ["src/FullTitle.tsx"],
+    deps = [":node_modules/react"],
+)
+
+js_library(
+    name = "ReviewBoard",
+    srcs = ["src/ReviewBoard.tsx"],
+    types = ["src/ReviewBoard.tsx"],
+    deps = [":CompleteTaskButton",":FullTitle",":StatusMarks",":domain",":drag-announcements",":i18n",":lane-reorder",":model",":module_group_14",":node_modules/@dnd-kit/collision",":node_modules/@dnd-kit/dom",":node_modules/@dnd-kit/react",":node_modules/lucide-react",":node_modules/react",":plan-updates",":planning-outcomes",":review-lanes",":row-drag",":weekly-review"],
+)
+
+js_library(
+    name = "QuickTasks",
+    srcs = ["src/QuickTasks.tsx"],
+    types = ["src/QuickTasks.tsx"],
+    deps = [":CompleteTaskButton",":FullTitle",":domain",":drag-announcements",":i18n",":model",":node_modules/@dnd-kit/react",":node_modules/lucide-react",":node_modules/react",":planning-outcomes"],
+)
+
+js_library(
+    name = "PlanningWeek",
+    srcs = ["src/PlanningWeek.tsx"],
+    types = ["src/PlanningWeek.tsx"],
+    deps = [":AddStep",":CompleteTaskButton",":FullTitle",":PlanningCalendar",":QuickTasks",":ReviewBoard",":StatusMarks",":domain",":drag-announcements",":i18n",":lane-reorder",":model",":node_modules/@dnd-kit/collision",":node_modules/@dnd-kit/dom",":node_modules/@dnd-kit/react",":node_modules/lucide-react",":node_modules/react",":plan-updates",":planning-outcomes",":row-drag",":weekly-review"],
+)
+
+js_library(
+    name = "BetText",
+    srcs = ["src/BetText.tsx"],
+    types = ["src/BetText.tsx"],
+    deps = [":StatusMarks",":bets",":i18n",":model",":node_modules/react"],
+)
+
+js_library(
+    name = "BetGoal",
+    srcs = ["src/BetGoal.tsx"],
+    types = ["src/BetGoal.tsx"],
+    deps = [":bets",":model",":node_modules/react"],
+)
+
+js_library(
+    name = "TaskDependencies",
+    srcs = ["src/TaskDependencies.tsx"],
+    types = ["src/TaskDependencies.tsx"],
+    deps = [":StatusMarks",":domain",":i18n",":model",":module_group_14",":node_modules/lucide-react",":node_modules/react"],
+)
+
+js_library(
+    name = "execution-fields_css",
+    srcs = ["src/execution-fields.css"],
+    deps = [],
+)
+
+js_library(
+    name = "ExecutionFields",
+    srcs = ["src/ExecutionFields.tsx"],
+    types = ["src/ExecutionFields.tsx"],
+    deps = [":execution-fields_css",":i18n",":model",":node_modules/lucide-react",":node_modules/react"],
+)
+
+js_library(
+    name = "TaskEditor",
+    srcs = ["src/TaskEditor.tsx"],
+    types = ["src/TaskEditor.tsx"],
+    deps = [":ExecutionFields",":StatusMarks",":TaskDependencies",":domain",":i18n",":model",":module_group_14",":node_modules/lucide-react",":node_modules/react",":planning-outcomes"],
+)
+
+js_library(
+    name = "WeeklyReview",
+    srcs = ["src/WeeklyReview.tsx"],
+    types = ["src/WeeklyReview.tsx"],
+    deps = [":BetGoal",":BetText",":PlanningCalendar",":TaskEditor",":announce",":bets",":domain",":i18n",":model",":module_group_14",":node_modules/lucide-react",":node_modules/react",":plan-updates",":plan-visibility",":planning-outcomes",":weekly-review"],
+)
+
+js_library(
+    name = "plan-view-state",
+    srcs = ["src/plan-view-state.ts"],
+    types = ["src/plan-view-state.ts"],
+    deps = [":model"],
+)
+
+js_library(
+    name = "PlanView",
+    srcs = ["src/PlanView.tsx"],
+    types = ["src/PlanView.tsx"],
+    deps = [":CompleteTaskButton",":PlanningWeek",":ReviewBoard",":WeeklyReview",":domain",":i18n",":model",":node_modules/react",":plan-view-state",":plan-visibility",":planning-outcomes",":review-lanes",":weekly-review"],
+)
+
+js_library(
+    name = "FocusEntries",
+    srcs = ["src/FocusEntries.tsx"],
+    types = ["src/FocusEntries.tsx"],
+    deps = [":StatusMarks",":domain",":i18n",":model",":node_modules/lucide-react",":node_modules/react",":plan-updates"],
+)
+
+js_library(
+    name = "idle-pause",
+    srcs = ["src/idle-pause.ts"],
+    types = ["src/idle-pause.ts"],
+    deps = [],
+)
+
+js_library(
+    name = "useIdlePause",
+    srcs = ["src/useIdlePause.ts"],
+    types = ["src/useIdlePause.ts"],
+    deps = [":idle-pause",":model",":node_modules/react"],
+)
+
+js_library(
+    name = "FocusBlock",
+    srcs = ["src/FocusBlock.tsx"],
+    types = ["src/FocusBlock.tsx"],
+    deps = [":FocusEntries",":StatusMarks",":domain",":i18n",":model",":node_modules/lucide-react",":node_modules/react",":planning-outcomes",":useIdlePause"],
+)
+
+js_library(
+    name = "FocusView",
+    srcs = ["src/FocusView.tsx"],
+    types = ["src/FocusView.tsx"],
+    deps = [":FocusBlock",":FocusEntries",":PlanningCalendar",":StatusMarks",":domain",":drag-announcements",":i18n",":model",":module_group_14",":node_modules/@dnd-kit/collision",":node_modules/@dnd-kit/dom",":node_modules/@dnd-kit/react",":node_modules/lucide-react",":node_modules/react",":plan-updates",":plan-visibility",":planning-outcomes",":row-drag",":useIdlePause"],
+)
+
+js_library(
+    name = "TaskBreadcrumb",
+    srcs = ["src/TaskBreadcrumb.tsx"],
+    types = ["src/TaskBreadcrumb.tsx"],
+    deps = [":domain",":model",":node_modules/react",":planning-outcomes"],
+)
+
+js_library(
+    name = "StepEditor",
+    srcs = ["src/StepEditor.tsx"],
+    types = ["src/StepEditor.tsx"],
+    deps = [":StatusMarks",":TaskBreadcrumb",":announce",":domain",":i18n",":model",":node_modules/lucide-react",":node_modules/react",":plan-updates"],
+)
+
+js_library(
+    name = "WeeklyGoals",
+    srcs = ["src/WeeklyGoals.tsx"],
+    types = ["src/WeeklyGoals.tsx"],
+    deps = [":BetGoal",":BetText",":PlanningCalendar",":announce",":bets",":domain",":i18n",":model",":node_modules/lucide-react",":node_modules/react"],
+)
+
+js_library(
+    name = "MiniTimer",
+    srcs = ["src/MiniTimer.tsx"],
+    types = ["src/MiniTimer.tsx"],
+    deps = [":domain",":i18n",":model",":node_modules/lucide-react",":node_modules/react"],
+)
+
+js_library(
+    name = "mini-timer_css",
+    srcs = ["src/mini-timer.css"],
+    deps = [],
+)
+
+js_library(
+    name = "picture-in-picture",
+    srcs = ["src/picture-in-picture.ts"],
+    types = ["src/picture-in-picture.ts"],
+    deps = [":i18n",":mini-timer_css",":model"],
+)
+
+js_library(
+    name = "App",
+    srcs = ["src/App.tsx"],
+    types = ["src/App.tsx"],
+    deps = [":FocusView",":MiniTimer",":PlanView",":PlanningCalendar",":StatusMarks",":StepEditor",":TaskEditor",":WeeklyGoals",":announce",":domain",":i18n",":idle-pause",":mail",":model",":node_modules/lucide-react",":node_modules/react",":node_modules/react-dom",":picture-in-picture",":plan-updates",":plan-view-state",":planning-outcomes",":useIdlePause"],
+)
+
+js_library(
+    name = "MailCategories",
+    srcs = ["src/MailCategories.tsx"],
+    types = ["src/MailCategories.tsx"],
+    deps = [":i18n",":mail",":model",":node_modules/lucide-react",":node_modules/react"],
+)
+
+js_library(
+    name = "api",
+    srcs = ["src/api.ts"],
+    types = ["src/api.ts"],
+    deps = ["//proto/tasks/ui/v1:ts","//proto/ts:http-client","//proto/ts:protobuf","//proto/ts:protobuf-wkt",":bets",":domain",":model"],
+)
+
+js_library(
+    name = "dependencies_css",
+    srcs = ["src/dependencies.css"],
+    deps = [],
+)
+
+js_library(
+    name = "focus_css",
+    srcs = ["src/focus.css"],
+    deps = [],
+)
+
+js_library(
+    name = "index",
+    srcs = ["src/index.ts"],
+    types = ["src/index.ts"],
+    deps = [":App",":ExecutionFields",":TaskDependencies",":TaskEditor",":api",":model",":plan-view-state"],
+)
+
+js_library(
+    name = "mail-categories_css",
+    srcs = ["src/mail-categories.css"],
+    deps = [],
+)
+
+js_library(
+    name = "planner_css",
+    srcs = ["src/planner.css"],
+    deps = [],
+)
+
+js_library(
+    name = "review-board_css",
+    srcs = ["src/review-board.css"],
+    deps = [],
+)
+
+js_library(
+    name = "planning-week_css",
+    srcs = ["src/planning-week.css"],
+    deps = [],
+)
+
+js_library(
+    name = "weekly-review_css",
+    srcs = ["src/weekly-review.css"],
+    deps = [],
+)
+
+js_library(
+    name = "planning-board_css",
+    srcs = ["src/planning-board.css"],
+    deps = [":planning-week_css",":review-board_css",":weekly-review_css"],
+)
+
+js_library(
+    name = "weekly-goals_css",
+    srcs = ["src/weekly-goals.css"],
+    deps = [],
+)
+
+js_library(
+    name = "styles_css",
+    srcs = ["src/styles.css"],
+    deps = [":dependencies_css",":focus_css",":mail-categories_css",":planner_css",":planning-board_css",":weekly-goals_css"],
+)
+
+
+js_library(name = "lib", deps = [":AddStep", ":App", ":BetText", ":ExecutionFields", ":FocusBlock", ":FocusView", ":MailCategories", ":PlanView", ":PlanningCalendar", ":PlanningWeek", ":QuickTasks", ":ReviewBoard", ":StatusMarks", ":TaskBreadcrumb", ":TaskDependencies", ":TaskEditor", ":WeeklyGoals", ":WeeklyReview", ":announce", ":api", ":bets", ":deadlines", ":dependencies", ":dependencies_css", ":domain", ":drag-announcements", ":focus_css", ":i18n", ":index", ":mail", ":model", ":plan-updates", ":plan-view-state", ":planner_css", ":planning-board_css", ":planning-outcomes", ":planning-week_css", ":review-board_css", ":review-lanes", ":styles_css", ":weekly-goals_css", ":weekly-review", ":weekly-review_css"])
+
+npm_package(name = "pkg", package = "@ziyixi/planning-ui", srcs = [":lib", "package.json"])
+
+proto_package(name = "proto_typecheck_package", deps = [":lib"])
+workspace_package_link(name = "proto_typecheck_link", src = ":proto_typecheck_package", runtime_dependencies = ["@bufbuild/protobuf"])
+
+proto_vitest_test(
+    name = "add-step_test",
+    runner = vitest.vitest_test,
+    tests = ["test/add-step.test.tsx"],
+    deps = [":App", ":bets", ":domain", ":model", ":plan-updates"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/fixture.ts", "test/setup.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "announce_test",
+    runner = vitest.vitest_test,
+    tests = ["test/announce.test.tsx"],
+    deps = [":announce"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/setup.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "api-dependencies_test",
+    runner = vitest.vitest_test,
+    tests = ["test/api-dependencies.test.ts"],
+    deps = ["//proto/tasks/ui/v1:ts", "//proto/ts:http-client", "//proto/ts:protobuf", ":api"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/setup.ts", "test/transport.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "api-planning_test",
+    runner = vitest.vitest_test,
+    tests = ["test/api-planning.test.ts"],
+    deps = ["//proto/tasks/ui/v1:ts", "//proto/ts:http-client", "//proto/ts:protobuf", "//proto/ts:rpc-status", ":api"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/setup.ts", "test/transport.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "api_test",
+    runner = vitest.vitest_test,
+    tests = ["test/api.test.ts"],
+    deps = ["//proto/ts:http-client", ":api", ":model"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/setup.ts", "test/transport.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "background-reads_test",
+    runner = vitest.vitest_test,
+    tests = ["test/background-reads.test.tsx"],
+    deps = [":App", ":bets", ":domain", ":model", ":plan-updates"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/fixture.ts", "test/setup.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "bets_test",
+    runner = vitest.vitest_test,
+    tests = ["test/bets.test.ts"],
+    deps = ["//proto/ts:http-client", "//proto/ts:rpc-status", ":api", ":bets", ":domain", ":model", ":plan-updates"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/fixture.ts", "test/setup.ts", "test/transport.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "components_test",
+    runner = vitest.vitest_test,
+    tests = ["test/components.test.tsx"],
+    deps = [":App", ":PlanView", ":bets", ":domain", ":model", ":plan-updates"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/fixture.ts", "test/setup.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "deadlines-ui_test",
+    runner = vitest.vitest_test,
+    tests = ["test/deadlines-ui.test.tsx"],
+    deps = [":App", ":FocusView", ":PlanView", ":TaskEditor", ":bets", ":domain", ":model", ":plan-updates"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/fixture.ts", "test/setup.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "deadlines_test",
+    runner = vitest.vitest_test,
+    tests = ["test/deadlines.test.ts"],
+    deps = [":domain", ":model", ":module_group_14"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/setup.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "dependencies-ui_test",
+    runner = vitest.vitest_test,
+    tests = ["test/dependencies-ui.test.tsx"],
+    deps = [":App", ":TaskDependencies", ":bets", ":domain", ":model", ":plan-updates"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/fixture.ts", "test/setup.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "dependencies_test",
+    runner = vitest.vitest_test,
+    tests = ["test/dependencies.test.ts"],
+    deps = [":bets", ":domain", ":model", ":module_group_14", ":plan-updates", ":review-lanes"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/fixture.ts", "test/setup.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "domain_test",
+    runner = vitest.vitest_test,
+    tests = ["test/domain.test.ts"],
+    deps = [":domain", ":model"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/setup.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "drag-announcements_test",
+    runner = vitest.vitest_test,
+    tests = ["test/drag-announcements.test.ts"],
+    deps = [":FocusView", ":PlanningWeek", ":drag-announcements"],
+    data = [":node_modules/@dnd-kit/dom", ":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/setup.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "focus-entries_test",
+    runner = vitest.vitest_test,
+    tests = ["test/focus-entries.test.tsx"],
+    deps = [":FocusEntries", ":FocusView", ":bets", ":domain", ":model", ":plan-updates"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/fixture.ts", "test/setup.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "focus_test",
+    runner = vitest.vitest_test,
+    tests = ["test/focus.test.tsx"],
+    deps = [":App", ":FocusView", ":PlanningCalendar", ":bets", ":domain", ":model", ":plan-updates"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/fixture.ts", "test/setup.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "full-title_test",
+    runner = vitest.vitest_test,
+    tests = ["test/full-title.test.tsx"],
+    deps = [":FullTitle"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/setup.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "host_test",
+    runner = vitest.vitest_test,
+    tests = ["test/host.test.tsx"],
+    deps = [":App", ":TaskEditor", ":bets", ":domain", ":model", ":plan-updates"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/fixture.ts", "test/setup.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "idle-pause-ui_test",
+    runner = vitest.vitest_test,
+    tests = ["test/idle-pause-ui.test.tsx"],
+    deps = [":App", ":idle-pause", ":model"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/setup.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "idle-pause_test",
+    runner = vitest.vitest_test,
+    tests = ["test/idle-pause.test.ts"],
+    deps = [":idle-pause"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/setup.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "mail_test",
+    runner = vitest.vitest_test,
+    tests = ["test/mail.test.ts"],
+    deps = [":mail"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/setup.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "mini-timer_test",
+    runner = vitest.vitest_test,
+    tests = ["test/mini-timer.test.tsx"],
+    deps = [":App", ":MiniTimer", ":model"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/setup.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "native-api_test",
+    runner = vitest.vitest_test,
+    tests = ["test/native-api.test.ts"],
+    deps = ["//proto/ts:http-client", ":api", ":model"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/setup.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "native-order_test",
+    runner = vitest.vitest_test,
+    tests = ["test/native-order.test.ts"],
+    deps = [":model", ":plan-updates", ":planning-outcomes"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/setup.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "native-planning_test",
+    runner = vitest.vitest_test,
+    tests = ["test/native-planning.test.tsx"],
+    deps = ["//proto/tasks/ui/v1:ts", "//proto/ts:http-client", "//proto/ts:protobuf", ":TaskEditor", ":WeeklyReview", ":api", ":domain", ":model", ":module_group_14", ":plan-updates", ":planning-outcomes", ":review-lanes", ":weekly-review"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/setup.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "native-timer_test",
+    runner = vitest.vitest_test,
+    tests = ["test/native-timer.test.tsx"],
+    deps = [":App", ":domain", ":model"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/setup.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "optimistic_test",
+    runner = vitest.vitest_test,
+    tests = ["test/optimistic.test.tsx"],
+    deps = [":App", ":bets", ":domain", ":model", ":plan-updates"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/fixture.ts", "test/setup.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "plan-updates_test",
+    runner = vitest.vitest_test,
+    tests = ["test/plan-updates.test.ts"],
+    deps = [":bets", ":domain", ":model", ":plan-updates"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/fixture.ts", "test/setup.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "plan-view-state_test",
+    runner = vitest.vitest_test,
+    tests = ["test/plan-view-state.test.ts"],
+    deps = [":plan-view-state"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/setup.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "plan-visibility_test",
+    runner = vitest.vitest_test,
+    tests = ["test/plan-visibility.test.tsx"],
+    deps = [":App", ":PlanView", ":bets", ":domain", ":model", ":plan-updates", ":plan-visibility", ":review-lanes"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/fixture.ts", "test/setup.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "planner_test",
+    runner = vitest.vitest_test,
+    tests = ["test/planner.test.tsx"],
+    deps = [":PlanView", ":TaskBreadcrumb", ":bets", ":domain", ":model", ":plan-updates", ":plan-view-state"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/fixture.ts", "test/setup.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "planning-outcomes_test",
+    runner = vitest.vitest_test,
+    tests = ["test/planning-outcomes.test.ts"],
+    deps = [":model", ":planning-outcomes"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/setup.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "polish_test",
+    runner = vitest.vitest_test,
+    tests = ["test/polish.test.tsx"],
+    deps = [":FocusView", ":PlanView", ":PlanningCalendar", ":ReviewBoard", ":bets", ":domain", ":model", ":plan-updates"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/fixture.ts", "test/setup.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "quick_test",
+    runner = vitest.vitest_test,
+    tests = ["test/quick.test.tsx"],
+    deps = [":FocusView", ":PlanView", ":TaskEditor", ":bets", ":domain", ":model", ":plan-updates", ":weekly-review"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/fixture.ts", "test/setup.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "render-cost_test",
+    runner = vitest.vitest_test,
+    tests = ["test/render-cost.test.tsx"],
+    deps = [":App", ":FocusBlock", ":PlanView", ":bets", ":domain", ":model", ":module_group_14", ":plan-updates", ":plan-visibility", ":planning-outcomes", ":review-lanes", ":weekly-review"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/fixture.ts", "test/setup.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "review-lanes_test",
+    runner = vitest.vitest_test,
+    tests = ["test/review-lanes.test.ts"],
+    deps = [":domain", ":model", ":plan-updates", ":plan-visibility", ":planning-outcomes", ":review-lanes", ":weekly-review"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/setup.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "row-drag_test",
+    runner = vitest.vitest_test,
+    tests = ["test/row-drag.test.ts"],
+    deps = [":row-drag"],
+    data = [":node_modules/@dnd-kit/dom", ":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/setup.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "step-editor_test",
+    runner = vitest.vitest_test,
+    tests = ["test/step-editor.test.tsx"],
+    deps = [":App", ":bets", ":domain", ":model", ":plan-updates"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/fixture.ts", "test/setup.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "weekly-goals_test",
+    runner = vitest.vitest_test,
+    tests = ["test/weekly-goals.test.tsx"],
+    deps = [":App", ":WeeklyGoals", ":bets", ":domain", ":model", ":plan-updates"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/fixture.ts", "test/setup.ts", "vitest.config.ts"],
+)
+
+proto_vitest_test(
+    name = "weekly-review_test",
+    runner = vitest.vitest_test,
+    tests = ["test/weekly-review.test.tsx"],
+    deps = ["//proto/ts:http-client", ":App", ":PlanView", ":api", ":bets", ":domain", ":model", ":plan-updates", ":plan-view-state", ":weekly-review"],
+    data = [":node_modules/@testing-library/react", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vitest", "package.json", "test/fixture.ts", "test/setup.ts", "test/transport.ts", "vitest.config.ts"],
+)
+
+ts_project(
+    name = "types",
+    srcs = ["src/AddStep.tsx", "src/App.tsx", "src/BetGoal.tsx", "src/BetText.tsx", "src/CompleteTaskButton.tsx", "src/ExecutionFields.tsx", "src/FocusBlock.tsx", "src/FocusEntries.tsx", "src/FocusView.tsx", "src/FullTitle.tsx", "src/MailCategories.tsx", "src/MiniTimer.tsx", "src/PlanView.tsx", "src/PlanningCalendar.tsx", "src/PlanningWeek.tsx", "src/QuickTasks.tsx", "src/ReviewBoard.tsx", "src/StatusMarks.tsx", "src/StepEditor.tsx", "src/TaskBreadcrumb.tsx", "src/TaskDependencies.tsx", "src/TaskEditor.tsx", "src/WeeklyGoals.tsx", "src/WeeklyReview.tsx", "src/announce.ts", "src/api.ts", "src/bets.ts", "src/deadlines.ts", "src/dependencies.ts", "src/domain.ts", "src/drag-announcements.ts", "src/i18n.ts", "src/idle-pause.ts", "src/index.ts", "src/lane-reorder.ts", "src/mail.ts", "src/model.ts", "src/picture-in-picture.ts", "src/plan-updates.ts", "src/plan-view-state.ts", "src/plan-visibility.ts", "src/planning-outcomes.ts", "src/review-lanes.ts", "src/row-drag.ts", "src/useIdlePause.ts", "src/weekly-review.ts", "test/add-step.test.tsx", "test/announce.test.tsx", "test/api-dependencies.test.ts", "test/api-planning.test.ts", "test/api.test.ts", "test/background-reads.test.tsx", "test/bets.test.ts", "test/components.test.tsx", "test/deadlines-ui.test.tsx", "test/deadlines.test.ts", "test/dependencies-ui.test.tsx", "test/dependencies.test.ts", "test/domain.test.ts", "test/drag-announcements.test.ts", "test/fixture.ts", "test/focus-entries.test.tsx", "test/focus.test.tsx", "test/full-title.test.tsx", "test/host.test.tsx", "test/idle-pause-ui.test.tsx", "test/idle-pause.test.ts", "test/mail.test.ts", "test/mini-timer.test.tsx", "test/native-api.test.ts", "test/native-order.test.ts", "test/native-planning.test.tsx", "test/native-timer.test.tsx", "test/optimistic.test.tsx", "test/plan-updates.test.ts", "test/plan-view-state.test.ts", "test/plan-visibility.test.tsx", "test/planner.test.tsx", "test/planning-outcomes.test.ts", "test/polish.test.tsx", "test/quick.test.tsx", "test/render-cost.test.tsx", "test/review-lanes.test.ts", "test/row-drag.test.ts", "test/setup.ts", "test/step-editor.test.tsx", "test/transport.ts", "test/weekly-goals.test.tsx", "test/weekly-review.test.tsx"],
+    no_emit = True,
+    deps = ["//:node_modules/@types/react", ":node_modules/@dnd-kit/collision", ":node_modules/@dnd-kit/dom", ":node_modules/@dnd-kit/react", ":node_modules/@testing-library/react", ":node_modules/@types/node", ":node_modules/@types/react", ":node_modules/@types/react-dom", ":node_modules/@vitejs/plugin-react", ":node_modules/jsdom", ":node_modules/lucide-react", ":node_modules/react", ":node_modules/react-dom", ":node_modules/vite", ":node_modules/vitest", ":proto_typecheck_link"],
+)
+
+alias(name = "typecheck", actual = ":types_typecheck")

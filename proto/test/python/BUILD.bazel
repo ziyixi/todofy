@@ -1,0 +1,164 @@
+load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
+
+package(default_visibility = ["//visibility:public"])
+
+py_library(name = "support", srcs = ["proto_test_support.py"], imports = ["."])
+
+py_binary(
+    name = "roundtrip",
+    srcs = ["roundtrip.py"],
+    legacy_create_init = False,
+    deps = [
+        ":support",
+        "//proto/prototest/v1:python",
+        "//proto/ops/v1:python",
+        "//proto/mailhero/webhook/v1:python",
+    ],
+)
+
+py_test(
+    name = 'test_doubles_and_maps',
+    srcs = ['test_doubles_and_maps.py', "//tools/bazel/python:unittest_main.py"],
+    main = "//tools/bazel/python:unittest_main.py",
+    args = ['test_doubles_and_maps'],
+    imports = ["."],
+    legacy_create_init = False,
+    deps = ['//proto/prototest/v1:python', '//proto:python_runtime', ':support'],
+    data = [],
+)
+
+py_test(
+    name = 'test_fleet_telemetry',
+    srcs = ['test_fleet_telemetry.py', "//tools/bazel/python:unittest_main.py"],
+    main = "//tools/bazel/python:unittest_main.py",
+    args = ['test_fleet_telemetry'],
+    imports = ["."],
+    legacy_create_init = False,
+    deps = ['//proto/fleet/telemetry/v1:python', '//proto:python_runtime', ':support'],
+    data = ['//contracts:fleet-report-v1/fixtures/healthy.json', '//contracts:fleet-report-v1/fixtures/node_metrics.json', '//contracts:fleet-report-v1/fleet-report-v1.schema.json'],
+)
+
+py_test(
+    name = 'test_gen_py',
+    srcs = ['test_gen_py.py', "//tools/bazel/python:unittest_main.py"],
+    main = "//tools/bazel/python:unittest_main.py",
+    args = ['test_gen_py'],
+    imports = ["."],
+    legacy_create_init = False,
+    deps = ['//proto/prototest/v1:python', '//proto/python:build_backend', '//proto/tools:generators', '//proto:python_runtime', ':support'],
+    data = [],
+)
+
+py_test(
+    name = 'test_generators',
+    srcs = ['test_generators.py', "//tools/bazel/python:unittest_main.py"],
+    main = "//tools/bazel/python:unittest_main.py",
+    args = ['test_generators'],
+    imports = ["."],
+    legacy_create_init = False,
+    deps = ['//proto/tools:generators', '//proto:python_runtime', ':support'],
+    data = [],
+)
+
+py_test(
+    name = 'test_mail_received',
+    srcs = ['test_mail_received.py', "//tools/bazel/python:unittest_main.py"],
+    main = "//tools/bazel/python:unittest_main.py",
+    args = ['test_mail_received'],
+    imports = ["."],
+    legacy_create_init = False,
+    deps = ['//proto/mailhero/webhook/v1:python', '//proto/ops/v1:python', '//proto:python_runtime', ':support'],
+    data = ['//contracts:mail-received-v1/fixtures/attachments_capacity.json', '//contracts:mail-received-v1/fixtures/attachments_metadata_limit.json', '//contracts:mail-received-v1/fixtures/attachments_stored_and_omitted.json', '//contracts:mail-received-v1/fixtures/body_only_no_subject.json', '//contracts:mail-received-v1/fixtures/canary_event.json', '//contracts:mail-received-v1/fixtures/chinese.json', '//contracts:mail-received-v1/fixtures/html_only.json', '//contracts:mail-received-v1/fixtures/legacy/pre_storage_v1.json', '//contracts:mail-received-v1/fixtures/max_size.json', '//contracts:mail-received-v1/fixtures/needs_review_attached_message.json', '//contracts:mail-received-v1/fixtures/needs_review_no_readable_body.json', '//contracts:mail-received-v1/fixtures/no_date_no_message_id.json', '//contracts:mail-received-v1/fixtures/plain_text.json', '//contracts:mail-received-v1/fixtures/sent_at_extended_year.json', '//contracts:mail-received-v1/fixtures/synthetic_test_event.json', '//contracts:mail-received-v1/fixtures/truncated_ui_and_webhook.json', '//contracts:mail-received-v1/fixtures/truncated_webhook.json', '//contracts:mail-received-v1/legacy/mail-received-v1.schema.json', '//contracts:mail-received-v1/mail-received-v1.schema.json'],
+)
+
+py_test(
+    name = 'test_ops',
+    srcs = ['test_ops.py', "//tools/bazel/python:unittest_main.py"],
+    main = "//tools/bazel/python:unittest_main.py",
+    args = ['test_ops'],
+    imports = ["."],
+    legacy_create_init = False,
+    deps = ['//proto/ops/v1:python', '//proto:python_runtime', ':support'],
+    data = ['//contracts:ops-v1/deployment-modes.json', '//contracts:ops-v1/fixtures/CanaryDelivery/delivered.json', '//contracts:ops-v1/fixtures/CanaryDelivery/failed-window.json', '//contracts:ops-v1/fixtures/CanaryDelivery/failed.json', '//contracts:ops-v1/fixtures/CanaryDelivery/paused-endpoint-blocked.json', '//contracts:ops-v1/fixtures/CanaryDelivery/paused.json', '//contracts:ops-v1/fixtures/CanaryDelivery/pending-first-attempt.json', '//contracts:ops-v1/fixtures/CanaryDelivery/pending-retrying.json', '//contracts:ops-v1/fixtures/CanaryDelivery/unknown.json', '//contracts:ops-v1/fixtures/CanaryResult/failed.json', '//contracts:ops-v1/fixtures/CanaryResult/not-seen.json', '//contracts:ops-v1/fixtures/CanaryResult/ok.json', '//contracts:ops-v1/fixtures/CanaryResult/processing-paused.json', '//contracts:ops-v1/fixtures/CanaryResult/processing.json', '//contracts:ops-v1/fixtures/GuardState/normal.json', '//contracts:ops-v1/fixtures/GuardState/shed-mail-hero.json', '//contracts:ops-v1/fixtures/GuardState/shed-todofy.json', '//contracts:ops-v1/fixtures/GuardState/shed-watch.json', '//contracts:ops-v1/fixtures/OpsReportReceipt/kept-newer.json', '//contracts:ops-v1/fixtures/OpsReportReceipt/stored.json', '//contracts:ops-v1/fixtures/OpsStatus/codex-gateway-ok.json', '//contracts:ops-v1/fixtures/OpsStatus/fleet-ok.json', '//contracts:ops-v1/fixtures/OpsStatus/links-degraded.json', '//contracts:ops-v1/fixtures/OpsStatus/links-ok.json', '//contracts:ops-v1/fixtures/OpsStatus/mail-hero-degraded.json', '//contracts:ops-v1/fixtures/OpsStatus/mail-hero-maintenance.json', '//contracts:ops-v1/fixtures/OpsStatus/mail-hero-ok.json', '//contracts:ops-v1/fixtures/OpsStatus/mailsort-backup-stale.json', '//contracts:ops-v1/fixtures/OpsStatus/mailsort-degraded.json', '//contracts:ops-v1/fixtures/OpsStatus/mailsort-ok.json', '//contracts:ops-v1/fixtures/OpsStatus/newsletter-ok.json', '//contracts:ops-v1/fixtures/OpsStatus/notion-publish-ok.json', '//contracts:ops-v1/fixtures/OpsStatus/personal-mcp-ok.json', '//contracts:ops-v1/fixtures/OpsStatus/recall-degraded.json', '//contracts:ops-v1/fixtures/OpsStatus/recall-ok.json', '//contracts:ops-v1/fixtures/OpsStatus/status-unavailable.json', '//contracts:ops-v1/fixtures/OpsStatus/tasks-ok.json', '//contracts:ops-v1/fixtures/OpsStatus/todofy-degraded.json', '//contracts:ops-v1/fixtures/OpsStatus/todofy-ok.json', '//contracts:ops-v1/fixtures/OpsStatus/watch-degraded.json', '//contracts:ops-v1/fixtures/OpsStatus/watch-ok.json', '//contracts:ops-v1/fixtures/SetGuardInput/normal.json', '//contracts:ops-v1/fixtures/SetGuardInput/shed.json', '//contracts:ops-v1/fixtures/StartCanaryInput/daily.json', '//contracts:ops-v1/fixtures/StartCanaryResult/paused-endpoint-blocked.json', '//contracts:ops-v1/fixtures/StartCanaryResult/paused-send-paused.json', '//contracts:ops-v1/fixtures/StartCanaryResult/queued.json', '//contracts:ops-v1/fixtures/StartCanaryResult/unavailable-maintenance.json', '//contracts:ops-v1/fixtures/StartCanaryResult/unavailable-no-endpoint.json', '//contracts:ops-v1/fixtures/invalid/CanaryDelivery/delivered-without-time.json', '//contracts:ops-v1/fixtures/invalid/CanaryDelivery/failed-without-code.json', '//contracts:ops-v1/fixtures/invalid/CanaryDelivery/state-null-with-delivery.json', '//contracts:ops-v1/fixtures/invalid/CanaryDelivery/state-null.json', '//contracts:ops-v1/fixtures/invalid/CanaryDelivery/unknown-with-attempts.json', '//contracts:ops-v1/fixtures/invalid/CanaryResult/failed-without-code.json', '//contracts:ops-v1/fixtures/invalid/CanaryResult/ok-with-summary.json', '//contracts:ops-v1/fixtures/invalid/CanaryResult/state-null.json', '//contracts:ops-v1/fixtures/invalid/GuardState/level-null.json', '//contracts:ops-v1/fixtures/invalid/GuardState/unknown-level.json', '//contracts:ops-v1/fixtures/invalid/OpsReportReceipt/too-many.json', '//contracts:ops-v1/fixtures/invalid/OpsStatus/address-as-counter-name.json', '//contracts:ops-v1/fixtures/invalid/OpsStatus/code-trailing-newline.json', '//contracts:ops-v1/fixtures/invalid/OpsStatus/extra-field-subject.json', '//contracts:ops-v1/fixtures/invalid/OpsStatus/free-text-code.json', '//contracts:ops-v1/fixtures/invalid/OpsStatus/guard-null.json', '//contracts:ops-v1/fixtures/invalid/OpsStatus/health-null.json', '//contracts:ops-v1/fixtures/invalid/OpsStatus/http-ui-url.json', '//contracts:ops-v1/fixtures/invalid/OpsStatus/mail-content-in-metric.json', '//contracts:ops-v1/fixtures/invalid/OpsStatus/missing-guard.json', '//contracts:ops-v1/fixtures/invalid/OpsStatus/offset-timestamp.json', '//contracts:ops-v1/fixtures/invalid/OpsStatus/signal-severity-null.json', '//contracts:ops-v1/fixtures/invalid/OpsStatus/string-mode.json', '//contracts:ops-v1/fixtures/invalid/SetGuardInput/free-text-reason.json', '//contracts:ops-v1/fixtures/invalid/SetGuardInput/level-null.json', '//contracts:ops-v1/fixtures/invalid/SetGuardInput/normal-with-until.json', '//contracts:ops-v1/fixtures/invalid/SetGuardInput/shed-without-until.json', '//contracts:ops-v1/fixtures/invalid/StartCanaryInput/extra-field.json', '//contracts:ops-v1/fixtures/invalid/StartCanaryInput/run-id-with-space.json', '//contracts:ops-v1/fixtures/invalid/StartCanaryResult/paused-with-event.json', '//contracts:ops-v1/fixtures/invalid/StartCanaryResult/queued-without-event.json', '//contracts:ops-v1/fixtures/invalid/StartCanaryResult/state-null.json', '//contracts:ops-v1/fixtures/invalid/StartCanaryResult/unknown-reason.json', '//contracts:ops-v1/legacy/ops-v1.schema.json', '//contracts:ops-v1/ops-v1.schema.json'],
+)
+
+py_test(
+    name = 'test_platform_runtime',
+    srcs = ['test_platform_runtime.py', "//tools/bazel/python:unittest_main.py"],
+    main = "//tools/bazel/python:unittest_main.py",
+    args = ['test_platform_runtime'],
+    imports = ["."],
+    legacy_create_init = False,
+    deps = ['//proto/platform/runtime/v1:python', '//proto:python_runtime', ':support'],
+    data = ['//contracts:platform-runtime-v1/fixtures/node-missing.json', '//contracts:platform-runtime-v1/fixtures/node-ready.json', '//contracts:platform-runtime-v1/fixtures/node-unknown.json', '//contracts:platform-runtime-v1/platform-runtime-v1.schema.json', '//proto/ts:rpc-status.ts'],
+)
+
+py_test(
+    name = 'test_profile_breaking',
+    srcs = ['test_profile_breaking.py', "//tools/bazel/python:unittest_main.py"],
+    main = "//tools/bazel/python:unittest_main.py",
+    args = ['test_profile_breaking'],
+    imports = ["."],
+    legacy_create_init = False,
+    deps = ['//proto/tools:breaking_rules', '//proto:python_runtime', ':support'],
+    data = [],
+)
+
+py_test(
+    name = 'test_retired',
+    srcs = ['test_retired.py', "//tools/bazel/python:unittest_main.py"],
+    main = "//tools/bazel/python:unittest_main.py",
+    args = ['test_retired'],
+    imports = ["."],
+    legacy_create_init = False,
+    deps = ['//proto/tools:breaking_rules', '//proto:python_runtime', ':support'],
+    data = [],
+)
+
+py_test(
+    name = 'test_schema_imports',
+    srcs = ['test_schema_imports.py', "//tools/bazel/python:unittest_main.py"],
+    main = "//tools/bazel/python:unittest_main.py",
+    args = ['test_schema_imports'],
+    imports = ["."],
+    legacy_create_init = False,
+    deps = ['//proto/tools:generators', '//proto:python_runtime', ':support'],
+    data = [],
+)
+
+py_test(
+    name = 'test_wire_enum',
+    srcs = ['test_wire_enum.py', "//tools/bazel/python:unittest_main.py"],
+    main = "//tools/bazel/python:unittest_main.py",
+    args = ['test_wire_enum'],
+    imports = ["."],
+    legacy_create_init = False,
+    deps = ['//proto/prototest/v1:python', '//proto:python_runtime', ':support'],
+    data = [],
+)
+
+py_test(
+    name = 'test_wire_profile_cases',
+    srcs = ['test_wire_profile_cases.py', "//tools/bazel/python:unittest_main.py"],
+    main = "//tools/bazel/python:unittest_main.py",
+    args = ['test_wire_profile_cases'],
+    imports = ["."],
+    legacy_create_init = False,
+    deps = ['//proto/prototest/v1:python', '//proto:python_runtime', ':support'],
+    data = ['//proto/testdata:wire-profile-cases.json'],
+)
+
+py_test(
+    name = 'test_wire_rules',
+    srcs = ['test_wire_rules.py', "//tools/bazel/python:unittest_main.py"],
+    main = "//tools/bazel/python:unittest_main.py",
+    args = ['test_wire_rules'],
+    imports = ["."],
+    legacy_create_init = False,
+    deps = ['//proto/prototest/v1:python', '//proto/tools:generators', '//proto:python_runtime', ':support'],
+    data = [],
+)
+
+test_suite(name = "tests", tests = [':test_doubles_and_maps', ':test_fleet_telemetry', ':test_gen_py', ':test_generators', ':test_mail_received', ':test_ops', ':test_platform_runtime', ':test_profile_breaking', ':test_retired', ':test_schema_imports', ':test_wire_enum', ':test_wire_profile_cases', ':test_wire_rules'])
+
+exports_files(["roundtrip.py"])

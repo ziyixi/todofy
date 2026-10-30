@@ -50,7 +50,10 @@ Release progress, business health and observation freshness stay separate. See [
 全仓共用 Node 26 / pnpm catalog 与一个 Node 锁文件、Python 3.14 / uv workspace 与一个 Python 锁文件。
 安装和版本更新命令见 [依赖管理](docs/dependencies.md)。
 
+构建与检查正在分批迁入 Bazel，第三方版本继续由现有锁文件固定；当前覆盖范围见 [Bazel](docs/bazel.md)。
+
 The repository shares one pnpm catalog/lock and one uv workspace/lock. See [dependencies](docs/dependencies.md).
+Builds and checks are migrating to Bazel; dependency versions remain in the existing locks. See [Bazel](docs/bazel.md).
 
 ```sh
 cd mail-hero    # 或 / or todofy, tasks, dashboard, links, watch, mailsort, recall, website, newsletter, fleet, platform
