@@ -1,0 +1,757 @@
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+
+package(default_visibility = ["//visibility:public"])
+
+js_library(
+    name = "gateway_error_contract",
+    srcs = ["worker/todofy/core/api_errors.py"],
+)
+
+py_library(
+    name = "core",
+    srcs = ["worker/todofy/core/__init__.py"],
+    imports = ["worker"],
+    deps = [":package"],
+)
+
+py_library(
+    name = "core_api_errors",
+    srcs = ["worker/todofy/core/api_errors.py"],
+    imports = ["worker"],
+    deps = [":core"],
+)
+
+py_library(
+    name = "core_backoff",
+    srcs = ["worker/todofy/core/backoff.py"],
+    imports = ["worker"],
+    deps = [":core", ":core_vocab"],
+)
+
+py_library(
+    name = "core_backup",
+    srcs = ["worker/todofy/core/backup.py"],
+    imports = ["worker"],
+    deps = [":core"],
+)
+
+py_library(
+    name = "core_carryover",
+    srcs = ["worker/todofy/core/carryover.py"],
+    imports = ["worker"],
+    deps = [":core"],
+)
+
+py_library(
+    name = "core_contract",
+    srcs = ["worker/todofy/core/contract.py"],
+    imports = ["worker"],
+    deps = ["//proto/mailhero/webhook/v1:python", "//proto:python_runtime", ":core"],
+)
+
+py_library(
+    name = "core_mailbox",
+    srcs = ["worker/todofy/core/mailbox.py"],
+    imports = ["worker"],
+    deps = [":core"],
+)
+
+py_library(
+    name = "core_metrics",
+    srcs = ["worker/todofy/core/metrics.py"],
+    imports = ["worker"],
+    deps = [":core", ":core_vocab"],
+)
+
+py_library(
+    name = "core_model_input",
+    srcs = ["worker/todofy/core/model_input.py"],
+    imports = ["worker"],
+    deps = [":core", ":core_contract"],
+)
+
+py_library(
+    name = "core_ops",
+    srcs = ["worker/todofy/core/ops.py"],
+    imports = ["worker"],
+    deps = ["//proto/ops/v1:python", "//proto:python_runtime", ":core"],
+)
+
+py_library(
+    name = "core_owner_ui",
+    srcs = ["worker/todofy/core/owner_ui.py"],
+    imports = ["worker"],
+    deps = ["//proto/todofy/report/v1:python", "//proto/todofy/ui/v1:python", "//proto:python_runtime", ":core", ":core_contract", ":core_sql"],
+)
+
+py_library(
+    name = "core_prompts",
+    srcs = ["worker/todofy/core/prompts.py"],
+    imports = ["worker"],
+    deps = [":core"],
+)
+
+py_library(
+    name = "core_render",
+    srcs = ["worker/todofy/core/render.py"],
+    imports = ["worker"],
+    deps = [":core", ":core_contract"],
+)
+
+py_library(
+    name = "core_report_schema",
+    srcs = ["worker/todofy/core/report_schema.py"],
+    imports = ["worker"],
+    deps = ["//proto/todofy/report/v1:python", "//proto:python_runtime", ":core"],
+)
+
+py_library(
+    name = "core_sql",
+    srcs = ["worker/todofy/core/sql/__init__.py"],
+    imports = ["worker"],
+    deps = [":core", ":core_vocab"],
+)
+
+py_library(
+    name = "core_sql_backup",
+    srcs = ["worker/todofy/core/sql/backup.py"],
+    imports = ["worker"],
+    deps = [":core_sql"],
+)
+
+py_library(
+    name = "core_sql_ledger",
+    srcs = ["worker/todofy/core/sql/ledger.py"],
+    imports = ["worker"],
+    deps = [":core_sql"],
+)
+
+py_library(
+    name = "core_sql_mailbox",
+    srcs = ["worker/todofy/core/sql/mailbox.py"],
+    imports = ["worker"],
+    deps = [":core_mailbox", ":core_sql"],
+)
+
+py_library(
+    name = "core_sql_metrics",
+    srcs = ["worker/todofy/core/sql/metrics.py"],
+    imports = ["worker"],
+    deps = [":core_sql"],
+)
+
+py_library(
+    name = "core_sql_reports",
+    srcs = ["worker/todofy/core/sql/reports.py"],
+    imports = ["worker"],
+    deps = [":core_carryover", ":core_sql", ":core_sql_mailbox"],
+)
+
+py_library(
+    name = "core_sql_retention",
+    srcs = ["worker/todofy/core/sql/retention.py"],
+    imports = ["worker"],
+    deps = [":core_sql"],
+)
+
+py_library(
+    name = "core_sql_views",
+    srcs = ["worker/todofy/core/sql/views.py"],
+    imports = ["worker"],
+    deps = [":core_sql"],
+)
+
+py_library(
+    name = "core_vocab",
+    srcs = ["worker/todofy/core/vocab.py"],
+    imports = ["worker"],
+    deps = [":core"],
+)
+
+py_library(
+    name = "package",
+    srcs = ["worker/todofy/__init__.py"],
+    imports = ["worker"],
+)
+
+py_library(
+    name = "runtime",
+    srcs = ["worker/todofy/runtime/__init__.py"],
+    imports = ["worker"],
+    deps = [":package"],
+)
+
+py_library(
+    name = "runtime_api",
+    srcs = ["worker/todofy/runtime/api.py"],
+    imports = ["worker"],
+    deps = [":core_api_errors", ":core_backoff", ":core_contract", ":core_render", ":core_report_schema", ":core_sql", ":core_sql_views", ":core_vocab", ":runtime", ":runtime_backup", ":runtime_config", ":runtime_http", ":runtime_interop", ":runtime_metrics", ":runtime_reports"],
+)
+
+py_library(
+    name = "runtime_backup",
+    srcs = ["worker/todofy/runtime/backup.py"],
+    imports = ["worker"],
+    deps = [":core", ":core_backoff", ":core_backup", ":core_metrics", ":core_sql", ":core_sql_backup", ":runtime", ":runtime_config", ":runtime_interop", ":runtime_metrics"],
+)
+
+py_library(
+    name = "runtime_config",
+    srcs = ["worker/todofy/runtime/config.py"],
+    imports = ["worker"],
+    deps = [":runtime"],
+)
+
+py_library(
+    name = "runtime_coordinator",
+    srcs = ["worker/todofy/runtime/coordinator.py"],
+    imports = ["worker"],
+    deps = [":core", ":core_api_errors", ":core_backoff", ":core_contract", ":core_metrics", ":core_model_input", ":core_ops", ":core_prompts", ":core_render", ":core_sql", ":core_sql_views", ":core_vocab", ":runtime", ":runtime_api", ":runtime_backup", ":runtime_config", ":runtime_http", ":runtime_interop", ":runtime_ledger", ":runtime_mail", ":runtime_metrics", ":runtime_model", ":runtime_model_settings", ":runtime_ops", ":runtime_owner_ui", ":runtime_reports", ":runtime_retention"],
+)
+
+py_library(
+    name = "runtime_entry",
+    srcs = ["worker/todofy/runtime/entry.py"],
+    imports = ["worker"],
+    deps = [":runtime", ":runtime_coordinator", ":runtime_http"],
+)
+
+py_library(
+    name = "runtime_http",
+    srcs = ["worker/todofy/runtime/http.py"],
+    imports = ["worker"],
+    deps = [":core_api_errors", ":runtime"],
+)
+
+py_library(
+    name = "runtime_interop",
+    srcs = ["worker/todofy/runtime/interop.py"],
+    imports = ["worker"],
+    deps = [":runtime"],
+)
+
+py_library(
+    name = "runtime_ledger",
+    srcs = ["worker/todofy/runtime/ledger.py"],
+    imports = ["worker"],
+    deps = [":core_backoff", ":core_mailbox", ":core_sql", ":core_sql_ledger", ":core_vocab", ":runtime"],
+)
+
+py_library(
+    name = "runtime_mail",
+    srcs = ["worker/todofy/runtime/mail.py"],
+    imports = ["worker"],
+    deps = ["//proto/todofy/mail/v1:python", "//proto:python_runtime", ":core", ":core_backoff", ":core_carryover", ":core_mailbox", ":core_render", ":core_sql", ":core_sql_mailbox", ":runtime", ":runtime_backup", ":runtime_config", ":runtime_interop"],
+)
+
+py_library(
+    name = "runtime_metrics",
+    srcs = ["worker/todofy/runtime/metrics.py"],
+    imports = ["worker"],
+    deps = [":core", ":core_backoff", ":core_metrics", ":core_sql", ":core_sql_metrics", ":core_vocab", ":runtime", ":runtime_config", ":runtime_interop", ":runtime_model"],
+)
+
+py_library(
+    name = "runtime_model",
+    srcs = ["worker/todofy/runtime/model.py"],
+    imports = ["worker"],
+    deps = ["//packages/model-router-client/python:package", ":core", ":core_model_input", ":core_vocab", ":runtime", ":runtime_config", ":runtime_interop"],
+)
+
+py_library(
+    name = "runtime_model_settings",
+    srcs = ["worker/todofy/runtime/model_settings.py"],
+    imports = ["worker"],
+    deps = ["//proto/todofy/ui/v1:python", ":core_owner_ui", ":runtime", ":runtime_interop", ":runtime_ledger", ":runtime_model"],
+)
+
+py_library(
+    name = "runtime_ops",
+    srcs = ["worker/todofy/runtime/ops.py"],
+    imports = ["worker"],
+    deps = [":core", ":core_backoff", ":core_carryover", ":core_ops", ":core_sql", ":core_sql_mailbox", ":core_sql_views", ":core_vocab", ":runtime", ":runtime_backup", ":runtime_config", ":runtime_ledger"],
+)
+
+py_library(
+    name = "runtime_owner_ui",
+    srcs = ["worker/todofy/runtime/owner_ui.py"],
+    imports = ["worker"],
+    deps = ["//packages/model-router-client/python:package", "//proto/todofy/ui/v1:python", "//proto:python_runtime", ":core", ":core_api_errors", ":core_owner_ui", ":core_report_schema", ":runtime", ":runtime_api", ":runtime_backup", ":runtime_config", ":runtime_interop", ":runtime_metrics", ":runtime_model_settings", ":runtime_reports"],
+)
+
+py_library(
+    name = "runtime_reports",
+    srcs = ["worker/todofy/runtime/reports.py"],
+    imports = ["worker"],
+    deps = [":core", ":core_api_errors", ":core_backoff", ":core_carryover", ":core_metrics", ":core_prompts", ":core_render", ":core_report_schema", ":core_sql", ":core_sql_reports", ":runtime", ":runtime_config", ":runtime_http", ":runtime_interop", ":runtime_metrics", ":runtime_model", ":runtime_model_settings"],
+)
+
+py_library(
+    name = "runtime_retention",
+    srcs = ["worker/todofy/runtime/retention.py"],
+    imports = ["worker"],
+    deps = [":core_backoff", ":core_sql", ":core_sql_retention", ":runtime", ":runtime_config", ":runtime_reports"],
+)
+
+py_library(
+    name = "library",
+    deps = [":core", ":core_api_errors", ":core_backoff", ":core_backup", ":core_carryover", ":core_contract", ":core_mailbox", ":core_metrics", ":core_model_input", ":core_ops", ":core_owner_ui", ":core_prompts", ":core_render", ":core_report_schema", ":core_sql", ":core_sql_backup", ":core_sql_ledger", ":core_sql_mailbox", ":core_sql_metrics", ":core_sql_reports", ":core_sql_retention", ":core_sql_views", ":core_vocab", ":package", ":runtime", ":runtime_api", ":runtime_backup", ":runtime_config", ":runtime_coordinator", ":runtime_entry", ":runtime_http", ":runtime_interop", ":runtime_ledger", ":runtime_mail", ":runtime_metrics", ":runtime_model", ":runtime_model_settings", ":runtime_ops", ":runtime_owner_ui", ":runtime_reports", ":runtime_retention"],
+)
+
+py_library(
+    name = "helper_tests_fakes_model_router_fake",
+    srcs = ["tests/fakes/model_router_fake.py"],
+    imports = ["."],
+    deps = [":helper_tests_fakes_server"],
+)
+
+py_library(
+    name = "helper_tests_fakes_server",
+    srcs = ["tests/fakes/server.py"],
+    imports = ["."],
+)
+
+py_library(
+    name = "helper_tests_mail_contract",
+    srcs = ["tests/mail_contract.py"],
+    imports = ["."],
+)
+
+py_library(
+    name = "helper_tests_unit_host_support",
+    srcs = ["tests/unit/host_support.py"],
+    imports = ["."],
+    deps = [":runtime", "@python_deps//pytest"],
+)
+
+py_library(
+    name = "helper_tests_unit_legacy_contract_before_idl",
+    srcs = ["tests/unit/legacy/contract_before_idl.py"],
+    imports = ["."],
+)
+
+py_library(
+    name = "helper_tests_unit_mail_cases",
+    srcs = ["tests/unit/mail_cases.py"],
+    imports = ["."],
+    deps = [":helper_tests_mail_contract"],
+)
+
+py_library(
+    name = "helper_tests_unit_report_cases",
+    srcs = ["tests/unit/report_cases.py"],
+    imports = ["."],
+    deps = [":core_report_schema"],
+)
+
+py_library(
+    name = "helper_tests_unit_test_backup",
+    srcs = ["tests/unit/test_backup.py"],
+    imports = ["."],
+    deps = [":core", ":core_backup", ":core_sql", ":core_sql_backup", "@python_deps//pytest"],
+)
+
+py_test(
+    name = "tests_unit_test_backoff",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/unit/test_backoff.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "tests", "worker"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "xdist.plugin", "-p", "xdist.looponfail", "$(rootpath tests/unit/test_backoff.py)"],
+    legacy_create_init = False,
+    data = ["conftest.py", "pyproject.toml", "tests/unit/conftest.py"],
+    deps = [":core", ":core_backoff", "@python_deps//pytest", "@python_deps//pytest_xdist"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+)
+
+py_test(
+    name = "tests_unit_test_backup",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/unit/test_backup.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "tests", "worker"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "xdist.plugin", "-p", "xdist.looponfail", "$(rootpath tests/unit/test_backup.py)"],
+    legacy_create_init = False,
+    data = [":migrations", ":unit_fixtures", "conftest.py", "pyproject.toml", "tests/unit/conftest.py"],
+    deps = [":core", ":core_backup", ":core_sql", ":core_sql_backup", "@python_deps//pytest", "@python_deps//pytest_xdist"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+)
+
+py_test(
+    name = "tests_unit_test_backup_job",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/unit/test_backup_job.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "tests", "worker"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "xdist.plugin", "-p", "xdist.looponfail", "$(rootpath tests/unit/test_backup_job.py)"],
+    legacy_create_init = False,
+    data = [":migrations", "conftest.py", "pyproject.toml", "tests/unit/conftest.py"],
+    deps = [":core", ":core_backup", ":core_sql", ":core_sql_backup", ":helper_tests_unit_host_support", ":helper_tests_unit_test_backup", ":runtime", ":runtime_backup", "@python_deps//pytest", "@python_deps//pytest_xdist"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+)
+
+py_test(
+    name = "tests_unit_test_carryover",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/unit/test_carryover.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "tests", "worker"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "xdist.plugin", "-p", "xdist.looponfail", "$(rootpath tests/unit/test_carryover.py)"],
+    legacy_create_init = False,
+    data = [":migrations", "conftest.py", "pyproject.toml", "tests/unit/conftest.py"],
+    deps = [":core", ":core_carryover", ":core_sql", ":core_sql_reports", "@python_deps//pytest", "@python_deps//pytest_xdist"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+)
+
+py_test(
+    name = "tests_unit_test_contract",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/unit/test_contract.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "tests", "worker"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "xdist.plugin", "-p", "xdist.looponfail", "$(rootpath tests/unit/test_contract.py)"],
+    legacy_create_init = False,
+    data = ["//contracts:fixtures", ":unit_fixtures", "conftest.py", "pyproject.toml", "tests/unit/conftest.py"],
+    deps = ["//proto/mailhero/webhook/v1:python", "//proto:python_runtime", ":core", ":core_contract", ":helper_tests_mail_contract", "@python_deps//pytest", "@python_deps//pytest_xdist"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+)
+
+py_test(
+    name = "tests_unit_test_core_isolation",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/unit/test_core_isolation.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "tests", "worker"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "xdist.plugin", "-p", "xdist.looponfail", "$(rootpath tests/unit/test_core_isolation.py)"],
+    legacy_create_init = False,
+    data = [":core_sources", "conftest.py", "pyproject.toml", "tests/unit/conftest.py"],
+    deps = ["//proto:python", "//proto:python_runtime", "@python_deps//pytest", "@python_deps//pytest_xdist"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+)
+
+py_test(
+    name = "tests_unit_test_gemini_wire",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/unit/test_gemini_wire.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "tests", "worker"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "xdist.plugin", "-p", "xdist.looponfail", "$(rootpath tests/unit/test_gemini_wire.py)"],
+    legacy_create_init = False,
+    data = [":unit_fixtures", "conftest.py", "pyproject.toml", "tests/unit/conftest.py"],
+    deps = [":core_contract", ":core_model_input", ":core_render", "@python_deps//pytest", "@python_deps//pytest_xdist"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+)
+
+py_test(
+    name = "tests_unit_test_machine_api",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/unit/test_machine_api.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "tests", "worker"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "xdist.plugin", "-p", "xdist.looponfail", "$(rootpath tests/unit/test_machine_api.py)"],
+    legacy_create_init = False,
+    data = ["//contracts:fixtures", ":api_schemas", "conftest.py", "pyproject.toml", "tests/unit/conftest.py"],
+    deps = [":core_api_errors", ":helper_tests_mail_contract", "@python_deps//jsonschema", "@python_deps//pytest", "@python_deps//pytest_xdist", "@python_deps//pyyaml"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+)
+
+py_test(
+    name = "tests_unit_test_mail",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/unit/test_mail.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "tests", "worker"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "xdist.plugin", "-p", "xdist.looponfail", "$(rootpath tests/unit/test_mail.py)"],
+    legacy_create_init = False,
+    data = [":migrations", ":unit_fixtures", "conftest.py", "pyproject.toml", "tests/unit/conftest.py"],
+    deps = [":helper_tests_unit_host_support", ":runtime", ":runtime_mail", "@python_deps//pytest", "@python_deps//pytest_xdist"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+)
+
+py_test(
+    name = "tests_unit_test_mail_hero_compat",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/unit/test_mail_hero_compat.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "tests", "worker"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "xdist.plugin", "-p", "xdist.looponfail", "$(rootpath tests/unit/test_mail_hero_compat.py)"],
+    legacy_create_init = False,
+    data = ["//contracts:fixtures", "conftest.py", "pyproject.toml", "tests/unit/conftest.py"],
+    deps = [":core_contract", ":core_model_input", ":core_render", ":helper_tests_mail_contract", "@python_deps//jsonschema", "@python_deps//pytest", "@python_deps//pytest_xdist"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+)
+
+py_test(
+    name = "tests_unit_test_mail_received_parser_legacy",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/unit/test_mail_received_parser_legacy.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "tests", "worker"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "xdist.plugin", "-p", "xdist.looponfail", "$(rootpath tests/unit/test_mail_received_parser_legacy.py)"],
+    legacy_create_init = False,
+    data = [":api_schemas", "conftest.py", "pyproject.toml", "tests/unit/conftest.py"],
+    deps = [":core", ":core_contract", ":helper_tests_unit_mail_cases", "@python_deps//pytest", "@python_deps//pytest_xdist"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+)
+
+py_test(
+    name = "tests_unit_test_mail_received_schema_legacy",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/unit/test_mail_received_schema_legacy.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "tests", "worker"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "xdist.plugin", "-p", "xdist.looponfail", "$(rootpath tests/unit/test_mail_received_schema_legacy.py)"],
+    legacy_create_init = False,
+    data = ["//contracts:fixtures", "conftest.py", "pyproject.toml", "tests/unit/conftest.py"],
+    deps = [":core", ":core_contract", ":helper_tests_mail_contract", ":helper_tests_unit_mail_cases", "@python_deps//jsonschema", "@python_deps//pytest", "@python_deps//pytest_xdist"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+)
+
+py_test(
+    name = "tests_unit_test_mailbox",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/unit/test_mailbox.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "tests", "worker"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "xdist.plugin", "-p", "xdist.looponfail", "$(rootpath tests/unit/test_mailbox.py)"],
+    legacy_create_init = False,
+    data = [":migrations", "conftest.py", "pyproject.toml", "tests/unit/conftest.py"],
+    deps = [":core", ":core_mailbox", "@python_deps//pytest", "@python_deps//pytest_xdist"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+)
+
+py_test(
+    name = "tests_unit_test_metrics",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/unit/test_metrics.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "tests", "worker"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "xdist.plugin", "-p", "xdist.looponfail", "$(rootpath tests/unit/test_metrics.py)"],
+    legacy_create_init = False,
+    data = [":migrations", "conftest.py", "pyproject.toml", "tests/unit/conftest.py"],
+    deps = ["//proto/todofy/ui/v1:python", "//proto:python_runtime", ":core", ":core_metrics", ":core_owner_ui", ":core_sql", ":core_sql_metrics", "@python_deps//pytest", "@python_deps//pytest_xdist"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+)
+
+py_test(
+    name = "tests_unit_test_metrics_record",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/unit/test_metrics_record.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "tests", "worker"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "xdist.plugin", "-p", "xdist.looponfail", "$(rootpath tests/unit/test_metrics_record.py)"],
+    legacy_create_init = False,
+    data = ["conftest.py", "pyproject.toml", "tests/unit/conftest.py"],
+    deps = [":core_metrics", ":runtime", ":runtime_metrics", "@python_deps//pytest", "@python_deps//pytest_xdist"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+)
+
+py_test(
+    name = "tests_unit_test_model_settings",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/unit/test_model_settings.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "tests", "worker"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "xdist.plugin", "-p", "xdist.looponfail", "$(rootpath tests/unit/test_model_settings.py)"],
+    legacy_create_init = False,
+    data = [":migrations", "conftest.py", "pyproject.toml", "tests/unit/conftest.py"],
+    deps = ["//packages/model-router-client/python:package", "//proto/todofy/ui/v1:python", "//proto:python_runtime", ":core_owner_ui", ":helper_tests_unit_host_support", ":runtime", ":runtime_model", ":runtime_model_settings", "@python_deps//pytest", "@python_deps//pytest_xdist"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+)
+
+py_test(
+    name = "tests_unit_test_native_coordinator",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/unit/test_native_coordinator.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "tests", "worker"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "xdist.plugin", "-p", "xdist.looponfail", "$(rootpath tests/unit/test_native_coordinator.py)"],
+    legacy_create_init = False,
+    data = [":migrations", "conftest.py", "pyproject.toml", "tests/unit/conftest.py"],
+    deps = [":helper_tests_unit_host_support", ":runtime", ":runtime_backup", ":runtime_coordinator", "@python_deps//pytest", "@python_deps//pytest_xdist"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+)
+
+py_test(
+    name = "tests_unit_test_ops_contract",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/unit/test_ops_contract.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "tests", "worker"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "xdist.plugin", "-p", "xdist.looponfail", "$(rootpath tests/unit/test_ops_contract.py)"],
+    legacy_create_init = False,
+    data = ["//contracts:fixtures", ":unit_fixtures", "conftest.py", "pyproject.toml", "tests/unit/conftest.py"],
+    deps = ["//proto/ops/v1:python", "//proto:python_runtime", ":helper_tests_mail_contract", "@python_deps//jsonschema", "@python_deps//pytest", "@python_deps//pytest_xdist"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+)
+
+py_test(
+    name = "tests_unit_test_ops_core",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/unit/test_ops_core.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "tests", "worker"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "xdist.plugin", "-p", "xdist.looponfail", "$(rootpath tests/unit/test_ops_core.py)"],
+    legacy_create_init = False,
+    data = ["//contracts:fixtures", "conftest.py", "pyproject.toml", "tests/unit/conftest.py"],
+    deps = [":core", ":core_ops", ":helper_tests_mail_contract", ":package", ":runtime_ops", "@python_deps//jsonschema", "@python_deps//pytest", "@python_deps//pytest_xdist"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+)
+
+py_test(
+    name = "tests_unit_test_ops_golden",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/unit/test_ops_golden.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "tests", "worker"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "xdist.plugin", "-p", "xdist.looponfail", "$(rootpath tests/unit/test_ops_golden.py)"],
+    legacy_create_init = False,
+    data = ["//contracts:fixtures", ":unit_fixtures", "conftest.py", "pyproject.toml", "tests/unit/conftest.py"],
+    deps = [":core", ":core_ops", ":helper_tests_mail_contract", ":package", "@python_deps//jsonschema", "@python_deps//pytest", "@python_deps//pytest_xdist"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+)
+
+py_test(
+    name = "tests_unit_test_owner_ui",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/unit/test_owner_ui.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "tests", "worker"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "xdist.plugin", "-p", "xdist.looponfail", "$(rootpath tests/unit/test_owner_ui.py)"],
+    legacy_create_init = False,
+    data = [":migrations", "conftest.py", "pyproject.toml", "tests/unit/conftest.py"],
+    deps = ["//proto/todofy/ui/v1:python", "//proto:python_runtime", ":core", ":core_owner_ui", ":core_sql", ":core_vocab", "@python_deps//pytest", "@python_deps//pytest_xdist"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+)
+
+py_test(
+    name = "tests_unit_test_owner_ui_handle",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/unit/test_owner_ui_handle.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "tests", "worker"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "xdist.plugin", "-p", "xdist.looponfail", "$(rootpath tests/unit/test_owner_ui_handle.py)"],
+    legacy_create_init = False,
+    data = ["conftest.py", "pyproject.toml", "tests/unit/conftest.py"],
+    deps = [":core", ":core_owner_ui", ":runtime", ":runtime_owner_ui", "@python_deps//pytest", "@python_deps//pytest_xdist"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+)
+
+py_test(
+    name = "tests_unit_test_prompts",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/unit/test_prompts.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "tests", "worker"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "xdist.plugin", "-p", "xdist.looponfail", "$(rootpath tests/unit/test_prompts.py)"],
+    legacy_create_init = False,
+    data = [":unit_fixtures", "conftest.py", "pyproject.toml", "tests/unit/conftest.py"],
+    deps = [":core", ":core_contract", ":core_mailbox", ":core_prompts", ":core_render", ":core_report_schema", "@python_deps//jsonschema", "@python_deps//pytest", "@python_deps//pytest_xdist"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+)
+
+py_test(
+    name = "tests_unit_test_pytest_setup",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/unit/test_pytest_setup.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "tests", "worker"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "xdist.plugin", "-p", "xdist.looponfail", "$(rootpath tests/unit/test_pytest_setup.py)"],
+    legacy_create_init = False,
+    data = [":pytest_setup_data", "conftest.py", "pyproject.toml", "tests/unit/conftest.py"],
+    deps = ["//proto/todofy/ui/v1:python", ":core_backoff", ":helper_tests_fakes_model_router_fake", ":helper_tests_fakes_server", "@python_deps//cryptography", "@python_deps//httpx", "@python_deps//jsonschema", "@python_deps//pytest", "@python_deps//pytest_xdist", "@python_deps//pyyaml"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "PYTEST_PLUGINS": "xdist.plugin,xdist.looponfail", "BAZEL_CHILD_PYTHON": "1", "BAZEL_COPY_WORKSPACE": "1"},
+)
+
+py_test(
+    name = "tests_unit_test_render",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/unit/test_render.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "tests", "worker"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "xdist.plugin", "-p", "xdist.looponfail", "$(rootpath tests/unit/test_render.py)"],
+    legacy_create_init = False,
+    data = [":unit_fixtures", "conftest.py", "pyproject.toml", "tests/unit/conftest.py"],
+    deps = [":core_contract", ":core_render", "@python_deps//pytest", "@python_deps//pytest_xdist"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+)
+
+py_test(
+    name = "tests_unit_test_report_schema",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/unit/test_report_schema.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "tests", "worker"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "xdist.plugin", "-p", "xdist.looponfail", "$(rootpath tests/unit/test_report_schema.py)"],
+    legacy_create_init = False,
+    data = [":unit_fixtures", "conftest.py", "pyproject.toml", "tests/unit/conftest.py"],
+    deps = [":core_report_schema", ":helper_tests_unit_report_cases", "@python_deps//pytest", "@python_deps//pytest_xdist"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+)
+
+py_test(
+    name = "tests_unit_test_report_schema_legacy",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/unit/test_report_schema_legacy.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "tests", "worker"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "xdist.plugin", "-p", "xdist.looponfail", "$(rootpath tests/unit/test_report_schema_legacy.py)"],
+    legacy_create_init = False,
+    data = [":api_schemas", ":unit_fixtures", "conftest.py", "pyproject.toml", "tests/unit/conftest.py"],
+    deps = ["@python_deps//jsonschema", "@python_deps//pytest", "@python_deps//pytest_xdist"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+)
+
+py_test(
+    name = "tests_unit_test_report_schemas",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/unit/test_report_schemas.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "tests", "worker"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "xdist.plugin", "-p", "xdist.looponfail", "$(rootpath tests/unit/test_report_schemas.py)"],
+    legacy_create_init = False,
+    data = [":api_schemas", "conftest.py", "pyproject.toml", "tests/unit/conftest.py"],
+    deps = [":core_prompts", ":core_report_schema", ":helper_tests_unit_report_cases", "@python_deps//jsonschema", "@python_deps//pytest", "@python_deps//pytest_xdist"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+)
+
+py_test(
+    name = "tests_unit_test_report_wire",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/unit/test_report_wire.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "tests", "worker"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "xdist.plugin", "-p", "xdist.looponfail", "$(rootpath tests/unit/test_report_wire.py)"],
+    legacy_create_init = False,
+    data = [":unit_fixtures", "conftest.py", "pyproject.toml", "tests/unit/conftest.py"],
+    deps = ["//proto/todofy/report/v1:python", "//proto:python_runtime", ":core_report_schema", ":helper_tests_unit_report_cases", "@python_deps//pytest", "@python_deps//pytest_xdist"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+)
+
+py_test(
+    name = "tests_unit_test_schema_sql",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/unit/test_schema_sql.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "tests", "worker"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "xdist.plugin", "-p", "xdist.looponfail", "$(rootpath tests/unit/test_schema_sql.py)"],
+    legacy_create_init = False,
+    data = [":core_sources", ":migrations", ":unit_fixtures", "conftest.py", "pyproject.toml", "tests/unit/conftest.py"],
+    deps = ["//proto:python", ":core_report_schema", ":core_sql", ":core_sql_metrics", ":core_sql_views", ":core_vocab", "@python_deps//pytest", "@python_deps//pytest_xdist"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+)
+
+py_test(
+    name = "tests_unit_test_vocab",
+    srcs = ["//tools/bazel/python:pytest_main.py", "tests/unit/test_vocab.py"],
+    main = "//tools/bazel/python:pytest_main.py",
+    imports = [".", "tests", "worker"],
+    args = ["-c", "$(rootpath pyproject.toml)", "-p", "no:cacheprovider", "-p", "xdist.plugin", "-p", "xdist.looponfail", "$(rootpath tests/unit/test_vocab.py)"],
+    legacy_create_init = False,
+    data = [":migrations", "conftest.py", "pyproject.toml", "tests/unit/conftest.py"],
+    deps = [":core_vocab", "@python_deps//pytest", "@python_deps//pytest_xdist"],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+)
+
+test_suite(
+    name = "tests",
+    tests = [":tests_unit_test_backoff", ":tests_unit_test_backup", ":tests_unit_test_backup_job", ":tests_unit_test_carryover", ":tests_unit_test_contract", ":tests_unit_test_core_isolation", ":tests_unit_test_gemini_wire", ":tests_unit_test_machine_api", ":tests_unit_test_mail", ":tests_unit_test_mail_hero_compat", ":tests_unit_test_mail_received_parser_legacy", ":tests_unit_test_mail_received_schema_legacy", ":tests_unit_test_mailbox", ":tests_unit_test_metrics", ":tests_unit_test_metrics_record", ":tests_unit_test_model_settings", ":tests_unit_test_native_coordinator", ":tests_unit_test_ops_contract", ":tests_unit_test_ops_core", ":tests_unit_test_ops_golden", ":tests_unit_test_owner_ui", ":tests_unit_test_owner_ui_handle", ":tests_unit_test_prompts", ":tests_unit_test_pytest_setup", ":tests_unit_test_render", ":tests_unit_test_report_schema", ":tests_unit_test_report_schema_legacy", ":tests_unit_test_report_schemas", ":tests_unit_test_report_wire", ":tests_unit_test_schema_sql", ":tests_unit_test_vocab"],
+)
+
+exports_files(["api/summary-v1.schema.json", "api/recommendation-v1.schema.json"])
+
+filegroup(
+    name = "core_sources",
+    srcs = glob(["worker/todofy/core/**/*.py"]),
+)
+
+filegroup(
+    name = "pytest_setup_data",
+    srcs = glob(["tests/runtime/**/*.py", "tests/unit/test_backoff.py"]),
+)
+
+filegroup(
+    name = "api_schemas",
+    srcs = glob(["api/*.json", "api/*.yaml", "tests/unit/legacy/*.json", "tests/unit/legacy/*.py"]),
+)
+
+filegroup(
+    name = "unit_fixtures",
+    srcs = glob(["tests/unit/golden/**"]),
+)
+
+filegroup(
+    name = "migrations",
+    srcs = glob(["migrations/*.sql"]),
+)

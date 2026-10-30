@@ -1,0 +1,14 @@
+load("@protobuf//bazel:proto_library.bzl", "proto_library")
+
+package(default_visibility = ["//visibility:public"])
+
+proto_library(
+    name = "proto",
+    srcs = ["task_inbox.proto"],
+    strip_import_prefix = "/proto",
+    deps = ["//proto/common/wire/v1:proto", "@googleapis//:google_api_field_behavior_proto"],
+)
+
+alias(name = "ts", actual = "//proto/ts:tasks_inbox_v1_ts")
+
+exports_files(['task_inbox.proto'])

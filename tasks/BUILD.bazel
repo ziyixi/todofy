@@ -1,0 +1,21 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+
+package(default_visibility = ["//visibility:public"])
+
+js_library(
+    name = "public_config",
+    srcs = [
+        "app.toml",
+        "wrangler.toml",
+    ],
+)
+
+js_library(
+    name = "migrations",
+    srcs = glob(["migrations/*.sql"]),
+)
+
+exports_files([
+    "wrangler.toml",
+    "app.toml",
+])

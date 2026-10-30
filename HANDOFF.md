@@ -31,7 +31,17 @@ dependency source; third-party source is downloaded with pinned integrity rather
   OCI packaging follow before obsolete check/build paths are removed.
 - No production behavior, model settings, data or credentials change as part of build migration. Each application
   changes check entrypoints only after its Bazel checks and existing release contracts are verified.
-- Pending: toolchain compatibility, real Bazel targets, affected-target/cache evidence, branch CI and staged release.
+- Verified locally: the existing pnpm/uv resolutions and Python 3.14.7 toolchain; package-scoped proto generation
+  retains existing bytes, and all 37 proto targets pass. Shared JS libraries and 142 offline Python file targets
+  execute in Bazel. Tasks' seven Worker unit targets, 25 UI file targets and the 16-case D1 CRUD target pass;
+  repeated representative targets report cached results with zero tests executed.
+- In progress: complete Tasks type/runtime/browser/bundle coverage, the remaining Worker checks and all three OCI
+  images. The first gateway OCI archive passes its Linux offline container probe and exact SDK-version check.
+- The independent, credential-free Bazel workflow uses fixed Target Determinator and groups actual affected targets.
+  The legacy selector ignores Bazel-only metadata so BUILD changes alone do not publish apps; real source/generator
+  edits retain their checks and release selection. Legacy checks remain active until each replacement is complete.
+- Pending: full Bazel and legacy branch CI, application check cutovers, exact-artifact publication and matching
+  production reconcile. Do not infer full migration or production acceptance from the current local foundation.
 
 ### Verify after the October 28 releases (read-only)
 

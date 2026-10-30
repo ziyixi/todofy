@@ -1,0 +1,456 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library", "js_test")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+load("//proto/bazel:ts_package.bzl", "proto_package")
+load("//tools/bazel:js.bzl", "workspace_package_link")
+
+package(default_visibility = ["//visibility:public"])
+
+npm_link_all_packages(name = "node_modules")
+
+js_library(
+    name = "native_types",
+    srcs = ["src/native/types.ts"],
+    types = ["src/native/types.ts"],
+    deps = [],
+)
+
+js_library(
+    name = "native_capacity",
+    srcs = ["src/native/capacity.ts"],
+    types = ["src/native/capacity.ts"],
+    deps = [":native_types"],
+)
+
+js_library(
+    name = "native_alerts",
+    srcs = ["src/native/alerts.ts"],
+    types = ["src/native/alerts.ts"],
+    deps = [":native_capacity", ":native_types"],
+)
+
+js_library(
+    name = "native_security",
+    srcs = ["src/native/security.ts"],
+    types = ["src/native/security.ts"],
+    deps = ["//packages/edge-auth:lib", ":native_types"],
+)
+
+js_library(
+    name = "native_api-common",
+    srcs = ["src/native/api-common.ts"],
+    types = ["src/native/api-common.ts"],
+    deps = [":native_security", ":native_types"],
+)
+
+js_library(
+    name = "native_backup-retention",
+    srcs = ["src/native/backup-retention.ts"],
+    types = ["src/native/backup-retention.ts"],
+    deps = [],
+)
+
+js_library(
+    name = "native_native-backup-format",
+    srcs = ["src/native/native-backup-format.ts"],
+    types = ["src/native/native-backup-format.ts"],
+    deps = [],
+)
+
+js_library(
+    name = "native_backup-artifact-capacity",
+    srcs = ["src/native/backup-artifact-capacity.ts"],
+    types = ["src/native/backup-artifact-capacity.ts"],
+    deps = [":native_types"],
+)
+
+js_library(
+    name = "native_native-backup-artifacts",
+    srcs = ["src/native/native-backup-artifacts.ts"],
+    types = ["src/native/native-backup-artifacts.ts"],
+    deps = [":native_backup-artifact-capacity", ":native_backup-retention", ":native_native-backup-format", ":native_types"],
+)
+
+js_library(
+    name = "module_group_9",
+    srcs = ["src/native/backup-artifacts.ts", "src/native/backup.ts"],
+    types = ["src/native/backup-artifacts.ts", "src/native/backup.ts"],
+    deps = [":native_backup-artifact-capacity", ":native_backup-retention", ":native_capacity", ":native_native-backup-artifacts", ":native_native-backup-format", ":native_security", ":native_types"],
+)
+
+alias(name = "native_backup-artifacts", actual = ":module_group_9")
+alias(name = "native_backup", actual = ":module_group_9")
+js_library(
+    name = "native_lifecycle",
+    srcs = ["src/native/lifecycle.ts"],
+    types = ["src/native/lifecycle.ts"],
+    deps = [":module_group_9", ":native_capacity", ":native_security", ":native_types"],
+)
+
+js_library(
+    name = "native_ops-guard",
+    srcs = ["src/native/ops-guard.ts"],
+    types = ["src/native/ops-guard.ts"],
+    deps = ["//contracts:ops-v1/runtime", "//proto/ops/v1:ts", "//proto/ts:protobuf", "//proto/ts:wire-json"],
+)
+
+js_library(
+    name = "module_group_12",
+    srcs = ["src/native/content-policy.ts", "src/native/ingest.ts", "src/native/parser.ts", "src/native/pipeline.ts"],
+    types = ["src/native/content-policy.ts", "src/native/ingest.ts", "src/native/parser.ts", "src/native/pipeline.ts"],
+    deps = ["//proto/mailhero/webhook/v1:ts", "//proto/ts:protobuf", "//proto/ts:wire-json", ":module_group_9", ":native_alerts", ":native_capacity", ":native_lifecycle", ":native_ops-guard", ":native_security", ":native_types", ":node_modules/parse5", ":node_modules/postal-mime"],
+)
+
+alias(name = "native_content-policy", actual = ":module_group_12")
+alias(name = "native_ingest", actual = ":module_group_12")
+alias(name = "native_parser", actual = ":module_group_12")
+alias(name = "native_pipeline", actual = ":module_group_12")
+js_library(
+    name = "module_group_13",
+    srcs = ["src/native/api-deliveries.ts", "src/native/api-delivery-stats.ts"],
+    types = ["src/native/api-deliveries.ts", "src/native/api-delivery-stats.ts"],
+    deps = ["//proto/mailhero/ui/v2:ts", ":module_group_12", ":native_api-common", ":native_security", ":native_types"],
+)
+
+alias(name = "native_api-deliveries", actual = ":module_group_13")
+alias(name = "native_api-delivery-stats", actual = ":module_group_13")
+js_library(
+    name = "native_api-endpoints",
+    srcs = ["src/native/api-endpoints.ts"],
+    types = ["src/native/api-endpoints.ts"],
+    deps = [":module_group_12", ":native_api-common", ":native_security", ":native_types"],
+)
+
+js_library(
+    name = "native_api-filter",
+    srcs = ["src/native/api-filter.ts"],
+    types = ["src/native/api-filter.ts"],
+    deps = [],
+)
+
+js_library(
+    name = "native_api-messages",
+    srcs = ["src/native/api-messages.ts"],
+    types = ["src/native/api-messages.ts"],
+    deps = [":module_group_12", ":native_api-common", ":native_security", ":native_types"],
+)
+
+js_library(
+    name = "native_api-settings",
+    srcs = ["src/native/api-settings.ts"],
+    types = ["src/native/api-settings.ts"],
+    deps = [":module_group_12", ":native_alerts", ":native_api-common", ":native_lifecycle", ":native_security", ":native_types"],
+)
+
+js_library(
+    name = "native_dependencies",
+    srcs = ["src/native/dependencies.ts"],
+    types = ["src/native/dependencies.ts"],
+    deps = [":native_types"],
+)
+
+js_library(
+    name = "native_api-v2",
+    srcs = ["src/native/api-v2.ts"],
+    types = ["src/native/api-v2.ts"],
+    deps = ["//proto/common/errors/v1:ts", "//proto/mailhero/ui/v2:ts", "//proto/ts:field-mask", "//proto/ts:http-transcoder", "//proto/ts:page-token", "//proto/ts:protobuf", "//proto/ts:protobuf-wkt", "//proto/ts:rpc-status", ":module_group_13", ":module_group_9", ":native_api-common", ":native_api-endpoints", ":native_api-filter", ":native_api-messages", ":native_api-settings", ":native_dependencies", ":native_security", ":native_types"],
+)
+
+js_library(
+    name = "native_ops-core",
+    srcs = ["src/native/ops-core.ts"],
+    types = ["src/native/ops-core.ts"],
+    deps = ["//proto/ops/v1:ts", "//proto/ts:protobuf", "//proto/ts:wire-json", ":module_group_12", ":module_group_9", ":native_alerts", ":native_capacity", ":native_ops-guard", ":native_security", ":native_types"],
+)
+
+js_library(
+    name = "native_warmup",
+    srcs = ["src/native/warmup.ts"],
+    types = ["src/native/warmup.ts"],
+    deps = ["//proto/mailhero/ui/v2:ts", "//proto/ops/v1:ts", "//proto/ts:http-path", "//proto/ts:http-rule", "//proto/ts:protobuf", "//proto/ts:protobuf-wkt", "//proto/ts:wire-json", ":native_api-common", ":native_api-messages", ":native_api-v2", ":native_ops-core", ":native_ops-guard"],
+)
+
+js_library(
+    name = "native_api",
+    srcs = ["src/native/api.ts"],
+    types = ["src/native/api.ts"],
+    deps = ["//proto/mailhero/ui/v2:ts", "//proto/ts:http-transcoder", "//proto/ts:rpc-status", ":native_api-messages", ":native_api-v2", ":native_dependencies", ":native_security", ":native_types", ":native_warmup"],
+)
+
+js_library(
+    name = "native_backup-checksum",
+    srcs = ["src/native/backup-checksum.ts"],
+    types = ["src/native/backup-checksum.ts"],
+    deps = [":node_modules/@noble/hashes"],
+)
+
+js_library(
+    name = "native_backup-state",
+    srcs = ["src/native/backup-state.ts"],
+    types = ["src/native/backup-state.ts"],
+    deps = [":module_group_9", ":native_native-backup-format", ":native_security", ":native_types"],
+)
+
+js_library(
+    name = "native_native-backup-runner",
+    srcs = ["src/native/native-backup-runner.ts"],
+    types = ["src/native/native-backup-runner.ts"],
+    deps = [":module_group_9", ":native_backup-checksum", ":native_backup-state", ":native_native-backup-artifacts", ":native_native-backup-format", ":native_types"],
+)
+
+js_library(
+    name = "native_coordinator",
+    srcs = ["src/native/coordinator.ts"],
+    types = ["src/native/coordinator.ts"],
+    deps = [":module_group_12", ":native_api", ":native_backup-state", ":native_capacity", ":native_native-backup-runner", ":native_ops-guard", ":native_types"],
+)
+
+js_library(
+    name = "native_ops",
+    srcs = ["src/native/ops.ts"],
+    types = ["src/native/ops.ts"],
+    deps = ["//proto/ops/v1:ts", ":native_ops-core", ":native_types"],
+)
+
+js_library(
+    name = "native_index",
+    srcs = ["src/native/index.ts"],
+    types = ["src/native/index.ts"],
+    deps = [":module_group_12", ":module_group_9", ":native_api", ":native_api-v2", ":native_coordinator", ":native_ops", ":native_security", ":native_types"],
+)
+
+
+js_library(name = "lib", deps = [":module_group_12", ":module_group_13", ":module_group_9", ":native_alerts", ":native_api", ":native_api-common", ":native_api-endpoints", ":native_api-filter", ":native_api-messages", ":native_api-settings", ":native_api-v2", ":native_backup-artifact-capacity", ":native_backup-checksum", ":native_backup-retention", ":native_backup-state", ":native_capacity", ":native_coordinator", ":native_dependencies", ":native_index", ":native_lifecycle", ":native_native-backup-artifacts", ":native_native-backup-format", ":native_native-backup-runner", ":native_ops", ":native_ops-core", ":native_ops-guard", ":native_security", ":native_types", ":native_warmup"])
+
+proto_package(name = "proto_package", deps = [":lib", "//proto/ts:filter", "//proto/ts:http-client"])
+workspace_package_link(name = "proto_link", src = ":proto_package", runtime_dependencies = ["@bufbuild/protobuf"])
+workspace_package_link(name = "edge_auth_link", src = "//packages/edge-auth:pkg")
+
+js_test(
+    name = "action-reservation_test",
+    entry_point = "test/action-reservation.test.mjs",
+    node_options = ["--test"],
+    chdir = "mail-hero/cloudflare",
+    data = [":edge_auth_link", ":lib", ":migrations", ":node_modules/esbuild", ":node_modules/miniflare", ":proto_link", "package.json", "test/action-reservation.test.mjs", "test/migrations.mjs"],
+)
+
+js_test(
+    name = "api-filter_test",
+    entry_point = "test/api-filter.test.mjs",
+    node_options = ["--test"],
+    chdir = "mail-hero/cloudflare",
+    data = ["//proto/testdata:filter-cases.json_data", "//proto/ts:filter", ":edge_auth_link", ":native_api-filter", ":proto_link", "package.json", "test/api-filter.test.mjs"],
+)
+
+js_test(
+    name = "backup-artifact-capacity_test",
+    entry_point = "test/backup-artifact-capacity.test.mjs",
+    node_options = ["--test"],
+    chdir = "mail-hero/cloudflare",
+    data = [":edge_auth_link", ":module_group_9", ":native_backup-artifact-capacity", ":proto_link", "package.json", "test/backup-artifact-capacity.test.mjs"],
+)
+
+js_test(
+    name = "backup-artifacts-runtime_test",
+    entry_point = "test/backup-artifacts-runtime.test.mjs",
+    node_options = ["--test"],
+    chdir = "mail-hero/cloudflare",
+    data = [":edge_auth_link", ":lib", ":node_modules/esbuild", ":node_modules/miniflare", ":proto_link", "package.json", "test/backup-artifacts-runtime.test.mjs"],
+)
+
+js_test(
+    name = "backup-artifacts_test",
+    entry_point = "test/backup-artifacts.test.mjs",
+    node_options = ["--test"],
+    chdir = "mail-hero/cloudflare",
+    data = [":edge_auth_link", ":module_group_9", ":proto_link", "package.json", "test/backup-artifacts.test.mjs"],
+)
+
+js_test(
+    name = "configure-webhook_test",
+    entry_point = "test/configure-webhook.test.mjs",
+    node_options = ["--test"],
+    chdir = "mail-hero/cloudflare",
+    data = ["//mail-hero/deploy:configure-webhook", ":edge_auth_link", ":migrations", ":native_security", ":proto_link", "package.json", "test/configure-webhook.test.mjs"],
+)
+
+js_test(
+    name = "content-policy_test",
+    entry_point = "test/content-policy.test.mjs",
+    node_options = ["--test"],
+    chdir = "mail-hero/cloudflare",
+    data = [":edge_auth_link", ":module_group_12", ":proto_link", "package.json", "test/content-policy.test.mjs"],
+)
+
+js_test(
+    name = "contract-fixtures_test",
+    entry_point = "test/contract-fixtures.test.mjs",
+    node_options = ["--test"],
+    chdir = "mail-hero/cloudflare",
+    data = ["//contracts:mail-received-v1/fixtures/attachments_capacity.json_data", "//contracts:mail-received-v1/fixtures/attachments_metadata_limit.json_data", "//contracts:mail-received-v1/fixtures/attachments_stored_and_omitted.json_data", "//contracts:mail-received-v1/fixtures/body_only_no_subject.json_data", "//contracts:mail-received-v1/fixtures/canary_event.json_data", "//contracts:mail-received-v1/fixtures/chinese.json_data", "//contracts:mail-received-v1/fixtures/html_only.json_data", "//contracts:mail-received-v1/fixtures/legacy/pre_storage_v1.json_data", "//contracts:mail-received-v1/fixtures/max_size.json_data", "//contracts:mail-received-v1/fixtures/needs_review_attached_message.json_data", "//contracts:mail-received-v1/fixtures/needs_review_no_readable_body.json_data", "//contracts:mail-received-v1/fixtures/no_date_no_message_id.json_data", "//contracts:mail-received-v1/fixtures/plain_text.json_data", "//contracts:mail-received-v1/fixtures/sent_at_extended_year.json_data", "//contracts:mail-received-v1/fixtures/synthetic_test_event.json_data", "//contracts:mail-received-v1/fixtures/truncated_ui_and_webhook.json_data", "//contracts:mail-received-v1/fixtures/truncated_webhook.json_data", "//contracts:mail-received-v1/legacy/mail-received-v1.schema.json_data", "//contracts:mail-received-v1/mail-received-v1.schema.json_data", "//proto/mailhero/webhook/v1:ts", "//proto/ts:wire-json", ":edge_auth_link", ":module_group_12", ":proto_link", "package.json", "test/contract-fixtures.mjs", "test/contract-fixtures.test.mjs"],
+)
+
+js_test(
+    name = "contract-schema-dialect_test",
+    entry_point = "test/contract-schema-dialect.test.mjs",
+    node_options = ["--test"],
+    chdir = "mail-hero/cloudflare",
+    data = ["//contracts:mail-received-v1/fixtures/attachments_capacity.json_data", "//contracts:mail-received-v1/fixtures/attachments_metadata_limit.json_data", "//contracts:mail-received-v1/fixtures/attachments_stored_and_omitted.json_data", "//contracts:mail-received-v1/fixtures/body_only_no_subject.json_data", "//contracts:mail-received-v1/fixtures/canary_event.json_data", "//contracts:mail-received-v1/fixtures/chinese.json_data", "//contracts:mail-received-v1/fixtures/html_only.json_data", "//contracts:mail-received-v1/fixtures/legacy/pre_storage_v1.json_data", "//contracts:mail-received-v1/fixtures/max_size.json_data", "//contracts:mail-received-v1/fixtures/needs_review_attached_message.json_data", "//contracts:mail-received-v1/fixtures/needs_review_no_readable_body.json_data", "//contracts:mail-received-v1/fixtures/no_date_no_message_id.json_data", "//contracts:mail-received-v1/fixtures/plain_text.json_data", "//contracts:mail-received-v1/fixtures/sent_at_extended_year.json_data", "//contracts:mail-received-v1/fixtures/synthetic_test_event.json_data", "//contracts:mail-received-v1/fixtures/truncated_ui_and_webhook.json_data", "//contracts:mail-received-v1/fixtures/truncated_webhook.json_data", "//contracts:mail-received-v1/legacy/mail-received-v1.schema.json_data", "//contracts:mail-received-v1/mail-received-v1.schema.json_data", ":edge_auth_link", ":proto_link", "package.json", "test/contract-schema-dialect.test.mjs"],
+)
+
+js_test(
+    name = "native-api-v2_test",
+    entry_point = "test/native-api-v2.test.mjs",
+    node_options = ["--test"],
+    chdir = "mail-hero/cloudflare",
+    data = ["//proto/mailhero/ui/v2:ts", "//proto/ts:http-client", ":edge_auth_link", ":lib", ":migrations", ":module_group_12", ":native_api", ":native_api-v2", ":native_security", ":proto_link", "package.json", "test/native-api-v2.test.mjs", "test/native-env.mjs", "test/owner-api.mjs"],
+)
+
+js_test(
+    name = "native-api_test",
+    entry_point = "test/native-api.test.mjs",
+    node_options = ["--test"],
+    chdir = "mail-hero/cloudflare",
+    data = ["//packages/edge-auth:lib", ":edge_auth_link", ":migrations", ":module_group_12", ":module_group_13", ":native_alerts", ":native_api", ":native_security", ":node_modules/jose", ":proto_link", "package.json", "test/native-api.test.mjs", "test/native-env.mjs", "test/owner-api.mjs"],
+)
+
+js_test(
+    name = "native-backup-artifacts-runtime_test",
+    entry_point = "test/native-backup-artifacts-runtime.test.mjs",
+    node_options = ["--test"],
+    chdir = "mail-hero/cloudflare",
+    data = [":edge_auth_link", ":lib", ":migrations", ":node_modules/esbuild", ":node_modules/miniflare", ":proto_link", "package.json", "test/native-backup-artifacts-runtime.test.mjs"],
+)
+
+js_test(
+    name = "native-backup-runner-runtime_test",
+    entry_point = "test/native-backup-runner-runtime.test.mjs",
+    node_options = ["--test"],
+    chdir = "mail-hero/cloudflare",
+    data = ["@python_3_14//:files", "//mail-hero/deploy/backup:native_restore_files", "//mail-hero/deploy:vars", ":edge_auth_link", ":lib", ":migrations", ":module_group_9", ":native_native-backup-runner", ":node_modules/esbuild", ":node_modules/miniflare", ":proto_link", "@python_3_14//:python3", "package.json", "test/migrations.mjs", "test/native-backup-runner-runtime.test.mjs"],
+    env = {"MAILHERO_TEST_PYTHON": "$(rootpath @python_3_14//:python3)"},
+    no_copy_to_bin = ["@python_3_14//:python3", "@python_3_14//:files"],
+)
+
+js_test(
+    name = "native-backup-runtime_test",
+    entry_point = "test/native-backup-runtime.test.mjs",
+    node_options = ["--test"],
+    chdir = "mail-hero/cloudflare",
+    data = [":edge_auth_link", ":lib", ":migrations", ":module_group_9", ":node_modules/esbuild", ":node_modules/miniflare", ":proto_link", "package.json", "test/migrations.mjs", "test/native-backup-runtime.test.mjs"],
+)
+
+js_test(
+    name = "native-backup_test",
+    entry_point = "test/native-backup.test.mjs",
+    node_options = ["--test"],
+    chdir = "mail-hero/cloudflare",
+    data = [":edge_auth_link", ":migrations", ":native_capacity", ":native_coordinator", ":proto_link", "package.json", "test/native-backup.test.mjs"],
+)
+
+js_test(
+    name = "native-bounded-runtime_test",
+    entry_point = "test/native-bounded-runtime.test.mjs",
+    node_options = ["--test"],
+    chdir = "mail-hero/cloudflare",
+    data = [":edge_auth_link", ":lib", ":migrations", ":module_group_9", ":native_lifecycle", ":node_modules/esbuild", ":node_modules/miniflare", ":proto_link", "package.json", "test/migrations.mjs", "test/native-bounded-runtime.test.mjs"],
+)
+
+js_test(
+    name = "native-large_test",
+    entry_point = "test/native-large.test.mjs",
+    node_options = ["--test"],
+    chdir = "mail-hero/cloudflare",
+    data = [":edge_auth_link", ":lib", ":migrations", ":node_modules/esbuild", ":node_modules/miniflare", ":proto_link", "package.json", "test/native-large.test.mjs"],
+)
+
+js_test(
+    name = "native-lifecycle-runtime_test",
+    entry_point = "test/native-lifecycle-runtime.test.mjs",
+    node_options = ["--test"],
+    chdir = "mail-hero/cloudflare",
+    data = [":edge_auth_link", ":lib", ":migrations", ":node_modules/esbuild", ":node_modules/miniflare", ":proto_link", "package.json", "test/migrations.mjs", "test/native-lifecycle-runtime.test.mjs"],
+)
+
+js_test(
+    name = "native-lifecycle_test",
+    entry_point = "test/native-lifecycle.test.mjs",
+    node_options = ["--test"],
+    chdir = "mail-hero/cloudflare",
+    data = [":edge_auth_link", ":migrations", ":module_group_12", ":native_alerts", ":native_api-settings", ":native_lifecycle", ":proto_link", "package.json", "test/native-lifecycle.test.mjs"],
+)
+
+js_test(
+    name = "native-ops-runtime_test",
+    entry_point = "test/native-ops-runtime.test.mjs",
+    node_options = ["--test"],
+    chdir = "mail-hero/cloudflare",
+    data = ["//proto/ops/v1:ts", "//proto/ts:wire-json", ":edge_auth_link", ":lib", ":migrations", ":module_group_12", ":native_ops-core", ":native_ops-guard", ":node_modules/esbuild", ":node_modules/miniflare", ":proto_link", "package.json", "test/migrations.mjs", "test/native-ops-runtime.test.mjs"],
+)
+
+js_test(
+    name = "native-ops_test",
+    entry_point = "test/native-ops.test.mjs",
+    node_options = ["--test"],
+    chdir = "mail-hero/cloudflare",
+    data = ["//proto/ops/v1:ts", "//proto/ts:wire-json", ":edge_auth_link", ":migrations", ":native_alerts", ":native_ops-core", ":native_ops-guard", ":proto_link", "package.json", "test/native-ops.test.mjs"],
+)
+
+js_test(
+    name = "native-pipeline_test",
+    entry_point = "test/native-pipeline.test.mjs",
+    node_options = ["--test"],
+    chdir = "mail-hero/cloudflare",
+    data = [":edge_auth_link", ":migrations", ":module_group_12", ":native_coordinator", ":native_security", ":proto_link", "package.json", "test/native-pipeline.test.mjs"],
+)
+
+js_test(
+    name = "native-resolved-runtime_test",
+    entry_point = "test/native-resolved-runtime.test.mjs",
+    node_options = ["--test"],
+    chdir = "mail-hero/cloudflare",
+    data = [":edge_auth_link", ":lib", ":migrations", ":node_modules/esbuild", ":node_modules/miniflare", ":proto_link", "package.json", "test/migrations.mjs", "test/native-resolved-runtime.test.mjs", "test/owner-api.mjs"],
+)
+
+js_test(
+    name = "native-runtime_test",
+    entry_point = "test/native-runtime.test.mjs",
+    node_options = ["--test"],
+    chdir = "mail-hero/cloudflare",
+    data = ["//contracts:mail-received-v1/fixtures/attachments_capacity.json_data", "//contracts:mail-received-v1/fixtures/attachments_metadata_limit.json_data", "//contracts:mail-received-v1/fixtures/attachments_stored_and_omitted.json_data", "//contracts:mail-received-v1/fixtures/body_only_no_subject.json_data", "//contracts:mail-received-v1/fixtures/canary_event.json_data", "//contracts:mail-received-v1/fixtures/chinese.json_data", "//contracts:mail-received-v1/fixtures/html_only.json_data", "//contracts:mail-received-v1/fixtures/legacy/pre_storage_v1.json_data", "//contracts:mail-received-v1/fixtures/max_size.json_data", "//contracts:mail-received-v1/fixtures/needs_review_attached_message.json_data", "//contracts:mail-received-v1/fixtures/needs_review_no_readable_body.json_data", "//contracts:mail-received-v1/fixtures/no_date_no_message_id.json_data", "//contracts:mail-received-v1/fixtures/plain_text.json_data", "//contracts:mail-received-v1/fixtures/sent_at_extended_year.json_data", "//contracts:mail-received-v1/fixtures/synthetic_test_event.json_data", "//contracts:mail-received-v1/fixtures/truncated_ui_and_webhook.json_data", "//contracts:mail-received-v1/fixtures/truncated_webhook.json_data", "//contracts:mail-received-v1/legacy/mail-received-v1.schema.json_data", "//contracts:mail-received-v1/mail-received-v1.schema.json_data", ":edge_auth_link", ":lib", ":migrations", ":node_modules/esbuild", ":node_modules/miniflare", ":proto_link", "package.json", "test/migrations.mjs", "test/native-runtime.test.mjs", "test/owner-api.mjs"],
+)
+
+js_test(
+    name = "ops-golden_test",
+    entry_point = "test/ops-golden.test.mjs",
+    node_options = ["--test"],
+    chdir = "mail-hero/cloudflare",
+    data = ["//contracts:ops-v1/legacy/ops-v1.schema.json_data", "//contracts:ops-v1/validate", ":edge_auth_link", ":native_ops-core", ":native_ops-guard", ":proto_link", "package.json", "test/golden/ops-v1.json", "test/ops-golden.test.mjs"],
+)
+
+js_test(
+    name = "signing-key_test",
+    entry_point = "test/signing-key.test.mjs",
+    node_options = ["--test"],
+    chdir = "mail-hero/cloudflare",
+    data = ["//packages/edge-auth:lib", ":edge_auth_link", ":native_security", ":proto_link", "package.json", "test/signing-key.test.mjs"],
+)
+
+js_test(
+    name = "warmup_test",
+    entry_point = "test/warmup.test.mjs",
+    node_options = ["--test"],
+    chdir = "mail-hero/cloudflare",
+    data = ["//proto/mailhero/ui/v2:ts", "//proto/ops/v1:ts", "//proto/ts:wire-json", ":edge_auth_link", ":native_api", ":native_warmup", ":proto_link", "package.json", "test/warmup.test.mjs"],
+)
+
+js_library(name = "migrations", srcs = glob(["migrations/*.sql"]))
+
+ts_project(
+    name = "typecheck_project",
+    srcs = ["src/native/alerts.ts", "src/native/api-common.ts", "src/native/api-deliveries.ts", "src/native/api-delivery-stats.ts", "src/native/api-endpoints.ts", "src/native/api-filter.ts", "src/native/api-messages.ts", "src/native/api-settings.ts", "src/native/api-v2.ts", "src/native/api.ts", "src/native/backup-artifact-capacity.ts", "src/native/backup-artifacts.ts", "src/native/backup-checksum.ts", "src/native/backup-retention.ts", "src/native/backup-state.ts", "src/native/backup.ts", "src/native/capacity.ts", "src/native/content-policy.ts", "src/native/coordinator.ts", "src/native/dependencies.ts", "src/native/index.ts", "src/native/ingest.ts", "src/native/lifecycle.ts", "src/native/native-backup-artifacts.ts", "src/native/native-backup-format.ts", "src/native/native-backup-runner.ts", "src/native/ops-core.ts", "src/native/ops-guard.ts", "src/native/ops.ts", "src/native/parser.ts", "src/native/pipeline.ts", "src/native/security.ts", "src/native/types.ts", "src/native/warmup.ts"],
+    no_emit = True,
+    deps = [":lib", ":proto_link", ":edge_auth_link", ":node_modules/@cloudflare/workers-types", ":node_modules/@noble/hashes", ":node_modules/parse5", ":node_modules/postal-mime"],
+)
+
+alias(name = "typecheck", actual = ":typecheck_project_typecheck")

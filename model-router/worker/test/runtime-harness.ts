@@ -32,6 +32,7 @@ let bundle: Promise<string> | undefined
 function script() {
   bundle ??= build({
     entryPoints: [join(root, 'test/runtime-entry.ts')],
+    ...(process.env.TEST_SRCDIR ? { nodePaths: [join(root, 'node_modules')] } : {}),
     bundle: true,
     format: 'esm',
     platform: 'browser',

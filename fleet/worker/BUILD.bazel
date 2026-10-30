@@ -1,0 +1,138 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@npm//fleet/worker:vitest/package_json.bzl", vitest = "bin")
+load("//proto/bazel:ts_package.bzl", "proto_package")
+load("//tools/bazel:js.bzl", "proto_vitest_test", "workspace_package_link")
+
+package(default_visibility = ["//visibility:public"])
+
+npm_link_all_packages(name = "node_modules")
+
+js_library(
+    name = "metrics",
+    srcs = ["src/metrics.ts"],
+    types = ["src/metrics.ts"],
+    deps = ["//proto/fleet/telemetry/v1:ts"],
+)
+
+js_library(
+    name = "runtime",
+    srcs = ["src/runtime.ts"],
+    types = ["src/runtime.ts"],
+    deps = ["//proto/fleet/telemetry/v1:ts", "//proto/platform/runtime/v1:ts"],
+)
+
+js_library(
+    name = "report",
+    srcs = ["src/report.ts"],
+    types = ["src/report.ts"],
+    deps = ["//proto/fleet/telemetry/v1:ts", "//proto/ts:wire-json", ":metrics", ":runtime"],
+)
+
+js_library(
+    name = "newsletter-config",
+    srcs = ["src/newsletter-config.ts"],
+    types = ["src/newsletter-config.ts"],
+    deps = ["//proto/fleet/telemetry/v1:ts"],
+)
+
+js_library(
+    name = "health",
+    srcs = ["src/health.ts"],
+    types = ["src/health.ts"],
+    deps = ["//proto/ops/v1:ts", ":newsletter-config", ":report", ":runtime"],
+)
+
+js_library(
+    name = "module_group_5",
+    srcs = ["src/env.ts", "src/state.ts"],
+    types = ["src/env.ts", "src/state.ts"],
+    deps = ["//proto/fleet/ui/v1:ts", "//proto/ops/v1:ts", "//proto/ts:wire-json", ":health", ":metrics", ":report"],
+)
+
+alias(name = "env", actual = ":module_group_5")
+alias(name = "state", actual = ":module_group_5")
+js_library(
+    name = "receipt",
+    srcs = ["src/receipt.ts"],
+    types = ["src/receipt.ts"],
+    deps = [":module_group_5", ":report"],
+)
+
+js_library(
+    name = "http",
+    srcs = ["src/http.ts"],
+    types = ["src/http.ts"],
+    deps = ["//packages/edge-auth:lib", "//proto/fleet/ui/v1:ts", "//proto/ts:http-transcoder", "//proto/ts:protobuf-wkt", "//proto/ts:rpc-status", ":metrics", ":module_group_5", ":receipt", ":report"],
+)
+
+js_library(
+    name = "ops",
+    srcs = ["src/ops.ts"],
+    types = ["src/ops.ts"],
+    deps = ["//proto/ops/v1:ts", ":module_group_5"],
+)
+
+js_library(
+    name = "index",
+    srcs = ["src/index.ts"],
+    types = ["src/index.ts"],
+    deps = [":http", ":module_group_5", ":ops"],
+)
+
+js_library(name = "lib", deps = [":health", ":http", ":index", ":metrics", ":module_group_5", ":newsletter-config", ":ops", ":receipt", ":report", ":runtime"])
+
+proto_package(name = "proto_types_package", deps = ["//proto/fleet/telemetry/v1:ts", "//proto/fleet/ui/v1:ts", "//proto/ops/v1:ts", "//proto/platform/runtime/v1:ts", "//proto/ts:http-transcoder", "//proto/ts:protobuf-wkt", "//proto/ts:rpc-status", "//proto/ts:wire-json", ":lib"])
+workspace_package_link(name = "proto_types_link", src = ":proto_types_package", runtime_dependencies = ["@bufbuild/protobuf"])
+workspace_package_link(name = "edge_auth_types_link", src = "//packages/edge-auth:pkg")
+proto_vitest_test(
+    name = "codex-gateway_test",
+    runner = vitest.vitest_test,
+    tests = ["test/codex-gateway.test.ts"],
+    deps = ["//contracts:fleet-report-v1/fixtures/healthy.json_data", ":health", ":report"],
+    data = [":node_modules/vitest", "package.json"],
+)
+
+proto_vitest_test(
+    name = "deploy_test",
+    runner = vitest.vitest_test,
+    tests = ["test/deploy.test.ts"],
+    deps = ["//fleet/deploy:vars"],
+    data = [":node_modules/vitest", "package.json"],
+)
+
+proto_vitest_test(
+    name = "metrics_test",
+    runner = vitest.vitest_test,
+    tests = ["test/metrics.test.ts"],
+    deps = ["//contracts:fleet-report-v1/fixtures/healthy.json_data", "//contracts:fleet-report-v1/fixtures/node_metrics.json_data", "//proto/fleet/telemetry/v1:ts", ":metrics", ":report"],
+    data = [":node_modules/vitest", "package.json"],
+)
+
+proto_vitest_test(
+    name = "newsletter-config_test",
+    runner = vitest.vitest_test,
+    tests = ["test/newsletter-config.test.ts"],
+    deps = ["//contracts:fleet-report-v1/fixtures/healthy.json_data", "//proto/fleet/telemetry/v1:ts", ":health", ":report"],
+    data = [":node_modules/vitest", "package.json"],
+)
+
+proto_vitest_test(
+    name = "report_test",
+    runner = vitest.vitest_test,
+    tests = ["test/report.test.ts"],
+    deps = ["//contracts:fleet-report-v1/fixtures/healthy.json_data", ":health", ":report"],
+    data = [":node_modules/vitest", "package.json"],
+)
+
+ts_project(
+    name = "types",
+    srcs = ["src/env.ts", "src/health.ts", "src/http.ts", "src/index.ts", "src/metrics.ts", "src/newsletter-config.ts", "src/ops.ts", "src/receipt.ts", "src/report.ts", "src/runtime.ts", "src/state.ts", "test/cloudflare-workers.ts", "test/codex-gateway.test.ts", "test/deploy.test.ts", "test/metrics.test.ts", "test/newsletter-config.test.ts", "test/report.test.ts", "vitest.config.ts", "vitest.runtime.config.ts"],
+    no_emit = True,
+    resolve_json_module = True,
+    data = ["vitest.config.ts", "vitest.runtime.config.ts"],
+    deps = ["//contracts:fleet-report-v1/fixtures/healthy.json_data", "//contracts:fleet-report-v1/fixtures/node_metrics.json_data", "//fleet/deploy:vars", ":edge_auth_types_link", ":lib", ":node_modules/@cloudflare/workers-types", ":node_modules/@types/node", ":node_modules/vitest", ":proto_types_link"],
+)
+
+alias(name = "typecheck", actual = ":types_typecheck")

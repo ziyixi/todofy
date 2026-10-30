@@ -1,0 +1,5 @@
+common --repo_env=DO_NOT_TRACK=1
+common --lockfile_mode=error
+build --incompatible_strict_action_env
+build --protocopt=--include_source_info
+test --test_output=errors

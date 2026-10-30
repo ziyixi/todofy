@@ -1,0 +1,9 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+
+exports_files(["workerd-cpu.mts"], visibility = ["//visibility:public"])
+
+js_library(
+    name = "lib",
+    srcs = ["workerd-cpu.mts"],
+    visibility = ["//visibility:public"],
+)

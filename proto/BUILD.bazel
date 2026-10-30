@@ -1,0 +1,417 @@
+load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("@npm//proto:vitest/package_json.bzl", vitest = "bin")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+load("//tools/bazel:js.bzl", "vitest_test")
+load("@rules_python//python:defs.bzl", "py_binary", "py_test")
+load("@rules_python//python:packaging.bzl", "py_package", "py_wheel")
+load("//proto/bazel:codegen.bzl", "proto_codegen", "proto_image")
+
+package(default_visibility = ["//visibility:public"])
+
+npm_link_all_packages(name = "node_modules")
+
+PROTO_SOURCES = [
+    'common/errors/v1/errors.proto',
+    'common/wire/v1/wire.proto',
+    'dashboard/mcp/v1/home_service.proto',
+    'dashboard/ui/v1/attention.proto',
+    'dashboard/ui/v1/canary.proto',
+    'dashboard/ui/v1/cloudflare_view.proto',
+    'dashboard/ui/v1/dashboard_ui_service.proto',
+    'dashboard/ui/v1/errors.proto',
+    'dashboard/ui/v1/flows_view.proto',
+    'dashboard/ui/v1/guard.proto',
+    'dashboard/ui/v1/home_view.proto',
+    'dashboard/ui/v1/ops_view.proto',
+    'dashboard/ui/v1/registry.proto',
+    'dashboard/ui/v1/usage.proto',
+    'fleet/telemetry/v1/host_report.proto',
+    'fleet/ui/v1/fleet_ui_service.proto',
+    'fleet/ui/v1/node.proto',
+    'links/ui/v1/errors.proto',
+    'links/ui/v1/link.proto',
+    'links/ui/v1/links_ui_service.proto',
+    'mailhero/ui/v2/delivery.proto',
+    'mailhero/ui/v2/endpoint.proto',
+    'mailhero/ui/v2/errors.proto',
+    'mailhero/ui/v2/mail_hero_ui_service.proto',
+    'mailhero/ui/v2/message.proto',
+    'mailhero/ui/v2/settings.proto',
+    'mailhero/webhook/v1/mail_received.proto',
+    'mailsort/ui/v2/backup.proto',
+    'mailsort/ui/v2/consolidation.proto',
+    'mailsort/ui/v2/errors.proto',
+    'mailsort/ui/v2/flow.proto',
+    'mailsort/ui/v2/label.proto',
+    'mailsort/ui/v2/mailsort_ui_service.proto',
+    'mailsort/ui/v2/prompt.proto',
+    'mailsort/ui/v2/replay.proto',
+    'mailsort/ui/v2/review.proto',
+    'mailsort/ui/v2/status.proto',
+    'modelrouter/inference/v1/console.proto',
+    'modelrouter/inference/v1/inference.proto',
+    'newsletter/ui/v1/backup_status.proto',
+    'newsletter/ui/v1/edition.proto',
+    'newsletter/ui/v1/model_call.proto',
+    'newsletter/ui/v1/newsletter_ui_service.proto',
+    'newsletter/ui/v1/overview.proto',
+    'newsletter/ui/v1/run.proto',
+    'newsletter/ui/v1/source_catalog.proto',
+    'ops/v1/ops.proto',
+    'platform/runtime/v1/errors.proto',
+    'platform/runtime/v1/runtime.proto',
+    'platform/runtime/v1/runtime_service.proto',
+    'prototest/v1/intent.proto',
+    'prototest/v1/prototest.proto',
+    'prototest/v1/rules.proto',
+    'recall/archive/v1/archive.proto',
+    'recall/ingest/v1/diagnostic.proto',
+    'recall/ingest/v1/ingest.proto',
+    'recall/ui/v1/errors.proto',
+    'recall/ui/v1/page.proto',
+    'recall/ui/v1/recall_ui_service.proto',
+    'recall/ui/v1/status.proto',
+    'tasks/inbox/v1/task_inbox.proto',
+    'tasks/ui/v1/focus.proto',
+    'tasks/ui/v1/goals.proto',
+    'tasks/ui/v1/gtd.proto',
+    'tasks/ui/v1/mail.proto',
+    'tasks/ui/v1/plan.proto',
+    'tasks/ui/v1/task.proto',
+    'tasks/ui/v1/tasks_ui_service.proto',
+    'todofy/mail/v1/mail_service.proto',
+    'todofy/report/v1/report.proto',
+    'todofy/ui/v1/errors.proto',
+    'todofy/ui/v1/history.proto',
+    'todofy/ui/v1/mail_event.proto',
+    'todofy/ui/v1/reports.proto',
+    'todofy/ui/v1/status.proto',
+    'todofy/ui/v1/todofy_ui_service.proto',
+    'watch/ui/v1/change.proto',
+    'watch/ui/v1/errors.proto',
+    'watch/ui/v1/snapshot.proto',
+    'watch/ui/v1/watch.proto',
+    'watch/ui/v1/watch_ui_service.proto',
+    'website/sync/v1/sync.proto',
+]
+
+PROTO_LIBRARIES = sorted({"//proto/" + source.rsplit("/", 1)[0] + ":proto": True for source in PROTO_SOURCES})
+
+py_binary(
+    name = "breaking",
+    srcs = ["//proto/tools:bazel_breaking.py"],
+    main = "//proto/tools:bazel_breaking.py",
+    legacy_create_init = False,
+    deps = ["//proto/tools:breaking_rules"],
+    data = [":image", ":buf.yaml", ":retired.json", "//tools/bazel:buf"],
+    args = [
+        "--buf", "$(location //tools/bazel:buf)",
+        "--image", "$(location :image)",
+        "--config", "$(location :buf.yaml)",
+        "--retired", "$(location :retired.json)",
+    ],
+    env = {"BAZEL_BINDIR": ".", "JS_BINARY__NO_CD_BINDIR": "1"},
+)
+
+alias(name = "python", actual = "//proto/python/src/ziyixi_proto:all_python")
+alias(name = "python_runtime", actual = "//proto/python/src/ziyixi_proto:runtime")
+alias(name = "ts", actual = "//proto/ts:all_ts")
+
+py_package(
+    name = "python_wheel_files",
+    packages = ["proto.python.src.ziyixi_proto"],
+    deps = [":python"],
+    tags = ["manual"],
+)
+
+py_wheel(
+    name = "python_wheel",
+    distribution = "ziyixi-proto",
+    version = "0.0.0",
+    python_requires = ">=3.14",
+    strip_path_prefixes = ["proto/python/src"],
+    deps = [":python_wheel_files"],
+    stamp = 0,
+    tags = ["manual"],
+)
+
+proto_codegen(
+    name = "fleet_telemetry_v1_schema",
+    protos = ["//proto/fleet/telemetry/v1:proto"],
+    proto_package = "fleet.telemetry.v1",
+    format = "schema",
+    sources = ["fleet/telemetry/v1/host_report.proto"],
+    outs = ["schema/fleet-report-v1.schema.json"],
+    output_paths = ["../contracts/fleet-report-v1/fleet-report-v1.schema.json"],
+)
+
+proto_codegen(
+    name = "mailhero_webhook_v1_schema",
+    protos = ["//proto/mailhero/webhook/v1:proto"],
+    proto_package = "mailhero.webhook.v1",
+    format = "schema",
+    sources = ["mailhero/webhook/v1/mail_received.proto"],
+    outs = ["schema/mail-received-v1.schema.json"],
+    output_paths = ["../contracts/mail-received-v1/mail-received-v1.schema.json"],
+)
+
+proto_codegen(
+    name = "ops_v1_schema",
+    protos = ["//proto/ops/v1:proto"],
+    proto_package = "ops.v1",
+    format = "schema",
+    sources = ["ops/v1/ops.proto"],
+    outs = ["schema/ops-v1.schema.json"],
+    output_paths = ["../contracts/ops-v1/ops-v1.schema.json"],
+)
+
+proto_codegen(
+    name = "platform_runtime_v1_schema",
+    protos = ["//proto/platform/runtime/v1:proto"],
+    proto_package = "platform.runtime.v1",
+    format = "schema",
+    sources = ["platform/runtime/v1/runtime.proto", "platform/runtime/v1/errors.proto", "platform/runtime/v1/runtime_service.proto"],
+    outs = ["schema/platform-runtime-v1.schema.json"],
+    output_paths = ["../contracts/platform-runtime-v1/platform-runtime-v1.schema.json"],
+)
+
+proto_codegen(
+    name = "recall_archive_v1_schema",
+    protos = ["//proto/recall/archive/v1:proto"],
+    proto_package = "recall.archive.v1",
+    format = "schema",
+    sources = ["recall/archive/v1/archive.proto"],
+    outs = ["schema/recall-archive-v1.schema.json"],
+    output_paths = ["../contracts/recall-archive-v1/recall-archive-v1.schema.json"],
+)
+
+proto_codegen(
+    name = "todofy_report_v1_schema",
+    protos = ["//proto/todofy/report/v1:proto"],
+    proto_package = "todofy.report.v1",
+    format = "schema",
+    sources = ["todofy/report/v1/report.proto"],
+    outs = ["schema/summary-v1.schema.json", "schema/recommendation-v1.schema.json"],
+    output_paths = ["../todofy/api/summary-v1.schema.json", "../todofy/api/recommendation-v1.schema.json"],
+)
+
+filegroup(name = "schemas", srcs = [":fleet_telemetry_v1_schema", ":mailhero_webhook_v1_schema", ":ops_v1_schema", ":platform_runtime_v1_schema", ":recall_archive_v1_schema", ":todofy_report_v1_schema"])
+
+exports_files(["buf.yaml", "buf.gen.yaml", "buf.lock", "retired.json", "reviewed-rules.json"])
+
+filegroup(name = "sources", srcs = ["//proto/" + source.rsplit("/", 1)[0] + ":" + source.rsplit("/", 1)[1] for source in PROTO_SOURCES])
+
+proto_image(name = "image", out = "image.binpb", protos = PROTO_LIBRARIES, sources = PROTO_SOURCES)
+
+py_test(
+    name = "schema_test",
+    srcs = ["//proto/tools:schema_golden.py"],
+    main = "//proto/tools:schema_golden.py",
+    legacy_create_init = False,
+    args = ["--generated", "$(locations :schemas)", "--expected"] + ['$(location //contracts:platform-runtime-v1/platform-runtime-v1.schema.json)', '$(location //contracts:fleet-report-v1/fleet-report-v1.schema.json)', '$(location //contracts:ops-v1/ops-v1.schema.json)', '$(location //contracts:mail-received-v1/mail-received-v1.schema.json)', '$(location //contracts:recall-archive-v1/recall-archive-v1.schema.json)', '$(location //todofy:api/summary-v1.schema.json)', '$(location //todofy:api/recommendation-v1.schema.json)'],
+    data = [":schemas"] + ['//contracts:platform-runtime-v1/platform-runtime-v1.schema.json', '//contracts:fleet-report-v1/fleet-report-v1.schema.json', '//contracts:ops-v1/ops-v1.schema.json', '//contracts:mail-received-v1/mail-received-v1.schema.json', '//contracts:recall-archive-v1/recall-archive-v1.schema.json', '//todofy:api/summary-v1.schema.json', '//todofy:api/recommendation-v1.schema.json'],
+)
+
+py_test(
+    name = 'lint_test',
+    srcs = ["//proto/tools:bazel_checks.py"],
+    main = "//proto/tools:bazel_checks.py",
+    legacy_create_init = False,
+    args = ['lint', '--buf', '$(location //tools/bazel:buf)', '--config', '$(location :buf.yaml)', '--image', '$(location :image)'],
+    data = ['//tools/bazel:buf', ':buf.yaml', ':image'],
+    env = {"BAZEL_BINDIR": ".", "JS_BINARY__NO_CD_BINDIR": "1"},
+)
+
+py_test(
+    name = 'format_test',
+    srcs = ["//proto/tools:bazel_checks.py"],
+    main = "//proto/tools:bazel_checks.py",
+    legacy_create_init = False,
+    args = ['format', '--buf', '$(location //tools/bazel:buf)', '--config', '$(location :buf.yaml)'],
+    data = ['//tools/bazel:buf', ':buf.yaml', ':sources'],
+    env = {"BAZEL_BINDIR": ".", "JS_BINARY__NO_CD_BINDIR": "1"},
+)
+
+py_test(
+    name = 'api_lint_test',
+    srcs = ["//proto/tools:bazel_checks.py"],
+    main = "//proto/tools:bazel_checks.py",
+    legacy_create_init = False,
+    args = ['api-lint', '--buf', '$(location //tools/bazel:buf)', '--config', '$(location :buf.yaml)', '--image', '$(location :image)', '--api-linter', '$(location //proto/tools/api-linter:api-linter)', '--googleapis-check', '$(location //proto/tools/api-linter/googleapis:googleapis-check)'] + [arg for source in PROTO_SOURCES for arg in ["--source", source]],
+    data = ['//tools/bazel:buf', ':buf.yaml', ':image', '//proto/tools/api-linter:api-linter', '//proto/tools/api-linter/googleapis:googleapis-check'],
+    env = {"BAZEL_BINDIR": ".", "JS_BINARY__NO_CD_BINDIR": "1"},
+)
+
+proto_image(name = "google_rpc_image", out = "google-rpc-image.json", protos = ["@googleapis//:google_rpc_code_proto", "@googleapis//:google_rpc_error_details_proto", "@googleapis//:google_rpc_status_proto"], sources = [])
+
+vitest_test(
+    name = 'ts_cross_language_test',
+    runner = vitest.vitest_test,
+    tests = ['test/cross-language.test.ts'],
+    data = [':node_modules/@bufbuild/protobuf', '//contracts:mail-received-v1/fixtures/attachments_capacity.json_data', '//contracts:mail-received-v1/fixtures/attachments_metadata_limit.json_data', '//contracts:mail-received-v1/fixtures/attachments_stored_and_omitted.json_data', '//contracts:mail-received-v1/fixtures/body_only_no_subject.json_data', '//contracts:mail-received-v1/fixtures/canary_event.json_data', '//contracts:mail-received-v1/fixtures/chinese.json_data', '//contracts:mail-received-v1/fixtures/html_only.json_data', '//contracts:mail-received-v1/fixtures/legacy/pre_storage_v1.json_data', '//contracts:mail-received-v1/fixtures/max_size.json_data', '//contracts:mail-received-v1/fixtures/needs_review_attached_message.json_data', '//contracts:mail-received-v1/fixtures/needs_review_no_readable_body.json_data', '//contracts:mail-received-v1/fixtures/no_date_no_message_id.json_data', '//contracts:mail-received-v1/fixtures/plain_text.json_data', '//contracts:mail-received-v1/fixtures/sent_at_extended_year.json_data', '//contracts:mail-received-v1/fixtures/synthetic_test_event.json_data', '//contracts:mail-received-v1/fixtures/truncated_ui_and_webhook.json_data', '//contracts:mail-received-v1/fixtures/truncated_webhook.json_data', '//contracts:ops-v1/deployment-modes.json_data', '//contracts:ops-v1/fixtures/CanaryDelivery/delivered.json_data', '//contracts:ops-v1/fixtures/CanaryDelivery/failed-window.json_data', '//contracts:ops-v1/fixtures/CanaryDelivery/failed.json_data', '//contracts:ops-v1/fixtures/CanaryDelivery/paused-endpoint-blocked.json_data', '//contracts:ops-v1/fixtures/CanaryDelivery/paused.json_data', '//contracts:ops-v1/fixtures/CanaryDelivery/pending-first-attempt.json_data', '//contracts:ops-v1/fixtures/CanaryDelivery/pending-retrying.json_data', '//contracts:ops-v1/fixtures/CanaryDelivery/unknown.json_data', '//contracts:ops-v1/fixtures/CanaryResult/failed.json_data', '//contracts:ops-v1/fixtures/CanaryResult/not-seen.json_data', '//contracts:ops-v1/fixtures/CanaryResult/ok.json_data', '//contracts:ops-v1/fixtures/CanaryResult/processing-paused.json_data', '//contracts:ops-v1/fixtures/CanaryResult/processing.json_data', '//contracts:ops-v1/fixtures/GuardState/normal.json_data', '//contracts:ops-v1/fixtures/GuardState/shed-mail-hero.json_data', '//contracts:ops-v1/fixtures/GuardState/shed-todofy.json_data', '//contracts:ops-v1/fixtures/GuardState/shed-watch.json_data', '//contracts:ops-v1/fixtures/OpsReportReceipt/kept-newer.json_data', '//contracts:ops-v1/fixtures/OpsReportReceipt/stored.json_data', '//contracts:ops-v1/fixtures/OpsStatus/codex-gateway-ok.json_data', '//contracts:ops-v1/fixtures/OpsStatus/fleet-ok.json_data', '//contracts:ops-v1/fixtures/OpsStatus/links-degraded.json_data', '//contracts:ops-v1/fixtures/OpsStatus/links-ok.json_data', '//contracts:ops-v1/fixtures/OpsStatus/mail-hero-degraded.json_data', '//contracts:ops-v1/fixtures/OpsStatus/mail-hero-maintenance.json_data', '//contracts:ops-v1/fixtures/OpsStatus/mail-hero-ok.json_data', '//contracts:ops-v1/fixtures/OpsStatus/mailsort-backup-stale.json_data', '//contracts:ops-v1/fixtures/OpsStatus/mailsort-degraded.json_data', '//contracts:ops-v1/fixtures/OpsStatus/mailsort-ok.json_data', '//contracts:ops-v1/fixtures/OpsStatus/newsletter-ok.json_data', '//contracts:ops-v1/fixtures/OpsStatus/notion-publish-ok.json_data', '//contracts:ops-v1/fixtures/OpsStatus/personal-mcp-ok.json_data', '//contracts:ops-v1/fixtures/OpsStatus/recall-degraded.json_data', '//contracts:ops-v1/fixtures/OpsStatus/recall-ok.json_data', '//contracts:ops-v1/fixtures/OpsStatus/status-unavailable.json_data', '//contracts:ops-v1/fixtures/OpsStatus/tasks-ok.json_data', '//contracts:ops-v1/fixtures/OpsStatus/todofy-degraded.json_data', '//contracts:ops-v1/fixtures/OpsStatus/todofy-ok.json_data', '//contracts:ops-v1/fixtures/OpsStatus/watch-degraded.json_data', '//contracts:ops-v1/fixtures/OpsStatus/watch-ok.json_data', '//contracts:ops-v1/fixtures/SetGuardInput/normal.json_data', '//contracts:ops-v1/fixtures/SetGuardInput/shed.json_data', '//contracts:ops-v1/fixtures/StartCanaryInput/daily.json_data', '//contracts:ops-v1/fixtures/StartCanaryResult/paused-endpoint-blocked.json_data', '//contracts:ops-v1/fixtures/StartCanaryResult/paused-send-paused.json_data', '//contracts:ops-v1/fixtures/StartCanaryResult/queued.json_data', '//contracts:ops-v1/fixtures/StartCanaryResult/unavailable-maintenance.json_data', '//contracts:ops-v1/fixtures/StartCanaryResult/unavailable-no-endpoint.json_data', '//contracts:ops-v1/fixtures/invalid/CanaryDelivery/delivered-without-time.json_data', '//contracts:ops-v1/fixtures/invalid/CanaryDelivery/failed-without-code.json_data', '//contracts:ops-v1/fixtures/invalid/CanaryDelivery/state-null-with-delivery.json_data', '//contracts:ops-v1/fixtures/invalid/CanaryDelivery/state-null.json_data', '//contracts:ops-v1/fixtures/invalid/CanaryDelivery/unknown-with-attempts.json_data', '//contracts:ops-v1/fixtures/invalid/CanaryResult/failed-without-code.json_data', '//contracts:ops-v1/fixtures/invalid/CanaryResult/ok-with-summary.json_data', '//contracts:ops-v1/fixtures/invalid/CanaryResult/state-null.json_data', '//contracts:ops-v1/fixtures/invalid/GuardState/level-null.json_data', '//contracts:ops-v1/fixtures/invalid/GuardState/unknown-level.json_data', '//contracts:ops-v1/fixtures/invalid/OpsReportReceipt/too-many.json_data', '//contracts:ops-v1/fixtures/invalid/OpsStatus/address-as-counter-name.json_data', '//contracts:ops-v1/fixtures/invalid/OpsStatus/code-trailing-newline.json_data', '//contracts:ops-v1/fixtures/invalid/OpsStatus/extra-field-subject.json_data', '//contracts:ops-v1/fixtures/invalid/OpsStatus/free-text-code.json_data', '//contracts:ops-v1/fixtures/invalid/OpsStatus/guard-null.json_data', '//contracts:ops-v1/fixtures/invalid/OpsStatus/health-null.json_data', '//contracts:ops-v1/fixtures/invalid/OpsStatus/http-ui-url.json_data', '//contracts:ops-v1/fixtures/invalid/OpsStatus/mail-content-in-metric.json_data', '//contracts:ops-v1/fixtures/invalid/OpsStatus/missing-guard.json_data', '//contracts:ops-v1/fixtures/invalid/OpsStatus/offset-timestamp.json_data', '//contracts:ops-v1/fixtures/invalid/OpsStatus/signal-severity-null.json_data', '//contracts:ops-v1/fixtures/invalid/OpsStatus/string-mode.json_data', '//contracts:ops-v1/fixtures/invalid/SetGuardInput/free-text-reason.json_data', '//contracts:ops-v1/fixtures/invalid/SetGuardInput/level-null.json_data', '//contracts:ops-v1/fixtures/invalid/SetGuardInput/normal-with-until.json_data', '//contracts:ops-v1/fixtures/invalid/SetGuardInput/shed-without-until.json_data', '//contracts:ops-v1/fixtures/invalid/StartCanaryInput/extra-field.json_data', '//contracts:ops-v1/fixtures/invalid/StartCanaryInput/run-id-with-space.json_data', '//contracts:ops-v1/fixtures/invalid/StartCanaryResult/paused-with-event.json_data', '//contracts:ops-v1/fixtures/invalid/StartCanaryResult/queued-without-event.json_data', '//contracts:ops-v1/fixtures/invalid/StartCanaryResult/state-null.json_data', '//contracts:ops-v1/fixtures/invalid/StartCanaryResult/unknown-reason.json_data', '//proto/mailhero/webhook/v1:ts', '//proto/ops/v1:ts', '//proto/prototest/v1:ts', '//proto/test/python:roundtrip', '//proto/testdata:wire-profile-cases.json_data', '//proto/ts:wire-json', 'test/fixtures.ts'],
+    env = {'PROTO_TEST_ROUNDTRIP': 'python/roundtrip'},
+    no_copy_to_bin = ["//proto/test/python:roundtrip.py"],
+)
+
+vitest_test(
+    name = 'ts_doubles_and_maps_test',
+    runner = vitest.vitest_test,
+    tests = ['test/doubles-and-maps.test.ts'],
+    data = [':node_modules/@bufbuild/protobuf', '//proto/prototest/v1:ts', '//proto/ts:wire-json'],
+    env = {},
+)
+
+vitest_test(
+    name = 'ts_field_mask_test',
+    runner = vitest.vitest_test,
+    tests = ['test/field-mask.test.ts'],
+    data = ['//proto/ts:field-mask'],
+    env = {},
+)
+
+vitest_test(
+    name = 'ts_filter_test',
+    runner = vitest.vitest_test,
+    tests = ['test/filter.test.ts'],
+    data = ['//proto/testdata:filter-cases.json_data', '//proto/ts:filter'],
+    env = {},
+)
+
+vitest_test(
+    name = 'ts_http_cases_test',
+    runner = vitest.vitest_test,
+    tests = ['test/http-cases.test.ts'],
+    data = [':node_modules/@bufbuild/protobuf', '//proto/prototest/v1:ts', '//proto/testdata:http-cases.json_data', '//proto/ts:http-client', '//proto/ts:http-rule', '//proto/ts:http-transcoder', '//proto/ts:rpc-status', '//proto/ts:wire-json'],
+    env = {},
+)
+
+vitest_test(
+    name = 'ts_http_client_test',
+    runner = vitest.vitest_test,
+    tests = ['test/http-client.test.ts'],
+    data = [':node_modules/@bufbuild/protobuf', '//proto/prototest/v1:ts', '//proto/ts:http-client', '//proto/ts:http-transcoder', '//proto/ts:rpc-status', '//proto/watch/ui/v1:ts'],
+    env = {},
+)
+
+vitest_test(
+    name = 'ts_http_path_test',
+    runner = vitest.vitest_test,
+    tests = ['test/http-path.test.ts'],
+    data = ['//proto/ts:http-path'],
+    env = {},
+)
+
+vitest_test(
+    name = 'ts_http_transcoder_test',
+    runner = vitest.vitest_test,
+    tests = ['test/http-transcoder.test.ts'],
+    data = [':node_modules/@bufbuild/protobuf', '//proto/common/errors/v1:ts', '//proto/prototest/v1:ts', '//proto/ts:google_api_annotations_ts', '//proto/ts:google_api_http_ts', '//proto/ts:http-rule', '//proto/ts:http-transcoder', '//proto/ts:rpc-status', '//proto/ts:wire-json'],
+    env = {},
+)
+
+vitest_test(
+    name = 'ts_mail_received_test',
+    runner = vitest.vitest_test,
+    tests = ['test/mail-received.test.ts'],
+    data = [':node_modules/@bufbuild/protobuf', '//contracts:mail-received-v1/fixtures/attachments_capacity.json_data', '//contracts:mail-received-v1/fixtures/attachments_metadata_limit.json_data', '//contracts:mail-received-v1/fixtures/attachments_stored_and_omitted.json_data', '//contracts:mail-received-v1/fixtures/body_only_no_subject.json_data', '//contracts:mail-received-v1/fixtures/canary_event.json_data', '//contracts:mail-received-v1/fixtures/chinese.json_data', '//contracts:mail-received-v1/fixtures/html_only.json_data', '//contracts:mail-received-v1/fixtures/legacy/pre_storage_v1.json_data', '//contracts:mail-received-v1/fixtures/max_size.json_data', '//contracts:mail-received-v1/fixtures/needs_review_attached_message.json_data', '//contracts:mail-received-v1/fixtures/needs_review_no_readable_body.json_data', '//contracts:mail-received-v1/fixtures/no_date_no_message_id.json_data', '//contracts:mail-received-v1/fixtures/plain_text.json_data', '//contracts:mail-received-v1/fixtures/sent_at_extended_year.json_data', '//contracts:mail-received-v1/fixtures/synthetic_test_event.json_data', '//contracts:mail-received-v1/fixtures/truncated_ui_and_webhook.json_data', '//contracts:mail-received-v1/fixtures/truncated_webhook.json_data', '//proto/mailhero/webhook/v1:ts', '//proto/ts:wire-json', 'test/fixtures.ts'],
+    env = {},
+)
+
+vitest_test(
+    name = 'ts_newsletter_ui_test',
+    runner = vitest.vitest_test,
+    tests = ['test/newsletter-ui.test.ts'],
+    data = [':node_modules/@bufbuild/protobuf', '//contracts:newsletter-ui-v1/fixtures/backup-status.json_data', '//contracts:newsletter-ui-v1/fixtures/edition-rendering.json_data', '//contracts:newsletter-ui-v1/fixtures/edition.json_data', '//contracts:newsletter-ui-v1/fixtures/editions.json_data', '//contracts:newsletter-ui-v1/fixtures/model-calls.json_data', '//contracts:newsletter-ui-v1/fixtures/model-usage-30d.json_data', '//contracts:newsletter-ui-v1/fixtures/overview.json_data', '//contracts:newsletter-ui-v1/fixtures/run-blocked-selection-timeout.json_data', '//contracts:newsletter-ui-v1/fixtures/run-ready.json_data', '//contracts:newsletter-ui-v1/fixtures/runs.json_data', '//contracts:newsletter-ui-v1/fixtures/source-catalog.json_data', '//proto/newsletter/ui/v1:ts', '//proto/ts:google_api_field_behavior_ts', '//proto/ts:http-rule', '//proto/ts:http-transcoder', '//proto/ts:wire-json'],
+    env = {},
+)
+
+vitest_test(
+    name = 'ts_ops_test',
+    runner = vitest.vitest_test,
+    tests = ['test/ops.test.ts'],
+    data = [':node_modules/@bufbuild/protobuf', '//contracts:ops-v1/deployment-modes.json_data', '//contracts:ops-v1/fixtures/CanaryDelivery/delivered.json_data', '//contracts:ops-v1/fixtures/CanaryDelivery/failed-window.json_data', '//contracts:ops-v1/fixtures/CanaryDelivery/failed.json_data', '//contracts:ops-v1/fixtures/CanaryDelivery/paused-endpoint-blocked.json_data', '//contracts:ops-v1/fixtures/CanaryDelivery/paused.json_data', '//contracts:ops-v1/fixtures/CanaryDelivery/pending-first-attempt.json_data', '//contracts:ops-v1/fixtures/CanaryDelivery/pending-retrying.json_data', '//contracts:ops-v1/fixtures/CanaryDelivery/unknown.json_data', '//contracts:ops-v1/fixtures/CanaryResult/failed.json_data', '//contracts:ops-v1/fixtures/CanaryResult/not-seen.json_data', '//contracts:ops-v1/fixtures/CanaryResult/ok.json_data', '//contracts:ops-v1/fixtures/CanaryResult/processing-paused.json_data', '//contracts:ops-v1/fixtures/CanaryResult/processing.json_data', '//contracts:ops-v1/fixtures/GuardState/normal.json_data', '//contracts:ops-v1/fixtures/GuardState/shed-mail-hero.json_data', '//contracts:ops-v1/fixtures/GuardState/shed-todofy.json_data', '//contracts:ops-v1/fixtures/GuardState/shed-watch.json_data', '//contracts:ops-v1/fixtures/OpsReportReceipt/kept-newer.json_data', '//contracts:ops-v1/fixtures/OpsReportReceipt/stored.json_data', '//contracts:ops-v1/fixtures/OpsStatus/codex-gateway-ok.json_data', '//contracts:ops-v1/fixtures/OpsStatus/fleet-ok.json_data', '//contracts:ops-v1/fixtures/OpsStatus/links-degraded.json_data', '//contracts:ops-v1/fixtures/OpsStatus/links-ok.json_data', '//contracts:ops-v1/fixtures/OpsStatus/mail-hero-degraded.json_data', '//contracts:ops-v1/fixtures/OpsStatus/mail-hero-maintenance.json_data', '//contracts:ops-v1/fixtures/OpsStatus/mail-hero-ok.json_data', '//contracts:ops-v1/fixtures/OpsStatus/mailsort-backup-stale.json_data', '//contracts:ops-v1/fixtures/OpsStatus/mailsort-degraded.json_data', '//contracts:ops-v1/fixtures/OpsStatus/mailsort-ok.json_data', '//contracts:ops-v1/fixtures/OpsStatus/newsletter-ok.json_data', '//contracts:ops-v1/fixtures/OpsStatus/notion-publish-ok.json_data', '//contracts:ops-v1/fixtures/OpsStatus/personal-mcp-ok.json_data', '//contracts:ops-v1/fixtures/OpsStatus/recall-degraded.json_data', '//contracts:ops-v1/fixtures/OpsStatus/recall-ok.json_data', '//contracts:ops-v1/fixtures/OpsStatus/status-unavailable.json_data', '//contracts:ops-v1/fixtures/OpsStatus/tasks-ok.json_data', '//contracts:ops-v1/fixtures/OpsStatus/todofy-degraded.json_data', '//contracts:ops-v1/fixtures/OpsStatus/todofy-ok.json_data', '//contracts:ops-v1/fixtures/OpsStatus/watch-degraded.json_data', '//contracts:ops-v1/fixtures/OpsStatus/watch-ok.json_data', '//contracts:ops-v1/fixtures/SetGuardInput/normal.json_data', '//contracts:ops-v1/fixtures/SetGuardInput/shed.json_data', '//contracts:ops-v1/fixtures/StartCanaryInput/daily.json_data', '//contracts:ops-v1/fixtures/StartCanaryResult/paused-endpoint-blocked.json_data', '//contracts:ops-v1/fixtures/StartCanaryResult/paused-send-paused.json_data', '//contracts:ops-v1/fixtures/StartCanaryResult/queued.json_data', '//contracts:ops-v1/fixtures/StartCanaryResult/unavailable-maintenance.json_data', '//contracts:ops-v1/fixtures/StartCanaryResult/unavailable-no-endpoint.json_data', '//contracts:ops-v1/fixtures/invalid/CanaryDelivery/delivered-without-time.json_data', '//contracts:ops-v1/fixtures/invalid/CanaryDelivery/failed-without-code.json_data', '//contracts:ops-v1/fixtures/invalid/CanaryDelivery/state-null-with-delivery.json_data', '//contracts:ops-v1/fixtures/invalid/CanaryDelivery/state-null.json_data', '//contracts:ops-v1/fixtures/invalid/CanaryDelivery/unknown-with-attempts.json_data', '//contracts:ops-v1/fixtures/invalid/CanaryResult/failed-without-code.json_data', '//contracts:ops-v1/fixtures/invalid/CanaryResult/ok-with-summary.json_data', '//contracts:ops-v1/fixtures/invalid/CanaryResult/state-null.json_data', '//contracts:ops-v1/fixtures/invalid/GuardState/level-null.json_data', '//contracts:ops-v1/fixtures/invalid/GuardState/unknown-level.json_data', '//contracts:ops-v1/fixtures/invalid/OpsReportReceipt/too-many.json_data', '//contracts:ops-v1/fixtures/invalid/OpsStatus/address-as-counter-name.json_data', '//contracts:ops-v1/fixtures/invalid/OpsStatus/code-trailing-newline.json_data', '//contracts:ops-v1/fixtures/invalid/OpsStatus/extra-field-subject.json_data', '//contracts:ops-v1/fixtures/invalid/OpsStatus/free-text-code.json_data', '//contracts:ops-v1/fixtures/invalid/OpsStatus/guard-null.json_data', '//contracts:ops-v1/fixtures/invalid/OpsStatus/health-null.json_data', '//contracts:ops-v1/fixtures/invalid/OpsStatus/http-ui-url.json_data', '//contracts:ops-v1/fixtures/invalid/OpsStatus/mail-content-in-metric.json_data', '//contracts:ops-v1/fixtures/invalid/OpsStatus/missing-guard.json_data', '//contracts:ops-v1/fixtures/invalid/OpsStatus/offset-timestamp.json_data', '//contracts:ops-v1/fixtures/invalid/OpsStatus/signal-severity-null.json_data', '//contracts:ops-v1/fixtures/invalid/OpsStatus/string-mode.json_data', '//contracts:ops-v1/fixtures/invalid/SetGuardInput/free-text-reason.json_data', '//contracts:ops-v1/fixtures/invalid/SetGuardInput/level-null.json_data', '//contracts:ops-v1/fixtures/invalid/SetGuardInput/normal-with-until.json_data', '//contracts:ops-v1/fixtures/invalid/SetGuardInput/shed-without-until.json_data', '//contracts:ops-v1/fixtures/invalid/StartCanaryInput/extra-field.json_data', '//contracts:ops-v1/fixtures/invalid/StartCanaryInput/run-id-with-space.json_data', '//contracts:ops-v1/fixtures/invalid/StartCanaryResult/paused-with-event.json_data', '//contracts:ops-v1/fixtures/invalid/StartCanaryResult/queued-without-event.json_data', '//contracts:ops-v1/fixtures/invalid/StartCanaryResult/state-null.json_data', '//contracts:ops-v1/fixtures/invalid/StartCanaryResult/unknown-reason.json_data', '//proto/common/wire/v1:ts', '//proto/ops/v1:ts', '//proto/ts:google_api_field_behavior_ts', '//proto/ts:wire-json', 'test/fixtures.ts'],
+    env = {},
+)
+
+vitest_test(
+    name = 'ts_page_token_test',
+    runner = vitest.vitest_test,
+    tests = ['test/page-token.test.ts'],
+    data = ['//proto/ts:page-token'],
+    env = {},
+)
+
+vitest_test(
+    name = 'ts_platform_runtime_test',
+    runner = vitest.vitest_test,
+    tests = ['test/platform-runtime.test.ts'],
+    data = ['//contracts:platform-runtime-v1/fixtures/node-missing.json_data', '//contracts:platform-runtime-v1/fixtures/node-ready.json_data', '//contracts:platform-runtime-v1/fixtures/node-unknown.json_data', '//proto/platform/runtime/v1:ts', '//proto/ts:wire-json'],
+    env = {},
+)
+
+vitest_test(
+    name = 'ts_recall_archive_test',
+    runner = vitest.vitest_test,
+    tests = ['test/recall-archive.test.ts'],
+    data = ['//contracts:recall-archive-v1/fixtures/ArchiveState/synced.json_data', '//contracts:recall-archive-v1/fixtures/Change/document.json_data', '//contracts:recall-archive-v1/fixtures/Change/tombstone.json_data', '//contracts:recall-archive-v1/fixtures/Change/visit.json_data', '//contracts:recall-archive-v1/fixtures/ChangePage/caught-up.json_data', '//contracts:recall-archive-v1/fixtures/ChangePage/first-page.json_data', '//contracts:recall-archive-v1/fixtures/archive/VERSION_data', '//contracts:recall-archive-v1/fixtures/archive/blobs/2026/10/7c2e9f41-3b6a-4d5e-8f10-2a9b4c6d8e01.txt.gz_data', '//contracts:recall-archive-v1/fixtures/archive/changes/2026/10/10.jsonl_data', '//contracts:recall-archive-v1/fixtures/archive/state.json_data', '//contracts:recall-archive-v1/fixtures/future/Change/star.json_data', '//contracts:recall-archive-v1/fixtures/future/blobs/2026/11/0d1e2f3a-4b5c-4d6e-8f70-819203a4b5c6.html.gz_data', '//contracts:recall-archive-v1/fixtures/invalid/ArchiveState/negative-seq.json_data', '//contracts:recall-archive-v1/fixtures/invalid/ArchiveState/without-feed-id.json_data', '//contracts:recall-archive-v1/fixtures/invalid/Change/blob-other-encoding.json_data', '//contracts:recall-archive-v1/fixtures/invalid/Change/blob-path-traversal.json_data', '//contracts:recall-archive-v1/fixtures/invalid/Change/sha256-upper-case.json_data', '//contracts:recall-archive-v1/fixtures/invalid/Change/tombstone-bad-target.json_data', '//contracts:recall-archive-v1/fixtures/invalid/Change/visit-non-http-url.json_data', '//contracts:recall-archive-v1/fixtures/invalid/Change/visit-with-blob.json_data', '//contracts:recall-archive-v1/fixtures/invalid/Change/visit-without-body.json_data', '//contracts:recall-archive-v1/fixtures/invalid/Change/visit-without-page-id.json_data', '//contracts:recall-archive-v1/fixtures/invalid/ChangePage/other-version.json_data', '//contracts:recall-archive-v1/fixtures/invalid/ChangePage/without-feed-id.json_data', '//proto/recall/archive/v1:ts', '//proto/ts:wire-json'],
+    env = {},
+)
+
+vitest_test(
+    name = 'ts_rpc_status_test',
+    runner = vitest.vitest_test,
+    tests = ['test/rpc-status.test.ts'],
+    data = [':node_modules/@bufbuild/protobuf', '//proto/prototest/v1:ts', '//proto/ts:rpc-status', ':google_rpc_image'],
+    env = {'PROTO_TEST_IMAGE': 'google-rpc-image.json'},
+)
+
+vitest_test(
+    name = 'ts_wire_enum_test',
+    runner = vitest.vitest_test,
+    tests = ['test/wire-enum.test.ts'],
+    data = ['//proto/prototest/v1:ts', '//proto/ts:wire-json'],
+    env = {},
+)
+
+vitest_test(
+    name = 'ts_wire_profile_cases_test',
+    runner = vitest.vitest_test,
+    tests = ['test/wire-profile-cases.test.ts'],
+    data = [':node_modules/@bufbuild/protobuf', '//proto/prototest/v1:ts', '//proto/testdata:wire-profile-cases.json_data', '//proto/ts:wire-json', 'test/fixtures.ts'],
+    env = {},
+)
+
+vitest_test(
+    name = 'ts_wire_rules_test',
+    runner = vitest.vitest_test,
+    tests = ['test/wire-rules.test.ts'],
+    data = [':node_modules/@bufbuild/protobuf', '//proto/prototest/v1:ts', '//proto/ts:wire-json', '//proto/ts:wire-rules'],
+    env = {},
+)
+
+test_suite(name = "ts_tests", tests = [':ts_cross_language_test', ':ts_doubles_and_maps_test', ':ts_field_mask_test', ':ts_filter_test', ':ts_http_cases_test', ':ts_http_client_test', ':ts_http_path_test', ':ts_http_transcoder_test', ':ts_mail_received_test', ':ts_newsletter_ui_test', ':ts_ops_test', ':ts_page_token_test', ':ts_platform_runtime_test', ':ts_recall_archive_test', ':ts_rpc_status_test', ':ts_wire_enum_test', ':ts_wire_profile_cases_test', ':ts_wire_rules_test'])
+
+ts_project(
+    name = "ts_project",
+    srcs = glob(["test/*.ts"]) + ["vitest.config.ts"],
+    tsconfig = "tsconfig.json",
+    no_emit = True,
+    deps = ["//proto/ts:all_ts", ":node_modules/@bufbuild/protobuf", ":node_modules/@cloudflare/workers-types", ":node_modules/@types/node", ":node_modules/vitest"],
+)
+
+alias(name = "typecheck", actual = ":ts_project_typecheck")
+
+test_suite(
+    name = "tests",
+    tests = [
+        ":schema_test",
+        ":format_test",
+        ":lint_test",
+        ":api_lint_test",
+        ":ts_tests",
+        ":ts_project_typecheck_test",
+        "//proto/test/python:tests",
+        "//proto/tools/api-linter/googleapis:googleapis_test",
+        "//proto/tools:bazel_inputs_test",
+    ],
+)

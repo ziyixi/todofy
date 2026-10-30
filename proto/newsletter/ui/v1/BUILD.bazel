@@ -1,0 +1,15 @@
+load("@protobuf//bazel:proto_library.bzl", "proto_library")
+
+package(default_visibility = ["//visibility:public"])
+
+proto_library(
+    name = "proto",
+    srcs = ["backup_status.proto", "edition.proto", "model_call.proto", "newsletter_ui_service.proto", "overview.proto", "run.proto", "source_catalog.proto"],
+    strip_import_prefix = "/proto",
+    deps = ["@googleapis//:google_api_annotations_proto", "@googleapis//:google_api_client_proto", "@googleapis//:google_api_field_behavior_proto", "@googleapis//:google_api_resource_proto", "@protobuf//:timestamp_proto"],
+)
+
+alias(name = "ts", actual = "//proto/ts:newsletter_ui_v1_ts")
+alias(name = "python", actual = "//proto/python/src/ziyixi_proto:newsletter_ui_v1_py")
+
+exports_files(['backup_status.proto', 'edition.proto', 'model_call.proto', 'newsletter_ui_service.proto', 'overview.proto', 'run.proto', 'source_catalog.proto'])

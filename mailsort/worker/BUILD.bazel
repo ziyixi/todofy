@@ -1,0 +1,303 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@npm//mailsort/worker:vitest/package_json.bzl", vitest = "bin")
+load("//proto/bazel:ts_package.bzl", "proto_package")
+load("//tools/bazel:js.bzl", "proto_vitest_test", "workspace_link", "workspace_package_link")
+
+package(default_visibility = ["//visibility:public"])
+
+npm_link_all_packages(name = "node_modules")
+
+js_library(
+    name = "limits",
+    srcs = ["src/limits.ts"],
+    types = ["src/limits.ts"],
+    deps = [],
+)
+
+js_library(
+    name = "ids",
+    srcs = ["src/ids.ts"],
+    types = ["src/ids.ts"],
+    deps = [],
+)
+
+js_library(
+    name = "paths",
+    srcs = ["src/paths.ts"],
+    types = ["src/paths.ts"],
+    deps = [":limits"],
+)
+
+js_library(
+    name = "gmail",
+    srcs = ["src/gmail.ts"],
+    types = ["src/gmail.ts"],
+    deps = [":limits", ":paths"],
+)
+
+js_library(
+    name = "mime",
+    srcs = ["src/mime.ts"],
+    types = ["src/mime.ts"],
+    deps = [":gmail", ":limits"],
+)
+
+js_library(
+    name = "mask",
+    srcs = ["src/mask.ts"],
+    types = ["src/mask.ts"],
+    deps = [":limits", ":mime"],
+)
+
+js_library(
+    name = "module_group_6",
+    srcs = ["src/label-identity.ts", "src/priority.ts", "src/store.ts"],
+    types = ["src/label-identity.ts", "src/priority.ts", "src/store.ts"],
+    deps = [":ids", ":limits", ":mask"],
+)
+
+alias(name = "label-identity", actual = ":module_group_6")
+alias(name = "priority", actual = ":module_group_6")
+alias(name = "store", actual = ":module_group_6")
+js_library(
+    name = "backup",
+    srcs = ["src/backup.ts"],
+    types = ["src/backup.ts"],
+    deps = ["//proto/ops/v1:ts", ":limits", ":module_group_6"],
+)
+
+js_library(
+    name = "classification-result",
+    srcs = ["src/classification-result.ts"],
+    types = ["src/classification-result.ts"],
+    deps = [],
+)
+
+js_library(
+    name = "priority-prompt",
+    srcs = ["src/priority-prompt.ts"],
+    types = ["src/priority-prompt.ts"],
+    deps = ["//mailsort/prompts:personal-rules", "//mailsort/prompts:priority-classification"],
+)
+
+js_library(
+    name = "classification-prompt",
+    srcs = ["src/classification-prompt.ts"],
+    types = ["src/classification-prompt.ts"],
+    deps = ["//proto/mailsort/ui/v2:ts", "//proto/ts:protobuf", "//proto/ts:protobuf-wkt", ":ids", ":module_group_6", ":priority-prompt"],
+)
+
+js_library(
+    name = "examples",
+    srcs = ["src/examples.ts"],
+    types = ["src/examples.ts"],
+    deps = [":module_group_6"],
+)
+
+js_library(
+    name = "flow",
+    srcs = ["src/flow.ts"],
+    types = ["src/flow.ts"],
+    deps = [":limits", ":module_group_6"],
+)
+
+js_library(
+    name = "feedback",
+    srcs = ["src/feedback.ts"],
+    types = ["src/feedback.ts"],
+    deps = [":examples", ":flow", ":module_group_6"],
+)
+
+js_library(
+    name = "unread",
+    srcs = ["src/unread.ts"],
+    types = ["src/unread.ts"],
+    deps = ["//proto/mailsort/ui/v2:ts", "//proto/ts:protobuf", "//proto/ts:protobuf-wkt", ":gmail", ":module_group_6"],
+)
+
+js_library(
+    name = "reasons",
+    srcs = ["src/reasons.ts"],
+    types = ["src/reasons.ts"],
+    deps = ["//proto/common/errors/v1:ts", "//proto/mailsort/ui/v2:ts", "//proto/ts:rpc-status"],
+)
+
+js_library(
+    name = "replay",
+    srcs = ["src/replay.ts"],
+    types = ["src/replay.ts"],
+    deps = [":limits", ":module_group_6"],
+)
+
+js_library(
+    name = "module_group_17",
+    srcs = ["src/api.ts", "src/classification-model.ts", "src/classifier-config.ts", "src/env.ts", "src/model.ts", "src/ops-status.ts", "src/pipeline.ts", "src/priority-setup.ts", "src/restore.ts", "src/session.ts", "src/settings.ts", "src/state.ts", "src/writes.ts"],
+    types = ["src/api.ts", "src/classification-model.ts", "src/classifier-config.ts", "src/env.ts", "src/model.ts", "src/ops-status.ts", "src/pipeline.ts", "src/priority-setup.ts", "src/restore.ts", "src/session.ts", "src/settings.ts", "src/state.ts", "src/writes.ts"],
+    deps = ["//packages/model-router-client:lib", "//proto/mailsort/ui/v2:ts", "//proto/ops/v1:ts", "//proto/ts:field-mask", "//proto/ts:http-client", "//proto/ts:http-transcoder", "//proto/ts:page-token", "//proto/ts:protobuf", "//proto/ts:protobuf-wkt", "//proto/ts:rpc-status", "//proto/ts:wire-json", ":backup", ":classification-prompt", ":classification-result", ":examples", ":feedback", ":flow", ":gmail", ":ids", ":limits", ":mask", ":mime", ":module_group_6", ":paths", ":reasons", ":replay", ":unread"],
+)
+
+alias(name = "api", actual = ":module_group_17")
+alias(name = "classification-model", actual = ":module_group_17")
+alias(name = "classifier-config", actual = ":module_group_17")
+alias(name = "env", actual = ":module_group_17")
+alias(name = "model", actual = ":module_group_17")
+alias(name = "ops-status", actual = ":module_group_17")
+alias(name = "pipeline", actual = ":module_group_17")
+alias(name = "priority-setup", actual = ":module_group_17")
+alias(name = "restore", actual = ":module_group_17")
+alias(name = "session", actual = ":module_group_17")
+alias(name = "settings", actual = ":module_group_17")
+alias(name = "state", actual = ":module_group_17")
+alias(name = "writes", actual = ":module_group_17")
+js_library(
+    name = "auth",
+    srcs = ["src/auth.ts"],
+    types = ["src/auth.ts"],
+    deps = ["//packages/edge-auth:lib", ":module_group_17"],
+)
+
+js_library(
+    name = "dmarc",
+    srcs = ["src/dmarc.ts"],
+    types = ["src/dmarc.ts"],
+    deps = [],
+)
+
+js_library(
+    name = "http",
+    srcs = ["src/http.ts"],
+    types = ["src/http.ts"],
+    deps = ["//packages/edge-auth:lib", "//proto/ts:rpc-status", ":auth", ":limits", ":module_group_17", ":reasons"],
+)
+
+js_library(
+    name = "ops",
+    srcs = ["src/ops.ts"],
+    types = ["src/ops.ts"],
+    deps = ["//proto/ops/v1:ts", ":module_group_17"],
+)
+
+js_library(
+    name = "index",
+    srcs = ["src/index.ts"],
+    types = ["src/index.ts"],
+    deps = [":http", ":module_group_17", ":ops"],
+)
+
+js_library(
+    name = "text_d",
+    srcs = ["src/text.d.ts"],
+    types = ["src/text.d.ts"],
+    deps = [],
+)
+
+js_library(name = "lib", deps = [":auth", ":backup", ":classification-prompt", ":classification-result", ":dmarc", ":examples", ":feedback", ":flow", ":gmail", ":http", ":ids", ":index", ":limits", ":mask", ":mime", ":module_group_17", ":module_group_6", ":ops", ":paths", ":priority-prompt", ":reasons", ":replay", ":text_d", ":unread"])
+
+proto_package(name = "proto_types_package", deps = ["//proto/common/errors/v1:ts", "//proto/mailsort/ui/v2:ts", "//proto/modelrouter/inference/v1:ts", "//proto/ops/v1:ts", "//proto/ts:field-mask", "//proto/ts:http-client", "//proto/ts:http-transcoder", "//proto/ts:page-token", "//proto/ts:protobuf", "//proto/ts:protobuf-wkt", "//proto/ts:rpc-status", "//proto/ts:wire-json", ":lib"])
+workspace_package_link(name = "proto_types_link", src = ":proto_types_package", runtime_dependencies = ["@bufbuild/protobuf"])
+workspace_package_link(name = "model_router_client_types_link", src = "//packages/model-router-client:pkg")
+workspace_package_link(name = "edge_auth_types_link", src = "//packages/edge-auth:pkg")
+proto_vitest_test(
+    name = "backup_test",
+    runner = vitest.vitest_test,
+    tests = ["test/backup.test.ts"],
+    deps = [":backup", ":module_group_6"],
+    data = ["//mailsort/docs:backup", ":node_modules/vitest", "package.json", "test/fakes/sql.ts"],
+)
+
+workspace_link(name = "classification-model_test_model_router_client_link", src = "//packages/model-router-client:pkg")
+proto_vitest_test(
+    name = "classification-model_test",
+    runner = vitest.vitest_test,
+    tests = ["test/classification-model.test.ts"],
+    deps = ["//proto/modelrouter/inference/v1:ts", "//proto/ts:protobuf", "//proto/ts:wire-json", ":module_group_17"],
+    data = [":classification-model_test_model_router_client_link", ":node_modules/vitest", "package.json"],
+)
+
+proto_vitest_test(
+    name = "gmail-guard_test",
+    runner = vitest.vitest_test,
+    tests = ["test/gmail-guard.test.ts"],
+    deps = [":gmail"],
+    data = [":node_modules/vitest", "package.json", "test/fakes/table.ts"],
+)
+
+proto_vitest_test(
+    name = "gmail-priority_test",
+    runner = vitest.vitest_test,
+    tests = ["test/gmail-priority.test.ts"],
+    deps = [":gmail"],
+    data = [":node_modules/vitest", "package.json", "test/fakes/fake-gmail.ts", "test/fakes/fixtures.ts", "test/fakes/table.ts"],
+)
+
+proto_vitest_test(
+    name = "gmail-recent_test",
+    runner = vitest.vitest_test,
+    tests = ["test/gmail-recent.test.ts"],
+    deps = [":gmail"],
+    data = [":node_modules/vitest", "package.json", "test/fakes/fake-gmail.ts", "test/fakes/fixtures.ts", "test/fakes/table.ts"],
+)
+
+proto_vitest_test(
+    name = "gmail-unread_test",
+    runner = vitest.vitest_test,
+    tests = ["test/gmail-unread.test.ts"],
+    deps = [":gmail"],
+    data = [":node_modules/vitest", "package.json", "test/fakes/fake-gmail.ts", "test/fakes/fixtures.ts", "test/fakes/table.ts"],
+)
+
+workspace_link(name = "ops-golden_test_model_router_client_link", src = "//packages/model-router-client:pkg")
+proto_vitest_test(
+    name = "ops-golden_test",
+    runner = vitest.vitest_test,
+    tests = ["test/ops-golden.test.ts"],
+    deps = ["//contracts:ops-v1/validate", "//proto/ops/v1:ts", "//proto/ts:wire-json", ":module_group_17", ":module_group_6"],
+    data = ["//contracts:ops-v1/fixtures/OpsStatus/mailsort-backup-stale.json_data", "test/golden/ops-v1.json", "//contracts:ops-v1/fixtures/OpsStatus/mailsort-degraded.json_data", "//contracts:ops-v1/fixtures/OpsStatus/mailsort-ok.json_data", "//contracts:ops-v1/ops-v1.schema.json_data", ":node_modules/vitest", ":ops-golden_test_model_router_client_link", "package.json"],
+)
+
+proto_vitest_test(
+    name = "read_test",
+    runner = vitest.vitest_test,
+    tests = ["test/read.test.ts"],
+    deps = [":dmarc", ":limits", ":mask", ":mime"],
+    data = [":node_modules/vitest", "package.json", "test/fakes/fake-gmail.ts", "test/fakes/fixtures.ts"],
+)
+
+workspace_link(name = "replay_test_model_router_client_link", src = "//packages/model-router-client:pkg")
+proto_vitest_test(
+    name = "replay_test",
+    runner = vitest.vitest_test,
+    tests = ["test/replay.test.ts"],
+    deps = ["//proto/mailsort/ui/v2:ts", "//proto/ts:wire-json", ":limits", ":module_group_17", ":module_group_6", ":replay"],
+    data = [":node_modules/vitest", ":replay_test_model_router_client_link", "package.json", "test/fakes/sql.ts"],
+)
+
+workspace_link(name = "settings_test_model_router_client_link", src = "//packages/model-router-client:pkg")
+proto_vitest_test(
+    name = "settings_test",
+    runner = vitest.vitest_test,
+    tests = ["test/settings.test.ts"],
+    deps = [":module_group_17", ":module_group_6"],
+    data = [":node_modules/vitest", ":settings_test_model_router_client_link", "package.json", "test/fakes/sql.ts"],
+)
+
+proto_vitest_test(
+    name = "store_test",
+    runner = vitest.vitest_test,
+    tests = ["test/store.test.ts"],
+    deps = [":flow", ":limits", ":mask", ":module_group_6", ":paths"],
+    data = [":node_modules/vitest", "package.json", "test/fakes/sql.ts"],
+)
+
+ts_project(
+    name = "types",
+    srcs = ["src/api.ts", "src/auth.ts", "src/backup.ts", "src/classification-model.ts", "src/classification-prompt.ts", "src/classification-result.ts", "src/classifier-config.ts", "src/dmarc.ts", "src/env.ts", "src/examples.ts", "src/feedback.ts", "src/flow.ts", "src/gmail.ts", "src/http.ts", "src/ids.ts", "src/index.ts", "src/label-identity.ts", "src/limits.ts", "src/mask.ts", "src/mime.ts", "src/model.ts", "src/ops-status.ts", "src/ops.ts", "src/paths.ts", "src/pipeline.ts", "src/priority-prompt.ts", "src/priority-setup.ts", "src/priority.ts", "src/reasons.ts", "src/replay.ts", "src/restore.ts", "src/session.ts", "src/settings.ts", "src/state.ts", "src/store.ts", "src/text.d.ts", "src/unread.ts", "src/writes.ts", "test/backup.test.ts", "test/classification-model.test.ts", "test/fakes/fake-gmail.ts", "test/fakes/fixtures.ts", "test/fakes/sql.ts", "test/fakes/table.ts", "test/fakes/upstream.ts", "test/gmail-guard.test.ts", "test/gmail-priority.test.ts", "test/gmail-recent.test.ts", "test/gmail-unread.test.ts", "test/golden/ops-v1.json", "test/jwt.ts", "test/ops-golden.test.ts", "test/read.test.ts", "test/replay.test.ts", "test/settings.test.ts", "test/smoke/tsconfig.json", "test/store.test.ts", "test/validate.d.ts", "vitest.config.ts", "vitest.runtime.config.ts"],
+    no_emit = True,
+    resolve_json_module = True,
+    data = ["vitest.config.ts", "vitest.runtime.config.ts"],
+    deps = ["//contracts:ops-v1/validate", "//mailsort/prompts:personal-rules", "//mailsort/prompts:priority-classification", ":edge_auth_types_link", ":lib", ":model_router_client_types_link", ":node_modules/@cloudflare/workers-types", ":node_modules/@types/node", ":node_modules/vitest", ":proto_types_link"],
+)
+
+alias(name = "typecheck", actual = ":types_typecheck")

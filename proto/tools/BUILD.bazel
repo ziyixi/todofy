@@ -1,0 +1,61 @@
+load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
+
+package(default_visibility = ["//visibility:public"])
+
+py_test(
+    name = "bazel_inputs_test",
+    srcs = ["test_bazel_inputs.py", "bazel_codegen.py"],
+    main = "test_bazel_inputs.py",
+    imports = ["."],
+    legacy_create_init = False,
+    data = ["//proto:buf.gen.yaml"],
+    deps = ["@python_deps//pyyaml"],
+)
+
+exports_files(["schema_golden.py", "bazel_checks.py", "bazel_breaking.py"])
+
+py_library(
+    name = "breaking_rules",
+    srcs = ["profile_breaking.py", "retired.py"],
+    imports = ["."],
+    data = ["//proto:reviewed-rules.json"],
+    deps = [":wire_rules"],
+)
+
+py_binary(
+    name = "bazel_image",
+    srcs = ["bazel_image.py"],
+    legacy_create_init = False,
+)
+
+py_library(
+    name = "generators",
+    deps = [":python_generator", ":schema_generator", ":ts_generator"],
+)
+
+py_library(
+    name = "wire_rules",
+    srcs = ["wire_rules.py"],
+    imports = ["."],
+)
+
+[
+    py_library(
+        name = language + "_generator",
+        srcs = [source],
+        imports = ["."],
+        deps = [":wire_rules"],
+    )
+    for language, source in [("ts", "gen_wire_ts.py"), ("python", "gen_py.py"), ("schema", "gen_schema.py")]
+]
+
+[
+    py_binary(
+        name = "bazel_" + language + "_codegen",
+        srcs = ["bazel_codegen.py"],
+        main = "bazel_codegen.py",
+        legacy_create_init = False,
+        deps = [":" + language + "_generator"] + (["@python_deps//pyyaml"] if language == "ts" else []),
+    )
+    for language in ["ts", "python", "schema"]
+]

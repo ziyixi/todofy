@@ -90,7 +90,7 @@ RESOURCE = "[google.api.resource]"
 WIRE_FIELD = "[common.wire.v1.field]"
 WIRE_METHOD = "[common.wire.v1.method]"
 VERBS = ("get", "put", "post", "delete", "patch", "custom")
-REVIEWED_RULES = Path(__file__).resolve().parents[1] / "reviewed-rules.json"
+REVIEWED_RULES = Path(__file__).absolute().parents[1] / "reviewed-rules.json"
 
 
 def files(image: dict[str, Any], ignore: tuple[str, ...]) -> Iterator[dict[str, Any]]:

@@ -1,0 +1,35 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "googleapis",
+    srcs = ["main.go"],
+    importpath = "github.com/ziyixi/todofy/proto/tools/api-linter/googleapis",
+    deps = [
+        "@com_google_cloud_go_longrunning//autogen/longrunningpb",
+        "@org_golang_google_genproto//googleapis/type/date",
+        "@org_golang_google_genproto//googleapis/type/datetime",
+        "@org_golang_google_genproto//googleapis/type/timeofday",
+        "@org_golang_google_genproto_googleapis_api//annotations",
+        "@org_golang_google_genproto_googleapis_api//httpbody",
+        "@org_golang_google_protobuf//proto",
+        "@org_golang_google_protobuf//reflect/protodesc",
+        "@org_golang_google_protobuf//reflect/protoregistry",
+        "@org_golang_google_protobuf//types/descriptorpb",
+    ],
+)
+
+go_binary(name = "googleapis-check", embed = [":googleapis"])
+
+go_test(
+    name = "googleapis_test",
+    srcs = ["main_test.go"],
+    embed = [":googleapis"],
+    deps = [
+        "@org_golang_google_protobuf//proto",
+        "@org_golang_google_protobuf//reflect/protodesc",
+        "@org_golang_google_protobuf//reflect/protoregistry",
+        "@org_golang_google_protobuf//types/descriptorpb",
+    ],
+)

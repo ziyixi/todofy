@@ -1,0 +1,46 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("@aspect_rules_js//npm:defs.bzl", "npm_package")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@npm//packages/task-dates:vitest/package_json.bzl", vitest = "bin")
+load("//tools/bazel:js.bzl", "vitest_test")
+
+package(default_visibility = ["//visibility:public"])
+
+npm_link_all_packages(name = "node_modules")
+
+js_library(
+    name = "lib",
+    srcs = ["src/index.ts"],
+    types = ["src/index.ts"],
+    deps = [
+        ":node_modules/chrono-node",
+        ":node_modules/rrule",
+    ],
+)
+
+npm_package(
+    name = "pkg",
+    srcs = [":lib", "package.json"],
+    package = "@ziyixi/task-dates",
+)
+
+ts_project(
+    name = "types",
+    srcs = ["src/index.ts", "test/dates.test.ts"],
+    no_emit = True,
+    deps = [
+        ":node_modules/chrono-node",
+        ":node_modules/rrule",
+        ":node_modules/vitest",
+    ],
+)
+
+vitest_test(
+    name = "dates_test",
+    runner = vitest.vitest_test,
+    tests = ["test/dates.test.ts"],
+    data = [":lib", "package.json"],
+)
+
+alias(name = "typecheck", actual = ":types_typecheck")

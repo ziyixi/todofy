@@ -1,0 +1,51 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("@aspect_rules_js//npm:defs.bzl", "npm_package")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@npm//packages/edge-auth:vitest/package_json.bzl", vitest = "bin")
+load("//tools/bazel:js.bzl", "vitest_test")
+
+package(default_visibility = ["//visibility:public"])
+
+npm_link_all_packages(name = "node_modules")
+
+js_library(
+    name = "lib",
+    srcs = glob(["src/*.ts"]),
+    types = glob(["src/*.ts"]),
+)
+
+npm_package(
+    name = "pkg",
+    srcs = [":lib", "package.json"],
+    package = "@ziyixi/edge-auth",
+)
+
+ts_project(
+    name = "types",
+    srcs = glob(["src/*.ts", "test/*.ts"]) + ["vitest.config.ts"],
+    no_emit = True,
+    deps = [":node_modules/@cloudflare/workers-types", ":node_modules/vitest"],
+)
+
+ts_project(
+    name = "types_dom",
+    srcs = glob(["src/*.ts"]),
+    tsconfig = "tsconfig.dom.json",
+    extends = "tsconfig.json",
+    no_emit = True,
+    deps = [":node_modules/@cloudflare/workers-types"],
+)
+
+[
+    vitest_test(
+        name = test.replace("test/", "").replace(".test.ts", "_test"),
+        runner = vitest.vitest_test,
+        tests = [test],
+        data = [":lib", "package.json", "vitest.config.ts", "test/helpers.ts"],
+    )
+    for test in glob(["test/*.test.ts"])
+]
+
+alias(name = "typecheck", actual = ":types_typecheck")
+alias(name = "typecheck_dom", actual = ":types_dom_typecheck")

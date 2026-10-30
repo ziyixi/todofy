@@ -413,9 +413,12 @@ def python_files(image: dict[str, Any]) -> dict[str, Any]:
     return {**image, "file": [file for file in image["file"] if file.get("package") in PYTHON_PACKAGES]}
 
 
-def generate(image: dict[str, Any]) -> dict[str, str]:
-    """Relative output path -> source, for every file of PYTHON_PACKAGES and every package directory. The value
-    rules of every file are checked first, a TypeScript-only package's too (wire_rules.check_image)."""
+def generate(image: dict[str, Any], packages: set[str] | None = None) -> dict[str, str]:
+    """Relative output path -> source, optionally restricted to selected packages.
+
+    Type indexes still cover the full import closure. The value rules of every file
+    are checked first, including TypeScript-only files (wire_rules.check_image).
+    """
     try:
         wire_rules.check_image(image)
     except wire_rules.RuleError as error:
@@ -425,6 +428,8 @@ def generate(image: dict[str, Any]) -> dict[str, str]:
     types = index_types(image)
     out: dict[str, str] = {}
     for file in sorted(image["file"], key=lambda f: f["name"]):
+        if packages is not None and file.get("package") not in packages:
+            continue
         if file.get("syntax") != "proto3":
             raise GenerateError(f"{file['name']}: only proto3 files are in the profile")
         module = module_of(file["name"])

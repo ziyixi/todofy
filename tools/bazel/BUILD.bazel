@@ -1,0 +1,39 @@
+load("@npm//proto:@bufbuild/buf/package_json.bzl", buf = "bin")
+load("@npm//proto:@bufbuild/protoc-gen-es/package_json.bzl", protoc_gen_es = "bin")
+load("@npm//packages/task-dates:vitest/package_json.bzl", vitest = "bin")
+load(":js.bzl", "workspace_link")
+load("@aspect_rules_js//js:defs.bzl", "js_test")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["js.bzl"])
+
+buf.buf_binary(name = "buf")
+
+protoc_gen_es.protoc_gen_es_binary(name = "protoc-gen-es")
+
+workspace_link(
+    name = "task_dates_link",
+    src = "//packages/task-dates:pkg",
+    data = ["//packages/task-dates:lib"],
+)
+
+vitest.vitest_test(
+    name = "workspace_link_test",
+    args = ["run", "test/workspace-link.test.ts", "--config", "test/vitest.config.mjs"],
+    chdir = "tools/bazel",
+    data = [":task_dates_link", "test/workspace-link.test.ts", "test/vitest.config.mjs"],
+)
+
+js_test(
+    name = "planning_ui_exports_test",
+    entry_point = "test/package-exports.mjs",
+    args = ["$(rootpath //packages/planning-ui:pkg)"],
+    data = ["//packages/planning-ui:pkg"],
+)
+
+js_test(
+    name = "toolchain_versions_test",
+    entry_point = "test/toolchain-versions.mjs",
+    data = ["//:toolchain_version_inputs"],
+)

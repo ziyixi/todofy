@@ -1,0 +1,14 @@
+load("@protobuf//bazel:proto_library.bzl", "proto_library")
+
+package(default_visibility = ["//visibility:public"])
+
+proto_library(
+    name = "proto",
+    srcs = ["errors.proto", "page.proto", "recall_ui_service.proto", "status.proto"],
+    strip_import_prefix = "/proto",
+    deps = ["//proto/recall/ingest/v1:proto", "@googleapis//:google_api_annotations_proto", "@googleapis//:google_api_client_proto", "@googleapis//:google_api_field_behavior_proto", "@googleapis//:google_api_field_info_proto", "@googleapis//:google_api_resource_proto", "@protobuf//:empty_proto", "@protobuf//:field_mask_proto", "@protobuf//:timestamp_proto"],
+)
+
+alias(name = "ts", actual = "//proto/ts:recall_ui_v1_ts")
+
+exports_files(['errors.proto', 'page.proto', 'recall_ui_service.proto', 'status.proto'])

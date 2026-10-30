@@ -1,0 +1,7 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(glob(["*.json"]))
+
+[js_library(name = path + "_data", srcs = [path]) for path in glob(["*.json"])]

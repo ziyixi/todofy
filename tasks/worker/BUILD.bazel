@@ -1,0 +1,826 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@npm//tasks/worker:vitest/package_json.bzl", vitest = "bin")
+load("@npm//tasks/worker:wrangler/package_json.bzl", wrangler = "bin")
+load("//proto/bazel:ts_package.bzl", "proto_package")
+load("//tools/bazel:js.bzl", "proto_vitest_test", "vitest_test", "workspace_link", "workspace_package_link")
+
+package(default_visibility = ["//visibility:public"])
+
+npm_link_all_packages(name = "node_modules")
+
+js_library(
+    name = "api",
+    srcs = ["src/api.ts"],
+    types = ["src/api.ts"],
+    deps = [
+        ":catalog",
+        ":env",
+        ":errors",
+        ":focus",
+        ":focus-entries",
+        ":focus-timer",
+        ":goal-model",
+        ":goal-progress",
+        ":goal-read",
+        ":goal-write",
+        ":gtd-report",
+        ":history",
+        ":mail",
+        ":model",
+        ":plan",
+        ":review",
+        ":task-copy",
+        ":task-order",
+        ":task-read",
+        ":task-write",
+        "//packages/task-dates:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+    ],
+)
+
+js_library(
+    name = "auth",
+    srcs = ["src/auth.ts"],
+    types = ["src/auth.ts"],
+    deps = [
+        ":env",
+        "//packages/edge-auth:lib",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+alias(
+    name = "backup-runner",
+    actual = ":cycle_backup_runner",
+)
+
+js_library(
+    name = "backup",
+    srcs = ["src/backup.ts"],
+    types = ["src/backup.ts"],
+    deps = [],
+)
+
+js_library(
+    name = "catalog-counts",
+    srcs = ["src/catalog-counts.ts"],
+    types = ["src/catalog-counts.ts"],
+    deps = [
+        ":errors",
+        ":filters",
+        ":model",
+        "//packages/task-dates:lib",
+        "//proto/tasks/ui/v1:ts",
+    ],
+)
+
+js_library(
+    name = "catalog-delete",
+    srcs = ["src/catalog-delete.ts"],
+    types = ["src/catalog-delete.ts"],
+    deps = [
+        ":errors",
+        ":model",
+        ":receipts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+    ],
+)
+
+js_library(
+    name = "catalog",
+    srcs = ["src/catalog.ts"],
+    types = ["src/catalog.ts"],
+    deps = [
+        ":catalog-counts",
+        ":catalog-delete",
+        ":errors",
+        ":filters",
+        ":model",
+        ":receipts",
+        ":task-moves",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:field-mask",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+alias(
+    name = "env",
+    actual = ":cycle_backup_runner",
+)
+
+js_library(
+    name = "errors",
+    srcs = ["src/errors.ts"],
+    types = ["src/errors.ts"],
+    deps = ["//proto/ts:rpc-status"],
+)
+
+js_library(
+    name = "filters",
+    srcs = ["src/filters.ts"],
+    types = ["src/filters.ts"],
+    deps = [
+        ":errors",
+        "//packages/task-dates:lib",
+    ],
+)
+
+js_library(
+    name = "focus-entries",
+    srcs = ["src/focus-entries.ts"],
+    types = ["src/focus-entries.ts"],
+    deps = [
+        ":errors",
+        ":focus",
+        ":model",
+        ":receipts",
+        "//packages/task-dates:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+    ],
+)
+
+js_library(
+    name = "focus-timer",
+    srcs = ["src/focus-timer.ts"],
+    types = ["src/focus-timer.ts"],
+    deps = [
+        ":errors",
+        ":focus",
+        ":model",
+        ":receipts",
+        "//packages/task-dates:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+    ],
+)
+
+js_library(
+    name = "focus",
+    srcs = ["src/focus.ts"],
+    types = ["src/focus.ts"],
+    deps = [
+        ":errors",
+        ":model",
+        ":planning",
+        ":receipts",
+        "//packages/task-dates:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+    ],
+)
+
+js_library(
+    name = "goal-model",
+    srcs = ["src/goal-model.ts"],
+    types = ["src/goal-model.ts"],
+    deps = [
+        ":errors",
+        ":model",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+    ],
+)
+
+js_library(
+    name = "goal-progress",
+    srcs = ["src/goal-progress.ts"],
+    types = ["src/goal-progress.ts"],
+    deps = [
+        ":errors",
+        ":goal-model",
+        ":goal-validation",
+        ":model",
+        ":receipts",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:page-token",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+    ],
+)
+
+js_library(
+    name = "goal-read",
+    srcs = ["src/goal-read.ts"],
+    types = ["src/goal-read.ts"],
+    deps = [
+        ":errors",
+        ":goal-model",
+        ":model",
+        "//packages/task-dates:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:protobuf",
+    ],
+)
+
+js_library(
+    name = "goal-validation",
+    srcs = ["src/goal-validation.ts"],
+    types = ["src/goal-validation.ts"],
+    deps = [
+        ":errors",
+        ":focus",
+        ":goal-model",
+        ":goal-read",
+        ":model",
+        "//proto/ts:field-mask",
+    ],
+)
+
+js_library(
+    name = "goal-write",
+    srcs = ["src/goal-write.ts"],
+    types = ["src/goal-write.ts"],
+    deps = [
+        ":errors",
+        ":focus",
+        ":goal-model",
+        ":goal-read",
+        ":goal-validation",
+        ":model",
+        ":receipts",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:wire-json",
+    ],
+)
+
+js_library(
+    name = "gtd-report",
+    srcs = ["src/gtd-report.ts"],
+    types = ["src/gtd-report.ts"],
+    deps = [
+        ":errors",
+        ":focus",
+        ":planning",
+        "//packages/task-dates:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:protobuf",
+    ],
+)
+
+alias(
+    name = "gtd",
+    actual = ":cycle_backup_runner",
+)
+
+js_library(
+    name = "history",
+    srcs = ["src/history.ts"],
+    types = ["src/history.ts"],
+    deps = [
+        ":errors",
+        ":model",
+        ":task-read",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:page-token",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+    ],
+)
+
+alias(
+    name = "http",
+    actual = ":cycle_http",
+)
+
+js_library(
+    name = "inbox-routes",
+    srcs = ["src/inbox-routes.ts"],
+    types = ["src/inbox-routes.ts"],
+    deps = [":errors"],
+)
+
+js_library(
+    name = "inbox",
+    srcs = ["src/inbox.ts"],
+    types = ["src/inbox.ts"],
+    deps = [
+        ":env",
+        ":errors",
+        ":inbox-routes",
+        ":receipts",
+        "//proto/tasks/inbox/v1:ts",
+        "//proto/ts:rpc-status",
+        "//proto/ts:wire-json",
+    ],
+)
+
+js_library(
+    name = "index",
+    srcs = ["src/index.ts"],
+    types = ["src/index.ts"],
+    deps = [
+        ":env",
+        ":http",
+        ":inbox",
+        ":jobs",
+        ":ops",
+        ":startup",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+alias(
+    name = "jobs",
+    actual = ":cycle_backup_runner",
+)
+
+alias(
+    name = "mail-proxy",
+    actual = ":cycle_http",
+)
+
+alias(
+    name = "mail",
+    actual = ":cycle_backup_runner",
+)
+
+js_library(
+    name = "model",
+    srcs = ["src/model.ts"],
+    types = ["src/model.ts"],
+    deps = [
+        ":errors",
+        ":planning",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+    ],
+)
+
+js_library(
+    name = "ops",
+    srcs = ["src/ops.ts"],
+    types = ["src/ops.ts"],
+    deps = [
+        ":backup-runner",
+        ":env",
+        ":gtd",
+        ":jobs",
+        "//proto/ops/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+js_library(
+    name = "plan",
+    srcs = ["src/plan.ts"],
+    types = ["src/plan.ts"],
+    deps = [
+        ":errors",
+        ":goal-validation",
+        ":planning",
+        "//packages/task-dates:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:field-mask",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+    ],
+)
+
+js_library(
+    name = "planning",
+    srcs = ["src/planning.ts"],
+    types = ["src/planning.ts"],
+    deps = [
+        ":errors",
+        "//packages/task-dates:lib",
+    ],
+)
+
+js_library(
+    name = "receipts",
+    srcs = ["src/receipts.ts"],
+    types = ["src/receipts.ts"],
+    deps = [
+        ":errors",
+        ":model",
+        "//proto/tasks/inbox/v1:ts",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
+        "//proto/ts:wire-json",
+    ],
+)
+
+alias(
+    name = "review",
+    actual = ":cycle_backup_runner",
+)
+
+alias(
+    name = "schedule",
+    actual = ":cycle_backup_runner",
+)
+
+js_library(
+    name = "startup",
+    srcs = ["src/startup.ts"],
+    types = ["src/startup.ts"],
+    deps = [
+        ":focus",
+        ":goal-model",
+        ":goal-read",
+        ":model",
+        ":planning",
+        ":task-read",
+        "//packages/task-dates:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+js_library(
+    name = "task-copy",
+    srcs = ["src/task-copy.ts"],
+    types = ["src/task-copy.ts"],
+    deps = [
+        ":errors",
+        ":model",
+        ":receipts",
+        ":task-read",
+        ":task-validation",
+        "//packages/task-dates:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:wire-json",
+    ],
+)
+
+js_library(
+    name = "task-dependencies",
+    srcs = ["src/task-dependencies.ts"],
+    types = ["src/task-dependencies.ts"],
+    deps = [
+        ":errors",
+        ":focus",
+        ":model",
+        ":planning",
+    ],
+)
+
+js_library(
+    name = "task-moves",
+    srcs = ["src/task-moves.ts"],
+    types = ["src/task-moves.ts"],
+    deps = [":errors"],
+)
+
+js_library(
+    name = "task-order",
+    srcs = ["src/task-order.ts"],
+    types = ["src/task-order.ts"],
+    deps = [
+        ":errors",
+        ":focus",
+        ":model",
+        ":planning",
+        ":receipts",
+        "//packages/task-dates:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:protobuf",
+    ],
+)
+
+js_library(
+    name = "task-read",
+    srcs = ["src/task-read.ts"],
+    types = ["src/task-read.ts"],
+    deps = [
+        ":errors",
+        ":filters",
+        ":model",
+        "//packages/task-dates:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:page-token",
+        "//proto/ts:protobuf",
+    ],
+)
+
+js_library(
+    name = "task-validation",
+    srcs = ["src/task-validation.ts"],
+    types = ["src/task-validation.ts"],
+    deps = [
+        ":errors",
+        ":model",
+        "//packages/task-dates:lib",
+        "//proto/tasks/ui/v1:ts",
+    ],
+)
+
+js_library(
+    name = "task-write",
+    srcs = ["src/task-write.ts"],
+    types = ["src/task-write.ts"],
+    deps = [
+        ":errors",
+        ":focus",
+        ":focus-timer",
+        ":goal-validation",
+        ":model",
+        ":planning",
+        ":receipts",
+        ":task-dependencies",
+        ":task-moves",
+        ":task-read",
+        ":task-validation",
+        "//packages/task-dates:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:field-mask",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+    ],
+)
+
+proto_vitest_test(
+    name = "filters_test",
+    data = [
+        "package.json",
+        "vitest.config.ts",
+        ":task-dates_link",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/filters.test.ts"],
+    deps = [
+        ":filters",
+    ],
+)
+
+proto_vitest_test(
+    name = "goal-model_test",
+    data = [
+        "package.json",
+        "vitest.config.ts",
+        ":task-dates_link",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/goal-model.test.ts"],
+    deps = [
+        ":goal-model",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:protobuf",
+    ],
+)
+
+proto_vitest_test(
+    name = "mail_test",
+    data = [
+        "package.json",
+        "vitest.config.ts",
+        ":task-dates_link",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/mail.test.ts"],
+    deps = [
+        ":mail",
+        "//proto/todofy/mail/v1:ts",
+        "//proto/ts:protobuf",
+    ],
+)
+
+proto_vitest_test(
+    name = "planning_test",
+    data = [
+        "package.json",
+        "vitest.config.ts",
+        ":task-dates_link",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/planning.test.ts"],
+    deps = [
+        ":planning",
+    ],
+)
+
+proto_vitest_test(
+    name = "receipts_test",
+    data = [
+        "package.json",
+        "vitest.config.ts",
+        ":task-dates_link",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/receipts.test.ts"],
+    deps = [
+        ":receipts",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:wire-json",
+    ],
+)
+
+proto_vitest_test(
+    name = "review_test",
+    data = [
+        "package.json",
+        "vitest.config.ts",
+        ":task-dates_link",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/review.test.ts"],
+    deps = [
+        ":gtd",
+        ":review",
+    ],
+)
+
+proto_vitest_test(
+    name = "startup_test",
+    data = [
+        "package.json",
+        "vitest.config.ts",
+        ":task-dates_link",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/startup.test.ts"],
+    deps = [
+        ":startup",
+    ],
+)
+
+# These modules already import one another; preserve that boundary without changing business code.
+js_library(
+    name = "cycle_backup_runner",
+    srcs = [
+        "src/backup-runner.ts",
+        "src/env.ts",
+        "src/gtd.ts",
+        "src/jobs.ts",
+        "src/mail.ts",
+        "src/review.ts",
+        "src/schedule.ts",
+    ],
+    types = [
+        "src/backup-runner.ts",
+        "src/env.ts",
+        "src/gtd.ts",
+        "src/jobs.ts",
+        "src/mail.ts",
+        "src/review.ts",
+        "src/schedule.ts",
+    ],
+    deps = [
+        ":backup",
+        ":errors",
+        ":inbox-routes",
+        ":model",
+        ":receipts",
+        ":task-read",
+        ":task-write",
+        "//packages/task-dates:lib",
+        "//proto/ops/v1:ts",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/todofy/mail/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+        "//proto/ts:wire-json",
+    ],
+)
+
+# These modules already import one another; preserve that boundary without changing business code.
+js_library(
+    name = "cycle_http",
+    srcs = [
+        "src/http.ts",
+        "src/mail-proxy.ts",
+    ],
+    types = [
+        "src/http.ts",
+        "src/mail-proxy.ts",
+    ],
+    deps = [
+        ":api",
+        ":auth",
+        ":env",
+        "//packages/edge-auth:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:rpc-status",
+        "//tasks/shared:build",
+    ],
+)
+
+workspace_link(
+    name = "task-dates_link",
+    src = "//packages/task-dates:pkg",
+)
+
+js_library(
+    name = "runtime_harness",
+    srcs = glob(
+        ["test/runtime/*.ts"],
+        exclude = [
+            "test/runtime/*.test.ts",
+            "test/runtime/dev-server.ts",
+        ],
+    ),
+    deps = [
+        ":index",
+        ":node_modules/esbuild",
+        ":node_modules/miniflare",
+        ":node_modules/vitest",
+        "//tools/workerd-cpu:lib",
+    ],
+)
+
+proto_package(
+    name = "runtime_proto",
+    deps = [":runtime_harness"],
+)
+
+workspace_link(
+    name = "runtime_proto_link",
+    src = ":runtime_proto",
+)
+
+[
+    vitest_test(
+        name = "runtime_" + test.removeprefix("test/runtime/").removesuffix(".test.ts") + "_test",
+        size = "large",
+        config = "vitest.runtime.config.ts",
+        data = [
+            "package.json",
+            "vitest.runtime.config.ts",
+            ":edge-auth_link",
+            ":runtime_harness",
+            ":runtime_proto_link",
+            ":task-dates_link",
+            "//tasks:migrations",
+        ] + ([
+            ":wrangler",
+            "//tasks/tools:backup_restore",
+            "//tasks:public_config",
+        ] if test.endswith("/backup-runner.test.ts") else []),
+        env = {"BAZEL_WRANGLER": "$(rootpath :wrangler)"} if test.endswith("/backup-runner.test.ts") else {},
+        runner = vitest.vitest_test,
+        tags = ["workerd"] + ([
+            "cpu",
+            "no-cache",
+        ] if test.endswith("/cpu.test.ts") else []),
+        tests = [test],
+    )
+    for test in glob(["test/runtime/*.test.ts"])
+]
+
+workspace_link(
+    name = "edge-auth_link",
+    src = "//packages/edge-auth:pkg",
+)
+
+workspace_package_link(
+    name = "typecheck_proto_link",
+    src = ":runtime_proto",
+    runtime_dependencies = ["@bufbuild/protobuf"],
+)
+
+ts_project(
+    name = "types",
+    srcs = glob([
+        "src/*.ts",
+        "test/*.ts",
+    ]) + [
+        "vitest.config.ts",
+        "vitest.runtime.config.ts",
+    ],
+    no_emit = True,
+    deps = [
+        ":index",
+        ":node_modules/@cloudflare/workers-types",
+        ":node_modules/@ziyixi/edge-auth",
+        ":node_modules/@ziyixi/task-dates",
+        ":node_modules/vitest",
+        ":typecheck_proto_link",
+    ],
+)
+
+alias(
+    name = "typecheck",
+    actual = ":types_typecheck",
+)
+
+wrangler.wrangler_binary(name = "wrangler")
+
+js_library(
+    name = "browser_server",
+    srcs = ["test/runtime/dev-server.ts"],
+    deps = [":runtime_harness"],
+)

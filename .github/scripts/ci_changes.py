@@ -728,7 +728,9 @@ def workspace_reach(paths: list[str], read: Reader | None) -> tuple[list[str], b
 
 
 def classify(paths: Iterable[str], read: Reader | None = None) -> dict[str, bool]:
-    paths = [path for path in paths if path]
+    # Bazel definitions and adapters are checked by the independent Bazel workflow during migration.
+    # They are not production inputs of the legacy builders; an adjacent application change still is.
+    paths = [path for path in paths if path and not bazel_input(path)]
     # Documentation selects nothing but the apps whose tests read it (checks only); everything below sees the rest.
     readers = {app for path in paths if is_documentation(path) for app in document_readers(path)}
     paths = [path for path in paths if not is_documentation(path)]
@@ -790,6 +792,16 @@ def classify(paths: Iterable[str], read: Reader | None = None) -> dict[str, bool
         infra=any(path.startswith((".github/", *INFRA)) for path in paths),
         proto=ci or node_workspace or python_workspace or bool(proto_checked) or any(path.startswith(PROTO_READS) for path in paths),
         extension=node_all or any(path.startswith(EXTENSION) for path in paths),
+    )
+
+
+def bazel_input(path: str) -> bool:
+    return (
+        Path(path).name in {"BUILD", "BUILD.bazel", "MODULE.bazel", "MODULE.bazel.lock", "REPO.bazel",
+                            ".bazelrc", ".bazelversion", ".bazelignore"}
+        or path.endswith(".bzl")
+        or path.startswith(("tools/bazel/", "proto/bazel/", "proto/tools/bazel_"))
+        or path == "proto/tools/schema_golden.py"
     )
 
 

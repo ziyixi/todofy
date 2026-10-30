@@ -1,0 +1,222 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@npm//personal-mcp/worker:vitest/package_json.bzl", vitest = "bin")
+load("//proto/bazel:ts_package.bzl", "proto_package")
+load("//tools/bazel:js.bzl", "proto_vitest_test", "workspace_link", "workspace_package_link")
+
+package(default_visibility = ["//visibility:public"])
+
+npm_link_all_packages(name = "node_modules")
+
+js_library(
+    name = "tasks",
+    srcs = ["src/tasks.ts"],
+    types = ["src/tasks.ts"],
+    deps = ["//proto/tasks/ui/v1:ts", "//proto/ts:http-client", "//proto/ts:wire-json", ":node_modules/@modelcontextprotocol/server", ":node_modules/zod"],
+)
+
+js_library(
+    name = "source-tools",
+    srcs = ["src/source-tools.ts"],
+    types = ["src/source-tools.ts"],
+    deps = ["//proto/ts:http-client", ":node_modules/@modelcontextprotocol/server"],
+)
+
+js_library(
+    name = "recall",
+    srcs = ["src/recall.ts"],
+    types = ["src/recall.ts"],
+    deps = ["//proto/recall/ui/v1:ts", "//proto/ts:http-client", "//proto/ts:wire-json", ":node_modules/@modelcontextprotocol/server", ":node_modules/zod", ":source-tools"],
+)
+
+js_library(
+    name = "content",
+    srcs = ["src/content.ts"],
+    types = ["src/content.ts"],
+    deps = ["//proto/dashboard/mcp/v1:ts", "//proto/tasks/ui/v1:ts", "//proto/todofy/mail/v1:ts", "//proto/ts:http-client", "//proto/ts:wire-json", ":node_modules/@modelcontextprotocol/server", ":node_modules/zod", ":recall", ":source-tools", ":tasks"],
+)
+
+js_library(
+    name = "events",
+    srcs = ["src/events.ts"],
+    types = ["src/events.ts"],
+    deps = ["//proto/todofy/mail/v1:ts", "//proto/ts:wire-json", ":content", ":tasks"],
+)
+
+js_library(
+    name = "work-model",
+    srcs = ["src/work-model.ts"],
+    types = ["src/work-model.ts"],
+    deps = [":node_modules/@modelcontextprotocol/server", ":node_modules/zod"],
+)
+
+js_library(
+    name = "work-read",
+    srcs = ["src/work-read.ts"],
+    types = ["src/work-read.ts"],
+    deps = [":node_modules/zod", ":work-model"],
+)
+
+js_library(
+    name = "work-store",
+    srcs = ["src/work-store.ts"],
+    types = ["src/work-store.ts"],
+    deps = [":node_modules/zod", ":work-model", ":work-read"],
+)
+
+js_library(
+    name = "work-tools",
+    srcs = ["src/work-tools.ts"],
+    types = ["src/work-tools.ts"],
+    deps = [":node_modules/@modelcontextprotocol/server", ":work-model", ":work-store"],
+)
+
+js_library(
+    name = "watch",
+    srcs = ["src/watch.ts"],
+    types = ["src/watch.ts"],
+    deps = ["//proto/ts:http-client", "//proto/ts:wire-json", "//proto/watch/ui/v1:ts", ":node_modules/@modelcontextprotocol/server", ":node_modules/zod", ":source-tools", ":work-model", ":work-store"],
+)
+
+js_library(
+    name = "server",
+    srcs = ["src/server.ts"],
+    types = ["src/server.ts"],
+    deps = [":content", ":events", ":node_modules/@modelcontextprotocol/server", ":node_modules/zod", ":tasks", ":watch", ":work-store", ":work-tools"],
+)
+
+js_library(
+    name = "webhook",
+    srcs = ["src/webhook.ts"],
+    types = ["src/webhook.ts"],
+    deps = ["//packages/edge-auth:lib", ":node_modules/@modelcontextprotocol/server", ":node_modules/standardwebhooks"],
+)
+
+js_library(
+    name = "backup",
+    srcs = ["src/backup.ts"],
+    types = ["src/backup.ts"],
+    deps = ["//proto/ops/v1:ts"],
+)
+
+js_library(
+    name = "watch-events",
+    srcs = ["src/watch-events.ts"],
+    types = ["src/watch-events.ts"],
+    deps = ["//proto/ts:http-client", "//proto/ts:wire-json", "//proto/watch/ui/v1:ts", ":events", ":watch", ":work-store"],
+)
+
+js_library(
+    name = "restore",
+    srcs = ["src/restore.ts"],
+    types = ["src/restore.ts"],
+    deps = [":backup", ":events"],
+)
+
+js_library(
+    name = "module_group_15",
+    srcs = ["src/auth.ts", "src/env.ts", "src/ops.ts", "src/store.ts"],
+    types = ["src/auth.ts", "src/env.ts", "src/ops.ts", "src/store.ts"],
+    deps = ["//packages/edge-auth:lib", "//proto/ops/v1:ts", "//proto/ts:http-client", "//proto/ts:protobuf", "//proto/ts:wire-json", ":backup", ":content", ":events", ":node_modules/@modelcontextprotocol/server", ":restore", ":server", ":watch", ":watch-events", ":webhook", ":work-store"],
+)
+
+alias(name = "auth", actual = ":module_group_15")
+alias(name = "env", actual = ":module_group_15")
+alias(name = "ops", actual = ":module_group_15")
+alias(name = "store", actual = ":module_group_15")
+js_library(
+    name = "index",
+    srcs = ["src/index.ts"],
+    types = ["src/index.ts"],
+    deps = [":module_group_15"],
+)
+
+js_library(name = "lib", deps = [":backup", ":content", ":events", ":index", ":module_group_15", ":recall", ":restore", ":server", ":source-tools", ":tasks", ":watch", ":watch-events", ":webhook", ":work-model", ":work-read", ":work-store", ":work-tools"])
+
+proto_package(name = "proto_types_package", deps = ["//proto/dashboard/mcp/v1:ts", "//proto/ops/v1:ts", "//proto/recall/ui/v1:ts", "//proto/tasks/ui/v1:ts", "//proto/todofy/mail/v1:ts", "//proto/ts:http-client", "//proto/ts:protobuf", "//proto/ts:wire-json", "//proto/watch/ui/v1:ts", ":lib"])
+workspace_package_link(name = "proto_types_link", src = ":proto_types_package", runtime_dependencies = ["@bufbuild/protobuf"])
+workspace_package_link(name = "edge_auth_types_link", src = "//packages/edge-auth:pkg")
+workspace_link(name = "auth_test_edge_auth_link", src = "//packages/edge-auth:pkg")
+proto_vitest_test(
+    name = "auth_test",
+    runner = vitest.vitest_test,
+    tests = ["test/auth.test.ts"],
+    deps = [":module_group_15"],
+    data = [":auth_test_edge_auth_link", ":node_modules/vitest", "package.json"],
+)
+
+proto_vitest_test(
+    name = "backup_test",
+    runner = vitest.vitest_test,
+    tests = ["test/backup.test.ts"],
+    deps = ["//proto/ops/v1:ts", ":backup"],
+    data = [":node_modules/vitest", "package.json"],
+)
+
+proto_vitest_test(
+    name = "content_test",
+    runner = vitest.vitest_test,
+    tests = ["test/content.test.ts"],
+    deps = ["//proto/dashboard/mcp/v1:ts", ":content"],
+    data = [":node_modules/@modelcontextprotocol/server", ":node_modules/vitest", "package.json"],
+)
+
+proto_vitest_test(
+    name = "events_test",
+    runner = vitest.vitest_test,
+    tests = ["test/events.test.ts"],
+    deps = ["//proto/dashboard/mcp/v1:ts", ":events"],
+    data = [":node_modules/vitest", "package.json"],
+)
+
+proto_vitest_test(
+    name = "tasks_test",
+    runner = vitest.vitest_test,
+    tests = ["test/tasks.test.ts"],
+    deps = [":tasks"],
+    data = [":node_modules/@modelcontextprotocol/server", ":node_modules/vitest", "package.json"],
+)
+
+proto_vitest_test(
+    name = "watch-events_test",
+    runner = vitest.vitest_test,
+    tests = ["test/watch-events.test.ts"],
+    deps = [":server", ":watch", ":watch-events", ":work-model", ":work-store"],
+    data = [":node_modules/vitest", "package.json"],
+)
+
+proto_vitest_test(
+    name = "watch_test",
+    runner = vitest.vitest_test,
+    tests = ["test/watch.test.ts"],
+    deps = [":watch", ":work-model", ":work-store"],
+    data = [":node_modules/@modelcontextprotocol/server", ":node_modules/vitest", "package.json"],
+)
+
+workspace_link(name = "webhook_test_edge_auth_link", src = "//packages/edge-auth:pkg")
+proto_vitest_test(
+    name = "webhook_test",
+    runner = vitest.vitest_test,
+    tests = ["test/webhook.test.ts"],
+    deps = [":webhook"],
+    data = ["//personal-mcp:config", ":node_modules/standardwebhooks", ":node_modules/vitest", ":webhook_test_edge_auth_link", "package.json"],
+)
+
+proto_vitest_test(
+    name = "work_test",
+    runner = vitest.vitest_test,
+    tests = ["test/work.test.ts"],
+    deps = [":work-model", ":work-store", ":work-tools"],
+    data = [":node_modules/@modelcontextprotocol/server", ":node_modules/vitest", "package.json"],
+)
+
+ts_project(
+    name = "types",
+    srcs = ["src/auth.ts", "src/backup.ts", "src/content.ts", "src/env.ts", "src/events.ts", "src/index.ts", "src/ops.ts", "src/recall.ts", "src/restore.ts", "src/server.ts", "src/source-tools.ts", "src/store.ts", "src/tasks.ts", "src/watch-events.ts", "src/watch.ts", "src/webhook.ts", "src/work-model.ts", "src/work-read.ts", "src/work-store.ts", "src/work-tools.ts", "test/auth.test.ts", "test/backup.test.ts", "test/content.test.ts", "test/events.test.ts", "test/tasks.test.ts", "test/watch-events.test.ts", "test/watch.test.ts", "test/webhook.test.ts", "test/work.test.ts", "vitest.config.ts", "vitest.runtime.config.ts"],
+    no_emit = True,
+    data = ["vitest.config.ts", "vitest.runtime.config.ts"],
+    deps = [":edge_auth_types_link", ":lib", ":node_modules/@cloudflare/workers-types", ":node_modules/@modelcontextprotocol/server", ":node_modules/@types/node", ":node_modules/standardwebhooks", ":node_modules/vitest", ":node_modules/zod", ":proto_types_link"],
+)
+
+alias(name = "typecheck", actual = ":types_typecheck")

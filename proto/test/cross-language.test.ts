@@ -63,7 +63,10 @@ const SCHEMAS = {
 /** ops-v1's inputs, read strictly; its outputs are read leniently. */
 const OPS_INPUTS = new Set(['SetGuardInput', 'StartCanaryInput']);
 // npm run test:python uses the same interpreter (todofy-core's Python); PROTO_TEST_PYTHON overrides it.
-const PYTHON = (process.env['PROTO_TEST_PYTHON'] ?? 'uv run --no-project --python 3.14 python').split(' ');
+const ROUNDTRIP = process.env['PROTO_TEST_ROUNDTRIP'];
+const PYTHON = ROUNDTRIP
+  ? [join(import.meta.dirname, ROUNDTRIP)]
+  : (process.env['PROTO_TEST_PYTHON'] ?? 'uv run --no-project --python 3.14 python').split(' ');
 
 /** TypeScript's read and write of `text`: the compact bytes, or null when the read throws. */
 function viaTypeScript(message: Name, text: string, strict: boolean): string | null {

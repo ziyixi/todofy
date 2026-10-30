@@ -14,6 +14,7 @@ import { nextNativeBackupAt } from '../src/native/native-backup-runner.ts';
 import { injectedVars } from '../../deploy/deploy-vars.mjs';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
+const python = process.env.MAILHERO_TEST_PYTHON ? resolve(root, '../..', process.env.MAILHERO_TEST_PYTHON) : 'python3';
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 test('daily UTC schedule rolls forward without a timer or local-time dependence', () => {
   assert.equal(new Date(nextNativeBackupAt(Date.parse('2026-10-03T04:16:59Z'))).toISOString(), '2026-10-03T04:17:00.000Z');
@@ -304,7 +305,7 @@ test('actual native snapshot restores through the Python bridge with frozen byte
       objects: entries.sort((a, b) => a.key.localeCompare(b.key)), latest_deletions: { bytes: journal.length, sha256: hash(journal) } }));
     await writeFile(join(bundle, 'receipt.json'), receipt, { mode: 0o600 });
     const destination = join(temporary, 'restored');
-    const recovered = JSON.parse(execFileSync('python3', [join(root, '../deploy/backup/native_backup.py'), 'restore',
+    const recovered = JSON.parse(execFileSync(python, [join(root, '../deploy/backup/native_backup.py'), 'restore',
       '--bundle', bundle, '--receipt-sha256', hash(receipt), '--latest-deletions', journalPath, '--destination', destination], { encoding: 'utf8' }));
     assert.equal(recovered.state, 'isolated_requires_reconciliation');
     assert.equal(recovered.native_format_version, 2);
@@ -318,7 +319,7 @@ test('actual native snapshot restores through the Python bridge with frozen byte
     assert.deepEqual(await readFile(join(destination, payload.path)), source.payload);
     assert.equal(raw.customMetadata.mode, 'archive');
     assert.equal(raw.httpMetadata.contentType, 'message/rfc822');
-    const restoredDB = JSON.parse(execFileSync('python3', ['-c', `
+    const restoredDB = JSON.parse(execFileSync(python, ['-c', `
 import json, sqlite3, sys
 with sqlite3.connect(sys.argv[1]) as db:
     print(json.dumps({

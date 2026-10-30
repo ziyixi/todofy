@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-PROTO = Path(__file__).resolve().parents[2]
+PROTO = Path(__file__).absolute().parents[2]
 REPO = PROTO.parent
 # Shared with test/wire-profile-cases.test.ts: both codecs, same verdicts and bytes.
 CASES_FILE = PROTO / "testdata" / "wire-profile-cases.json"

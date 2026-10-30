@@ -1465,6 +1465,16 @@ class RealGit(unittest.TestCase):
         self.assertEqual(self.main_run(unrelated, ""), expected)
 
 
+def source_files(pattern):
+    """Inspect repository source, excluding dependency installs and Bazel's output symlinks."""
+    for directory in REPO.iterdir():
+        if directory.is_symlink() or not directory.is_dir() or directory.name in {"node_modules", ".venv"}:
+            continue
+        for source in directory.glob(pattern.removeprefix("*/")):
+            if "node_modules" not in source.relative_to(REPO).parts:
+                yield source
+
+
 class PackageUsers(unittest.TestCase):
     """PACKAGE_USERS must match the repository: every packages/<name>/ directory is registered, and each
     lists exactly the apps with a workspace dependency on it (a missing app would never be redeployed)."""
@@ -1475,7 +1485,7 @@ class PackageUsers(unittest.TestCase):
             json.loads(manifest.read_text())["name"]: manifest.parent.name
             for manifest in (REPO / "packages").glob("*/package.json")
         }
-        for manifest in REPO.glob("*/**/package.json"):
+        for manifest in source_files("*/**/package.json"):
             relative = manifest.relative_to(REPO)
             if "node_modules" in relative.parts or relative.parts[0] == "packages":
                 continue
@@ -1488,7 +1498,7 @@ class PackageUsers(unittest.TestCase):
             tomllib.loads(manifest.read_text())["project"]["name"]: manifest.parents[1].name
             for manifest in (REPO / "packages").glob("*/python/pyproject.toml")
         }
-        for manifest in REPO.glob("*/pyproject.toml"):
+        for manifest in source_files("*/pyproject.toml"):
             if manifest.parent.name in {"proto", "packages"}:
                 continue
             for dependency in tomllib.loads(manifest.read_text()).get("project", {}).get("dependencies", []):
@@ -1517,7 +1527,7 @@ class PackageUsers(unittest.TestCase):
         added to APPS, or its changes would run nothing."""
         tops = {
             manifest.relative_to(REPO).parts[0]
-            for manifest in REPO.glob("*/**/package.json")
+            for manifest in source_files("*/**/package.json")
             if "node_modules" not in manifest.parts
         }
         catalog = ci_changes.load_catalog(REPO)
@@ -1534,6 +1544,12 @@ class ToolsTests(unittest.TestCase):
     def test_the_changes_job_runs_every_tools_own_tests(self):
         changes = workflow_jobs()["changes"]
         for test_dir in sorted((REPO / "tools").glob("*/test")):
+            if test_dir.parent.name == "bazel":
+                # These run in declared Bazel toolchains, rather than the Changes job's host Node.
+                planner = (REPO / "tools/bazel/ci/plan.py").read_text()
+                self.assertIn("//tools/bazel/...", planner)
+                self.assertIn("python3 tools/bazel/ci/run.py", (REPO / ".github/workflows/bazel.yml").read_text())
+                continue
             kinds = sorted({path.name.split(".test.", 1)[1] for path in test_dir.glob("*.test.*")})
             for kind in kinds:
                 with self.subTest(tool=test_dir.parent.name, kind=kind):
@@ -3517,7 +3533,7 @@ class HostnameGuard(unittest.TestCase):
     def test_every_production_config_with_routes_is_guarded(self):
         text = effective_ci()
         release = (REPO / ".github" / "workflows" / "website-release.yml").read_text()
-        for config in sorted(REPO.glob("*/**/wrangler.toml")):
+        for config in sorted(source_files("*/**/wrangler.toml")):
             relative = config.relative_to(REPO).as_posix()
             if "node_modules" in relative or not self.has_routes(relative):
                 continue

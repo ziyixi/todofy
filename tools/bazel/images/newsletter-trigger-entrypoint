@@ -1,0 +1,4 @@
+#!/opt/newsletter/.venv/bin/python
+from newsletter.trigger import main
+
+raise SystemExit(main())

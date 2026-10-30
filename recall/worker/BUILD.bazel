@@ -1,0 +1,346 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@npm//recall/worker:vitest/package_json.bzl", vitest = "bin")
+load("//proto/bazel:ts_package.bzl", "proto_package")
+load("//tools/bazel:js.bzl", "proto_vitest_test", "workspace_link", "workspace_package_link")
+
+package(default_visibility = ["//visibility:public"])
+
+npm_link_all_packages(name = "node_modules")
+
+js_library(
+    name = "reasons",
+    srcs = ["src/reasons.ts"],
+    types = ["src/reasons.ts"],
+    deps = ["//proto/common/errors/v1:ts", "//proto/recall/ui/v1:ts", "//proto/ts:rpc-status"],
+)
+
+js_library(
+    name = "answers",
+    srcs = ["src/answers.ts"],
+    types = ["src/answers.ts"],
+    deps = ["//proto/ts:rpc-status", ":reasons"],
+)
+
+js_library(
+    name = "blobs",
+    srcs = ["src/blobs.ts"],
+    types = ["src/blobs.ts"],
+    deps = [],
+)
+
+js_library(
+    name = "limits",
+    srcs = ["src/limits.ts"],
+    types = ["src/limits.ts"],
+    deps = [],
+)
+
+js_library(
+    name = "store",
+    srcs = ["src/store.ts"],
+    types = ["src/store.ts"],
+    deps = [":limits"],
+)
+
+js_library(
+    name = "feed",
+    srcs = ["src/feed.ts"],
+    types = ["src/feed.ts"],
+    deps = ["//proto/recall/archive/v1:ts", "//proto/ts:protobuf", "//proto/ts:protobuf-wkt", "//proto/ts:wire-json", ":answers", ":blobs", ":limits", ":store"],
+)
+
+js_library(
+    name = "archive",
+    srcs = ["src/archive.ts"],
+    types = ["src/archive.ts"],
+    deps = ["//proto/recall/archive/v1:ts", "//proto/ts:protobuf", "//proto/ts:protobuf-wkt", "//proto/ts:wire-json", ":feed", ":limits", ":store"],
+)
+
+js_library(
+    name = "screenshot",
+    srcs = ["src/screenshot.ts"],
+    types = ["src/screenshot.ts"],
+    deps = ["//recall/shared:url"],
+)
+
+js_library(
+    name = "dropbox",
+    srcs = ["src/dropbox.ts"],
+    types = ["src/dropbox.ts"],
+    deps = [":blobs", ":limits"],
+)
+
+js_library(
+    name = "model",
+    srcs = ["src/model.ts"],
+    types = ["src/model.ts"],
+    deps = ["//proto/recall/ui/v1:ts", "//proto/ts:protobuf", "//proto/ts:protobuf-wkt", ":blobs", ":feed", ":limits", ":store"],
+)
+
+js_library(
+    name = "backup",
+    srcs = ["src/backup.ts"],
+    types = ["src/backup.ts"],
+    deps = ["//packages/edge-auth:lib", "//proto/recall/ui/v1:ts", "//proto/ts:protobuf", ":archive", ":blobs", ":dropbox", ":feed", ":limits", ":model", ":store"],
+)
+
+js_library(
+    name = "fts",
+    srcs = ["src/fts.ts"],
+    types = ["src/fts.ts"],
+    deps = ["//recall/shared:segment", "//recall/shared:url", ":limits", ":store"],
+)
+
+js_library(
+    name = "ids",
+    srcs = ["src/ids.ts"],
+    types = ["src/ids.ts"],
+    deps = [],
+)
+
+js_library(
+    name = "settings",
+    srcs = ["src/settings.ts"],
+    types = ["src/settings.ts"],
+    deps = ["//recall/shared:denylist", ":ids", ":limits", ":store"],
+)
+
+js_library(
+    name = "retention",
+    srcs = ["src/retention.ts"],
+    types = ["src/retention.ts"],
+    deps = [":backup", ":blobs", ":fts", ":limits", ":settings", ":store"],
+)
+
+js_library(
+    name = "search",
+    srcs = ["src/search.ts"],
+    types = ["src/search.ts"],
+    deps = ["//recall/shared:segment", ":limits", ":store"],
+)
+
+js_library(
+    name = "diagnostic",
+    srcs = ["src/diagnostic.ts"],
+    types = ["src/diagnostic.ts"],
+    deps = ["//proto/recall/ingest/v1:ts", "//proto/recall/ui/v1:ts", "//proto/ts:protobuf", "//proto/ts:protobuf-wkt", "//proto/ts:wire-json", ":store"],
+)
+
+js_library(
+    name = "tokens",
+    srcs = ["src/tokens.ts"],
+    types = ["src/tokens.ts"],
+    deps = ["//proto/recall/ui/v1:ts", "//proto/ts:protobuf", ":blobs", ":limits", ":model", ":store"],
+)
+
+js_library(
+    name = "status",
+    srcs = ["src/status.ts"],
+    types = ["src/status.ts"],
+    deps = ["//proto/recall/ui/v1:ts", "//proto/ts:protobuf", ":backup", ":diagnostic", ":feed", ":limits", ":model", ":settings", ":store", ":tokens"],
+)
+
+js_library(
+    name = "timeline",
+    srcs = ["src/timeline.ts"],
+    types = ["src/timeline.ts"],
+    deps = [":limits", ":store"],
+)
+
+js_library(
+    name = "api",
+    srcs = ["src/api.ts"],
+    types = ["src/api.ts"],
+    deps = ["//proto/recall/ui/v1:ts", "//proto/ts:field-mask", "//proto/ts:filter", "//proto/ts:http-transcoder", "//proto/ts:page-token", "//proto/ts:protobuf", "//proto/ts:protobuf-wkt", "//proto/ts:wire-json", "//recall/shared:denylist", "//recall/shared:url", ":archive", ":backup", ":blobs", ":dropbox", ":limits", ":model", ":reasons", ":retention", ":screenshot", ":search", ":settings", ":status", ":store", ":timeline", ":tokens"],
+)
+
+js_library(
+    name = "ingest",
+    srcs = ["src/ingest.ts"],
+    types = ["src/ingest.ts"],
+    deps = ["//proto/recall/archive/v1:ts", "//proto/recall/ingest/v1:ts", "//proto/ts:protobuf", "//proto/ts:protobuf-wkt", "//proto/ts:wire-json", "//recall/shared:denylist", "//recall/shared:scrub", "//recall/shared:url", ":answers", ":blobs", ":diagnostic", ":feed", ":fts", ":limits", ":screenshot", ":settings", ":store"],
+)
+
+js_library(
+    name = "ops-status",
+    srcs = ["src/ops-status.ts"],
+    types = ["src/ops-status.ts"],
+    deps = ["//proto/ops/v1:ts", "//proto/ts:protobuf", "//proto/ts:wire-json", ":backup", ":ingest", ":limits", ":status", ":store"],
+)
+
+js_library(
+    name = "module_group_23",
+    srcs = ["src/env.ts", "src/state.ts"],
+    types = ["src/env.ts", "src/state.ts"],
+    deps = ["//proto/ops/v1:ts", "//proto/recall/ui/v1:ts", "//proto/ts:http-transcoder", "//proto/ts:rpc-status", "//recall/shared:denylist", ":answers", ":api", ":archive", ":backup", ":blobs", ":dropbox", ":feed", ":ingest", ":limits", ":ops-status", ":reasons", ":retention", ":search", ":store", ":tokens"],
+)
+
+alias(name = "env", actual = ":module_group_23")
+alias(name = "state", actual = ":module_group_23")
+js_library(
+    name = "auth",
+    srcs = ["src/auth.ts"],
+    types = ["src/auth.ts"],
+    deps = ["//packages/edge-auth:lib", ":module_group_23"],
+)
+
+js_library(
+    name = "machine",
+    srcs = ["src/machine.ts"],
+    types = ["src/machine.ts"],
+    deps = ["//packages/edge-auth:lib", ":answers", ":blobs", ":limits", ":module_group_23", ":tokens"],
+)
+
+js_library(
+    name = "http",
+    srcs = ["src/http.ts"],
+    types = ["src/http.ts"],
+    deps = ["//packages/edge-auth:lib", "//proto/ts:rpc-status", ":answers", ":auth", ":backup", ":ids", ":limits", ":machine", ":module_group_23", ":reasons"],
+)
+
+js_library(
+    name = "ops",
+    srcs = ["src/ops.ts"],
+    types = ["src/ops.ts"],
+    deps = ["//proto/ops/v1:ts", ":module_group_23"],
+)
+
+js_library(
+    name = "service",
+    srcs = ["src/service.ts"],
+    types = ["src/service.ts"],
+    deps = ["//packages/edge-auth:lib", "//proto/ts:rpc-status", ":ids", ":module_group_23", ":reasons"],
+)
+
+js_library(
+    name = "index",
+    srcs = ["src/index.ts"],
+    types = ["src/index.ts"],
+    deps = [":http", ":module_group_23", ":ops", ":service"],
+)
+
+js_library(name = "lib", deps = [":answers", ":api", ":archive", ":auth", ":backup", ":blobs", ":diagnostic", ":dropbox", ":feed", ":fts", ":http", ":ids", ":index", ":ingest", ":limits", ":machine", ":model", ":module_group_23", ":ops", ":ops-status", ":reasons", ":retention", ":screenshot", ":search", ":service", ":settings", ":status", ":store", ":timeline", ":tokens"])
+
+proto_package(name = "proto_types_package", deps = ["//proto/common/errors/v1:ts", "//proto/ops/v1:ts", "//proto/recall/archive/v1:ts", "//proto/recall/ingest/v1:ts", "//proto/recall/ui/v1:ts", "//proto/ts:field-mask", "//proto/ts:filter", "//proto/ts:http-transcoder", "//proto/ts:page-token", "//proto/ts:protobuf", "//proto/ts:protobuf-wkt", "//proto/ts:rpc-status", "//proto/ts:wire-json", ":lib"])
+workspace_package_link(name = "proto_types_link", src = ":proto_types_package", runtime_dependencies = ["@bufbuild/protobuf"])
+workspace_package_link(name = "edge_auth_types_link", src = "//packages/edge-auth:pkg")
+workspace_link(name = "api-tokens_test_edge_auth_link", src = "//packages/edge-auth:pkg")
+proto_vitest_test(
+    name = "api-tokens_test",
+    runner = vitest.vitest_test,
+    tests = ["test/api-tokens.test.ts"],
+    deps = ["//proto/recall/ui/v1:ts", "//proto/ts:protobuf", ":api", ":store", ":tokens"],
+    data = [":api-tokens_test_edge_auth_link", ":node_modules/vitest", "package.json", "test/sqlite.ts"],
+)
+
+proto_vitest_test(
+    name = "archive_test",
+    runner = vitest.vitest_test,
+    tests = ["test/archive.test.ts"],
+    deps = [":archive", ":store"],
+    data = ["//contracts:recall-archive-v1/fixtures/ArchiveState/synced.json_data", "//contracts:recall-archive-v1/fixtures/Change/document.json_data", "//contracts:recall-archive-v1/fixtures/Change/tombstone.json_data", "//contracts:recall-archive-v1/fixtures/Change/visit.json_data", "//contracts:recall-archive-v1/fixtures/ChangePage/caught-up.json_data", "//contracts:recall-archive-v1/fixtures/ChangePage/first-page.json_data", "//contracts:recall-archive-v1/fixtures/archive/VERSION_data", "//contracts:recall-archive-v1/fixtures/archive/blobs/2026/10/7c2e9f41-3b6a-4d5e-8f10-2a9b4c6d8e01.txt.gz_data", "//contracts:recall-archive-v1/fixtures/archive/changes/2026/10/10.jsonl_data", "//contracts:recall-archive-v1/fixtures/archive/state.json_data", "//contracts:recall-archive-v1/fixtures/future/Change/star.json_data", "//contracts:recall-archive-v1/fixtures/future/blobs/2026/11/0d1e2f3a-4b5c-4d6e-8f70-819203a4b5c6.html.gz_data", "//contracts:recall-archive-v1/fixtures/invalid/ArchiveState/negative-seq.json_data", "//contracts:recall-archive-v1/fixtures/invalid/ArchiveState/without-feed-id.json_data", "//contracts:recall-archive-v1/fixtures/invalid/Change/blob-other-encoding.json_data", "//contracts:recall-archive-v1/fixtures/invalid/Change/blob-path-traversal.json_data", "//contracts:recall-archive-v1/fixtures/invalid/Change/sha256-upper-case.json_data", "//contracts:recall-archive-v1/fixtures/invalid/Change/tombstone-bad-target.json_data", "//contracts:recall-archive-v1/fixtures/invalid/Change/visit-non-http-url.json_data", "//contracts:recall-archive-v1/fixtures/invalid/Change/visit-with-blob.json_data", "//contracts:recall-archive-v1/fixtures/invalid/Change/visit-without-body.json_data", "//contracts:recall-archive-v1/fixtures/invalid/Change/visit-without-page-id.json_data", "//contracts:recall-archive-v1/fixtures/invalid/ChangePage/other-version.json_data", "//contracts:recall-archive-v1/fixtures/invalid/ChangePage/without-feed-id.json_data", ":node_modules/vitest", "package.json", "test/sqlite.ts"],
+)
+
+proto_vitest_test(
+    name = "denylist_test",
+    runner = vitest.vitest_test,
+    tests = ["test/denylist.test.ts"],
+    deps = ["//recall/shared:denylist"],
+    data = [":node_modules/vitest", "package.json"],
+)
+
+proto_vitest_test(
+    name = "devices_test",
+    runner = vitest.vitest_test,
+    tests = ["test/devices.test.ts"],
+    deps = [":store"],
+    data = [":node_modules/vitest", "package.json", "test/sqlite.ts"],
+)
+
+proto_vitest_test(
+    name = "dropbox_test",
+    runner = vitest.vitest_test,
+    tests = ["test/dropbox.test.ts"],
+    deps = [":dropbox"],
+    data = [":node_modules/vitest", "package.json"],
+)
+
+proto_vitest_test(
+    name = "feed_test",
+    runner = vitest.vitest_test,
+    tests = ["test/feed.test.ts"],
+    deps = ["//proto/recall/archive/v1:ts", "//proto/ts:protobuf", "//proto/ts:wire-json", ":blobs", ":feed", ":store"],
+    data = ["//contracts:recall-archive-v1/fixtures/ArchiveState/synced.json_data", "//contracts:recall-archive-v1/fixtures/Change/document.json_data", "//contracts:recall-archive-v1/fixtures/Change/tombstone.json_data", "//contracts:recall-archive-v1/fixtures/Change/visit.json_data", "//contracts:recall-archive-v1/fixtures/ChangePage/caught-up.json_data", "//contracts:recall-archive-v1/fixtures/ChangePage/first-page.json_data", "//contracts:recall-archive-v1/fixtures/archive/VERSION_data", "//contracts:recall-archive-v1/fixtures/archive/blobs/2026/10/7c2e9f41-3b6a-4d5e-8f10-2a9b4c6d8e01.txt.gz_data", "//contracts:recall-archive-v1/fixtures/archive/changes/2026/10/10.jsonl_data", "//contracts:recall-archive-v1/fixtures/archive/state.json_data", "//contracts:recall-archive-v1/fixtures/future/Change/star.json_data", "//contracts:recall-archive-v1/fixtures/future/blobs/2026/11/0d1e2f3a-4b5c-4d6e-8f70-819203a4b5c6.html.gz_data", "//contracts:recall-archive-v1/fixtures/invalid/ArchiveState/negative-seq.json_data", "//contracts:recall-archive-v1/fixtures/invalid/ArchiveState/without-feed-id.json_data", "//contracts:recall-archive-v1/fixtures/invalid/Change/blob-other-encoding.json_data", "//contracts:recall-archive-v1/fixtures/invalid/Change/blob-path-traversal.json_data", "//contracts:recall-archive-v1/fixtures/invalid/Change/sha256-upper-case.json_data", "//contracts:recall-archive-v1/fixtures/invalid/Change/tombstone-bad-target.json_data", "//contracts:recall-archive-v1/fixtures/invalid/Change/visit-non-http-url.json_data", "//contracts:recall-archive-v1/fixtures/invalid/Change/visit-with-blob.json_data", "//contracts:recall-archive-v1/fixtures/invalid/Change/visit-without-body.json_data", "//contracts:recall-archive-v1/fixtures/invalid/Change/visit-without-page-id.json_data", "//contracts:recall-archive-v1/fixtures/invalid/ChangePage/other-version.json_data", "//contracts:recall-archive-v1/fixtures/invalid/ChangePage/without-feed-id.json_data", ":node_modules/vitest", "package.json"],
+)
+
+workspace_link(name = "ops-golden_test_edge_auth_link", src = "//packages/edge-auth:pkg")
+proto_vitest_test(
+    name = "ops-golden_test",
+    runner = vitest.vitest_test,
+    tests = ["test/ops-golden.test.ts"],
+    deps = ["//contracts:ops-v1/validate", ":limits", ":ops-status", ":store"],
+    data = ["test/golden/ops-v1.json", "//contracts:ops-v1/fixtures/OpsStatus/recall-degraded.json_data", "//contracts:ops-v1/fixtures/OpsStatus/recall-ok.json_data", "//contracts:ops-v1/ops-v1.schema.json_data", ":node_modules/vitest", ":ops-golden_test_edge_auth_link", "package.json", "test/sqlite.ts"],
+)
+
+workspace_link(name = "retention_test_edge_auth_link", src = "//packages/edge-auth:pkg")
+proto_vitest_test(
+    name = "retention_test",
+    runner = vitest.vitest_test,
+    tests = ["test/retention.test.ts"],
+    deps = [":fts", ":limits", ":retention", ":settings", ":store"],
+    data = [":node_modules/vitest", ":retention_test_edge_auth_link", "package.json", "test/sqlite.ts"],
+)
+
+proto_vitest_test(
+    name = "screenshot_test",
+    runner = vitest.vitest_test,
+    tests = ["test/screenshot.test.ts"],
+    deps = ["//recall/shared:url", ":screenshot"],
+    data = ["test/fixtures/screenshot-1x1.jpg", ":node_modules/vitest", "package.json"],
+)
+
+proto_vitest_test(
+    name = "scrub_test",
+    runner = vitest.vitest_test,
+    tests = ["test/scrub.test.ts"],
+    deps = ["//recall/shared:scrub"],
+    data = [":node_modules/vitest", "package.json"],
+)
+
+proto_vitest_test(
+    name = "search_test",
+    runner = vitest.vitest_test,
+    tests = ["test/search.test.ts"],
+    deps = ["//recall/shared:segment", ":search"],
+    data = [":node_modules/vitest", "package.json"],
+)
+
+workspace_link(name = "tokens_test_edge_auth_link", src = "//packages/edge-auth:pkg")
+proto_vitest_test(
+    name = "tokens_test",
+    runner = vitest.vitest_test,
+    tests = ["test/tokens.test.ts"],
+    deps = [":limits", ":machine", ":module_group_23", ":store", ":tokens"],
+    data = [":node_modules/vitest", ":tokens_test_edge_auth_link", "package.json", "test/sqlite.ts"],
+)
+
+proto_vitest_test(
+    name = "url_test",
+    runner = vitest.vitest_test,
+    tests = ["test/url.test.ts"],
+    deps = ["//recall/shared:url"],
+    data = [":node_modules/vitest", "package.json"],
+)
+
+ts_project(
+    name = "types",
+    srcs = ["src/answers.ts", "src/api.ts", "src/archive.ts", "src/auth.ts", "src/backup.ts", "src/blobs.ts", "src/diagnostic.ts", "src/dropbox.ts", "src/env.ts", "src/feed.ts", "src/fts.ts", "src/http.ts", "src/ids.ts", "src/index.ts", "src/ingest.ts", "src/limits.ts", "src/machine.ts", "src/model.ts", "src/ops-status.ts", "src/ops.ts", "src/reasons.ts", "src/retention.ts", "src/screenshot.ts", "src/search.ts", "src/service.ts", "src/settings.ts", "src/state.ts", "src/status.ts", "src/store.ts", "src/timeline.ts", "src/tokens.ts", "test/api-tokens.test.ts", "test/archive.test.ts", "test/denylist.test.ts", "test/devices.test.ts", "test/dropbox.test.ts", "test/feed.test.ts", "test/golden/ops-v1.json", "test/jwt.ts", "test/ops-golden.test.ts", "test/retention.test.ts", "test/screenshot.test.ts", "test/scrub.test.ts", "test/search.test.ts", "test/smoke/tsconfig.json", "test/sqlite.ts", "test/tokens.test.ts", "test/url.test.ts", "test/validate.d.ts", "vitest.config.ts", "vitest.runtime.config.ts"],
+    no_emit = True,
+    resolve_json_module = True,
+    data = ["vitest.config.ts", "vitest.runtime.config.ts"],
+    deps = ["//contracts:ops-v1/validate", "//recall/shared:denylist", "//recall/shared:scrub", "//recall/shared:segment", "//recall/shared:url", ":edge_auth_types_link", ":lib", ":node_modules/@cloudflare/workers-types", ":node_modules/@types/node", ":node_modules/vitest", ":proto_types_link"],
+)
+
+alias(name = "typecheck", actual = ":types_typecheck")

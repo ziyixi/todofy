@@ -1,0 +1,184 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@npm//todofy/gateway:vitest/package_json.bzl", vitest = "bin")
+load("//proto/bazel:ts_package.bzl", "proto_package")
+load("//tools/bazel:js.bzl", "proto_vitest_test", "workspace_link", "workspace_package_link")
+
+package(default_visibility = ["//visibility:public"])
+
+npm_link_all_packages(name = "node_modules")
+
+js_library(
+    name = "module_group_0",
+    srcs = ["src/coordinator.ts", "src/env.ts", "src/http.ts"],
+    types = ["src/coordinator.ts", "src/env.ts", "src/http.ts"],
+    deps = ["//packages/edge-auth:lib", "//proto/ops/v1:ts"],
+)
+
+alias(name = "coordinator", actual = ":module_group_0")
+alias(name = "env", actual = ":module_group_0")
+alias(name = "http", actual = ":module_group_0")
+js_library(
+    name = "access",
+    srcs = ["src/access.ts"],
+    types = ["src/access.ts"],
+    deps = ["//packages/edge-auth:lib", ":module_group_0"],
+)
+
+js_library(
+    name = "crypto",
+    srcs = ["src/crypto.ts"],
+    types = ["src/crypto.ts"],
+    deps = [],
+)
+
+js_library(
+    name = "ui",
+    srcs = ["src/ui.ts"],
+    types = ["src/ui.ts"],
+    deps = ["//proto/common/errors/v1:ts", "//proto/todofy/ui/v1:ts", "//proto/ts:http-transcoder", "//proto/ts:page-token", "//proto/ts:protobuf", "//proto/ts:rpc-status", "//proto/ts:wire-json", ":module_group_0"],
+)
+
+js_library(
+    name = "csrf",
+    srcs = ["src/csrf.ts"],
+    types = ["src/csrf.ts"],
+    deps = ["//packages/edge-auth:lib", ":module_group_0", ":ui"],
+)
+
+js_library(
+    name = "hooks",
+    srcs = ["src/hooks.ts"],
+    types = ["src/hooks.ts"],
+    deps = [":crypto", ":module_group_0"],
+)
+
+js_library(
+    name = "metrics",
+    srcs = ["src/metrics.ts"],
+    types = ["src/metrics.ts"],
+    deps = [":module_group_0"],
+)
+
+js_library(
+    name = "warm",
+    srcs = ["src/warm.ts"],
+    types = ["src/warm.ts"],
+    deps = ["//proto/todofy/ui/v1:ts", "//proto/ts:protobuf", "//proto/ts:wire-json"],
+)
+
+js_library(
+    name = "owner",
+    srcs = ["src/owner.ts"],
+    types = ["src/owner.ts"],
+    deps = ["//proto/ts:http-transcoder", "//proto/ts:rpc-status", ":access", ":csrf", ":module_group_0", ":ui", ":warm"],
+)
+
+js_library(
+    name = "ops",
+    srcs = ["src/ops.ts"],
+    types = ["src/ops.ts"],
+    deps = ["//proto/ops/v1:ts", ":module_group_0"],
+)
+
+js_library(
+    name = "mail",
+    srcs = ["src/mail.ts"],
+    types = ["src/mail.ts"],
+    deps = ["//proto/todofy/mail/v1:ts", "//proto/ts:http-transcoder", "//proto/ts:rpc-status", "//proto/ts:wire-json", ":module_group_0", ":ui"],
+)
+
+js_library(
+    name = "index",
+    srcs = ["src/index.ts"],
+    types = ["src/index.ts"],
+    deps = [":hooks", ":mail", ":metrics", ":module_group_0", ":ops", ":owner"],
+)
+
+js_library(name = "lib", deps = [":access", ":crypto", ":csrf", ":hooks", ":index", ":mail", ":metrics", ":module_group_0", ":ops", ":owner", ":ui", ":warm"])
+
+proto_package(name = "proto_types_package", deps = ["//proto/common/errors/v1:ts", "//proto/ops/v1:ts", "//proto/todofy/mail/v1:ts", "//proto/todofy/ui/v1:ts", "//proto/ts:http-client", "//proto/ts:http-transcoder", "//proto/ts:page-token", "//proto/ts:protobuf", "//proto/ts:rpc-status", "//proto/ts:wire-json", ":lib"])
+workspace_package_link(name = "proto_types_link", src = ":proto_types_package", runtime_dependencies = ["@bufbuild/protobuf"])
+workspace_package_link(name = "edge_auth_types_link", src = "//packages/edge-auth:pkg")
+workspace_link(name = "access_test_edge_auth_link", src = "//packages/edge-auth:pkg")
+proto_vitest_test(
+    name = "access_test",
+    runner = vitest.vitest_test,
+    tests = ["test/access.test.ts"],
+    deps = [":index", ":module_group_0"],
+    data = ["test/setup.ts", ":access_test_edge_auth_link", ":node_modules/vitest", "package.json", "test/cloudflare-workers.ts", "test/helpers.ts"],
+)
+
+workspace_link(name = "hooks_test_edge_auth_link", src = "//packages/edge-auth:pkg")
+proto_vitest_test(
+    name = "hooks_test",
+    runner = vitest.vitest_test,
+    tests = ["test/hooks.test.ts"],
+    deps = [":index", ":module_group_0"],
+    data = ["test/setup.ts", ":hooks_test_edge_auth_link", ":node_modules/vitest", "package.json", "test/cloudflare-workers.ts", "test/helpers.ts"],
+)
+
+workspace_link(name = "mail_test_edge_auth_link", src = "//packages/edge-auth:pkg")
+proto_vitest_test(
+    name = "mail_test",
+    runner = vitest.vitest_test,
+    tests = ["test/mail.test.ts"],
+    deps = ["//proto/todofy/mail/v1:ts", "//proto/ts:http-client", ":index", ":mail", ":module_group_0"],
+    data = ["test/setup.ts", ":mail_test_edge_auth_link", ":node_modules/vitest", "package.json", "test/cloudflare-workers.ts", "test/helpers.ts"],
+)
+
+workspace_link(name = "metrics_test_edge_auth_link", src = "//packages/edge-auth:pkg")
+proto_vitest_test(
+    name = "metrics_test",
+    runner = vitest.vitest_test,
+    tests = ["test/metrics.test.ts"],
+    deps = [":index", ":metrics", ":module_group_0"],
+    data = ["test/setup.ts", ":metrics_test_edge_auth_link", ":node_modules/vitest", "package.json", "test/cloudflare-workers.ts", "test/helpers.ts"],
+)
+
+workspace_link(name = "ops_test_edge_auth_link", src = "//packages/edge-auth:pkg")
+proto_vitest_test(
+    name = "ops_test",
+    runner = vitest.vitest_test,
+    tests = ["test/ops.test.ts"],
+    deps = ["//contracts:ops-v1/fixtures/CanaryResult/processing-paused.json_data", "//contracts:ops-v1/fixtures/GuardState/shed-todofy.json_data", "//contracts:ops-v1/fixtures/OpsStatus/todofy-degraded.json_data", "//proto/ops/v1:ts", "//proto/ts:protobuf", "//proto/ts:wire-json", ":index", ":module_group_0", ":ops"],
+    data = ["test/setup.ts", ":node_modules/vitest", ":ops_test_edge_auth_link", "package.json", "test/cloudflare-workers.ts", "test/helpers.ts"],
+)
+
+workspace_link(name = "owner_test_edge_auth_link", src = "//packages/edge-auth:pkg")
+proto_vitest_test(
+    name = "owner_test",
+    runner = vitest.vitest_test,
+    tests = ["test/owner.test.ts"],
+    deps = [":index", ":module_group_0"],
+    data = ["test/setup.ts", ":node_modules/vitest", ":owner_test_edge_auth_link", "package.json", "test/cloudflare-workers.ts", "test/helpers.ts"],
+)
+
+workspace_link(name = "pre-encoded_test_edge_auth_link", src = "//packages/edge-auth:pkg")
+proto_vitest_test(
+    name = "pre-encoded_test",
+    runner = vitest.vitest_test,
+    tests = ["test/pre-encoded.test.ts"],
+    deps = ["//proto/todofy/ui/v1:ts", "//proto/ts:protobuf", "//proto/ts:wire-json", ":ui"],
+    data = ["test/setup.ts", ":node_modules/vitest", ":pre-encoded_test_edge_auth_link", "package.json", "test/cloudflare-workers.ts", "test/runtime/fixtures.ts"],
+)
+
+workspace_link(name = "routing_test_edge_auth_link", src = "//packages/edge-auth:pkg")
+proto_vitest_test(
+    name = "routing_test",
+    runner = vitest.vitest_test,
+    tests = ["test/routing.test.ts"],
+    deps = ["//todofy:gateway_error_contract", ":index", ":module_group_0"],
+    data = ["test/setup.ts", ":node_modules/vitest", ":routing_test_edge_auth_link", "package.json", "test/cloudflare-workers.ts", "test/helpers.ts"],
+)
+
+ts_project(
+    name = "types",
+    srcs = ["test/runtime/fixtures.ts", "src/access.ts", "src/coordinator.ts", "src/crypto.ts", "src/csrf.ts", "src/env.ts", "src/hooks.ts", "src/http.ts", "src/index.ts", "src/mail.ts", "src/metrics.ts", "src/ops.ts", "src/owner.ts", "src/ui.ts", "src/warm.ts", "test/access.test.ts", "test/cloudflare-workers.ts", "test/helpers.ts", "test/hooks.test.ts", "test/mail.test.ts", "test/metrics.test.ts", "test/ops.test.ts", "test/owner.test.ts", "test/pre-encoded.test.ts", "test/raw.d.ts", "test/routing.test.ts", "test/setup.ts", "test/validate.d.ts", "vitest.config.ts", "vitest.runtime.config.ts"],
+    no_emit = True,
+    data = ["test/setup.ts", "vitest.config.ts", "vitest.runtime.config.ts"],
+    deps = ["//contracts:ops-v1/fixtures/CanaryResult/processing-paused.json_data", "//contracts:ops-v1/fixtures/GuardState/shed-todofy.json_data", "//contracts:ops-v1/fixtures/OpsStatus/todofy-degraded.json_data", "//todofy:gateway_error_contract", ":edge_auth_types_link", ":lib", ":node_modules/@cloudflare/workers-types", ":node_modules/@types/node", ":node_modules/vitest", ":proto_types_link"],
+)
+
+alias(name = "typecheck", actual = ":types_typecheck")

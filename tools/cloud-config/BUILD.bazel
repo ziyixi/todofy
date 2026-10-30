@@ -1,0 +1,11 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+
+package(default_visibility = ["//visibility:public"])
+
+js_library(name = "worker-secrets", srcs = ["worker-secrets.mjs", "worker-secrets.json"])
+
+js_library(
+    name = "worker-deploy",
+    srcs = ["worker-deploy.mjs"],
+    deps = [":worker-secrets"],
+)

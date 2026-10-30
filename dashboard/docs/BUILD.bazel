@@ -1,0 +1,9 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+
+package(default_visibility = ["//visibility:public"])
+
+js_library(name = "limits", srcs = ["limits.md"])
+
+js_library(name = "design", srcs = ["design.md"])
+
+js_library(name = "design-v2", srcs = ["design-v2.md"])

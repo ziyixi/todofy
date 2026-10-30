@@ -1,0 +1,31 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+
+ts_project(
+    name = "types",
+    srcs = [
+        "build.ts",
+        "colors.ts",
+    ],
+    declaration = True,
+    emit_declaration_only = True,
+    tsconfig = {"compilerOptions": {
+        "target": "ES2024",
+        "module": "ESNext",
+        "strict": True,
+    }},
+)
+
+js_library(
+    name = "colors",
+    srcs = ["colors.ts"],
+    visibility = ["//visibility:public"],
+    deps = [":types"],
+)
+
+js_library(
+    name = "build",
+    srcs = ["build.ts"],
+    visibility = ["//visibility:public"],
+    deps = [":types"],
+)
