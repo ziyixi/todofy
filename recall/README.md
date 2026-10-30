@@ -16,7 +16,7 @@ NAS. Every owner step is a click. Chinese UI, mobile first. Design:
 | `extension/` | The Chrome extension (Manifest V3, no runtime dependency): visits and focus, captures, scrub, the outbox and uploads, self-update; built by CI, each new version a GitHub Release `recall-extension-v<version>` ([README](extension/README.md)) |
 | `shared/` | The code the extension and the Worker both run: URL normalization and the page ID, the scrubber, the denylist, the bigram segmenter |
 | `worker/` | The Worker `recall`: the fetch handler (the three machine routes with their own tokens, then Access and CSRF, the Dropbox callback) and `RecallState` (ingest, storage, search, the change feed, the machine tokens, the archive's writer to Dropbox, the owner API, ops-v1, the alarm) |
-| `web/` | The UI (时间线 · 搜索 · 设置), built into `web/dist` and served by the Worker |
+| `web/` | The UI (时间线 · 搜索 · 设置), built by `//recall/web:bundle` and served by the Worker |
 | `deploy/` | The deploy wrapper `deploy-vars.mjs` and the bundle budget |
 | `wrangler.toml` | The production config (top level = production); `wrangler.test.toml` is for local development and the smoke run |
 | `../proto/recall/` | The owner API `recall.ui.v1`, the upload `recall.ingest.v1` and the feed `recall.archive.v1` |
@@ -67,53 +67,40 @@ Text and images share the existing document, upload and Dropbox archive. R2 keep
 files; older content is downloaded only when the owner opens a snapshot, without caching it back in R2. Dropbox
 disconnection or missing files are shown in the detail. Existing visits and text-only archive records remain readable.
 
-## Develop
+## Develop and check
 
-From the repository root (Node 26; versions and the lockfile are shared):
+From the repository root:
 
 ```sh
-pnpm install --frozen-lockfile
-cd recall/worker
-npm run lint && npm run typecheck && npm test   # unit tests (Node): shared/, query building, snippets, the feed's and
-                                                # the archive's lines, the Dropbox client, the machine tokens
-npm run test:runtime                            # workerd: a real RecallState and R2, a fake Dropbox, the owner API,
-                                                # ops-v1, CPU, rows read
-(cd ../web && npm run lint && npm run typecheck && npm test && npm run build)
-(cd ../extension && npm run lint && npm run typecheck && npm test && npm run build)
-node --test ../deploy/test/*.test.mjs
-npm run test:smoke                              # the whole path on loopback (needs the UI build)
+bazel test //recall:check
+bazel build //recall
+bazel test //recall/worker:runtime_tests --nocache_test_results
+bazel test //recall/worker:smoke_test --nocache_test_results
+bazel test //recall/extension:browser_tests
 ```
 
-The smoke run (`worker/test/smoke/smoke.mts`) starts the real `wrangler dev`, makes the machine tokens through the
-owner API, lets the extension's own code (`extension/test/smoke-upload.ts`, under its fake `chrome.*`) upload a
-browsing session, calls the owner API as the UI does, connects a loopback fake of Dropbox
-(`worker/test/runtime/fake-dropbox.ts`, through its OAuth flow) and checks the archive the alarm writes there against the
-contract with the generated codec, then deletes a page and checks that the archive gains its tombstone and loses
-nothing.
+The root artifact collects the compiled Worker/UI and both extension packages. `//recall:worker_artifact` and
+`//recall:extension_artifact` remain independent publication units. Package build/test/type/lint scripts are thin
+Bazel aliases. The smoke test runs the real Worker, extension upload code and fake Dropbox on loopback, checks the
+archive contract and deletion tombstone, and uses no production browsing data.
 
-Trying the UI by hand (synthetic data only): copy `.dev.vars.example` to `.dev.vars`, build the UI, then `npm run dev`
-from `worker/` (wrangler dev on http://127.0.0.1:8797, local bindings only); make a token in 设置 → 插件口令. Local state
-is in `recall/.wrangler/` (delete it after a schema change).
+For interactive development, follow [workspace setup](../docs/dependencies.md), copy `.dev.vars.example` to ignored
+`.dev.vars`, then run `pnpm dev` in `worker/`. It builds the UI with Bazel before starting local Wrangler on
+`http://127.0.0.1:8797`. Development uses local bindings and the no-argument proto materializer. Do not delete local
+state as a substitute for verifying a schema migration.
 
 ## Deploy
 
-Only from GitHub Actions: `Recall deploy` (`.github/workflows/ci.yml`, the recipe in `worker-release.yml`) on `main`
-after `CI gate`, in the `production` environment, through `deploy/deploy-vars.mjs` (never a plain `wrangler deploy`).
-"Infra apply" created the Access applications (`recall`, the whole host, and `recall machine routes`, the Bypass of
-the three machine routes) and the bucket on 2026-10-10; recall is live since its go-live commit (`ee02b62`), and a change
-to recall deploys it, and Home after it (design §11).
+Main Actions publishes the checked compiled Worker archive through `deploy/deploy-vars.mjs` after CI gate. The
+wrapper validates build identity and owner inputs. A plain `wrangler deploy` would bypass those inputs.
 
-The extension is never deployed. Its builds are on GitHub: a change under `extension/` or `shared/` that reaches `main`
-publishes the build CI tested as the Release `recall-extension-v<version>` with its zip (`Recall extension release`,
-after `CI gate`; a version whose tag exists is skipped), and `npm run install-extension -- <downloaded zip>` installs
-one ([extension README](extension/README.md#builds-github-releases)).
+The extension is published separately as GitHub Release `recall-extension-v<version>`, with Chrome and Orion ZIPs.
+Actions promotes the tested files. Installation is an explicit owner operation; see the
+[extension README](extension/README.md#mac-install-and-update). This build migration does not update an installed browser.
 
-The wrapper writes the Worker secrets `ACCESS_OWNER` and `ACCESS_OWNER_ALIASES` (from the dashboard's secrets: one
-owner), and sets `BUILD_SHA`. recall has no operational switch.
-No deploy carries a machine token or anything of Dropbox: the owner makes the tokens in 设置 (RecallState keeps their
-digests) and connects Dropbox there (OAuth with PKCE: an App key, no secret; the refresh token stays in RecallState).
-A digest put by hand as a Worker secret (`INGEST_TOKEN_SHA256`, `EXPORT_TOKEN_SHA256` and their `_PREVIOUS`) is
-accepted as well, and `wrangler deploy --secrets-file` keeps it (`deploy/test/secrets-kept.test.mjs`).
+Machine tokens and Dropbox authorization are managed in 设置. Only token digests remain in RecallState, and the
+Dropbox refresh token never leaves it. Existing Worker-secret digests remain accepted across deployment; deploying
+code does not revoke them. Recall has no operational switch.
 
 ### The owner's setup: clicks only
 
@@ -147,5 +134,5 @@ one for 24 hours); 设置 → 备份到 Dropbox → 断开 (revokes the token at
 that should not have been kept (the Dropbox copy keeps its files: delete them there by hand). A code-only revert is the
 normal rollback (a revert to before the retention window leaves archived texts' records without their text: the page
 detail would then fail to read them, so revert the UI with it or set 正文在云端保留 to 永久 first, which stops further
-removals). Deleting the Worker deletes `RecallState` (the index and every record) for good; the window's texts stay in
-`recall-store`, and every record and text in the Dropbox archive and its NAS copy.
+removals). A Worker deletion is not a rollback or a verified restore procedure. Preserve RecallState, R2 and the archive when
+recovering code; see the [rebuild boundary](../docs/rebuild-verification.md).

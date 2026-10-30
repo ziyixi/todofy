@@ -2,7 +2,7 @@
 package, file, enum value, allowed value, method, message or field without weakening the breaking gate for anything
 else.
 
-Usage (scripts/breaking.sh and scripts/rules-selftest.sh run it)::
+Usage (//proto:breaking and scripts/rules-selftest.sh run it)::
 
     python3 tools/retired.py retired.json BASE_IMAGE.json HEAD_IMAGE.json OUT_IMAGE.json
 

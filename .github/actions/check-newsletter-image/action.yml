@@ -3,22 +3,13 @@ description: "check-newsletter-image; called by the repository workflow."
 runs:
   using: composite
   steps:
-    - name: Install the shared proto build tools
-      uses: ./.github/actions/setup-workspace
-      with:
-        root: .
-        filters: ''
-    - name: Generate shared contracts before the Python-only image build
-      working-directory: .
-      shell: bash -e {0}
-      run: node proto/tools/ensure.mjs
+    - uses: ./.github/actions/setup-bazel
     - name: Test the independent image without credentials or external calls
       working-directory: newsletter
       shell: bash -e {0}
       run: |
         python3 scripts/smoke_image.py --audit-source
-        docker build --platform linux/amd64 --file Dockerfile --build-arg BUILD_SHA="$GITHUB_SHA" \
-          --build-arg SOURCE_REPOSITORY="https://github.com/$GITHUB_REPOSITORY" --tag "newsletter-ci:$GITHUB_SHA" ..
+        python3 ../tools/container-release/build.py --service newsletter --sha "$GITHUB_SHA"
         tested_image=$(docker image inspect --format '{{.Id}}' "newsletter-ci:$GITHUB_SHA")
         python3 scripts/smoke_image.py --image "$tested_image" --platform linux/amd64
         python3 scripts/publish_content_config.py validate \

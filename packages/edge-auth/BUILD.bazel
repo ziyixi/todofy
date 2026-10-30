@@ -1,11 +1,12 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library")
-load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
 load("@aspect_rules_js//npm:defs.bzl", "npm_package")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
 load("@npm//:defs.bzl", "npm_link_all_packages")
 load("@npm//packages/edge-auth:vitest/package_json.bzl", vitest = "bin")
 load("//tools/bazel:js.bzl", "vitest_test")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
-package(default_visibility = ["//visibility:public"])
+package(default_visibility = ["//visibility:private"])
 
 npm_link_all_packages(name = "node_modules")
 
@@ -13,39 +14,108 @@ js_library(
     name = "lib",
     srcs = glob(["src/*.ts"]),
     types = glob(["src/*.ts"]),
+    visibility = ["//visibility:public"],
 )
 
 npm_package(
     name = "pkg",
-    srcs = [":lib", "package.json"],
+    srcs = [
+        "package.json",
+        ":lib",
+    ],
     package = "@ziyixi/edge-auth",
+    visibility = ["//visibility:public"],
 )
 
 ts_project(
     name = "types",
-    srcs = glob(["src/*.ts", "test/*.ts"]) + ["vitest.config.ts"],
+    srcs = glob([
+        "src/*.ts",
+        "test/*.ts",
+    ]) + ["vitest.config.ts"],
     no_emit = True,
-    deps = [":node_modules/@cloudflare/workers-types", ":node_modules/vitest"],
+    deps = [
+        ":node_modules/@cloudflare/workers-types",
+        ":node_modules/vitest",
+    ],
 )
 
 ts_project(
     name = "types_dom",
     srcs = glob(["src/*.ts"]),
-    tsconfig = "tsconfig.dom.json",
     extends = "tsconfig.json",
     no_emit = True,
+    tsconfig = "tsconfig.dom.json",
     deps = [":node_modules/@cloudflare/workers-types"],
 )
 
 [
     vitest_test(
         name = test.replace("test/", "").replace(".test.ts", "_test"),
+        data = [
+            "package.json",
+            "test/helpers.ts",
+            "vitest.config.ts",
+            ":lib",
+        ],
         runner = vitest.vitest_test,
+        tags = ["unit"],
         tests = [test],
-        data = [":lib", "package.json", "vitest.config.ts", "test/helpers.ts"],
     )
     for test in glob(["test/*.test.ts"])
 ]
 
-alias(name = "typecheck", actual = ":types_typecheck")
-alias(name = "typecheck_dom", actual = ":types_dom_typecheck")
+alias(
+    name = "typecheck",
+    actual = ":types_typecheck",
+)
+
+alias(
+    name = "typecheck_dom",
+    actual = ":types_dom_typecheck",
+)
+
+test_suite(
+    name = "check",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "edge-auth",
+    actual = ":lib",
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        [
+            "*",
+            "src/**",
+            "test/**",
+        ],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)
+
+test_suite(
+    name = "typecheck_tests",
+    tests = [
+        ":types_dom_typecheck_test",
+        ":types_typecheck_test",
+    ],
+)

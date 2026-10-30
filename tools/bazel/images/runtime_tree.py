@@ -1,4 +1,4 @@
-"""Prepare a venv and the Dockerfile's account from the declared OCI base."""
+"""Prepare the venv and service account from the declared OCI base."""
 
 import argparse
 import json

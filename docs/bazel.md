@@ -1,79 +1,64 @@
-# Bazel migration
+# Bazel
 
-Bazel is being introduced for the repository's builds, tests, generators and packages. Actions continues to own
-production credentials, publication, deployment ordering and reconcile. Existing checks remain authoritative for
-an application until its complete Bazel path is verified and replaces them.
+Application roots are the public build interface. `bazel build //tasks` produces the complete Tasks release;
+`bazel test //tasks:check` checks it. Frontend, Worker, shared-library and generated-code targets underneath retain
+fine-grained dependencies for caching and affected-test selection.
 
-## Dependencies
+## Setup and dependencies
 
-Third-party source is not vendored. Node dependencies keep the root pnpm catalog and lock; Python dependencies keep
-the root uv workspace and lock. Bazel imports these resolutions. Go's API linter keeps its existing module sums.
-The fixed Bazel version is in `.bazelversion`; rule versions and module resolution are committed in `MODULE.bazel`
-and its lock. Base images use digests. A normal check must not resolve new versions or rewrite locks.
+Install Bazelisk, or put the official Bazel version from `.bazelversion` on `PATH`. Bazelisk uses that version file.
+The repository imports third-party dependencies rather than vendoring their source:
 
-The first implementation preserves Node 26.9.0, pnpm 11.25.0, TypeScript 6.0.3 and Python 3.14.7. Python's standalone
-toolchain explicitly selects the official 3.14.7 archives and checksums because the rule's default version table no
-longer includes that patch. It does not use the developer's Python installation. The OCI rule is fixed at the
-registry's 2.3.0 release; the initially proposed GitHub 2.3.3 release was not available in that registry.
+- Node versions live in the root pnpm catalog and `pnpm-lock.yaml`.
+- Python versions live in the root uv workspace and `uv.lock`.
+- The Go API linter keeps its module file and sums.
+- Bazel/rules/toolchain versions live in `.bazelversion`, `MODULE.bazel` and `MODULE.bazel.lock`.
+- Downloaded executables, browsers, runtime archives and OCI bases have fixed checksums/digests.
 
-Upgrade the existing dependency declaration and its lock together, then run the affected targets. Update Bazel
-rules explicitly, refresh their lock with `bazel mod deps --lockfile_mode=update` and commit it with them. Ordinary
-commands use `--lockfile_mode=error` so checks cannot silently update module resolution. No automatic dependency upgrades, extra dependency mirror,
-remote execution service or paid cache is introduced.
+Ordinary commands use `--lockfile_mode=error`; they do not update dependency resolution. Upgrade a declaration and its
+existing lock together. Rule upgrades explicitly refresh the module lock with
+`bazel mod deps --lockfile_mode=update`. There is no paid remote execution service or extra dependency mirror.
 
-## Target boundaries
+Node remains 26.9.0 and Python 3.14.7. Python uses the pinned standalone archive, not a developer virtualenv. The Python
+Worker keeps its own existing `pylock.toml` runtime contract. Package installation is separate from Bazel execution;
+checks do not depend on a local `node_modules` or `.venv`.
 
-Libraries follow actual imports. Existing circular imports stay in one library rather than being changed during
-the build migration. Individual unit-test files depend on their source closure; runtime tests that bundle a whole
-Worker correctly depend on that whole bundle. A frontend bundle remains one final application build.
+## Targets
 
-Proto targets belong to their IDL package. They read that package's descriptor/import closure and write generated
-files into Bazel outputs. The custom wire profile, Python dataclasses, HTTP metadata and frozen contract bytes are
-preserved. Consumers assemble only the proto runtime and packages they use under the existing npm import paths.
+| Target | Result |
+| --- | --- |
+| `//tasks`, `//mailsort`, other Worker app roots | Compiled Worker, assets and deployment inputs in a release archive |
+| `//newsletter`, `//platform`, `//codex-gateway` | Independent Linux OCI image archives |
+| `//recall:worker_artifact` | Recall Worker/owner UI archive |
+| `//recall:extension_artifact` | Chrome and Orion builds and their ZIPs |
+| `//website` | Static export from an explicitly supplied prepared-content repository |
+| `//website:relay` | Independent relay Worker archive |
+| `//platform:bootstrap_bundle` | Fixed-source VPS installation bundle using published image digests |
+| `//proto:materialized` | Existing generated TS/Python development files, from Bazel providers |
+| `<app>:check` | Application check closure |
+| `<app>:config` | Static configuration; no provider writes |
+| `<app>:release` | Actual artifact plus its publication inputs, for CI selection |
 
-Source libraries and declaration outputs are distinct where TypeScript crosses package boundaries. Tests and build
-actions declare their fixtures, configuration, assets, npm links and native tools; they do not read a local
-`node_modules` or virtualenv. Bazel's test adapters preserve the existing Vitest/pytest configuration and sandbox file
-semantics without changing production loaders.
+Build images for the VPS with `--platforms=//tools/bazel/images:linux_amd64`. Actions stamps release outputs with the
+checked source SHA. Ordinary local builds remain unstamped. Website publication supplies its validated snapshot;
+the default unconfigured input deliberately fails when someone tries to build a production site without content.
 
-The following paths have run successfully during the migration:
+Libraries follow actual imports. Existing circular imports stay together. Test files declare their source closure,
+fixtures, config and tools; whole-Worker runtime tests depend on the whole Worker they execute. Tests keep their
+original assertions and limits. Package-scoped proto providers preserve the wire profile and frozen contract bytes;
+raw developer materialization and Python wheels consume those providers rather than running another generator.
 
-```sh
-bazel test //proto:tests
-bazel test //packages/task-dates:dates_test
-bazel test //tasks/worker:planning_test
-bazel test //tasks/worker:runtime_tasks_test
-bazel test //tasks/web:src__dates_test
-bazel test //newsletter:tests //platform:tests //codex-gateway:tests //todofy:tests
-```
+## CI and caches
 
-The last command currently covers the declared offline Python tests, including Todofy's host unit tests. It does
-not replace Todofy's workerd checks or prove a VPS image or production release. The original non-Bazel proto
-generation entry remains available while applications migrate.
+[CI/CD](ci-cd.md) describes publication. Changes discovers public check facades and compares native Bazel graphs with
+fixed Target Determinator. Work is grouped into a small execution matrix. There is no handwritten file-to-app map.
 
-## Checks and caches
+Bazel caches reusable test/build actions; CPU and live integration checks execute as required. Source identities are
+terminal inputs. Actions keeps repository/action caches by platform and execution group. Native browser tests use
+declared browser archives and synthetic loopback fixtures, not the owner's installed browser or profile.
 
-The migration workflow has no production credentials or release steps. It groups affected tests by execution
-environment rather than starting a runner for each file. Target Determinator compares Bazel graphs between Git
-revisions; the planner only selects the baseline and groups its result. A baseline without a Bazel graph checks all
-targets currently covered by that workflow. A failed deployment does not invalidate an otherwise successful Bazel
-check baseline.
+Host integration prerequisites, including Docker and the CI runner's kernel-policy check, are outside the app build
+cache. Provider credentials, deployment locks, infrastructure apply, production verification and repair remain
+Actions/operator operations. A successful build does not prove a live rollout.
 
-Actions retains the pinned tool downloads and Bazel disk/repository caches. macOS and Linux caches stay separate.
-CPU tests are selected with the `cpu` tag and execute without reusing test results; `workerd` and `browser` identify
-their integration environments. Publication and live-state checks always execute. Git identities enter the final
-release layer, not every library or ordinary test.
-
-## Completion checklist
-
-- Fixed toolchains and the existing third-party locks: first real builds and tests verified.
-- Package-scoped proto and shared libraries: generated bytes and offline checks verified.
-- Tasks: unit and initial D1/runtime checks verified; complete runtime, browser and release packaging in progress.
-- Other Cloudflare applications: library and test targets migrating; old checks remain until verified.
-- Website and Recall extensions: static/snapshot build and ZIP targets still to migrate.
-- Python applications: 142 offline test targets verified; Linux OCI images and packaging in progress.
-- CI cutover: affected-target workflow in progress; legacy check/build recipes removed only after their replacements
-  and exact tested release artifacts are verified.
-
-Each application's cutover must also pass the existing main release and matching reconcile. A successful local
-target, a successful image build and an observed production rollout remain separate evidence.
+During migration, [HANDOFF](../HANDOFF.md) records which local/Linux/publication evidence has actually completed.

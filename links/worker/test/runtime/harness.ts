@@ -46,6 +46,7 @@ export function op(): string {
 let bundle: Promise<string> | undefined;
 function workerBundle(): Promise<string> {
   bundle ??= build({
+    ...(process.env.TEST_SRCDIR ? { nodePaths: [`${process.cwd()}/node_modules`] } : {}),
     entryPoints: [join(ROOT, 'src/index.ts')],
     bundle: true,
     format: 'esm',

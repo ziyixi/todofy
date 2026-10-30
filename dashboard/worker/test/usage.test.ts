@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import design from '../../docs/design.md?raw';
+import reviewedQuery from './fixtures/usage-query-reviewed.graphql?raw';
 import { type QuotaRow } from '../src/api-types.ts';
 import { QUOTA_RESOURCES } from '../src/idl.ts';
 import { ALLOWANCES } from '../src/limits.ts';
@@ -32,10 +32,9 @@ function row(rows: readonly QuotaRow[], id: QuotaRow['id']): QuotaRow {
 const normalise = (text: string): string => text.replace(/\s+/g, ' ').trim();
 
 describe('the usage query', () => {
-  it('is the verified query of design.md §7.2, verbatim', () => {
-    const block = /### 7\.2[\s\S]*?```graphql\n([\s\S]*?)```/.exec(design)?.[1];
-    expect(block).toBeDefined();
-    expect(normalise(USAGE_QUERY)).toBe(normalise(block ?? ''));
+  it('matches the frozen reviewed query verbatim', () => {
+    expect(reviewedQuery.trim()).not.toBe('');
+    expect(normalise(USAGE_QUERY)).toBe(normalise(reviewedQuery));
   });
 
   it('asks for the UTC day so far and the UTC month to date', () => {

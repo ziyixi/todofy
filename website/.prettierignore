@@ -11,8 +11,6 @@ test-results/
 pnpm-lock.yaml
 
 # Planning inputs are preserved as authored source material.
-doc/plan.md
-doc/cs-homepage-survey.md
 
 # The monorepo import record is kept exactly as written.
 docs/history-map.md

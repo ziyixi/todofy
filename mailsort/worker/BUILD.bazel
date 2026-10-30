@@ -1,11 +1,16 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library")
-load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
 load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@npm//mailsort/worker:eslint/package_json.bzl", eslint = "bin")
 load("@npm//mailsort/worker:vitest/package_json.bzl", vitest = "bin")
+load("@npm//mailsort/worker:wrangler/package_json.bzl", wrangler = "bin")
+load("@npm//website:tsx/package_json.bzl", tsx = "bin")
 load("//proto/bazel:ts_package.bzl", "proto_package")
-load("//tools/bazel:js.bzl", "proto_vitest_test", "workspace_link", "workspace_package_link")
+load("//tools/bazel:js.bzl", "proto_vitest_test", "workerd_vitest_test", "workspace_link", "workspace_package_link")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/lint:defs.bzl", "eslint_test")
 
-package(default_visibility = ["//visibility:public"])
+package(default_visibility = ["//mailsort:__subpackages__"])
 
 npm_link_all_packages(name = "node_modules")
 
@@ -34,38 +39,75 @@ js_library(
     name = "gmail",
     srcs = ["src/gmail.ts"],
     types = ["src/gmail.ts"],
-    deps = [":limits", ":paths"],
+    deps = [
+        ":limits",
+        ":paths",
+    ],
 )
 
 js_library(
     name = "mime",
     srcs = ["src/mime.ts"],
     types = ["src/mime.ts"],
-    deps = [":gmail", ":limits"],
+    deps = [
+        ":gmail",
+        ":limits",
+    ],
 )
 
 js_library(
     name = "mask",
     srcs = ["src/mask.ts"],
     types = ["src/mask.ts"],
-    deps = [":limits", ":mime"],
+    deps = [
+        ":limits",
+        ":mime",
+    ],
 )
 
 js_library(
     name = "module_group_6",
-    srcs = ["src/label-identity.ts", "src/priority.ts", "src/store.ts"],
-    types = ["src/label-identity.ts", "src/priority.ts", "src/store.ts"],
-    deps = [":ids", ":limits", ":mask"],
+    srcs = [
+        "src/label-identity.ts",
+        "src/priority.ts",
+        "src/store.ts",
+    ],
+    types = [
+        "src/label-identity.ts",
+        "src/priority.ts",
+        "src/store.ts",
+    ],
+    deps = [
+        ":ids",
+        ":limits",
+        ":mask",
+    ],
 )
 
-alias(name = "label-identity", actual = ":module_group_6")
-alias(name = "priority", actual = ":module_group_6")
-alias(name = "store", actual = ":module_group_6")
+alias(
+    name = "label-identity",
+    actual = ":module_group_6",
+)
+
+alias(
+    name = "priority",
+    actual = ":module_group_6",
+)
+
+alias(
+    name = "store",
+    actual = ":module_group_6",
+)
+
 js_library(
     name = "backup",
     srcs = ["src/backup.ts"],
     types = ["src/backup.ts"],
-    deps = ["//proto/ops/v1:ts", ":limits", ":module_group_6"],
+    deps = [
+        ":limits",
+        ":module_group_6",
+        "//proto/ops/v1:ts",
+    ],
 )
 
 js_library(
@@ -79,14 +121,24 @@ js_library(
     name = "priority-prompt",
     srcs = ["src/priority-prompt.ts"],
     types = ["src/priority-prompt.ts"],
-    deps = ["//mailsort/prompts:personal-rules", "//mailsort/prompts:priority-classification"],
+    deps = [
+        "//mailsort/prompts:personal-rules",
+        "//mailsort/prompts:priority-classification",
+    ],
 )
 
 js_library(
     name = "classification-prompt",
     srcs = ["src/classification-prompt.ts"],
     types = ["src/classification-prompt.ts"],
-    deps = ["//proto/mailsort/ui/v2:ts", "//proto/ts:protobuf", "//proto/ts:protobuf-wkt", ":ids", ":module_group_6", ":priority-prompt"],
+    deps = [
+        ":ids",
+        ":module_group_6",
+        ":priority-prompt",
+        "//proto/mailsort/ui/v2:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+    ],
 )
 
 js_library(
@@ -100,62 +152,193 @@ js_library(
     name = "flow",
     srcs = ["src/flow.ts"],
     types = ["src/flow.ts"],
-    deps = [":limits", ":module_group_6"],
+    deps = [
+        ":limits",
+        ":module_group_6",
+    ],
 )
 
 js_library(
     name = "feedback",
     srcs = ["src/feedback.ts"],
     types = ["src/feedback.ts"],
-    deps = [":examples", ":flow", ":module_group_6"],
+    deps = [
+        ":examples",
+        ":flow",
+        ":module_group_6",
+    ],
 )
 
 js_library(
     name = "unread",
     srcs = ["src/unread.ts"],
     types = ["src/unread.ts"],
-    deps = ["//proto/mailsort/ui/v2:ts", "//proto/ts:protobuf", "//proto/ts:protobuf-wkt", ":gmail", ":module_group_6"],
+    deps = [
+        ":gmail",
+        ":module_group_6",
+        "//proto/mailsort/ui/v2:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+    ],
 )
 
 js_library(
     name = "reasons",
     srcs = ["src/reasons.ts"],
     types = ["src/reasons.ts"],
-    deps = ["//proto/common/errors/v1:ts", "//proto/mailsort/ui/v2:ts", "//proto/ts:rpc-status"],
+    deps = [
+        "//proto/common/errors/v1:ts",
+        "//proto/mailsort/ui/v2:ts",
+        "//proto/ts:rpc-status",
+    ],
 )
 
 js_library(
     name = "replay",
     srcs = ["src/replay.ts"],
     types = ["src/replay.ts"],
-    deps = [":limits", ":module_group_6"],
+    deps = [
+        ":limits",
+        ":module_group_6",
+    ],
 )
 
 js_library(
     name = "module_group_17",
-    srcs = ["src/api.ts", "src/classification-model.ts", "src/classifier-config.ts", "src/env.ts", "src/model.ts", "src/ops-status.ts", "src/pipeline.ts", "src/priority-setup.ts", "src/restore.ts", "src/session.ts", "src/settings.ts", "src/state.ts", "src/writes.ts"],
-    types = ["src/api.ts", "src/classification-model.ts", "src/classifier-config.ts", "src/env.ts", "src/model.ts", "src/ops-status.ts", "src/pipeline.ts", "src/priority-setup.ts", "src/restore.ts", "src/session.ts", "src/settings.ts", "src/state.ts", "src/writes.ts"],
-    deps = ["//packages/model-router-client:lib", "//proto/mailsort/ui/v2:ts", "//proto/ops/v1:ts", "//proto/ts:field-mask", "//proto/ts:http-client", "//proto/ts:http-transcoder", "//proto/ts:page-token", "//proto/ts:protobuf", "//proto/ts:protobuf-wkt", "//proto/ts:rpc-status", "//proto/ts:wire-json", ":backup", ":classification-prompt", ":classification-result", ":examples", ":feedback", ":flow", ":gmail", ":ids", ":limits", ":mask", ":mime", ":module_group_6", ":paths", ":reasons", ":replay", ":unread"],
+    srcs = [
+        "src/api.ts",
+        "src/classification-model.ts",
+        "src/classifier-config.ts",
+        "src/env.ts",
+        "src/model.ts",
+        "src/ops-status.ts",
+        "src/pipeline.ts",
+        "src/priority-setup.ts",
+        "src/restore.ts",
+        "src/session.ts",
+        "src/settings.ts",
+        "src/state.ts",
+        "src/writes.ts",
+    ],
+    types = [
+        "src/api.ts",
+        "src/classification-model.ts",
+        "src/classifier-config.ts",
+        "src/env.ts",
+        "src/model.ts",
+        "src/ops-status.ts",
+        "src/pipeline.ts",
+        "src/priority-setup.ts",
+        "src/restore.ts",
+        "src/session.ts",
+        "src/settings.ts",
+        "src/state.ts",
+        "src/writes.ts",
+    ],
+    deps = [
+        ":backup",
+        ":classification-prompt",
+        ":classification-result",
+        ":examples",
+        ":feedback",
+        ":flow",
+        ":gmail",
+        ":ids",
+        ":limits",
+        ":mask",
+        ":mime",
+        ":module_group_6",
+        ":paths",
+        ":reasons",
+        ":replay",
+        ":unread",
+        "//packages/model-router-client:lib",
+        "//proto/mailsort/ui/v2:ts",
+        "//proto/ops/v1:ts",
+        "//proto/ts:field-mask",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:page-token",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+        "//proto/ts:wire-json",
+    ],
 )
 
-alias(name = "api", actual = ":module_group_17")
-alias(name = "classification-model", actual = ":module_group_17")
-alias(name = "classifier-config", actual = ":module_group_17")
-alias(name = "env", actual = ":module_group_17")
-alias(name = "model", actual = ":module_group_17")
-alias(name = "ops-status", actual = ":module_group_17")
-alias(name = "pipeline", actual = ":module_group_17")
-alias(name = "priority-setup", actual = ":module_group_17")
-alias(name = "restore", actual = ":module_group_17")
-alias(name = "session", actual = ":module_group_17")
-alias(name = "settings", actual = ":module_group_17")
-alias(name = "state", actual = ":module_group_17")
-alias(name = "writes", actual = ":module_group_17")
+alias(
+    name = "api",
+    actual = ":module_group_17",
+)
+
+alias(
+    name = "classification-model",
+    actual = ":module_group_17",
+)
+
+alias(
+    name = "classifier-config",
+    actual = ":module_group_17",
+)
+
+alias(
+    name = "env",
+    actual = ":module_group_17",
+)
+
+alias(
+    name = "model",
+    actual = ":module_group_17",
+)
+
+alias(
+    name = "ops-status",
+    actual = ":module_group_17",
+)
+
+alias(
+    name = "pipeline",
+    actual = ":module_group_17",
+)
+
+alias(
+    name = "priority-setup",
+    actual = ":module_group_17",
+)
+
+alias(
+    name = "restore",
+    actual = ":module_group_17",
+)
+
+alias(
+    name = "session",
+    actual = ":module_group_17",
+)
+
+alias(
+    name = "settings",
+    actual = ":module_group_17",
+)
+
+alias(
+    name = "state",
+    actual = ":module_group_17",
+)
+
+alias(
+    name = "writes",
+    actual = ":module_group_17",
+)
+
 js_library(
     name = "auth",
     srcs = ["src/auth.ts"],
     types = ["src/auth.ts"],
-    deps = ["//packages/edge-auth:lib", ":module_group_17"],
+    deps = [
+        ":module_group_17",
+        "//packages/edge-auth:lib",
+    ],
 )
 
 js_library(
@@ -169,21 +352,35 @@ js_library(
     name = "http",
     srcs = ["src/http.ts"],
     types = ["src/http.ts"],
-    deps = ["//packages/edge-auth:lib", "//proto/ts:rpc-status", ":auth", ":limits", ":module_group_17", ":reasons"],
+    deps = [
+        ":auth",
+        ":limits",
+        ":module_group_17",
+        ":reasons",
+        "//packages/edge-auth:lib",
+        "//proto/ts:rpc-status",
+    ],
 )
 
 js_library(
     name = "ops",
     srcs = ["src/ops.ts"],
     types = ["src/ops.ts"],
-    deps = ["//proto/ops/v1:ts", ":module_group_17"],
+    deps = [
+        ":module_group_17",
+        "//proto/ops/v1:ts",
+    ],
 )
 
 js_library(
     name = "index",
     srcs = ["src/index.ts"],
     types = ["src/index.ts"],
-    deps = [":http", ":module_group_17", ":ops"],
+    deps = [
+        ":http",
+        ":module_group_17",
+        ":ops",
+    ],
 )
 
 js_library(
@@ -193,111 +390,1006 @@ js_library(
     deps = [],
 )
 
-js_library(name = "lib", deps = [":auth", ":backup", ":classification-prompt", ":classification-result", ":dmarc", ":examples", ":feedback", ":flow", ":gmail", ":http", ":ids", ":index", ":limits", ":mask", ":mime", ":module_group_17", ":module_group_6", ":ops", ":paths", ":priority-prompt", ":reasons", ":replay", ":text_d", ":unread"])
-
-proto_package(name = "proto_types_package", deps = ["//proto/common/errors/v1:ts", "//proto/mailsort/ui/v2:ts", "//proto/modelrouter/inference/v1:ts", "//proto/ops/v1:ts", "//proto/ts:field-mask", "//proto/ts:http-client", "//proto/ts:http-transcoder", "//proto/ts:page-token", "//proto/ts:protobuf", "//proto/ts:protobuf-wkt", "//proto/ts:rpc-status", "//proto/ts:wire-json", ":lib"])
-workspace_package_link(name = "proto_types_link", src = ":proto_types_package", runtime_dependencies = ["@bufbuild/protobuf"])
-workspace_package_link(name = "model_router_client_types_link", src = "//packages/model-router-client:pkg")
-workspace_package_link(name = "edge_auth_types_link", src = "//packages/edge-auth:pkg")
-proto_vitest_test(
-    name = "backup_test",
-    runner = vitest.vitest_test,
-    tests = ["test/backup.test.ts"],
-    deps = [":backup", ":module_group_6"],
-    data = ["//mailsort/docs:backup", ":node_modules/vitest", "package.json", "test/fakes/sql.ts"],
+js_library(
+    name = "lib",
+    deps = [
+        ":auth",
+        ":backup",
+        ":classification-prompt",
+        ":classification-result",
+        ":dmarc",
+        ":examples",
+        ":feedback",
+        ":flow",
+        ":gmail",
+        ":http",
+        ":ids",
+        ":index",
+        ":limits",
+        ":mask",
+        ":mime",
+        ":module_group_17",
+        ":module_group_6",
+        ":ops",
+        ":paths",
+        ":priority-prompt",
+        ":reasons",
+        ":replay",
+        ":text_d",
+        ":unread",
+    ],
 )
 
-workspace_link(name = "classification-model_test_model_router_client_link", src = "//packages/model-router-client:pkg")
+proto_package(
+    name = "proto_types_package",
+    deps = [
+        ":lib",
+        "//proto/common/errors/v1:ts",
+        "//proto/mailsort/ui/v2:ts",
+        "//proto/modelrouter/inference/v1:ts",
+        "//proto/ops/v1:ts",
+        "//proto/ts:field-mask",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:page-token",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+        "//proto/ts:wire-json",
+    ],
+)
+
+workspace_package_link(
+    name = "proto_types_link",
+    src = ":proto_types_package",
+    runtime_dependencies = ["@bufbuild/protobuf"],
+)
+
+workspace_package_link(
+    name = "model_router_client_types_link",
+    src = "//packages/model-router-client:pkg",
+)
+
+workspace_package_link(
+    name = "edge_auth_types_link",
+    src = "//packages/edge-auth:pkg",
+)
+
+proto_vitest_test(
+    name = "backup_test",
+    data = [
+        "package.json",
+        "test/fakes/sql.ts",
+        ":node_modules/vitest",
+        "//mailsort/docs:backup",
+    ],
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = ["test/backup.test.ts"],
+    deps = [
+        ":backup",
+        ":module_group_6",
+    ],
+)
+
+workspace_link(
+    name = "classification-model_test_model_router_client_link",
+    src = "//packages/model-router-client:pkg",
+)
+
 proto_vitest_test(
     name = "classification-model_test",
+    data = [
+        "package.json",
+        ":classification-model_test_model_router_client_link",
+        ":node_modules/vitest",
+    ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/classification-model.test.ts"],
-    deps = ["//proto/modelrouter/inference/v1:ts", "//proto/ts:protobuf", "//proto/ts:wire-json", ":module_group_17"],
-    data = [":classification-model_test_model_router_client_link", ":node_modules/vitest", "package.json"],
+    deps = [
+        ":module_group_17",
+        "//proto/modelrouter/inference/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
 )
 
 proto_vitest_test(
     name = "gmail-guard_test",
+    data = [
+        "package.json",
+        "test/fakes/table.ts",
+        ":node_modules/vitest",
+    ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/gmail-guard.test.ts"],
     deps = [":gmail"],
-    data = [":node_modules/vitest", "package.json", "test/fakes/table.ts"],
 )
 
 proto_vitest_test(
     name = "gmail-priority_test",
+    data = [
+        "package.json",
+        "test/fakes/fake-gmail.ts",
+        "test/fakes/fixtures.ts",
+        "test/fakes/table.ts",
+        ":node_modules/vitest",
+    ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/gmail-priority.test.ts"],
     deps = [":gmail"],
-    data = [":node_modules/vitest", "package.json", "test/fakes/fake-gmail.ts", "test/fakes/fixtures.ts", "test/fakes/table.ts"],
 )
 
 proto_vitest_test(
     name = "gmail-recent_test",
+    data = [
+        "package.json",
+        "test/fakes/fake-gmail.ts",
+        "test/fakes/fixtures.ts",
+        "test/fakes/table.ts",
+        ":node_modules/vitest",
+    ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/gmail-recent.test.ts"],
     deps = [":gmail"],
-    data = [":node_modules/vitest", "package.json", "test/fakes/fake-gmail.ts", "test/fakes/fixtures.ts", "test/fakes/table.ts"],
 )
 
 proto_vitest_test(
     name = "gmail-unread_test",
+    data = [
+        "package.json",
+        "test/fakes/fake-gmail.ts",
+        "test/fakes/fixtures.ts",
+        "test/fakes/table.ts",
+        ":node_modules/vitest",
+    ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/gmail-unread.test.ts"],
     deps = [":gmail"],
-    data = [":node_modules/vitest", "package.json", "test/fakes/fake-gmail.ts", "test/fakes/fixtures.ts", "test/fakes/table.ts"],
 )
 
-workspace_link(name = "ops-golden_test_model_router_client_link", src = "//packages/model-router-client:pkg")
+workspace_link(
+    name = "ops-golden_test_model_router_client_link",
+    src = "//packages/model-router-client:pkg",
+)
+
 proto_vitest_test(
     name = "ops-golden_test",
+    data = [
+        "package.json",
+        "test/golden/ops-v1.json",
+        ":node_modules/vitest",
+        ":ops-golden_test_model_router_client_link",
+        "//contracts:ops-v1/fixtures/OpsStatus/mailsort-backup-stale.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/mailsort-degraded.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/mailsort-ok.json_data",
+        "//contracts:ops-v1/ops-v1.schema.json_data",
+    ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/ops-golden.test.ts"],
-    deps = ["//contracts:ops-v1/validate", "//proto/ops/v1:ts", "//proto/ts:wire-json", ":module_group_17", ":module_group_6"],
-    data = ["//contracts:ops-v1/fixtures/OpsStatus/mailsort-backup-stale.json_data", "test/golden/ops-v1.json", "//contracts:ops-v1/fixtures/OpsStatus/mailsort-degraded.json_data", "//contracts:ops-v1/fixtures/OpsStatus/mailsort-ok.json_data", "//contracts:ops-v1/ops-v1.schema.json_data", ":node_modules/vitest", ":ops-golden_test_model_router_client_link", "package.json"],
+    deps = [
+        ":module_group_17",
+        ":module_group_6",
+        "//contracts:ops-v1/validate",
+        "//proto/ops/v1:ts",
+        "//proto/ts:wire-json",
+    ],
 )
 
 proto_vitest_test(
     name = "read_test",
+    data = [
+        "package.json",
+        "test/fakes/fake-gmail.ts",
+        "test/fakes/fixtures.ts",
+        ":node_modules/vitest",
+    ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/read.test.ts"],
-    deps = [":dmarc", ":limits", ":mask", ":mime"],
-    data = [":node_modules/vitest", "package.json", "test/fakes/fake-gmail.ts", "test/fakes/fixtures.ts"],
+    deps = [
+        ":dmarc",
+        ":limits",
+        ":mask",
+        ":mime",
+    ],
 )
 
-workspace_link(name = "replay_test_model_router_client_link", src = "//packages/model-router-client:pkg")
+workspace_link(
+    name = "replay_test_model_router_client_link",
+    src = "//packages/model-router-client:pkg",
+)
+
 proto_vitest_test(
     name = "replay_test",
+    data = [
+        "package.json",
+        "test/fakes/sql.ts",
+        ":node_modules/vitest",
+        ":replay_test_model_router_client_link",
+    ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/replay.test.ts"],
-    deps = ["//proto/mailsort/ui/v2:ts", "//proto/ts:wire-json", ":limits", ":module_group_17", ":module_group_6", ":replay"],
-    data = [":node_modules/vitest", ":replay_test_model_router_client_link", "package.json", "test/fakes/sql.ts"],
+    deps = [
+        ":limits",
+        ":module_group_17",
+        ":module_group_6",
+        ":replay",
+        "//proto/mailsort/ui/v2:ts",
+        "//proto/ts:wire-json",
+    ],
 )
 
-workspace_link(name = "settings_test_model_router_client_link", src = "//packages/model-router-client:pkg")
+workspace_link(
+    name = "settings_test_model_router_client_link",
+    src = "//packages/model-router-client:pkg",
+)
+
 proto_vitest_test(
     name = "settings_test",
+    data = [
+        "package.json",
+        "test/fakes/sql.ts",
+        ":node_modules/vitest",
+        ":settings_test_model_router_client_link",
+    ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/settings.test.ts"],
-    deps = [":module_group_17", ":module_group_6"],
-    data = [":node_modules/vitest", ":settings_test_model_router_client_link", "package.json", "test/fakes/sql.ts"],
+    deps = [
+        ":module_group_17",
+        ":module_group_6",
+    ],
 )
 
 proto_vitest_test(
     name = "store_test",
+    data = [
+        "package.json",
+        "test/fakes/sql.ts",
+        ":node_modules/vitest",
+    ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/store.test.ts"],
-    deps = [":flow", ":limits", ":mask", ":module_group_6", ":paths"],
-    data = [":node_modules/vitest", "package.json", "test/fakes/sql.ts"],
+    deps = [
+        ":flow",
+        ":limits",
+        ":mask",
+        ":module_group_6",
+        ":paths",
+    ],
 )
 
 ts_project(
     name = "types",
-    srcs = ["src/api.ts", "src/auth.ts", "src/backup.ts", "src/classification-model.ts", "src/classification-prompt.ts", "src/classification-result.ts", "src/classifier-config.ts", "src/dmarc.ts", "src/env.ts", "src/examples.ts", "src/feedback.ts", "src/flow.ts", "src/gmail.ts", "src/http.ts", "src/ids.ts", "src/index.ts", "src/label-identity.ts", "src/limits.ts", "src/mask.ts", "src/mime.ts", "src/model.ts", "src/ops-status.ts", "src/ops.ts", "src/paths.ts", "src/pipeline.ts", "src/priority-prompt.ts", "src/priority-setup.ts", "src/priority.ts", "src/reasons.ts", "src/replay.ts", "src/restore.ts", "src/session.ts", "src/settings.ts", "src/state.ts", "src/store.ts", "src/text.d.ts", "src/unread.ts", "src/writes.ts", "test/backup.test.ts", "test/classification-model.test.ts", "test/fakes/fake-gmail.ts", "test/fakes/fixtures.ts", "test/fakes/sql.ts", "test/fakes/table.ts", "test/fakes/upstream.ts", "test/gmail-guard.test.ts", "test/gmail-priority.test.ts", "test/gmail-recent.test.ts", "test/gmail-unread.test.ts", "test/golden/ops-v1.json", "test/jwt.ts", "test/ops-golden.test.ts", "test/read.test.ts", "test/replay.test.ts", "test/settings.test.ts", "test/smoke/tsconfig.json", "test/store.test.ts", "test/validate.d.ts", "vitest.config.ts", "vitest.runtime.config.ts"],
+    srcs = [
+        "src/api.ts",
+        "src/auth.ts",
+        "src/backup.ts",
+        "src/classification-model.ts",
+        "src/classification-prompt.ts",
+        "src/classification-result.ts",
+        "src/classifier-config.ts",
+        "src/dmarc.ts",
+        "src/env.ts",
+        "src/examples.ts",
+        "src/feedback.ts",
+        "src/flow.ts",
+        "src/gmail.ts",
+        "src/http.ts",
+        "src/ids.ts",
+        "src/index.ts",
+        "src/label-identity.ts",
+        "src/limits.ts",
+        "src/mask.ts",
+        "src/mime.ts",
+        "src/model.ts",
+        "src/ops.ts",
+        "src/ops-status.ts",
+        "src/paths.ts",
+        "src/pipeline.ts",
+        "src/priority.ts",
+        "src/priority-prompt.ts",
+        "src/priority-setup.ts",
+        "src/reasons.ts",
+        "src/replay.ts",
+        "src/restore.ts",
+        "src/session.ts",
+        "src/settings.ts",
+        "src/state.ts",
+        "src/store.ts",
+        "src/text.d.ts",
+        "src/unread.ts",
+        "src/writes.ts",
+        "test/backup.test.ts",
+        "test/classification-model.test.ts",
+        "test/fakes/fake-gmail.ts",
+        "test/fakes/fixtures.ts",
+        "test/fakes/sql.ts",
+        "test/fakes/table.ts",
+        "test/fakes/upstream.ts",
+        "test/gmail-guard.test.ts",
+        "test/gmail-priority.test.ts",
+        "test/gmail-recent.test.ts",
+        "test/gmail-unread.test.ts",
+        "test/golden/ops-v1.json",
+        "test/jwt.ts",
+        "test/ops-golden.test.ts",
+        "test/read.test.ts",
+        "test/replay.test.ts",
+        "test/settings.test.ts",
+        "test/smoke/tsconfig.json",
+        "test/store.test.ts",
+        "test/validate.d.ts",
+        "vitest.config.ts",
+        "vitest.runtime.config.ts",
+    ],
+    data = [
+        "vitest.config.ts",
+        "vitest.runtime.config.ts",
+    ],
     no_emit = True,
     resolve_json_module = True,
-    data = ["vitest.config.ts", "vitest.runtime.config.ts"],
-    deps = ["//contracts:ops-v1/validate", "//mailsort/prompts:personal-rules", "//mailsort/prompts:priority-classification", ":edge_auth_types_link", ":lib", ":model_router_client_types_link", ":node_modules/@cloudflare/workers-types", ":node_modules/@types/node", ":node_modules/vitest", ":proto_types_link"],
+    deps = [
+        ":edge_auth_types_link",
+        ":lib",
+        ":model_router_client_types_link",
+        ":node_modules/@cloudflare/workers-types",
+        ":node_modules/@types/node",
+        ":node_modules/vitest",
+        ":proto_types_link",
+        "//contracts:ops-v1/validate",
+        "//mailsort/prompts:personal-rules",
+        "//mailsort/prompts:priority-classification",
+    ],
 )
 
-alias(name = "typecheck", actual = ":types_typecheck")
+alias(
+    name = "typecheck",
+    actual = ":types_typecheck",
+)
+
+wrangler.wrangler_binary(name = "wrangler")
+
+js_library(
+    name = "application_sources",
+    srcs = glob([
+        "src/**",
+        "package.json",
+        "tsconfig.json",
+    ]),
+)
+
+test_suite(name = "check")
+
+js_library(
+    name = "runtime_helpers",
+    srcs = [
+        "test/runtime/harness.ts",
+        "test/runtime/helpers.ts",
+        "test/runtime/tsconfig.json",
+    ],
+    types = glob(
+        ["test/runtime/**/*.ts"],
+        exclude = ["**/*.test.ts"],
+    ),
+)
+
+workerd_vitest_test(
+    name = "runtime_api_test",
+    data = [
+        "test/fakes/fake-gmail.ts",
+        "test/fakes/fixtures.ts",
+        "test/fakes/upstream.ts",
+        ":model_router_client_types_link",
+        ":test_support",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/api.test.ts"],
+    deps = [
+        "//proto/mailsort/ui/v2:ts",
+        "//proto/modelrouter/inference/v1:ts",
+        "//proto/ops/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_backup-steps_test",
+    data = [
+        "test/fakes/fake-gmail.ts",
+        "test/fakes/sql.ts",
+        "test/fakes/upstream.ts",
+        ":model_router_client_types_link",
+        ":test_support",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/backup-steps.test.ts"],
+    deps = [
+        "//proto/mailsort/ui/v2:ts",
+        "//proto/modelrouter/inference/v1:ts",
+        "//proto/ops/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_backup_test",
+    data = [
+        "test/fakes/fake-gmail.ts",
+        "test/fakes/fixtures.ts",
+        "test/fakes/table.ts",
+        "test/fakes/upstream.ts",
+        ":model_router_client_types_link",
+        ":test_support",
+        ":wrangler",
+        "//mailsort:config",
+        "//mailsort/tools:backup-restore",
+    ],
+    env = {"BAZEL_WRANGLER": "$(rootpath :wrangler)"},
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/backup.test.ts"],
+    deps = [
+        "//proto/mailsort/ui/v2:ts",
+        "//proto/modelrouter/inference/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_classification-interval_test",
+    data = [
+        "test/fakes/fake-gmail.ts",
+        "test/fakes/upstream.ts",
+        ":model_router_client_types_link",
+        ":test_support",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/classification-interval.test.ts"],
+    deps = [
+        "//proto/mailsort/ui/v2:ts",
+        "//proto/modelrouter/inference/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_classification-prompt_test",
+    data = [
+        "test/fakes/fake-gmail.ts",
+        "test/fakes/fixtures.ts",
+        "test/fakes/table.ts",
+        "test/fakes/upstream.ts",
+        ":model_router_client_types_link",
+        ":test_support",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/classification-prompt.test.ts"],
+    deps = [
+        "//proto/mailsort/ui/v2:ts",
+        "//proto/modelrouter/inference/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_codex-pipeline_test",
+    data = [
+        "test/fakes/fake-gmail.ts",
+        "test/fakes/fixtures.ts",
+        "test/fakes/table.ts",
+        "test/fakes/upstream.ts",
+        ":model_router_client_types_link",
+        ":test_support",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/codex-pipeline.test.ts"],
+    deps = [
+        "//proto/mailsort/ui/v2:ts",
+        "//proto/modelrouter/inference/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_cpu_test",
+    data = [
+        "test/fakes/fake-gmail.ts",
+        "test/fakes/fixtures.ts",
+        "test/fakes/upstream.ts",
+        "test/jwt.ts",
+        ":model_router_client_types_link",
+        ":test_support",
+        "//tools/workerd-cpu:lib",
+    ],
+    runner = vitest.vitest_test,
+    tags = [
+        "cpu",
+        "exclusive",
+        "workerd",
+    ],
+    tests = ["test/runtime/cpu.test.ts"],
+    deps = [
+        "//proto/mailsort/ui/v2:ts",
+        "//proto/modelrouter/inference/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_failures_test",
+    data = [
+        "test/fakes/fake-gmail.ts",
+        "test/fakes/fixtures.ts",
+        "test/fakes/table.ts",
+        "test/fakes/upstream.ts",
+        ":model_router_client_types_link",
+        ":test_support",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/failures.test.ts"],
+    deps = [
+        "//proto/mailsort/ui/v2:ts",
+        "//proto/modelrouter/inference/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_labels_test",
+    data = [
+        "test/fakes/fake-gmail.ts",
+        "test/fakes/fixtures.ts",
+        "test/fakes/table.ts",
+        "test/fakes/upstream.ts",
+        ":model_router_client_types_link",
+        ":test_support",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/labels.test.ts"],
+    deps = [
+        "//proto/mailsort/ui/v2:ts",
+        "//proto/modelrouter/inference/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_model-failures_test",
+    data = [
+        "test/fakes/fake-gmail.ts",
+        "test/fakes/fixtures.ts",
+        "test/fakes/table.ts",
+        "test/fakes/upstream.ts",
+        ":model_router_client_types_link",
+        ":test_support",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/model-failures.test.ts"],
+    deps = [
+        "//proto/mailsort/ui/v2:ts",
+        "//proto/modelrouter/inference/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_pipeline_test",
+    data = [
+        "test/fakes/fake-gmail.ts",
+        "test/fakes/fixtures.ts",
+        "test/fakes/table.ts",
+        "test/fakes/upstream.ts",
+        ":model_router_client_types_link",
+        ":test_support",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/pipeline.test.ts"],
+    deps = [
+        "//proto/mailsort/ui/v2:ts",
+        "//proto/modelrouter/inference/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_priority-setup_test",
+    data = [
+        "test/fakes/fake-gmail.ts",
+        "test/fakes/fixtures.ts",
+        "test/fakes/table.ts",
+        "test/fakes/upstream.ts",
+        ":model_router_client_types_link",
+        ":test_support",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/priority-setup.test.ts"],
+    deps = [
+        "//proto/mailsort/ui/v2:ts",
+        "//proto/modelrouter/inference/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_provider-settings_test",
+    data = [
+        "test/fakes/fake-gmail.ts",
+        "test/fakes/upstream.ts",
+        ":model_router_client_types_link",
+        ":test_support",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/provider-settings.test.ts"],
+    deps = [
+        "//proto/mailsort/ui/v2:ts",
+        "//proto/modelrouter/inference/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_recent-read_test",
+    data = [
+        "test/fakes/fake-gmail.ts",
+        "test/fakes/fixtures.ts",
+        "test/fakes/table.ts",
+        "test/fakes/upstream.ts",
+        ":model_router_client_types_link",
+        ":test_support",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/recent-read.test.ts"],
+    deps = [
+        "//proto/mailsort/ui/v2:ts",
+        "//proto/modelrouter/inference/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_replay_test",
+    data = [
+        "test/fakes/fake-gmail.ts",
+        "test/fakes/fixtures.ts",
+        "test/fakes/table.ts",
+        "test/fakes/upstream.ts",
+        ":model_router_client_types_link",
+        ":test_support",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/replay.test.ts"],
+    deps = [
+        "//proto/mailsort/ui/v2:ts",
+        "//proto/modelrouter/inference/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_unread_test",
+    data = [
+        "test/fakes/fake-gmail.ts",
+        "test/fakes/fixtures.ts",
+        "test/fakes/table.ts",
+        "test/fakes/upstream.ts",
+        ":model_router_client_types_link",
+        ":test_support",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/unread.test.ts"],
+    deps = [
+        "//proto/mailsort/ui/v2:ts",
+        "//proto/modelrouter/inference/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_config(
+    name = "worker_config",
+    src = "tsconfig.json",
+)
+
+ts_config(
+    name = "runtime_config",
+    src = "test/runtime/tsconfig.json",
+    deps = [":worker_config"],
+)
+
+ts_project(
+    name = "runtime_types",
+    srcs = [
+        "src/text.d.ts",
+        ":proto_types_package_wire_types",
+    ] + glob(
+        [
+            "test/runtime/**/*.ts",
+            "test/runtime/**/*.mts",
+        ],
+        allow_empty = True,
+    ),
+    extends = ":runtime_config",
+    no_emit = True,
+    resolve_json_module = True,
+    tsconfig = {
+        "compilerOptions": {"noEmit": True},
+        "include": [],
+        "exclude": [],
+    },
+    deps = [
+        ":edge_auth_types_link",
+        ":lib",
+        ":model_router_client_types_link",
+        ":node_modules/@cloudflare/workers-types",
+        ":node_modules/@types/node",
+        ":node_modules/esbuild",
+        ":node_modules/miniflare",
+        ":node_modules/vitest",
+        ":proto_types_link",
+        ":test_support",
+        "//:node_modules/@cloudflare/workers-types",
+        "//contracts:ops-v1/validate",
+        "//mailsort/prompts:personal-rules",
+        "//mailsort/prompts:priority-classification",
+        "//tools/workerd-cpu:types",
+    ],
+)
+
+ts_config(
+    name = "smoke_config",
+    src = "test/smoke/tsconfig.json",
+    deps = [":worker_config"],
+)
+
+ts_project(
+    name = "smoke_types",
+    srcs = [":proto_types_package_wire_types"] + glob(
+        [
+            "test/smoke/**/*.ts",
+            "test/smoke/**/*.mts",
+        ],
+        allow_empty = True,
+    ),
+    extends = ":smoke_config",
+    no_emit = True,
+    resolve_json_module = True,
+    tsconfig = {
+        "compilerOptions": {"noEmit": True},
+        "include": [],
+        "exclude": [],
+    },
+    deps = [
+        ":edge_auth_types_link",
+        ":lib",
+        ":model_router_client_types_link",
+        ":node_modules/@cloudflare/workers-types",
+        ":node_modules/@types/node",
+        ":node_modules/esbuild",
+        ":node_modules/miniflare",
+        ":node_modules/vitest",
+        ":proto_types_link",
+        ":runtime_helpers",
+        ":test_support",
+        "//:node_modules/@cloudflare/workers-types",
+        "//contracts:ops-v1/validate",
+        "//mailsort/prompts:personal-rules",
+        "//mailsort/prompts:priority-classification",
+        "//tools/workerd-cpu:types",
+    ],
+)
+
+js_library(
+    name = "test_support",
+    srcs = glob(
+        ["test/**"],
+        exclude = [
+            "test/runtime/**",
+            "test/smoke/**",
+            "**/*.test.ts",
+        ],
+    ),
+    types = glob(
+        ["test/**/*.ts"],
+        exclude = [
+            "test/runtime/**",
+            "test/smoke/**",
+            "**/*.test.ts",
+        ],
+    ),
+)
+
+eslint_test(
+    name = "lint",
+    data = [
+        "package.json",
+        "test/runtime/tsconfig.json",
+        "test/smoke/tsconfig.json",
+        "tsconfig.json",
+        ":application_sources",
+        ":edge_auth_types_link",
+        ":lib",
+        ":model_router_client_types_link",
+        ":node_modules/@cloudflare/workers-types",
+        ":node_modules/@eslint/js",
+        ":node_modules/@types/node",
+        ":node_modules/esbuild",
+        ":node_modules/eslint",
+        ":node_modules/miniflare",
+        ":node_modules/typescript",
+        ":node_modules/typescript-eslint",
+        ":node_modules/vitest",
+        ":node_modules/wrangler",
+        ":proto_types_link",
+        ":runtime_helpers",
+        ":test_support",
+        "//:node_modules/@cloudflare/workers-types",
+        "//contracts:ops-v1/fixtures",
+        "//contracts:ops-v1/validate",
+        "//mailsort/prompts:personal-rules",
+        "//mailsort/prompts:priority-classification",
+        "//tools/workerd-cpu:types",
+    ],
+    runner = eslint.eslint_test,
+    sources = glob(
+        [
+            "src/**/*.ts",
+            "src/**/*.tsx",
+            "test/**/*.ts",
+            "test/**/*.mts",
+            "scripts/**/*.mjs",
+            "*.js",
+            "*.ts",
+        ],
+        allow_empty = True,
+    ),
+)
+
+js_library(
+    name = "smoke_support",
+    srcs = glob(["test/smoke/**"]),
+)
+
+tsx.tsx_test(
+    name = "smoke_test",
+    size = "large",
+    args = ["test/smoke/smoke.mts"],
+    chdir = "mailsort/worker",
+    data = [
+        "package.json",
+        ":application_sources",
+        ":edge_auth_types_link",
+        ":lib",
+        ":model_router_client_types_link",
+        ":proto_types_link",
+        ":runtime_helpers",
+        ":smoke_support",
+        ":test_support",
+        ":wrangler",
+        "//mailsort:test_config",
+        "//mailsort/prompts:personal-rules",
+        "//mailsort/prompts:priority-classification",
+        "//mailsort/web:bundle",
+    ],
+    env = {"BAZEL_WRANGLER": "$(rootpath :wrangler)"},
+    tags = [
+        "smoke",
+        "workerd",
+    ],
+)
+
+js_library(
+    name = "package_metadata",
+    srcs = ["package.json"],
+)
+
+js_library(
+    name = "entry_metadata",
+    srcs = ["src/index.ts"],
+)
+
+js_library(
+    name = "runtime_metadata",
+    srcs = ["test/runtime/harness.ts"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        [
+            "*",
+            "src/**",
+            "test/**",
+        ],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)
+
+test_suite(
+    name = "typecheck_tests",
+    tests = [
+        ":runtime_types_typecheck_test",
+        ":smoke_types_typecheck_test",
+        ":types_typecheck_test",
+    ],
+)
+
+test_suite(
+    name = "runtime_tests",
+    tests = [":runtime_" + file.removeprefix("test/runtime/").removesuffix(".test.ts") + "_test" for file in glob(["test/runtime/*.test.ts"])],
+)

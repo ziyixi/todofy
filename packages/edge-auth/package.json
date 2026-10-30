@@ -8,8 +8,9 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.dom.json",
-    "test": "vitest run"
+    "typecheck": "bazel test //packages/edge-auth:typecheck_tests",
+    "test": "bazel test //packages/edge-auth:unit_tests",
+    "check": "bazel test //packages/edge-auth:check"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",

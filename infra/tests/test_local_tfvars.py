@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "local_tfvars.py"
+SCRIPT = Path(__file__).absolute().parents[1] / "scripts" / "local_tfvars.py"
 spec = importlib.util.spec_from_file_location("local_tfvars", SCRIPT)
 local_tfvars = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(local_tfvars)

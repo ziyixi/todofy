@@ -19,7 +19,7 @@ Website Worker (static assets only)
 
 ## Hostnames
 
-Current state (since 2026-10-01): `www.ziyixi.science` and the apex `ziyixi.science` are the two Workers
+Production configuration: `www.ziyixi.science` and the apex `ziyixi.science` are the two Workers
 Custom Domains of `ziyixi-website`, listed in [`wrangler.toml`](../wrangler.toml), and both serve the same
 static site. `www` is canonical: every page carries `<link rel="canonical">` to `https://www.ziyixi.science`,
 and the feed, sitemap and Open Graph URLs use it. The apex answers with the same pages (status 200, no
@@ -34,30 +34,16 @@ refuses a removal, and an addition that would take over another Worker's hostnam
 record (or whose DNS records its token cannot read), unless the release step allows that exact hostname. The release verifies the whole route contract on `www` and the build
 identity on the apex ([`release.md`](release.md)).
 
-**Why both are Custom Domains (2026-10-01).** Until then `www` was a zone route (`www.ziyixi.science/*`) in
-front of the old Vercel CNAME and the apex a zone route (`ziyixi.science/*`) to the separate Worker
-`ziyixi-apex-redirect`, which answered a 308 to `www`. The apex had no certificate of its own: Cloudflare
-served it whichever certificate listed the apex, and every Workers Custom Domain's certificate
-(`mail-hero`, `home`, `todofy`, …) lists the zone apex, so that choice changed whenever a Custom
-Domain was added. Chrome reuses (coalesces) an HTTP/2 or HTTP/3 connection for another hostname that
-resolves to the same IPs when the certificate it saw on that connection covers the new hostname. Cloudflare's
-edge rejects a request whose `Host` is not covered by the certificate it currently maps to the connection's
-SNI (over HTTP/3: an empty `403` with `cache-control: private, no-store`). So a desktop Chrome that had
-opened the apex got empty 403s on `mail-hero`, `lab` and `www` until its sockets were flushed. Now the apex
-and `www` share one dedicated certificate (SANs `ziyixi.science`, `www.ziyixi.science`,
-`*.www.ziyixi.science`) that covers none of the app hosts, so an app request is never coalesced onto a site
-connection. The old Vercel-era records (apex A `76.76.21.21`, `www` CNAME `cname.vercel-dns.com`), both
-zone routes and the preview Custom Domain `website-preview.ziyixi.science` were deleted, and
-`ziyixi-apex-redirect` (formerly `website/apex-redirect/`) was retired. The dashboard links and probes
-`www` (canonical) for the same reason.
+The apex and `www` share the website certificate. Keeping them on the same website Worker prevents a website
+connection from being coalesced onto unrelated app hosts. The former apex redirect Worker and Vercel origin are
+retired. Do not restore their routes or touch the apex mail records when changing the site.
 
 ## The site: static export on Workers Static Assets
 
 - `next build` with `output: "export"` writes `out/`: one HTML file per route (`blog.html`,
   `blog/<slug>.html`), the RSC segment payloads (`**/__next.*.txt`) that client navigation fetches,
   `build-info.json`, `publication-state.json`, `feed.xml`, `sitemap.xml`, `robots.txt`, `404.html`. All
-  routes were already static on Vercel (`dynamicParams = false`, `force-static` route handlers); only
-  `robots.ts` and `sitemap.ts` needed `dynamic = "force-static"`.
+  routes are static (`dynamicParams = false`, `force-static` route handlers).
 - The Worker has no script (`wrangler.toml` has no `main`). Requests for static assets are free and do not
   count against the Workers Free request or CPU limits. `html_handling = "auto-trailing-slash"` serves
   `/blog` from `blog.html`; the trailing-slash form of every canonical page and feed path (`/blog/`,
@@ -92,7 +78,7 @@ zone routes and the preview Custom Domain `website-preview.ziyixi.science` were 
 
 ## Images
 
-There is no request-time image optimizer (Vercel's `/_next/image` is gone), so the content step makes the
+There is no request-time image optimizer, so the content step makes the
 variants at build time ([`scripts/images/prepare.ts`](../scripts/images/prepare.ts)):
 
 - Sources: the profile portrait and every PNG/JPEG/WebP article image of the snapshot. For each, WebP files
@@ -104,15 +90,6 @@ variants at build time ([`scripts/images/prepare.ts`](../scripts/images/prepare.
 - The custom loader ([`src/lib/images/loader.ts`](../src/lib/images/loader.ts)) maps `(src, width)` to the
   smallest variant at least that wide, from `.generated/images.json`. Unknown sources (GIF, SVG, external)
   keep their original URL. The lightbox still opens the original `/media/<sha256>.<ext>`.
-- Measured (2026-09-30, a read-only Notion sync whose `contentHash` equals the live site's):
-  - the homepage portrait `profile/ziyixi-headshot-2026.png`, 1122 × 1402, is 2,782,888 B; the 160w
-    variant is 2,416 B and the 320w variant (a 160 px slot on a 2x screen) 6,050 B. Vercel served about
-    8 KB; without variants the export would ship the 2.78 MB PNG;
-  - the 10 article images (703–3022 px wide) are 1,465,313 B as originals; the variants an article page
-    loads are 94,360 B at 1x (750w, 6.4 %) and 190,740 B at 2x (1360w, 13.0 %); the largest original,
-    476,575 B, becomes 15,454 B / 41,798 B;
-  - the whole export with that content: 270 files, 9.9 MB (`wrangler deploy --dry-run` reads 285 files,
-    counting `_headers` and `_redirects` and wrangler's own manifest entries).
 - The Open Graph image is still the original portrait PNG (crawlers fetch it rarely).
 - Old image URLs: Vercel's pages referenced `/_next/image?url=…&w=…&q=75`; those URLs answer 404 after the
   cutover (`_redirects` cannot match a query string). Only image-search entries and external hotlinks to
@@ -145,5 +122,12 @@ Static asset requests are free and do not run Worker code. The relay has one dai
 plus owner actions/status reads. Notion content downloads and builds run in GitHub Actions on standard
 public-repository runners. No new Durable Object or paid scheduling service is required.
 
-The live site has no analytics beacon today (checked 2026-09-30: no `cloudflareinsights` in the HTML of any
-page); adding Cloudflare Web Analytics would be a separate owner decision, not part of the migration.
+Analytics is not part of the site's configured visitor path. Adding a beacon requires a separate owner decision.
+
+## Visual reference
+
+The approved [v6 concept](../doc/assets/homepage-concept-v6.png) records the compact academic layout: About before
+Blog/publications, left-aligned text navigation, an unframed portrait, Source Sans/Source Serif and a muted background.
+The actual portrait and bibliographic data come from committed content, not generated concept text or likeness.
+Current responsive dimensions and focus states belong to the CSS/components and browser checks; the concept is not
+a pixel or mobile acceptance result. Font licenses remain beside the bundled fonts.

@@ -1,0 +1,87 @@
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES", "source_manifest")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files([
+    "infra_guard.py",
+    "test_infra_guard.py",
+])
+
+py_library(
+    name = "audit_workspace",
+    srcs = ["audit_workspace.py"],
+    imports = ["."],
+)
+
+source_manifest(
+    name = "repository_sources",
+    srcs = "//:repository_audit_files",
+)
+
+py_test(
+    name = "audit_test",
+    srcs = ["bazel_test.py"],
+    args = ["$(rootpath :repository_sources)"],
+    data = [
+        ":repository_sources",
+        "//tools/bazel/python:node_binary",
+    ],
+    env = {"BAZEL_NODE": "$(rootpath //tools/bazel/python:node_binary)"},
+    legacy_create_init = False,
+    main = "bazel_test.py",
+    deps = [
+        ":audit_workspace",
+        "@python_deps//pyyaml",
+    ],
+)
+
+py_test(
+    name = "generated_config_test",
+    srcs = ["check_generated.py"],
+    args = ["$(rootpath :repository_sources)"],
+    data = [":repository_sources"],
+    legacy_create_init = False,
+    main = "check_generated.py",
+    deps = [":audit_workspace"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["*"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+py_test(
+    name = "infra_guard_cases_test",
+    srcs = [
+        "test_infra_guard.py",
+        "//tools/bazel/python:unittest_main.py",
+    ],
+    args = ["test_infra_guard"],
+    data = ["//infra:config"],
+    imports = ["."],
+    legacy_create_init = False,
+    main = "//tools/bazel/python:unittest_main.py",
+    deps = ["//infra:guard_lib"],
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        ":audit_test",
+        ":generated_config_test",
+        ":infra_guard_cases_test",
+    ],
+)

@@ -1,7 +1,6 @@
 """The rules of proto/ (proto/README.md, Rules) that live outside the buf module.
 
-python3 -m unittest discover -s .github/scripts (the Changes job, every push, which Proto checks needs). Standard
-library only.
+Repository audit checks of workspace wiring and native proto dependency declarations.
 
 - One version: buf, protoc-gen-es and the protobuf-es runtime use exact root catalog versions and one
   workspace lock; the runtime equals the generator's version. No app has its own
@@ -13,22 +12,17 @@ library only.
   vitest, eslint, wrangler, vite) in a TypeScript user, or in a package whose sources import a user's sources, runs
   ensure.mjs first as its pre-script, so a pull or branch switch that changes a .proto file cannot leave stale
   generated types behind (uv's cache keys do the same for Python).
-- ci_changes.PROTO_USERS lists exactly those users, each with the languages its production bundles compile
-  in (a TypeScript "dependencies" entry with a value import in production code, a Python [project]
-  dependency); a user marked test-only has no production import of it; ci_changes.PROTO_PACKAGES names
-  exactly the apps whose production code imports each package's generated code (type-only imports compile to
-  nothing), so a proto/ change deploys only the bundles it reaches.
+- Bazel proto_library sources and dependencies match every IDL import; native root :check closures and
+  Target Determinator select affected checks and release facades. No application reachability map is maintained.
 - Generated code is never committed and is ignored; uv's cache keys cover every input ensure.mjs hashes.
 - Sources: a .proto file holds no invisible character but the space and the line feed (no other Unicode space,
   line or paragraph separator, control or format character): a pattern writes one as a \\u escape, so a reviewer
   sees it and every tool counts the same lines.
 - api-linter: one exact version, in the Go tool module proto/tools/api-linter only (go.mod pins it and
-  the Go toolchain, go.sum every checksum); scripts/api-lint.sh builds it from there, and the Proto checks
-  job installs exactly that toolchain and runs the script. Nothing else installs api-linter.
+  the Go toolchain, go.sum every checksum); Bazel builds it from that module and checks its embedded annotations against the locked descriptor image.
 """
 
-from workflow_sources import effective_ci
-
+import ast
 import json
 import os
 import re
@@ -36,9 +30,9 @@ import subprocess
 import sys
 import unicodedata
 import unittest
+from pathlib import Path
 
 import yaml
-from pathlib import Path
 
 try:
     import tomllib
@@ -51,9 +45,8 @@ except ModuleNotFoundError:
     ) from None
 
 sys.path.insert(0, str(Path(__file__).parent))
-import ci_changes  # noqa: E402
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).absolute().parents[2]
 PROTO = REPO / "proto"
 TOOLCHAIN = ("@bufbuild/buf", "@bufbuild/protoc-gen-es", "@bufbuild/protobuf")
 RUNTIME = "@bufbuild/protobuf"
@@ -63,7 +56,9 @@ ENSURE = PROTO / "tools" / "ensure.mjs"
 # Script commands that read the generated code (compile, test, type-aware lint, bundle or serve it); the script's
 # pre-script must run ensure.mjs. `vite\b` does not match vitest (the s is a word character). Node itself reads it
 # through type stripping: its test runner (Mail Hero's tests import the ops-v1 sources) and a TypeScript script.
-READS_GENERATED = re.compile(r"(^|[\s;&|(])(tsc|vitest|wrangler|eslint|vite|node\s+--test|node\s+\S+\.m?ts)\b")
+READS_GENERATED = re.compile(
+    r"(^|[\s;&|(])(tsc|vitest|wrangler|eslint|vite|node\s+--test|node\s+\S+\.m?ts)\b"
+)
 RELATIVE_IMPORT = re.compile(r"""(?:\bfrom|\bimport)\s*\(?\s*['"](\.\.?/[^'"]+)['"]""")
 EXACT = re.compile(r"\d+\.\d+\.\d+")
 SKIP_PARTS = {"node_modules", ".venv", ".venv-workers", "python_modules", ".wrangler"}
@@ -76,11 +71,26 @@ def tracked(pattern: str) -> list[Path]:
     """Files matching a git pathspec glob that are or can be committed (not ignored: never installed or
     generated copies)."""
     out = subprocess.run(
-        ["git", "-C", str(REPO), "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", pattern],
+        [
+            "git",
+            "-C",
+            str(REPO),
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "--",
+            pattern,
+        ],
         check=True,
         capture_output=True,
     ).stdout.decode()
-    return [REPO / name for name in out.split("\0") if name and (REPO / name).is_file() and not SKIP_PARTS & set(Path(name).parts)]
+    return [
+        REPO / name
+        for name in out.split("\0")
+        if name and (REPO / name).is_file() and not SKIP_PARTS & set(Path(name).parts)
+    ]
 
 
 def app_of(path: Path) -> str:
@@ -92,21 +102,34 @@ def consuming_apps(manifest: Path) -> set[str]:
     if app_of(manifest) != "packages":
         return {app_of(manifest)}
     python = manifest.name == "pyproject.toml"
-    name = (tomllib.loads(manifest.read_text())["project"]["name"] if python
-            else json.loads(manifest.read_text())["name"])
+    name = (
+        tomllib.loads(manifest.read_text())["project"]["name"]
+        if python
+        else json.loads(manifest.read_text())["name"]
+    )
     result = set()
     for candidate in tracked("*pyproject.toml" if python else "*package.json"):
         if app_of(candidate) in {"packages", "proto"}:
             continue
         if python:
-            dependencies = tomllib.loads(candidate.read_text()).get("project", {}).get("dependencies", [])
-            if name in {re.split(r"[\s<>=!~;\[]", dependency, maxsplit=1)[0] for dependency in dependencies}:
+            dependencies = (
+                tomllib.loads(candidate.read_text())
+                .get("project", {})
+                .get("dependencies", [])
+            )
+            if name in {
+                re.split(r"[\s<>=!~;\[]", dependency, maxsplit=1)[0]
+                for dependency in dependencies
+            }:
                 result.add(app_of(candidate))
         else:
             dependencies = json.loads(candidate.read_text()).get("dependencies", {})
-            if name in dependencies or any(isinstance(spec, str) and spec.startswith("file:")
-                    and (candidate.parent / spec[5:]).resolve() == manifest.parent.resolve()
-                    for spec in dependencies.values()):
+            if name in dependencies or any(
+                isinstance(spec, str)
+                and spec.startswith("file:")
+                and (candidate.parent / spec[5:]).resolve() == manifest.parent.resolve()
+                for spec in dependencies.values()
+            ):
                 result.add(app_of(candidate))
     return result
 
@@ -118,7 +141,10 @@ def ts_users() -> dict[Path, dict]:
         if manifest.name != "package.json" or app_of(manifest) == "proto":
             continue
         data = json.loads(manifest.read_text())
-        if any(TS_PACKAGE in data.get(section, {}) for section in ("dependencies", "devDependencies")):
+        if any(
+            TS_PACKAGE in data.get(section, {})
+            for section in ("dependencies", "devDependencies")
+        ):
             found[manifest] = data
     return found
 
@@ -129,13 +155,27 @@ def importers_of(users: dict[Path, dict]) -> dict[Path, dict]:
     roots = [manifest.parent for manifest in users]
     found = {}
     for manifest in tracked("*package.json"):
-        if manifest.name != "package.json" or app_of(manifest) == "proto" or manifest in users:
+        if (
+            manifest.name != "package.json"
+            or app_of(manifest) == "proto"
+            or manifest in users
+        ):
             continue
         base = manifest.parent
-        sources = [*tracked(f"{base.relative_to(REPO)}/*.ts"), *tracked(f"{base.relative_to(REPO)}/*.tsx")]
+        sources = [
+            *tracked(f"{base.relative_to(REPO)}/*.ts"),
+            *tracked(f"{base.relative_to(REPO)}/*.tsx"),
+        ]
         for source in sources:
-            targets = [(source.parent / spec).resolve() for spec in RELATIVE_IMPORT.findall(source.read_text())]
-            if any(target.is_relative_to(root) and not target.is_relative_to(base) for target in targets for root in roots):
+            targets = [
+                (source.parent / spec).resolve()
+                for spec in RELATIVE_IMPORT.findall(source.read_text())
+            ]
+            if any(
+                target.is_relative_to(root) and not target.is_relative_to(base)
+                for target in targets
+                for root in roots
+            ):
                 found[manifest] = json.loads(manifest.read_text())
                 break
     return found
@@ -151,13 +191,19 @@ def py_users() -> dict[Path, dict]:
         names = [*data.get("project", {}).get("dependencies", [])]
         for group in data.get("dependency-groups", {}).values():
             names += [item for item in group if isinstance(item, str)]
-        if any(re.split(r"[\s<>=!~;\[]", name, maxsplit=1)[0] == PY_PACKAGE for name in names):
+        if any(
+            re.split(r"[\s<>=!~;\[]", name, maxsplit=1)[0] == PY_PACKAGE
+            for name in names
+        ):
             found[pyproject] = data
     return found
 
 
 # A specifier of @ziyixi/proto in an import or export statement (the statement's start decides type-only).
-TS_FROM = re.compile(r"""\bfrom\s*['"](@ziyixi/proto(?:/[^'"]*)?)['"]|^\s*import\s*['"](@ziyixi/proto(?:/[^'"]*)?)['"]""", re.MULTILINE)
+TS_FROM = re.compile(
+    r"""\bfrom\s*['"](@ziyixi/proto(?:/[^'"]*)?)['"]|^\s*import\s*['"](@ziyixi/proto(?:/[^'"]*)?)['"]""",
+    re.MULTILINE,
+)
 
 
 def ts_proto_imports(text: str) -> list[tuple[str, bool]]:
@@ -167,9 +213,20 @@ def ts_proto_imports(text: str) -> list[tuple[str, bool]]:
         if match.group(2) is not None:
             found.append((match.group(2), False))  # `import '...'`: run for its effects
             continue
-        start = max(text.rfind("\nimport", 0, match.start()), text.rfind("\nexport", 0, match.start())) + 1
+        start = (
+            max(
+                text.rfind("\nimport", 0, match.start()),
+                text.rfind("\nexport", 0, match.start()),
+            )
+            + 1
+        )
         statement = text[start : match.start()]
-        found.append((match.group(1), re.match(r"\s*(import|export)\s+type\b", statement) is not None))
+        found.append(
+            (
+                match.group(1),
+                re.match(r"\s*(import|export)\s+type\b", statement) is not None,
+            )
+        )
     return found
 
 
@@ -184,7 +241,9 @@ def production_sources(manifest: Path) -> list[Path]:
         path
         for root in roots
         for path in sorted(root.rglob("*.ts*"))
-        if ".test." not in path.name and not {"test", "__tests__", "node_modules"} & set(path.relative_to(base).parts)
+        if ".test." not in path.name
+        and not {"test", "__tests__", "node_modules"}
+        & set(path.relative_to(base).parts)
     ]
 
 
@@ -197,41 +256,28 @@ def py_production_sources(pyproject: Path) -> list[Path]:
     else:
         root = pyproject.parent / "src"
         if not root.is_dir():
-            raise AssertionError("a VPS Python proto user must have an explicit src/ package")
+            raise AssertionError(
+                "a VPS Python proto user must have an explicit src/ package"
+            )
     return sorted(root.rglob("*.py"))
 
 
-def proto_import_closure(paths: set[str], root: Path = PROTO) -> set[str]:
-    """Descriptors compile their imported message packages into a bundle, including shared runtime types."""
-    sources = {"proto/" + path.relative_to(root).as_posix(): path for path in root.rglob("*.proto")
-               if not {"node_modules", "ts", "python", ".generate"} & set(path.relative_to(root).parts)
-               and not any(part.startswith(".") for part in path.relative_to(root).parts)}
-    graph = {name: {"proto/" + imported for imported in re.findall(r'^\s*import(?:\s+(?:public|weak))?\s+"([^"\n]+)"',
-                                                               path.read_text(), re.M)}
-             for name, path in sources.items()}
-    pending = []
-    for imported in paths:
-        if not imported.startswith("proto/") or imported in {"proto/ts", "proto/python"}:
-            continue
-        stem = re.sub(r"_(?:pb|wire)(?:\.ts)?$", "", imported)
-        exact = stem + ".proto"
-        if exact in sources:
-            pending.append(exact)
-        else:
-            pending.extend(name for name in sources if name.startswith(imported.rstrip("/") + "/"))
-    result, visited = set(paths), set()
-    while pending:
-        current = pending.pop()
-        if current in visited:
-            continue
-        visited.add(current)
-        result.add(current)
-        pending.extend(dependency for dependency in graph.get(current, ()) if dependency in sources)
-    return result
+def proto_metadata(package: str) -> dict:
+    build = PROTO / package / "BUILD.bazel"
+    calls = [
+        node
+        for node in ast.walk(ast.parse(build.read_text()))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "proto_library"
+    ]
+    if len(calls) != 1:
+        raise AssertionError(f"{package}: expected one package-scoped proto_library")
+    return {item.arg: ast.literal_eval(item.value) for item in calls[0].keywords}
 
 
 def value_importers() -> dict[str, set[str]]:
-    """App -> the proto/ paths (a package directory, or a language: "ts", "python") its production bundles import."""
+    """App -> direct generated-module imports in production, without inferring affected applications."""
     found: dict[str, set[str]] = {}
     for manifest, data in ts_users().items():
         if TS_PACKAGE not in data.get("dependencies", {}):
@@ -240,25 +286,41 @@ def value_importers() -> dict[str, set[str]]:
             for specifier, type_only in ts_proto_imports(source.read_text()):
                 if not type_only:
                     for app in consuming_apps(manifest):
-                        found.setdefault(app, set()).update({"ts", f"proto/{specifier.removeprefix(TS_PACKAGE + '/')}"})
+                        found.setdefault(app, set()).update(
+                            {"ts", f"proto/{specifier.removeprefix(TS_PACKAGE + '/')}"}
+                        )
     for pyproject, data in py_users().items():
         if not py_bundled(data):
             continue
         for source in py_production_sources(pyproject):
-            for module in re.findall(r"^\s*(?:from|import)\s+(ziyixi_proto(?:\.\w+)*)\b", source.read_text(), re.MULTILINE):
+            for module in re.findall(
+                r"^\s*(?:from|import)\s+(ziyixi_proto(?:\.\w+)*)\b",
+                source.read_text(),
+                re.MULTILINE,
+            ):
                 for app in consuming_apps(pyproject):
-                    found.setdefault(app, set()).update({"python", "proto/" + "/".join(module.split(".")[1:])})
-    return {app: proto_import_closure(paths) for app, paths in found.items()}
+                    found.setdefault(app, set()).update(
+                        {"python", "proto/" + "/".join(module.split(".")[1:])}
+                    )
+    return {
+        app: {re.sub(r"_(?:pb|wire)(?:\.ts)?$", ".proto", path) for path in paths}
+        for app, paths in found.items()
+    }
 
 
 def py_bundled(data: dict) -> bool:
-    return any(re.split(r"[\s<>=!~;\[]", name, maxsplit=1)[0] == PY_PACKAGE for name in data["project"]["dependencies"])
+    return any(
+        re.split(r"[\s<>=!~;\[]", name, maxsplit=1)[0] == PY_PACKAGE
+        for name in data["project"]["dependencies"]
+    )
 
 
 class OneVersion(unittest.TestCase):
     def setUp(self):
         self.manifest = json.loads((PROTO / "package.json").read_text())
-        self.catalog = yaml.safe_load((REPO / "pnpm-workspace.yaml").read_text())["catalog"]
+        self.catalog = yaml.safe_load((REPO / "pnpm-workspace.yaml").read_text())[
+            "catalog"
+        ]
         self.lock = yaml.safe_load((REPO / "pnpm-lock.yaml").read_text())
 
     def test_the_toolchain_is_pinned_in_the_shared_catalog(self):
@@ -267,21 +329,36 @@ class OneVersion(unittest.TestCase):
             with self.subTest(package=name):
                 self.assertEqual(pins[name], "catalog:")
                 self.assertRegex(self.catalog[name], rf"^{EXACT.pattern}$")
-                self.assertEqual(self.lock["catalogs"]["default"][name]["version"], self.catalog[name])
-                self.assertEqual(self.lock["importers"]["proto"]["dependencies"][name]["version"].split("(", 1)[0], self.catalog[name])
+                self.assertEqual(
+                    self.lock["catalogs"]["default"][name]["version"],
+                    self.catalog[name],
+                )
+                self.assertEqual(
+                    self.lock["importers"]["proto"]["dependencies"][name][
+                        "version"
+                    ].split("(", 1)[0],
+                    self.catalog[name],
+                )
 
     def test_the_runtime_is_the_generators_version(self):
         self.assertEqual(self.catalog[RUNTIME], self.catalog["@bufbuild/protoc-gen-es"])
-        version = self.lock["importers"]["proto"]["dependencies"]["@bufbuild/protoc-gen-es"]["version"]
+        version = self.lock["importers"]["proto"]["dependencies"][
+            "@bufbuild/protoc-gen-es"
+        ]["version"]
         generator = self.lock["snapshots"]["@bufbuild/protoc-gen-es@" + version]
-        dependencies = {**generator.get("dependencies", {}), **generator.get("optionalDependencies", {})}
+        dependencies = {
+            **generator.get("dependencies", {}),
+            **generator.get("optionalDependencies", {}),
+        }
         self.assertEqual(dependencies[RUNTIME], self.catalog[RUNTIME])
 
     def test_the_lock_has_one_runtime_version(self):
         copies = [key for key in self.lock["packages"] if key.startswith(RUNTIME + "@")]
         self.assertEqual(copies, [RUNTIME + "@" + self.catalog[RUNTIME]])
         runtime = self.lock["importers"]["proto/ts"]["dependencies"][RUNTIME]
-        self.assertEqual(runtime, {"specifier": "catalog:", "version": self.catalog[RUNTIME]})
+        self.assertEqual(
+            runtime, {"specifier": "catalog:", "version": self.catalog[RUNTIME]}
+        )
 
     def test_no_app_has_its_own_runtime_or_generator(self):
         """Only proto owns the runtime; applications import it through @ziyixi/proto/protobuf."""
@@ -291,7 +368,11 @@ class OneVersion(unittest.TestCase):
             with self.subTest(file=str(path.relative_to(REPO))):
                 text = path.read_text()
                 for name in TOOLCHAIN:
-                    self.assertNotIn(f'"{name}"', text, f"import it from {TS_PACKAGE}/protobuf instead")
+                    self.assertNotIn(
+                        f'"{name}"',
+                        text,
+                        f"import it from {TS_PACKAGE}/protobuf instead",
+                    )
 
 
 class ApiLinter(unittest.TestCase):
@@ -300,57 +381,77 @@ class ApiLinter(unittest.TestCase):
 
     def test_one_exact_version_and_toolchain_in_the_tool_module(self):
         self.assertIn(f"tool {API_LINTER}/cmd/api-linter\n", self.go_mod)
-        versions = re.findall(rf"^\s*{re.escape(API_LINTER)} (v\S+)", self.go_mod, re.MULTILINE)
+        versions = re.findall(
+            rf"^\s*{re.escape(API_LINTER)} (v\S+)", self.go_mod, re.MULTILINE
+        )
         self.assertEqual(len(versions), 1, versions)
         self.assertRegex(versions[0], rf"^v{EXACT.pattern}$")
-        self.assertRegex(self.go_mod, r"(?m)^toolchain go\d+\.\d+\.\d+$", "pin the Go toolchain exactly")
+        self.assertRegex(
+            self.go_mod,
+            r"(?m)^toolchain go\d+\.\d+\.\d+$",
+            "pin the Go toolchain exactly",
+        )
         go_sum = (LINTER_MODULE / "go.sum").read_text()
         self.assertIn(f"{API_LINTER} {versions[0]} h1:", go_sum)
         self.assertIn(f"{API_LINTER} {versions[0]}/go.mod h1:", go_sum)
 
-    def test_the_script_builds_from_the_module_without_changing_it(self):
-        script = (PROTO / "scripts" / "api-lint.sh").read_text()
-        build = f"go -C tools/api-linter build -mod=readonly -o ../../.tools/api-linter {API_LINTER}/cmd/api-linter"
-        self.assertIn(build, script)
-        scripts = json.loads((PROTO / "package.json").read_text())["scripts"]
-        self.assertEqual(scripts["api-lint"], "sh scripts/api-lint.sh")
+    def test_bazel_uses_the_pinned_linter_module(self):
+        module = (REPO / "MODULE.bazel").read_text()
+        self.assertIn('go_mod = "//proto/tools/api-linter:go.mod"', module)
+        build = (LINTER_MODULE / "BUILD.bazel").read_text()
+        self.assertIn(
+            "@com_github_googleapis_api_linter_v2//cmd/api-linter:api-linter", build
+        )
+        self.assertIn('"go.sum"', build)
 
-    def test_the_linters_googleapis_is_checked_against_buf_lock_before_it_runs(self):
-        """api-linter interprets the google.api annotations with the genproto code compiled into it, buf compiles the
-        module against buf.lock's googleapis: tools/api-linter/googleapis fails unless both carry the same files."""
-        script = (PROTO / "scripts" / "api-lint.sh").read_text()
-        for line in (
-            "go -C tools/api-linter test -mod=readonly ./googleapis\n",
-            "go -C tools/api-linter build -mod=readonly -o ../../.tools/googleapis-check ./googleapis\n",
-            '.tools/googleapis-check "$work/image.binpb"\n',
-        ):
-            with self.subTest(line=line):
-                self.assertIn(line, script)
-        self.assertLess(script.index(".tools/googleapis-check \""), script.index("if .tools/api-linter "))
-        # The check compares against the packages api-linter v2 imports; genproto is a direct, exact requirement of
-        # the tool module, so a bump is a reviewed change of go.mod.
-        check = (LINTER_MODULE / "googleapis" / "main.go").read_text()
-        self.assertIn('_ "google.golang.org/genproto/googleapis/api/annotations"', check)
-        self.assertRegex(self.go_mod, r"(?m)^\tgoogle\.golang\.org/genproto/googleapis/api v0\.0\.0-\d{14}-[0-9a-f]{12}$")
+    def test_the_linter_checks_its_annotations_against_the_locked_descriptor(self):
+        runner = (PROTO / "tools/bazel_checks.py").read_text()
+        self.assertLess(
+            runner.index("args.googleapis_check, str(args.image)"),
+            runner.index("args.api_linter,"),
+        )
+        build = (PROTO / "BUILD.bazel").read_text()
+        self.assertIn(
+            '"$(location //proto/tools/api-linter/googleapis:googleapis-check)"', build
+        )
+        self.assertIn('"$(location :image)"', build)
+        check = (LINTER_MODULE / "googleapis/main.go").read_text()
+        self.assertIn(
+            '_ "google.golang.org/genproto/googleapis/api/annotations"', check
+        )
+        self.assertRegex(
+            self.go_mod,
+            r"(?m)^\tgoogle\.golang\.org/genproto/googleapis/api v0\.0\.0-\d{14}-[0-9a-f]{12}$",
+        )
         self.assertIn("buf.lock", self.go_mod)
 
     def test_nothing_else_installs_it(self):
         offenders = []
         for path in tracked("*"):
-            skipped = path.is_relative_to(LINTER_MODULE) or path == Path(__file__).resolve()
+            skipped = (
+                path.is_relative_to(LINTER_MODULE) or path == Path(__file__).absolute()
+            )
             if skipped or path.suffix in {".md", ".sum"} or not path.is_file():
                 continue
             text = path.read_text(errors="ignore")
-            if re.search(r"api-linter(/v2)?(/cmd/api-linter)?@|go install\b[^\n]*api-linter", text):
+            if re.search(
+                r"api-linter(/v2)?(/cmd/api-linter)?@|go install\b[^\n]*api-linter",
+                text,
+            ):
                 offenders.append(str(path.relative_to(REPO)))
         self.assertEqual(offenders, [])
 
-    def test_the_proto_checks_job_installs_the_modules_toolchain_and_runs_the_linter(self):
-        job = effective_ci().split("\n  proto-checks:\n", 1)[1].split("\n  gate:\n", 1)[0]
-        self.assertIn("go-version-file: proto/tools/api-linter/go.mod", job)
-        self.assertIn("cache-dependency-path: proto/tools/api-linter/go.sum", job)
-        self.assertNotIn("go-version:", job)
-        self.assertIn("run: npm run api-lint", job)
+    def test_public_proto_check_covers_linter_and_annotation_agreement(self):
+        build = (PROTO / "BUILD.bazel").read_text()
+        for label in (
+            ":api_lint_test",
+            "//proto/tools/api-linter/googleapis:googleapis_test",
+        ):
+            self.assertIn('"' + label + '"', build)
+        self.assertEqual(
+            json.loads((PROTO / "package.json").read_text())["scripts"]["test"],
+            "bazel test //proto:check",
+        )
 
 
 class Users(unittest.TestCase):
@@ -360,42 +461,68 @@ class Users(unittest.TestCase):
         lock = yaml.safe_load((REPO / "pnpm-lock.yaml").read_text())
         for manifest, data in users.items():
             with self.subTest(manifest=str(manifest.relative_to(REPO))):
-                spec = data.get("dependencies", {}).get(TS_PACKAGE) or data["devDependencies"][TS_PACKAGE]
+                spec = (
+                    data.get("dependencies", {}).get(TS_PACKAGE)
+                    or data["devDependencies"][TS_PACKAGE]
+                )
                 self.assertEqual(spec, "workspace:*")
                 postinstall = data.get("scripts", {}).get("postinstall", "")
                 match = re.fullmatch(r"node (\S+/tools/ensure\.mjs)", postinstall)
                 self.assertIsNotNone(
-                    match, f"postinstall must be exactly `node <...>/proto/tools/ensure.mjs`: {postinstall!r}"
+                    match,
+                    f"postinstall must be exactly `node <...>/proto/tools/ensure.mjs`: {postinstall!r}",
                 )
                 self.assertEqual((manifest.parent / match.group(1)).resolve(), ENSURE)
-                importer = lock["importers"][manifest.parent.relative_to(REPO).as_posix()]
-                dependencies = {**importer.get("dependencies", {}), **importer.get("devDependencies", {})}
+                importer = lock["importers"][
+                    manifest.parent.relative_to(REPO).as_posix()
+                ]
+                dependencies = {
+                    **importer.get("dependencies", {}),
+                    **importer.get("devDependencies", {}),
+                }
                 dependency = dependencies[TS_PACKAGE]
                 self.assertEqual(dependency["specifier"], "workspace:*")
                 self.assertTrue(dependency["version"].startswith("link:"))
-                self.assertEqual((manifest.parent / dependency["version"].removeprefix("link:")).resolve(), PROTO / "ts")
+                self.assertEqual(
+                    (
+                        manifest.parent / dependency["version"].removeprefix("link:")
+                    ).resolve(),
+                    PROTO / "ts",
+                )
 
-    def test_the_workspace_install_caches_the_shared_root_lock(self):
-        action = (REPO / ".github/actions/setup-workspace/action.yml").read_text()
-        self.assertIn("/pnpm-lock.yaml", action)
-        self.assertIn("pnpm \"${args[@]}\" install --frozen-lockfile", action)
-        self.assertIn("--filter @ziyixi/proto-toolchain", action)
+    def test_bazel_imports_the_shared_root_lock(self):
+        module = (REPO / "MODULE.bazel").read_text()
+        self.assertIn('pnpm_lock = "//:pnpm-lock.yaml"', module)
         self.assertFalse(tracked("*package-lock.json"))
 
     def test_scripts_that_read_the_generated_code_regenerate_it_first(self):
         users = ts_users()
         importers = importers_of(users)
         # The watch app's UI calls watch.ui.v1 through the generated client: a user itself.
-        self.assertIn(REPO / "watch" / "web" / "package.json", users, "the watch app's UI depends on @ziyixi/proto")
+        self.assertIn(
+            REPO / "watch" / "web" / "package.json",
+            users,
+            "the watch app's UI depends on @ziyixi/proto",
+        )
         for manifest, data in {**users, **importers}.items():
             scripts = data.get("scripts", {})
             for name, command in scripts.items():
-                if name.startswith(("pre", "post")) or not READS_GENERATED.search(command):
+                if name.startswith(("pre", "post")) or not READS_GENERATED.search(
+                    command
+                ):
                     continue
-                with self.subTest(manifest=str(manifest.relative_to(REPO)), script=name):
-                    match = re.fullmatch(r"node (\S+/tools/ensure\.mjs)", scripts.get(f"pre{name}", ""))
-                    self.assertIsNotNone(match, f"add \"pre{name}\": \"node <...>/proto/tools/ensure.mjs\"")
-                    self.assertEqual((manifest.parent / match.group(1)).resolve(), ENSURE)
+                with self.subTest(
+                    manifest=str(manifest.relative_to(REPO)), script=name
+                ):
+                    match = re.fullmatch(
+                        r"node (\S+/tools/ensure\.mjs)", scripts.get(f"pre{name}", "")
+                    )
+                    self.assertIsNotNone(
+                        match, f'add "pre{name}": "node <...>/proto/tools/ensure.mjs"'
+                    )
+                    self.assertEqual(
+                        (manifest.parent / match.group(1)).resolve(), ENSURE
+                    )
 
     def test_the_freshness_rule_names_every_tool_that_reads_the_generated_code(self):
         """eslint reads the generated types through typescript-eslint's project service, vite compiles them, Node's test
@@ -431,90 +558,175 @@ class Users(unittest.TestCase):
         users = py_users()
         self.assertTrue(users, "no Python user of ziyixi-proto")
         workspace = tomllib.loads((REPO / "pyproject.toml").read_text())["tool"]["uv"]
-        self.assertEqual(workspace["sources"][PY_PACKAGE], {"workspace": True, "editable": False})
+        self.assertEqual(
+            workspace["sources"][PY_PACKAGE], {"workspace": True, "editable": False}
+        )
         self.assertIn("proto/python", workspace["workspace"]["members"])
         lock = tomllib.loads((REPO / "uv.lock").read_text())
-        package = next(package for package in lock["package"] if package["name"] == PY_PACKAGE)
+        package = next(
+            package for package in lock["package"] if package["name"] == PY_PACKAGE
+        )
         self.assertEqual(package["source"], {"directory": "proto/python"})
         for pyproject, data in users.items():
             with self.subTest(pyproject=str(pyproject.relative_to(REPO))):
-                self.assertIn(pyproject.parent.relative_to(REPO).as_posix(), workspace["workspace"]["members"])
-                self.assertNotIn(PY_PACKAGE, data.get("tool", {}).get("uv", {}).get("sources", {}))
+                self.assertIn(
+                    pyproject.parent.relative_to(REPO).as_posix(),
+                    workspace["workspace"]["members"],
+                )
+                self.assertNotIn(
+                    PY_PACKAGE, data.get("tool", {}).get("uv", {}).get("sources", {})
+                )
                 self.assertFalse((pyproject.parent / "uv.lock").exists())
 
     def test_a_python_worker_regenerates_when_its_node_toolchain_installs(self):
         """pywrangler vendors ziyixi-proto from proto/'s source tree inside Pyodide, which cannot generate,
         and uv may install the package from its wheel cache without regenerating that tree (after `git clean
         -fdX`, for example). The npm install every pywrangler command needs (wrangler) regenerates it."""
-        users = {path: data for path, data in py_users().items()
-                 if py_bundled(data) and (path.parent / "wrangler.toml").is_file()}
+        users = {
+            path: data
+            for path, data in py_users().items()
+            if py_bundled(data) and (path.parent / "wrangler.toml").is_file()
+        }
         self.assertTrue(users, "no Python Worker bundles ziyixi-proto")
         for pyproject in users:
             with self.subTest(pyproject=str(pyproject.relative_to(REPO))):
                 manifest = json.loads((pyproject.parent / "package.json").read_text())
-                match = re.fullmatch(r"node (\S+/tools/ensure\.mjs)", manifest.get("scripts", {}).get("postinstall", ""))
-                self.assertIsNotNone(match, "add \"postinstall\": \"node <...>/proto/tools/ensure.mjs\"")
+                match = re.fullmatch(
+                    r"node (\S+/tools/ensure\.mjs)",
+                    manifest.get("scripts", {}).get("postinstall", ""),
+                )
+                self.assertIsNotNone(
+                    match, 'add "postinstall": "node <...>/proto/tools/ensure.mjs"'
+                )
                 self.assertEqual((pyproject.parent / match.group(1)).resolve(), ENSURE)
 
-    def test_proto_users_matches_the_manifests_and_sources(self):
-        """Every user is listed, with exactly the languages its production bundles take from proto/."""
-        # Todofy takes both: todofy-core vendors the Python package, and its gateway (the transcoder of todofy.ui.v1)
-        # and UI (the client) bundle the TypeScript runtime and generated code.
-        for manifest in (REPO / "todofy" / "gateway" / "package.json", REPO / "todofy" / "web" / "package.json"):
-            self.assertIn(TS_PACKAGE, json.loads(manifest.read_text())["dependencies"])
-        users = {app for path in [*ts_users(), *py_users()] for app in consuming_apps(path)}
-        imports = value_importers()
-        derived = {app: {lang for lang in imports.get(app, set()) if lang in ("ts", "python")} for app in users}
-        self.assertEqual(derived, {app: set(languages) for app, languages in ci_changes.PROTO_USERS.items()})
-        self.assertLessEqual(set(derived), set(ci_changes.APPS))
+    def test_proto_libraries_declare_every_idl_import_edge(self):
+        for build in tracked("proto/**/BUILD.bazel"):
+            calls = [
+                node
+                for node in ast.walk(ast.parse(build.read_text()))
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "proto_library"
+            ]
+            for call in calls:
+                metadata = {
+                    item.arg: ast.literal_eval(item.value) for item in call.keywords
+                }
+                sources = {build.parent / source for source in metadata["srcs"]}
+                imports = {
+                    name
+                    for source in sources
+                    for name in re.findall(
+                        r'^import "([^"]+)";', source.read_text(), re.MULTILINE
+                    )
+                }
+                expected = set()
+                for name in imports:
+                    if name.startswith("google/protobuf/"):
+                        expected.add("@protobuf//:" + Path(name).stem + "_proto")
+                    elif name.startswith("google/"):
+                        expected.add(
+                            "@googleapis//:"
+                            + name.removesuffix(".proto").replace("/", "_")
+                            + "_proto"
+                        )
+                    elif PROTO / name not in sources:
+                        expected.add("//proto/" + str(Path(name).parent) + ":proto")
+                with self.subTest(package=str(build.parent.relative_to(REPO))):
+                    self.assertEqual(set(metadata.get("deps", [])), expected)
+                    self.assertEqual(metadata["strip_import_prefix"], "/proto")
 
-    def test_proto_packages_name_exactly_their_importers(self):
-        """ci_changes.PROTO_PACKAGES: the apps whose production code imports each package's generated code."""
-        imports = value_importers()
-        for package, importers in ci_changes.PROTO_PACKAGES.items():
-            with self.subTest(package=package):
-                actual = {app for app, paths in imports.items() if any(path.startswith(package) for path in paths)}
-                self.assertEqual(actual, set(importers))
+    def test_each_idl_package_has_a_native_proto_library(self):
+        sources = [
+            path
+            for path in tracked("proto/**/*.proto")
+            if "node_modules" not in path.parts
+        ]
+        self.assertTrue(sources)
+        for source in sources:
+            with self.subTest(source=str(source.relative_to(PROTO))):
+                build = source.parent / "BUILD.bazel"
+                self.assertTrue(
+                    build.is_file(), "IDL packages declare their own Bazel boundary"
+                )
+                self.assertIn(
+                    source.name,
+                    proto_metadata(source.parent.relative_to(PROTO).as_posix())["srcs"],
+                )
 
-    def test_proto_dependencies_include_foreign_shared_message_packages(self):
-        import tempfile
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            for name, text in {"fleet/telemetry/v1/report.proto": 'import "platform/runtime/v1/runtime.proto";',
-                               "platform/runtime/v1/runtime.proto": 'import "common/wire/v1/wire.proto";',
-                               "common/wire/v1/wire.proto": ''}.items():
-                path = root / name
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(text)
-            closure = proto_import_closure({"ts", "proto/fleet/telemetry/v1/report_pb.ts"}, root)
-            self.assertIn("proto/platform/runtime/v1/runtime.proto", closure)
-            self.assertIn("proto/common/wire/v1/wire.proto", closure)
-            self.assertIn("ts", closure)
+    def test_shared_message_dependencies_are_real_bazel_edges(self):
+        self.assertIn(
+            "//proto/platform/runtime/v1:proto",
+            proto_metadata("fleet/telemetry/v1")["deps"],
+        )
+        self.assertIn(
+            "//proto/common/wire/v1:proto",
+            proto_metadata("platform/runtime/v1")["deps"],
+        )
+        self.assertNotIn(
+            "//proto/website/sync/v1:proto", proto_metadata("ops/v1")["deps"]
+        )
 
     def test_vps_python_proto_user_has_independent_source_and_local_dependency(self):
         platform = REPO / "platform/pyproject.toml"
         data = tomllib.loads(platform.read_text())
         self.assertTrue(py_bundled(data))
         workspace = tomllib.loads((REPO / "pyproject.toml").read_text())["tool"]["uv"]
-        self.assertEqual(workspace["sources"][PY_PACKAGE], {"workspace": True, "editable": False})
-        self.assertEqual(data["project"]["scripts"]["personal-cloud"], "personal_cloud.__main__:main")
+        self.assertEqual(
+            workspace["sources"][PY_PACKAGE], {"workspace": True, "editable": False}
+        )
+        self.assertEqual(
+            data["project"]["scripts"]["personal-cloud"], "personal_cloud.__main__:main"
+        )
         self.assertFalse((platform.parent / "wrangler.toml").exists())
-        self.assertTrue(all(source.is_relative_to(platform.parent / "src") for source in py_production_sources(platform)))
+        self.assertTrue(
+            all(
+                source.is_relative_to(platform.parent / "src")
+                for source in py_production_sources(platform)
+            )
+        )
 
     def test_the_website_manifest_covers_its_separate_relay_bundle(self):
         manifest = REPO / "website" / "package.json"
         sources = production_sources(manifest)
         self.assertIn(REPO / "website" / "relay" / "src" / "status.ts", sources)
-        self.assertFalse([path for path in sources if "tests" in path.parts or "node_modules" in path.parts])
-        values = {name for path in sources for name, type_only in ts_proto_imports(path.read_text()) if not type_only}
+        self.assertFalse(
+            [
+                path
+                for path in sources
+                if "tests" in path.parts or "node_modules" in path.parts
+            ]
+        )
+        values = {
+            name
+            for path in sources
+            for name, type_only in ts_proto_imports(path.read_text())
+            if not type_only
+        }
         self.assertIn("@ziyixi/proto/website/sync/v1/sync_pb", values)
         self.assertIn("@ziyixi/proto/ops/v1/ops_pb", values)
 
-    def test_website_sync_reaches_the_relay_and_home_not_the_ops_v1_apps(self):
-        # ops.v1 no longer embeds website.sync.v1: Home reads the evidence from the relay's WebsiteSync entrypoint.
+    def test_website_sync_has_direct_and_shared_descriptor_consumers(self):
         imports = value_importers()
-        users = {app for app, paths in imports.items() if "proto/website/sync/v1/sync.proto" in paths}
-        self.assertEqual(users, {"website", "dashboard", "personal-mcp"})
+        direct = {
+            app
+            for app, paths in imports.items()
+            if "proto/website/sync/v1/sync.proto" in paths
+        }
+        self.assertEqual(direct, {"website", "dashboard"})
+        self.assertIn(
+            "proto/dashboard/mcp/v1/home_service.proto", imports["personal-mcp"]
+        )
+        self.assertIn(
+            "//proto/dashboard/ui/v1:proto", proto_metadata("dashboard/mcp/v1")["deps"]
+        )
+        self.assertIn(
+            "//proto/website/sync/v1:proto", proto_metadata("dashboard/ui/v1")["deps"]
+        )
+        self.assertNotIn(
+            "//proto/website/sync/v1:proto", proto_metadata("ops/v1")["deps"]
+        )
 
     def test_type_only_imports_are_told_apart(self):
         text = (
@@ -526,11 +738,17 @@ class Users(unittest.TestCase):
         )
         self.assertEqual(
             ts_proto_imports(text),
-            [("@ziyixi/proto/a/v1/a_pb", True), ("@ziyixi/proto/b/v1/b_pb", False), ("@ziyixi/proto/c", False), ("@ziyixi/proto/e", True), ("@ziyixi/proto/f", False)],
+            [
+                ("@ziyixi/proto/a/v1/a_pb", True),
+                ("@ziyixi/proto/b/v1/b_pb", False),
+                ("@ziyixi/proto/c", False),
+                ("@ziyixi/proto/e", True),
+                ("@ziyixi/proto/f", False),
+            ],
         )
 
     def test_a_test_only_user_has_no_production_import(self):
-        """PROTO_USERS[app] False means no deploy on a proto/ change: nothing that ships may import it."""
+        """A test-only dependency cannot appear in a production bundle."""
         for manifest, data in ts_users().items():
             if TS_PACKAGE in data.get("dependencies", {}):
                 continue
@@ -542,9 +760,15 @@ class Users(unittest.TestCase):
             if py_bundled(data):
                 continue
             config = tomllib.loads((pyproject.parent / "wrangler.toml").read_text())
-            for source in sorted((pyproject.parent / config.get("base_dir", ".")).rglob("*.py")):
+            for source in sorted(
+                (pyproject.parent / config.get("base_dir", ".")).rglob("*.py")
+            ):
                 with self.subTest(file=str(source.relative_to(REPO))):
-                    self.assertNotRegex(source.read_text(), r"^\s*(from|import)\s+ziyixi_proto\b", re.MULTILINE)
+                    self.assertNotRegex(
+                        source.read_text(),
+                        r"^\s*(from|import)\s+ziyixi_proto\b",
+                        re.MULTILINE,
+                    )
 
 
 # Unicode categories a .proto source may not hold literally (besides the space and the line feed): spaces, line and
@@ -566,26 +790,45 @@ def invisible_characters(text: str) -> list[tuple[int, str]]:
 class Sources(unittest.TestCase):
     def test_no_proto_source_holds_an_invisible_character(self):
         sources = tracked("*.proto")
-        self.assertTrue(any(path.parts[-4:] == ("todofy", "report", "v1", "report.proto") for path in sources))
+        self.assertTrue(
+            any(
+                path.parts[-4:] == ("todofy", "report", "v1", "report.proto")
+                for path in sources
+            )
+        )
         for path in sources:
             with self.subTest(file=str(path.relative_to(REPO))):
                 self.assertEqual(
-                    invisible_characters(path.read_text(encoding="utf-8")), [], "write it as a \\u escape"
+                    invisible_characters(path.read_text(encoding="utf-8")),
+                    [],
+                    "write it as a \\u escape",
                 )
 
     def test_the_check_sees_what_a_reviewer_cannot(self):
         text = 'pattern: "[ \\u00A0\u00a0\u2028\t]" // 报税\n\ufeffx'
-        self.assertEqual(invisible_characters(text), [(1, "U+00A0"), (1, "U+2028"), (1, "U+0009"), (2, "U+FEFF")])
+        self.assertEqual(
+            invisible_characters(text),
+            [(1, "U+00A0"), (1, "U+2028"), (1, "U+0009"), (2, "U+FEFF")],
+        )
 
 
 class Generated(unittest.TestCase):
     def test_no_generated_file_is_committed(self):
         committed = [
-            str(path.relative_to(REPO)) for path in tracked("proto/ts") + tracked("proto/python/src/ziyixi_proto")
+            str(path.relative_to(REPO))
+            for path in tracked("proto/ts") + tracked("proto/python/src/ziyixi_proto")
         ]
         roots = ("proto/ts/", "proto/python/src/ziyixi_proto/")
-        nested = [name for name in committed if "/" in name.removeprefix(next(r for r in roots if name.startswith(r)))]
-        self.assertEqual(nested, [], "every directory under the package roots is generated (proto/.gitignore)")
+        nested = [
+            name
+            for name in committed
+            if "/" in name.removeprefix(next(r for r in roots if name.startswith(r)))
+        ]
+        self.assertEqual(
+            nested,
+            [],
+            "every directory under the package roots is generated (proto/.gitignore)",
+        )
 
     def test_generated_paths_are_ignored(self):
         for path in (
@@ -594,34 +837,54 @@ class Generated(unittest.TestCase):
             "proto/.generated.json",
         ):
             with self.subTest(path=path):
-                result = subprocess.run(["git", "-C", str(REPO), "check-ignore", "-q", "--no-index", path], check=False)
+                result = subprocess.run(
+                    ["git", "-C", str(REPO), "check-ignore", "-q", "--no-index", path],
+                    check=False,
+                )
                 self.assertEqual(result.returncode, 0, f"{path} must be ignored")
 
-    def test_uv_rebuilds_when_any_input_of_the_stamp_changes(self):
-        ensure = (PROTO / "tools" / "ensure.mjs").read_text()
-        inputs = json.loads(
-            re.search(r"^const INPUT_FILES = (\[.*\]);$", ensure, re.MULTILINE).group(1).replace("'", '"')
-        )
+    def test_uv_cache_covers_bazel_inputs_and_the_materialized_manifest(self):
         keys = {
             key["file"]
-            for key in tomllib.loads((PROTO / "python" / "pyproject.toml").read_text())["tool"]["uv"]["cache-keys"]
+            for key in tomllib.loads((PROTO / "python/pyproject.toml").read_text())[
+                "tool"
+            ]["uv"]["cache-keys"]
         }
-        self.assertLessEqual({f"../{name}" for name in inputs} | {"../**/*.proto"}, keys)
-        # The stamp itself: a clean deletes it with the generated code, and uv must rebuild then.
-        self.assertIn("../.generated.json", keys)
+        self.assertLessEqual(
+            {
+                "../.generated.json",
+                "../**/*.proto",
+                "../**/BUILD.bazel",
+                "../bazel/*.bzl",
+                "../buf.gen.yaml",
+                "../buf.lock",
+                "../../MODULE.bazel",
+                "../../MODULE.bazel.lock",
+                "../../.bazelrc",
+                "../../.bazelversion",
+                "../tools/*.py",
+                "../tools/ensure.mjs",
+                "../ts/*.ts",
+                "../../uv.lock",
+                "src/ziyixi_proto/py.typed",
+            },
+            keys,
+        )
 
-    def test_buf_and_ensure_exclude_the_same_directories(self):
-        ensure = (PROTO / "tools" / "ensure.mjs").read_text()
-        excluded = set(
-            json.loads(
-                re.search(r"^const EXCLUDED = new Set\((\[.*\])\);$", ensure, re.MULTILINE).group(1).replace("'", '"')
-            )
-        )
-        buf_yaml = (PROTO / "buf.yaml").read_text()
-        listed = set(
-            re.findall(r"^      - (\S+)$", buf_yaml.split("excludes:", 1)[1].split("\ndeps:", 1)[0], re.MULTILINE)
-        )
-        self.assertEqual(excluded, listed)
+    def test_development_entry_only_materializes_canonical_bazel_outputs(self):
+        ensure = ENSURE.read_text()
+        self.assertIn("bazel(['build', '//proto:materialized'])", ensure)
+        for obsolete in (
+            "toolCommands",
+            "check-deterministic",
+            "pnpm install",
+            "buf generate",
+            "gen_py.py",
+        ):
+            self.assertNotIn(obsolete, ensure)
+        build = (PROTO / "BUILD.bazel").read_text()
+        self.assertIn('typescript = "//proto/ts:pkg"', build)
+        self.assertIn('name = "materialized"', build)
 
 
 if __name__ == "__main__":

@@ -118,21 +118,15 @@ AI 机构与作者博客、Nature/Science 及地球物理、地震学期刊，�
 `rendering.render_edition()` 未提供冻结模板时仍使用包内模板，离线demo同样不会读取
 生产活动配置。已有运行继续使用其冻结模板，活动配置损坏不能成为包内模板回退的理由。
 
-## 本地离线检查
+## 离线检查
 
-```sh
-uv run --locked python -m newsletter.config_cli build \
-  --source content-config --revision "$(git rev-parse HEAD)" --output /tmp/newsletter-bundle.json
-uv run --locked python -m newsletter.config_cli validate \
-  --bundle /tmp/newsletter-bundle.json
-```
-
-macOS 上 `/tmp` 是符号链接时请用 `/private/tmp/newsletter-bundle.json`。
-不需要 `.env` 或 Codex 登录；输出只含 revision、digest 和预算，不输出配置正文或任何凭据。
+Linux Docker 主机运行 `bazel test //newsletter:container_test`：它只挂载声明的公开配置，
+在声明的精确引擎镜像 ID 中构建并再次校验配置包，禁用网络，不调用模型或邮件。
+`//newsletter:check` 已包含这个目标和合成配置回归；源码与镜像发布仍由各自 Actions 门禁处理。
 
 ## 部署、故障与回退
 
-使用 self-host-on-vultr 中的 bootstrap。配置宿主目录由 uid10001拥有，挂给同步器可写，
+使用本仓库的 [VPS bootstrap bundle](../../tools/vps-bootstrap/README.md)。配置宿主目录由 uid10001拥有，挂给同步器可写，
 挂给 newsletter 只读。同步器不挂数据库、业务 `.env` 或 Codex 登录，不暴露端口。
 只运行配置同步循环，不创建第二个内容 cron；既有每日07:00洛杉矶调度保持不变。
 
@@ -144,14 +138,9 @@ macOS 上 `/tmp` 是符号链接时请用 `/private/tmp/newsletter-bundle.json`�
 执行 `python -m newsletter.config_sync initialize`。它只在配置卷完全为空时 seed 包内基线；
 已有活动配置只校验且不改写。非空目录缺少基线或基线损坏时失败，不自动重置配置。
 
-以下 Compose 命令用于本地演示；生产日常验收使用下文 Fleet/Home 只读入口。
-
-```sh
-docker compose exec -T newsletter-config-sync python -m newsletter.config_sync status
-docker compose exec -T newsletter-config-sync python -m newsletter.config_sync once
-docker compose exec -T newsletter-config-sync python -m newsletter.config_sync pin <历史digest>
-docker compose exec -T newsletter-config-sync python -m newsletter.config_sync unpin
-```
+配置维护使用已安装镜像中的 `python -m newsletter.config_sync`：`status` 只读，
+`once` 拉取并校验一次，`pin <digest>` / `unpin` 是显式配置回退操作。生产执行仍需相应授权，
+日常验收优先使用下文的 Fleet/Home 只读入口。
 
 pin 会持久化并切换到已保存的版本，后续自动同步不会覆盖人工回退；unpin 后恢复自动追踪。
 `status` 区分远端期望 commit、活动源 revision/digest、固定状态、最后成功时间和错误码。

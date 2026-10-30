@@ -1,0 +1,1159 @@
+load("@aspect_rules_js//js:defs.bzl", "js_binary", "js_library", "js_run_binary")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("@bazel_lib//lib:expand_template.bzl", "expand_template")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@npm//recall/extension:eslint/package_json.bzl", eslint = "bin")
+load("@npm//recall/extension:vitest/package_json.bzl", vitest = "bin")
+load("//proto/bazel:ts_package.bzl", "proto_package")
+load("//tools/bazel:js.bzl", "vitest_test", "workspace_link", "workspace_package_link")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/lint:defs.bzl", "eslint_test")
+load(":bazel.bzl", "options_browser_test")
+
+package(default_visibility = ["//recall:__subpackages__"])
+
+npm_link_all_packages(name = "node_modules")
+
+js_library(
+    name = "src__context",
+    srcs = [
+        "src/context.ts",
+    ],
+    deps = [
+    ],
+)
+
+js_library(
+    name = "src__page",
+    srcs = [
+        "src/page.ts",
+    ],
+    deps = [
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+)
+
+js_library(
+    name = "src__db",
+    srcs = [
+        "src/db.ts",
+    ],
+    deps = [
+        ":src__page",
+    ],
+)
+
+js_library(
+    name = "src__limits",
+    srcs = [
+        "src/limits.ts",
+    ],
+    deps = [
+    ],
+)
+
+js_library(
+    name = "src__store",
+    srcs = [
+        "src/store.ts",
+    ],
+    deps = [
+        ":src__limits",
+        "//recall/shared:denylist",
+    ],
+)
+
+js_library(
+    name = "src__messages",
+    srcs = [
+        "src/messages.ts",
+    ],
+    deps = [
+        ":src__store",
+        "//proto/recall/ingest/v1:ts",
+    ],
+)
+
+js_library(
+    name = "src__visits",
+    srcs = [
+        "src/visits.ts",
+    ],
+    deps = [
+        ":src__context",
+        ":src__db",
+        ":src__limits",
+        ":src__page",
+        "//proto/recall/ingest/v1:ts",
+    ],
+)
+
+js_library(
+    name = "src__browser",
+    srcs = [
+        "src/browser.ts",
+        "src/diagnostic.ts",
+        "src/settings.ts",
+        "src/upload.ts",
+    ],
+    deps = [
+        ":src__context",
+        ":src__db",
+        ":src__limits",
+        ":src__messages",
+        ":src__page",
+        ":src__store",
+        ":src__visits",
+        "//proto/recall/ingest/v1:ts",
+        "//recall/shared:denylist",
+    ],
+)
+
+js_library(
+    name = "src__page-text",
+    srcs = [
+        "src/page-text.ts",
+    ],
+    deps = [
+        "//recall/shared:url",
+    ],
+)
+
+js_library(
+    name = "src__capture-script",
+    srcs = [
+        "src/capture-script.ts",
+    ],
+    deps = [
+        ":src__page-text",
+    ],
+)
+
+js_library(
+    name = "src__focus",
+    srcs = [
+        "src/focus.ts",
+    ],
+    deps = [
+        ":src__browser",
+        ":src__context",
+        ":src__db",
+        ":src__limits",
+        ":src__page",
+        ":src__store",
+        ":src__visits",
+    ],
+)
+
+js_library(
+    name = "src__screenshot",
+    srcs = [
+        "src/screenshot.ts",
+    ],
+    deps = [
+        "//recall/shared:url",
+    ],
+)
+
+js_library(
+    name = "src__capture",
+    srcs = [
+        "src/capture.ts",
+    ],
+    deps = [
+        ":src__browser",
+        ":src__context",
+        ":src__db",
+        ":src__focus",
+        ":src__limits",
+        ":src__page",
+        ":src__page-text",
+        ":src__screenshot",
+        ":src__store",
+        ":src__visits",
+        "//proto/recall/ingest/v1:ts",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+)
+
+js_library(
+    name = "src__options-view",
+    srcs = [
+        "src/options-view.ts",
+    ],
+    deps = [
+        ":src__limits",
+        ":src__messages",
+        "//recall/shared:diagnostic",
+    ],
+)
+
+js_library(
+    name = "src__options",
+    srcs = [
+        "src/options.ts",
+    ],
+    deps = [
+        ":src__limits",
+        ":src__messages",
+        ":src__options-view",
+        "//recall/shared:diagnostic",
+    ],
+)
+
+js_library(
+    name = "src__probe-script",
+    srcs = [
+        "src/probe-script.ts",
+    ],
+    deps = [
+        ":src__page-text",
+    ],
+)
+
+js_library(
+    name = "src__update",
+    srcs = [
+        "src/update.ts",
+    ],
+    deps = [
+        ":src__context",
+    ],
+)
+
+js_library(
+    name = "src__sw",
+    srcs = [
+        "src/sw.ts",
+    ],
+    deps = [
+        ":src__browser",
+        ":src__capture",
+        ":src__context",
+        ":src__db",
+        ":src__focus",
+        ":src__limits",
+        ":src__messages",
+        ":src__store",
+        ":src__update",
+    ],
+)
+
+js_library(
+    name = "scripts__icons",
+    srcs = [
+        "scripts/icons.mjs",
+    ],
+    deps = [
+    ],
+)
+
+js_library(
+    name = "scripts__manifest",
+    srcs = [
+        "scripts/manifest.mjs",
+    ],
+    deps = [
+        ":manifest_asset",
+    ],
+)
+
+js_library(
+    name = "scripts__zip",
+    srcs = [
+        "scripts/zip.mjs",
+    ],
+    deps = [
+    ],
+)
+
+js_library(
+    name = "scripts__build",
+    srcs = [
+        "scripts/build.mjs",
+    ],
+    deps = [
+        ":application_sources",
+        ":build_assets",
+        ":node_modules/esbuild",
+        ":scripts__icons",
+        ":scripts__manifest",
+        ":scripts__zip",
+        "//recall/shared:notice",
+    ],
+)
+
+js_library(
+    name = "scripts__install",
+    srcs = [
+        "scripts/install.mjs",
+    ],
+    deps = [
+        ":scripts__manifest",
+        ":scripts__zip",
+    ],
+)
+
+proto_package(
+    name = "test__capture_test_proto",
+    deps = [
+        ":node_modules/fake-indexeddb",
+        ":node_modules/vitest",
+        ":src__browser",
+        ":src__capture",
+        ":src__context",
+        ":src__db",
+        ":src__focus",
+        ":src__limits",
+        ":src__messages",
+        ":src__page",
+        ":src__page-text",
+        ":src__screenshot",
+        ":src__store",
+        ":src__visits",
+        "//proto/recall/ingest/v1:ts",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+)
+
+workspace_link(
+    name = "test__capture_test_proto_link",
+    src = ":test__capture_test_proto",
+)
+
+vitest_test(
+    name = "test__capture_test",
+    data = [
+        "package.json",
+        "test/fake-chrome.ts",
+        "test/helpers.ts",
+        "vitest.config.ts",
+        ":node_modules/fake-indexeddb",
+        ":node_modules/vitest",
+        ":src__browser",
+        ":src__capture",
+        ":src__context",
+        ":src__db",
+        ":src__focus",
+        ":src__limits",
+        ":src__messages",
+        ":src__page",
+        ":src__page-text",
+        ":src__screenshot",
+        ":src__store",
+        ":src__visits",
+        ":test__capture_test_proto_link",
+        "//proto/recall/ingest/v1:ts",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = ["test/capture.test.ts"],
+)
+
+proto_package(
+    name = "test__contract_test_proto",
+    deps = [
+        ":node_modules/fake-indexeddb",
+        ":node_modules/vitest",
+        ":src__browser",
+        ":src__capture",
+        ":src__context",
+        ":src__db",
+        ":src__focus",
+        ":src__limits",
+        ":src__messages",
+        ":src__page",
+        ":src__page-text",
+        ":src__screenshot",
+        ":src__store",
+        ":src__visits",
+        "//proto/recall/ingest/v1:ts",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+)
+
+workspace_link(
+    name = "test__contract_test_proto_link",
+    src = ":test__contract_test_proto",
+)
+
+vitest_test(
+    name = "test__contract_test",
+    data = [
+        "package.json",
+        "test/fake-chrome.ts",
+        "vitest.config.ts",
+        ":node_modules/fake-indexeddb",
+        ":node_modules/vitest",
+        ":src__browser",
+        ":src__capture",
+        ":src__context",
+        ":src__db",
+        ":src__focus",
+        ":src__limits",
+        ":src__messages",
+        ":src__page",
+        ":src__page-text",
+        ":src__screenshot",
+        ":src__store",
+        ":src__visits",
+        ":test__contract_test_proto_link",
+        "//proto/recall/ingest/v1:ts",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = ["test/contract.test.ts"],
+)
+
+proto_package(
+    name = "test__diagnostic_test_proto",
+    deps = [
+        ":node_modules/fake-indexeddb",
+        ":node_modules/vitest",
+        ":src__browser",
+        ":src__context",
+        ":src__db",
+        ":src__limits",
+        ":src__messages",
+        ":src__page",
+        ":src__store",
+        ":src__visits",
+        "//proto/recall/ingest/v1:ts",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+)
+
+workspace_link(
+    name = "test__diagnostic_test_proto_link",
+    src = ":test__diagnostic_test_proto",
+)
+
+vitest_test(
+    name = "test__diagnostic_test",
+    data = [
+        "package.json",
+        "test/fake-chrome.ts",
+        "vitest.config.ts",
+        ":node_modules/fake-indexeddb",
+        ":node_modules/vitest",
+        ":src__browser",
+        ":src__context",
+        ":src__db",
+        ":src__limits",
+        ":src__messages",
+        ":src__page",
+        ":src__store",
+        ":src__visits",
+        ":test__diagnostic_test_proto_link",
+        "//proto/recall/ingest/v1:ts",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = ["test/diagnostic.test.ts"],
+)
+
+proto_package(
+    name = "test__focus_test_proto",
+    deps = [
+        ":node_modules/fake-indexeddb",
+        ":node_modules/vitest",
+        ":src__browser",
+        ":src__context",
+        ":src__db",
+        ":src__focus",
+        ":src__limits",
+        ":src__messages",
+        ":src__page",
+        ":src__store",
+        ":src__visits",
+        "//proto/recall/ingest/v1:ts",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+)
+
+workspace_link(
+    name = "test__focus_test_proto_link",
+    src = ":test__focus_test_proto",
+)
+
+vitest_test(
+    name = "test__focus_test",
+    data = [
+        "package.json",
+        "test/fake-chrome.ts",
+        "test/helpers.ts",
+        "vitest.config.ts",
+        ":node_modules/fake-indexeddb",
+        ":node_modules/vitest",
+        ":src__browser",
+        ":src__context",
+        ":src__db",
+        ":src__focus",
+        ":src__limits",
+        ":src__messages",
+        ":src__page",
+        ":src__store",
+        ":src__visits",
+        ":test__focus_test_proto_link",
+        "//proto/recall/ingest/v1:ts",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = ["test/focus.test.ts"],
+)
+
+proto_package(
+    name = "test__install_test_proto",
+    deps = [
+        ":node_modules/esbuild",
+        ":node_modules/vitest",
+        ":scripts__build",
+        ":scripts__icons",
+        ":scripts__install",
+        ":scripts__manifest",
+        ":scripts__zip",
+    ],
+)
+
+workspace_link(
+    name = "test__install_test_proto_link",
+    src = ":test__install_test_proto",
+)
+
+vitest_test(
+    name = "test__install_test",
+    data = [
+        "package.json",
+        "vitest.config.ts",
+        ":node_modules/esbuild",
+        ":node_modules/fake-indexeddb",
+        ":node_modules/vitest",
+        ":scripts__build",
+        ":scripts__icons",
+        ":scripts__install",
+        ":scripts__manifest",
+        ":scripts__zip",
+        ":test__install_test_proto_link",
+    ],
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = ["test/install.test.mjs"],
+)
+
+proto_package(
+    name = "test__manifest_test_proto",
+    deps = [
+        ":node_modules/vitest",
+        ":scripts__manifest",
+    ],
+)
+
+workspace_link(
+    name = "test__manifest_test_proto_link",
+    src = ":test__manifest_test_proto",
+)
+
+vitest_test(
+    name = "test__manifest_test",
+    data = [
+        "package.json",
+        "vitest.config.ts",
+        ":node_modules/fake-indexeddb",
+        ":node_modules/vitest",
+        ":scripts__manifest",
+        ":test__manifest_test_proto_link",
+    ],
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = ["test/manifest.test.mjs"],
+)
+
+proto_package(
+    name = "test__mobile_test_proto",
+    deps = [
+        ":node_modules/fake-indexeddb",
+        ":node_modules/vitest",
+        ":src__browser",
+        ":src__capture",
+        ":src__context",
+        ":src__db",
+        ":src__focus",
+        ":src__limits",
+        ":src__messages",
+        ":src__page",
+        ":src__page-text",
+        ":src__screenshot",
+        ":src__store",
+        ":src__visits",
+        "//proto/recall/ingest/v1:ts",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+)
+
+workspace_link(
+    name = "test__mobile_test_proto_link",
+    src = ":test__mobile_test_proto",
+)
+
+vitest_test(
+    name = "test__mobile_test",
+    data = [
+        "package.json",
+        "test/fake-chrome.ts",
+        "test/helpers.ts",
+        "vitest.config.ts",
+        ":node_modules/fake-indexeddb",
+        ":node_modules/vitest",
+        ":src__browser",
+        ":src__capture",
+        ":src__context",
+        ":src__db",
+        ":src__focus",
+        ":src__limits",
+        ":src__messages",
+        ":src__page",
+        ":src__page-text",
+        ":src__screenshot",
+        ":src__store",
+        ":src__visits",
+        ":test__mobile_test_proto_link",
+        "//proto/recall/ingest/v1:ts",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = ["test/mobile.test.ts"],
+)
+
+proto_package(
+    name = "test__screenshot_test_proto",
+    deps = [
+        ":node_modules/vitest",
+        ":src__screenshot",
+        "//recall/shared:url",
+    ],
+)
+
+workspace_link(
+    name = "test__screenshot_test_proto_link",
+    src = ":test__screenshot_test_proto",
+)
+
+vitest_test(
+    name = "test__screenshot_test",
+    data = [
+        "package.json",
+        "vitest.config.ts",
+        ":node_modules/fake-indexeddb",
+        ":node_modules/vitest",
+        ":src__screenshot",
+        ":test__screenshot_test_proto_link",
+        "//recall/shared:url",
+    ],
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = ["test/screenshot.test.ts"],
+)
+
+proto_package(
+    name = "test__settings_test_proto",
+    deps = [
+        ":node_modules/fake-indexeddb",
+        ":node_modules/vitest",
+        ":src__browser",
+        ":src__context",
+        ":src__db",
+        ":src__focus",
+        ":src__limits",
+        ":src__messages",
+        ":src__options-view",
+        ":src__page",
+        ":src__store",
+        ":src__visits",
+        "//proto/recall/ingest/v1:ts",
+        "//recall/shared:denylist",
+        "//recall/shared:diagnostic",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+)
+
+workspace_link(
+    name = "test__settings_test_proto_link",
+    src = ":test__settings_test_proto",
+)
+
+vitest_test(
+    name = "test__settings_test",
+    data = [
+        "package.json",
+        "test/fake-chrome.ts",
+        "vitest.config.ts",
+        ":node_modules/fake-indexeddb",
+        ":node_modules/vitest",
+        ":src__browser",
+        ":src__context",
+        ":src__db",
+        ":src__focus",
+        ":src__limits",
+        ":src__messages",
+        ":src__options-view",
+        ":src__page",
+        ":src__store",
+        ":src__visits",
+        ":test__settings_test_proto_link",
+        "//proto/recall/ingest/v1:ts",
+        "//recall/shared:denylist",
+        "//recall/shared:diagnostic",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = ["test/settings.test.ts"],
+)
+
+proto_package(
+    name = "test__sw_test_proto",
+    deps = [
+        ":node_modules/fake-indexeddb",
+        ":node_modules/vitest",
+        ":src__browser",
+        ":src__capture",
+        ":src__context",
+        ":src__db",
+        ":src__focus",
+        ":src__limits",
+        ":src__messages",
+        ":src__page",
+        ":src__page-text",
+        ":src__screenshot",
+        ":src__store",
+        ":src__sw",
+        ":src__update",
+        ":src__visits",
+        "//proto/recall/ingest/v1:ts",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+)
+
+workspace_link(
+    name = "test__sw_test_proto_link",
+    src = ":test__sw_test_proto",
+)
+
+vitest_test(
+    name = "test__sw_test",
+    data = [
+        "package.json",
+        "test/fake-chrome.ts",
+        "vitest.config.ts",
+        ":node_modules/fake-indexeddb",
+        ":node_modules/vitest",
+        ":src__browser",
+        ":src__capture",
+        ":src__context",
+        ":src__db",
+        ":src__focus",
+        ":src__limits",
+        ":src__messages",
+        ":src__page",
+        ":src__page-text",
+        ":src__screenshot",
+        ":src__store",
+        ":src__sw",
+        ":src__update",
+        ":src__visits",
+        ":test__sw_test_proto_link",
+        "//proto/recall/ingest/v1:ts",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = ["test/sw.test.ts"],
+)
+
+proto_package(
+    name = "test__update_test_proto",
+    deps = [
+        ":node_modules/fake-indexeddb",
+        ":node_modules/vitest",
+        ":src__context",
+        ":src__db",
+        ":src__page",
+        ":src__update",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+)
+
+workspace_link(
+    name = "test__update_test_proto_link",
+    src = ":test__update_test_proto",
+)
+
+vitest_test(
+    name = "test__update_test",
+    data = [
+        "package.json",
+        "test/fake-chrome.ts",
+        "vitest.config.ts",
+        ":node_modules/fake-indexeddb",
+        ":node_modules/vitest",
+        ":src__context",
+        ":src__db",
+        ":src__page",
+        ":src__update",
+        ":test__update_test_proto_link",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = ["test/update.test.ts"],
+)
+
+proto_package(
+    name = "test__upload_test_proto",
+    deps = [
+        ":node_modules/fake-indexeddb",
+        ":node_modules/vitest",
+        ":src__browser",
+        ":src__context",
+        ":src__db",
+        ":src__limits",
+        ":src__messages",
+        ":src__page",
+        ":src__store",
+        ":src__visits",
+        "//proto/recall/ingest/v1:ts",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+)
+
+workspace_link(
+    name = "test__upload_test_proto_link",
+    src = ":test__upload_test_proto",
+)
+
+vitest_test(
+    name = "test__upload_test",
+    data = [
+        "package.json",
+        "test/fake-chrome.ts",
+        "vitest.config.ts",
+        ":node_modules/fake-indexeddb",
+        ":node_modules/vitest",
+        ":src__browser",
+        ":src__context",
+        ":src__db",
+        ":src__limits",
+        ":src__messages",
+        ":src__page",
+        ":src__store",
+        ":src__visits",
+        ":test__upload_test_proto_link",
+        "//proto/recall/ingest/v1:ts",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = ["test/upload.test.ts"],
+)
+
+proto_package(
+    name = "test__visits_test_proto",
+    deps = [
+        ":node_modules/fake-indexeddb",
+        ":node_modules/vitest",
+        ":src__browser",
+        ":src__context",
+        ":src__db",
+        ":src__focus",
+        ":src__limits",
+        ":src__messages",
+        ":src__page",
+        ":src__store",
+        ":src__visits",
+        "//proto/recall/ingest/v1:ts",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+)
+
+workspace_link(
+    name = "test__visits_test_proto_link",
+    src = ":test__visits_test_proto",
+)
+
+vitest_test(
+    name = "test__visits_test",
+    data = [
+        "package.json",
+        "test/fake-chrome.ts",
+        "test/helpers.ts",
+        "vitest.config.ts",
+        ":node_modules/fake-indexeddb",
+        ":node_modules/vitest",
+        ":src__browser",
+        ":src__context",
+        ":src__db",
+        ":src__focus",
+        ":src__limits",
+        ":src__messages",
+        ":src__page",
+        ":src__store",
+        ":src__visits",
+        ":test__visits_test_proto_link",
+        "//proto/recall/ingest/v1:ts",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = ["test/visits.test.ts"],
+)
+
+js_library(
+    name = "manifest_asset",
+    srcs = ["src/manifest.json"],
+)
+
+js_library(
+    name = "application_sources",
+    srcs = glob(["src/**"]),
+)
+
+js_library(
+    name = "build_assets",
+    srcs = glob([
+        "src/*.html",
+        "src/*.css",
+    ]),
+)
+
+test_suite(name = "check")
+
+proto_package(
+    name = "build_proto",
+    deps = [
+        ":src__capture-script",
+        ":src__options",
+        ":src__probe-script",
+        ":src__sw",
+        "//proto/ts:protobuf-wkt",
+    ],
+)
+
+workspace_package_link(
+    name = "build_proto_link",
+    src = ":build_proto",
+    runtime_dependencies = ["@bufbuild/protobuf"],
+)
+
+expand_template(
+    name = "build_identity",
+    out = "build_identity.json",
+    stamp = -1,
+    stamp_substitutions = {
+        "__COMMIT__": "{{BUILD_EMBED_LABEL}}",
+        "__TIME__": "{{BUILD_TIMESTAMP}}",
+    },
+    substitutions = {
+        "__COMMIT__": "dev",
+        "__TIME__": "946684800",
+    },
+    template = ['{"commit":"__COMMIT__","time":"__TIME__"}'],
+)
+
+js_binary(
+    name = "builder",
+    data = [
+        "package.json",
+        ":scripts__build",
+    ],
+    entry_point = "scripts/bazel-build.mjs",
+)
+
+js_run_binary(
+    name = "extension_artifact",
+    srcs = [
+        "package.json",
+        ":application_sources",
+        ":build_assets",
+        ":build_identity",
+        ":build_proto_link",
+        ":scripts__build",
+    ],
+    args = ["build_identity.json"],
+    chdir = "recall/extension",
+    include_transitive_types = True,
+    include_types = True,
+    out_dirs = ["dist"],
+    tool = ":builder",
+)
+
+ts_project(
+    name = "types",
+    srcs = glob([
+        "src/*.ts",
+        "test/*.ts",
+    ]) + [
+        "vitest.config.ts",
+        ":build_proto_wire_types",
+    ],
+    no_emit = True,
+    deps = [
+        ":build_proto_link",
+        ":node_modules/@types/chrome",
+        ":node_modules/@types/node",
+        ":node_modules/fake-indexeddb",
+        ":node_modules/vitest",
+        "//recall/shared:denylist",
+        "//recall/shared:diagnostic",
+        "//recall/shared:scrub",
+        "//recall/shared:segment",
+        "//recall/shared:url",
+    ],
+)
+
+alias(
+    name = "typecheck",
+    actual = ":types_typecheck",
+)
+
+js_library(
+    name = "smoke_sources",
+    srcs = [
+        "test/fake-chrome.ts",
+        "test/smoke-upload.ts",
+    ],
+    deps = [
+        ":build_proto_link",
+        ":node_modules/fake-indexeddb",
+        ":src__browser",
+        ":src__capture",
+        ":src__db",
+        ":src__focus",
+        ":src__store",
+    ],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        [
+            "*",
+            "scripts/**",
+            "src/**",
+            "test/**",
+        ],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+eslint_test(
+    name = "lint",
+    data = [
+        "package.json",
+        "tsconfig.json",
+        ":application_sources",
+        ":build_proto_link",
+        ":node_modules/@eslint/js",
+        ":node_modules/@types/chrome",
+        ":node_modules/@types/node",
+        ":node_modules/eslint",
+        ":node_modules/fake-indexeddb",
+        ":node_modules/typescript",
+        ":node_modules/typescript-eslint",
+        ":node_modules/vitest",
+        ":smoke_sources",
+        "//recall/shared:denylist",
+        "//recall/shared:diagnostic",
+        "//recall/shared:scrub",
+        "//recall/shared:segment",
+        "//recall/shared:url",
+    ],
+    runner = eslint.eslint_test,
+    sources = glob(
+        [
+            "src/**/*.ts",
+            "test/**/*.ts",
+            "test/**/*.mjs",
+            "scripts/**/*.mjs",
+            "*.ts",
+            "*.js",
+        ],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+)
+
+options_browser_test(name = "options_browser_test")
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)
+
+test_suite(
+    name = "typecheck_tests",
+    tests = [":types_typecheck_test"],
+)
+
+test_suite(
+    name = "browser_tests",
+    tags = ["browser"],
+)

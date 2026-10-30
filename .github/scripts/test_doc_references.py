@@ -14,7 +14,7 @@ import unittest
 from collections.abc import Callable
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).absolute().parents[2]
 REFERENCE = re.compile(r"(?<![\w.-])((?:[\w.-]+/)*migrations/)?(\d{4}_[A-Za-z0-9_]+\.sql)\b")
 # A line that records an old name on purpose.
 RENUMBERED = re.compile(r"renumbered", re.I)

@@ -41,56 +41,17 @@ synchronize task stores or own server state. CSS is compiled into Tasks and scop
 `.planning-ui`; Tasks' layout owns the outer width and spacing. The mini timer's own stylesheet
 (`src/mini-timer.css`) goes only into its window, with the page's computed tokens.
 
-Run `pnpm install --frozen-lockfile`, `pnpm run typecheck` and `pnpm test`. The unit suite in `test/` covers the components, the
-domain rules and the API mapping over a fake transport; Tasks' Playwright journeys
-(`tasks/web/test/browser/planning-*.spec.ts`) cover them in the browser. The behaviour and the API used
-for each operation are described in [docs/interface.md](docs/interface.md).
+## Checks and behavior
 
-Tasks distinguishes ordinary tasks/subtasks from executable steps. Only `kind=step` or a task set to Standalone
-or Quick appears among calendar candidates. Both task editors use the controlled `ExecutionFields` component
-(`@ziyixi/planning-ui/ExecutionFields`): Steps, Standalone and Quick are one radio choice; Routine is an independent
-switch. The parent maps the choice to `task`/`quick` flags without changing the task's kind or other flags.
-Planning state is the task's saved stage and its planning flags (`waiting`, `parked`, `active`, …), never its
-ordinary tags. Manual In progress, Waiting, On hold and Parked controls are absent from task editors; persisted
-flags and dependencies remain readable. The start-ahead field accepts 0–365 calendar days. Open deadline
-windows and completed prerequisites surface inactive tasks in Parked; committed work keeps that status in
-Committed. Start or dragging a ready card to a stage acknowledges readiness through the existing active flag;
-manual parking keeps its own flag, and dragging a parked task that has become ready out acknowledges it too.
-Both dependency directions are visible, with Dependents read-only. See
-[readiness](../../tasks/docs/planning-readiness.md).
+```sh
+bazel test //packages/planning-ui:check
+bazel build //packages/planning-ui
+```
 
-Focus keeps its day queues, the one timer and time records in Tasks (`proto/tasks/ui/v1/focus.proto`). The
-timer counts up by default or runs a 25/50-minute pomodoro; Start counts on Tasks' today and keeps the step's
-area on its record, reloads hydrate the same session, and pause/resume keeps its day. Visible pages read only the timer once per minute and refresh the
-task view at account midnight. Stop and a pomodoro's Finish save the session as one record of whole minutes;
-Finish caps it at the target and count-up stops at four hours, even if the browser was closed. Each queue
-change is one `MoveFocusStep`, and every write keeps its request ID until confirmed, so a lost answer replays.
-`readFocus` reads the selected day, and records are added, changed and deleted with `addEntry`,
-`updateEntry` and `deleteEntry`. Focus shows daily execution with previous/next day and Today controls.
-Each card's logged time opens the day's records (`FocusEntries`); past records remain editable. Only today's
-steps run, complete and reorder by their whole row. A header checkbox shows the day's completed steps.
-The View statistics link opens [Tasks GTD](../../tasks/docs/gtd.md) at its Time tab (`onOpenGtd("time")`),
-which owns the weekly bars, monthly calendar and time-by-task report; the weekly review's GTD overview link
-passes no tab. Selecting a statistics day opens it in Focus for record editing. Plan and Focus both count from Tasks' today (`PlanState.today`, `FocusState.date`). A task's estimate is its Tasks
-duration: the host supplies `updateEstimate`, which writes Tasks and answers the saved duration
-and the task's new etag (`{ estimate, etag }`). Steps, Standalone and Quick actions share the panel for
-optional estimates and direct deletion with confirmation, which names the children deleted with a task
-(`StepEditor`); other tasks open the full planning panel. Deletion uses Tasks' existing
-DeleteTask under Plan's etag and a stable request ID, then reads the authoritative task and Focus state.
+Package scripts delegate to these Bazel checks. A frozen pnpm workspace install supports source development. Unit tests cover components, domain rules and API mapping over a fake transport; Tasks' browser
+journeys in `tasks/web/test/browser/planning-*.spec.ts` cover the complete interaction.
 
-Review keeps candidate columns together and gives Committed a separate full-width row of horizontal cards.
-Every Plan and Focus card's left edge is its area's colour (Work slate, Personal ochre, Unassigned none), and
-the area filters' Work and Personal dots are the legend.
-Plan's outcome, Step, Quick and calendar checkboxes complete like Focus, in one Tasks write with a Focus
-day: calendar cards pass their own day, the rest Focus's. A retry resends the first request ID and day. A completed calendar
-Step stays in its day after the open ones, in Focus's done style, outside the day's total; its title opens Tasks' own
-dialog, where it can be reopened. Quick actions always qualify as standalone, even when an older
-response contains only the Quick flag. Every executable kind also offers an optional estimate in native task details. Calendar cards preserve the task's
-configured clock time and timezone, else its estimate; an untimed Quick without an estimate shows Quick, not
-an unknown estimate. Quick does not
-contribute to unknown-estimate counters. Existing stored estimates and time records are retained.
-Ordinary labels do not imply planning properties.
-Quick's existing Due selection and order also respect its Deadline start window: future windows stay
-hidden, zero lead opens on the deadline day, and active work remains eligible.
-
-Plan, Focus and weekly calendars run Sunday through Saturday in the account time zone. The stable week ID remains the Monday after that Sunday, so saved weekly goals and history keep their identities. Saturday choices may be kept for next week; other unfinished commitments return to Week at Sunday 00:00, with no second rollover on Monday. The weekly review writes next week's two goals on Saturday and, as the automatic review arrives after the rollover, this week's on Sunday.
+[Interface behavior](docs/interface.md) defines Plan/Focus layout, execution kinds, readiness and dependencies,
+weekly rollover/review, completion, timer and record editing, mini timer, idle pause and ordered writes. It is the
+shared behavior reference; [Tasks readiness](../../tasks/docs/planning-readiness.md) defines the host's readiness
+rules. The controlled `ExecutionFields` export is also used by Tasks' native task editor.

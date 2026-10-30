@@ -1,10 +1,121 @@
-load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@aspect_rules_js//js:defs.bzl", "js_library", "js_test")
+load("@npm//website:tsx/package_json.bzl", tsx = "bin")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
-package(default_visibility = ["//visibility:public"])
+package(default_visibility = ["//fleet:__subpackages__"])
 
 js_library(
     name = "vars",
     srcs = ["deploy-vars.mjs"],
     types = ["deploy-vars.d.mts"],
     deps = ["//tools/cloud-config:worker-deploy"],
+)
+
+js_library(
+    name = "public-navigation",
+    srcs = ["public-navigation.mjs"],
+    types = ["public-navigation.d.mts"],
+    deps = [
+        "//fleet:config",
+        "//tools/cf-guard:toml",
+    ],
+)
+
+tsx.tsx_test(
+    name = "deploy-vars_test",
+    args = [
+        "--test",
+        "test/deploy-vars.test.mjs",
+    ],
+    chdir = "fleet/deploy",
+    data = [
+        "test/deploy-vars.test.mjs",
+        ":source_deploy_vars_mjs",
+        "//fleet:config",
+        "//fleet/worker:package_metadata",
+    ],
+)
+
+tsx.tsx_test(
+    name = "wrangler-config_test",
+    args = [
+        "--test",
+        "test/wrangler-config.test.mjs",
+    ],
+    chdir = "fleet/deploy",
+    data = [
+        "test/wrangler-config.test.mjs",
+        ":source_deploy_vars_mjs",
+        ":source_public_navigation_mjs",
+        "//:cloud_profile_inputs",
+        "//fleet:config",
+        "//fleet/worker:entry_metadata",
+        "//fleet/worker:env_metadata",
+        "//fleet/worker:node_modules/wrangler",
+        "//fleet/worker:package_metadata",
+        "//fleet/worker:runtime_metadata",
+        "//tools/cf-guard:toml",
+    ],
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        ":bundle_budget_test",
+        ":deploy-vars_test",
+        ":wrangler-config_test",
+    ],
+)
+
+js_test(
+    name = "bundle_budget_test",
+    args = ["$(rootpath //fleet:worker_bundle)"],
+    data = [
+        ":source_bundle_size_mjs",
+        "//fleet:worker_bundle",
+    ],
+    entry_point = "bundle-size.mjs",
+    preserve_symlinks_main = False,
+)
+
+js_library(
+    name = "source_deploy_vars_mjs",
+    srcs = ["deploy-vars.mjs"],
+    visibility = [
+        "//fleet:__subpackages__",
+        "//tools/cloud-config:__pkg__",
+    ],
+    deps = ["//tools/cloud-config:worker-deploy"],
+)
+
+js_library(
+    name = "source_public_navigation_mjs",
+    srcs = ["public-navigation.mjs"],
+    deps = ["//tools/cf-guard:toml"],
+)
+
+js_library(
+    name = "source_bundle_size_mjs",
+    srcs = ["bundle-size.mjs"],
+    deps = ["//tools/bundle-size:library"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        [
+            "*",
+            "test/**",
+        ],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
 )

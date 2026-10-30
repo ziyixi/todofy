@@ -13,15 +13,15 @@ records and estimates were not copied anywhere. The release that merged `claude/
 commit with its source and documents is `777d5f01` (`git show 777d5f01:flowday/README.md`); its owner API
 `flowday.ui.v1` is listed in `proto/retired.json`.
 
-| Part | Replaced by |
+| Part | Successor or retirement outcome |
 | --- | --- |
-| The Worker `flowday`, its Next.js UI and owner API | Focus in Tasks (Day, Week and Month views) and `focus.proto` |
+| The Worker `flowday`, its Next.js UI and owner API | Native Focus in Tasks and `focus.proto` |
 | Day queues, the timer and time records in the D1 database `flowday` | Tasks' `day_steps`, `focus_timer` and `focus_entries`; FlowDay's rows were not migrated |
 | Its estimate override and the one-time estimate backfill (`tasks/tools/estimate-backfill.ts`) | Each task's Tasks duration |
 | The Tasks mirror (a `read` binding and the change feed) | Nothing. Tasks keeps the generic `read` access level and the change feed, which its Ops counter and backup read |
 | `FlowDay checks`, `FlowDay deploy` and Home's FlowDay tile and manifest probe | Nothing; Home probes the website and the links app |
 | The Access applications `flowday` and `flowday-bypass`, their two reusable policies and the D1 database | Deleted by "Infra apply" through `infra/retired.tf` ([Retiring an app](../../infra/README.md#retiring-an-app)) |
-| The Worker script, its Custom Domain and secrets, and the GitHub `FLOWDAY_*` secrets | Deleted by hand, as the release's HANDOFF steps say |
+| The Worker script, its Custom Domain and secrets, and the GitHub `FLOWDAY_*` secrets | Retired with the application; this record is not a teardown command |
 
 The one-time tools that read FlowDay or Todofy's planning store went with it: the estimate backfill, and the Tasks
 planning import and planning-identity cutover (`tasks/tools/planning-import.ts`, `planning-cutover.ts` and the

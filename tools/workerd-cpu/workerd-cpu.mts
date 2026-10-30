@@ -2,10 +2,8 @@
  * CPU of a Worker's requests inside workerd, calibrated to the machine running the test: the shared part of the
  * apps' CPU tests (each Worker's test/runtime/cpu.test.ts, Mail Hero's test/cpu/native-ops-cpu.test.mjs) against Workers Free's 10 ms per request.
  *
- * Test tooling only. A test imports this file by relative path; no production source may (a bundle would carry it,
- * and a tools/ change deploys nothing: .github/scripts/ci_changes.py, test_app_isolation.py). It imports
- * nothing, so it type-checks under each app's own flags and runs under Node's type stripping
- * (node --test tools/workerd-cpu/test/*.test.mts, in the Changes job).
+ * Test tooling only. BUILD.bazel declares its consumers and test_app_isolation.py enforces the source boundary.
+ * It has no runtime imports. Its own checks run with `bazel test //tools/workerd-cpu:check`.
  *
  * Measuring. workerd's DevTools inspector (Miniflare's `inspectorPort`; 0 lets the OS pick a free port, which
  * connectCpuMeter reads back from Miniflare) records a sampled CPU profile of the Worker's isolate around each

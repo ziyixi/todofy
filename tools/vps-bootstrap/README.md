@@ -1,285 +1,55 @@
-# One-time VPS bootstrap
+# VPS bootstrap bundle
 
-Edit public identity in `config/cloud.toml`, configure credentials, and use the same
-verified images on a supported new VPS. The Cloudflare/GitHub sequence and remaining
-fresh-account gaps are in [`docs/rebuild.md`](../../docs/rebuild.md) and its
-[code audit](../../docs/rebuild-audit.md).
+This tool prepares the public, immutable input to the existing one-time installer. Normal releases use the daemon API through Actions. Configuration and recovery limits are documented in [rebuild](../../docs/rebuild.md).
 
-The installer is a one-time root setup for standard K3s, retained storage, scoped
-RBAC and a dedicated Cloudflare connector. Normal releases use the platform API
-from GitHub Actions. Both the daemon and observer run **only as container images
-in K3s**, without a host Python service, executable, extra user or timer.
+<a id="prepare-locally"></a>
 
-## Prepare locally
+## Build the public bundle
 
-Use the development Python environment with PyYAML and a local `kubectl` for
-**offline** Kustomize rendering. Select both immutable digests from the successful
-Actions run for the exact commit; this tool rejects a mutable tag or foreign owner.
+From the repository root, use the exact tested source SHA and published image digests:
 
 ```sh
-platform/.venv/bin/python tools/vps-bootstrap/prepare.py \
-  --sha <verified-40-character-source-sha> \
-  --newsletter-image ghcr.io/<owner>/<repository>-newsletter@sha256:<digest> \
-  --platform-image ghcr.io/<owner>/<repository>-platform@sha256:<digest> \
-  --codex-gateway-image ghcr.io/<owner>/<repository>-codex-gateway@sha256:<digest> \
-  --output <new-public-bundle-directory>
+bazel build //platform:bootstrap_bundle \
+  --embed_label=<verified-full-source-sha> \
+  --define=TODOFY_NEWSLETTER_IMAGE=ghcr.io/<owner>/<repository>-newsletter@sha256:<digest> \
+  --define=TODOFY_PLATFORM_IMAGE=ghcr.io/<owner>/<repository>-platform@sha256:<digest> \
+  --define=TODOFY_CODEX_GATEWAY_IMAGE=ghcr.io/<owner>/<repository>-codex-gateway@sha256:<digest>
 ```
 
-The public bundle contains rendered resources, pinned versions, allowed private
-setting names, standard K3s/Tunnel units and stdlib installer modules. Each file
-has a checksum; these establish bundle consistency, not an independent signature.
-Initial Newsletter admission holds `release-<source_sha>` with new work disabled;
-the initial gate is usually `draining`, not a verified `frozen` receipt. Its daily CronJob
-is suspended. The observer CronJob remains active every five minutes, with Forbid
-concurrency and its own persistent sequence/pending-receipt PVC.
-The first API release must use that same bootstrap source SHA. Keep normal VPS
-deployment disabled and avoid advancing the first-release commit until it is verified;
-a different SHA cannot silently replace the existing held admission operation.
-After bootstrap/authentication/held-state checks, enable `VPS_DEPLOY_ENABLED` for a controlled
-same-SHA Actions release while holding main changes. That normal release verifies drain/freeze,
-then resumes admission and unsuspends the daily trigger before reaching ready. Complete provider
-setup and decide the restored unknown-outcome policy before that release; it is not a paused rollout
-with a separate activation step. A failed operation requires its explicit original-ID continuation.
+The gateway value may be empty for an existing paired release. Both paired images remain required. The original validators reject foreign repositories, mutable tags, partial digests and invalid source identities. The rule uses the declared public profile, reviewed YAML, AppArmor policy, installer sources and fixed kubectl; it does not read host credentials, apply resources or contact the VPS.
 
-## Private input
+The resulting directory contains rendered foundation/runtime resources, allowed setting names, pinned versions, standard units and stdlib installer modules. `manifest.json` binds their bytes to the source SHA and image references. These checksums establish internal consistency. Actions uploads the same directory through `package-vps`.
 
-Create a JSON file **on the VPS**, owned by its creator with mode 600. Never commit
-it or send tokens through chat. Exact shape:
+## Installer contract
 
-```json
-{
-  "schema_version": 1,
-  "newsletter_env": {
-    "NEWSLETTER_EDITOR_TOKEN": "<preserve existing>",
-    "NEWSLETTER_SEND_TOKEN": "<preserve existing>",
-    "NEWSLETTER_MONITOR_TOKEN": "<new independent readonly token>"
-  },
-  "trigger_env": {
-    "NEWSLETTER_EDITOR_TOKEN": "<same as engine>",
-    "NEWSLETTER_SEND_TOKEN": "<same as engine>",
-    "NEWSLETTER_TIME_ZONE": "America/Los_Angeles"
-  },
-  "platform_env": {"PLATFORM_DEPLOY_TOKEN": "<dedicated release API token>"},
-  "fleet_key": "<64 hexadecimal characters, independent receipt HMAC>",
-  "connector_token": "<dedicated runtime Tunnel connector token>",
-  "old_paths": {
-    "data": "<absolute stopped-runtime data directory>",
-    "auth": "<absolute provider login directory>",
-    "config": "<absolute content configuration directory>"
-  }
-}
-```
+The supported host is Ubuntu 24.04 Linux amd64 with its existing Python stdlib, systemd, network prerequisites and enabled AppArmor parser/includes. No application Python runtime is installed on the host. K3s, cloudflared and image versions/checksums come from the reviewed bundle and [versions.json](../../platform/versions.json). Tunnel transport also needs its documented outbound connectivity.
 
-Engine settings must appear in generated `allowedkeys.json`. Trigger accepts only
-shared editor/send tokens and optional time zone; platform accepts only its deploy
-token. Preserve existing editor/send values; editor requires 24–512 characters,
-send/monitor/platform require 32–512, and tokens cannot contain whitespace.
-Editor and send must differ, monitor must differ from editor/send/platform, and
-platform must differ from send. These checks run before server changes.
-The gateway needs no application Bearer secret. Its image bakes the public Access issuer/audience
-and verifies signed machine JWTs on inference routes. Older recovery inputs may retain the retired
-`codex_gateway_env` field; bootstrap ignores it and creates no gateway secret. The privileged platform
-deployment token remains independent and unchanged. Older two-image bundles remain supported.
-The gateway runs as UID 10001, mounts the existing `newsletter-auth` claim, and receives no Kubernetes
-service token. Its loopback port is 18766. The existing remotely managed platform Tunnel routes only
-`/api/codex/v1/.*` to that port before the normal platform rule. Each route retains the origin JWT
-check for its dedicated Access application; inference credentials do not grant deployment access.
-Newsletter's console listener needs no secret either: its image bakes the public issuer and the console
-application's audience, its manifest sets `NEWSLETTER_CONSOLE_PORT` (controlled; private input cannot set
-it) and publishes it on loopback 18767, and the Tunnel routes only `/api/newsletter/v1/.*` there, checked
-against the console's own Access application.
-The renderer controls persistent paths, release/admission IDs, and service URLs.
-Private input cannot override those paths or inject PATH/HOME/PYTHONPATH,
-OPENAI_API_KEY or loader variables. A fresh VPS may use `old_paths: {}`; Newsletter's
-same-image init container seeds the packaged configuration only into a completely
-empty configuration volume. Existing active configuration is validated without
-rewriting it; nonempty missing or corrupt state stops startup for review. Complete
-the application's normal provider setup separately. Existing source directories must be
-regular, symlink-free, stopped, and outside SSH/GPG folders.
+Host installation and recovery require the owner's separate authorization and controlled runbook. The public bundle contains no credentials or private state. Private inputs remain outside Git, images and logs; their shape and independent-token checks are enforced by `config.py` and generated `allowedkeys.json`. They cannot override controlled paths, release identities, service URLs or loader variables.
 
-## Install
+The installer preserves the stopped source state, creates only its declared services/resources, and refuses foreign managed files or nonempty conflicting destinations. The existing SSH connector stays outside its scope. It uses namespace-scoped rotating Kubernetes identities; the deployment client never receives cluster-admin credentials.
 
-The supported Ubuntu host must provide enabled AppArmor and its standard parser,
-ABI and includes. Bootstrap dry-compiles and loads the pinned
-[observer profile](../../platform/apparmor/README.md) before applying workloads.
-It adds one root-owned OS policy file, with no extra host application service.
-For an existing node, load that profile with the documented profile-only installer
-before publishing a manifest that references it; ordinary image releases cannot
-modify host kernel policy.
-
-Supported initial host: Ubuntu 24.04 Linux amd64 with its existing Python 3 stdlib,
-systemd and iptables/ip6tables restore commands. A preinstalled cloudflared is not required.
-No Python packages are installed on the VPS. Meet [K3s requirements](https://docs.k3s.io/installation/requirements)
-and provide outbound HTTPS for the pinned official K3s/cloudflared binaries and verified public images.
-Tunnel operation also requires outbound port **7844**, via UDP for QUIC or TCP for HTTP/2;
-HTTPS on 443 alone is insufficient. Allow the required Cloudflare destinations described in the
-[official firewall guide](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/configure-tunnels/tunnel-with-firewall/).
-
-```sh
-sudo python3 <bundle>/installer/install.py \
-  --bundle <bundle> --credentials <owner-only-credentials.json>
-```
-
-The installer checks inputs before writes, copies opaque state without removing
-its source, creates root-reviewed host directories owned by UID 10001, installs
-the pinned K3s binary, and applies foundation/Secrets/held runtime. All apply uses
-server-side apply with `field-manager=personal-cloud`, matching normal releases,
-without force takeover. Its own `PCLOUD-K3S` INPUT chain allows Kubernetes ports
-6443/10250 and VXLAN 8472 only on loopback, or from the cni0 Pod CIDR to the fixed node
-address below. It does not flush other chains or change SSH. Its rules reload before K3s starts.
-
-Bootstrap downloads the official Linux amd64 cloudflared **2026.8.2**, pinned by SHA256 in
-[`platform/versions.json`](../../platform/versions.json), into
-`/usr/local/libexec/personal-cloud/cloudflared`. The checksum matches the
-[official release](https://github.com/cloudflare/cloudflared/releases/tag/2026.8.2).
-The private project path avoids replacing any global cloudflared binary used by SSH.
-Its directories and an existing matching binary must be root-owned and non-writable
-by group/others; unknown bytes or unsafe paths stop preflight. An incomplete retry
-reuses matching bytes without downloading or replacing them.
-
-The only new host connector is `cloudflared-platform.service`, with its own private
-token file. Its standard readiness notification must confirm a registered connection
-before bootstrap can write a completion marker. Existing SSH/cloudflared services are untouched. After preserving the stopped legacy state,
-the installer disables and stops existing docker.socket/docker.service before applying
-its firewall rules. This authorized retirement does not uninstall Docker or delete
-images, Compose files, volumes or the preserved source directories. Daemon and
-observer use rotating projected Kubernetes identities. No long-lived host token
-or cluster credential reaches GitHub/Fleet. Observer's independent HMAC/transport
-Secret does not authorize deployment.
-
-`complete_held` means bootstrap finished while business admission is held. It does
-not claim delivery, release activation, or an accepted Fleet report. Use the matching
-Actions operation to activate the release, check actual SHA/digest/UUID, healthy
-worker and accepting admission, verify Fleet's fresh report. Compose services are already retired by this one-time
-bootstrap; they are not automatically restarted as a fallback. System-bus permissions also require the non-mutating
-polkit check described in [the observer boundary](../../platform/systemd/README.md).
+Initial Newsletter admission remains held and its daily trigger suspended. `complete_held` records completion of bootstrap only. The first verified Actions release must use the bootstrap source identity, check drain/freeze, actual digest/generation/process provenance, then resume admission and the trigger. Unknown business outcomes and frozen inputs stay intact.
 
 ## Fixed node address and DNS
 
-Neither the node address nor cluster DNS depends on DHCP.
+`node_address.py` owns the reviewed fixed address, dummy interface, K3s dependency and explicit resolver set. Neither the API address nor cluster DNS depends on DHCP. It checks existing network/configuration ownership before changes, and waits for the Node address, API EndpointSlice, in-Pod API access and DNS observations. The exact constants and accepted prior templates live in that module; the public documentation does not duplicate them.
 
-K3s never uses the DHCP address. Without `node-ip` it would take the default route's address
-once at startup and keep advertising it after a lease change, breaking every in-cluster API
-client. The one-shot `personal-cloud-node-address.service` runs before `k3s.service` (which
-`Requires=` it): it creates or keeps the dummy interface `pcloud0`, sets exactly `10.254.0.42/32`
-and brings it up, leaving no process and having no stop action. The K3s configuration sets
-`node-ip` and `advertise-address` to that address and `flannel-iface` to `pcloud0`;
-`node-external-ip` stays unset. K3s adds both addresses to its serving certificate, and the host
-kubeconfig keeps using `127.0.0.1`. Where NetworkManager is installed, a drop-in marks only
-`pcloud0` unmanaged. Pod egress still masquerades through the current default route.
+A matching retry verifies existing state. The explicit rollback restores the prior reviewed configuration; it does not discard application state. A failed or partial migration stops for review. See [host address recovery](../../docs/rebuild.md#主机地址变化).
 
-The address is RFC 1918, outside the K3s Pod/Service CIDRs, Docker's default pools, CGNAT and
-Tailscale's 100.64/10 and the networks home routers usually assign. Install, migration and
-recovery stop before writing if any existing host network contains it, if `pcloud0` exists for
-another purpose, or if K3s uses embedded etcd. See [host address recovery](../../docs/rebuild.md#主机地址变化).
+## Recovery boundaries
 
-CoreDNS never uses the DHCP DNS servers. Without `resolv-conf`, K3s gives the kubelet the host's
-`/run/systemd/resolve/resolv.conf`, the servers DHCP supplied. CoreDNS runs with `dnsPolicy: Default`
-and `forward . /etc/resolv.conf`: its Pod gets a copy of that list when it is created and reads it
-once, so new DHCP DNS servers would break Pod DNS until CoreDNS was recreated. Bootstrap writes the
-root-owned `/etc/rancher/k3s/resolv.conf` with `1.1.1.1`, `1.0.0.1` (Cloudflare) and `8.8.8.8`
-(Google, another operator), all unfiltered and IPv4 like the Pod network, and points `resolv-conf`
-at it. The kubelet reads that file for every new Pod, so it must always exist; rollback keeps it.
-`ClusterFirst` Pods still resolve through CoreDNS and no longer inherit the DHCP search domain.
-Once K3s runs with it, bootstrap, migration and recovery set `personal-cloud/upstream-dns` on
-CoreDNS's pod template: that Deployment's own rolling update replaces its Pod once (cluster DNS pauses
-for a few seconds, as when a K3s upgrade replaces CoreDNS), and an equal value replaces nothing. The
-daemon's own Pod then resolves the Fleet host through CoreDNS. Queries to the resolvers are forwarded
-Pod traffic, the same path as other Pod egress; the INPUT-only `PCLOUD-K3S` neither sees nor opens them.
+A completion marker binds one exact public bundle. Repeating that completed bundle reports `already_initialized`; a different bundle uses the normal release path. An incomplete retry keeps the same input and checkpoint. Neither path forces unknown deliveries complete, deletes old state, reopens admission or starts a retired Compose stack.
 
-A host installed before this change migrates once, from a bundle that contains it:
+<a id="initial-client-repair"></a>
+
+The bounded `repair.py` compatibility path is for the original bootstrap client and an empty API release ledger. It accepts only a reviewed replacement with unchanged host/foundation configuration, preserves queued and unknown business records, and finishes held. It is not a general second installer or an API resume. Host-address migration remains a separate operation.
+
+Optional diagnostics use a distinct restricted reader identity. Read access does not authorize deployment, host changes or credential redistribution.
+
+## Checks
 
 ```sh
-sudo /usr/bin/python3 -E -s <bundle>/installer/node_address.py --bundle <bundle>
+bazel test //tools/vps-bootstrap:check //platform:tests
 ```
 
-It accepts only host K3s files equal to this bundle's or to their rendering before the fixed
-address and DNS. Before writing, the daemon's own Pod sends one DNS query straight to each fixed
-resolver over the forwarded Pod egress CoreDNS will use; a resolver that never replies stops it with
-`CLUSTER_DNS_UPSTREAM_UNREACHABLE`. While that Pod cannot be reached (for example through the stale
-Node address this fixes) the `upstreams` event says `unchecked` and the final lookup decides. It then
-writes the unit, address and resolver file, writes the new K3s configuration and
-firewall, restarts K3s once (`KillMode=process` keeps containers running), then waits until the Node
-InternalIP and the `default/kubernetes` EndpointSlice show only the fixed address (K3s's cloud
-controller syncs Node addresses every minute; each wait allows 5 minutes). It then replaces CoreDNS
-once as above, and the daemon's own Pod reads the API through `kubernetes.default.svc` and resolves
-the Fleet host. The last line is `"status": "stable"`. It restarts K3s only when a file changes or
-the running K3s was started with another node-ip (the Node's `k3s.io/internal-ip` annotation; the
-same configuration file sets the DNS), and replaces CoreDNS only when its marker differs, so a repeat
-run only verifies and a rerun after a timeout keeps waiting instead of restarting again.
-`--rollback` restores the previous K3s files, restarts K3s once and removes the marker, so CoreDNS
-returns to the DHCP-provided servers. It also undoes a migration whose lookup failed
-(`CLUSTER_DNS_LOOKUP_FAILED`, for example on a network that blocks public DNS when the check
-before writing could not run).
-
-## Failures and retries
-
-After the connector/services step succeeds, the installer atomically writes a
-root-owned completion marker for that exact public bundle. Running that same bundle
-again returns `already_initialized` and makes no changes, without claiming admission
-is still held. A different bundle is refused: normal updates, including after
-release activation, always use the daemon API through Actions. The completion marker
-is never written for a failed install; retry that same incomplete bundle to continue.
-
-Foreign managed units, K3s or project cloudflared binaries,
-configurations, firewall rules, credentials or nonempty state destinations are
-refused rather than merged. A crash during a copy may leave a staging directory or
-new destination before its final marker; retry then fails with a fixed review code.
-Review that new copy against the preserved original before recovery. Unknown business
-outcomes remain held; no installer step forces them complete, resumes delivery,
-deletes old state or automatically restarts Compose. Credential rotation is a separate reviewed step.
-
-```sh
-platform/.venv/bin/python -m unittest discover -s tools/vps-bootstrap/tests -v
-platform/.venv/bin/python -m unittest discover -s platform/tests/bootstrap -v
-kubectl kustomize platform/k3s/bootstrap
-```
-
-These are synthetic/offline checks, not proof of live firewall, Access/Tunnel,
-provider authentication, production recovery or delivery.
-
-## Initial client repair
-
-The installed `54861b2` client cannot authenticate with its pinned Kubernetes SDK.
-Until the daemon is repaired it cannot deploy its own replacement. The bounded
-`installer/repair.py` recovery path accepts only that completed original bundle,
-an empty API release ledger, and a new exact-SHA CI-verified bundle with unchanged
-host configuration and foundation resources. It is not a second general installer.
-
-```sh
-sudo python3 <fixed-bundle>/installer/repair.py \
-  --previous-bundle <original-54861b2-bundle> --bundle <fixed-bundle>
-```
-
-Repair keeps the daily trigger suspended, stops the daemon and both business Pods,
-then transfers admission while the application holds its existing exclusive store
-lock. A single unprivileged maintenance Job uses only the Newsletter data PVC and
-ordinary drain transitions; it starts no provider or worker. Queued work and every
-historical unknown record stay intact. A failure keeps business stopped; a matching
-retry uses its separate repair checkpoint. The original bootstrap marker remains.
-
-`complete_held` still requires a normal **CreateRelease** from Actions for the new
-source SHA. There is no old API release to resume. Keep VPS deployment disabled
-until the new daemon can read Kubernetes and the frozen admission is verified.
-Bundles that carry the fixed node address change host configuration, so this repair
-path refuses them; migrate such a host with `node_address.py` instead.
-
-## Diagnosis without sudo
-
-The optional `--grant-reader` flag on install or repair creates a separate namespace reader for
-the user who invoked sudo. It writes only `~/.kube/personal-cloud-reader.json`
-(mode 600); the user's default kubeconfig is untouched. The standard Kubernetes
-Role permits reading Pod, Service, Deployment, ReplicaSet, Job and CronJob metadata,
-plus the two public release ConfigMaps. It cannot read Secrets, logs, exec into Pods,
-write resources or manage the host. Actions never receives this credential.
-
-```sh
-K3S_CONFIG_FILE=/dev/null k3s kubectl --kubeconfig "$HOME/.kube/personal-cloud-reader.json" \
-  -n personal-cloud get pods,deployments,cronjobs
-```
-
-The native TokenRequest asks for one year; the API server can shorten it. The
-command reports the actual expiry without printing the token. Renewal uses the
-same explicit reader operation; deleting its RoleBinding revokes namespace access.
-Deployment remains the daemon API's responsibility. Host service installation,
-firewall changes and disaster recovery still require administrator privileges.
+Synthetic tests cover ownership refusal, partial copies, stable release identities, drain handoff, retry checkpoints and recovery. They do not establish live Tunnel connectivity, provider authentication, restored data completeness or successful delivery. The Linux image job additionally exercises isolated K3s SSA; the AppArmor parser check compiles the policy without loading it.

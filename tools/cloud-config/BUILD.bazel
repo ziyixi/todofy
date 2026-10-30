@@ -1,11 +1,145 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@npm//website:tsx/package_json.bzl", tsx = "bin")
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
 package(default_visibility = ["//visibility:public"])
 
-js_library(name = "worker-secrets", srcs = ["worker-secrets.mjs", "worker-secrets.json"])
+js_library(
+    name = "worker-secrets",
+    srcs = [
+        "worker-secrets.json",
+        "worker-secrets.mjs",
+    ],
+)
 
 js_library(
     name = "worker-deploy",
     srcs = ["worker-deploy.mjs"],
     deps = [":worker-secrets"],
+)
+
+py_library(
+    name = "cloud_profile",
+    srcs = ["cloud_profile.py"],
+    imports = ["."],
+)
+
+py_library(
+    name = "generate",
+    srcs = ["generate.py"],
+    imports = ["."],
+    deps = [
+        "//tools/cloud-config:cloud_profile",
+        "//tools/service-catalog:catalog",
+    ],
+)
+
+py_library(
+    name = "outputs",
+    srcs = ["outputs.py"],
+    imports = ["."],
+    deps = ["//tools/cloud-config:cloud_profile"],
+)
+
+py_test(
+    name = "test_cloud_config_test",
+    srcs = [
+        "tests/test_cloud_config.py",
+        "//tools/bazel/python:unittest_main.py",
+    ],
+    args = ["test_cloud_config"],
+    data = [
+        ":python_sources",
+        "//tools:repository_test_data",
+    ],
+    env = {"BAZEL_COPY_WORKSPACE": "1"},
+    imports = [
+        ".",
+        "tests",
+    ],
+    legacy_create_init = False,
+    main = "//tools/bazel/python:unittest_main.py",
+    deps = [
+        "//tools/cloud-config:cloud_profile",
+        "//tools/service-catalog:catalog",
+    ],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        [
+            "*.py",
+            "*.sh",
+            "*.mjs",
+            "*.json",
+            "tests/*.py",
+        ],
+        allow_empty = True,
+    ),
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        ":test_cloud_config_test",
+        ":worker-deploy_test",
+        ":worker-secrets_test",
+    ],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        [
+            "*",
+            "tests/**",
+        ],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+tsx.tsx_test(
+    name = "worker-secrets_test",
+    args = [
+        "--test",
+        "tools/cloud-config/tests/worker-secrets.test.mjs",
+    ],
+    data = [
+        "tests/worker-secrets.test.mjs",
+        ":worker-deploy",
+        ":worker-secrets",
+        "//dashboard/deploy:source_deploy_vars_mjs",
+        "//fleet/deploy:source_deploy_vars_mjs",
+        "//links/deploy:source_deploy_vars_mjs",
+        "//mail-hero/deploy:source_deploy_vars_mjs",
+        "//watch/deploy:source_deploy_vars_mjs",
+        "//website:relay_deploy_vars",
+        "//website:relay_deployment_config",
+    ],
+)
+
+tsx.tsx_test(
+    name = "worker-deploy_test",
+    args = [
+        "--test",
+        "tools/cloud-config/tests/worker-deploy.test.mjs",
+    ],
+    data = [
+        "tests/worker-deploy.test.mjs",
+        ":worker-deploy",
+        ":worker-secrets",
+        "//website:relay_deploy_vars",
+        "//website:relay_deployment_config",
+    ],
 )

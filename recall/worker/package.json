@@ -6,18 +6,14 @@
   "description": "Worker \"recall\": the owner's browsing record (RecallState, one SQLite Durable Object, and the private R2 bucket recall-store): the extension's uploads, the archive change feed, and the owner API (recall.ui.v1) behind Access.",
   "scripts": {
     "postinstall": "node ../../proto/tools/ensure.mjs",
-    "pretypecheck": "node ../../proto/tools/ensure.mjs",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p test/runtime/tsconfig.json && tsc --noEmit -p test/smoke/tsconfig.json",
-    "prelint": "node ../../proto/tools/ensure.mjs",
-    "lint": "eslint .",
-    "pretest": "node ../../proto/tools/ensure.mjs",
-    "test": "vitest run",
-    "pretest:runtime": "node ../../proto/tools/ensure.mjs",
-    "test:runtime": "vitest run --config vitest.runtime.config.ts",
-    "pretest:smoke": "node ../../proto/tools/ensure.mjs",
-    "test:smoke": "node test/smoke/smoke.mts",
+    "typecheck": "bazel test //recall/worker:typecheck_tests",
+    "lint": "bazel test //recall/worker:lint",
+    "test": "bazel test //recall/worker:unit_tests",
+    "test:runtime": "bazel test //recall/worker:runtime_tests --nocache_test_results",
+    "test:smoke": "bazel test //recall/worker:smoke_test",
     "predev": "node ../../proto/tools/ensure.mjs",
-    "dev": "wrangler dev --config ../wrangler.test.toml --ip 127.0.0.1 --port 8797 --local-upstream 127.0.0.1:8797"
+    "dev": "bazel build //recall/web:bundle && wrangler dev --assets ../../bazel-bin/recall/web/dist --config ../wrangler.test.toml --ip 127.0.0.1 --port 8797 --local-upstream 127.0.0.1:8797",
+    "check": "bazel test //recall:check"
   },
   "dependencies": {
     "@ziyixi/edge-auth": "workspace:*",

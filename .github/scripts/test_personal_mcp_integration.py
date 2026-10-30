@@ -5,20 +5,17 @@ import tomllib
 import unittest
 from pathlib import Path
 
-import ci_changes
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).absolute().parents[2]
 
 
 class PersonalMcpIntegration(unittest.TestCase):
-    def test_private_mcp_source_checks_and_publishes_only_its_own_worker(self):
-        flags = ci_changes.classify(["personal-mcp/worker/src/index.ts"])
-        self.assertTrue(flags["personal_mcp_check"])
-        self.assertTrue(flags["personal_mcp_deploy"])
-        self.assertTrue(flags["contracts"])
-        self.assertEqual({key for key, value in flags.items() if key.endswith("_deploy") and value},
-                         {"personal_mcp_deploy"})
-        self.assertIn("personal-mcp", ci_changes.HOME_BOUND)
+    def test_private_mcp_has_an_independent_bazel_release(self):
+        build = (ROOT / "personal-mcp/BUILD.bazel").read_text()
+        self.assertIn('"release:worker:personal-mcp"', build)
+        self.assertIn('"artifact://personal-mcp:personal-mcp"', build)
+        home = tomllib.loads((ROOT / "dashboard/wrangler.toml").read_text())
+        self.assertTrue(any(item["service"] == "personal-mcp" for item in home["services"]))
 
     def test_worker_uses_one_sqlite_object_and_the_private_application_apis(self):
         config = tomllib.loads((ROOT / "personal-mcp/wrangler.toml").read_text())

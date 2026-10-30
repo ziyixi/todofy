@@ -1,51 +1,56 @@
 # Workspace dependencies
 
-The monorepo has one Node workspace and one Python workspace. Applications keep their own code,
-dependency selection, images and release scope; shared versions and resolution live at the repository root.
+Applications select their own dependencies. Common versions and resolution live at the repository root; Bazel
+imports those locks for builds and tests. Third-party source is downloaded with integrity checks, not vendored.
 
-| Ecosystem | Version source | Lock | Runtime |
-| --- | --- | --- | --- |
-| Node | `package.json` and the catalog in `pnpm-workspace.yaml` | `pnpm-lock.yaml` | Node 26, pnpm 11.25.0 |
-| Python | Root `pyproject.toml` constraints and dependency groups | `uv.lock` | `.python-version`, Python 3.14 |
+| Ecosystem | Version declaration | Lock |
+| --- | --- | --- |
+| Node | Root pnpm catalog, Node 26.9.0, pnpm 11.25.0 | `pnpm-lock.yaml` |
+| Python | Root uv workspace/constraints, Python 3.14.7 | `uv.lock` |
+| Go API linter | Its existing `go.mod` | `go.sum` |
+| Bazel and rules | `.bazelversion`, `MODULE.bazel` | `MODULE.bazel.lock` |
 
-Member Node manifests use `catalog:` for external dependencies and `workspace:*` for internal packages.
-Python members declare the dependencies and extras they actually need; exact common versions are root constraints.
-The official Codex Python SDK pins its corresponding CLI runtime in the VPS executor. Newsletter uses the
-shared provider-neutral Model Router client and installs no SDK or CLI of its own.
-Do not create member `package-lock.json`, `pnpm-lock.yaml` or `uv.lock` files.
+Node members use `catalog:` for external packages and `workspace:*` for shared repository packages. Python members
+declare only the dependencies/extras they need. Do not add member lock files. The Python Worker retains its existing
+`pylock.toml` runtime SDK contract; the VPS executor alone owns the subscribed Codex runtime.
 
-## Install and run
+## Build and check
 
-Run dependency installation from the repository root:
+With Bazelisk or the pinned Bazel binary on `PATH`:
 
 ```sh
-uv python install
+bazel build //tasks
+bazel test //tasks:check
+bazel test //newsletter:check
+bazel test //proto:check
+```
+
+These commands use declared toolchains and dependencies. A local Node install, Python virtualenv or browser profile
+is not required for the builds/tests. The [Bazel guide](bazel.md) lists release targets and CI execution groups.
+
+For raw-source development tools that need `node_modules` or an editable Python environment, installation still uses
+the authoritative workspace locks:
+
+```sh
 pnpm install --frozen-lockfile
 uv sync --locked --all-packages --all-extras
+node proto/tools/ensure.mjs
 ```
 
-Normal application scripts retain their application working directories. For example:
+The last command only materializes the existing Bazel-generated development files. Python's build backend consumes
+the same providers; it does not run a second Buf/protoc generation chain. Production artifacts consume generated
+providers directly. Release-tool installation disables lifecycle scripts and does not rebuild an application.
 
-```sh
-pnpm --dir mailsort/worker run test
-pnpm --dir mailsort/web run build
-uv run --locked --package personal-newsletter newsletter --help
-```
+## Upgrade a dependency
 
-CI installs the required workspace selection from these same frozen locks. Python's protobuf build backend
-uses the root toolchain and the interpreter selected by `.python-version`; it does not recursively invoke
-`uv run` while generating its own package.
+For Node, edit the catalog and update `pnpm-lock.yaml` with pnpm. For Python, edit the root constraint and run
+`uv lock`. Review the lock diff and run the affected Bazel checks. Keep member dependency lists accurate rather than
+installing everything into every application.
 
-## Update a dependency
+For Bazel/rule upgrades, update the explicit pin, refresh with `bazel mod deps --lockfile_mode=update`, and commit the
+module lock. Ordinary builds use `--lockfile_mode=error`. Browser/runtime executable downloads and OCI bases retain
+explicit checksums/digests.
 
-For Node, edit the root catalog entry and run `pnpm install` to update the shared lock.
-For Python, edit the root constraint and run `uv lock`. Review the lock diff and run the affected checks.
-Keep package dependency choices in their member manifests instead of installing every dependency into every image.
-
-Shared-lock and toolchain changes reach the corresponding applications in CI and release source selection.
-Retiring an app is the one workspace change that reaches no other member: when `pnpm-workspace.yaml` differs only by
-members whose directories the same diff deletes and `pnpm-lock.yaml` only drops their importers and packages nobody
-else uses, the remaining members resolve exactly as before (`retired_members` in
-[ci_changes.py](../.github/scripts/ci_changes.py)). Any other member, setting or lock change reaches every member.
-Each production image is still built, tested and published independently. The running service version is
-verified from its normal release receipt and actual workload state, not from a lockfile alone.
+CI follows native dependency edges through these imported packages. It does not maintain a second manual version or
+file-to-application map. Each production image is checked and published independently; runtime identity comes from
+its release receipt and observed workload, not from a lock file alone.

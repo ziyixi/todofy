@@ -1,0 +1,270 @@
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//visibility:public"])
+
+py_library(
+    name = "apply_diagnostics",
+    srcs = ["scripts/apply_diagnostics.py"],
+    imports = ["scripts"],
+)
+
+py_library(
+    name = "bootstrap_state",
+    srcs = ["scripts/bootstrap_state.py"],
+    imports = ["scripts"],
+    deps = [
+        "//infra:infra_state",
+        "//tools/cloud-bootstrap:cloud_api",
+        "//tools/cloud-bootstrap:private_input",
+    ],
+)
+
+py_library(
+    name = "infra_state",
+    srcs = [
+        "scripts/infra_state.py",
+        "scripts/reviewed_plans.py",
+    ],
+    imports = ["scripts"],
+    deps = [
+        "//infra:apply_diagnostics",
+        "//infra:platform_export",
+        "//infra:reconcile_policy",
+        "//tools/cloud-config:cloud_profile",
+        "//tools/cloud-config:generate",
+    ],
+)
+
+py_library(
+    name = "local_tfvars",
+    srcs = ["scripts/local_tfvars.py"],
+    imports = ["scripts"],
+    deps = ["//tools/cloud-config:cloud_profile"],
+)
+
+py_library(
+    name = "platform_export",
+    srcs = ["scripts/platform_export.py"],
+    imports = ["scripts"],
+)
+
+py_library(
+    name = "reconcile_policy",
+    srcs = ["scripts/reconcile_policy.py"],
+    imports = ["scripts"],
+)
+
+py_test(
+    name = "test_apply_diagnostics_test",
+    srcs = [
+        "tests/test_apply_diagnostics.py",
+        "//tools/bazel/python:unittest_main.py",
+    ],
+    args = ["test_apply_diagnostics"],
+    data = [
+        "variables.tf",
+        ":python_sources",
+        "//tools:repository_test_data",
+    ],
+    imports = [
+        "scripts",
+        "tests",
+    ],
+    legacy_create_init = False,
+    main = "//tools/bazel/python:unittest_main.py",
+    deps = [
+        "//infra:apply_diagnostics",
+        "//infra:infra_state",
+    ],
+)
+
+py_test(
+    name = "test_infra_state_test",
+    srcs = [
+        "tests/test_infra_state.py",
+        "//tools/bazel/python:unittest_main.py",
+    ],
+    args = ["test_infra_state"],
+    data = [
+        "variables.tf",
+        ":python_sources",
+        "//tools:repository_test_data",
+    ],
+    imports = [
+        "scripts",
+        "tests",
+    ],
+    legacy_create_init = False,
+    main = "//tools/bazel/python:unittest_main.py",
+    deps = [
+        "//infra:bootstrap_state",
+        "//infra:infra_state",
+    ],
+)
+
+py_test(
+    name = "test_local_tfvars_test",
+    srcs = [
+        "tests/test_local_tfvars.py",
+        "//tools/bazel/python:unittest_main.py",
+    ],
+    args = ["test_local_tfvars"],
+    data = [
+        "variables.tf",
+        ":python_sources",
+        "//tools:repository_test_data",
+    ],
+    imports = [
+        "scripts",
+        "tests",
+    ],
+    legacy_create_init = False,
+    main = "//tools/bazel/python:unittest_main.py",
+    deps = [],
+)
+
+py_test(
+    name = "test_platform_export_test",
+    srcs = [
+        "tests/test_platform_export.py",
+        "//tools/bazel/python:unittest_main.py",
+    ],
+    args = ["test_platform_export"],
+    data = [
+        "variables.tf",
+        ":python_sources",
+        "//tools:repository_test_data",
+    ],
+    imports = [
+        "scripts",
+        "tests",
+    ],
+    legacy_create_init = False,
+    main = "//tools/bazel/python:unittest_main.py",
+    # CMS AES-GCM requires OpenSSL 3, supplied by the existing Ubuntu CI runner.
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = ["//infra:platform_export"],
+)
+
+py_test(
+    name = "test_reconcile_test",
+    srcs = [
+        "tests/test_reconcile.py",
+        "//tools/bazel/python:unittest_main.py",
+    ],
+    args = ["test_reconcile"],
+    data = [
+        "variables.tf",
+        ":python_sources",
+        "//tools:repository_test_data",
+    ],
+    imports = [
+        "scripts",
+        "tests",
+    ],
+    legacy_create_init = False,
+    main = "//tools/bazel/python:unittest_main.py",
+    deps = [
+        "//infra:infra_state",
+        "//infra:reconcile_policy",
+    ],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        [
+            "scripts/*.py",
+            "tests/*.py",
+        ],
+        allow_empty = True,
+    ),
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        ":config_guard_test",
+        ":format_validate_test",
+        ":test_apply_diagnostics_test",
+        ":test_infra_state_test",
+        ":test_local_tfvars_test",
+        ":test_platform_export_test",
+        ":test_reconcile_test",
+        "//.github/scripts:infra_guard_cases_test",
+    ],
+)
+
+_CONFIG_INPUTS = glob([
+    "*.tf",
+    ".terraform.lock.hcl",
+    "local.tfvars.example",
+    ".gitignore",
+    "scripts/*.py",
+    "tests/*.py",
+]) + ["BUILD.bazel"]
+
+filegroup(
+    name = "config",
+    srcs = _CONFIG_INPUTS,
+)
+
+py_library(
+    name = "guard_lib",
+    srcs = ["//.github/scripts:infra_guard.py"],
+    imports = ["../.github/scripts"],
+)
+
+py_test(
+    name = "config_guard_test",
+    srcs = ["//tools/bazel/python:check_infra.py"],
+    args = ["$(rootpath " + source + ")" for source in _CONFIG_INPUTS],
+    data = _CONFIG_INPUTS,
+    legacy_create_init = False,
+    main = "//tools/bazel/python:check_infra.py",
+    deps = [":guard_lib"],
+)
+
+py_test(
+    name = "format_validate_test",
+    srcs = ["//tools/bazel/python:check_infra.py"],
+    args = [
+        "--tofu",
+        "$(rootpath //tools/bazel/python:tofu)",
+        "--provider-files",
+        "$(rootpaths //tools/bazel/python:cloudflare_provider)",
+        "--platform",
+    ] + select({
+        "//tools/bazel/images:macos_arm64": ["darwin_arm64"],
+        "//tools/bazel/images:linux_x86_64": ["linux_amd64"],
+    }) + ["--"] + ["$(rootpath " + source + ")" for source in _CONFIG_INPUTS],
+    data = _CONFIG_INPUTS + [
+        "//tools/bazel/python:cloudflare_provider",
+        "//tools/bazel/python:tofu",
+    ],
+    legacy_create_init = False,
+    main = "//tools/bazel/python:check_infra.py",
+    deps = [":guard_lib"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        [
+            "*",
+            "scripts/**",
+            "tests/**",
+        ],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)

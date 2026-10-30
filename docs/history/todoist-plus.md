@@ -11,7 +11,7 @@ The owner decided on 2026-10-18 to remove it, with no compatibility window; the 
 (`git show 69ddb339:todoist-plus/README.md`); its releases are recorded in
 [the retired handoff](todoist-plus-handoff-2026-10-17.md).
 
-| Part | Replaced by |
+| Part | Successor at the retirement transition |
 | --- | --- |
 | The extension (`todoist-plus/`), its WXT build, Chromium scenarios and ZIP releases | Plan, Focus and Mail in Tasks; the components and their unit tests in `packages/planning-ui`; Tasks' browser journeys `tasks/web/test/browser/planning-*.spec.ts` |
 | Planning labels, the label mapping and `/plus` (ConfirmPlanMapping, UpdatePlanLabels) | Each task's saved stage and planning flags in Todofy's planning store; nothing to map |
@@ -21,7 +21,9 @@ The owner decided on 2026-10-18 to remove it, with no compatibility window; the 
 | `todofy/docs/todoist-plus.md` | [mail-api.md](../../todofy/docs/mail-api.md) |
 | `docs/todoist-plus-verification.md`, `docs/todoist-plus-planning-prototype.md`, the extension's docs | Git history at `69ddb339` |
 
-The nine retired RPCs and the messages only they used are listed in `proto/retired.json`. The planning store
-(`plan_*`), the Bets, dependencies, lane orders and mail summaries are unchanged: Tasks uses them. Todofy's
+The nine retired RPCs and the messages only they used are listed in `proto/retired.json`. At that cutoff the planning store
+(`plan_*`), Bets, dependencies, lane orders and mail summaries temporarily remained in Todofy. The subsequent
+move/drop is recorded in [October 20](handoff-2026-10-20.md) and [October 21](handoff-2026-10-21.md); current Tasks
+architecture is not the retired Planning channel. Todofy's
 migration `0012_drop_plus_idle.sql` drops the idle `plus_connections` and `plus_actions` tables, and the backup
 restore tool skips them in older backups.

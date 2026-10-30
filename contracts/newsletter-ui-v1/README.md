@@ -11,8 +11,7 @@ Status: Newsletter answers every method on its console listener
 console Worker ([`newsletter-console/`](../../newsletter-console/README.md), on `news.<zone>`) routes it behind the
 owner's Access login and forwards every read to that listener; its UI shows the overview, the issues (each readable
 as rendered from its body, as the frozen email and as plain text), the runs, the sources, the model usage and the
-backup. A change to the IDL checks and deploys Newsletter (with the
-paired VPS release) and the console (`PROTO_PACKAGES`).
+backup. Bazel dependencies connect the IDL to both the paired VPS release and the console.
 
 | Side | What it does |
 | --- | --- |
@@ -89,7 +88,7 @@ that login expires.
 | `SourceCatalog.config_history` | 10 revisions |
 | `FeedSource.recent` | The latest 7 scheduled runs |
 | `BackupStatus.exceptions` | 50, oldest first |
-| An answer through the Worker | 2 MiB (each MiB costs the Worker up to about 1.5 ms of CPU; real answers are a few hundred KiB) |
+| An answer through the Worker | 2 MiB |
 
 ## Rules that keep the console consistent
 
@@ -141,8 +140,8 @@ assertion: logs carry request IDs, method names, status classes and durations, o
 
 ## Checks and changes
 
-`Proto checks` holds the IDL to `buf lint`, Google's api-linter, `buf breaking` and the wire profile's breaking
-rules; a change to `fixtures/` runs it too (`PROTO_READS`).
+`bazel test //proto:check //newsletter:check //newsletter-console:check` covers the shared codec and consumer
+contracts. CI selects affected leaves from these roots; baseline compatibility also runs the wire-profile rules.
 
 `fixtures/` holds the answers Newsletter's reader writes for a synthetic database
 (`newsletter/tests/support/console_world.py`; `newsletter/scripts/console_fixtures.py` checks them and `--update` rewrites

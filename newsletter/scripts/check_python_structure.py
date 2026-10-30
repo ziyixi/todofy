@@ -180,7 +180,7 @@ def inspect_source(
 
 def main() -> int:
     """Check hand-written Python and report safe, relative source locations."""
-    root = pathlib.Path(__file__).resolve().parents[1]
+    root = pathlib.Path(__file__).absolute().parents[1]
     modules = module_names(root)
     failed = False
     for folder in ("src", "scripts", "tests"):

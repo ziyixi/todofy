@@ -6,7 +6,7 @@
 // separate pins of the same files, bumped together. This command reads buf's image of the module (with its imports)
 // and fails unless every googleapis file there (google/..., but not google/protobuf/: the well-known types are no
 // annotations) equals the copy compiled into this module's api-linter, or defines no extension the linter could
-// need to interpret. Run by ../../../scripts/api-lint.sh before the linter:
+// need to interpret. Run by //proto:api_lint_test before the linter:
 //
 //	googleapis-check <image.binpb>
 package main

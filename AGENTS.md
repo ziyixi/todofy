@@ -37,8 +37,9 @@
   维护中的 PyJWT（Codex 网关核对机器断言，Newsletter 控制台监听核对 owner 身份断言，都不比对邮箱）；owner 邮箱匹配只在 edge-auth。
 - Cookie、token 来源、邮箱匹配、nbf、开发绕过、密钥派生和错误映射属于应用行为；改前核对
   [edge-auth SPEC §4、§5.4](packages/edge-auth/SPEC.md)。
-- 包代码变更检查并发布每个使用者。Markdown 与 docs 文件夹是文档，不选中任何应用检查或发布（构建打包或检查读取的例外见 CI/CD）。新增包/使用者同步 `PACKAGE_USERS`，守卫核对实际依赖。
-  详细映射由 [ci_changes.py](.github/scripts/ci_changes.py) 管理，说明见 [CI/CD](docs/ci-cd.md)。
+- 包、生成代码和使用者在 `BUILD.bazel` 声明实际依赖；CI 通过 Bazel 图选择受影响检查和发布，不维护另一份路径映射。
+  应用根提供同名发布产物、公开 `:check`、`:config` 和 `:release`；子目录实现目标保持应用内可见。
+  文档只有被构建或检查实际读取时才进入相应闭包。说明见 [Bazel](docs/bazel.md) 和 [CI/CD](docs/ci-cd.md)。
 
 ## IDL 与合同
 
@@ -47,7 +48,7 @@
 - Node 外部依赖版本统一在根 pnpm catalog，Python 统一在根 pyproject/uv.lock；不新增成员锁文件。
   Node 26 与 Python 3.14 的解释器和 workspace 安装命令见 [依赖管理](docs/dependencies.md)。
 - 生成代码不提交；安装与检查前脚本运行 `ensure.mjs`，Python 由构建后端生成。应用不自带 protobuf runtime；
-  通过 `@ziyixi/proto/protobuf` 使用唯一版本。新增语言/包使用者同步 `PROTO_USERS`、`PROTO_PACKAGES`。
+  通过 `@ziyixi/proto/protobuf` 使用唯一版本。新增语言/包使用者更新对应的包级 Bazel 依赖。
 - Access JWT、Origin、mutation CSRF 必须在转码器读取正文之前验证。机器接口有独立鉴权，不能隐式继承 owner 权限。
   Newsletter 保留外部 `ziyixi-protos`、wire JSON 和现有机器 HTTP 模型；其内部部署 drain API 使用应用文档中的版本化 JSON 合同。
   入仓不授权重写它的运行时或迁移全部接口到根 proto。它的 owner 只读接口 `newsletter.ui.v1` 是根 proto 的新包，由独立的控制台监听

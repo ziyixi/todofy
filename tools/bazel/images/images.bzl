@@ -108,13 +108,13 @@ def _newsletter_healthcheck_impl(ctx):
     base = ctx.attr.base[DefaultInfo]
     args = ctx.actions.args()
     args.add("--base", ctx.file.base.path)
-    args.add("--dockerfile", ctx.file.dockerfile)
+    args.add("--config", ctx.file.config)
     args.add("--out", output.path)
     args.add("--digest", digest)
     ctx.actions.run(
         executable = ctx.executable._tool,
         arguments = [args],
-        inputs = depset([ctx.file.base, ctx.file.dockerfile], transitive = [base.default_runfiles.files]),
+        inputs = depset([ctx.file.base, ctx.file.config], transitive = [base.default_runfiles.files]),
         outputs = [output, digest],
         mnemonic = "NewsletterImageHealthcheck",
     )
@@ -127,7 +127,7 @@ newsletter_healthcheck = rule(
     implementation = _newsletter_healthcheck_impl,
     attrs = {
         "base": attr.label(allow_single_file = True, mandatory = True),
-        "dockerfile": attr.label(allow_single_file = True, mandatory = True),
+        "config": attr.label(allow_single_file = True, mandatory = True),
         "_tool": attr.label(default = Label("//tools/bazel/images:newsletter_healthcheck"), executable = True, cfg = "exec"),
     },
 )

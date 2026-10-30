@@ -1,8 +1,11 @@
+load("@aspect_rules_js//js:defs.bzl", "js_test")
+load("@npm//links/worker:wrangler/package_json.bzl", wrangler = "bin")
+load("@npm//packages/task-dates:vitest/package_json.bzl", vitest = "bin")
 load("@npm//proto:@bufbuild/buf/package_json.bzl", buf = "bin")
 load("@npm//proto:@bufbuild/protoc-gen-es/package_json.bzl", protoc_gen_es = "bin")
-load("@npm//packages/task-dates:vitest/package_json.bzl", vitest = "bin")
+load("@npm//website:tsx/package_json.bzl", tsx = "bin")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 load(":js.bzl", "workspace_link")
-load("@aspect_rules_js//js:defs.bzl", "js_test")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -20,20 +23,61 @@ workspace_link(
 
 vitest.vitest_test(
     name = "workspace_link_test",
-    args = ["run", "test/workspace-link.test.ts", "--config", "test/vitest.config.mjs"],
+    args = [
+        "run",
+        "test/workspace-link.test.ts",
+        "--config",
+        "test/vitest.config.mjs",
+    ],
     chdir = "tools/bazel",
-    data = [":task_dates_link", "test/workspace-link.test.ts", "test/vitest.config.mjs"],
+    data = [
+        "test/vitest.config.mjs",
+        "test/workspace-link.test.ts",
+        ":task_dates_link",
+    ],
 )
 
 js_test(
     name = "planning_ui_exports_test",
-    entry_point = "test/package-exports.mjs",
     args = ["$(rootpath //packages/planning-ui:pkg)"],
     data = ["//packages/planning-ui:pkg"],
+    entry_point = "test/package-exports.mjs",
 )
 
 js_test(
     name = "toolchain_versions_test",
-    entry_point = "test/toolchain-versions.mjs",
     data = ["//:toolchain_version_inputs"],
+    entry_point = "test/toolchain-versions.mjs",
+)
+
+wrangler.wrangler_binary(
+    name = "wrangler",
+    env = {
+        "CI": "true",
+        "WRANGLER_SEND_METRICS": "false",
+    },
+)
+
+tsx.tsx_binary(name = "tsx")
+
+test_suite(name = "check")
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        [
+            "*",
+            "test/**",
+        ],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
 )

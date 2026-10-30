@@ -18,10 +18,10 @@ matching BUILD_SHA, and no pending D1 migration when a binding is supplied.
 login redirect for that exact host passes. Network failures and 5xx retry up to
 ten times; anonymous 2xx, wrong redirects and other responses fail immediately.
 
-The workflow integration and adverse-response tests run in Changes:
+The workflow integration and adverse-response tests run through the repository Bazel check facade:
 
 ```sh
-uv run --locked --only-group ci python -m unittest discover -s .github/scripts
+bazel test //.github/scripts:check
 ```
 
 App jobs retain their own tokens, gates, concurrency groups, and special checks

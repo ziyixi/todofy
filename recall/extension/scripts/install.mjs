@@ -2,7 +2,7 @@
 //
 // Installs a build into the stable folder Chrome loads the unpacked extension from (../../docs/design.md §3.10), by
 // default ~/recall-extension, outside Google Drive (a cloud-only placeholder file would fail to load). Without a
-// source it installs this package's own build (dist/extension, `npm run build`); a source is a build folder, the
+// source it installs this package's Bazel build (`npm run build`); a source is a build folder, the
 // build's zip or the CI artifact recall-extension-<sha>.zip as downloaded.
 //
 // It never replaces files under the running extension: it unpacks into the sibling <target>.next, checks it (the
@@ -19,7 +19,7 @@ import { EXTENSION_ID, extensionIdOf, isChromeVersion, readTemplate } from './ma
 import { readZip } from './zip.mjs';
 
 export const DEFAULT_TARGET = join(homedir(), 'recall-extension');
-const OWN_BUILD = join(dirname(dirname(fileURLToPath(import.meta.url))), 'dist', 'extension');
+const OWN_BUILD = resolve(dirname(dirname(fileURLToPath(import.meta.url))), '../../bazel-bin/recall/extension/dist/extension');
 /** The files every build has. */
 export const BUILD_FILES = ['manifest.json', 'sw.js', 'capture.js', 'options.html', 'options.js', 'options.css'];
 

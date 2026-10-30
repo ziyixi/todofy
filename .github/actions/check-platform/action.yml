@@ -7,39 +7,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Install the selected Node workspaces
-      uses: ./.github/actions/setup-workspace
-      with:
-        root: .
-        filters: ''
-    - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-      with:
-        version: '0.12.10'
-        cache-dependency-glob: |
-          uv.lock
-          pyproject.toml
-          .python-version
-          **/pyproject.toml
-        cache-suffix: todofy-personal-cloud
-        working-directory: .
-        enable-cache: true
-    - name: Install locked contracts and daemon dependencies
-      working-directory: .
-      shell: bash -e {0}
-      run: |
-        node proto/tools/ensure.mjs
-        uv sync --package todofy-personal-cloud --locked
-    - name: Install the pinned manifest compiler
-      working-directory: .
-      shell: bash -e {0}
-      run: |
-        mkdir -p "$RUNNER_TEMP/kubectl-bin"
-        version=$(python3 -c 'import json; print(json.load(open("platform/versions.json"))["kubectl"]["version"])')
-        checksum=$(python3 -c 'import json; print(json.load(open("platform/versions.json"))["kubectl"]["linux_amd64_sha256"])')
-        curl --fail --silent --show-error --location "https://dl.k8s.io/release/$version/bin/linux/amd64/kubectl" --output "$RUNNER_TEMP/kubectl-bin/kubectl"
-        printf '%s  %s\n' "$checksum" "$RUNNER_TEMP/kubectl-bin/kubectl" | sha256sum --check --status
-        chmod 755 "$RUNNER_TEMP/kubectl-bin/kubectl"
-        echo "$RUNNER_TEMP/kubectl-bin" >> "$GITHUB_PATH"
+    - uses: ./.github/actions/setup-bazel
     - name: Compile the pinned observer AppArmor policy without loading it
       working-directory: .
       shell: bash -e {0}
@@ -47,22 +15,12 @@ runs:
         test -x /usr/sbin/apparmor_parser
         /usr/sbin/apparmor_parser --skip-kernel-load --skip-cache --quiet \
           platform/apparmor/personal-cloud-systemd-observer-v1
-    - name: Check deployment, status and observer contracts
-      working-directory: .
-      shell: bash -e {0}
-      run: |
-        uv run --package todofy-personal-cloud --locked ruff check platform/src platform/tests tools/platform-build tools/vps-release tools/vps-bootstrap
-        uv run --package todofy-personal-cloud --locked ruff format --check platform/src platform/tests tools/platform-build tools/vps-release tools/vps-bootstrap
-        uv run --package todofy-personal-cloud --locked pytest platform/tests tools/platform-build/tests tools/vps-release/tests tools/vps-bootstrap/tests
     - name: Build and verify the independent runtime image
       if: ${{ fromJSON(inputs.build-image) }}
       working-directory: .
       shell: bash -e {0}
       run: |
-        uv run --package todofy-personal-cloud --locked python tools/platform-build/build.py --sha "$GITHUB_SHA" --output "$RUNNER_TEMP/platform-build"
-        docker build --platform linux/amd64 --build-arg BUILD_SHA="$GITHUB_SHA" \
-          --build-arg SOURCE_REPOSITORY="https://github.com/$GITHUB_REPOSITORY" \
-          --tag "platform-ci:$GITHUB_SHA" "$RUNNER_TEMP/platform-build"
+        python3 tools/container-release/build.py --service platform --sha "$GITHUB_SHA"
         tested_image=$(docker image inspect --format '{{.Id}}' "platform-ci:$GITHUB_SHA")
         docker run --rm --network none "$tested_image" identity | python3 -c 'import json, os, sys; assert json.load(sys.stdin)["source_sha"] == os.environ["GITHUB_SHA"]'
         docker run --rm --network none --entrypoint python "$tested_image" \
@@ -73,47 +31,6 @@ runs:
           --entrypoint python "$tested_image" - < tools/platform-build/smoke_systemd.py
         python3 tools/container-release/image.py save --image "$tested_image" --sha "$GITHUB_SHA" \
           --directory "$RUNNER_TEMP/platform-image"
-    - name: Verify real Kubernetes SSA in an isolated API-only k3s
-      env:
-        K3S_ACCEPTANCE_DIR: ${{ runner.temp }}/k3s-acceptance
-      working-directory: .
-      shell: bash -e {0}
-      run: |
-        mkdir -m 700 "$K3S_ACCEPTANCE_DIR"
-        version=$(python3 -c 'import json; print(json.load(open("platform/versions.json"))["k3s"]["version"])')
-        tag=${version/+/-}
-        # This digest pins only the isolated CI fixture, not the VPS installer.
-        image="docker.io/rancher/k3s:$tag@sha256:ca7f37d993d82ef0dcdcfecb2e0e2618ea541dbaffc620c8cedebe01a82acd0d"
-        docker run --detach --privileged --name k3s-acceptance --platform linux/amd64 \
-          --publish 127.0.0.1:6443:6443 --tmpfs /run --tmpfs /var/run \
-          --mount type=volume,source=k3s-acceptance,target=/var/lib/rancher/k3s \
-          "$image" server --disable-agent \
-          --disable=traefik,servicelb,metrics-server,local-storage,coredns
-        actual=$(docker exec k3s-acceptance k3s --version)
-        case "$actual" in "k3s version $version ("*) ;; *) exit 1 ;; esac
-        # The image exposes kubectl via its direct multicall symlink.
-        for attempt in $(seq 1 60); do
-          if docker exec --env KUBECONFIG=/etc/rancher/k3s/k3s.yaml k3s-acceptance /bin/kubectl get --raw=/readyz >/dev/null 2>&1; then break; fi
-          sleep 2
-        done
-        docker exec --env KUBECONFIG=/etc/rancher/k3s/k3s.yaml k3s-acceptance /bin/kubectl get --raw=/readyz >/dev/null
-        docker cp platform/k3s/bootstrap/namespace.yaml k3s-acceptance:/tmp/namespace.yaml
-        docker cp platform/k3s/bootstrap/rbac.yaml k3s-acceptance:/tmp/rbac.yaml
-        docker exec --env KUBECONFIG=/etc/rancher/k3s/k3s.yaml k3s-acceptance /bin/kubectl apply -f /tmp/namespace.yaml -f /tmp/rbac.yaml
-        docker cp k3s-acceptance:/etc/rancher/k3s/k3s.yaml "$K3S_ACCEPTANCE_DIR/kubeconfig"
-        docker cp k3s-acceptance:/var/lib/rancher/k3s/server/tls/server-ca.crt "$K3S_ACCEPTANCE_DIR/ca.crt"
-        docker exec --env KUBECONFIG=/etc/rancher/k3s/k3s.yaml k3s-acceptance /bin/kubectl -n personal-cloud create token platform-controller \
-          --duration=10m > "$K3S_ACCEPTANCE_DIR/token"
-        chmod 600 "$K3S_ACCEPTANCE_DIR/"*
-        uv run --package todofy-personal-cloud --locked pytest -q platform/tests/deployment/test_k3s_acceptance.py
-    - name: Remove the isolated k3s fixture
-      if: always()
-      working-directory: .
-      shell: bash -e {0}
-      run: |
-        docker rm --force k3s-acceptance >/dev/null 2>&1 || true
-        docker volume rm k3s-acceptance >/dev/null 2>&1 || true
-        rm -rf "$RUNNER_TEMP/k3s-acceptance"
     - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       if: ${{ fromJSON(inputs.build-image) }}
       with:

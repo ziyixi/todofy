@@ -51,10 +51,9 @@
   },
   "scripts": {
     "postinstall": "node ../../proto/tools/ensure.mjs",
-    "pretypecheck": "node ../../proto/tools/ensure.mjs",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "pretest": "node ../../proto/tools/ensure.mjs"
+    "typecheck": "bazel test //packages/planning-ui:typecheck_tests",
+    "test": "bazel test //packages/planning-ui:unit_tests",
+    "check": "bazel test //packages/planning-ui:check"
   },
   "dependencies": {
     "@dnd-kit/collision": "catalog:",

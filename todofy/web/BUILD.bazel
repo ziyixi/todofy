@@ -1,0 +1,1181 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@npm//todofy/web:vite/package_json.bzl", vite = "bin")
+load("@npm//todofy/web:vitest/package_json.bzl", vitest = "bin")
+load("//proto/bazel:ts_package.bzl", "proto_package")
+load("//tools/bazel:js.bzl", "proto_vitest_test", "vite_bundle", "workspace_link", "workspace_package_link")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//visibility:public"])
+
+npm_link_all_packages(name = "node_modules")
+
+js_library(
+    name = "src__api__client",
+    srcs = ["src/api/client.ts"],
+    types = ["src/api/client.ts"],
+    deps = [
+        "//proto/common/errors/v1:ts",
+        "//proto/todofy/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+js_library(
+    name = "src__queryClient",
+    srcs = ["src/queryClient.ts"],
+    types = ["src/queryClient.ts"],
+    deps = [
+        ":node_modules/@tanstack/react-query",
+        ":src__api__client",
+    ],
+)
+
+js_library(
+    name = "src__api__types",
+    srcs = ["src/api/types.ts"],
+    types = ["src/api/types.ts"],
+    deps = [
+        "//proto/todofy/report/v1:ts",
+        "//proto/todofy/ui/v1:ts",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+    ],
+)
+
+js_library(
+    name = "src__api__queries",
+    srcs = ["src/api/queries.ts"],
+    types = ["src/api/queries.ts"],
+    deps = [
+        ":node_modules/@tanstack/react-query",
+        ":node_modules/react",
+        ":src__api__client",
+        ":src__api__types",
+        "//proto/todofy/ui/v1:ts",
+    ],
+)
+
+js_library(
+    name = "src__components__StatusBanner",
+    srcs = ["src/components/StatusBanner.tsx"],
+    types = ["src/components/StatusBanner.tsx"],
+    deps = [
+        ":node_modules/lucide-react",
+        ":node_modules/react",
+        ":src__api__types",
+    ],
+)
+
+js_library(
+    name = "src__components__Shell",
+    srcs = ["src/components/Shell.tsx"],
+    types = ["src/components/Shell.tsx"],
+    deps = [
+        ":node_modules/lucide-react",
+        ":node_modules/react",
+        ":node_modules/react-router",
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__components__StatusBanner",
+    ],
+)
+
+js_library(
+    name = "src__lib__format",
+    srcs = ["src/lib/format.ts"],
+    types = ["src/lib/format.ts"],
+    deps = [],
+)
+
+js_library(
+    name = "src__lib__labels",
+    srcs = ["src/lib/labels.ts"],
+    types = ["src/lib/labels.ts"],
+    deps = [
+        ":src__api__client",
+        ":src__api__types",
+    ],
+)
+
+js_library(
+    name = "src__components__ui",
+    srcs = ["src/components/ui.tsx"],
+    types = ["src/components/ui.tsx"],
+    deps = [
+        ":node_modules/lucide-react",
+        ":node_modules/react",
+        ":src__api__client",
+        ":src__lib__format",
+        ":src__lib__labels",
+    ],
+)
+
+js_library(
+    name = "src__components__EventList",
+    srcs = ["src/components/EventList.tsx"],
+    types = ["src/components/EventList.tsx"],
+    deps = [
+        ":node_modules/lucide-react",
+        ":node_modules/react",
+        ":node_modules/react-router",
+        ":src__api__types",
+        ":src__components__ui",
+        ":src__lib__format",
+        ":src__lib__labels",
+    ],
+)
+
+js_library(
+    name = "src__pages__AttentionPage",
+    srcs = ["src/pages/AttentionPage.tsx"],
+    types = ["src/pages/AttentionPage.tsx"],
+    deps = [
+        ":node_modules/lucide-react",
+        ":node_modules/react",
+        ":src__api__queries",
+        ":src__components__EventList",
+        ":src__components__ui",
+    ],
+)
+
+js_library(
+    name = "src__components__TrendChart",
+    srcs = ["src/components/TrendChart.tsx"],
+    types = ["src/components/TrendChart.tsx"],
+    deps = [
+        ":node_modules/react",
+        ":src__lib__format",
+    ],
+)
+
+js_library(
+    name = "src__pages__BudgetPage",
+    srcs = ["src/pages/BudgetPage.tsx"],
+    types = ["src/pages/BudgetPage.tsx"],
+    deps = [
+        ":node_modules/@tanstack/react-query",
+        ":node_modules/lucide-react",
+        ":node_modules/react",
+        ":src__api__queries",
+        ":src__api__types",
+        ":src__components__TrendChart",
+        ":src__components__ui",
+        ":src__lib__format",
+    ],
+)
+
+js_library(
+    name = "src__api__useAction",
+    srcs = ["src/api/useAction.ts"],
+    types = ["src/api/useAction.ts"],
+    deps = [
+        ":node_modules/react",
+        ":src__api__client",
+    ],
+)
+
+js_library(
+    name = "src__components__Modal",
+    srcs = ["src/components/Modal.tsx"],
+    types = ["src/components/Modal.tsx"],
+    deps = [
+        ":node_modules/lucide-react",
+        ":node_modules/react",
+        ":node_modules/react-dom",
+        ":src__components__ui",
+    ],
+)
+
+js_library(
+    name = "src__pages__DigestPage",
+    srcs = ["src/pages/DigestPage.tsx"],
+    types = ["src/pages/DigestPage.tsx"],
+    deps = [
+        ":node_modules/@tanstack/react-query",
+        ":node_modules/lucide-react",
+        ":node_modules/react",
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__api__types",
+        ":src__api__useAction",
+        ":src__components__Modal",
+        ":src__components__ui",
+        ":src__lib__labels",
+        "//proto/todofy/report/v1:ts",
+        "//proto/ts:wire-json",
+    ],
+)
+
+js_library(
+    name = "src__pages__ReconcileDialog",
+    srcs = ["src/pages/ReconcileDialog.tsx"],
+    types = ["src/pages/ReconcileDialog.tsx"],
+    deps = [
+        ":node_modules/@tanstack/react-query",
+        ":node_modules/react",
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__api__types",
+        ":src__api__useAction",
+        ":src__components__Modal",
+        ":src__components__ui",
+        ":src__lib__format",
+        ":src__lib__labels",
+    ],
+)
+
+js_library(
+    name = "src__pages__EventDetailPage",
+    srcs = ["src/pages/EventDetailPage.tsx"],
+    types = ["src/pages/EventDetailPage.tsx"],
+    deps = [
+        ":node_modules/@tanstack/react-query",
+        ":node_modules/lucide-react",
+        ":node_modules/react",
+        ":node_modules/react-router",
+        ":src__api__queries",
+        ":src__api__types",
+        ":src__components__EventList",
+        ":src__components__ui",
+        ":src__lib__format",
+        ":src__lib__labels",
+        ":src__pages__ReconcileDialog",
+    ],
+)
+
+js_library(
+    name = "src__pages__EventsPage",
+    srcs = ["src/pages/EventsPage.tsx"],
+    types = ["src/pages/EventsPage.tsx"],
+    deps = [
+        ":node_modules/lucide-react",
+        ":node_modules/react",
+        ":node_modules/react-router",
+        ":src__api__queries",
+        ":src__api__types",
+        ":src__components__EventList",
+        ":src__components__ui",
+        ":src__lib__labels",
+    ],
+)
+
+js_library(
+    name = "src__pages__HealthPage",
+    srcs = ["src/pages/HealthPage.tsx"],
+    types = ["src/pages/HealthPage.tsx"],
+    deps = [
+        ":node_modules/lucide-react",
+        ":node_modules/react",
+        ":src__api__queries",
+        ":src__api__types",
+        ":src__components__ui",
+        ":src__lib__format",
+        ":src__lib__labels",
+        ":src__pages__BudgetPage",
+    ],
+)
+
+js_library(
+    name = "src__pages__MorePage",
+    srcs = ["src/pages/MorePage.tsx"],
+    types = ["src/pages/MorePage.tsx"],
+    deps = [
+        ":node_modules/lucide-react",
+        ":node_modules/react",
+        ":node_modules/react-router",
+        ":src__components__Shell",
+        ":src__components__ui",
+    ],
+)
+
+js_library(
+    name = "src__pages__NotFoundPage",
+    srcs = ["src/pages/NotFoundPage.tsx"],
+    types = ["src/pages/NotFoundPage.tsx"],
+    deps = [
+        ":node_modules/lucide-react",
+        ":node_modules/react",
+        ":node_modules/react-router",
+        ":src__components__ui",
+    ],
+)
+
+js_library(
+    name = "src__pages__RouteError",
+    srcs = ["src/pages/RouteError.tsx"],
+    types = ["src/pages/RouteError.tsx"],
+    deps = [
+        ":node_modules/react",
+        ":node_modules/react-router",
+        ":src__components__ui",
+    ],
+)
+
+js_library(
+    name = "src__components__ModelSettings",
+    srcs = ["src/components/ModelSettings.tsx"],
+    types = ["src/components/ModelSettings.tsx"],
+    deps = [
+        ":node_modules/@tanstack/react-query",
+        ":node_modules/react",
+        ":src__api__client",
+        ":src__components__ui",
+        "//proto/todofy/ui/v1:ts",
+    ],
+)
+
+js_library(
+    name = "src__pages__SetupPage",
+    srcs = ["src/pages/SetupPage.tsx"],
+    types = ["src/pages/SetupPage.tsx"],
+    deps = [
+        ":node_modules/lucide-react",
+        ":node_modules/react",
+        ":src__api__queries",
+        ":src__api__types",
+        ":src__components__ModelSettings",
+        ":src__components__ui",
+    ],
+)
+
+js_library(
+    name = "src__routes",
+    srcs = ["src/routes.tsx"],
+    types = ["src/routes.tsx"],
+    deps = [
+        ":node_modules/react",
+        ":node_modules/react-router",
+        ":src__components__Shell",
+        ":src__pages__AttentionPage",
+        ":src__pages__BudgetPage",
+        ":src__pages__DigestPage",
+        ":src__pages__EventDetailPage",
+        ":src__pages__EventsPage",
+        ":src__pages__HealthPage",
+        ":src__pages__MorePage",
+        ":src__pages__NotFoundPage",
+        ":src__pages__RouteError",
+        ":src__pages__SetupPage",
+    ],
+)
+
+js_library(
+    name = "src__main",
+    srcs = [
+        "src/main.tsx",
+        "src/styles/app.css",
+        "src/styles/tokens.css",
+    ],
+    types = ["src/main.tsx"],
+    deps = [
+        ":node_modules/@tanstack/react-query",
+        ":node_modules/react",
+        ":node_modules/react-dom",
+        ":node_modules/react-router",
+        ":src__queryClient",
+        ":src__routes",
+    ],
+)
+
+js_library(
+    name = "lib",
+    deps = [
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__api__types",
+        ":src__api__useAction",
+        ":src__components__EventList",
+        ":src__components__Modal",
+        ":src__components__ModelSettings",
+        ":src__components__Shell",
+        ":src__components__StatusBanner",
+        ":src__components__TrendChart",
+        ":src__components__ui",
+        ":src__lib__format",
+        ":src__lib__labels",
+        ":src__main",
+        ":src__pages__AttentionPage",
+        ":src__pages__BudgetPage",
+        ":src__pages__DigestPage",
+        ":src__pages__EventDetailPage",
+        ":src__pages__EventsPage",
+        ":src__pages__HealthPage",
+        ":src__pages__MorePage",
+        ":src__pages__NotFoundPage",
+        ":src__pages__ReconcileDialog",
+        ":src__pages__RouteError",
+        ":src__pages__SetupPage",
+        ":src__queryClient",
+        ":src__routes",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__queryClient_test",
+    data = [
+        "package.json",
+        "src/test/setup.ts",
+        "vite.config.ts",
+        ":node_modules/@testing-library/dom",
+        ":node_modules/@testing-library/user-event",
+        ":node_modules/@vitejs/plugin-react",
+        ":node_modules/jsdom",
+        ":node_modules/vite",
+        "//:node_modules/vitest",
+    ],
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = ["src/queryClient.test.ts"],
+    deps = [
+        ":node_modules/@testing-library/jest-dom",
+        ":node_modules/@testing-library/react",
+        ":node_modules/vitest",
+        ":src__api__client",
+        ":src__queryClient",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__api__client_test",
+    data = [
+        "package.json",
+        "src/test/fixtures.ts",
+        "src/test/harness.tsx",
+        "src/test/setup.ts",
+        "vite.config.ts",
+        ":node_modules/@testing-library/dom",
+        ":node_modules/@testing-library/user-event",
+        ":node_modules/@vitejs/plugin-react",
+        ":node_modules/jsdom",
+        ":node_modules/vite",
+        "//:node_modules/vitest",
+    ],
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = ["src/api/client.test.ts"],
+    deps = [
+        ":node_modules/@tanstack/react-query",
+        ":node_modules/@testing-library/jest-dom",
+        ":node_modules/@testing-library/react",
+        ":node_modules/react-router",
+        ":node_modules/vitest",
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__api__types",
+        ":src__api__useAction",
+        ":src__components__EventList",
+        ":src__components__Modal",
+        ":src__components__ModelSettings",
+        ":src__components__Shell",
+        ":src__components__StatusBanner",
+        ":src__components__TrendChart",
+        ":src__components__ui",
+        ":src__lib__format",
+        ":src__lib__labels",
+        ":src__pages__AttentionPage",
+        ":src__pages__BudgetPage",
+        ":src__pages__DigestPage",
+        ":src__pages__EventDetailPage",
+        ":src__pages__EventsPage",
+        ":src__pages__HealthPage",
+        ":src__pages__MorePage",
+        ":src__pages__NotFoundPage",
+        ":src__pages__ReconcileDialog",
+        ":src__pages__RouteError",
+        ":src__pages__SetupPage",
+        ":src__queryClient",
+        ":src__routes",
+        "//proto/todofy/report/v1:ts",
+        "//proto/todofy/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__api__queries_test",
+    data = [
+        "package.json",
+        "src/test/fixtures.ts",
+        "src/test/setup.ts",
+        "vite.config.ts",
+        ":node_modules/@testing-library/dom",
+        ":node_modules/@testing-library/user-event",
+        ":node_modules/@vitejs/plugin-react",
+        ":node_modules/jsdom",
+        ":node_modules/vite",
+        "//:node_modules/vitest",
+    ],
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = ["src/api/queries.test.ts"],
+    deps = [
+        ":node_modules/@testing-library/jest-dom",
+        ":node_modules/@testing-library/react",
+        ":node_modules/vitest",
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__api__types",
+        "//proto/todofy/report/v1:ts",
+        "//proto/todofy/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__api__report-schema-dialect_test",
+    data = [
+        "package.json",
+        "src/test/setup.ts",
+        "vite.config.ts",
+        ":node_modules/@testing-library/dom",
+        ":node_modules/@testing-library/user-event",
+        ":node_modules/@vitejs/plugin-react",
+        ":node_modules/jsdom",
+        ":node_modules/vite",
+        "//:node_modules/vitest",
+        "//todofy:api_schema_data",
+    ],
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = ["src/api/report-schema-dialect.test.ts"],
+    deps = [
+        ":node_modules/@testing-library/jest-dom",
+        ":node_modules/@testing-library/react",
+        ":node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__components__ModelSettings_test",
+    data = [
+        "package.json",
+        "src/test/fixtures.ts",
+        "src/test/harness.tsx",
+        "src/test/setup.ts",
+        "vite.config.ts",
+        ":node_modules/@testing-library/dom",
+        ":node_modules/@vitejs/plugin-react",
+        ":node_modules/jsdom",
+        ":node_modules/vite",
+        "//:node_modules/vitest",
+    ],
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = ["src/components/ModelSettings.test.tsx"],
+    deps = [
+        ":node_modules/@tanstack/react-query",
+        ":node_modules/@testing-library/jest-dom",
+        ":node_modules/@testing-library/react",
+        ":node_modules/@testing-library/user-event",
+        ":node_modules/react-router",
+        ":node_modules/vitest",
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__api__types",
+        ":src__api__useAction",
+        ":src__components__EventList",
+        ":src__components__Modal",
+        ":src__components__ModelSettings",
+        ":src__components__Shell",
+        ":src__components__StatusBanner",
+        ":src__components__TrendChart",
+        ":src__components__ui",
+        ":src__lib__format",
+        ":src__lib__labels",
+        ":src__pages__AttentionPage",
+        ":src__pages__BudgetPage",
+        ":src__pages__DigestPage",
+        ":src__pages__EventDetailPage",
+        ":src__pages__EventsPage",
+        ":src__pages__HealthPage",
+        ":src__pages__MorePage",
+        ":src__pages__NotFoundPage",
+        ":src__pages__ReconcileDialog",
+        ":src__pages__RouteError",
+        ":src__pages__SetupPage",
+        ":src__queryClient",
+        ":src__routes",
+        "//proto/todofy/report/v1:ts",
+        "//proto/todofy/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__components__StatusBanner_test",
+    data = [
+        "package.json",
+        "src/test/fixtures.ts",
+        "src/test/setup.ts",
+        "vite.config.ts",
+        ":node_modules/@testing-library/dom",
+        ":node_modules/@testing-library/user-event",
+        ":node_modules/@vitejs/plugin-react",
+        ":node_modules/jsdom",
+        ":node_modules/vite",
+        "//:node_modules/vitest",
+    ],
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = ["src/components/StatusBanner.test.tsx"],
+    deps = [
+        ":node_modules/@testing-library/jest-dom",
+        ":node_modules/@testing-library/react",
+        ":node_modules/vitest",
+        ":src__api__types",
+        ":src__components__StatusBanner",
+        "//proto/todofy/report/v1:ts",
+        "//proto/todofy/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__lib__format_test",
+    data = [
+        "package.json",
+        "src/test/setup.ts",
+        "vite.config.ts",
+        ":node_modules/@testing-library/dom",
+        ":node_modules/@testing-library/user-event",
+        ":node_modules/@vitejs/plugin-react",
+        ":node_modules/jsdom",
+        ":node_modules/vite",
+        "//:node_modules/vitest",
+    ],
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = ["src/lib/format.test.ts"],
+    deps = [
+        ":node_modules/@testing-library/jest-dom",
+        ":node_modules/@testing-library/react",
+        ":node_modules/vitest",
+        ":src__lib__format",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__lib__labels_test",
+    data = [
+        "package.json",
+        "src/test/setup.ts",
+        "vite.config.ts",
+        ":application_sources",
+        ":node_modules/@testing-library/dom",
+        ":node_modules/@testing-library/user-event",
+        ":node_modules/@vitejs/plugin-react",
+        ":node_modules/jsdom",
+        ":node_modules/vite",
+        "//:node_modules/vitest",
+        "//todofy:api_schema_data",
+    ],
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = ["src/lib/labels.test.ts"],
+    deps = [
+        ":node_modules/@testing-library/jest-dom",
+        ":node_modules/@testing-library/react",
+        ":node_modules/vitest",
+        ":src__api__client",
+        ":src__api__types",
+        ":src__lib__labels",
+        "//proto/common/errors/v1:ts",
+        "//proto/todofy/ui/v1:ts",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__pages__eventDetail_test",
+    data = [
+        "package.json",
+        "src/test/fixtures.ts",
+        "src/test/harness.tsx",
+        "src/test/setup.ts",
+        "vite.config.ts",
+        ":node_modules/@testing-library/dom",
+        ":node_modules/@vitejs/plugin-react",
+        ":node_modules/jsdom",
+        ":node_modules/vite",
+        "//:node_modules/vitest",
+    ],
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = ["src/pages/eventDetail.test.tsx"],
+    deps = [
+        ":node_modules/@tanstack/react-query",
+        ":node_modules/@testing-library/jest-dom",
+        ":node_modules/@testing-library/react",
+        ":node_modules/@testing-library/user-event",
+        ":node_modules/react-router",
+        ":node_modules/vitest",
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__api__types",
+        ":src__api__useAction",
+        ":src__components__EventList",
+        ":src__components__Modal",
+        ":src__components__ModelSettings",
+        ":src__components__Shell",
+        ":src__components__StatusBanner",
+        ":src__components__TrendChart",
+        ":src__components__ui",
+        ":src__lib__format",
+        ":src__lib__labels",
+        ":src__pages__AttentionPage",
+        ":src__pages__BudgetPage",
+        ":src__pages__DigestPage",
+        ":src__pages__EventDetailPage",
+        ":src__pages__EventsPage",
+        ":src__pages__HealthPage",
+        ":src__pages__MorePage",
+        ":src__pages__NotFoundPage",
+        ":src__pages__ReconcileDialog",
+        ":src__pages__RouteError",
+        ":src__pages__SetupPage",
+        ":src__queryClient",
+        ":src__routes",
+        "//proto/todofy/report/v1:ts",
+        "//proto/todofy/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__pages__health_test",
+    data = [
+        "package.json",
+        "src/test/fixtures.ts",
+        "src/test/harness.tsx",
+        "src/test/setup.ts",
+        "vite.config.ts",
+        ":node_modules/@testing-library/dom",
+        ":node_modules/@testing-library/user-event",
+        ":node_modules/@vitejs/plugin-react",
+        ":node_modules/jsdom",
+        ":node_modules/vite",
+        "//:node_modules/vitest",
+    ],
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = ["src/pages/health.test.tsx"],
+    deps = [
+        ":node_modules/@tanstack/react-query",
+        ":node_modules/@testing-library/jest-dom",
+        ":node_modules/@testing-library/react",
+        ":node_modules/react-router",
+        ":node_modules/vitest",
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__api__types",
+        ":src__api__useAction",
+        ":src__components__EventList",
+        ":src__components__Modal",
+        ":src__components__ModelSettings",
+        ":src__components__Shell",
+        ":src__components__StatusBanner",
+        ":src__components__TrendChart",
+        ":src__components__ui",
+        ":src__lib__format",
+        ":src__lib__labels",
+        ":src__pages__AttentionPage",
+        ":src__pages__BudgetPage",
+        ":src__pages__DigestPage",
+        ":src__pages__EventDetailPage",
+        ":src__pages__EventsPage",
+        ":src__pages__HealthPage",
+        ":src__pages__MorePage",
+        ":src__pages__NotFoundPage",
+        ":src__pages__ReconcileDialog",
+        ":src__pages__RouteError",
+        ":src__pages__SetupPage",
+        ":src__queryClient",
+        ":src__routes",
+        "//proto/todofy/report/v1:ts",
+        "//proto/todofy/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__pages__lists_test",
+    data = [
+        "package.json",
+        "src/test/fixtures.ts",
+        "src/test/harness.tsx",
+        "src/test/setup.ts",
+        "vite.config.ts",
+        ":node_modules/@testing-library/dom",
+        ":node_modules/@vitejs/plugin-react",
+        ":node_modules/jsdom",
+        ":node_modules/vite",
+        "//:node_modules/vitest",
+    ],
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = ["src/pages/lists.test.tsx"],
+    deps = [
+        ":node_modules/@tanstack/react-query",
+        ":node_modules/@testing-library/jest-dom",
+        ":node_modules/@testing-library/react",
+        ":node_modules/@testing-library/user-event",
+        ":node_modules/react-router",
+        ":node_modules/vitest",
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__api__types",
+        ":src__api__useAction",
+        ":src__components__EventList",
+        ":src__components__Modal",
+        ":src__components__ModelSettings",
+        ":src__components__Shell",
+        ":src__components__StatusBanner",
+        ":src__components__TrendChart",
+        ":src__components__ui",
+        ":src__lib__format",
+        ":src__lib__labels",
+        ":src__pages__AttentionPage",
+        ":src__pages__BudgetPage",
+        ":src__pages__DigestPage",
+        ":src__pages__EventDetailPage",
+        ":src__pages__EventsPage",
+        ":src__pages__HealthPage",
+        ":src__pages__MorePage",
+        ":src__pages__NotFoundPage",
+        ":src__pages__ReconcileDialog",
+        ":src__pages__RouteError",
+        ":src__pages__SetupPage",
+        ":src__queryClient",
+        ":src__routes",
+        "//proto/todofy/report/v1:ts",
+        "//proto/todofy/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__pages__status_test",
+    data = [
+        "package.json",
+        "src/test/fixtures.ts",
+        "src/test/harness.tsx",
+        "src/test/setup.ts",
+        "vite.config.ts",
+        ":node_modules/@testing-library/dom",
+        ":node_modules/@vitejs/plugin-react",
+        ":node_modules/jsdom",
+        ":node_modules/vite",
+        "//:node_modules/vitest",
+    ],
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = ["src/pages/status.test.tsx"],
+    deps = [
+        ":node_modules/@tanstack/react-query",
+        ":node_modules/@testing-library/jest-dom",
+        ":node_modules/@testing-library/react",
+        ":node_modules/@testing-library/user-event",
+        ":node_modules/react-router",
+        ":node_modules/vitest",
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__api__types",
+        ":src__api__useAction",
+        ":src__components__EventList",
+        ":src__components__Modal",
+        ":src__components__ModelSettings",
+        ":src__components__Shell",
+        ":src__components__StatusBanner",
+        ":src__components__TrendChart",
+        ":src__components__ui",
+        ":src__lib__format",
+        ":src__lib__labels",
+        ":src__pages__AttentionPage",
+        ":src__pages__BudgetPage",
+        ":src__pages__DigestPage",
+        ":src__pages__EventDetailPage",
+        ":src__pages__EventsPage",
+        ":src__pages__HealthPage",
+        ":src__pages__MorePage",
+        ":src__pages__NotFoundPage",
+        ":src__pages__ReconcileDialog",
+        ":src__pages__RouteError",
+        ":src__pages__SetupPage",
+        ":src__queryClient",
+        ":src__routes",
+        "//proto/todofy/report/v1:ts",
+        "//proto/todofy/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__pages__trends_test",
+    data = [
+        "package.json",
+        "src/test/fixtures.ts",
+        "src/test/harness.tsx",
+        "src/test/setup.ts",
+        "vite.config.ts",
+        ":node_modules/@testing-library/dom",
+        ":node_modules/@vitejs/plugin-react",
+        ":node_modules/jsdom",
+        ":node_modules/vite",
+        "//:node_modules/vitest",
+    ],
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = ["src/pages/trends.test.tsx"],
+    deps = [
+        ":node_modules/@tanstack/react-query",
+        ":node_modules/@testing-library/jest-dom",
+        ":node_modules/@testing-library/react",
+        ":node_modules/@testing-library/user-event",
+        ":node_modules/react-router",
+        ":node_modules/vitest",
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__api__types",
+        ":src__api__useAction",
+        ":src__components__EventList",
+        ":src__components__Modal",
+        ":src__components__ModelSettings",
+        ":src__components__Shell",
+        ":src__components__StatusBanner",
+        ":src__components__TrendChart",
+        ":src__components__ui",
+        ":src__lib__format",
+        ":src__lib__labels",
+        ":src__pages__AttentionPage",
+        ":src__pages__BudgetPage",
+        ":src__pages__DigestPage",
+        ":src__pages__EventDetailPage",
+        ":src__pages__EventsPage",
+        ":src__pages__HealthPage",
+        ":src__pages__MorePage",
+        ":src__pages__NotFoundPage",
+        ":src__pages__ReconcileDialog",
+        ":src__pages__RouteError",
+        ":src__pages__SetupPage",
+        ":src__queryClient",
+        ":src__routes",
+        "//proto/todofy/report/v1:ts",
+        "//proto/todofy/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+js_library(
+    name = "application_sources",
+    srcs = glob(
+        [
+            "src/**",
+            "public/**",
+            "index.html",
+            "_headers",
+            "_redirects",
+        ],
+        allow_empty = True,
+    ),
+)
+
+js_library(
+    name = "build_checks",
+    srcs = [
+        "scripts/js-budget.mjs",
+        "scripts/js-budget.test.mjs",
+    ],
+    deps = ["//tools/bundle-size:library"],
+)
+
+proto_package(
+    name = "bundle_proto",
+    deps = [
+        ":lib",
+        "//proto/common/errors/v1:ts",
+        "//proto/todofy/report/v1:ts",
+        "//proto/todofy/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+        "//proto/ts:wire-json",
+    ],
+)
+
+workspace_package_link(
+    name = "bundle_proto_link",
+    src = ":bundle_proto",
+    runtime_dependencies = ["@bufbuild/protobuf"],
+)
+
+vite.vite_binary(name = "vite")
+
+vite_bundle(
+    name = "bundle",
+    out_dir = "dist",
+    postbuild = "scripts/js-budget.mjs",
+    tool = ":vite",
+    deps = [
+        ":application_sources",
+        ":build_checks",
+        ":bundle_proto_link",
+        ":lib",
+        ":node_modules/@tanstack/react-query",
+        ":node_modules/@vitejs/plugin-react",
+        ":node_modules/lucide-react",
+        ":node_modules/react",
+        ":node_modules/react-dom",
+        ":node_modules/react-router",
+        ":node_modules/vite",
+        ":node_modules/vitest",
+    ],
+)
+
+ts_project(
+    name = "typecheck_project",
+    srcs = [
+        "src/api/client.test.ts",
+        "src/api/client.ts",
+        "src/api/queries.test.ts",
+        "src/api/queries.ts",
+        "src/api/report-schema-dialect.test.ts",
+        "src/api/types.ts",
+        "src/api/useAction.ts",
+        "src/components/EventList.tsx",
+        "src/components/Modal.tsx",
+        "src/components/ModelSettings.test.tsx",
+        "src/components/ModelSettings.tsx",
+        "src/components/Shell.tsx",
+        "src/components/StatusBanner.test.tsx",
+        "src/components/StatusBanner.tsx",
+        "src/components/TrendChart.tsx",
+        "src/components/ui.tsx",
+        "src/lib/format.test.ts",
+        "src/lib/format.ts",
+        "src/lib/labels.test.ts",
+        "src/lib/labels.ts",
+        "src/main.tsx",
+        "src/pages/AttentionPage.tsx",
+        "src/pages/BudgetPage.tsx",
+        "src/pages/DigestPage.tsx",
+        "src/pages/EventDetailPage.tsx",
+        "src/pages/EventsPage.tsx",
+        "src/pages/HealthPage.tsx",
+        "src/pages/MorePage.tsx",
+        "src/pages/NotFoundPage.tsx",
+        "src/pages/ReconcileDialog.tsx",
+        "src/pages/RouteError.tsx",
+        "src/pages/SetupPage.tsx",
+        "src/pages/eventDetail.test.tsx",
+        "src/pages/health.test.tsx",
+        "src/pages/lists.test.tsx",
+        "src/pages/status.test.tsx",
+        "src/pages/trends.test.tsx",
+        "src/queryClient.test.ts",
+        "src/queryClient.ts",
+        "src/routes.tsx",
+        "src/test/fixtures.ts",
+        "src/test/harness.tsx",
+        "src/test/setup.ts",
+        "vite.config.ts",
+        ":bundle_proto_wire_types",
+    ],
+    extends = "tsconfig.json",
+    no_emit = True,
+    resolve_json_module = True,
+    tsconfig = {
+        "compilerOptions": {"noEmit": True},
+        "include": [],
+        "exclude": [],
+    },
+    deps = [
+        ":bundle_proto_link",
+        ":node_modules/@tanstack/react-query",
+        ":node_modules/@testing-library/dom",
+        ":node_modules/@testing-library/jest-dom",
+        ":node_modules/@testing-library/react",
+        ":node_modules/@testing-library/user-event",
+        ":node_modules/@types/node",
+        ":node_modules/@types/react",
+        ":node_modules/@types/react-dom",
+        ":node_modules/@vitejs/plugin-react",
+        ":node_modules/lucide-react",
+        ":node_modules/react",
+        ":node_modules/react-dom",
+        ":node_modules/react-router",
+        ":node_modules/vite",
+        ":node_modules/vitest",
+        "//:node_modules/@types/react",
+        "//:node_modules/vitest",
+    ],
+)
+
+alias(
+    name = "typecheck",
+    actual = ":typecheck_project_typecheck",
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        [
+            "*",
+            "public/**",
+            "scripts/**",
+            "src/**",
+        ],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+test_suite(name = "check")
+
+proto_vitest_test(
+    name = "scripts_js_budget_test",
+    data = [
+        "package.json",
+        "src/test/setup.ts",
+        "vite.config.ts",
+        ":node_modules/@testing-library/jest-dom",
+        ":node_modules/@testing-library/react",
+        ":node_modules/@vitejs/plugin-react",
+        ":node_modules/jsdom",
+        ":node_modules/vite",
+        "//:node_modules/vitest",
+    ],
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = ["scripts/js-budget.test.mjs"],
+    deps = [":build_checks"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)
+
+test_suite(
+    name = "typecheck_tests",
+    tests = [":typecheck_project_typecheck_test"],
+)

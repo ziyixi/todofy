@@ -12,7 +12,7 @@ if sys.version_info < (3, 11) and os.environ.get("GITHUB_ACTIONS") != "true":
 
 
 def load_tests(loader, tests, pattern):
-    directory = Path(__file__).resolve().parents[2] / "tools/service-catalog/tests"
+    directory = Path(__file__).absolute().parents[2] / "tools/service-catalog/tests"
     # Nested discovery changes a loader's top-level directory. The outer loader
     # must retain its own directory so it can continue with sibling CI tests.
     catalog_tests = unittest.TestLoader().discover(

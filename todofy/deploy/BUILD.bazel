@@ -1,0 +1,134 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library", "js_test")
+load("@npm//website:tsx/package_json.bzl", tsx = "bin")
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//todofy:__subpackages__"])
+
+filegroup(
+    name = "release_wrapper",
+    srcs = ["deploy_vars.py"],
+)
+
+tsx.tsx_test(
+    name = "bundle-size_test",
+    args = [
+        "--test",
+        "test/bundle-size.test.mjs",
+    ],
+    chdir = "todofy/deploy",
+    data = [
+        "test/bundle-size.test.mjs",
+        ":source_bundle_size_mjs",
+        "//todofy/gateway:package_metadata",
+        "//tools/bundle-size:library",
+    ],
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        ":bundle-size_test",
+        ":bundle_budget_test",
+        ":test_deploy_vars_test",
+        ":test_wrangler_configs_test",
+    ],
+)
+
+js_test(
+    name = "bundle_budget_test",
+    args = ["$(rootpath //todofy/gateway:bundle)"],
+    data = [
+        ":source_bundle_size_mjs",
+        "//todofy/gateway:bundle",
+    ],
+    entry_point = "bundle-size.mjs",
+    preserve_symlinks_main = False,
+)
+
+js_library(
+    name = "source_bundle_size_mjs",
+    srcs = ["bundle-size.mjs"],
+    deps = ["//tools/bundle-size:library"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        [
+            "*",
+            "test/**",
+        ],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+py_library(
+    name = "deploy_vars",
+    srcs = ["deploy_vars.py"],
+    imports = [".."],
+)
+
+filegroup(
+    name = "python_lint_inputs",
+    srcs = glob(["*.py"]),
+    visibility = ["//visibility:public"],
+)
+
+[
+    py_test(
+        name = source.removesuffix(".py") + "_test",
+        srcs = [
+            source,
+            "//tools/bazel/python:pytest_main.py",
+        ],
+        args = [
+            "-c",
+            "$(rootpath //todofy:pyproject.toml)",
+            "-p",
+            "no:cacheprovider",
+            "-p",
+            "xdist.plugin",
+            "-p",
+            "xdist.looponfail",
+            "$(rootpath " + source + ")",
+        ],
+        data = [
+            "//todofy:config",
+            "//todofy:conftest.py",
+            "//todofy:core_application_sources",
+            "//todofy:pyproject.toml",
+            "//todofy/gateway:application_sources",
+            "//tools/cloud-config:worker-secrets",
+        ],
+        env = {
+            "BAZEL_COPY_WORKSPACE": "1",
+            "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+        },
+        imports = [
+            "..",
+            "../worker",
+        ],
+        legacy_create_init = False,
+        main = "//tools/bazel/python:pytest_main.py",
+        deps = [
+            ":deploy_vars",
+            "//todofy:core_report_schema",
+            "@python_deps//pytest",
+            "@python_deps//pytest_xdist",
+        ],
+    )
+    for source in [
+        "test_deploy_vars.py",
+        "test_wrangler_configs.py",
+    ]
+]

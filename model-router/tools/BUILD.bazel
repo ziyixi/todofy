@@ -1,7 +1,15 @@
-load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@aspect_rules_js//js:defs.bzl", "js_library", "js_test")
 load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("@npm//website:tsx/package_json.bzl", tsx = "bin")
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
-package(default_visibility = ["//visibility:public"])
+package(default_visibility = ["//model-router:__subpackages__"])
+
+filegroup(
+    name = "connection_check",
+    srcs = ["check_connections.py"],
+)
 
 ts_project(
     name = "restore_types",
@@ -20,11 +28,108 @@ ts_project(
             "typeRoots": ["../worker/node_modules/@types"],
         },
     },
-    deps = ["//model-router/worker:backup_types", "//model-router/worker:node_modules/@types/node"],
+    deps = [
+        "//model-router/worker:backup_types",
+        "//model-router/worker:node_modules/@types/node",
+    ],
 )
 
 js_library(
     name = "backup-restore",
     srcs = ["backup-restore.ts"],
-    deps = [":restore_types", "//model-router/worker:backup"],
+    deps = [
+        ":restore_types",
+        "//model-router/worker:backup",
+    ],
+)
+
+tsx.tsx_test(
+    name = "deploy-vars_test",
+    args = [
+        "--test",
+        "test/deploy-vars.test.mjs",
+    ],
+    chdir = "model-router/tools",
+    data = [
+        "test/deploy-vars.test.mjs",
+        ":source_deploy_vars_mjs",
+        "//model-router:config",
+        "//model-router/worker:package_metadata",
+    ],
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        ":bundle_budget_test",
+        ":deploy-vars_test",
+        ":restore_types_typecheck_test",
+        ":test_connections",
+    ],
+)
+
+js_test(
+    name = "bundle_budget_test",
+    args = ["$(rootpath //model-router:worker_bundle)"],
+    data = [
+        ":source_bundle_size_mjs",
+        "//model-router:worker_bundle",
+    ],
+    entry_point = "bundle-size.mjs",
+    preserve_symlinks_main = False,
+)
+
+js_library(
+    name = "source_deploy_vars_mjs",
+    srcs = ["deploy-vars.mjs"],
+    deps = ["//tools/cloud-config:worker-secrets"],
+)
+
+js_library(
+    name = "source_bundle_size_mjs",
+    srcs = ["bundle-size.mjs"],
+    deps = ["//tools/bundle-size:library"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        [
+            "*",
+            "test/**",
+        ],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+py_library(
+    name = "connections",
+    srcs = ["check_connections.py"],
+    imports = ["."],
+    deps = ["//tools/cloud-release:api"],
+)
+
+py_test(
+    name = "test_connections",
+    srcs = [
+        "test/test_connections.py",
+        "//tools/bazel/python:unittest_main.py",
+    ],
+    args = ["test_connections"],
+    imports = [
+        ".",
+        "test",
+    ],
+    legacy_create_init = False,
+    main = "//tools/bazel/python:unittest_main.py",
+    deps = [":connections"],
 )

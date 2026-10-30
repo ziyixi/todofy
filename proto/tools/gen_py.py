@@ -1,6 +1,6 @@
 """Generates stdlib-only Python modules for the wire JSON profile from a buf image (proto/README.md).
 
-Usage (tools/ensure.mjs runs it; never by hand)::
+Usage (Bazel package actions invoke this generator; the stdin form also serves isolated tests)::
 
     buf build --exclude-imports --exclude-source-info -o -#format=json \
         | python3 tools/gen_py.py OUT_DIR

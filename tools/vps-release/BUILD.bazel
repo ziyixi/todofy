@@ -1,0 +1,193 @@
+load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//visibility:public"])
+
+py_library(
+    name = "deploy",
+    srcs = ["deploy.py"],
+    imports = ["."],
+    deps = [
+        "//proto/platform/runtime/v1:python",
+        "//tools/vps-release:evidence",
+        "//tools/vps-release:release_identity",
+        "//tools/vps-release:transport",
+    ],
+)
+
+py_library(
+    name = "evidence",
+    srcs = ["evidence.py"],
+    imports = ["."],
+    deps = ["//tools/vps-release:transport"],
+)
+
+py_library(
+    name = "reconcile",
+    srcs = ["reconcile.py"],
+    imports = ["."],
+    deps = [
+        "//proto/platform/runtime/v1:python",
+        "//tools/vps-release:deploy",
+        "//tools/vps-release:evidence",
+        "//tools/vps-release:release_identity",
+        "//tools/vps-release:transport",
+    ],
+)
+
+py_library(
+    name = "release_identity",
+    srcs = ["release_identity.py"],
+    imports = ["."],
+    deps = ["//tools/cloud-config:cloud_profile"],
+)
+
+py_library(
+    name = "render",
+    srcs = ["render.py"],
+    imports = ["."],
+    deps = [
+        "//platform:deployment_resources",
+        "//platform:status_daemon_config",
+        "//proto/platform/runtime/v1:python",
+        "//tools/vps-release:release_identity",
+        "@python_deps//pyyaml",
+    ],
+)
+
+py_library(
+    name = "transport",
+    srcs = ["transport.py"],
+    imports = ["."],
+    deps = [
+        "//proto:python_runtime",
+        "//proto/common/errors/v1:python",
+        "//proto/platform/runtime/v1:python",
+        "@python_deps//httpx",
+    ],
+)
+
+py_library(
+    name = "test_deploy_module",
+    srcs = ["tests/test_deploy.py"],
+    imports = ["tests"],
+    deps = [
+        "//proto:python_runtime",
+        "//proto/platform/runtime/v1:python",
+        "//tools/vps-release:deploy",
+        "//tools/vps-release:release_identity",
+        "//tools/vps-release:transport",
+        "@python_deps//httpx",
+    ],
+)
+
+py_test(
+    name = "test_deploy_test",
+    srcs = [
+        "tests/test_deploy.py",
+        "//tools/bazel/python:unittest_main.py",
+    ],
+    args = ["test_deploy"],
+    data = [
+        ":python_sources",
+        "//tools:repository_test_data",
+    ],
+    imports = [
+        ".",
+        "tests",
+    ],
+    legacy_create_init = False,
+    main = "//tools/bazel/python:unittest_main.py",
+    deps = [
+        "//proto:python_runtime",
+        "//proto/platform/runtime/v1:python",
+        "//tools/vps-release:deploy",
+        "//tools/vps-release:release_identity",
+        "//tools/vps-release:transport",
+        "@python_deps//httpx",
+    ],
+)
+
+py_test(
+    name = "test_reconcile_test",
+    srcs = [
+        "tests/test_reconcile.py",
+        "//tools/bazel/python:unittest_main.py",
+    ],
+    args = ["test_reconcile"],
+    data = [
+        ":python_sources",
+        "//tools:repository_test_data",
+    ],
+    imports = [
+        ".",
+        "tests",
+    ],
+    legacy_create_init = False,
+    main = "//tools/bazel/python:unittest_main.py",
+    deps = [
+        ":test_deploy_module",
+        "//proto:python_runtime",
+        "//proto/platform/runtime/v1:python",
+        "//tools/vps-release:evidence",
+        "//tools/vps-release:reconcile",
+        "//tools/vps-release:transport",
+        "@python_deps//httpx",
+    ],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        [
+            "*.py",
+            "*.sh",
+            "*.mjs",
+            "*.json",
+            "tests/*.py",
+        ],
+        allow_empty = True,
+    ),
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        ":test_deploy_test",
+        ":test_reconcile_test",
+    ],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        [
+            "*",
+            "tests/**",
+        ],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+[
+    py_binary(
+        name = command + "_cli",
+        srcs = [command + ".py"],
+        legacy_create_init = False,
+        main = command + ".py",
+        deps = [":" + command],
+    )
+    for command in [
+        "deploy",
+        "reconcile",
+    ]
+]

@@ -10,6 +10,9 @@ on:
       source_sha:
         type: string
         default: ''
+      artifact_run_id:
+        type: string
+        default: ''
       repair:
         type: boolean
         default: false
@@ -22,6 +25,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
   deployments: write
 
 env:
@@ -87,6 +91,38 @@ jobs:
           if [ "$RELEASE_REPAIR" = true ]; then args+=(--repair); fi
           if [ "$RELEASE_CHECK_ONLY" = true ]; then args+=(--check-only); fi
           python3 tools/cloud-release/control.py preflight --app "$RELEASE_APP" --source-sha "$RELEASE_SOURCE" --source-root .release-source "${args[@]}"
+      - name: Download the checked Worker archive
+        if: steps.preflight.outputs.required == 'true' && !inputs.repair
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: worker-${{ inputs.app }}-${{ steps.source.outputs.source_sha }}
+          path: ${{ runner.temp }}/worker-release
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.artifact_run_id || github.run_id }}
+      - uses: ./.github/actions/setup-bazel
+        if: steps.preflight.outputs.required == 'true' && inputs.repair
+      - name: Rebuild the recorded source for a repair
+        if: steps.preflight.outputs.required == 'true' && inputs.repair
+        working-directory: .release-source
+        env:
+          RELEASE_APP: ${{ inputs.app }}
+          RELEASE_SOURCE: ${{ steps.source.outputs.source_sha }}
+        run: |
+          case "$RELEASE_APP" in
+            recall) target=//recall:worker_artifact ;;
+            website-relay) target=//website:relay ;;
+            *) target="//$RELEASE_APP" ;;
+          esac
+          python3 tools/cloud-release/artifact.py build --app "$RELEASE_APP" --sha "$RELEASE_SOURCE" \
+            --target "$target" --directory "$RUNNER_TEMP/worker-release"
+      - name: Verify and stage the exact compiled release
+        if: steps.preflight.outputs.required == 'true'
+        env:
+          RELEASE_APP: ${{ inputs.app }}
+          RELEASE_SOURCE: ${{ steps.source.outputs.source_sha }}
+        run: |
+          python3 tools/cloud-release/artifact.py stage --app "$RELEASE_APP" --sha "$RELEASE_SOURCE" \
+            --directory "$RUNNER_TEMP/worker-release" --source-root .release-source
       - name: Release todofy
         id: todofy
         if: inputs.app == 'todofy' && steps.preflight.outputs.required == 'true'

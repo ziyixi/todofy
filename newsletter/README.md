@@ -105,11 +105,13 @@ newsletter-trigger --send --timeout 7200
 Newsletter 只使用共享的 `modelrouter.inference.v1` Python 客户端，不安装模型 SDK，也不挂载登录目录。默认模型是 `gpt-6.1-sol`（`settings.DEFAULT_MODEL`）；未指定 effort 时保留模型默认值。一次采编调用可在同一短会话内补查一轮，使用 Router 返回的实际网页观察和逐次用量。历史运行保留冻结输入，既有业务开关和发送账本保持原样。
 
 ```sh
-make check    # Ruff、mypy、结构检查和离线测试；与 CI 相同
+make check    # Bazel完整检查：Ruff、mypy、结构、测试和离线安装包smoke
 make format   # 格式化 Python 代码
 make smoke    # 本地 HTTP 全流程测试，模拟外部服务，不发真实邮件
-make build    # 构建 Python 安装包
+make build    # 构建固定源码身份的Linux OCI镜像归档
 ```
+
+CI 的完整检查在仓库根运行 `bazel test //newsletter:check`。发布产物由 `bazel build //newsletter --platforms=//tools/bazel/images:linux_amd64 --embed_label=<full-commit-sha>` 构建，Dockerfile 已由声明的 OCI 分层目标替代。本地 Compose 使用预先加载的 `todofy-newsletter:bazel` 镜像。
 
 代码在 `src/newsletter/`，测试及基准材料在 `tests/`，可重复使用的验证工具在 `scripts/`。业务消息继续使用公共 [protos 仓库](https://github.com/ziyixi/protos) 的 Python wheel；模型调用使用仓库根 proto 的共享客户端，Newsletter 不生成 IDL。
 

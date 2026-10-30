@@ -2,19 +2,17 @@
 
 The owner's web watches: a page, a feed or a JSON API checked on a schedule, a deterministic pipeline that decides
 whether a difference meets an ordinary watch rule, and saved evidence for Dots to judge against a Work goal.
-One Worker `watch`, one SQLite Durable Object `WatchState`, one private evidence R2 bucket, a Chinese mobile-first UI, on Workers Free at $0. The owner approved this design
-on 2026-10-01 with every recommended default (the research report the lead keeps); this document is how it is built.
-
-W1 built and checked it; W2 deploys it on `watch.ziyixi.science` and W3 adds the notifications and ops-v1 (§11).
+One Worker `watch`, one SQLite Durable Object `WatchState`, a private evidence R2 bucket and a Chinese mobile-first
+UI. Production bindings and limits are declared in `wrangler.toml`; the default design uses Workers Free.
 
 ## 1. Scope
 
 - One owner, at most 50 watches (`WATCHES_MAX`), checked every 6 hours by default (1 hour to 7 days).
 - Pages that render on the server, RSS/Atom/JSON feeds, JSON APIs and data embedded in pages (JSON-LD, Next.js).
   Pages that need JavaScript or screenshots use the metered browser renderer (§4).
-- Not in v1: the AI judge. Deployment and Access came with W2; notifications (W3, §7) are one daily digest task and
-  urgent changes, created in Tasks through its create-only `TaskInbox` (Todofy's task intents until 2026-10-21), and
-  ops-v1 counts for the dashboard.
+- The ordinary AI judge is disabled. Confirmed-rule notifications create a daily digest or urgent Tasks through
+  the create-only `TaskInbox`; private Work monitoring instead exposes evidence for Dots to judge. Ops reports counts
+  and codes to Home.
 - Never: logging a watched URL, page text or a diff; fetching a site faster than the etiquette allows (a redirect's
   target included); working around a bot challenge; fetching the owner's own hosts or Workers.
 
@@ -34,7 +32,7 @@ browser ──Access──▶ Worker "watch" (fetch)
 - The fetch handler stays thin (Workers Free: 10 ms of CPU per request): it verifies a JWT, checks a CSRF token and
   passes the request to the object. Everything else, the API included, runs in WatchState (30 s of CPU per
   invocation).
-- WatchState schedules itself with `setAlarm()`; there is no cron trigger (the account's five are taken). An error is
+- WatchState schedules itself with `setAlarm()`; there is no cron trigger. An error is
   caught, logged as a code and the alarm re-armed 5 minutes later. A check that throws never stops the others: it is
   a failure of its own (`INTERNAL_ERROR`, §5), counts toward BROKEN and the auto-pause, and is retried with a delay
   that doubles from 5 minutes up to the regular interval, never sooner than 15 minutes after its request. Every API
@@ -214,9 +212,8 @@ not memory.
 ## 6. WatchState's storage
 
 `worker/src/store.ts`; regular history is pruned, while an undelivered outbox row stays until Tasks accepts it.
-Schema v3 adds the sink's `intents` and a partial index of undelivered events; v4 adds frozen change context;
-v5 adds private reading-evidence indexes; v6 adds `backup_evidence`, the daily backup's record of its evidence copies
-([backup.md](backup.md): every table but `previews` and that record is backed up). After an alarm the watches whose checks may have added rows are pruned
+The schema includes the delivery inbox, immutable change context, private evidence indexes and
+`backup_evidence` ([backup.md](backup.md): every table but `previews` and that record is backed up). After an alarm the watches whose checks may have added rows are pruned
 (`pruneWatches`, through the `(watch_id, state, id)` index: only that watch's rows are read); the global tables at
 most once an hour and every watch once per UTC day (`pruneGlobal`).
 
@@ -237,8 +234,7 @@ most once an hour and every watch once per UTC day (`pruneGlobal`).
 | `backup_evidence` | the evidence objects the daily backup copied into `watch-backups`, with their SHA-256 ([backup.md](backup.md)) | the copies the 30 kept backups name |
 
 A check that finds nothing new writes a few rows (the watch, its host, the URL's fetch time); the day's request count
-is written once per alarm. The schema has a version in `meta`; a change adds a migration step (v2: the
-`changes_watch_state` index and `url_fetches`; v3: `intents` and `notifications_pending`).
+is written once per alarm. The schema version in `meta` advances through explicit migration steps.
 
 ## 7. Bindings, notifications
 
@@ -264,8 +260,7 @@ An event carries IDs, a kind and a policy only. A `NotificationSink` takes event
 transaction that marks them delivered, into its own durable inbox (so an event is never lost and never sent twice
 whatever fails afterwards), then sends from that inbox after the transaction. `pendingCounts` is what ops-v1 reports.
 
-The sink (`worker/src/tasks.ts`; the owner's decisions of 2026-10-01, W3, moved from Todofy's task intents to Tasks
-on 2026-10-21) is Tasks' `TaskInbox` entrypoint over the `TASKS` service binding (least privilege: `createInboxTask`
+The sink (`worker/src/tasks.ts`) is Tasks' `TaskInbox` entrypoint over the `TASKS` service binding (least privilege: `createInboxTask`
 for source `watch` only; `proto/tasks/inbox/v1`):
 
 - **The digest**: once a UTC day, at the first alarm from 14:00 UTC (`DIGEST_UTC_HOUR`; the alarm wakes for it),
@@ -347,9 +342,9 @@ completeness marker is also treated as incomplete. These fields describe evidenc
 
 ## 8. HTTP surface, limits and cost
 
-- The whole host is behind the Access application "watch" (W2). The Worker verifies the JWT on every path but
-  `/health` (liveness, the build, no data). Mutations need the same-origin Origin and the signed double-submit CSRF
-  token (`watch_csrf`, from `GET /api/csrf`), checked before the body is read.
+- The whole host is behind the Access application "watch". The Worker verifies the JWT on every path but
+  `/health` (liveness, the build, no data). Mutations require exact allowed Origin, a bounded nonempty `X-CSRF-Token` header
+  (current clients send `1`) and JSON media type, checked before reading the body. No CSRF signing key or cookie is used.
 - `/api/v1/*`: WatchUiService through the shared transcoder (AIP-131/132/133/134/135, `:pause`, `:resume`,
   `:check`, `watches:preview`, `watches/-/changes?filter=state = NEW`, `:acknowledge`, `serviceStatus`), AIP-154
   etags (a mask names `etag` for the shared client to send it), AIP-155 request IDs (one transaction with the
@@ -360,56 +355,16 @@ completeness marker is also treated as incomplete. These fields describe evidenc
   CSP. A refusal logs one line (request ID, status, reason); an alarm logs counts; a failed check logs its watch ID
   and an error code. Invocation logs and traces are off: they would record URLs.
 
-Measured on 2026-10-01 (`worker/test/runtime/cpu.test.ts`, WatchState in an isolate of its own as on Cloudflare,
-the reference machine of `tools/workerd-cpu`): the fetch handler about 2 ms on its very first request and 0.4 to 1
-ms otherwise, whatever the answer's size; in WatchState a full list of 50 watches about 2 to 5 ms, a full page of 50
-changes with 200 diff lines each about 25 to 35 ms, a preview of a 200 KiB page about 40 to 50 ms, of a 2 MiB page
-about 340 ms and of a 2 MiB page of hostile runs (2,000 characters of each class the masks consume) about 65 ms
-(the quadratic Chinese mask it replaced took ~5 s), an alarm pass over 200 KiB pages 0.6 to 1.2 s and the worst
-pass (pages of 2 MiB, bounded by the 24 MiB budget) about 4 s of the 30 s an invocation may use. The test fails
-beyond 6 ms (2 ms warm) for the fetch handler, 300 ms for an API call and 7.5 s for an alarm pass or the largest
-preview, and the hostile preview beyond twice the plain one, in reference milliseconds (each isolate's numbers divided
-by its measured speed); the fetch handler's very first request is the median of three fresh isolates, the rest is
-measured once, in the third (`tools/workerd-cpu` and its README). The worst pass must read all 12 pages its byte budget
-allows, each a change, with none of its own or the earlier passes' checks failed: a timeout would hide a page's parse.
-Wall time is the machine's, not what the test bounds (a request's timer includes waiting for the isolate while the other
-lanes parse; one request of that pass outlived production's 15 s on GitHub runners), so its page requests may take 60 s
-and its measured runs 120 s; the fetch timeout itself is `etiquette.test.ts`'s.
-Bundles: the Worker 126.9 KiB gzip with the Todofy sink and the Ops entrypoint (measured with W3; the Tasks sink replaced it on 2026-10-21; budget 140 KiB,
-`deploy/bundle-size.mjs`), the UI's JavaScript 50.3 KiB gzip (budget 56 KiB, `web/scripts/js-budget.mjs`), both with
-the wire profile's rule checker of proto/ts.
+CPU, serialization and SQLite read/write budgets are executable checks in `worker/test/runtime/cpu.test.ts`,
+`rows.test.ts` and `ops.test.ts`, selected through `//watch:check`. The HTTP handler stays thin; extraction,
+confirmation and storage run in WatchState. Tests use synthetic pages, injected clocks and the reference CPU meter.
+Per-path limits remain assertions rather than estimates of a typical day.
 
-SQLite rows are a budget of their own: Workers Free gives the account's SQLite Durable Objects 5,000,000 rows read
-and 100,000 rows written a day, Mail Hero's included, and every call fails past them until 00:00 UTC. The store
-counts what each statement reads and writes (`takeMeter`); `worker/test/runtime/rows.test.ts` fills every table to
-its bound (50 watches, 200 changes and 22 snapshots each) and holds each path to a budget. Measured on 2026-10-01:
-
-| Path | Rows read | Rows written |
-| --- | --- | --- |
-| an idle alarm pass | 5 (6 with the backup bucket: its state's meta row) | 1 |
-| the daily backup (every row once; [backup.md](backup.md)) | a few thousand, ~15,000 at every bound | 1 a step, 1 per new evidence copy |
-| an idle alarm pass with the sink (`notify.test.ts`; Todofy's then, Tasks' since 2026-10-21, one meta row more) | 11 | 1 |
-| a check that finds nothing new | ~30 | ~7 |
-| a check that records a change (its own watch's prune included) | ~330 | ~22 |
-| the daily sweep of every watch's bounds (once per UTC day) | ~14,500 | ~200 |
-| ListWatches, GetServiceStatus (they count the open changes) | ~5,200 here, at most ~10,000 | 0 |
-| the inbox (a page of ListChanges) | ~150 | 0 |
-| ops-v1 `status()`, 48 a day (the dashboard's tick; `ops.test.ts` at the bounds: 50 watches, 1,000 new changes, 500 undelivered events, a week of unsettled and failed intents) | 1,709 at the bounds, at most `STATUS_ROWS_MAX` 1,750; ~65 on a normal day | 0 (1 when it re-arms a missing alarm) |
-
-The work-monitoring extension was checked locally on 2026-10-22: the existing CPU and row-budget runtime tests
-passed, with the same budgets. A private feed poll reads the sequence, retention floor and at most 101 indexed
-event rows (the extra row answers `has_more`); an idle poll reads at most four rows and writes none. At one
-poll per minute this adds at most 5,760 idle reads per day while the MCP source is subscribed. Retention's extra
-scan at the retained 500-row bound adds about 12,000 reads per day, plus events created since each hourly prune; evidence adds up to 16 KiB
-per change without an additional row write. The dry-run Worker bundle measured 129.1 KiB gzip against 140 KiB;
-the built UI measured 51.2 KiB against 56 KiB. These are local checks, not production or Dots acceptance.
-
-A day, typically (50 watches at 6 hours, ~250 checks, a few dozen changes, a few dozen page loads): under 100,000
-rows read and 5,000 written, plus ~3,000 read by the dashboard's 48 `status()` calls (84,000 at their bounds). At
-every bound at once (50 watches at 1 hour, every check a change with its
-confirmation, ~2,400 checks; every watch at 200 unread changes; 100 loads of the heaviest pages): ~0.8 M rows read by
-checks and ~2 M by the UI, ~55,000 written: within the day's 5 M and 100 k, with room for Mail Hero, but only
-because a prune reads one watch's rows (before the `(watch_id, state, id)` index every alarm read ~318,000 rows).
+A private feed page reads its sequence, retention floor and at most 101 indexed events (one extra for `has_more`);
+an idle poll reads at most four rows and writes none. Frozen context adds at most 8 KiB per side without another row.
+The 2026-10-22 local work-monitoring checks passed the existing CPU and row budgets; that record is not a production
+or Dots acceptance result. Current acceptance runs the complete Bazel facade. Original per-path local measurements remain in the
+[fixed historical design](https://github.com/ziyixi/todofy/blob/288e5ef7/watch/docs/design.md); they are not current budgets.
 
 ## 9. The UI
 
@@ -443,12 +398,12 @@ font, script or image, and nothing but its own API through the shared typed clie
 
 All hermetic: synthetic content only, the only network is loopback, clocks are injected.
 
-- Unit (`npm test` in `worker/`, Node): normalization and every mask (deadlines kept, linear on hostile runs), the
+- Unit (`//watch/worker:check`): normalization and every mask (deadlines kept, linear on hostile runs), the
   diff, the triggers (edges, floors, values, the kept diff's bytes), robots.txt, scheduling and backoff, the URL
   policy (the own names), JSONPath, feeds, JSON-LD, markdown, numbers, charsets (GBK), the health gate, snapshots,
   settings and hashes, the fetch with a stub (redirects, the hop gate, caps, per-request timers), the browser ledger,
   the dev rewrite.
-- workerd (`npm run test:runtime`): Miniflare runs the bundled Worker with a real SQLite WatchState; every request it
+- Workerd (`//watch:check`): Miniflare runs the bundled Worker with a real SQLite WatchState; every request it
   makes goes to `test/fake-sites.ts` through the outbound service, a proxy Worker that streams each body as it is read
   (`test/runtime/fake-net.ts`: a body written ahead of a busy WatchState into Miniflare's loopback connection crawled
   on Linux 6.17 runners), so nothing leaves the machine. A probe Worker calls `step(now)`, `setClock(now)` and
@@ -460,80 +415,11 @@ All hermetic: synthetic content only, the only network is loopback, clocks are i
   masks, shadow mode, the API surface (AIP-155 replays), the browser tier (the production renderer on a synthetic
   launcher, `test/stubs/browser-state.ts`; the ledger charges failed renders), real alarms, storage bounds, the rows
   budget and the CPU (§8).
-- UI (`npm test` in `web/`, jsdom): the transport, the formats, the inbox and drawer with ignore and undo, the add
+- UI (`//watch/web:check`, jsdom): the transport, the formats, the inbox and drawer with ignore and undo, the add
   flow from a fragment (nothing fetched before 预览, the fragment cleared) with the block picker, a create whose
   response was lost, the settings form's round trip and mask, taking an ignored line back, accessibility, the health
   groups, a stale save; no external URL, `fetch` only in `api.ts`, no HTML from strings.
 - Local: `wrangler dev` with `DEV_FAKE_UPSTREAM` and `worker/test/runtime/serve-fake-sites.ts` (README "Develop").
-
-## 11. Steps
-
-- **W1** (this step): the IDL `proto/watch/ui/v1`, the Worker, WatchState, the UI, the tests and CI. `watch` is in
-  `ci_changes.py`'s `CHECK_ONLY` (a `Watch checks` job in the gate, no deploy job), `wrangler.toml` is in
-  `test_wrangler_configs.py`'s `UNDEPLOYED` with no route and the all-zeros Access AUD, and
-  `deploy/deploy-vars.mjs` refuses anything but `--dry-run`.
-- **W2** (the lead; the first deploy). Like the links app's L2 (`links/docs/design.md` §11, commit "Deploy links on
-  s.ziyixi.science (L2)"), every list a production Worker is in changes in one commit, "Deploy the watch app on
-  watch.ziyixi.science (W2)". As built: the Access probe covers `/`, `/api/v1/watches` and `/new` (the whole host is
-  behind Access, `/health` too, so no anonymous request reaches the Worker); the dashboard's `WATCH` binding, its
-  registry entry and the `WatchState` row (id after the deploy) arrived with W3's Ops entrypoint and this commit; the
-  alarm is checked by hand after the deploy (README "Deploy"). The lead fills in two values read after the apply
-  (`infra/README.md` "Adding an app" step 4) and commits them together: the AUD in `wrangler.toml`
-  (`deploy/test/wrangler-config.test.mjs` fails while it is the placeholder) and the application id in
-  `infra/ids.tf` `access_app_ids["watch"]` (`test_infra_config.py` fails while it is the all-zeros UUID); both were
-  filled in on 2026-10-02, after "Infra apply" created the application. The push
-  changes `infra/`, so it runs "Infra drift": it must be green (`no-op: 19`, `output changes: 0`, no outputs problem)
-  before the deploy is trusted, since the Access probes pass whatever the AUD (Access answers before the Worker runs);
-  red with `vars.ACCESS_AUDIENCE differs` means a wrong AUD: fix it and push again:
-  1. Resources: the Access application "watch" for the whole host `watch.ziyixi.science` (an `owner_apps` entry in
-     `infra/access.tf`, session 24h as for the other owner apps, created by "Infra apply" before this commit:
-     `infra/README.md` "Adding an app"), its AUD committed as `ACCESS_AUDIENCE`; the owner inputs come from
-     the dashboard's `DASHBOARD_ACCESS_OWNER` and `DASHBOARD_ACCESS_OWNER_ALIASES`. W2 needed no D1 or R2;
-     the later page-evidence release adds the private `watch-evidence` bucket.
-  2. `wrangler.toml`: `routes = [{ pattern = "watch.ziyixi.science", custom_domain = true }]`.
-  3. `.github/scripts/test_wrangler_configs.py`: `watch` from `UNDEPLOYED` to `PRODUCTION` and `WRAPPERS`, its
-     `WATCH_ACCESS_OWNER*` in `PERSONAL_INPUTS` and `SHARED_SECRETS`, and a routed Worker in
-     `LocalDev.test_the_production_configs_with_routes_are_the_ones_dev_runs`;
-     `.github/scripts/test_infra_config.py`: `watch` in `PRODUCTION` (or `NOT_ADOPTED` with its reason until the Access
-     application is in `infra/`).
-  4. `.github/scripts/ci_changes.py`: `watch` out of `CHECK_ONLY`, a `watch_deploy` output; `.github/workflows/ci.yml`:
-     a `Watch deploy` job shaped like `Links deploy` (secrets file, dry run with the bundle budget, `tools/cf-guard`
-     on the config, the wrapper's deploy, the production check of the live `BUILD_SHA`, an Access probe of `/`,
-     `/api/v1/watches` and `/new` answering Access's login redirect; `/health` is behind Access too and not probed);
-     stubs in
-     `test_ci_changes.py`.
-  5. `tools/cf-guard/test/cf-guard.test.mjs`: `"watch/wrangler.toml": ["watch", ["watch.ziyixi.science"]]`.
-  6. The drift check: `watch` in `.github/scripts/drift_desired.py` `WORKERS` and in `WRAPPERS` as `{"language":
-     "js", "file": "watch/deploy/deploy-vars.mjs", "vars": "watch", "secrets": "watch"}`; regenerate
-     `dashboard/worker/src/drift-desired.json`; the Worker count in `dashboard/worker/test/drift.test.ts` and
-     `dashboard/docs/design-v2.md`.
-  7. The dashboard registry (`dashboard/worker/src/registry.ts`): the Worker `watch` in `WORKERS`, and a `RESOURCES`
-     row of kind `do` for the namespace `WatchState`, whose id is known only after the first deploy (a follow-up
-     commit adds it, as `registry.test.ts` records for an id not yet known).
-  8. After the deploy: the first API call arms the alarm; verify with a synthetic page on a host the lead controls.
-
-  Rollback (README "Rollback"): normally a code-only revert through `Watch deploy`. Leaving production is a separate
-  decision with ordered steps: stop the side effects first (a watch release without the notification binding, every
-  watch paused), then detach the Custom Domain, and keep the dashboard's `WATCH` binding, registry entry and drift entry
-  while the Worker exists. Reverting this commit alone would leave WatchState running and the dashboard reporting it
-  unreachable.
-- **W3** (notifications; ops-v1 is merged: `proto/ops/v1/ops.proto`, generated code and the Contracts job; the sink
-  moved from Todofy's task intents to Tasks' TaskInbox on 2026-10-21, §7). Steps 1
-  to 3 are done (commit "task-intent-v1: SOURCE_WATCH, ...", the Todofy sink and the Ops entrypoint, §7); the
-  dashboard's `WATCH` binding is part of the first deploy (W2), since a binding needs the Worker deployed:
-  1. `proto/todofy/taskintent/v1`: a new `Source` value `SOURCE_WATCH` whose URL host allow-list is
-     `watch.ziyixi.science` only, so a task links to the change in the app (`/watches/<id>`), never to the watched URL
-     (which keeps the rule that a watched URL leaves the object only through the owner API); Todofy's source handling
-     (`todofy/worker/todofy/core/intents.py` and its tests) accepts it with that allow-list
-     (`ERROR_CODE_SOURCE_NOT_ALLOWED` otherwise); the task-intent-v1 schema and fixtures regenerated.
-  2. A `[[services]]` binding `TODOFY` to `todofy`'s entrypoint `Intents` with `props = { source = "watch" }` in
-     `wrangler.toml` (`Intents` has only the two task-intent methods, for this source, never `Ops`), called from
-     WatchState by a `NotificationSink` (`notify.ts`): an `urgent` change at once, the `digest` events once a day.
-  3. An `export { Ops }` entrypoint (as the other apps') answering ops-v1 from `pendingCounts` and the
-     scheduler's state; `watch` out of `ci_changes.py`'s `NO_CONTRACTS`, with its ops-v1 golden test run by the
-     Contracts job like the other apps'; the dashboard registry's ops binding for it.
-  4. Logs stay IDs and counts: a task intent carries the watch's display name, the trigger type and a count (the
-     owner decided against the change's summary: it is page text), never the page's text or URL.
 
 ## Page evidence (2026-10-23)
 

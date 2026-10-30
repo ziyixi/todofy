@@ -178,9 +178,8 @@ Count-up, Focus's default, stops at four hours. Completing a task, from any list
 today), and a related running or paused session on the task or a descendant saved as a record and stopped, its
 Steps marked on the session's own day. An unrelated timer is left alone, and completing an unplanned task adds
 it to no queue. Reopening opens the queue rows that completion marked. There is no separate settlement step to
-fail. Records are edited, added and deleted one at a time with their etags; Focus's Week and Month read their
-days with `ListFocusDays` (at most seven days a call) and total them in the browser, so the Worker does no
-aggregation.
+fail. Records are edited, added and deleted with their etags. Focus owns daily execution; GTD Time owns the current
+week/month statistics through its bounded report, as described in [GTD](gtd.md).
 
 Pause and Resume may take effect earlier than now: `CommandFocusTimer.effective_time` (PAUSE and RESUME only,
 anything else is `INVALID_ARGUMENT`) is moved into its range, a PAUSE's between its running segment's start and now
@@ -345,20 +344,9 @@ dependencies (one correlated subquery), so nothing reads planning separately. `c
 100 planned tasks (60 waiting for 5 each), the fullest plan and a dependency write; `read-budget.test.ts` bounds
 the rows GetPlan and a task's dependencies read.
 
-An isolate's start costs more than any request. The global scope's warm-up (`src/startup.ts`) measured 19.4-20.8
-reference ms on its first run (three runs, 2026-10-20): about 11 for the first Intl initialization and 9 for
-warming the task page's and the Focus week's code. Warming the goal catalog's read joined it on 2026-10-29 and
-added about 2 (medians of eight alternating runs: 20.2 without it, 22.0 with it), against its bound of 30. Every
-request `cpu.test.ts` measures stays below 10 even as an isolate's first request and below 8 warm: owner pages,
-GetPlan, reorders, duplicates, Home's `Ops.status()` and Todofy's service calls (a footer search of 20 full
-descriptions, a page of 100). On 2026-10-20, 5.8 was the highest first run and 4.2 the highest warm median; the goal
-catalog's first read, measured since, is about 7.5. Completing a family is a fixed number of D1 statements, its
-subtree walked in D1, not in the Worker. So the only measured work near the CPU p99 Home's Cloudflare view showed on
-2026-10-20 (20.5 ms, p50 2.9 ms) is an isolate's start: the p99 matches new isolates (after a deploy, or an evicted
-one), not a heavy request. That reading assumes the metric counts an isolate's start with its first invocation,
-which Cloudflare does not document either way. Cloudflare limits startup separately (1 s), and its metrics page
-notes that high quantiles can pass the CPU limit without errors.
-`cpu.test.ts` bounds the warm-up's first run at 30 reference ms.
+Startup warms the expensive Intl/read/codec paths before requests. Existing CPU tests measure first and warm
+requests with their original limits; the startup bound is separate. Historical local profiles and Cloudflare
+percentiles are not a guarantee of current request latency. The source fixtures/budgets own these checks.
 
 Migration 0004 keeps reads independent of history. An open-roots index serves the Inbox and project roots
 without completed tasks, and a partial index counts only native completions, not imported occurrences.
@@ -375,10 +363,9 @@ D1 batches atomically store each write with its request receipt; updates carry m
 Resource references are checked again by database triggers. A task family is limited to 32 hierarchy levels;
 moves batch by depth to stay below Workers Free's D1 query limit. No new queue, DO or cron is needed.
 
-Owner requests validate Access before reading the body and validate Origin/CSRF before mutation decoding.
-The CSRF token and cookie last 168 hours, the Access session's length, so a PWA left open overnight can still
-save its first edit without a refresh. The web reads the token at startup beside the catalog, so the first write
-does not wait for it; a write still reads it when that failed, and a 401 or 403 drops it.
+Owner requests validate Access before body parsing and exact Origin, a bounded nonempty CSRF header and JSON before
+mutation decoding. The current client sends the keyless header directly; there is no expiring CSRF cookie or signing
+secret. The dated compatibility route is separate from the current write path.
 API responses, HTML, manifest and service worker use private no-store headers. Hashed JS/CSS can use the
 browser's private immutable cache. The service worker only supplies a clear offline page; it does not cache
 private tasks, credentials or writes. The installed PWA needs a connection to use task data.

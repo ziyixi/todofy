@@ -33,21 +33,7 @@ privilege is installed. Initial VPS bootstrap preflights and loads this same
 profile before applying the runtime. Its root-owned file in `/etc/apparmor.d/`
 is loaded again by the existing OS service after reboot.
 
-For an existing VPS, a public bootstrap bundle can load only this profile:
-
-```sh
-sudo /usr/bin/python3 -E -s /path/to/bundle/installer/observer_policy.py --bundle /path/to/bundle
-```
-
-`-E -s` ignores Python environment variables and user-site packages while retaining
-the reviewed sibling helper modules; `-I` would exclude those imports.
-The CLI reads no credentials, calls no Kubernetes API and restarts no service.
-It accepts only the fixed profile's compiled SHA256, dry-compiles the verified
-bytes through stdin, writes one root-owned 0644 file and loads only that profile.
-Unknown existing bytes, unsafe paths, a same-name kernel profile without a
-trusted file, or missing OS prerequisites fail without overwrite. After load,
-it checks exact `enforce` mode; a later retry reuses the identical managed file.
-Do not publish the Localhost manifest until the existing host has loaded it.
+The controlled profile-only installer accepts only the compiled policy checksum, validates ownership and paths, and checks enforce mode. A matching retry reuses managed bytes; foreign state is refused. Host policy updates require separate owner authorization before a manifest can reference the profile.
 
 CI uses the Ubuntu runner's real parser with `--skip-kernel-load --skip-cache`.
 Absence of the parser fails the check. Synthetic installer tests do not prove

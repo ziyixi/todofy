@@ -7,6 +7,8 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { mergeWorkerSecrets, workerSecretSpec, validWorkerSecrets } from '../worker-secrets.mjs'
 
+const NODE_EXECUTABLE = process.env.JS_BINARY__NODE_BINARY ?? process.execPath;
+
 const applications = { dashboard: 'home', fleet: 'fleet', links: 'links', watch: 'watch', 'mail-hero': 'mail-hero', 'website/relay': 'ziyixi-notion-publish' }
 const privateValue = 'synthetic-private-value'
 class SettingError extends Error {
@@ -125,7 +127,7 @@ test('the relay CLI writes a complete private file without printing values or re
     const path = join(directory, 'secrets.json')
     const complete = Object.fromEntries(spec.required.map((name) => [name, privateValue]))
     const cli = fileURLToPath(new URL('../worker-secrets.mjs', import.meta.url))
-    const invoke = () => spawnSync(process.execPath, [cli, 'secrets', worker, path], {
+    const invoke = () => spawnSync(NODE_EXECUTABLE, ['--preserve-symlinks-main', cli, 'secrets', worker, path], {
       env: { [spec.github_secret]: JSON.stringify(complete), REQUIRE_COMPLETE_WORKER_SECRETS: 'true' }, encoding: 'utf8',
     })
     const first = invoke()
@@ -153,17 +155,17 @@ test('the relay wrapper uploads one complete map and propagates the deployed sou
     const legacy = { ...complete, NOTION_TOKEN: privateValue, NOTION_DATA_SOURCE_ID: privateValue, NOTION_WEBHOOK_SECRET: privateValue }
     const env = { [spec.github_secret]: JSON.stringify(legacy), REQUIRE_COMPLETE_WORKER_SECRETS: 'true',
       GITHUB_SHA: 'a'.repeat(40), BUILD_SOURCE_SHA: 'b'.repeat(40) }
-    const prepare = spawnSync(process.execPath, [cli, 'secrets', path], { env, encoding: 'utf8' })
+    const prepare = spawnSync(NODE_EXECUTABLE, ['--preserve-symlinks-main', cli, 'secrets', path], { env, encoding: 'utf8' })
     assert.equal(prepare.status, 0, prepare.stderr)
     assert.equal(statSync(path).mode & 0o777, 0o600)
     assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), complete)
     writeFileSync(stub, `import { writeFileSync } from 'node:fs'\nwriteFileSync(${JSON.stringify(output)}, JSON.stringify(process.argv.slice(2)))\n`)
-    const deploy = spawnSync(process.execPath,
-      [cli, 'exec', '--', process.execPath, stub, 'deploy', '--config', config, '--secrets-file', path], { env, encoding: 'utf8' })
+    const deploy = spawnSync(NODE_EXECUTABLE,
+      ['--preserve-symlinks-main', cli, 'exec', '--', NODE_EXECUTABLE, stub, 'deploy', '--config', config, '--secrets-file', path], { env, encoding: 'utf8' })
     assert.equal(deploy.status, 0, deploy.stderr)
     assert.deepEqual(JSON.parse(readFileSync(output, 'utf8')).slice(-2), ['--var', `BUILD_SHA:${'b'.repeat(40)}`])
-    const refused = spawnSync(process.execPath,
-      [cli, 'exec', '--', process.execPath, stub, 'deploy', '--config', config, '--env', 'preview'], { env, encoding: 'utf8' })
+    const refused = spawnSync(NODE_EXECUTABLE,
+      ['--preserve-symlinks-main', cli, 'exec', '--', NODE_EXECUTABLE, stub, 'deploy', '--config', config, '--env', 'preview'], { env, encoding: 'utf8' })
     assert.equal(refused.status, 2)
     for (const result of [prepare, deploy, refused]) assert.ok(!(result.stdout + result.stderr).includes(privateValue))
   } finally { rmSync(directory, { recursive: true, force: true }) }

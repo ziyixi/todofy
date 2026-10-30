@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import Mock
 
-SPEC = importlib.util.spec_from_file_location("router_connections", Path(__file__).resolve().parents[1] / "check_connections.py")
+SPEC = importlib.util.spec_from_file_location("router_connections", Path(__file__).absolute().parents[1] / "check_connections.py")
 connections = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(connections)
 ACCOUNT = "a" * 32

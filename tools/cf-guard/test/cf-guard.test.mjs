@@ -20,8 +20,12 @@ import {
   triggersFromConfig,
 } from "../cf-guard.mjs";
 
+const NODE_EXECUTABLE = process.env.JS_BINARY__NODE_BINARY ?? process.execPath;
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const REPO = path.resolve(HERE, "../../..");
+const REPO = process.env.BAZEL_CONFIG_FIXTURE
+  ? path.resolve(process.env.TEST_SRCDIR, process.env.TEST_WORKSPACE, process.env.BAZEL_CONFIG_FIXTURE)
+  : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const CLI = path.join(HERE, "..", "cf-guard.mjs");
 const ACCOUNT = "0123456789abcdef0123456789abcdef";
 const ZONE = "fedcba9876543210fedcba9876543210";
@@ -451,12 +455,12 @@ test("the CLI end to end against a loopback server", async () => {
       CLOUDFLARE_API_TOKEN: TOKEN,
       CF_GUARD_API_URL: `http://127.0.0.1:${server.address().port}/client/v4`,
     };
-    const failed = await promisify(execFile)(process.execPath, [CLI, "--config", file], { env }).catch((error) => error);
+    const failed = await promisify(execFile)(NODE_EXECUTABLE, ['--preserve-symlinks-main', CLI, "--config", file], { env }).catch((error) => error);
     assert.equal(failed.code, 1);
     assert.match(failed.stdout, /REMOVE {2}1 live Custom Domain\(s\) not in wrangler\.toml/);
     assert.ok(!names(failed.stdout, "example.com") && !names(failed.stderr, "example.com"));
     assert.ok(!failed.stdout.includes(TOKEN) && !failed.stderr.includes(TOKEN));
-    const { stdout } = await promisify(execFile)(process.execPath, [CLI, "--config", file], {
+    const { stdout } = await promisify(execFile)(NODE_EXECUTABLE, ['--preserve-symlinks-main', CLI, "--config", file], {
       env: { ...env, CF_GUARD_ALLOW_REMOVE: "example.com" },
     });
     assert.match(stdout, /cf-guard: PASS/);

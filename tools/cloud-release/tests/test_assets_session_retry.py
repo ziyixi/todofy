@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-HELPER = Path(__file__).resolve().parents[1] / "assets-session-retry.sh"
+HELPER = Path(__file__).absolute().parents[1] / "assets-session-retry.sh"
 UNKNOWN = (
     "An unknown error has occurred. If this error persists, please file a report in workers-sdk "
     "(https://github.com/cloudflare/workers-sdk/issues) or reach out to your account team."

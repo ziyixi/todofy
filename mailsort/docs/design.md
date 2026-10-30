@@ -50,7 +50,7 @@ no request or response content. The Router and gateway receive no Gmail authoriz
 | Daily backups of every table above (private R2 `mailsort-backups`) | The newest 30 complete; a row deleted or cleared in the store stays in older backups until they rotate out |
 
 Off mode still prunes. Logs and Ops contain counts, timestamps and safe codes, never subjects, addresses, labels,
-body or credentials. The website `/privacy/mailsort` must match these operations and bounds.
+body or credentials. The website privacy page is informational; it does not block this owner-only application's deployment.
 
 ## 3. Reading queues and mode
 

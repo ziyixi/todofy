@@ -24,7 +24,7 @@ class SyntheticSnapshot:
     def __init__(self):
         self.database = sqlite3.connect(":memory:")
         self.database.row_factory = sqlite3.Row
-        for migration in sorted((Path(__file__).resolve().parents[2] / "cloudflare/migrations").glob("*.sql")):
+        for migration in sorted((Path(__file__).absolute().parents[2] / "cloudflare/migrations").glob("*.sql")):
             self.database.executescript(migration.read_text())
         self.database.execute("INSERT INTO webhook_endpoints(id,label,created_at,updated_at) VALUES('endpoint','Synthetic',?,?)", (NOW, NOW))
         self.database.execute("INSERT INTO endpoint_revisions(id,endpoint_id,revision,url,auth_type,credential_ciphertext,created_at) VALUES('revision','endpoint',1,'https://example.invalid/hook','bearer','synthetic-ciphertext',?)", (NOW,))

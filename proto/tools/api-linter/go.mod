@@ -8,7 +8,7 @@ tool github.com/googleapis/api-linter/v2/cmd/api-linter
 
 // api-linter's own copy of googleapis: it interprets the google.api annotations through this compiled genproto code,
 // while buf compiles the module against the googleapis commit buf.lock pins. Bump the two together: googleapis/
-// (googleapis-check, run by ../../scripts/api-lint.sh) fails until every googleapis file the module imports is the
+// (googleapis-check, run by //proto:api_lint_test) fails until every googleapis file the module imports is the
 // same in both.
 require (
 	cloud.google.com/go/longrunning v1.2.0

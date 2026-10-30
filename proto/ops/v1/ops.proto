@@ -24,7 +24,7 @@
 // (never free text, an address or a subject), metrics, modes and counters are numbers or booleans, and the only
 // URLs are `HttpsUrl`s without a query.
 //
-// Google's api-linter runs on this file (scripts/api-lint.sh). The rules it cannot meet without changing ops-v1's
+// Google's api-linter runs on this file (//proto:api_lint_test). The rules it cannot meet without changing ops-v1's
 // frozen wire are disabled where they apply, each with its reason. File-wide (api-linter reads them from this
 // header):
 //

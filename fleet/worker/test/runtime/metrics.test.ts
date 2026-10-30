@@ -181,6 +181,7 @@ describe('metric store rollups, pruning and budgets in workerd SQLite', () => {
   let mf: Miniflare;
   beforeAll(async () => {
     const result = await build({
+    ...(process.env.TEST_SRCDIR ? { nodePaths: [`${process.cwd()}/node_modules`] } : {}),
       stdin: { contents: PROBE, resolveDir: resolve('.'), loader: 'ts' },
       bundle: true, format: 'esm', platform: 'neutral', external: ['cloudflare:workers'], write: false,
     });
@@ -280,6 +281,7 @@ export default {
 describe('a failed sample in workerd SQLite', () => {
   it('rolls back alone and the report still lands', async () => {
     const result = await build({
+    ...(process.env.TEST_SRCDIR ? { nodePaths: [`${process.cwd()}/node_modules`] } : {}),
       stdin: { contents: BROKEN, resolveDir: resolve('.'), loader: 'ts' },
       bundle: true, format: 'esm', platform: 'neutral', external: ['cloudflare:workers'], write: false,
     });

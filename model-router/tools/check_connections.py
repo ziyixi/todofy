@@ -6,7 +6,7 @@ import sys
 import tomllib
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "tools/cloud-release"))
+sys.path.insert(0, str(Path(__file__).absolute().parents[2] / "tools/cloud-release"))
 from api import Api, ReleaseError  # noqa: E402
 
 

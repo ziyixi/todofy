@@ -23,7 +23,8 @@ const HTML = '<html><head><title>Synthetic evidence</title><meta name="descripti
 beforeAll(async () => {
   persistence = await mkdtemp(join(tmpdir(), 'watch-evidence-'));
   // The single race hook changes the Watch setting after an actual R2 put, without a production test hook.
-  const bundle = await build({ stdin: { resolveDir: process.cwd(), contents: `
+  const bundle = await build({
+    ...(process.env.TEST_SRCDIR ? { nodePaths: [`${process.cwd()}/node_modules`] } : {}), stdin: { resolveDir: process.cwd(), contents: `
     import { DurableObject } from 'cloudflare:workers';
     import { Store } from './src/store.ts';
     import { saveEvidence, latestEvidence, readEvidence, readEvidenceImage, cleanEvidence } from './src/evidence.ts';

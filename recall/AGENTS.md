@@ -44,14 +44,14 @@
   （两年规模下每条路径读取的行数）；预算（`deploy/bundle-size.mjs`、`web/scripts/js-budget.mjs`）只能有意提高。
 - **变更 feed 是公开合同**：`contracts/recall-archive-v1` 由 recall 拥有。feed 是记录行自己的 `seq`（压缩：修订移到新
   seq，删除留下一个 `pages/<id>` 墓碑），`feed_id` 标识 feed，seq 从不复用。本次 owner 明确选择在现有 v1 内追加截图字段与 blob role、取消每日采样限制并将热窗口改为 7 天；
-  保留旧字段与历史字节可读，不为未使用的外部消费者增加版本迁移。其余格式变更继续遵循合同。改 IDL 后运行 `proto/` 的 `npm run schema`，
+  保留旧字段与历史字节可读，不为未使用的外部消费者增加版本迁移。其余格式变更继续遵循合同。改 IDL 后运行 `bazel test //proto:check`、必要时显式 `bazel run //proto:write_schemas`，
   并让 `proto/test/recall-archive.test.ts`、`worker/test/archive.test.ts`、`test/runtime/archive.test.ts` 与
   `worker/test/smoke/` 一起通过（归档的日文件、`state.json` 与 `VERSION` 逐字节等于合同的 `fixtures/archive/`）。
 - **接口**：owner API 是 `proto/recall/ui/v1`，扩展的上传是 `proto/recall/ingest/v1`（扩展只用生成的 wire 类型，
-  bundle 里没有 protobuf 代码），feed 是 `proto/recall/archive/v1`；改 proto 时运行 `proto/` 的 lint、api-lint 与 breaking。
+  bundle 里没有 protobuf 代码），feed 是 `proto/recall/archive/v1`；改 proto 时运行 `bazel test //proto:check`（含 lint、api-lint 与 breaking）。
   扩展、Worker、UI 与 Dropbox 归档之间的一致性由 `worker/test/smoke/smoke.mts`（`npm run test:smoke`）端到端检查。
 - **部署**：Worker 只由 CI 的 `Recall deploy` 经 `deploy/deploy-vars.mjs` 部署；不要手动 `wrangler deploy`，本地开发只用
   `wrangler.test.toml` 与 `recall/.dev.vars`（`DEV_DROPBOX_ORIGIN` 只在本机回环、开发绕过开启时生效）。扩展从不部署：
-  CI 构建产物，main 上每个新版本发布为 GitHub Release `recall-extension-v<version>`；agent 下载它，用
+  Bazel 构建经检查的产物，main 上每个新版本发布为 GitHub Release `recall-extension-v<version>`；agent 下载它，用
   `npm run install-extension -- <zip>` 放进固定文件夹，owner 只做首次的点击（`extension/README.md`）。
   owner 的设置步骤只有点击，不要求 owner 运行命令。

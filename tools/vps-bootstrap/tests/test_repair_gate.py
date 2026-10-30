@@ -7,7 +7,7 @@ import sys
 import unittest
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).absolute().parents[3]
 sys.path.insert(0, str(ROOT / "tools/vps-bootstrap"))
 import repair_gate
 

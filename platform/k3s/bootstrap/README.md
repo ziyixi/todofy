@@ -25,13 +25,13 @@ no deployment credential. See [ServiceAccount lifecycle](https://kubernetes.io/d
 
 Five static PV/PVC pairs prebind the exact existing single-node directories:
 
-| Claim | Default host path | Use |
+| Claim | Path below configured state root | Use |
 | --- | --- | --- |
-| `observer-state` | `/srv/todofy/observer` | observer sequence and frozen pending receipt |
-| `platform-state` | `/srv/todofy/platform` | daemon SQLite release ledger |
-| `newsletter-data` | `/srv/todofy/newsletter/data` | Newsletter's existing persistent state |
-| `newsletter-auth` | `/srv/todofy/newsletter/auth` | Codex gateway's subscription login (the claim keeps its original name) |
-| `newsletter-config` | `/srv/todofy/newsletter/config` | public content configuration; writable by config sync, read-only in engine |
+| `observer-state` | `<state_root>/observer` | observer sequence and frozen pending receipt |
+| `platform-state` | `<state_root>/platform` | daemon SQLite release ledger |
+| `newsletter-data` | `<state_root>/newsletter/data` | Newsletter's existing persistent state |
+| `newsletter-auth` | `<state_root>/newsletter/auth` | Codex gateway's subscription login (the claim keeps its original name) |
+| `newsletter-config` | `<state_root>/newsletter/config` | public content configuration; writable by config sync, read-only in engine |
 
 `hostPath.type: Directory` makes a missing directory fail instead of silently creating an empty
 replacement. The installer prepares paths and preserves existing data before Pods start. Runtime

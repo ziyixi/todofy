@@ -1,0 +1,16 @@
+name: setup-bazel
+description: Install the repository's fixed Bazel binary for Linux checks and builds.
+runs:
+  using: composite
+  steps:
+    - name: Install fixed Bazel
+      working-directory: .
+      shell: bash -e {0}
+      run: |
+        set -uo pipefail
+        test "$(cat .bazelversion)" = 9.3.1
+        mkdir -p "$RUNNER_TEMP/bazel-tools"
+        curl -fsSL https://github.com/bazelbuild/bazel/releases/download/9.3.1/bazel-9.3.1-linux-x86_64 -o "$RUNNER_TEMP/bazel-tools/bazel"
+        printf '7f775b54bbec487efaf0f49ccda1d2ed02cd34f582edfdd6aeeec76e39ef585c  %s\n' "$RUNNER_TEMP/bazel-tools/bazel" | sha256sum --check --status
+        chmod +x "$RUNNER_TEMP/bazel-tools/bazel"
+        printf '%s\n' "$RUNNER_TEMP/bazel-tools" >> "$GITHUB_PATH"

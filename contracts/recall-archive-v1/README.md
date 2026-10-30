@@ -1,7 +1,7 @@
 # `recall-archive-v1`: recall's archive and its change feed
 
 recall (`recall/`, the owner's browsing recorder) keeps every visit in Cloudflare, and the captured page texts of a
-rolling window the owner chooses (a year by default), and writes a durable copy of everything as plain files in a
+rolling window the owner chooses (seven days by default), and writes a durable copy of everything as plain files in a
 **layout** that any file store can hold and that plain tools (`find`, `zcat`, `grep`, `jq`) can read for decades.
 recall writes it itself: today into the app folder of the owner's own **Dropbox** app, about hourly while there are
 changes, from where the owner's NAS syncs it with its own Dropbox support (UGREEN's Cloud Drives); nothing of recall's
@@ -12,7 +12,7 @@ the contract.
 | File | Purpose |
 | --- | --- |
 | [`proto/recall/archive/v1/archive.proto`](../../proto/recall/archive/v1/archive.proto) | The records and their value rules: the one source |
-| `recall-archive-v1.schema.json` | JSON Schema 2020-12 **generated** from the IDL (`npm run schema` in `proto/`; `npm run check:schema` fails when stale): `$defs/Change` (one archived line), `$defs/ArchiveState` (`state.json`), `$defs/ChangePage` (a feed answer). A reader's schema: every object open, and a change of a kind it does not know passes on its envelope |
+| `recall-archive-v1.schema.json` | JSON Schema 2020-12 **generated** from the IDL (`bazel run //proto:write_schemas`; `//proto:schema_test` checks freshness): `$defs/Change` (one archived line), `$defs/ArchiveState` (`state.json`), `$defs/ChangePage` (a feed answer). A reader's schema: every object open, and a change of a kind it does not know passes on its envelope |
 | `fixtures/<Def>/*.json` | Golden examples, synthetic, exact bytes (2-space JSON, as the codec writes them, then a newline) |
 | `fixtures/future/` | A change a newer recall may write within v1 (`Change/star.json`, a planned kind, and its blob): every reader keeps it |
 | `fixtures/invalid/<Def>/*.json` | Examples every reader must refuse (a blob path with `..`, an upper-case digest, another blob encoding, a visit without its body or page, a visit with a blob, a non-http URL, a malformed tombstone target, another version, a page or state without its feed, a negative cursor) |
@@ -193,9 +193,8 @@ the cursor.
 
 ## 5. Versioning
 
-The owner's October 11 update adds optional screenshot fields and a blob role, removes the daily sampling limit,
-and changes the default hot-file window to seven days within this existing archive. Stored historical bytes and
-field identities remain valid. No external consumer migration is required for this personal deployment.
+Screenshot fields and roles are optional; text-only historical records remain valid. The hot-file window defaults
+to seven days. Stored field identities, historical bytes and archive layout retain their v1 meanings.
 
 Within v1, recall may add optional fields, kinds and blob roles; a reader keeps what it does not know (each change is
 kept whole) and checks what it does. Anything else (a renamed or
@@ -206,15 +205,15 @@ profile's breaking checks (`proto/tools/profile_breaking.py`) hold the IDL to th
 
 ## 6. Checks
 
-- `proto/test/recall-archive.test.ts` (Proto checks, which a change here also runs: `PROTO_READS`): every valid
+- `proto/test/recall-archive.test.ts` (`//proto:check`): every valid
   fixture round-trips byte for byte through the codec's strict read, every invalid one is refused by strict and
   lenient reads, the future change passes a lenient read with its kind and body listed as unrecognized and its blob
   matches it, and `fixtures/archive/` holds the first page's changes (its day file's lines, its `state.json`, its blob's
   size and digest).
-- The generated schema is fresh (`npm run check:schema`). Checked by hand on 2026-10-10 with Python `jsonschema`
-  (Draft 2020-12): it gives every fixture the codec's verdict, accepts the future change alone and inside a page, and
+- The generated schema is checked by `//proto:schema_test`. Python `jsonschema`
+  (Draft 2020-12) gives every fixture the codec's verdict, accepts the future change alone and inside a page, and
   accepts a known kind with unknown members.
-- In "Recall checks": recall's Worker renders each change from its row and its tests rebuild `fixtures/Change/`,
+- `//recall:check`: recall's Worker renders each change from its row and its tests rebuild `fixtures/Change/`,
   `fixtures/ChangePage/` (`recall/worker/test/feed.test.ts`) and `fixtures/archive/` (`test/archive.test.ts`, and in
   workerd `test/runtime/archive.test.ts`, which writes it to a fake Dropbox byte for byte) from synthetic records; the
   smoke run (`recall/worker/test/smoke/`) checks the archive a real `wrangler dev` writes to a loopback fake of Dropbox

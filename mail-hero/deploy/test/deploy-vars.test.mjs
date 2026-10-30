@@ -9,6 +9,9 @@ import {
   CONFIG, INJECTED, SECRETS, SettingError, generateSecrets, injectedVars, refusal, run, secretsFileProblem, wranglerArgs, writeSecrets,
 } from '../deploy-vars.mjs'
 
+// CLI children keep their minimal environment and use the pinned interpreter directly.
+const NODE_EXECUTABLE = process.env.JS_BINARY__NODE_BINARY ?? process.execPath
+
 const WRAPPER = fileURLToPath(new URL('../deploy-vars.mjs', import.meta.url))
 const CLOUDFLARE = fileURLToPath(new URL('../../cloudflare/', import.meta.url))
 const SHA = 'c'.repeat(40)
@@ -151,7 +154,7 @@ test('only a deploy of mail-hero/wrangler.toml with one valid --secrets-file, wi
 }))
 
 function runWrapper(args, env, cwd = CLOUDFLARE) {
-  return spawnSync(process.execPath, [WRAPPER, ...args], { cwd, env: { PATH: process.env.PATH, ...env }, encoding: 'utf8' })
+  return spawnSync(NODE_EXECUTABLE, ['--preserve-symlinks-main', WRAPPER, ...args], { cwd, env: { PATH: process.env.PATH, ...env }, encoding: 'utf8' })
 }
 
 test('exec runs the command unchanged plus the --var flags, and exits with its status', () => withTemp((dir) => {
@@ -172,7 +175,7 @@ test('exec runs the command unchanged plus the --var flags, and exits with its s
 
   // The exec step needs only the switches and the build: the personal values reach it in the file.
   const execEnv = { GITHUB_SHA: SHA, MAIL_HERO_FORCE_SEND_PAUSED: 'false', MAIL_HERO_MAINTENANCE_MODE: 'false', MAIL_HERO_NATIVE_BACKUP_ENABLED: 'true', STUB_STATUS: '3' }
-  const command = ['exec', '--', process.execPath, stub, 'deploy', '--dry-run', '--config', config, '--secrets-file', secrets]
+  const command = ['exec', '--', NODE_EXECUTABLE, stub, 'deploy', '--dry-run', '--config', config, '--secrets-file', secrets]
   const result = runWrapper(command, execEnv)
   assert.equal(result.status, 3, result.stderr)
   assert.deepEqual(JSON.parse(readFileSync(out, 'utf8')),
@@ -180,10 +183,10 @@ test('exec runs the command unchanged plus the --var flags, and exits with its s
 
   // A refused command, a missing secrets file or a bad value never starts the command.
   rmSync(out)
-  const refused = runWrapper(['exec', '--', process.execPath, stub, 'deploy', '--config', config, '--secrets-file', secrets, '--keep-vars'], execEnv)
+  const refused = runWrapper(['exec', '--', NODE_EXECUTABLE, stub, 'deploy', '--config', config, '--secrets-file', secrets, '--keep-vars'], execEnv)
   assert.equal(refused.status, 2)
   assert.match(refused.stderr, /Refused: --keep-vars/)
-  const noFile = runWrapper(['exec', '--', process.execPath, stub, 'deploy', '--config', config], execEnv)
+  const noFile = runWrapper(['exec', '--', NODE_EXECUTABLE, stub, 'deploy', '--config', config], execEnv)
   assert.equal(noFile.status, 2)
   assert.match(noFile.stderr, /Refused: exactly one --secrets-file/)
   const invalid = runWrapper(command, { ...execEnv, MAIL_HERO_MAINTENANCE_MODE: 'secret-looking-value' })

@@ -15,7 +15,7 @@ from ziyixi_proto.platform.runtime.v1 import runtime_service_pb as service
 from ziyixi_proto.rpc_status import RpcError, status_body
 from ziyixi_proto.wire_json import to_wire
 
-TOOL = Path(__file__).resolve().parents[1]
+TOOL = Path(__file__).absolute().parents[1]
 sys.path.insert(0, str(TOOL))
 from deploy import BINDINGS, Deployment, verified_snapshot
 from release_identity import reconcile_id, release_id, resume_id, verified_images

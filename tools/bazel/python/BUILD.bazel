@@ -1,9 +1,51 @@
-load("@rules_python//python:defs.bzl", "py_binary")
+load("@aspect_rules_js//js:defs.bzl", "js_binary")
+load("@bazel_lib//lib:copy_to_directory.bzl", "copy_to_directory")
+load("@rules_python//python:defs.bzl", "py_binary", "py_test")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load(":node_binary.bzl", "node_binary")
 
-exports_files([
-    "pytest_main.py",
-    "unittest_main.py",
-], visibility = ["//visibility:public"])
+exports_files(
+    [
+        "pytest_main.py",
+        "unittest_main.py",
+        "pyvenv.cfg",
+        "check_infra.py",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+node_binary(
+    name = "node_binary",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "tofu",
+    actual = select({
+        "//tools/bazel/images:macos_arm64": "@tofu_darwin_arm64//:tofu",
+        "//tools/bazel/images:linux_x86_64": "@tofu_linux_amd64//:tofu",
+    }),
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "cloudflare_provider",
+    actual = select({
+        "//tools/bazel/images:macos_arm64": "@cloudflare_provider_darwin_arm64//:files",
+        "//tools/bazel/images:linux_x86_64": "@cloudflare_provider_linux_amd64//:files",
+    }),
+    visibility = ["//visibility:public"],
+)
+
+copy_to_directory(
+    name = "test_cli_bin",
+    srcs = ["//tools/bazel/images:kubectl"],
+    out = "test_cli_bin",
+    include_external_repositories = ["*"],
+    replace_prefixes = {"file/downloaded": "kubectl"},
+    root_paths = [""],
+    visibility = ["//visibility:public"],
+)
 
 py_binary(
     name = "extract_test_font",
@@ -15,7 +57,91 @@ genrule(
     name = "noto_cjk_font",
     srcs = ["@newsletter_fonts//:data.tar.xz"],
     outs = ["NotoSansCJK-Regular.ttc"],
-    tools = [":extract_test_font"],
     cmd = "$(location :extract_test_font) $(location @newsletter_fonts//:data.tar.xz) $@",
+    tools = [":extract_test_font"],
+    visibility = ["//visibility:public"],
+)
+
+py_test(
+    name = "worker_runtime_lock_test",
+    srcs = [
+        "test_worker_runtime_lock.py",
+        "unittest_main.py",
+    ],
+    args = ["test_worker_runtime_lock"],
+    data = [
+        "//:toolchain_version_inputs",
+        "//todofy:core_application_sources",
+        "@workers_runtime_sdk//:files",
+    ],
+    imports = ["."],
+    legacy_create_init = False,
+    main = "unittest_main.py",
+    visibility = ["//visibility:public"],
+    deps = ["@rules_python//python/runfiles"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["*"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    ["todofy_runtime_main.py"],
+    visibility = ["//visibility:public"],
+)
+
+js_binary(
+    name = "workerd_path",
+    data = ["//todofy:node_modules/workerd"],
+    entry_point = "workerd_path.mjs",
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    ["check_ruff.py"],
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    ["newsletter_smoke_test.py"],
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    ["newsletter_wheel_smoke.py"],
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    ["bootstrap_bundle.bzl"],
+    visibility = ["//visibility:public"],
+)
+
+py_binary(
+    name = "bootstrap_bundle_tool",
+    srcs = ["bootstrap_bundle.py"],
+    legacy_create_init = False,
+    main = "bootstrap_bundle.py",
+    deps = ["//tools/vps-bootstrap:prepare"],
+)
+
+exports_files(
+    [
+        "container_test.bzl",
+        "container_test.py",
+    ],
     visibility = ["//visibility:public"],
 )

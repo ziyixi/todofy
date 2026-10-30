@@ -1,114 +1,59 @@
-# Connection acceptance
+# Personal Cloud connection
 
-## Original connection gate (historical)
+Access Managed OAuth protects the existing private ChatGPT App. Keep its App identity and account connection;
+application publication and plugin/tool-catalog refresh are separate operations. Current tools are defined by the
+Worker, with usage rules in [the skill](../plugin/skills/personal-cloud/SKILL.md).
 
-The first gate exposed only `personal_cloud.test`, with no filters and a synthetic message plus the build SHA.
-That gate passed before business bindings were added. The current catalog is in [README](../README.md); the Dot-facing
-rules are in [the skill](../plugin/skills/personal-cloud/SKILL.md) and the tool descriptions.
+## Setup and publication
 
-Subscriptions live in the single `SubscriptionStore` SQLite DO. A subscription ID includes its owner, callback,
-event name and arguments. A signed challenge must succeed before it is saved. Repeated subscriptions renew the
-same identity. The default lifetime is 30 days; `ttlMs: null` grants no expiration. Unsubscribe stops queued delivery.
-No historical replay is supported (`cursor: null`).
+1. Use [the rebuild runbook](../../docs/rebuild.md) to create/adopt the dedicated Access app and record its real AUD.
+   Its OAuth redirect allowlist must contain the exact documented or observed ChatGPT callback. Do not infer a
+   callback ID or use a wildcard.
+2. Deploy the private Tasks, Todofy Mail, Recall, Watch and Home entrypoints before MCP binds them. Main Actions
+   enforces the declared provider order; the Work store uses the existing DO and audience.
+3. Connect through the existing private App and complete the normal Access login. After adding tools, refresh its
+   catalog and verify the actual discovered tools and event types. An Inspector call alone does not verify Dots.
+4. If changing the packaged skill, retrieve the current App-backed manifest, update its version and skill files,
+   and preserve its App binding, title, description and sharing. Worker deployment does not publish this package.
 
-Test deliveries use a stable event ID and exact serialized body, signed by `standardwebhooks`. A successful
-response records `accepted`. Transient failures get two further attempts after one and five minutes; other failures
-remain visible through `connection_status`. This first gate does not send real content.
+## Subscription behavior
 
-Only HTTPS callbacks on the exact configured `CALLBACK_HOSTS` are accepted. Redirect responses are failures;
-Workers fetch uses `redirect: manual`. The real Dots subscription uses `connectors.api.openai.com`; this exact
-hostname is the production allowlist. Record only the hostname, never the callback path or signing secret.
-Arbitrary webhook destinations are outside this personal ChatGPT integration. The current live acceptance
-record is in [Personal MCP verification](verification.md).
+The single `SubscriptionStore` SQLite DO owns subscriptions. Their identity includes owner, callback, event name
+and arguments. A signed challenge must succeed before saving; repeating the same subscription renews it.
+The default lifetime is 30 days; `ttlMs: null` has no expiration. Only `work.attention` accepts a `work_id` filter.
+Subscriptions establish a current baseline rather than replaying historical source content. Unsubscribe stops
+queued delivery.
 
-## Release and real-client checks
+Only HTTPS callbacks on exact `CALLBACK_HOSTS` are accepted, currently `connectors.api.openai.com`. Redirects fail.
+Do not log callback paths, signing secrets or business content. A frozen event keeps its ID and serialized body
+through the existing signed delivery attempts; a successful callback records `accepted`. This means the receiver
+accepted it, not that a Dot performed the intended work.
 
-1. Pass branch CI. The first merge prepared infrastructure only; the new Access application now exists.
-2. Run the existing Infra drift/apply flow. Review that it creates only the new MCP Access application; record its
-   actual app ID and AUD in `config/resources.toml`, then regenerate config. Preserve existing applications/policies.
-3. Managed OAuth is enabled only for this application. IaC declares the documented issuer-aware ChatGPT redirect
-   and the exact callback-ID URI observed in this owner's live connection form. A new ChatGPT connection may
-   produce a different callback-ID URI; update that exact value through IaC. No wildcard is needed.
-4. The publication gate is now enabled. Pass CI and release the same SHA via main Actions. Record the new DO
-   namespace in resources after first deployment.
-5. Register the live MCP in the private plugin, finish the real Access login, and rescan. Confirm two tools and the
-   test event are discovered. Do not use Inspector success as a substitute for ChatGPT.
-6. In a Dots or Cloud Work chat, subscribe to `personal_cloud.test`, invoke `send_test_event` with a fresh request ID,
-   and confirm both the accepted delivery and ChatGPT's actual receipt. Repeat the request ID once: no second event.
-7. Stop the subscription and verify it is gone. Record the observed run/build/event identities below, excluding
-   credentials. Only after this gate passes, begin the agreed Tasks/Mail/Recall/Home integration.
+`connection_status` exposes current source-check times and safe delivery/source errors. Home monitors the same
+app through Ops. For `cursor_reset_required`, inspect the source recovery state, then stop and recreate only the
+needed source subscription to establish a fresh baseline. Missing history is not replayed. A callback failure
+remains visible until that subscription is stopped; a new subscription verifies its own callback.
 
-If real-client login is incompatible, record the exact blocker and keep this gate isolated. Do not prebuild
-alternative OAuth servers or modify the business applications while investigating it.
+## Work and evidence
 
-## Evidence
+Watch evidence and health enter linked open Works as reports. MCP initializes the source cursor before creating
+or attaching a Watch, and reads at most one page of 100 events per minute while a work subscription needs it or a
+Work read requests it. An expired cursor creates a new baseline plus one blocked gap report per affected open Work.
+When no open Work has a Watch link, the next attachment starts fresh.
 
-2026-10-20 (America/Los_Angeles): local type checks, lint and synthetic unit tests pass. The workerd runtime journey
-passes discovery, persistent subscription and queued event after restart, signed webhook delivery, repeated test request and
-unsubscribe. The later live acceptance completed Access OAuth, ChatGPT discovery, signed Dots subscription,
-actual receipt, same-request deduplication and unsubscribe on `422df6a0`; see the root verification record above.
+`review_at` is a hint, not a scheduler. Authorized Dots schedules and local Codex delegation use their native
+facilities; saving a reference in MCP does not start them. `watch_read`/`watch_view` read stored evidence and never
+fetch a page or call a model. Work lifecycle and cleanup rules are in [work memory](work-memory.md).
 
-References: [OpenAI Events](https://developers.openai.com/plugins/build/mcp-events),
-[OpenAI auth](https://developers.openai.com/plugins/build/auth),
+## Acceptance
+
+Use a synthetic event with a fresh request ID; confirm both the accepted signed callback and the Dot's reply
+identifying that event. Replay the same request once, then unsubscribe. For business tests use temporary synthetic
+records and verify their actual source effects separately. Do not read real mail or browsing records as fixtures.
+
+[Connection verification](verification.md), [Work verification](../../docs/work-memory-verification.md) and
+[Watch evidence verification](../../docs/watch-evidence-verification.md) record the completed checks and gaps.
+
+References: [OpenAI authentication](https://developers.openai.com/plugins/build/auth),
+[events](https://developers.openai.com/plugins/build/mcp-events),
 [Cloudflare Managed OAuth](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/managed-oauth/).
-
-The first complete branch gate passed at `9e1681a1429b1ac93b99ede55822077522c59204`
-([CI 39544158967](https://github.com/ziyixi/todofy/actions/runs/39544158967)); the same SHA reached main.
-[Infra apply 39545088566](https://github.com/ziyixi/todofy/actions/runs/39545088566) created only the dedicated
-MCP Access application, left all 36 existing resources unchanged, and verified no remaining drift. Its real ID/AUD
-are recorded in `config/resources.toml`. The next release enables the Worker and exact observed OAuth redirect.
-These steps establish infrastructure readiness, not real Dots receipt.
-
-## Business release
-
-The connection gate above passed before business sources were connected. The current source catalog is listed in
-[README](../README.md). Private `TasksApi`, `Mail` (Todofy's, read-only; `MailApi` until 2026-10-21), `RecallApi` and `HomeApi` entrypoints must be deployed before
-the MCP binds them. The staged bridge does this through the normal source-app Actions releases; it also adds MCP's
-private Ops entrypoint before Home begins monitoring it.
-
-After the business Worker release:
-
-1. Open the existing Personal Cloud plugin's **Manage** page and choose **Refresh tools**. Keep the existing
-   account and OAuth connection; do not register a second App. The Watch-evidence catalog exposes 36 tools and six
-   event types. Verify the actual catalog; the original 18 tools remain available.
-2. Verify a temporary synthetic Inbox task, Steps, exact request replay, read-back and soft-delete. Do not test
-   completion against real tasks or use real mail/browsing contents as fixtures.
-3. Subscribe to a business event using Dots' native lifecycle. Subscriptions establish a current baseline;
-   historical tasks, existing ready mail and current Home attention are not replayed.
-4. Check `connection_status` source check times/errors and the Home MCP Ops card. Test callbacks accepted by the
-   receiver separately from the Dot's actual payload-specific reply. Stop test responsibilities afterward.
-
-The GTD skill source is `plugin/skills/personal-cloud/SKILL.md`. Before an account update, retrieve the existing
-App-backed plugin manifest, bump its version and package it with that skill in a temporary directory. The upload
-preserves the App binding, title, description and sharing; only skill/support files and version change. Refresh the App-owned tool
-catalog and descriptions through its own management page, then re-read the manifest before packaging to avoid
-restoring stale App metadata. GitHub deploys the Worker; skill publication remains a separate authorized account
-update. The verification record distinguishes published code from live business checks still to do.
-
-A subscription source error appears in Home. For `cursor_reset_required`, inspect the source's restore status,
-then explicitly stop and recreate only that source subscription to establish a current baseline. This does not
-replay missing history. A failed callback remains visible until the owner stops that subscription; recreating it
-verifies the new callback and starts from current state. No automatic replay or second notification path is added.
-
-## Work-memory release
-
-`WatchApi` must deploy before MCP binds it, alongside the existing Recall activity-read permission. Actions
-enforces this provider order. Work records use the existing `SubscriptionStore`; no new namespace, secret or
-OAuth audience is needed. `work.attention` accepts `{work_id}` or `{}` for all open work. The subscription keeps
-the real callback private and emits only report identity and source refs. A later subscription also discovers
-already pending reports in its scope.
-
-Before creating or attaching a Watch, MCP establishes its source cursor. The Watch feed carries captured page
-evidence changes and broken/paused transitions only; rule confirmations stay in Watch's own Tasks outbox.
-Source checking runs while a work subscription uses Watch links, or when `work_context`/`work_get` is read, at most
-once per minute and one page of up to 100 events at a time. Stopping the subscription stops background polling; an
-authorized native hourly review can still refresh it through those read tools.
-
-`work_context` and `work_get` expose the latest Watch source check and error. If the feed's retention outran the
-cursor, the same poll takes a new baseline and gives each open Work with a Watch one `blocked` report about the gap;
-the Dot reads `watch_changes` to catch up. When no open Work has a Watch link, the next attachment starts fresh.
-
-`watch_read` and `watch_view` read stored evidence only; they never fetch a page or call a model. Watch's own
-`BROWSER` binding renders browser-mode watches; MCP only exposes the `fetcher` setting, and Watch's availability, interval
-and budget rules still apply. Refresh the existing App's tools after the authorized Worker release. The Dot-facing rules
-are [the skill](../plugin/skills/personal-cloud/SKILL.md) and the tool descriptions.

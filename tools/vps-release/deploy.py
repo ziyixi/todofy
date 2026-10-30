@@ -13,7 +13,9 @@ from transport import ReleaseFailure, TransientFailure, Transport
 from ziyixi_proto.platform.runtime.v1 import runtime_pb as pb
 from ziyixi_proto.platform.runtime.v1 import runtime_service_pb as service
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(
+    os.environ.get("BUILD_WORKSPACE_DIRECTORY", Path(__file__).resolve().parents[2])
+)
 BINDINGS = {binding.rpc: binding for binding in service.HTTP_BINDINGS}
 
 

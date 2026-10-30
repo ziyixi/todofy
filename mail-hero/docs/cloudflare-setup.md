@@ -1,210 +1,76 @@
-# Cloudflare 原生部署、预算与恢复
+# Mail Hero 配置、预算与恢复
 
-Mail Hero 使用 **Workers Free + D1 + 私有 R2 Standard + SQLite Durable Object Alarm + Static Assets + Access**。应用、数据库和网页都由 Cloudflare 托管。Todofy 是独立 webhook 消费者，可以保留自己的服务器和 Tunnel。
+应用只使用 Workers Free、D1、私有 R2、SQLite Durable Object Alarm、Assets 与 Access。当前权威配置是 [`wrangler.toml`](../wrangler.toml) 顶层；个人值与开关经[发布包装器](ci-cd.md)注入。资源由根 `infra/` 的受控流程管理，现有部署不重新创建资源或生成新密钥。
 
-当前已部署：唯一地址为 `inbox` 子域上的专用地址（GitHub secret `MAIL_HERO_RECEIVE_ADDRESS`，公开仓库不写明），UI **[mail-hero.ziyixi.science](https://mail-hero.ziyixi.science)**，唯一 owner 为 canonical owner 邮箱（GitHub secret `MAIL_HERO_ACCESS_OWNER`），数据库 `mail-hero`，私有桶 `mail-hero-store`。GitHub 登录和一封真实纯文本邮件的入站、持久保存、解析及 UI 展示已验收；来源自动转发、HTML/附件、大邮件、OTP 备用登录及生产收信额度仍需分别验证。Todofy消费者已具备持久接管接口，完整邮件到任务链路仍待用户测试信验收，见 [消费者接入说明](todofy-integration.md)。
+## 1. Free 运行边界
 
-生产配置是提交的 [`mail-hero/wrangler.toml`](../wrangler.toml)（顶层即生产，不含个人值、运维开关与密钥）；[GitHub Actions](ci-cd.md) 部署它，并由 `deploy/deploy-vars.mjs` 在同一次发布中把收件地址、owner 邮箱（production secrets）作为 Worker secret（`--secrets-file`）加入，把运维开关（production variables）与 `BUILD_SHA` 以 `--var` 加入。本地开发只用本地绑定和 `mail-hero/.dev.vars`（见 `.dev.vars.example`），D1 命令一律 `--local`。以下资源创建和初始化步骤供新环境参考，**现有部署不需要重建资源或重新生成密钥**。完整证据和待验收项见 [验收记录](verification-native.md)。
+普通 email/fetch handler 只做短小校验与流式保存，MIME 解析交给 Alarm。代码保留原件、parts、头部、嵌套、正文和附件预算，不能靠增加 Paid CPU 配置规避边界。25 MiB 是原件接受上限，复杂 MIME 的实际 CPU/内存仍须验证。
 
-UI 的投递 Dashboard 可按浏览器时区的本地小时或日期查看成功、进入重试、终止失败及结果未确认的 webhook 尝试，并进入对应投递记录。统计单位、时间边界和历史数据的限制见 [投递 Dashboard 统计口径](delivery-dashboard.md)。
-
-## 1. 免费计划的运行边界
-
-保持 **Workers Free**，不需要 $5/月的 Workers Paid、Queues 或 Workflows。R2 需要单独开通订阅；它有免费额度，超出按量计费，没有本项目能够保证的每月 $2 硬账单上限。[R2 开通](https://developers.cloudflare.com/r2/get-started/)、[用量计费与提醒](https://developers.cloudflare.com/billing/understand/usage-based-billing/)
-
-| 项目 | 官方 Free 限额 | 本项目用法 |
-| --- | --- | --- |
-| Workers | 100,000 请求/天；普通调用 10ms CPU；128MB isolate 内存 | Email handler 只校验和流式保存，UI/API 保持短小。[限制](https://developers.cloudflare.com/workers/platform/limits/) |
-| SQLite Durable Objects | 100,000 请求/天，含 Alarm；13,000 GB-s/天；SQL 5M 读/100k 写/天、总5GB | 一个 coordinator 保存任务；超额操作失败，不自动升级 Paid。[价格](https://developers.cloudflare.com/durable-objects/platform/pricing/) |
-| DO Alarm | 默认每次30秒 CPU；wall time 最长15分钟；仍受128MB内存约束 | 有界后台解析和交付，等下次任务用 Alarm。[限制](https://developers.cloudflare.com/durable-objects/platform/limits/) |
-| D1 | 5M行读/天、100k行写/天；**单库500MB**、账户总5GB；单行/BLOB 2,000,000 bytes | 索引、状态、正文前16KiB搜索内容；完整正文在R2。[价格](https://developers.cloudflare.com/d1/platform/pricing/)、[限制](https://developers.cloudflare.com/d1/platform/limits/) |
-| R2 Standard | 10GB-month、1M Class A、10M Class B/月；出网免费 | 原件、正文、附件、冻结事件；超额存储$0.015/GB-month、A $4.50/M、B $0.36/M。[价格](https://developers.cloudflare.com/r2/pricing/) |
-| Static Assets / Access | 静态请求及资源存储免费；Access Free 50用户 | 单人 UI 和 owner 登录。[Assets](https://developers.cloudflare.com/workers/static-assets/billing-and-limitations/)、[Access](https://www.cloudflare.com/sase/products/access/) |
-| Email Routing | 入站无限量；单封25MiB | 一个精确地址；Worker运行仍计量。[价格](https://developers.cloudflare.com/email-service/platform/pricing/)、[限制](https://developers.cloudflare.com/email-service/platform/limits/) |
-
-25MiB 是原件上限，不代表任意25MiB MIME都已通过真实免费运行环境验收。解析在 DO Alarm 内执行，不在普通10ms Email/fetch handler里做。复杂附件、字符集和嵌套仍可能触及CPU/内存限制；失败时保留原件并显示错误。不能通过给普通Worker配置 `cpu_ms` 来获得付费能力。
+本地检查使用 `bazel test //mail-hero:check`，发布归档用 `bazel build //mail-hero`。CPU 回归保持独占，所有 fixture 是合成邮件。官方平台限额与计费以 [Workers](https://developers.cloudflare.com/workers/platform/limits/)、[DO](https://developers.cloudflare.com/durable-objects/platform/limits/)、[D1](https://developers.cloudflare.com/d1/platform/limits/)和[R2](https://developers.cloudflare.com/r2/pricing/)的当前说明为准。
 
 ## 2. 预算保护
 
-2026-09-25 本轮账户概览只读核对：R2已开通，既有桶约779.89MB，本账期显示$0。没有读取其对象内容；这些是当时状态，不是未来可用额度保证。新Mail Hero资源的最终部署状态以本轮报告为准。
+保持 Free；未经 owner 决定不升级或新增收费产品。账户免费量共享，容量与预算提醒都不是账单硬上限。
 
-1. 在 Billing 确认 Workers Free，不升级Paid。R2只用Standard，不启用Infrequent Access、R2 SQL、Data Catalog、Sippy等不需要的服务。
-2. 查看账户已有用量；免费额度由全部项目共享。建立账户级$1和$2 budget alerts；若只可设置一个，先设$1。**提醒只发通知，不停服务**，Threshold Billing扣款也不是限额。
-3. 桶保持私有：不开 `r2.dev`，不绑定公开桶域名，不开放匿名下载。只开放Access保护的UI及精确邮件规则。
-4. 保持应用初始逻辑容量 **5GiB**。它不是账户账单上限，不覆盖其他项目、备份和所有孤立对象。失败及待投递邮件不能静默删除腾空间。
-5. 默认每个UTC日限制300封、256MiB原件，由 `INGEST_DAILY_MESSAGE_LIMIT` 与 `INGEST_DAILY_BYTE_LIMIT` 配置。DO在写R2前原子预留，D1故障时也生效；达到任一值会暂时拒绝入站。调高前核对用量，不能声称来源一定自动重投。这不是Cloudflare账户账单上限。
-6. 新邮件冻结分阶段保留策略：原件默认 7 天、正文及附件默认 30 天，从安全终态开始计时。历史邮件只有在设置页选择并预览确认后才纳入，不因升级立即清理。维护分为恢复、保留、提醒三个独立 Alarm；保留阶段最多处理两个到期阶段，或先续做一个中断的完整删除，提醒约每 10 分钟评估。原件恢复每页最多 100 个 key，未结束时约 10 分钟续页，空闲完整扫描每天一次。未经之后的送达或 owner 取消处理的失败、待处理和未经 owner 处理的需人工检查邮件不自动清理；owner 已处理的投递异常按 `resolved_retention_days`（默认 60 天）清理，见 2.1。部署状态见验收记录。
-7. 每周查看R2总量/Class A/B、D1大小、DO duration/请求、Workers超限错误。建议R2 7GB、A 700k/月、B 7M/月、D1 300MB时开始处理；D1 400MB或应用容量90%时优先导出/清理。异常增长先暂停相关收件规则和失控任务，保留源邮箱副本，再查原因。
+- 默认逻辑容量 5 GiB、每 UTC 日 300 封和 256 MiB 原件。DO 在写 R2 前原子预留额度，D1 故障时仍生效；超过预算暂时拒绝接收，不能据此保证上游重投。
+- 正文只索引 UTF-8 前16 KiB，UI 必须显示搜索范围；详情仍读取实际保留的内容。
+- 失败、待处理和未对账邮件不为腾空间而删除。增长异常先保留来源副本与业务状态，按当前用量核对原因。
+- 私有桶不开公开下载。数据、备份与其他项目共同占用账户额度。
 
-每天100封、平均原件1MB、保留30天，原件约3GB；正文、解码附件、事件、备份还会增加空间。正常低量有望$0/月，但不删除会累积到应用或D1容量限制。R2按计费单位向上取整，Class A超过1M免费量后，即使只多一点也可能增加$4.50。因此 **$0–2是目标，不是硬承诺**。
+## 2.1 保留与历史邮件
 
-## 2.1 分阶段保留与历史邮件
+新邮件冻结 `raw_retention_days=7`、`content_retention_days=30`、`ledger_retention_days=180` 的策略快照。历史 NULL 策略只有 owner 预览确认后才纳入；缩短期限也要签名预览。
 
-新邮件默认值为 `raw_retention_days=7`、`content_retention_days=30`、`ledger_retention_days=180`。收件时将策略版本及期限冻结到原件 metadata，登记 D1 时复制到邮件行；改变默认值只影响之后的新邮件。最小去重账本至少保留配置天数，当前实现保守保留账本，不自动删除。
+普通计时只在解析成功、无 review/策略错误或活动 claim、且所有要求的交付已确认时建立。原件先到期；其余内容到期走完整删除，保留非内容去重身份。晚到解析和中断删除必须受同一 tombstone/恢复约束。
 
-安全终态要求解析成功、没有 `needs_review` 或策略错误、没有处理 claim/lease；归档邮件不能有未完成交付，自动投递邮件必须有与冻结目标 revision 对应的成功交付，且全部交付均为 delivered。达到安全终态才建立时钟；后续成功交付会延后截止时间。已建立时钟的邮件若之后出现失败或被取消的交付（例如一次重发），在全部交付送达、重新达到安全终态之前不会自动清理，也不会改用下面的已处理异常期限。未经之后的送达或 owner 取消处理的失败、未经 owner 处理的需人工检查或积压中的邮件不会为释放容量而被自动删除。
+尚未建立普通时钟、已有策略快照的已处理异常，才适用全局 `resolved_retention_days`（默认60天，可关闭）：无在途工作，最后一次送达之后的交付都已送达或被 owner 取消；从未送达时全部都须 owner 取消。期限不短于当前和冻结的正文期限，正文永久保留时也不清理。重试/取消重新计时，删除前原子复核；未处理失败和后来未取消的失败继续保留。完整谓词与并发回归由 `lifecycle.ts` 及其测试维护。
 
-有未送达交付的邮件达不到安全终态。尚未建立时钟、已有保留策略快照的这类邮件在 owner 处理后成为“已处理异常”：解析成功、没有进行中的交付，且最后一个已送达交付之后新建的交付都已送达或被 owner 取消（`cancelled_by_owner`），例如先失败、之后重发送达；从未送达时则全部交付都被 owner 取消。它们按全局 `resolved_retention_days`（默认 60 天，1–3650，留空即 `null` 表示关闭）删除全部内容。实际期限在每次判定时实时读取，取该设置、当前正文期限与邮件自身冻结的正文期限中最长者；任一正文期限为“不自动清理”时永不清理，因此正文期限留空时此项必须留空（API 返回 400）。该期限不冻结到邮件；计时从最后一次交付尝试结束与系统确认其已处理（`resolved_at`）中较晚者开始，因此升级前已处理的邮件从首次确认起至少再保留一个完整期限。owner 重试或取消交付会清空 `resolved_at`，邮件离开已处理状态（例如新的重发）时也会清空，时钟从之后再次确认已处理时重新开始。删除前在变更保护内复核，删除墓碑写入时再原子复核条件与实时到期时间；并发开始的重发或设置变更会让这次删除作废并推迟。判定按交付创建顺序：最后一次送达之前的失败不阻止清理，但之后新建且未被 owner 取消的失败（例如之后失败的重发）会阻止。未经之后的送达或 owner 取消处理的失败（例如只有 `retry_window_expired`，或 `message_needs_review` 后没有送达的发送）、待处理、解析未完成或处理中的邮件永不自动清理；尚无保留策略快照的邮件（升级前历史或策略读取失败）也不受影响，除非 owner 已确认纳入；纳入后其中已处理的投递异常从确认后首次后台检查起按此期限计时，预览的 `resolved_messages` 可能未包含它们。
+## 2.2 提醒
 
-迁移 `0009` 为现有设置行直接启用此期限，未经预览：取 60 与当前正文期限中较大者，正文期限为“不自动清理”时为 `null`。`resolved_at` 只由新 Worker 的保留扫描记录，所以部署后至少一个完整期限内不会按此规则删除任何邮件；如不需要，部署后在设置页留空关闭。
-
-- 原件到期先写 `raw_expired_at`，立即停止下载和重解析。R2 删除与容量结算可独立重试，正文仍可查看。
-- 正文到期使用完整删除流程，清理原件、正文、附件、搜索正文和冻结 payload，保留去重身份及非内容记录。
-- 新默认启用或缩短、历史邮件纳入均需签名预览确认，令牌绑定 owner、settings version、全部期限（含 `resolved_retention_days`）及历史选择，有效 10 分钟。已处理异常期限的启用或缩短同样需要确认；预览返回当前已处理且未清理的邮件数 `resolved_messages`，保存后这些邮件在之后的保留阶段按新期限重新计算，已超期的逐批删除。历史选择只作用于尚无策略的邮件，其时钟从确认之后达到安全终态开始，本次设置保存不删除内容。
-- 原件期限不能长于正文期限；留空表示不单独自动清理该阶段。正文到期仍会删除所有内容，包含尚未单独过期的原件。
-- 设置页分别显示逻辑内容和待物理删除字节；桶实际空间、账户 R2 用量没有可靠测量时明确显示“未测量”，不能从逻辑计数推算账单。
-
-API 为 `mailhero.ui.v2` 的 `PreviewRetentionPolicy`（`GET /api/v2/settings:previewRetentionPolicy?raw_retention_days=7&content_retention_days=30&ledger_retention_days=180&resolved_retention_days=60&apply_existing=false`）；无限期即不传该字段。`UpdateSettings`（`PATCH /api/v2/settings?update_mask=...`）在 `update_mask` 中列出四个保留期与 `etag`，提交相同的值，需要确认时附预览返回的 `retention_confirmation`（绑定 owner、`etag` 与完整策略，10 分钟有效）。旧的单一 `retention_days` 不能再设置，不会隐式给历史邮件设策略。
-
-## 2.2 持久提醒
-
-D1 保存容量 70% / 85% / 95%、备份超过 36 小时、处理积压超过 1 小时、解析失败等状态；容量取 D1 逻辑字节与 DO 容量计账的较大值，覆盖尚未登记的原件及预留空间，仅激活当前最高档。DO 暂不可用时指标明确标出计账不可用，暂用 D1 数据；两者都不等于实际账户账单。状态变化在下一次评估（约每 10 分钟）登记，每个提醒代码在 `alerts` 表中一行。活跃提醒显示在工作台顶部和设置页，并作为 `Ops.status()` 的 signals 由 Home 读取，汇入 Home 在 Tasks 中每天至多一条的运维摘要任务。提醒只含代码、计数和时间，不含收件地址、发件人、主题、正文、附件或远端响应。提醒不是扣费硬上限，也不是完整备份成功的替代证据。
-
-Mail Hero 没有自己的外部提醒通道。按 ops-v1 计划保持未配置的可选 `ALERT_WEBHOOK_URL` 及其发件箱于 2026-10-21 删除；不再读写的 `alert_notifications` 表由之后一次发布的迁移 `0011_drop_alert_outbox.sql` 删除（迁移在旧 Worker 仍运行时执行，必须向后兼容，所以晚一次发布）。
+提醒通过 Ops signals 进入 Home 的统一运维视图，不再维护独立外部提醒 webhook。进程、容量、待处理、投递和备份新鲜度分别反映实际状态；不含邮件正文、地址或目标 URL。
 
 ## 2.3 运维入口（ops-v1）
 
-Worker 导出命名入口 `Ops`（`src/native/ops.ts`，`index.ts` 只加一行导出），只能由同一 Cloudflare 账户内部署的 Worker 通过 service binding（`[[services]] binding = "MAIL_HERO"`、`service = "mail-hero"`、`entrypoint = "Ops"`）调用；没有公开 HTTP 路由，也不经过 Access。合同见 [`contracts/ops-v1`](../../contracts/ops-v1/README.md)。输出只含代码、数字、布尔值、时间、事件 ID 和 UI 地址，不含主题、地址、正文、目标 URL 或远端响应。
+`Ops` 只经同账户 service binding，默认 fetch/email 行为不变，无新增公共入口。status 是有界只读索引查询。输出与[根合同](../../contracts/ops-v1/README.md)一致。
 
-- 变量 `PUBLIC_HOST`：UI 自定义域名，`status()` 以 `https://<PUBLIC_HOST>/` 返回 `ui_url`。与 `mail-hero/wrangler.toml` 的自定义域名同在该文件中提交（配置测试核对两者一致）。
-- `status()`：一次 DO 请求加最多 6 条 D1 只读查询（与每10分钟的提醒阶段读取相同的部分索引范围），不写入。调用方至少间隔10分钟。
-- 降载 guard（`setGuard`）：保存在协调器自身 SQLite，到 `until`（最多36小时后）自动失效，不需要 Alarm，不进入备份。`shed` 只推迟以下清理与安全网，且每项距上次完整运行满48小时仍会执行，并按正常节奏一直执行到追上积压为止：已开始的 R2 盘点继续逐页扫描，扫完整个桶才算一次运行；保留期清理和金丝雀清理只有在没有剩余到期项时才算一次运行。所以上限覆盖整个任务，而不是其中一页或一批：
+shed guard 最长36小时，自动失效；仅推迟以下任务，距上次完整执行48小时仍运行到追上积压：
 
-| 工作 | shed | 原因 |
-| --- | --- | --- |
-| 收信、每日额度预留、R2 写入、任务登记 | 保持 | 收件 |
-| 解析任务、投递与重试、路由阻断复查 | 保持 | 已接管邮件的处理 |
-| 修复阶段重新登记待解析/未投递、到期投递、过期窗口标记、冷却修复 | 保持 | 完整性，不能让已接管邮件搁浅 |
-| 容量对账、中断的内容删除续做 | 保持 | 释放入站额度；已开始的删除不能复活 |
-| 提醒评估、备份租约及回执、金丝雀本身 | 保持 | 监控、原生备份与运维检查 |
-| `raw_reconcile`：R2 `raw/` 盘点与孤儿回收 | 推迟（48小时） | 任务在写 R2 前登记，盘点只是安全网；节省 R2 Class A |
-| `lifecycle_retention`：保留期清理、已处理异常清理、计时扫描 | 推迟（48小时） | 纯清理，稍后执行不丢数据；容量提醒仍可见 |
-| `canary_cleanup`：7天前金丝雀内容 | 推迟（48小时） | 合成内容清理 |
+| 工作 | shed 下行为 |
+| --- | --- |
+| 收件、配额预留、原件、登记 | 保持 |
+| 解析、投递、重试、阻断复查 | 保持 |
+| 任务修复、容量对账、中断删除续做 | 保持 |
+| 提醒、备份、canary 执行 | 保持 |
+| `raw_reconcile`、`lifecycle_retention`、`canary_cleanup` | 有界推迟，进行中的盘点仍续页 |
 
-- 金丝雀（`startCanary`）：沿用 owner 连接测试路径，固定合成文本并带 `mail.received.v1` 顶层 `canary` 标记，发往当前默认目标，按正常自动重试。同一 `run_id` 幂等。`FORCE_SEND_PAUSED`、设置暂停、目标暂停/归档或阻断时返回 `paused`；维护模式、备份快照、仅归档/无目标或容量不足时返回 `unavailable`；这些情况都不创建任何记录。只有目标消费者声明支持 `canary`（Todofy 的 `canary_consumer`）时仪表盘才应调用。金丝雀不进入收件箱、搜索、保留计时或提醒；投递列表以“金丝雀”标记显示；7天后按 owner 删除路径清理内容，交付记录保留。与连接测试一样计入概览的投递计数。
+canary 沿用连接测试路径和稳定 run_id，带合同标记。暂停、维护、阻断、无目标或容量不足时不静默排队；消费者必须声明支持，且不能产生真实任务等副作用。owner 的普通连接测试仍会实际 POST 目标。
 
-## 3. 创建资源与配置
+## 3. 资源与唯一配置
 
-需要Node.js 26。通过正规 `wrangler login` 或权限受限的API token认证。已有独立任务token时沿用该本机流程，不覆盖其他项目的登录；不要把token、邮件或密钥发到聊天。
+`DB`、`MAIL_STORE`、`BACKUP_STORE`、`COORDINATOR`、Assets、路由与公开 Access 身份都来自提交配置。根资源登记与清单必须一致；不添加并行生产配置、env 分支或 keep_vars。
 
-本次独立 token 已在本机保存并核实有效，且已追加仅目标 zone 的 `Zone Settings Write`，不需要再次保存。新环境首次保存时，在单仓库的 `mail-hero/` 目录运行 `python3 deploy/cloudflare-admin.py save-token`，提示后从 Cloudflare 的一次性成功页复制 token 并粘贴到本机终端（不回显）。助手只新建 owner-only 文件，不覆盖已有文件，不改 Wrangler 全局登录。随后运行 `python3 deploy/cloudflare-admin.py inspect` 核对权限；下文 Wrangler 命令可改用 `python3 deploy/cloudflare-admin.py wrangler <命令与参数>`。包装命令从单仓库的 `mail-hero/` 目录调用，但实际工作目录为 `cloudflare/`，所以配置参数使用 `--config ../wrangler.toml`；凭据只通过进程环境传递。它拒绝 `deploy`（发布只经 CI 或 `deploy/deploy-vars.mjs exec`）。
+新环境首次保持 archive 与强制暂停。`CREDENTIAL_KEY` 负责既有密文/动作签名，快照不包含它；修改不是透明轮换。秘密只通过既有私有授权流程提供，公开资料不记录其值或保管步骤。
 
-仅新环境初始化，从单仓库的 `mail-hero/` 目录：
+## 4. Access 与浏览器
 
-```sh
-npm --prefix web ci
-npm --prefix web run build
-npm --prefix cloudflare ci
-cd cloudflare
-npx wrangler whoami
-npx wrangler d1 create mail-hero
-npx wrangler r2 bucket create mail-hero-store
-```
+UI 在固定 Custom Domain，Worker 另行校验 Access JWT。owner/alias 是同一人的精确身份；不能放宽到所有提供商用户。浏览器写入先校验 Origin/固定 CSRF 头再读正文。下载保持私有、no-store/nosniff，HTML 禁脚本/禁外网。细节由 `security.ts` 与共享 edge-auth SPEC 维护。
 
-已经创建的资源只核对，不重复创建。将D1返回的ID填入 `mail-hero/wrangler.toml` 并提交（D1 ID、桶名、主机名等都不是秘密），检查：
+## 5. 专用收信子域
 
-- `DB`对应D1，`MAIL_STORE`对应私有Standard桶。
-- `COORDINATOR`对应 `MailCoordinator`，migration使用 `new_sqlite_classes`；应用固定实例名 `inbox-v1`。
-- `RECEIVE_ADDRESS`为最终唯一地址（GitHub secret `MAIL_HERO_RECEIVE_ADDRESS`，部署时作为 Worker secret 注入，不写进配置）；改地址必须同步路由和来源转发。
-- 首次部署时 GitHub variables `MAIL_HERO_FORCE_SEND_PAUSED=true`、`MAIL_HERO_MAINTENANCE_MODE=false`，默认archive。
-- `INGEST_DAILY_MESSAGE_LIMIT="300"`、`INGEST_DAILY_BYTE_LIMIT="268435456"`，按UTC日计量。
-- `WEBHOOK_ALLOWED_HOSTS`为允许的消费者精确域名；没有消费者可留空。
-- `workers_dev=false`、`preview_urls=false`；使用Access保护的自定义域名。
-- 不含Queues绑定、普通Worker的Paid CPU配置或生产 `DEV_AUTH_BYPASS`。
+只使用获准的专用子域与精确收信规则，不启用 catch-all，不修改根域既有 MX/TXT/DKIM 或主邮箱。DNS、API ready 与控制台显示是不同观察；不能为消除根域提示而重做会覆盖主邮箱的 onboarding。来源转发由 owner 在正规邮箱流程中配置并保留来源副本。
 
-仅首次初始化时生成并在密码管理器独立保存 `CREDENTIAL_KEY`：32随机字节，以64位十六进制表示。当前生产密钥已经生成并安装，不要重生成或覆盖。经Wrangler交互输入，不写入 `[vars]`：
+## 6. 验收与消费者
 
-```sh
-npx wrangler secret put CREDENTIAL_KEY --config ../wrangler.toml
-npx wrangler d1 migrations apply DB --remote --config ../wrangler.toml
-npm run typecheck
-npm test
-```
+先用合成邮件验证持久接管、中文/MIME、截断/省略、25 MiB边界、故障重试、重复Alarm、删除不复活和鉴权。来源自动转发、实际 Free 用量和真实消费者业务另外验收，不能由本地构建或一次HTTP 2xx推断。
 
-该密钥解密webhook凭据并签署管理令牌，D1/R2备份不会包含它。不能直接改成新值当作完成轮换；已有密文需要迁移。
+消费者只允许精确公网 HTTPS 目标；Access service identity与业务 Bearer/Basic 各自独立。相同事件/bytes必须持久去重。Mail Hero“已交付”只表示消费者接管；当前 Todofy/Tasks 边界见[接入合同](todofy-integration.md)。
 
-## 4. UI域名与Access
+## 8. 原生备份
 
-当前 `mail-hero.ziyixi.science` 已绑定 Access 应用，提供 GitHub 和邮件验证码两种登录方式，没有 Bypass。Gmail 备用策略保留 canonical owner 邮箱；GitHub 使用独立 Allow 策略，Include 只含通过 IdP Test 核实的本人精确邮箱，Require 必须是既有 GitHub 登录提供商。不要把邮箱和提供商都放到 Include（那会成为 OR 条件）。应用和策略 ID 见验收记录。
+每日快照复用 DO Alarm，最长30分钟租约暂停解析/交付/清理/API写入，新邮件进入下一份。新副本是普通 v2 文件，不增加加密或恢复密钥；全量读回/引用校验及 durable commit 通过后才登记成功与轮转。具体[格式与接口](native-backup.md)、[下载/恢复](../deploy/backup/README.md)分别维护。
 
-`ACCESS_OWNER` 保留原 Gmail 作为唯一管理员标识，可选 `ACCESS_OWNER_ALIASES` 列出同一个人经核实的其他登录邮箱（逗号分隔，最多 8 个，精确匹配；owner 与 alias 须为可打印 ASCII，否则按未配置 fail closed）。JWT 签名、issuer、audience、时效继续校验；alias 成功登录统一映射到原 owner，CSRF 和管理动作身份不变。实际 owner 与别名只保存在 GitHub secrets `MAIL_HERO_ACCESS_OWNER`、`MAIL_HERO_ACCESS_OWNER_ALIASES`，部署时注入；新环境先验证 IdP 实际返回身份，再配置 Access 与应用两层白名单。
+## 9. 隔离恢复
 
-Custom Domain 写在提交的 `mail-hero/wrangler.toml`（每次部署都以它为准）：
+使用新空 D1/R2，不绑定真实入站，强制维护和停发。核对同一版本的 schema、对象字节/hash/metadata、最新删除清单和独立恢复凭据，再重建 DO 调度与容量状态。保留 event_id 和冻结 bytes，对不确定交付与消费者账本对账后才安排切换。
 
-```toml
-routes = [{ pattern = "mail-hero.ziyixi.science", custom_domain = true }]
-```
-
-应用独立校验JWT的签名（仅RS256）、issuer、audience、过期和owner；浏览器写操作校验Origin/CSRF。两者由共享包 `packages/edge-auth` 实现，配置项不变。附件只能通过鉴权后路由访问，不要为下载而公开R2。[Custom Domains](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/)、[Access JWT](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/)
-
-当前 Custom Domain 已绑定，`workers_dev=false`、`preview_urls=false`。日常代码更新和运维开关变更通过 [GitHub Actions](ci-cd.md) 发布（改 GitHub variable 后手工运行 workflow）。确需人工部署时，在完成构建与验证后，从 `mail-hero/cloudflare` 经包装器发布，环境中给出与 CI 相同的值（`MAIL_HERO_RECEIVE_ADDRESS` 等与两个开关，`GITHUB_SHA` 为所发布的提交；只在本机 shell，不进聊天）。secrets 文件放在仓库外，发布后删除：
-
-```sh
-node ../deploy/deploy-vars.mjs secrets "$TMPDIR/mail-hero-secrets.json"
-node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml \
-  --secrets-file "$TMPDIR/mail-hero-secrets.json"
-rm -f "$TMPDIR/mail-hero-secrets.json"
-```
-
-普通 `wrangler deploy` 会删除注入的 var（暂停解除），包装器也拒绝没有 secrets 文件的发布；不要绕过。
-
-打开 [UI](https://mail-hero.ziyixi.science)，点击 **GitHub** 即可登录。已使用本人 GitHub 会话成功进入 `/setup`，受保护的配置、D1 状态、调度状态与固定收件地址均正常显示；没有读取私人邮件。之前的拒绝来自 GitHub 返回邮箱与原 Gmail 白名单不一致，现已通过本人 alias 解决。邮件验证码仍可用 canonical owner 邮箱作为备用；验证码只填在正规登录网页，本轮未单独重测 OTP 流程。
-
-## 5. 仅设置专用收信子域
-
-本次已经完成，仅启用 **`inbox.ziyixi.science`**，不需要再次操作根域 onboarding：
-
-1. 记录根域现有 MX/SPF，并取得限定 `inbox.ziyixi.science` 的实时 DNS 预览；待添加的三条 MX 和一条 SPF 都只涉及这个子域。
-2. 确认 DNS API 支持请求 body 后，调用 `POST /zones/{zone_id}/email/routing/dns`，body 为 `{"name":"inbox.ziyixi.science"}`，返回 `enabled: true`、`status: ready`，再次查询 DNS 预览返回 `errors: null`。这一步尚未让 UI 的 Subdomains 列表显示已启用，不能把 API 的 DNS 状态当成全部设置完成。
-3. 启用精确地址规则：收件地址（与 `MAIL_HERO_RECEIVE_ADDRESS` 相同），action **Send to a Worker**，Worker 为 `mail-hero`。catch-all 保持禁用，未更改。刷新设置后，在 Settings → Subdomains 添加 `inbox`，最终明确显示 **Enabled、DNS Locked**；该 UI 步骤也开启了父级路由标记。
-4. UI 步骤添加了 Cloudflare 公共 DKIM TXT `cf2024-1._domainkey.ziyixi.science`。操作前后再次核对根域 MX/SPF，精确一致，原有 iCloud `mx01.mail.icloud.com` / `mx02.mail.icloud.com` 保留。公共 DNS 已查到子域三条 Cloudflare MX 与 SPF；DNS 可解析仍不等于真实邮件链路验收。
-
-根域仍使用 iCloud，根域 Email Routing 因此显示 `status: misconfigured`，界面可能提示根域 DNS **Conflicting/Missing**；专用子域已经显示 Enabled、DNS Locked。**不要点击 Add missing records，也不要删除 iCloud MX/SPF 来消除这个根域提示。** 单独设置 `skip_wizard: true` 未完成子域启用；会修改根域的 UI Activate 没有执行。
-
-其他环境同样必须先核对仅作用于专用子域的 DNS 变更，不直接激活根域向导或盲目重放以上操作。Email Routing 调用 Email handler 不经过 UI 的 HTTP 登录，不能因此给 UI 加 Bypass。[设置 API](https://developers.cloudflare.com/api/resources/email_routing/methods/edit/)、[DNS 查询 API](https://developers.cloudflare.com/api/typescript/resources/email_routing/subresources/dns/methods/get/)
-
-官方：[子域](https://developers.cloudflare.com/email-service/configuration/subdomains/)、[域名要求](https://developers.cloudflare.com/email-service/configuration/domains/)、[Email handler](https://developers.cloudflare.com/email-service/api/route-emails/email-handler/)
-
-## 6. 合成邮件验收与来源转发
-
-先保持 archive 和强制暂停。用户已发送测试信，实际主题为 **`Test`**；生产收件、R2 原件大小/摘要、D1 ready 状态、后台解析及线上中文正文均已核实。该信只有纯文本、没有附件，不能代替所有格式或来源的验收。日志不输出正文或凭据，详细证据见验收记录。
-
-至少检查纯文本、中文、HTML-only、常见编码、嵌套附件、接近25MiB原件；实际查看免费CPU/内存错误。再测D1/R2故障、任务注册/唤醒中断、重复Alarm、消费者500→204、429、超时/响应丢失、同ID重试、删除与发送并发、Access错误身份、HTML禁脚本/禁网，完成一次隔离恢复。
-
-UI 会显示解析错误、正文截断和附件省略状态；遇到嵌套邮件、TNEF 等不透明内容时，不猜测内部正文或自动交付。连续三次解析运行中断后停止自动尝试，原件仍可下载，检查后可明确重解析。正文搜索范围仅前 16KiB；详情以实际保留的正文及明确的截断提示为准。聚合状态使用五分钟共享缓存，可在收件箱或设置页人工刷新。
-
-Cloudflare未明确承诺 `email()` 在R2写入前失败时的完整持久重投语义。不能声称“永不丢信”；真实入口故障测试和源邮箱副本仍是必要验收。
-
-收件验收通过后，在 Gmail 的“设置 → 转发和 POP/IMAP → 添加转发地址”填写收件地址（`MAIL_HERO_RECEIVE_ADDRESS` 的值），用 Mail Hero 阅读验证邮件，再回 Gmail 完成确认；选择保留 Gmail 副本，按需使用过滤器只转发需要处理的邮件。Exchange/Outlook 同样填写这个地址，保留原邮箱副本；组织账户可能需要管理员允许外部转发。分别用来源邮箱测试实际到达，不轮询任何来源邮箱。
-
-新环境先保持 archive 和强制暂停，完成下一节的消费者接管验收后再配置 forward并解除暂停，以接收用户主动发送的业务测试信。当前Todofy进度见验收记录；来源邮箱的自动转发由用户在完整链路测试通过后开启。历史archive邮件不会自动释放。
-
-## 7. 独立消费者
-
-将消费者精确域名加入 `WEBHOOK_ALLOWED_HOSTS` 后部署，再在UI创建目标和认证。目标必须公网HTTPS；Workers不能直接访问家里的私有IP。Todofy可继续通过现有Tunnel hostname提供 `/hooks/mail`。
-
-若消费者由Access保护，单独创建Service Auth及Service Token，配置 `ACCESS_SERVICE_ORIGIN` 和秘密 `ACCESS_CLIENT_ID`、`ACCESS_CLIENT_SECRET`。它与消费者自身Bearer/Basic是两层认证，不能使用owner登录凭据。[Service Tokens](https://developers.cloudflare.com/cloudflare-one/access-controls/service-credentials/service-tokens/)
-
-消费者必须先持久接管再回2xx，并按稳定来源+event_id去重。“已交付”不等于Todofy/Tasks业务完成。先测合成事件，再解除 `FORCE_SEND_PAUSED` 并选择forward。CloudMailin与Mail Hero不能同时触发同一业务。
-
-## 8. Cloudflare 原生备份
-
-自动备份复用 Mail Hero 的 SQLite DO Alarm，输出到独立私有 BACKUP_STORE；不需要 VPS、Compose 或 k3s collector。
-新入站继续进入原件桶，快照以有界租约冻结解析/交付/清理/API 写入，最多30分钟。
-加密、逐块完整读回校验和 durable commit 在 DO 内执行，成功后才更新设置页/Home 的备份新鲜度并轮转。
-[配置、机器接口、预算和离线恢复说明](native-backup.md)是当前操作入口，旧 v1 密文仍可恢复。
-
-D1 Free Time Travel 只有最近7天，不包括 R2、DO 或秘密；同账户 R2 备份也不覆盖整个账户丢失。
-恢复私钥与独立保存的 receipt/密文副本在可信设备保管。[Time Travel](https://developers.cloudflare.com/d1/reference/time-travel/)
-备份成功、独立解密、隔离恢复和新 Cloudflare 资源恢复分别记录，不承诺未实测的 RPO/RTO。
-
-## 9. 隔离恢复演练
-
-恢复到**新的空D1和新的私有桶**，不要直接覆盖生产：
-
-1. 新配置保持维护和强制暂停，不绑定真实Email Routing。隔离演练用的临时配置放在仓库外（仓库只允许 `mail-hero/wrangler.toml` 一个 Mail Hero 配置，`.github/scripts/test_wrangler_configs.py` 检查）。不要原样复制 `mail-hero/wrangler.toml`：它就是生产配置，D1 `database_id`、两个桶名和 `routes` 都指向生产。临时配置必须改用新的 Worker `name`、新 D1 的 `database_name`/`database_id`、新的桶名，删除 `routes`，把 `main`、`migrations_dir` 和 `[assets].directory` 改成指向本仓库的绝对路径（相对路径按临时配置所在目录解析，放到仓库外会找不到），并在其 `[vars]` 写入 `MAINTENANCE_MODE = "true"`、`FORCE_SEND_PAUSED = "true"` 及合成的 `RECEIVE_ADDRESS`/`ACCESS_OWNER`；使用前用 `grep` 确认其中没有生产的 D1 ID、桶名或主机名，再先 `--dry-run`。真正把生产切到新的 D1 或桶，是在维护模式下提交修改后的 `mail-hero/wrangler.toml`（D1 ID/桶名），经 CI 发布。
-2. 导入D1 SQL，恢复R2全部字节与metadata，装入原 `CREDENTIAL_KEY`。[D1导入导出](https://developers.cloudflare.com/d1/best-practices/import-export-data/)
-3. 校验D1引用的原件、正文、附件和冻结payload存在且散列一致。记录未引用对象，不能盲删。
-4. DO调度状态不在D1导出中。通过应用恢复逻辑重新登记pending、retry_wait及未索引raw，对不确定sending先核查。不能假定新DO自动拥有旧Alarm任务。
-5. 对照消费者已接管event_id，保留身份和冻结bytes，不重建事件“修复”未知结果。旧备份可能含后来已经交付的任务。
-6. 在隔离资源通过合成读取、失败恢复、fake consumer后再安排真实路由切换。未实际演练，不能声称达到RPO/RTO或一键恢复。
+stateful binding 切换需独立审核；生产发布只提升同一编译归档，不临时从源码重打包。D1 Time Travel 仅覆盖 D1，同账户桶也不等于账户外恢复。实际恢复、路由切换和 RPO/RTO 单独取证，历史范围见[验收记录](verification-native.md)。

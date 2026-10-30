@@ -7,11 +7,6 @@ non-empty category replaces what is live (verified in wrangler 4.142's `publish-
   `PUT .../workers/scripts/<name>/domains/records` with `override_scope: true`. In CI (no TTY) wrangler also
   sets `override_existing_origin` and `override_existing_dns_record`, so a listed hostname is taken from
   another Worker without a prompt, and wrangler asks the API to overwrite an existing DNS record for it.
-  **The API does not always do so**: on 2026-10-01 it refused a cutover onto a hostname whose DNS
-  record was a tunnel CNAME it had not created (Cloudflare error `100117`), although CI passed
-  `override_existing_dns_record`. Moving a hostname off such a record (a tunnel CNAME, an `A` record to an old
-  server) therefore needs that record deleted by hand right before the deploy, after saving it privately for
-  the rollback; between the deletion and the deploy the hostname does not resolve.
 - **Zone routes**: `PUT .../workers/scripts/<name>/routes`, which deletes the script's other routes in every
   zone.
 - An **empty** category is left alone.
@@ -46,9 +41,8 @@ step, in the same commit that edits `wrangler.toml`, and clear them again afterw
   Domain), `dns:<host>` (an existing DNS record of a new hostname) or `route:<pattern>` (another script's zone
   route). An allowance covers only its own kind, so allowing a DNS record never also allows taking the
   hostname from another Worker; an entry without a kind is an error (exit 2). An `unchecked` hostname cannot be
-  allowed: give the token DNS read on the zone instead. A `dns:` allowance only lets the guard pass: the API
-  may still refuse the record (`100117`, above), so for a record it did not create delete the record right
-  before the deploy instead, and then there is no conflict to allow.
+  allowed. Resolve the DNS-read failure before publishing. An allowance permits the guard decision only; it does not
+  perform a DNS change or guarantee that Cloudflare accepts the later operation.
 
 **Read-only, public-log safe.** Only `GET` requests: `/accounts/{A}/workers/domains` (filtered by `service`
 and by `hostname`), and only when needed `/zones` (zone lookup), `/zones/{Z}/dns_records?name=` (for a new
@@ -64,9 +58,10 @@ dashboard. The token is the deploy job's
 own (`Workers Scripts` covers the domain list; the zone reads need `Zone`/`DNS`/`Workers Routes` read, which a
 config with zone routes needs for its deploy anyway).
 
-**No dependency.** Node 20+ only, so it runs before any install; `toml.mjs` reads TOML 1.0 and its test
-compares it with Python's `tomllib` on every committed wrangler config. Tests use a synthetic API:
+The implementation has no npm runtime dependency. `toml.mjs` reads TOML 1.0 and its test compares it with the pinned
+Python `tomllib` on committed Wrangler configurations. The guard remains a read-only deployment operator; its
+synthetic API and parser checks run from the workspace root:
 
 ```sh
-node --test tools/cf-guard/test/*.test.mjs
+bazel test //tools/cf-guard:check
 ```

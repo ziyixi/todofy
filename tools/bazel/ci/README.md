@@ -1,30 +1,31 @@
-# Bazel migration validation
+# Affected checks and releases
 
-The independent `Bazel migration validation` workflow checks `proto/`, shared packages, Tasks, the verified offline
-Python suites of Todofy, Codex Gateway, Platform and Newsletter, and the Bazel tool tests. Apps continue through their
-existing CI until their complete Bazel checks replace it.
-`ci.yml`, production credentials, tested release artifacts, deployment ordering and reconcile are unchanged.
-The owner waits for both `CI gate` and `Bazel migration gate` during this stage.
+`plan.py` discovers public `:check` facades, expands their leaf tests, and reads release metadata from application
+root BUILD files. Fixed Target Determinator compares the union in one native graph operation. It emits compatible
+test groups and selected releases; it contains no file-to-application dependency map.
 
-`plan.py` delegates graph comparison to the fixed [Target Determinator v0.34.0](https://github.com/bazel-contrib/target-determinator/tree/v0.34.0)
-binary. It does not maintain a path-to-application impact map. A branch uses its merge base with `origin/main`;
-main uses the newest ancestor whose own Bazel check gate passed. A failed release does not invalidate that check
-evidence. Missing evidence, dispatch, or a baseline without `MODULE.bazel` selects every current foundation test.
-If the baseline query predates a newly added suite, Target Determinator also selects all checks. A current-graph
-or comparison failure fails planning. Manual tests stay outside this workflow.
+Each public release filegroup includes its real archive, own publication wrapper/action and shared release tooling:
 
-The selected tests run in groups: Node, Python, Go, browser, workerd, CPU, and generic build checks. Tags `cpu`,
-`browser` and `workerd` take priority over the language. Each group uses one Bazel invocation with a target-pattern
-file. Workerd, CPU and browser tests run one target at a time; the other groups run at most four tests together.
-CPU tests always receive `--nocache_test_results`. Other tests use the Bazel action cache. Repository and
-action caches are saved with the fixed dependency inputs and runner group in their key.
+```starlark
+filegroup(
+    name = "release",
+    srcs = [":tasks", "//tasks/deploy:deploy_vars", "//tools/cloud-release:release_inputs"],
+    tags = ["release:worker:tasks", "artifact://tasks:tasks"],
+    visibility = ["//visibility:public"],
+)
+```
 
-The workflow verifies fixed SHA-256 values for Bazel 9.3.1 and Target Determinator before execution. Its token is
-read-only and only the planner uses Actions read access to find successful check evidence. Whole-module generation
-lifecycle, determinism, mutation self-tests and the existing Git-base breaking gate remain in the original CI
-during migration; the new `bazel run //proto:breaking -- BASE` entrypoint has also been checked locally.
+Release kinds are the ones CI currently uses: `worker`, `image`, `extension`, `website`. Independent Recall Worker/ZIP
+and Website site/relay inputs have independent filegroups. Test and source dependencies remain in their actual
+libraries; release groups add the execution inputs publication consumes.
 
-Local entrypoints, with the two fixed binaries on `PATH`:
+`releases.py` supplies the Actions decisions: cumulative successful-main base, explicit application dispatch, existing
+Newsletter/Platform pairing, held VPS resume and exact-SHA green branch artifact reuse. Reuse requires all producers
+and their unexpired artifacts. It skips neither the current cumulative check plan nor production verification.
+
+`run.py` executes one affected group with Bazel. Node/Python/Go checks run up to four at once; workerd, CPU, browser and container
+groups run one at a time. CPU test results are not reused. Repository/action caches are separate by execution group
+and platform. Browser environment preparation is an explicit CI step; owner browser profiles are never used.
 
 ```sh
 python3 -m unittest discover -s tools/bazel/ci
@@ -32,6 +33,22 @@ python3 tools/bazel/ci/plan.py --output /tmp/bazel-plan.json
 python3 tools/bazel/ci/run.py --plan /tmp/bazel-plan.json --group python
 ```
 
-Use `--base COMMIT` for a deliberate local comparison. Planning against an existing Bazel base requires a clean
-checkout, as Target Determinator does. Both scripts accept `--bazel` and repeated `--bazel-startup-option` arguments
-for isolated local servers.
+Without `--base`, a local branch compares against its merge base with `origin/main`. Main and manual dispatch
+check the complete graph; cumulative main evidence is resolved only by `releases.py baseline` in CI.
+
+Manual dispatch uses `--app all`, `--app both` (Todofy and Mail Hero), or one catalog app. Its checks include that
+application's public root plus shared proto/contract/package/tool/audit/infra roots. Newsletter and Platform retain paired
+checks; a Codex gateway resume also checks Platform source. `--resume-vps-release` excludes container tests and image
+release facades before the TD comparison, so continuing a held release builds no replacement image. The full release
+catalog remains available to the publication helper.
+
+For release selection, resolve a cumulative base and pass `--base COMMIT` plus
+`--release-input-query 'attr(tags, "release:", //...)'`. The root CI workflow contains the full invocation. A clean
+checkout and the pinned Bazel/Target Determinator binaries are required. Current-graph failures stop planning;
+a baseline predating the new roots selects all candidates rather than silently omitting them.
+
+The real Git/Bazel/Target Determinator fixture verifies source-only, unused-document, release-input-only and image
+changes, worker dispatch isolation and resume source checks. Its image actions deliberately fail if built, so the
+resume acceptance also proves that no image action ran.
+Other tests cover grouping, cumulative publication retry, paired images, resume and artifact reuse. See
+[CI/CD](../../../docs/ci-cd.md) for publication gates and runtime verification.

@@ -41,7 +41,11 @@ import newsletter.usage as usage
 import newsletter.workflow.content as content
 import newsletter.workflow.story_editor as story_editor
 
-REPOSITORY = pathlib.Path(__file__).resolve().parents[1]
+REPOSITORY = (
+    pathlib.Path(os.environ["BUILD_WORKSPACE_DIRECTORY"]) / "newsletter"
+    if "BUILD_WORKSPACE_DIRECTORY" in os.environ
+    else pathlib.Path(__file__).resolve().parents[1]
+)
 BODY_FIELDS = {"story_id", "title", "kind", "paragraphs", "limitations"}
 STOP_ERRORS = {
     "authentication",

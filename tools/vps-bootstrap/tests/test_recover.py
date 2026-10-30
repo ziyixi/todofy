@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 from personal_cloud.deployment.store import Store
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).absolute().parents[3]
 sys.path.insert(0, str(ROOT / "tools/vps-bootstrap"))
 import prepare
 import recover

@@ -124,9 +124,11 @@ class CompositeActions(unittest.TestCase):
                         self.assertTrue(step["working-directory"])
                     if "uses" in step:
                         if step["uses"].startswith("./"):
-                            self.assertEqual(step["uses"], "./.github/actions/setup-workspace")
+                            self.assertIn(step["uses"], {
+                                "./.github/actions/setup-workspace", "./.github/actions/setup-bazel",
+                            })
                             installer = workflow_data(ROOT / step["uses"] / "action.yml")
-                            self.assertEqual(set(step["with"]), set(installer["inputs"]))
+                            self.assertEqual(set(step.get("with", {})), set(installer.get("inputs", {})))
                         else:
                             self.assertRegex(step["uses"], r"^[\w./-]+@[0-9a-f]{40}$")
                     self.assertNotEqual(
@@ -200,73 +202,22 @@ class CompositeActions(unittest.TestCase):
                     for step in action["runs"]["steps"]:
                         self.assertNotIn(name, step.get("env", {}))
 
-    def test_runtime_shards_and_resume_are_passed_explicitly(self):
+    def test_image_publication_uses_the_checked_artifact_run(self):
         ci = workflow_data(ROOT / ".github/workflows/ci.yml")["jobs"]
-        runtime = next(
-            step
-            for step in ci["todofy-runtime"]["steps"]
-            if step.get("uses") == "./.github/actions/check-todofy-runtime"
-        )
-        self.assertEqual(runtime["with"]["shard-index"], "${{ strategy.job-index }}")
-        self.assertEqual(runtime["with"]["shard-total"], "${{ strategy.job-total }}")
-        platform = next(
-            step
-            for step in ci["platform-checks"]["steps"]
-            if step.get("uses") == "./.github/actions/check-platform"
-        )
-        self.assertEqual(
-            platform["with"]["build-image"],
-            "${{ !(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release) }}",
-        )
-        action = workflow_data(ROOT / ".github/actions/check-platform/action.yml")
-        self.assertEqual(
-            sum(
-                step.get("if") == "${{ fromJSON(inputs.build-image) }}"
-                for step in action["runs"]["steps"]
-            ),
-            2,
-        )
-        for job_name in ("newsletter-deploy", "platform-image"):
+        for job_name in ("newsletter-deploy", "platform-image", "codex-gateway-image"):
             job = ci[job_name]
-            self.assertEqual(
-                job["outputs"]["image"], "${{ steps.publish.outputs.image }}"
-            )
+            self.assertEqual(job["outputs"]["image"], "${{ steps.publish.outputs.image }}")
             publish = next(step for step in job["steps"] if step.get("id") == "publish")
-            self.assertEqual(
-                publish["with"]["artifact-run-id"],
-                "${{ needs.changes.outputs.reused_run_id || github.run_id }}",
-            )
+            self.assertEqual(publish["with"]["artifact-run-id"], "${{ needs.changes.outputs.artifact_run_id || github.run_id }}")
 
-    def test_smoke_checks_keep_native_step_timeouts_after_ui_build(self):
-        ci = workflow_data(ROOT / ".github/workflows/ci.yml")["jobs"]
+
+    def test_worker_smokes_declare_the_built_ui_and_run_in_workerd_group(self):
         for app in ("recall", "mailsort"):
-            sequence = ci[app + "-checks"]["steps"]
-            check = next(
-                i
-                for i, step in enumerate(sequence)
-                if step.get("uses") == "./.github/actions/check-" + app
-            )
-            smoke = next(
-                i
-                for i, step in enumerate(sequence)
-                if step.get("run") == "npm run test:smoke"
-            )
-            dry_run = next(
-                i
-                for i, step in enumerate(sequence)
-                if "wrangler deploy --dry-run" in step.get("run", "")
-            )
-            self.assertLess(check, smoke)
-            self.assertLess(smoke, dry_run)
-            self.assertEqual(sequence[smoke]["timeout-minutes"], "5")
-            self.assertTrue(any(step.get("if") == "always()" for step in sequence))
-            action = workflow_data(ROOT / f".github/actions/check-{app}/action.yml")
-            self.assertTrue(
-                any(
-                    "npm run build" in step.get("run", "")
-                    for step in action["runs"]["steps"]
-                )
-            )
+            build = (ROOT / app / "worker/BUILD.bazel").read_text()
+            self.assertIn('name = "smoke_test"', build)
+            self.assertIn(f'"//{app}/web:bundle"', build)
+            self.assertIn('"workerd"', build)
+
 
     def test_reader_follows_real_action_commands_and_refuses_missing_inputs(self):
         with tempfile.TemporaryDirectory() as tmp:

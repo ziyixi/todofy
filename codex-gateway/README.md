@@ -65,12 +65,13 @@ children, and Linux parent-death notification handles abrupt server termination.
 its temporary files. Normal shutdown closes active contexts.
 No prompts, responses, private URLs, credentials or vendor error text are logged; access logging is disabled.
 
-Build from the repository root after generating the shared Python package:
+Build the final OCI archive from the repository root:
 
 ```sh
-node proto/tools/ensure.mjs
-docker build -f codex-gateway/Dockerfile --build-arg SOURCE_SHA=<full-commit-sha> .
+bazel build //codex-gateway --platforms=//tools/bazel/images:linux_amd64 --embed_label=<full-commit-sha>
 ```
+
+`//codex-gateway:check` includes the locked unit/Ruff checks and the real offline container probe on Linux Docker hosts. The image acceptance uses synthetic JWTs and a fake executor with networking disabled.
 
 ## Home and usage
 
@@ -81,9 +82,7 @@ durations are the Model Router's request records; its console is the one usage v
 ## Offline checks
 
 ```sh
-uv run --locked --package personal-codex-gateway python -m unittest discover -s codex-gateway/tests -v
-uv run --locked --package personal-codex-gateway ruff check codex-gateway/src codex-gateway/tests
-uv run --locked --package personal-codex-gateway ruff format --check codex-gateway/src codex-gateway/tests
+bazel test //codex-gateway:check
 ```
 
 Tests use a fake SDK, real synthetic RSA-signed JWTs, local JWKS and synthetic processes.

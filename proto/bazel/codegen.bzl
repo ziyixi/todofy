@@ -3,7 +3,7 @@
 load("@protobuf//bazel/common:proto_info.bzl", "ProtoInfo")
 
 def _generate_impl(ctx):
-    outputs = [ctx.actions.declare_file(path) for path in ctx.attr.outs]
+    outputs = []
     descriptors = depset(transitive = [dep[ProtoInfo].transitive_descriptor_sets for dep in ctx.attr.protos])
     args = ctx.actions.args()
     args.add("--format", ctx.attr.format)
@@ -16,8 +16,16 @@ def _generate_impl(ctx):
         configs.append(ctx.file._generation_config)
     for source in ctx.attr.sources:
         args.add("--source", source)
-    for output, path in zip(outputs, ctx.attr.output_paths):
-        args.add("--output", path + "=" + output.path)
+    unknown = [path for path in ctx.attr.output_paths if path not in ctx.attr.outs]
+    if unknown:
+        fail("output_paths keys must name declared outputs: " + ", ".join(unknown))
+    for path in ctx.attr.outs:
+        output = ctx.actions.declare_file(path)
+        outputs.append(output)
+
+        # outs is a set-like Bazel field and formatters may reorder it.
+        # Bind generator names by output path, never by a parallel list's index.
+        args.add("--output", ctx.attr.output_paths.get(path, path) + "=" + output.path)
     args.add_all(descriptors, before_each = "--descriptor")
     generator = getattr(ctx.attr, "_" + ctx.attr.format + "_generator")
     ctx.actions.run(
@@ -40,7 +48,7 @@ proto_codegen = rule(
         "format": attr.string(values = ["ts", "python", "schema"], mandatory = True),
         "sources": attr.string_list(mandatory = True),
         "outs": attr.string_list(mandatory = True),
-        "output_paths": attr.string_list(mandatory = True),
+        "output_paths": attr.string_dict(),
         "_ts_generator": attr.label(default = "//proto/tools:bazel_ts_codegen", executable = True, cfg = "exec"),
         "_python_generator": attr.label(default = "//proto/tools:bazel_python_codegen", executable = True, cfg = "exec"),
         "_schema_generator": attr.label(default = "//proto/tools:bazel_schema_codegen", executable = True, cfg = "exec"),
@@ -87,4 +95,12 @@ proto_image = rule(
         "_generator": attr.label(default = "//proto/tools:bazel_image", executable = True, cfg = "exec"),
         "_buf": attr.label(default = "//tools/bazel:buf", executable = True, cfg = "exec"),
     },
+)
+
+def _proto_sources_impl(ctx):
+    return [DefaultInfo(files = depset(transitive = [dep[ProtoInfo].transitive_sources for dep in ctx.attr.protos]))]
+
+proto_source_files = rule(
+    implementation = _proto_sources_impl,
+    attrs = {"protos": attr.label_list(providers = [ProtoInfo], mandatory = True)},
 )

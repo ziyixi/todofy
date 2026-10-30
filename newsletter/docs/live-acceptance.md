@@ -4,19 +4,16 @@
 
 ## 先统一运行环境
 
-在仓库根目录使用项目要求的 `uv 0.12.10`，不要混用手工 pip 安装和其他虚拟环境：
+在仓库根运行固定 Bazel 工具链的检查：
 
 ```sh
-make setup
-make check
-make build
-make smoke
-make smoke-codex
+bazel test //newsletter:check
+bazel build //newsletter --platforms=//tools/bazel/images:linux_amd64 --embed_label=<full-commit-sha>
 ```
 
-`make setup` 按仓库根 `.python-version`（Python 3.14.7）和唯一的 `uv.lock` 选择 Newsletter 成员安装，包含共享 Model Router 客户端、dev 工具组及 GitHub Release 分发的 `ziyixi-protos==0.1.0.dev7`；可能下载解释器或依赖，但不会访问账号。`make check` 覆盖锁一致性、Ruff 80列/Google公开文档/模块导入、AST结构门禁、严格mypy与离线测试；`make format` 单独格式化Python。发布包与loopback服务另用上面的build/smoke。`make proto-check` 校验已安装公共 wheel 的代码、stub、descriptor hash、来源清单及发行版本；不依赖 sibling protos 仓库或 protoc，也不在 newsletter 内生成代码。不能运行的验收项单独标记，不应通过跳过来宣称完整通过。
-
-这里的 `make build` 只构建 Python 包，不发布镜像。Docker 验收须另行检查 daemon、构建和运行：镜像只在构建阶段从同一锁安装运行依赖及共享 Model Router 客户端，不带 dev 工具，不在服务启动时解析或下载依赖。锁定工具链不会搬动或读取已有 `.env` 和提供方凭据。
+`newsletter/Makefile` 的 check/build/test/lint/typecheck/smoke 命令都转到这些 Bazel 目标。
+检查使用根 `uv.lock`、Python 3.14.7、固定 proto 依赖和合成数据；Linux Docker 主机另跑真实离线镜像。
+它们不启动真实采编、不读账号或发送邮件。交互式本地开发可单独 `make setup` 安装 uv 环境。
 
 ## 需要准备什么
 
@@ -28,9 +25,9 @@ make smoke-codex
 | Resend 投递 | `RESEND_API_KEY`、`NEWSLETTER_FROM_EMAIL`、`RECIPIENT_EMAIL` | 可复用现有 key；新建时优先只允许 Sending access 并限制发件域名。发件地址使用已验证域名，收件人由用户明确确认。 |
 | 服务 HTTP 鉴权 | `NEWSLETTER_EDITOR_TOKEN`、`NEWSLETTER_SEND_TOKEN` | 完成 `make setup` 后，用 `.venv/bin/newsletter token` 分别在本机生成两个不同随机值（各至少24字符），无需第三方账号。只准备内容的触发器仅持 editor token；用户明确授权每日投递时，独立 cron 容器另持 send token，不获得供应商密钥。ingest 角色及其旧环境变量已退休。 |
 
-newsletter 不直接调用 Gemini。Todofy 自己负责其服务器上的 `GEMINI_API_KEY`；读取事件推荐/概述可能触发 Gemini，不能当成没有成本的数据库查询。
+Newsletter 和 Todofy 的模型调用都经 Router。读取事件概述可能触发 Todofy 的模型处理，应计入真实联调范围。
 
-凭据不要发在聊天、截图、命令行参数、Git、镜像或日志里。现有仓库位于 Google Drive 同步目录；**新增登录缓存与联调密钥放到同步目录之外**。不要覆盖已有 `.env`，新服务也不会自动加载它。准备完成后只告知私有文件/目录的位置和非秘密的数据库链接。
+凭据只通过既有私有授权流程注入，不进入命令行、Git、镜像、报告或日志。应用不自动加载 `.env`。
 
 ## Model Router 连接
 
@@ -68,7 +65,7 @@ newsletter 不直接调用 Gemini。Todofy 自己负责其服务器上的 `GEMIN
 4. **Notion 与服务韧性**：在专用数据库创建有限条材料、核对投影；本地验证重启后仍能取冻结预览、重复请求不多投影或重取 Todofy。Notion 结果不明时先核对，不自动重试；测试记录不自行删除。
 5. **邮件预览**：HTML、纯文本、CID 图像、长标题/长理由、无图、无 head 样式、桌面/手机；内容与最终批准 hash 一致。
 6. **一次真实投递（另行批准）**：核对 Resend 接受/送达状态及实际收件；检查用户使用的 Gmail / Apple Mail / Outlook、手机及深色模式。没有使用的客户端或未取得截图的项目明确标未验，不声称全客户端兼容。
-7. **部署验收（确认目标后）**：Docker 构建、只读根文件系统/非root运行、缺依赖时拒绝启动、持久化目录/登录刷新、TLS/服务鉴权、重启和日志脱敏。由外部调度器触发，服务无 cron。部署前确认旧 GitHub daily 的 schedule 已停用，避免重复；本地改 workflow 不会改变线上调度，不为联调擅自部署或推送。
+7. **部署验收（确认目标后）**：Bazel OCI 产物、只读根文件系统/非root运行、缺依赖时拒绝启动、持久化目录、TLS/服务鉴权、重启和日志脱敏。由外部调度器触发，服务无 cron。部署前确认旧 GitHub daily 的 schedule 已停用，避免重复；本地改 workflow 不会改变线上调度，不为联调擅自部署或推送。
 
 ## 发布前的阅读体验验收
 

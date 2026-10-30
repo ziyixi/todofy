@@ -8,7 +8,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 import { Severity } from '@ziyixi/proto/ops/v1/ops_pb';
@@ -39,7 +39,9 @@ import { measuredReads, startHarness, type Harness } from './harness.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const TOOL = join(HERE, '../../../tools/backup-restore.ts');
-const WRANGLER = join(HERE, '../../node_modules/.bin/wrangler');
+const WRANGLER = process.env.BAZEL_WRANGLER
+  ? resolve(process.env.TEST_SRCDIR ?? '', process.env.TEST_WORKSPACE ?? '', process.env.BAZEL_WRANGLER)
+  : join(HERE, '../../node_modules/.bin/wrangler');
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 /** The daily slot, 05:25 UTC. */
@@ -440,7 +442,7 @@ describe('the Alarm, Home and a restore', () => {
 
     const work = await mkdtemp(join(tmpdir(), 'links-restore-'));
     try {
-      const tool = (...args: string[]) => spawnSync('node', [TOOL, ...args], { encoding: 'utf8' });
+      const tool = (...args: string[]) => spawnSync(process.execPath, [TOOL, ...args, ...(WRANGLER && process.env.BAZEL_WRANGLER && ['download', 'upload', 'verify'].includes(args[0] ?? '') ? ['--wrangler', WRANGLER] : [])], { encoding: 'utf8' });
       const wrangler = (...args: string[]) =>
         execFileSync(WRANGLER, args, { encoding: 'utf8', env: { ...process.env, CI: 'true', WRANGLER_SEND_METRICS: 'false' }, stdio: 'pipe', maxBuffer: 256 << 20 });
       const restore = join(work, 'restore');

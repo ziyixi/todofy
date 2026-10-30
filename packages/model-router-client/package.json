@@ -15,10 +15,9 @@
     "vitest": "catalog:"
   },
   "scripts": {
-    "test": "vitest run",
-    "typecheck": "tsc --noEmit",
+    "test": "bazel test //packages/model-router-client:unit_tests",
+    "typecheck": "bazel test //packages/model-router-client:typecheck_tests",
     "postinstall": "node ../../proto/tools/ensure.mjs",
-    "pretest": "node ../../proto/tools/ensure.mjs",
-    "pretypecheck": "node ../../proto/tools/ensure.mjs"
+    "check": "bazel test //packages/model-router-client:check"
   }
 }

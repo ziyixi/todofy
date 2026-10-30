@@ -13,7 +13,9 @@ from release_identity import load_profile
 from transport import ReleaseFailure, Transport
 from ziyixi_proto.platform.runtime.v1 import runtime_service_pb as api
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(
+    os.environ.get("BUILD_WORKSPACE_DIRECTORY", Path(__file__).resolve().parents[2])
+)
 UUID = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
 )

@@ -1,12 +1,17 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library")
-load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
 load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@npm//tasks/worker:eslint/package_json.bzl", eslint = "bin")
 load("@npm//tasks/worker:vitest/package_json.bzl", vitest = "bin")
 load("@npm//tasks/worker:wrangler/package_json.bzl", wrangler = "bin")
 load("//proto/bazel:ts_package.bzl", "proto_package")
 load("//tools/bazel:js.bzl", "proto_vitest_test", "vitest_test", "workspace_link", "workspace_package_link")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/lint:defs.bzl", "eslint_test")
 
-package(default_visibility = ["//visibility:public"])
+package(default_visibility = ["//tasks:__subpackages__"])
+
+test_suite(name = "check")
 
 npm_link_all_packages(name = "node_modules")
 
@@ -558,6 +563,7 @@ proto_vitest_test(
         ":task-dates_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/filters.test.ts"],
     deps = [
         ":filters",
@@ -572,6 +578,7 @@ proto_vitest_test(
         ":task-dates_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/goal-model.test.ts"],
     deps = [
         ":goal-model",
@@ -588,6 +595,7 @@ proto_vitest_test(
         ":task-dates_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/mail.test.ts"],
     deps = [
         ":mail",
@@ -604,6 +612,7 @@ proto_vitest_test(
         ":task-dates_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/planning.test.ts"],
     deps = [
         ":planning",
@@ -618,6 +627,7 @@ proto_vitest_test(
         ":task-dates_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/receipts.test.ts"],
     deps = [
         ":receipts",
@@ -634,6 +644,7 @@ proto_vitest_test(
         ":task-dates_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/review.test.ts"],
     deps = [
         ":gtd",
@@ -649,6 +660,7 @@ proto_vitest_test(
         ":task-dates_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/startup.test.ts"],
     deps = [
         ":startup",
@@ -734,6 +746,7 @@ js_library(
         ],
     ),
     deps = [
+        ":application_sources",
         ":index",
         ":node_modules/esbuild",
         ":node_modules/miniflare",
@@ -774,7 +787,7 @@ workspace_link(
         runner = vitest.vitest_test,
         tags = ["workerd"] + ([
             "cpu",
-            "no-cache",
+            "exclusive",
         ] if test.endswith("/cpu.test.ts") else []),
         tests = [test],
     )
@@ -823,4 +836,128 @@ js_library(
     name = "browser_server",
     srcs = ["test/runtime/dev-server.ts"],
     deps = [":runtime_harness"],
+)
+
+# Runtime journeys compile the complete Worker, so every production source is an input.
+js_library(
+    name = "application_sources",
+    srcs = glob(["src/**"]),
+)
+
+# Original ESLint config and source scope, with generated Bazel launchers kept outside the file list.
+eslint_test(
+    name = "lint",
+    data = [
+        "package.json",
+        "test/runtime/tsconfig.json",
+        "tsconfig.json",
+        ":index",
+        ":node_modules/@cloudflare/workers-types",
+        ":node_modules/@eslint/js",
+        ":node_modules/@types/node",
+        ":node_modules/@ziyixi/edge-auth",
+        ":node_modules/@ziyixi/task-dates",
+        ":node_modules/esbuild",
+        ":node_modules/eslint",
+        ":node_modules/miniflare",
+        ":node_modules/typescript",
+        ":node_modules/typescript-eslint",
+        ":node_modules/vitest",
+        ":runtime_harness",
+        ":typecheck_proto_link",
+        "//:node_modules/@cloudflare/workers-types",
+        "//tasks/tools:backup_restore",
+        "//tools/workerd-cpu:lib",
+    ],
+    runner = eslint.eslint_test,
+    sources = glob([
+        "src/**/*.ts",
+        "test/**/*.ts",
+        "*.ts",
+        "*.js",
+    ]),
+)
+
+ts_config(
+    name = "worker_compiler_profile",
+    src = "tsconfig.json",
+)
+
+ts_config(
+    name = "runtime_compiler_profile",
+    src = "test/runtime/tsconfig.json",
+    deps = [":worker_compiler_profile"],
+)
+
+ts_project(
+    name = "runtime_types",
+    srcs = glob(["test/runtime/*.ts"]) + [":runtime_proto_wire_types"],
+    extends = ":runtime_compiler_profile",
+    no_emit = True,
+    tsconfig = {
+        "compilerOptions": {
+            "noEmit": True,
+        },
+        "include": [],
+        "exclude": [],
+    },
+    deps = [
+        ":index",
+        ":node_modules/@cloudflare/workers-types",
+        ":node_modules/@types/node",
+        ":node_modules/@ziyixi/edge-auth",
+        ":node_modules/@ziyixi/task-dates",
+        ":node_modules/esbuild",
+        ":node_modules/miniflare",
+        ":node_modules/vitest",
+        ":runtime_harness",
+        ":typecheck_proto_link",
+        "//:node_modules/@cloudflare/workers-types",
+        "//tasks/tools:backup_restore",
+        "//tools/workerd-cpu:types",
+    ],
+)
+
+alias(
+    name = "runtime_typecheck",
+    actual = ":runtime_types_typecheck",
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        [
+            "*",
+            "src/**",
+            "test/**",
+        ],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)
+
+test_suite(
+    name = "typecheck_tests",
+    tests = [
+        ":runtime_types_typecheck_test",
+        ":types_typecheck_test",
+    ],
+)
+
+test_suite(
+    name = "runtime_tests",
+    tests = [":runtime_" + file.removeprefix("test/runtime/").removesuffix(".test.ts") + "_test" for file in glob(["test/runtime/*.test.ts"])],
 )

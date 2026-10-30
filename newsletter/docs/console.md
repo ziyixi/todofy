@@ -45,8 +45,8 @@ Notion 简报库类型同一规则；待核对计数与最近投递使用监控�
 
 - `tests/support/console_world.py` 用引擎自己的建表和固定时间写出一个合成世界（10-27 已投递、10-28 选题超出冻结预算后
   无可发布内容、10-29 Notion 同步中、修订、样张，以及全部 Notion 副本状态），没有任何生产数据。
-- `contracts/newsletter-ui-v1/fixtures/` 是读接口对这个世界的 golden 回答。`uv run --locked python scripts/console_fixtures.py`
-  检查，`--update` 在有意变更后重写；`proto/test/newsletter-ui.test.ts` 用 TypeScript 编解码器逐字节往返。
+- `contracts/newsletter-ui-v1/fixtures/` 是读接口对这个世界的 golden 回答。`bazel test //newsletter:tests_test_console_contract`
+  校验，fixture 重写只用于有意的合同更新；`proto/test/newsletter-ui.test.ts` 用 TypeScript 编解码器逐字节往返。
 - `test_console_access.py`、`test_console_read.py`、`test_console_readonly.py`、`test_console_listener.py`、
   `test_console_views.py`、`test_console_api_surface.py`、`test_console_contract.py` 覆盖身份、读取规则、只读、监听生命周期、
   纯规则、路由和字节；镜像 smoke 检查烘焙的策略，并确认无登录请求被拒绝、引擎路由不在控制台端口上。

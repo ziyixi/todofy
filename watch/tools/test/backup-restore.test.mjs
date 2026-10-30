@@ -13,6 +13,9 @@ import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 import { RestoreError, verifyDownload } from '../backup-restore.ts';
 
+// CLI children keep their minimal environment and use the pinned interpreter directly.
+const NODE_EXECUTABLE = process.env.JS_BINARY__NODE_BINARY ?? process.execPath
+
 const TOOL = fileURLToPath(new URL('../backup-restore.ts', import.meta.url));
 const BACKUP = 'backups/2026-10-28T112300Z/';
 const sha256 = (data) => createHash('sha256').update(data).digest('hex');
@@ -67,7 +70,7 @@ function bucket(root, { tamper = false } = {}) {
 }
 
 function run(fakeRoot, ...args) {
-  return spawnSync('node', [TOOL, ...args, '--wrangler', `node ${FAKE}`], { encoding: 'utf8', env: { ...process.env, FAKE_R2: fakeRoot } });
+  return spawnSync(NODE_EXECUTABLE, ['--preserve-symlinks-main', TOOL, ...args, '--wrangler', `node ${FAKE}`], { encoding: 'utf8', env: { ...process.env, FAKE_R2: fakeRoot } });
 }
 
 test('download fetches the newest backup and its evidence owner-only, and checks every SHA-256', () => {
@@ -117,7 +120,7 @@ test('verify refuses a changed part, a changed evidence copy and a key that leav
     const manifest = JSON.parse(readFileSync(join(root, 'good', 'manifest.json'), 'utf8'));
     manifest.evidence.objects[0].key = '../outside.json';
     writeFileSync(join(root, 'good', 'manifest.json'), JSON.stringify(manifest));
-    const outside = spawnSync('node', [TOOL, 'verify', '--in', join(root, 'good')], { encoding: 'utf8' });
+    const outside = spawnSync(NODE_EXECUTABLE, ['--preserve-symlinks-main', TOOL, 'verify', '--in', join(root, 'good')], { encoding: 'utf8' });
     assert.equal(outside.status, 1);
     assert.match(outside.stderr, /leaves the download directory/);
   } finally {

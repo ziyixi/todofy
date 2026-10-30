@@ -80,7 +80,7 @@ for another backup while one is unfinished, 404 `backup_not_found` for a prefix 
 ### Step by step
 
 `PRIV` is a private directory outside the repository, for example
-`mkdir -m 700 ~/.local/share/personal-mcp-restore && PRIV=$_`. Its files hold Work memory and signing secrets;
+an owner-controlled isolated recovery location. Its files hold Work memory and signing secrets;
 delete them afterwards.
 
 1. From `personal-mcp/`, download the newest backup and check it (`--backup backups/<job start>/` picks an older
@@ -155,4 +155,6 @@ Home's status, the tool downloads, verifies and uploads it with wrangler (`--loc
 `--remote`), and the owner call restores it into a new environment, which then serves the same Work, re-baselines its
 business source and replays the Watch feed. `worker/test/runtime/backup.test.ts` restores a larger synthetic store and
 compares every table and KV key row for row, and covers the step budgets, failed steps, a failed job, a resumed
-restore, retention, Ops and a retired object. `node --test tools/test/*.test.mjs` covers the tool.
+restore, retention, Ops and a retired object. `bazel test //personal-mcp/tools:check` covers the tool.
+
+The committed synthetic build/test path is `bazel test //personal-mcp:check`. Runtime backup/restore tests and tool checks are selected as leaves from that facade; remote recovery commands above are separate authorized operator work.

@@ -1,9 +1,36 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
 package(default_visibility = ["//visibility:public"])
 
-js_library(name = "limits", srcs = ["limits.md"])
+js_library(
+    name = "limits",
+    srcs = ["limits.md"],
+)
 
-js_library(name = "design", srcs = ["design.md"])
+js_library(
+    name = "design",
+    srcs = ["design.md"],
+)
 
-js_library(name = "design-v2", srcs = ["design-v2.md"])
+js_library(
+    name = "design-v2",
+    srcs = ["design-v2.md"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["*"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)

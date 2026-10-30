@@ -1,31 +1,46 @@
 load("@rules_python//python:defs.bzl", "py_binary")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
 package(default_visibility = ["//visibility:public"])
 
-exports_files(["images.bzl", "docker-public.json", "newsletter-entrypoint", "newsletter-trigger-entrypoint"])
+exports_files([
+    "images.bzl",
+    "docker-public.json",
+    "newsletter-entrypoint",
+    "newsletter-trigger-entrypoint",
+])
 
 platform(
     name = "linux_amd64",
-    constraint_values = ["@platforms//os:linux", "@platforms//cpu:x86_64"],
+    constraint_values = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
 )
 
 config_setting(
     name = "macos_arm64",
-    constraint_values = ["@platforms//os:macos", "@platforms//cpu:aarch64"],
+    constraint_values = [
+        "@platforms//os:macos",
+        "@platforms//cpu:aarch64",
+    ],
 )
 
 config_setting(
     name = "linux_x86_64",
-    constraint_values = ["@platforms//os:linux", "@platforms//cpu:x86_64"],
+    constraint_values = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
 )
 
 alias(
     name = "kubectl",
-    tags = ["manual"],
     actual = select({
         ":macos_arm64": "@kubectl_darwin_arm64//file",
         ":linux_x86_64": "@kubectl_linux_amd64//file",
     }),
+    tags = ["manual"],
 )
 
 py_binary(
@@ -65,4 +80,21 @@ py_binary(
     srcs = ["platform_resources.py"],
     legacy_create_init = False,
     deps = ["@python_deps//pyyaml"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["*"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
 )

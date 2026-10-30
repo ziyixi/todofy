@@ -68,9 +68,7 @@ Retention is in code, never an R2 lifecycle rule, so a stopped job never ages ou
 complete backup, the newest 30 complete backups are kept; older complete ones and every incomplete prefix older than
 the new one are deleted, each prefix with all its objects. A job never rewrites or deletes a kept backup.
 
-A backup is the store's rows, gzip-compressed; 30 of them stay far inside R2's free storage, which the account
-shares. The daily job reads every row once, a small part of the account's 5 million free SQLite reads a day, and
-writes a few dozen R2 objects.
+Backup size and work are measured from the actual manifest and run state. Account quotas are shared; this is not a billing or restore-time guarantee.
 
 ## Ops
 
@@ -92,7 +90,7 @@ A restore loads a backup into an empty store only: no labels, decisions, ledger 
 `meta`, `pending`, `usage` and `requests` by itself before its setup (history registration and counters); the restore
 replaces them. It never loads over a store that holds the owner's records.
 
-`PRIV` is a private directory outside the repository, for example `mkdir -m 700 ~/.local/share/mailsort-restore && PRIV=$_`.
+`PRIV` is a private directory outside the repository, for example an owner-controlled isolated recovery location.
 The files written there hold the owner's mail metadata; delete them afterwards.
 
 1. Choose and check the backup. From `mailsort/`, download the newest one (or `--backup backups/<job start>/`; the R2
@@ -160,6 +158,8 @@ into a local R2 bucket, a second, empty one restores it through the owner API, a
 and value for value (its SQLite type included), with the schema; then the pipeline resumes without a Gmail write. It
 also covers a damaged part and a restart, the daily write allowance, in-flight writes, the Ops view and this tool's
 download with wrangler. `backup-steps.test.ts` covers failed steps, a failed job, an empty store and retention against
-a local R2 bucket, and `cpu.test.ts` measures the heaviest backup and restore steps. `node --test tools/test/*.test.mjs`
+a local R2 bucket, and `cpu.test.ts` measures the heaviest backup and restore steps. `bazel test //mailsort/tools:check`
 covers the tool on synthetic backups. The same commands work on a local bucket with `--local --persist-to <dir>` in
 place of `--remote`.
+
+The committed synthetic build/test path is `bazel test //mailsort:check`. Runtime backup/restore tests and tool checks are selected as leaves from that facade; remote recovery commands above are separate authorized operator work.

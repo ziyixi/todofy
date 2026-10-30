@@ -7,16 +7,12 @@
     "postinstall": "node ../../proto/tools/ensure.mjs",
     "predev": "node ../../proto/tools/ensure.mjs",
     "dev": "vite --host 127.0.0.1",
-    "prebuild": "node ../../proto/tools/ensure.mjs",
-    "build": "tsc --noEmit && vite build",
-    "pretypecheck": "node ../../proto/tools/ensure.mjs",
-    "typecheck": "tsc --noEmit",
-    "pretest": "node ../../proto/tools/ensure.mjs",
-    "test": "vitest run",
-    "lint": "eslint .",
-    "test:browser": "playwright test",
-    "prelint": "node ../../proto/tools/ensure.mjs",
-    "pretest:browser": "node ../../proto/tools/ensure.mjs"
+    "build": "bazel build //tasks/web:bundle",
+    "typecheck": "bazel test //tasks/web:typecheck_tests",
+    "test": "bazel test //tasks/web:unit_tests",
+    "lint": "bazel test //tasks/web:lint",
+    "test:browser": "bazel test //tasks/web:browser_tests",
+    "check": "bazel test //tasks:check"
   },
   "dependencies": {
     "@base-ui/react": "catalog:",

@@ -10,7 +10,7 @@
 import { spawnSync } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createHttpClient } from '@ziyixi/proto/http-client';
@@ -23,6 +23,9 @@ import { DAY, HOUR, MINUTE, op, reasonOf, rejection, startHarness, T0, type Harn
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const TOOL = join(HERE, '../../../tools/backup-restore.ts');
+const WRANGLER = process.env.BAZEL_WRANGLER
+  ? resolve(process.env.TEST_SRCDIR ?? '', process.env.TEST_WORKSPACE ?? '', process.env.BAZEL_WRANGLER)
+  : undefined;
 /** 2026-10-02T11:23:00Z: the daily slot after a day of checks. */
 const SLOT = T0 + DAY + 11 * HOUR + 23 * MINUTE;
 const SHOP = 'https://shop.example.com/kettle';
@@ -72,7 +75,7 @@ async function backupJobOpen(h: Harness): Promise<boolean> {
   return row !== undefined && (JSON.parse(row.value) as { job: unknown }).job !== null;
 }
 
-const tool = (...args: string[]) => spawnSync('node', [TOOL, ...args], { encoding: 'utf8' });
+const tool = (...args: string[]) => spawnSync(process.execPath, [TOOL, ...args, ...(WRANGLER && process.env.BAZEL_WRANGLER && ['download', 'upload', 'verify'].includes(args[0] ?? '') ? ['--wrangler', WRANGLER] : [])], { encoding: 'utf8' });
 
 describe('backup and restore of the real WatchState', () => {
   it('backs up at the daily slot, restores into a new namespace, and nothing old acts again', async () => {

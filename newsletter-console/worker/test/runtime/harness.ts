@@ -40,6 +40,7 @@ export interface Harness {
 
 export async function startHarness(jwks: unknown, options: HarnessOptions = {}): Promise<Harness> {
   const result = await build({
+    ...(process.env.TEST_SRCDIR ? { nodePaths: [`${process.cwd()}/node_modules`] } : {}),
     entryPoints: [resolve('src/index.ts')], bundle: true, format: 'esm',
     platform: 'neutral', target: 'es2024', conditions: ['workerd', 'worker', 'import'], write: false, logLevel: 'silent',
   });

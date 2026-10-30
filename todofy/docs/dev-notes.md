@@ -1,815 +1,139 @@
 # Todofy developer notes
 
-How to work on Todofy: local commands, repo layout, the Python Workers idioms this code relies on, and
-the contracts between modules. Todofy is two Workers: the TypeScript gateway `todofy` (`gateway/`: host
-routing, Access, CSRF, webhook and Basic credentials, assets, cron) and the Python `todofy-core`
-(`worker/`), which hosts the `TodofyCore` Durable Object where D1 work and model invocation coordination run. Todofy writes no
-task since 2026-10-21 (Tasks converts mail through the `Mail` entrypoint); the column names that still say
-`todoist` are frozen identities, and neither Worker binds Tasks (Tasks backs itself up). `gateway-contract.md` is the contract between them. Plans and decisions live in `cloudflare-migration-plan.md` (v2, §0.1
-overrides) and `implementation-order.md`; where they disagree with this file on a name or interface,
-this file reflects what is in the tree. The retired Go service is gone from the tree (S11); it stays in
-the git history at `6c46ed4`.
+Todofy is a TypeScript gateway plus a private Python Durable Object. It owns mail/summary/report data, not Tasks'
+planning or task creation. Read the [gateway contract](gateway-contract.md), [Mail API](mail-api.md) and root proto
+before changing a boundary. Source and current contracts supersede the retired rewrite proposals.
 
-## 1. Run everything locally
-
-Prerequisites: Node 26 (root `package.json`), pnpm 11.25.0, uv 0.12.10, Python 3.14 (`.python-version`; uv fetches it).
-Run everything from `todofy/` in the monorepo.
+## 1. Build and test
 
 ```sh
-pnpm --dir .. install --frozen-lockfile   # the root workspace lock (docs/dependencies.md), gateway/ and web/ included
-uv sync --locked                     # dev tools; the Worker itself has no third-party packages
-uv run ruff check worker tests tools deploy && uv run ruff format --check worker tests tools deploy
-uv run pytest tests/unit tests/fakes tools deploy   # host CPython (tools includes a local-D1 round trip)
-(cd gateway && npm run lint && npm run typecheck && npm test)
-(cd gateway && npm run test:runtime) # the gateway alone in workerd: the owner API's CPU per request (gateway-contract.md §8)
-(cd web && npm run typecheck && npm test && npm run build)  # build checks the JS budget
-uv run pytest tests/runtime          # real workerd via `wrangler dev`, serially: ~10 min (about 80
-                                     # dev servers, each running the gateway and todofy-core in one process)
-uv run pytest tests/runtime -n 4     # the same tests in 4 processes (pytest-xdist): ~3 min
-uv run pytest                        # everything (testpaths: tests, tools, deploy)
+bazel test //todofy:check
+bazel build //todofy
+bazel test //todofy:runtime_tests --local_test_jobs=1
+bazel test //todofy:runtime_test_routing
 ```
 
-These are the steps of the `Todofy static checks` job and the `Todofy runtime` shards in the monorepo's
-`.github/workflows/ci.yml` ([ci-cd.md](ci-cd.md)); CI also dry-runs both committed production configs
-through `deploy/deploy_vars.py` with placeholder values for what the deploy adds. `npm run build` writes `uiassets/dist`; without it the runtime harness
-serves a placeholder `index.html` and one placeholder file under `assets/`.
+Bazel declares the compiled UI, fixed Node/workerd/Pyodide/SDK and synthetic upstreams. A scenario file runs whole,
+in its original order, with its own module-level server and state. Collection/runtime skips fail the target; native
+JUnit is the result record. There are no custom shard weights, manual warm-ups or separate JUnit merger.
 
-Running the runtime suite in parallel:
+For raw-source interactive work, use the root workspace locks and thin `node proto/tools/ensure.mjs` materializer.
+Keep local bindings and `.dev.vars`; D1 commands explicitly use `--local`. The gateway is primary when running the
+original paired dev server: it owns the port, host routing, assets and cron. Core vars come from its own config,
+not primary-only CLI overrides. Never publish a production config from this development loop.
 
-- A file always runs whole, in its own order, in one process. Tests in a file share the module's Worker,
-  and some rely on the ones before them: 13 tests in 9 files fail when their file runs reversed. Files
-  are independent of each other: every file passed in a random and in a reversed file order. So
-  pytest-xdist runs with `--dist loadfile --no-loadscope-reorder` (the `addopts` default in
-  `pyproject.toml`), and the rootdir `conftest.py` refuses every other mode (`--dist load`,
-  `worksteal`, `loadgroup`, `each`, `loadscope`), also for `uv run pytest -n 4` over all testpaths
-  (`tests/unit/test_pytest_setup.py`). Never add pytest-randomly or a rerun plugin.
-- Ports: each pytest process takes the ports of its servers from its own range of 500, from 20000 up
-  (the xdist worker number picks the range). That is below the Linux (32768–60999) and macOS
-  (49152–65535) ephemeral ranges, where the fakes' and clients' OS-assigned ports live. Each server
-  also gets an explicit `--inspector-port` from the range; wrangler's own pick (9229, else a random
-  port) races between processes. To run several pytest commands at once, give each a different
-  `TODOFY_TEST_PORT_SLOT` that is at least the previous one plus its `-n` (for example 0, 4 and 8 for
-  three runs with `-n 4`).
-- Shared state in the checkout is prepared under file locks in `.wrangler/`: `pywrangler sync` (once per
-  process) and the first Pyodide download. `uv run python -m tests.runtime.warm_up` does both once, up
-  front; CI runs it before each shard.
-- `test_alarm.py::test_timeout_really_closes_a_hanging_upstream_connection` and
-  `test_clients_model.py::test_hanging_binding_is_cancelled_at_the_step_deadline` exercise real
-  cancellation through the local `MODEL_ROUTER` binding and its loopback bridge. The client bounds
-  both headers and body by the step deadline, with explicit async timeout and abort cleanup.
-  Test configs use `MODEL_TIMEOUT_MS=1500`; CI also runs the alarm test serially after each shard.
-- Longest first: xdist hands out files in the order pytest collects them, so pass the files heaviest
-  first. The CI plan prints them in that order; to run shard `I` of 3 exactly as CI does:
-
-  ```sh
-  uv run pytest tests/runtime --collect-only -q -p no:cacheprovider > /tmp/collected.txt
-  uv run pytest -n 4 $(python3 ../.github/scripts/pytest_shards.py --collected /tmp/collected.txt \
-    --durations ../.github/scripts/todofy-runtime-durations.json --workers 4 --total 3 --index I \
-    --serial ../.github/scripts/todofy-runtime-serial.txt --serial-out /tmp/serial.txt)
-  [ -s /tmp/serial.txt ] && uv run pytest $(cat /tmp/serial.txt)   # this shard's files that run alone
-  ```
-
-  Without `--serial`, `--total 1 --index 0` prints every file, heaviest first, for a single `-n 4` run.
-
-One host test, `tools/legacy_migration/test_legacy_to_d1.py::test_model_table_matches_the_proto`,
-cross-checks the legacy model table against the `protos` checkout. It reads `TODOFY_PROTOS_DIR` if set,
-otherwise a `protos` checkout next to the monorepo checkout (or next to a standalone `todofy` checkout),
-and skips when none is present, as in CI.
-
-Other useful commands (all local, no credentials):
+For the interactive paired local server, from `todofy/` after raw-source materialization:
 
 ```sh
-# Both Workers in one local process (gateway first: it owns the port, the cron trigger, the assets and
-# --var). The committed configs are production: local bindings only, never --remote. The local hosts
-# replace the production ones. wrangler dev would otherwise make the gateway's first production route
-# every request's URL (whatever the Host header), which is neither local host, so --local-upstream pins
-# the URL to the owner host: browse http://todofy.localhost:8787. To reach the hooks host instead (e.g.
-# tools/smoke_webhook.py), restart with --local-upstream todofy-hooks.localhost:8787. DEV_AUTH_BYPASS
-# applies only to *.localhost hosts. Core-only local values and secrets go in todofy/.dev.vars
-# (.dev.vars.example; the runtime tests' cores read it too).
 uv run pywrangler dev -c gateway/wrangler.toml -c wrangler.toml \
   --port 8787 --local-upstream todofy.localhost:8787 \
   --var TODOFY_PUBLIC_HOST:todofy.localhost --var TODOFY_HOOKS_HOSTS:todofy-hooks.localhost \
-  --var BUILD_SHA:dev --var MAINTENANCE_MODE:false --var DEV_AUTH_BYPASS:true
-# Apply D1 migrations to a throwaway local database
-node_modules/.bin/wrangler d1 migrations apply DB --local --persist-to /tmp/todofy-d1 --config wrangler.test.toml
-# Bundle checks of the production configs (without the deploy's --var values); list every module and binding.
-# The exact deploy commands, with deploy/deploy_vars.py, are in cloudflare-setup.md §6.
-CI=true uv run pywrangler deploy --dry-run --config wrangler.toml --outdir /tmp/todofy-core-bundle
-CI=true node_modules/.bin/wrangler deploy --dry-run --config gateway/wrangler.toml --outdir /tmp/todofy-gateway-bundle
+  --var BUILD_SHA:dev
 ```
 
-`uv run pywrangler dev` / `deploy` re-create `.venv-workers/` and `python_modules/` (both gitignored)
-whenever `pyproject.toml` or `pylock.toml` change. `pylock.toml` pins `workers-runtime-sdk` with its hash
-and is generated by pywrangler; commit it.
+## 2. Source map
 
-## 2. Repo layout
+| Directory/module | Responsibility |
+| --- | --- |
+| `gateway/src/` | Host routing, authentication, CSRF, assets, cron and RPC/transcoder adapters |
+| `worker/todofy/core/` | Host-testable stdlib rules, vocabulary, prompts, validation and SQL definitions |
+| `runtime/coordinator.py` | The only ledger writer; alarms, budgets, summary work and periodic ticks |
+| `runtime/ledger.py` | Frozen events, compare-and-set transitions and owner request receipts |
+| `runtime/model.py`, `model_settings.py` | Provider-neutral Router calls and separate saved mail/report selections |
+| `runtime/reports.py`, `retention.py` | Bounded reports/precompute and retention |
+| `runtime/owner_ui.py`, `mail.py` | Current owner/private Mail methods |
+| `runtime/backup.py`, `metrics.py`, `ops.py` | Weekly D1 snapshots, counters and content-free operations |
+| `core/sql/` | Every D1 statement and its expected index |
+| `migrations/`, `api/`, root `proto/`/`contracts/` | Storage history, machine contract, current messages and frozen fixtures |
+| `tests/unit`, `tests/fakes`, `tests/runtime` | Host rules, loopback providers and real paired workerd scenarios |
 
-```
-wrangler.toml                  todofy-core production config (D1, the DO class; no routes; top level =
-                               production); must keep this name, next to python_modules/ (pywrangler)
-.dev.vars.example              local core values (copy to .dev.vars, gitignored)
-wrangler.test.toml             todofy-core for the runtime tests: short timeouts, fake upstreams
-gateway/                       the gateway Worker `todofy` (TypeScript, own package.json and lockfile;
-                               Access, CSRF and private headers come from ../packages/edge-auth, linked
-                               by a `file:` dependency and compiled into this Worker)
-  src/                         index.ts (routing, cron), hooks.ts, owner.ts, access.ts, csrf.ts, ...
-  test/                        vitest unit tests with fake ASSETS/COORDINATOR bindings
-  wrangler.toml                gateway production config (hosts, assets, cron, COORDINATOR → todofy-core)
-  wrangler.test.toml           runtime tests: DEV_AUTH_BYPASS
-  wrangler.test-auth.toml      runtime tests: real Access JWT checks against a loopback issuer
-migrations/0001_init.sql       the D1 schema; 0002_daily_metrics.sql adds the owner UI's daily trends (§6);
-                               0003_ops.sql adds mail_events.canary_run_id, mail_reminders.ops_count/ops_generated_at (§5, ops-v1);
-                               0004_gtd.sql adds the GTD ledger (gtd_snapshots, gtd_snapshot_tasks, gtd_daily,
-                               gtd_reviews) and mail_reminders.project_id (gtd-features.md, at b9d18aba);
-                               0005_task_intents.sql adds task_intents and task_intent_tasks (§5, task-intent-v1);
-                               0006_todoist_plus.sql the Todoist Plus tables and 0007_plan_store.sql the planning
-                               store (mail-api.md); 0014_retire_task_writes.sql drops the task intents and the GTD
-                               snapshot once no row still needs the task writes (its guard stops the deploy otherwise);
-                               0015_drop_copied_stores.sql drops the GTD days and reviews and the Mail categories
-                               Tasks copied (mail_reminders stays for tools/legacy_migration)
-api/                           machine-api-v1.openapi.yaml (the hooks hosts' routes: webhook, newsletter,
-                               health; the owner API is ../proto/todofy/ui/v1), newsletter report
-                               schemas; the webhook body references ../contracts/mail-received-v1 (shared,
-                               generated from proto/mailhero/webhook/v1; core/contract.py reads every body
-                               with its generated Python codec)
-worker/todofy/core/            pure stdlib Python, host-testable, no `js`/`workers` imports
-  vocab.py api_errors.py contract.py render.py prompts.py backoff.py report_schema.py
-  model_input.py carryover.py mailbox.py metrics.py backup.py ops.py owner_ui.py
-  sql/                         every D1 statement, one module per owning runtime module
-worker/todofy/runtime/         runs only inside workerd (imports `js`, `workers`, `pyodide`)
-tests/unit/                    host tests for core/, the migration and the API contract (golden/ = legacy captures and current prompts)
-tests/fakes/                   in-process loopback HTTP fake (+ its own tests)
-tests/runtime/                 black-box tests against `wrangler dev` (gateway + core) with real
-                               D1/DO/alarms/cron/assets (harness.py; run serially or in parallel, §1)
-tests/mail_contract.py         paths of the shared contract: ../contracts/mail-received-v1 holds the schema and
-                               the exact webhook bytes Mail Hero's builder emits (compat fixtures, synthetic mail);
-                               tests/unit/mail_cases.py mutates them for the differential tests against the frozen
-                               hand-written schema and parser (tests/unit/legacy/)
-web/                           owner UI (React + Vite); builds into uiassets/dist; calls todofy.ui.v1 through the
-                               generated client (@ziyixi/proto/http-client, src/api/client.ts)
-tools/                         legacy SQLite snapshot → D1 export/verify scripts and the webhook smoke test
-                               (stdlib, Python 3.9+)
-deploy/                        deploy_vars.py (adds what is never committed: --var values, each Worker's
-                               secrets file) and the tests of the committed production configs
-```
+`runtime/api.py`/`owner_api` retain only the dated old-gateway compatibility surface. The gateway's current public
+entrypoints are `Ops` and `Mail`. Historical column names mentioning Todoist remain data identities, not an active
+integration. Do not rename stored identities during build or doc cleanup.
 
-Conventions: English identifiers and comments, Chinese user-facing strings, type hints everywhere,
-comments explain why. `core/` modules import each other relatively (`from .vocab import Code`);
-runtime modules import absolutely (`from todofy.core.vocab import Code`). Comments that cite
-`*.go` files refer to the Go service at `6c46ed4` (git history).
+## 3. Python Workers rules
 
-## 3. Python Workers idioms used here
+- `Default.fetch` returns 404; the core has no public routes. The gateway reaches
+  `COORDINATOR.getByName("inbox-v1")` over RPC, with arguments it chose itself.
+- Use `self.env`. Binding access is through JsProxy; absent attributes can raise, so the existing config readers
+  supply defaults. Public config, personal inputs and provider connections keep their existing separate owners.
+- Expected outcomes return the existing plain result objects. Python exceptions lose structured attributes over
+  RPC. Return dictionaries/lists/strings/bytes rather than tuples or element-wise memoryviews.
+- D1 uses `prepare(...).bind(...)`, `first/all/run` and atomic `batch`. DO SQLite uses synchronous
+  `ctx.storage.sql.exec`. Alarms use epoch milliseconds; D1/business deadlines use Unix seconds.
+- `runtime/interop.py` owns JS conversion, WebCrypto and bounded stream reading. `to_js` creates plain JS objects;
+  `read_capped` cancels oversized input without buffering the rest.
+- Model transport uses the shared Router client. A deadline bounds headers and body; cancellation aborts the
+  binding request. Prompts, input fencing, business retry and token reservation remain Todofy's responsibility.
+- Use host tests for pure rules, real workerd tests for JsProxy/stream/D1/DO behavior, and synthetic providers only.
 
-Layout and entry
-- `main = "worker/todofy/runtime/entry.py"`, `base_dir = "worker"`: every `.py` under `worker/` is
-  uploaded and module names are relative to it, so imports are `todofy.core.x` / `todofy.runtime.x`.
-  The dry-run bundle lists `todofy/core/*.py`; the runtime tests prove core imports work in Pyodide.
-- `entry.py` exports `Default(WorkerEntrypoint)`, whose `fetch` answers 404 (the core has no public
-  routes), and re-exports `TodofyCore` in `__all__`.
-- pywrangler picks the Python version from the root `wrangler.toml` only (`compatibility_date =
-  "2026-09-08"` + `python_workers` → Python 3.14 / Pyodide 3.14.2), whatever `--config` says. Every
-  other config must keep the same date and flags (`tests/runtime/test_configs.py` guards the test ones,
-  `deploy/test_wrangler_configs.py` the gateway).
+## 4. Ledger, SQL and model invariants
 
-Host routing, credentials and assets live in the gateway (`gateway/src`, gateway-contract.md §2)
-- `TODOFY_PUBLIC_HOST` → `owner.ts`: Access JWT on every request, including assets; `/api/*` or
-  `ASSETS` (SPA fallback via `not_found_handling`, `run_worker_first = true`), private headers added.
-- Every name in `TODOFY_HOOKS_HOSTS` (comma-separated) → `hooks.ts`: exactly `POST /hooks/mail`,
-  `GET /api/summary`, `GET /api/recommendation`, `GET /health`. Anything else, and any other host → 404.
-- `request.url` carries the Host header under `wrangler dev`, so tests pick the vhost with
-  `host: todofy.localhost` / `host: todofy-hooks.localhost`.
-- The gateway calls the object's RPC methods on `env.COORDINATOR.getByName("inbox-v1")` with arguments it
-  picks itself (the owner API gets the canonical owner); the object's `fetch` answers 404 to everything.
-  Bodies are passed as streams, unread. Every method answers with an `http.Result` dict, which the gateway
-  turns into the HTTP response (gateway-contract.md §3).
+Vocabulary comes from `core.vocab`, matching stored CHECK constraints and the generated messages' wire names.
+User-facing Chinese labels live in the UI's label module. Source/event identities and payload hashes are frozen.
 
-Env, secrets, bindings (core)
-- `config.var(env, NAME, default)`, `flag()` (== "true") and `integer()`. A missing binding
-  raises on the JsProxy; `var` uses getattr with a default. Secrets read exactly like vars.
-- Dev-only switches (`DEV_AUTH_BYPASS`, `DEV_ACCESS_LOOPBACK_ISSUER`) are gateway vars and only work when
-  `TODOFY_PUBLIC_HOST` ends with `.localhost`; no production config holds `DEV_*` (tests check it).
-- Use `self.env` in handlers. The core has no `scheduled()`: the gateway's cron calls the object's `wake()`.
+Every D1 statement is a `Query` constant under `core/sql/`, with the key/index it uses. The SQL test discovers these
+queries and checks their actual query plans. Keep active/due/attention predicates in the existing shared SQL rules,
+not slightly different copies in readers.
 
-Answers (`runtime/http.py`)
-- RPC methods take plain arguments (JS strings arrive as `str`, null as `None`, a ReadableStream as a
-  JsProxy that `interop.read_capped` reads) and return `Result.wire()`, a plain dict. Build a `Result`
-  with `ok(data)` (200, `json.dumps(ensure_ascii=False)` text), `NO_CONTENT` (204) or
-  `failed(status, ApiError.X, retry_after=None)`. Never raise for an expected outcome: a Python
-  exception reaches the gateway only as an opaque `PythonError` with a traceback (503 there).
-- Return `bytes`, `str`, dicts and lists over RPC, never a tuple (refused) or a memoryview/typed array
-  (converted element by element, about 1.5 s per MiB in workers-runtime-sdk 1.9.0).
-- Every error body of the hooks hosts (and of `owner_api`, the previous gateway's) is the envelope
-  `{"error": {"code", "message", "request_id"}}` (`api/machine-api-v1.openapi.yaml`). Codes are the
-  closed `core.api_errors.ApiError` (== the document's `ApiErrorCode`, unit-tested), messages come from
-  `api_errors.MESSAGES`. The gateway's `errorEnvelope()` (`gateway/src/http.ts`) builds the envelope and
-  logs `{request_id, status, code}` once for every error, `failed()` results included; the core builds no
-  envelopes and never sees the request ID, except `http.error_response()` (the fetch handlers' 404 and
-  the transition 503), which makes and logs its own (gateway-contract.md §4). A new code means editing
-  `ApiError`, `MESSAGES` and the document's enum together. The owner API (todofy.ui.v1) answers
-  google.rpc.Status instead: `owner_ui` returns a reason (`core/owner_ui.py` `Reason`, the reasons of
-  `proto/todofy/ui/v1/errors.proto` and `common.errors.v1`) and the gateway builds the Status.
+A state transition is one `(state,version)` compare-and-set plus its transition/summary/owner-action effects in the
+same batch. Dependent statements are guarded by the preceding `changes() = 1`; a lost transition writes no
+secondary record. Completion drops raw payload and freezes the summary/model. Deleted summaries leave the event
+ledger, so they cannot be summarized again.
 
-D1 (`env.DB`, wrapped by the SDK)
-- `stmt = env.DB.prepare(sql).bind(*args)` (Python `None` → NULL); `await stmt.first()` → JsDict or None
-  (`row.col` or `row["col"]`); `await stmt.all()` → `.results` (list of JsDict); `await stmt.run()`;
-  `await env.DB.batch([s1, s2])` → list of results (`results[1].results[0].col`); results are plain
-  Python, `json.dumps` works. D1 times are Unix seconds.
-- Only run SQL from `todofy.core.sql` (see §4.2): `env.DB.prepare(views.RECENT_PAGE.sql)`.
+Only one coordinator may write a ledger. Recovery treats interrupted summaries as abandoned; a second live writer
+would reset the first one's in-flight work. Keep this invariant on database restore, replacement and reverts.
 
-Durable Object (SQLite-backed)
-- `self.ctx.storage.sql.exec(sql, *args)` is synchronous → cursor with `.one()` / `.toArray()`. Create DO
-  tables in `__init__` with `IF NOT EXISTS`.
-- Alarms: `await self.ctx.storage.getAlarm()` (None or epoch ms), `await self.ctx.storage.setAlarm(ms)`;
-  handler `async def alarm(self, alarm_info=None)`.
-- `interop.now_ms()` / `interop.now_s()`. Time does not advance during pure CPU work in workerd, so
-  CPU cannot be timed inside the isolate; production CPU comes from Workers Logs.
+A model call reserves tokens before execution, then settles actual or conservative unknown usage on every exit.
+Saved model changes affect future work, not completed summaries. `GEMINI_DAILY_TOKEN_BUDGET` and historical metric
+keys are legacy physical names covering the current provider-neutral calls. Do not reset budgets when changing
+transport or model choice. Prompt snapshots and output-schema examples are tested separately from frozen legacy
+contract fixtures.
 
-Python/JavaScript conversions (`runtime/interop.py`)
-- `to_js(value)` builds plain JS objects (the default conversion would build a Map).
-- `read_capped(stream, limit)` reads a JS ReadableStream up to the byte limit and cancels an oversized
-  stream without buffering the rest. Runtime tests keep the early-stop and cancellation checks.
-- `sha256_hex(bytes)` uses WebCrypto. `now_ms()` and `now_s()` expose the isolate clock.
-- Model transport belongs to `runtime/model.py`: the shared client calls `MODEL_ROUTER`, bounds both
-  headers and body by the deadline, and aborts the binding call on timeout or cancellation.
+Reports use their bounded recent-mail window and optional pending-mail carryover. Precompute and on-demand work keep
+the existing daily/hourly caps and bounded retry. An unusable result is not served as an empty successful report.
+Only the owner deletes summaries; ordinary retention does not. Source constants and SQL own current bounds.
 
-Local runtime quirks (not production behaviour)
-- Local cron: `GET /cdn-cgi/local/scheduled?cron=...` (`Worker.trigger_cron`). `/__scheduled` and
-  `--test-scheduled` no longer work in wrangler 4.142 (the plan docs carry an as-built note).
-- `wrangler dev` holds an answer to a request whose body nobody read until the body is consumed, so the
-  gateway cancels an unread upload after answering on the headers alone (401/403/404/413/415/503). If an
-  answer still leaves an upload in flight (405 from assets), wrangler's local proxy may fail the next POST
-  on that dev server with a 500. Send such requests without a body, use `Worker.headers_only_status`, or
-  use the per-test `throwaway_worker` fixture.
-- wrangler's local proxy forwards each request to workerd over a pooled keep-alive connection, and both
-  ends drop an idle connection after exactly 5 s (kj's client `idleTimeout` and server `pipelineTimeout`).
-  A request sent about 5 s after the server's last answer can be written into a connection workerd is
-  closing; the proxy resends a GET or HEAD but answers any other method with a 500 `Error: Network
-  connection lost.` (dev.log: `Error inside ProxyWorker ... (failed after 1 attempt)`, and no request line:
-  the Worker never saw it). Locally 16 of 85 POSTs sent 4.993-4.999 s after an answer failed, and none
-  outside that window; in CI it failed about one runtime shard in 135. The harness's clients trust no
-  connection idle for `PROXY_IDLE_S` (1 s): `_DevProxyTransport` closes its own, and before any method but
-  GET or HEAD after such a pause `Worker.refresh_proxy` sends `GET /health` (which the proxy does resend),
-  as `headers_only_status` does too; the request then reuses the connection that GET left. Never retry the
-  request itself: a real Durable Object call that drops reads the same. Remove the workaround once wrangler
-  resends a request with a body (workers-sdk #16348) or expires its pool before workerd closes (#14641).
-- Local D1 is a SQLite file in the persist directory, and after every D1 query, a SELECT too, workerd writes
-  an ersatz session bookmark into it (`ActorSqlite::getCurrentBookmark`), with no busy timeout. So a second
-  process on the file (`wrangler d1 execute --local` beside a running server) fails whichever side asks for
-  the write lock while the other holds it: SQLITE_BUSY, which a Worker's D1 call sees as `internal error;
-  reference = ...` at miniflare's `database.worker.ts:233` (workerd `--verbose`: `database is locked:
-  SQLITE_BUSY`). A report tick that hits it runs again after `TICK_RETRY` (10 min), far past any test wait.
-  Locally a Worker reading D1 in a loop failed 2 of 6,935 reads in 60 s beside the tests' 0.5 s `wrangler d1
-  execute` poll, and none of 6,953 with the same poll through the server. `Worker.d1` therefore runs its SQL
-  in the server, through wrangler dev's Local Explorer (`POST /cdn-cgi/local/explorer/api/d1/database/<id>/raw`),
-  in turn with the Worker's queries. Local R2 keeps its object index in SQLite as well (a `wrangler r2 object
-  get` beside the backup test's server failed in CI with `internal error`), so run wrangler's own `--local` D1
-  and R2 commands only on files the server has not opened yet or with the server stopped (`test_backup.py`).
-- wrangler's local proxy passes a chunked upload on only in large pieces (1.1 MiB unterminated never
-  reached the object in a probe; 3.2 MiB did) and may add a length, so an HTTP test cannot prove that the
-  object stops reading early. `test_owner_body_limit.py` proves the early stop on `interop.read_capped`
-  itself, fed a JS stream through the clients probe's `/read-capped` route, and checks the owner route
-  with a complete chunked body of exactly 16 KiB (served) and 16 KiB + 1 (400, nothing written).
-- A binding to a Worker the dev process does not run (the gateway started alone) gets a plain-text 503
-  `Worker "todofy-core" not found` from wrangler itself, not the gateway's `unavailable` envelope.
-- The first object call after startup takes ~2 s (Pyodide cold start); the harness only waits on the
-  gateway's `/health`, which never calls the object.
-- workerd downloads the ~14 MB Pyodide bundle from `pyodide-capnp-bin.edgeworker.net` on every start
-  unless it gets `--pyodide-bundle-disk-cache-dir`, which wrangler never passes. A slow download once
-  stalled a dev server for 77 s and once killed it (`read(): Operation timed out`), so the runtime harness
-  launches workerd through `.wrangler/workerd-with-pyodide-cache` (via `MINIFLARE_WORKERD_PATH`), which
-  caches it in `.wrangler/pyodide-cache`. Plain `pywrangler dev` still downloads it each time.
-- The harness starts `node_modules/.bin/wrangler dev` itself: `pywrangler dev` runs `pywrangler sync` and
-  `npx wrangler --version` on every start (about 1.2 s) and then the same `npx wrangler dev`. The harness
-  runs `pywrangler sync` once per pytest process instead. A new server's empty persist directory gets a
-  copy of one migrated per process and database, instead of its own `d1 migrations apply` (1.3 s).
+## 5. Gateway and current APIs
 
-## 4. Contracts every module must keep
+Access runs before owner body parsing; exact Origin, CSRF header and JSON checks run before mutations. Use the shared
+edge-auth adapters and root transcoder/client, not another JWT/CSRF implementation. Machine routes retain their
+existing credential/error envelopes; owner APIs use `google.rpc.Status`.
 
-### 4.1 Vocabulary, units, identities
-- States, error codes and owner actions: `core.vocab` only (== migration CHECKs == the todofy.ui.v1 enums'
-  wire names == the machine document's `ApiErrorCode`, tested).
-  The owner-facing Chinese text for each code lives only in `web/src/lib/labels.ts`; change it together
-  with the behaviour it describes.
-  Transition actors are the literals `worker` / `owner`.
-- Units: core timing constants and `backoff.*` are seconds; D1 columns are Unix seconds (store
-  `math.ceil`ed deadlines); DO alarms are epoch ms. Pass `now: int` (Unix seconds) through runtime calls.
-- Mail source: every ledger row uses `source_id = var(env, "MAIL_SOURCE_ID", "mail-hero-personal")`.
-- Payload hash: lowercase hex SHA-256 of the exact webhook bytes (`interop.sha256_hex`).
-- Owner identity: the gateway's `access.ts` (Todofy's policy for the shared `packages/edge-auth`
-  verifier) returns `ACCESS_OWNER` ASCII-lowercased (aliases in `ACCESS_OWNER_ALIASES` map to it) and passes
-  it to `owner_ui` (and `owner_api`, the previous gateway's); `owner_actions.owner` is always that value.
+Successful core answers remain pre-encoded through the gateway except list pages, whose opaque tokens it composes.
+Do not decode and rewrite large summaries, reports or legacy text just to forward them; the CPU suite protects that
+path and existing budgets. Binding-provided Mail access gates reads/writes before body parsing.
 
-### 4.2 SQL
-- Every D1 statement is a module-level `Query(sql, index, sort_allowed=False)` in `worker/todofy/core/sql/`,
-  in the module named after its runtime owner (`ledger`, `views`, `mailbox`, `reports`, `retention`,
-  `metrics`, `backup`).
-  `tests/unit/test_schema_sql.py` discovers all of them and checks each query plan uses its index with no
-  unbounded scan, so adding or widening a statement needs no test edit. Placeholder column lists
-  (`SELECT event_id ...`) are meant to be widened by the owner.
-- "Active" is always the `sql.ACTIVE` IN list (never `NOT IN`), due rows are `sql.DUE`, attention is
-  `sql.ACTIVE AND sql.ATTENTION` with the cutoff `now - ATTENTION_AGE_SECONDS`.
-- Every state change is one `STATE_CAS` (`state = ? AND version = ?`, `version = version + 1`, check
-  `meta.changes == 1`) plus its `event_transitions` insert in the same `batch()`. Moving to `complete` or
-  `ignored` also sets `payload = NULL` (CHECK-enforced) and, for `complete`, inserts the `summaries` row.
-  Each dependent insert (transition, summaries row, owner action) is guarded by `changes() = 1`, i.e. the
-  statement just before it changed one row, so a lost CAS writes nothing (a version match alone is not
-  enough: a writer one version behind matches the row another writer has just moved). A transition takes
-  a completed summary or an owner action, never both (`tests/runtime/test_ledger_cas.py`).
-- Statements that write (INSERT/UPDATE/DELETE) are also `Query` constants; name the index of the key they
-  hit (`sqlite_autoindex_<table>_1` for primary keys). A plain `INSERT ... VALUES` has no query plan, so
-  the test only checks that its index is a unique index of the inserted table.
+The authoritative RPC shapes and errors are in [gateway-contract.md](gateway-contract.md); public owner/report/mail
+messages are in root proto. Update both sides of an internal signature in one change, with compatible deployment
+ordering. Keep dated old-client responses until [their window](../../docs/history.md#owner-api-compatibility) closes.
 
-### 4.3 HTTP
-- Webhook: the gateway (`hooks.ts`) checks Bearer vs `MAIL_WEBHOOK_TOKEN_SHA256` / `_PREVIOUS` (constant
-  time), then `MAINTENANCE_MODE` (503 `maintenance` with `Retry-After`), 415, and 413 for a declared
-  `Content-Length` over 1 MiB, and passes the body stream and the `Idempotency-Key` header to the
-  object's `ingest`. A request without `Content-Length` is accepted and the object stops reading at 1 MiB
-  (413). The object requires one Idempotency-Key equal to `event_id` (a value containing "," means
-  repeated → 400), runs `contract.parse_mail_event`, answers 204 (stored or same bytes), 409 (different
-  bytes), 400, or 503.
-- Newsletter: the gateway checks Basic, `sha256("user:password")` compared in constant time with every
-  digest in the comma-separated `REPORT_BASIC_AUTH_SHA256` (list two while rotating). A correct credential
-  goes straight to the object's `newsletter(kind, query)` (`reports.serve`) and is always served. A failure
-  goes to `newsletter_auth_failure()` (`reports.count_auth_failure`), counted per UTC hour in `auth_failures`;
-  after 20 a failing request gets 429 and nothing more is written (at most 20 D1 writes an hour). That
-  lockout no longer slows guessing, so the newsletter password must be a random secret of at least 128
-  bits. A stored report is served only when computed since the latest `REPORT_PRECOMPUTE_UTC` time and
-  `ok`/`empty_window`; otherwise the coordinator computes one within 40 s, and anything but a usable
-  report is 503 (the newsletter reads only the HTTP status, so an old or empty-by-failure report is never
-  a 200). Responses must validate against `api/summary-v1` / `recommendation-v1`, which are generated from
-  `proto/todofy/report/v1/report.proto` (`cd proto && npm run schema`; never edited by hand; the UI reads the
-  reports as the generated messages of `@ziyixi/proto`):
-  `core/report_schema.py` builds every report as a generated message written by the wire codec, which refuses one
-  that breaks a rule, and `tests/unit/test_report_wire.py` pins the bytes of synthetic reports
-  (`golden/reports-v1.json`, written before the move onto the IDL).
-- Owner API (todofy.ui.v1, `proto/todofy/ui/v1`): the gateway checks Access on every request, then serves
-  `/api/v1/*` with the shared transcoder: Origin and CSRF on writes,
-  `MAINTENANCE_MODE`, a 16 KiB body limit and a strict read of every request; page tokens are the gateway's
-  (bound to the list's other fields). Every rpc but `GetIntegration` is one `owner_ui` call: the object reads
-  the request strictly again with the generated Python code, does the work (30 s CPU, single writer; writes
-  with `request_id` idempotency via `owner_actions`, its `action_request_id` column) and answers the generated
-  response message (`runtime/owner_ui.py`, mapped from the ledger's dicts by `core/owner_ui.py`) as wire JSON,
-  which the gateway sends as it is (`PreEncoded`), except a list's page: that it reads leniently, gives its page
-  token and writes again. The paths before todofy.ui.v1 answer 410 `reload_required` for one release
-  (gateway-contract.md §2.2); the object keeps `owner_api` for the previous gateway until then.
-- One coordinator per D1 database: `ledger.recover_interrupted` treats every `summarizing` row as abandoned, so
-  two objects on the same database would undo each other's work.
-  A rollback or cutover stops one before the other runs (gateway-contract.md §6.5).
+## 6. Backups, metrics and local harness details
 
-## 5. Module contracts
+Weekly backups freeze their column set, write table parts and the manifest last, and temporarily hold ledger writes.
+Restore into a new empty D1 and verify it before switching bindings under maintenance. Details and actual commands
+are in [setup/recovery](cloudflare-setup.md#7-backups-and-restore).
 
-The build phase split the Worker between four owners (P, O, R, T below); the split still marks the
-module seams. Signatures are the contract between modules — change one together with its callers.
+Analytics Engine is write-only from Workers and best-effort. Points contain route templates, safe codes, timings and
+counts, never subject/body/owner/URL. D1 `daily_metrics` supplies finished-day UI trends. Physical `gemini_*` keys and
+pre-retirement `todoist_*` rows keep their historical meaning; missing observations stay unrecorded.
 
-| Owner | Files |
-|---|---|
-| **P – pipeline** | `runtime/coordinator.py`, `runtime/ledger.py`, `runtime/model.py`, `runtime/model_settings.py`, `core/sql/ledger.py`, `config.py`, `interop.py` |
-| **O – owner API and Mail** | `runtime/api.py`, `runtime/owner_ui.py`, `runtime/mail.py`, `core/sql/views.py`, `core/sql/mailbox.py` |
-| **G – gateway** | `gateway/` (TypeScript: routing, Access, CSRF, webhook and Basic credentials, assets, cron) |
-| **R – reports & retention** | `runtime/reports.py`, `runtime/retention.py`, `core/sql/{reports,retention}.py`, `core/carryover.py` |
-| **T – runtime tests** | `tests/fakes/model_router_fake.py`, `tests/runtime/test_*.py` scenarios (v2 §6.2 + impl-order §1.5), `wrangler.test.toml` and `gateway/wrangler.test*.toml` vars |
+The metrics walker uses indexed transition pages and bounded flushes. It checks the saved cursor's row identity so
+switching/restoring D1 cannot silently skip reused row IDs. Lost or changed state restarts observations rather than
+inventing a successful empty period. Metrics failures never change the business outcome they describe.
 
-`entry.py`, `http.py`, `core/*` and the migration stay with the lead; a new `ApiError` or a schema change
-goes through the lead. The signatures below are as built (S5/S6 done); the spike code is gone.
+The real local harness deliberately handles these observed platform behaviors:
 
-### entry.py (lead; exists)
-```python
-class Default(WorkerEntrypoint):
-    async def fetch(self, request) -> Response      # always 404: the core has no public routes
-```
+- `wrangler dev` can hold a headers-only refusal until the unread body is cancelled.
+- Its pooled proxy can lose an unsafe method at the idle timeout. The existing harness refreshes an idle connection
+  with a safe GET; it does not retry the business request itself.
+- Local D1/R2 use SQLite. Do not open a second CLI writer beside a running server. `Worker.d1` uses that server's
+  Local Explorer; bucket file reads happen after the server stops.
+- Each test process/pair owns its ports, registry and persist state. A standalone gateway cannot accidentally reach
+  another test's core. Cancellation/deadline tests use actual hangs and socket cleanup, not sleeping assertions.
+- The first core invocation includes Pyodide startup. Bazel supplies the pinned cached bundle and native workerd;
+  it does not perform an unpinned runtime download or run package generation during a test.
 
-### config.py (P)
-Small readers for the active Worker configuration:
-```python
-def var(env, name: str, default: str = "") -> str
-def flag(env, name: str) -> bool
-def integer(env, name: str, default: int) -> int
-def source_id(env) -> str                           # MAIL_SOURCE_ID, default "mail-hero-personal"
-def report_default_top(env) -> int                  # REPORT_DEFAULT_TOP, 1-10
-```
-Vars (plain, with defaults): `MAIL_SOURCE_ID`, `MODEL_TIMEOUT_MS` (180000),
-`GEMINI_DAILY_TOKEN_BUDGET` (3000000; physical legacy budget key), `BACKOFF_BASE_MS` (60000),
-`WATCHDOG_MS` (420000), `REPORT_DEFAULT_TOP` (10), `REPORT_PRECOMPUTE_UTC` ("13:30"),
-`REPORT_CARRYOVER_DAYS` (14; 0 disables carryover), `LEGACY_TEXT_RETENTION_DAYS`,
-`MAINTENANCE_MODE`, `PROCESSING_PAUSED`, `BUILD_SHA` and `TODOFY_PUBLIC_HOST`.
-
-The core calls `MODEL_ROUTER` (`service=model-router`, `entrypoint=Inference`, `props.app=todofy`);
-provider credentials stay in the Router. Mail/report choices are stored in D1 `model_settings` and
-updated through the owner API with an etag and request ID. The gateway's vars and secrets
-(`ACCESS_*`, `TODOFY_HOOKS_HOSTS`, `MAIL_WEBHOOK_TOKEN_SHA256(_PREVIOUS)`,
-`REPORT_BASIC_AUTH_SHA256`) are listed in gateway-contract.md §1. Owner writes use the keyless JSON checks below;
-no CSRF signing secret is configured.
-Test configs shorten `*_MS` values; production keeps their code defaults.
-
-### coordinator.py (P) — the only writer of the ledger
-RPC methods, called only by the gateway's binding (gateway-contract.md §3; `fetch` answers 404). Each
-returns `Result.wire()` except `wake` and `setup`:
-```
-ingest(idempotency_key, body)             webhook stream → 204|400|409|413|503
-wake()                                    → None (the gateway's cron)
-newsletter(kind, query)                   stored or on-demand report, after the gateway accepted Basic
-newsletter_auth_failure()                 count a failed Basic credential → 401 | 429
-owner_ui(owner, method, request, cursor)  the owner API todofy.ui.v1 (owner_ui.handle): {"ok", "next_cursor"}
-                                          or {"error", "detail", "retry_after"}, never raised
-mail(method, request)                     the Mail entry todofy.mail.v1 (mail.handle): {"ok"} or
-                                          {"error", "retry_after"}, never raised
-owner_api(owner, method, path, query,     the owner API before todofy.ui.v1 (api.handle), only for the previous
-          content_length, body)           gateway during this release's deploy; removed next release
-setup()                                   {"mail_source_id", "configured": {...}} for the setup page
-ops_status() | ops_set_guard(input_json)  the gateway's Ops entrypoint (contracts/ops-v1, below):
-ops_canary_result(event_id)               {"ok": value} or {"error": "invalid_input" | "busy" | "unavailable"},
-                                          never raised; JSON text in, plain dicts out
-```
-Every other method is callable over RPC too (Python exposes them all, `_`-prefixed ones included); only
-the gateway binds the class, and it calls only these.
-The owner API calls the object's methods directly: `apply_reconcile(owner, event_id, action, version,
-action_request_id, task_id)` (`reconcile` wraps it for `owner_api`), `recompute_outcome(owner, action_request_id,
-kind, top_n)` (`recompute` wraps it), `event_detail(event_id)`,
-`compute_report(kind, top_n, now)`, `event(id)` and `budgets()` (Overview).
-Alarm loop (v2 §5.3): running guard → maintenance check → watchdog alarm → settle the token
-reservation of a summary call an eviction cut short → `ledger.recover_interrupted` → the weekly backup when it
-holds the ledger → at most one summary step, skipped while `PROCESSING_PAUSED` → `reports.tick` and
-`retention.tick` when their `control` time is due, then the metrics flush → next alarm = min(ledger due, control
-times). A wake-up that arrives while the loop runs re-arms the alarm for now when the loop ends. DO SQLite tables
-it owns: `control(next_reminder_check, next_report, next_maintenance, todoist_blocked_until)` (the first and last
-columns are no longer read), `llm_usage(day, reserved_tokens, used_tokens, calls)`,
-`llm_inflight(event_id, day, reserved)`, `report_requests(hour_bucket, count)`,
-`report_failures(kind, top_n, day, count)`. `DO_SCHEMA` drops what earlier releases left: the Todoist call
-window, `plus_cache` and the mail-brief tables; Mail's receipts (`plus_receipts`) and the planning writes' journal
-(`native_task_requests`); the GTD ledger's `gtd_state` and the dashboard's `ops_report`. Budget helpers used by R:
-```python
-def reserve_tokens(self, tokens: int, now: int) -> bool
-def settle_tokens(self, reserved: int, used: int, now: int) -> None
-def take_report_slot(self, now: int) -> bool        # hourly report-computation cap
-def report_failures(self, kind: str, top_n: int, day: str) -> int
-def count_report_failure(self, kind: str, top_n: int, day: str) -> None
-```
-A summary settles its reservation on every exit: nothing spent before the request goes out, all of it if
-the call dies midway (as `reports._generate`), the real count after an answer.
-
-### ledger.py (P)
-```python
-@dataclass(frozen=True, slots=True)
-class EventRow:                                     # one mail_events row, times in Unix seconds
-    source_id: str; event_id: str; state: EventState; version: int; payload: str | None
-    summary: str; summary_model: str; todo_body: str; todoist_request_id: str; task_id: str  # the last three:
-                                                    # frozen by the task writes before 2026-10-21
-    attempt_count: int; crashes: int; next_attempt_at: int; last_error_code: str
-    imported: bool; created_at: int; updated_at: int
-
-class Stored(StrEnum): NEW, DUPLICATE, CONFLICT
-
-async def ingest(db, source_id, event_id, payload: str, payload_hash: str, now: int) -> Stored
-async def get(db, source_id, event_id) -> EventRow | None
-async def next_due(db, now: int) -> EventRow | None             # the oldest pending row due for its summary
-async def next_wake_at(db) -> int | None                         # when the earliest pending row is due
-async def recover_interrupted(db, now: int) -> None              # summarizing→pending(+crash), at the limit failed_summary
-async def transition(db, row: EventRow, to: EventState, *, actor: str, now: int, code: str = "",
-                     completed: CompletedSummary | None = None, action: OwnerAction | None = None,
-                     **columns) -> EventRow | None   # CAS + transition row (+ summaries row, + owner action); None if lost
-async def find_action(db, owner, action_request_id, request_hash) -> ActionClaim      # read only (reconcile)
-async def claim_action(db, owner, action_request_id, kind, request_hash, now) -> ActionClaim  # insert, then read (recompute)
-async def finish_action(db, owner, action_request_id, result_ref: str, http_status: int) -> None
-async def release_action(db, owner, action_request_id) -> None   # a failed recompute: the same id runs again
-async def take_over_action(db, owner, action_request_id, request_hash, now, stale_before) -> bool  # an unfinished claim
-```
-`ActionClaim.claim` is `new`, `replay` (with `result_ref`, `http_status`) or `conflict` (same id, different
-hash → 409). A recompute stores only a computed report (200); a failure (429, 503) releases its claim, and a
-claim whose run never finished is taken over after `RECOMPUTE_CLAIM_STALE_S` (120 s), so repeating the same
-`request_id` after a retryable error computes it then (AIP-155).
-
-### model.py and model_settings.py (P; used by R)
-```python
-@dataclass(frozen=True, slots=True)
-class ModelVerdict:
-    ok: bool
-    code: Code | None
-    retry_after: float
-
-@dataclass(frozen=True, slots=True)
-class ModelResult:
-    verdict: ModelVerdict           # normalized result mapped to existing business codes
-    text: str                       # final text, empty on failure
-    model: str                      # reported model when available, otherwise public route
-    tokens: int                     # normalized total for this call
-    prompt_tokens: int
-    attempts: int                   # upstream attempt count reported by the Router
-    usage_available: bool
-
-async def generate(env, *, system: str, user: str, deadline_ms: int, model: str,
-                   response_schema: dict | None = None, preface: str = "") -> ModelResult
-```
-`generate` makes one shared-client call through the private service binding and returns the final result.
-The Router owns provider formats and any configured fallback; business retries across alarms remain
-with the caller. The deadline covers the binding response and body read. Unknown usage keeps the
-call's conservative token reservation.
-
-`core.model_input` frames untrusted mail between `<<<BEGIN_CONTENT>>>` and `<<<END_CONTENT>>>`,
-neutralising embedded markers. Trusted `preface` text, such as a truncation notice, stays before the fence.
-The summary step uses `prompts.SUMMARY_EMAIL`, `model_input.summary_content(event)` and
-`render.content_notice(event)` with the saved email route. Reports use the saved report route and
-standard JSON Schema where needed. A completed mail keeps its frozen summary and model after a choice changes.
-`core/prompts.py` describes the task, decision rules, output format and synthetic input/output examples.
-`SUMMARY_EMAIL` produces one or two Chinese sentences with a plain first-line brief of at most 40 characters;
-`core/mailbox.brief_of` reads it and `COMPLETE_SUMMARY` stores it in `summaries.brief`. `SUMMARY_RANGE` keeps the
-four plain-text categories, and recommendations keep the existing JSON array schema. Current prompt snapshots
-and example checks live in `tests/unit/test_prompts.py`; legacy schema and event fixtures stay separate.
-
-### reports.py (R)
-```python
-async def tick(env, coordinator, now: int) -> int     # precompute at REPORT_PRECOMPUTE_UTC; next time
-async def compute(env, coordinator, kind: str, top_n: int, now: int, budget_ms: int) -> dict
-async def serve(env, coordinator, kind: str, query: str) -> Result  # newsletter(kind) after the gateway's Basic check
-async def count_auth_failure(db, now: int) -> Result  # a failed Basic credential: 401, or 429 once locked
-async def latest(db) -> dict                          # ReportsLatest for api.py
-```
-The recommendation's input is the 24 h window plus the **carryover** (`reports.carryover`, rules in
-`core/carryover.py`): mail that arrived 1 to `REPORT_CARRYOVER_DAYS` (≤ 14) days ago and still awaits a decision
-in Mail (`NATIVE_PENDING`, read through `summaries_pending`, at most 2,000 candidates), at most 30 picked
-round-robin over the days they arrived (`pick_carried`, oldest day first), each `[N 天前] summary` cut to 1 KiB,
-the block ≤ 16 KiB, newest first after the new rows; the prompt is then `prompts.recommend_prompt(top_n,
-carryover=True)`, which asks for a "（N 天前）" reason prefix on carried picks. With no such mail, with
-`REPORT_CARRYOVER_DAYS = 0`, on any error in that read, or once a precompute attempt of the recommendation failed
-that UTC day, the input, prompt and payload are exactly the 24 h report; a token reservation refused with the carried lines is retried at once without
-them. The payload adds `new_count` and `carryover_count`
-(`task_count` is their sum; `empty_window` only when both are 0). The summary report never carries.
-Precompute only `top_n = REPORT_DEFAULT_TOP` (default 10, what the newsletter asks for); other `top`
-values are computed on demand under the hourly cap (429 with `Retry-After` until the next UTC hour). A
-summary longer than the newsletter's 12,000 characters is cut at a line break with a notice
-(`report_schema.fit_summary`) rather than failed. `tick` counts failures per report and UTC day in the
-coordinator: a failed or `model_output_invalid` report is retried in 10 minutes, after the other report,
-at most `PRECOMPUTE_ATTEMPTS` (3) times a day. On-demand work runs in the object
-(`coordinator.compute_report`) with a 40 s budget; see §4.3 for what the newsletter gets.
-
-### retention.py (R)
-```python
-async def tick(db, env, now: int) -> bool             # one bounded sweep; True if more work remains
-```
-Uses only `core.sql.retention` batches (≤ 5 bounded writes per call, one D1 batch: reports after 90 days,
-owner actions after 180, auth failures after 30, imported legacy text at its `expires_at` and,
-with `LEGACY_TEXT_RETENTION_DAYS`, after that many days); never deletes `mail_events`, nor `summaries` (since
-2026-10: a summary is Mail's mail, which the owner deletes).
-
-### Gateway (G; `gateway/src`)
-`access.ts` and `csrf.ts` are adapters over the shared package `packages/edge-auth` (the repository
-root; its `SPEC.md` has every parameter): they pass Todofy's values and map the package's failure
-reasons to Todofy's codes; the package itself is never edited for one app. `access.ts` (Access JWT:
-RS256 via WebCrypto, keys cached per isolate for an hour, an unknown kid refetches at most once a
-minute; `alg`/`kid`/no `crit`, `iss`, `aud`, `exp`, `iat`, optional `nbf`, non-empty `sub` and `email`
-matched case-insensitively over ASCII only, non-ASCII addresses refused; `ACCESS_OWNER_ALIASES` ≤ 8 emails mapped to `ACCESS_OWNER`),
-`csrf.ts` (after Access authentication and before body parsing: exact allowed `Origin`, a nonempty
-`X-CSRF-Token` of at most 1024 characters, and `application/json`; local HTTP origins follow the existing
-`.localhost` dev rule). Clients send header `1` directly, including for bodyless mutations. Until 2026-11-02,
-`GET /api/csrf` still returns a static `{"token":"1"}` without a cookie for a cached UI from before the keyless change,
-which fetches it before its first write. Old nonempty headers remain accepted under the same Origin and JSON checks. A failed check is 403 `CSRF_FAILED`.
-The other modules are `http.ts` (error
-envelopes; the package's private headers plus the `/assets/` cache exception), `crypto.ts` (the hooks
-hosts' Bearer and Basic digest checks only), `owner.ts` (the gate: Access → the old paths' 410 →
-`/api/csrf` until 2026-11-02 → the owner API, private headers on every response), `mail.ts` (the `Mail` entrypoint:
-todofy.mail.v1 on the shared transcoder, its binding's `access` prop, one `mail` call per rpc; mail-api.md),
-`ops.ts` (the `Ops` entrypoint, below), `ui.ts` (TodofyUiService on the shared
-transcoder: CSRF and `MAINTENANCE_MODE` on writes in its `authorize` hook, one `owner_ui` call per rpc with
-the page tokens and `request_id` handled here, `GetIntegration` from the gateway's facts and the object's
-`setup()`), `warm.ts` (runs the codec once at global scope, outside every request's CPU), `hooks.ts` (webhook, newsletter, health), `metrics.ts`
-(one Analytics Engine point per request and cron, §6). The rules are in gateway-contract.md §2; the gateway's unit tests check its error messages
-against `core.api_errors`.
-
-### owner_ui.py (`core/owner_ui.py` maps to the generated messages of `proto/todofy/ui/v1`)
-```python
-async def handle(env, coordinator, owner: str, method: str, request_json: str, cursor_json: str | None) -> dict
-METHODS: dict[str, tuple[type, Handler, bool]]         # rpc name → (request message, handler, writes)
-```
-Reads the request strictly with the generated code, refuses writes in maintenance or while a backup holds the
-ledger, and answers the response message or a reason; the reads are api.py's (`overview_data`, `event_page`,
-`legacy_text_data`) and `metrics.day_page`. Page sizes follow
-AIP-158 (0 → the default, above the maximum → the maximum, negative → `BAD_REQUEST`).
-
-### api.py (O)
-```python
-async def handle(request: OwnerRequest, env, coordinator, owner: str) -> Result  # old /api/v1/* (RPC owner_api)
-def setup(env) -> dict                                 # the object's facts for the setup page (RPC setup())
-```
-The routes are the previous gateway's (removed next release); the readers below them are shared with
-owner_ui.py.
-Everything runs in the object: overview (D1 counts + `coordinator.budgets()`), events pages, event detail,
-`reports/latest` (`reports.latest`), legacy text, reconcile and recompute.
-Cursors are opaque base64url of `created_at:event_id` (events).
-The owner API's answers are the generated messages of `proto/todofy/ui/v1`; the runtime tests read each with
-the generated code (`tests/runtime/harness.py` `filled`).
-Imported `legacy:<hash>` / `legacy:row-<id>` rows (CloudMailin era, or Mail Hero rows with no ledger event)
-are an archive: the reports read their summaries by date, and only `wrangler d1 execute` reaches their text.
-`GetLegacyText` (`legacyTexts/{id}`) serves an event's text only: a `legacy:` key's colon is outside AIP-122's
-IDs, and no page links one. A metric day's page cursor must name a real day (`core/owner_ui.day_cursor`), else
-`BAD_REQUEST`.
-
-### backup.py (weekly D1 backup; `core/backup.py`, `core/sql/backup.py`)
-```python
-async def run(env, store, now: int) -> int | None   # called by the alarm loop after recover_interrupted:
-                                                     # epoch ms to continue at while a job holds the ledger
-def holds_ledger(env, store, now: int) -> bool       # owner writes answer UNAVAILABLE while True
-def next_run(env, store) -> int | None               # for _next_alarm_ms; None without the BACKUPS binding
-def overview(env, store, now: int) -> dict           # ServiceStatus.backup (todofy.ui.v1 BackupStatus)
-```
-Sunday 10:00 UTC, or due now on an object with no `backup_state` row (a new or wiped object); after a
-backup the next run is the first Sunday 10:00 on a later UTC day. A job pages every table by rowid
-(`rowid > last AND rowid <= max`, `max` fixed when it starts), reads `mail_events.payload` by rowid at
-most 8 rows at a time, and writes one gzip NDJSON part per table per alarm invocation to
-`backups/<job start>/` (e.g. `backups/2026-10-04T100002Z/`), then `manifest.json` last. Every job has its
-own prefix and never deletes or rewrites another: a second job on the same day (a first deploy early on
-a Sunday, lost object state) cannot cost a complete backup. Every table is in every backup,
-`legacy_mail_text` included, so each backup restores on its own and a row D1 retention deletes leaves R2
-once the last backup holding it rotates out. While the job runs (a few minutes; LEASE = 30 min at most)
-the alarm skips the ledger step and the ticks (the metrics flush included) and owner writes get 503:
-that is what makes the pages one snapshot. A job that ends writes one `backup` metrics point (§6). At most `BACKUP_QUERY_BUDGET` (30; tests use 1) D1 statements and 24 MiB of rows per invocation.
-Retention, after each new manifest, keeps the newest 6 complete prefixes and deletes every incomplete
-one older than the new one (the leftovers of failed or lost jobs). The job state is a JSON document in
-the DO SQLite table `backup_state`; losing it only makes the next backup due now. Each table's cursor keeps
-the columns the job was planned with, and its parts and manifest entry hold exactly those, so a release that
-adds a column while a job runs cannot mix two row widths; a state another version wrote (a job saved without
-its columns, say) does not load, and the next backup is due now. Only
-`tests/runtime/test_backup.py` binds the bucket (the shared test config has none, so no other scenario
-pauses for a backup). `tools/backup_restore.py` downloads, checks, and turns a backup into SQL
-(docs/cloudflare-setup.md §7).
-
-Until Tasks backed itself up ([tasks/docs/backup.md](../../tasks/docs/backup.md)), the job also copied Tasks' D1
-through a `TASKS` binding into `backups/<job start>/tasks/` and the manifest's `tasks` section. A state that
-release saved still loads: its extra field (`tasks_included`) is left out, so the last backup and the next slot
-survive, and a job it planned with Tasks' cursors starts over when due.
-
-### ops-v1 (lead; `core/ops.py`, `runtime/ops.py`, `gateway/src/ops.ts`)
-The operations surface a dashboard Worker in the same account reaches through a service binding to the
-gateway's named entrypoint `Ops` (`[[services]] service = "todofy" entrypoint = "Ops"`); no public route,
-no Access policy. The contract is `../contracts/ops-v1` (README, generated schema, fixtures) with its IDL
-`../proto/ops/v1/ops.proto`: the gateway implements the generated services (`ops_wire.ts`, types only) and the
-core reads every input strictly and writes every output as a generated message (`ziyixi_proto.ops.v1`) with
-the wire codec, which checks the contract's value rules. `Ops` forwards each method to one `ops_*` RPC method and turns `{"error": code}` into
-`new Error(code)`; a failed call is `unavailable`. `core/ops.py` holds every rule the IDL cannot (guard expiry
-against the clock, signals and health, canary result) and builds outputs only from
-numbers, booleans, timestamps and closed codes; `tests/unit/test_ops_core.py` validates them against the
-schema and `test_ops_golden.py` pins their bytes. CI: the root `Contracts` job runs `test_ops_contract.py`,
-`test_ops_core.py`, `test_ops_golden.py` and the gateway's
-`test/ops.test.ts` (with Mail Hero's side of ops-v1); `tests/runtime/test_ops.py` (real bindings, a probe
-Worker bound with `entrypoint = "Ops"`, like the dashboard) runs in `Todofy checks`. The golden canary is
-`contracts/mail-received-v1/fixtures/canary_event.json`; its `event_id` differs from every other fixture's
-(`test_mail_hero_compat.py` checks it), because the runtime suite posts all fixtures to one Worker.
-```
-status()          one D1 batch of 5 indexed reads (views.ACTIVE_COUNTS, ATTENTION_COUNT, RECEIVED_SINCE,
-                  OLDEST_DUE, mailbox.PENDING_BETWEEN) + object storage; D1 failure → health "down"
-setGuard(input)   object storage only (ops_guard); idempotent; shed until ≤ 36 h; expires by itself
-canaryResult(id)  one primary-key read (ledger.get)
-```
-The counter `carryover_open` is the mail of the brief's carryover window still pending (`PENDING_BETWEEN`, 1 to
-14 days old). Todofy implements no `reportOps()` since 2026-10-21: Home creates the daily reminder itself.
-Object storage (`runtime/ops.DO_SCHEMA`, may be lost like the other object tables): `ops_guard` (epoch ms),
-`ops_job_runs` (last run of each deferrable job).
-
-Canary events (`mail.received.v1` with top-level `canary`, `contract.MailEvent.canary_run_id`, stored in
-`mail_events.canary_run_id`): same intake and idempotency; the normal summary step (same prompt, token
-reservation, `llm_inflight`), recorded as Analytics Engine step `canary`; then `complete` without a
-`summaries` row when Gemini answered, else retried up to 3 attempts for `summary_failed`/`llm_quota` and
-otherwise `ignored` with the code. Where real mail would wait for the owner (`failed_summary`, crash limit,
-budget) a canary ends `ignored`; `allowed_actions(..., canary=True)` is empty. `sql.REAL_MAIL` keeps canaries
-out of every list and count (attention page and count, Overview counts, recent pages), `metrics._walk` skips
-them, and the event detail answers `canary: true`. A processing pause holds a canary `pending` (reported as `processing`).
-
-Guard `shed` defers only: a new weekly backup (unless the last complete one is older than 7.5 days, 12 h
-before `backup_stale` at 8 days, or there is none; a running job continues), the retention tick and the
-metrics rollup (each unless its last complete run is 72 h old; a run that continues in a minute, one batch
-of a backlog, does not count, so once due a job keeps its cadence until it has caught up). A deferred job's own time moves to min(guard end, bound); ending or changing the guard
-makes them due again and wakes the object. Everything else keeps running: intake, the ledger steps,
-canaries, recovery, the watchdog, report precompute and the cron wake.
-
-### health (lead)
-`GET /health` on the hooks hosts is answered by the gateway alone: `{"build", "service": "todofy",
-"status": "healthy", "timestamp"}` (the newsletter's preflight reads `service` and `status`). The
-"oldest due row" signal lives in the Overview `oldest_due_at`.
-
-### Fakes (T)
-Extend `tests/fakes/server.py` for loopback control. `model_router_fake.py` records the common
-Generate request and serves normalized final output, usage, attempt counts and safe errors.
-The runtime harness adds a test-only Worker bridge under `MODEL_ROUTER`, so the production client
-uses the same service-binding seam. Delays and hangs verify deadlines and socket cleanup; no provider
-credentials, provider wire payloads or production HTTP escape are needed.
-
-## 6. Metrics and ops queries
-
-Two sinks, with different jobs (`core/metrics.py`, `runtime/metrics.py`, `gateway/src/metrics.ts`):
-
-- **Workers Analytics Engine**, binding `METRICS`, dataset `todofy_metrics`, on both Workers. Write-only
-  from the Workers (reading needs the SQL API and an account token, which the Workers never hold), so it
-  serves the owner's ad-hoc queries below, never the UI. Workers Free includes 100,000 points written
-  and 10,000 read queries per day; points are kept three months. Local dev binds a dataset that accepts
-  every write and stores nothing, so shapes are unit-tested instead (≤ 20 blobs, ≤ 20 doubles, one index
-  ≤ 96 bytes, ≤ 250 points per invocation). A failed write never fails the request or step: the core
-  logs it (`{"metrics": "write_failed"}`), the gateway drops it silently.
-- **D1 `daily_metrics(day, key, value)`** (migration `0002`), for the budget page's 30-day trends
-  (`GET /api/v1/metrics/daily?days=1..90`, default 30; finished UTC days only, oldest first). The
-  charts (`web/src/components/TrendChart.tsx`) colour series with the categorical `--series-1…5`
-  tokens, never the status tones (accent and ok are both green); lines also differ by dash, stacked
-  bars have a gap. The token chart shows up to five models, largest total first; with more (a changed
-  model list), the four largest plus one 其他 series, so no two series share a colour. Every chart also has a text summary and a table.
-
-Point layouts (one dataset; `blob1` tells them apart):
-
-| Writer | `index1` | `blob1` | `blob2` | `blob3` | `blob4` | `double1` | `double2` | `double3` | `double4` |
-|---|---|---|---|---|---|---|---|---|---|
-| gateway, per request and cron | route | host kind: `owner`, `hooks`, `unknown`, `cron` | method (`OTHER` if unusual) | route template (`/api/v1/mailEvents/{id}`, `asset`, `page`, `other`, `wake`) | status class `2xx`…`5xx` | wall ms to response headers | request Content-Length (0 if none) | response Content-Length (0 if none) | — |
-| core, per upstream step | step | step: `summary`, `canary` (a canary's summary call), `report`, `backup` (until 2026-10-21 also the task writes' `task`, `lookup`, `reminder`, `gtd` and `review`) | outcome: `ok`/`failed` | error code or empty | Gemini model or empty | upstream wall ms | tokens in (prompt) | tokens out (total − prompt) | requests sent (models tried) |
-
-Never written: paths, query strings, event IDs, subjects, addresses, the owner's identity, upstream bodies.
-`backup` is one point per job, written when it ends: outcome `ok`/`failed`, code `storage_error`,
-`lease_expired` or `tasks_unavailable`, `double1` the job's wall ms from start to end.
-
-`daily_metrics` keys per finished UTC day: `mails_received` (always, 0 included: it marks the day as
-recorded), `mails_completed`, `mails_failed` (moves to `failed_summary`), `latency_p50_s`/`latency_p90_s`
-(arrival → `complete` of the day's completions, nearest rank), `gemini_calls`, `gemini_tokens:<model>`, and
-on days before 2026-10-21 `todoist_creates` and `todoist_lookups`; zero counters are not stored. How it stays within the D1 budget:
-
-- Mail counts and latencies come from `event_transitions`, walked by rowid from a cursor kept in the
-  object's SQLite (`metric_flush`): ≤ 3 pages of 500 per alarm, so each transition is read once (a few
-  hundred rows read per day, never a scan).
-- Step counters (`gemini_*`) are added to the object's SQLite (`metric_counts`) when a step
-  ends, not to D1. Like the data point, the counter write is best effort: `runtime/metrics.record`
-  never raises and logs `{"metrics": "count_failed"}` (a full object storage, say), and every caller
-  runs it after the step's result is committed (the ledger transition), so it can never sit between a
-  Gemini call and its record. A failed write only
-  under-counts that day (`tests/runtime/test_metrics_daily.py`, `tests/unit/test_metrics_record.py`).
-- A few minutes after UTC midnight (`metric_flush.next_at`, one more time in `_next_alarm_ms`) the
-  object writes each finished day as one `INSERT … SELECT … FROM json_each(?)` statement plus one bounded
-  expiry (400 days), in one batch: about a dozen rows plus their primary-key index, i.e. a few dozen D1
-  rows written per day. A backlog (days without alarms) is caught up at most 7 days per flush, a minute
-  apart.
-- If the object's storage is lost (cutover, `crash_and_restart(lose_object_storage=True)`), counting
-  restarts at the newest transition; that day is only partly seen and stays `recorded: false`, and so
-  do days that were never written. A transition committed just after midnight with an older timestamp
-  than one already walked is dropped rather than rewriting a finished day.
-- The same restart happens when the database changes under a kept object: a backup restore that
-  production is switched to, or a D1 Time Travel restore in place (cloudflare-setup.md §7).
-  `event_transitions.id` has no AUTOINCREMENT, so the restored database hands out ids again from its own
-  `max(id) + 1`; walking on from the old cursor would skip them and write those days with
-  `mails_received = 0`. `metric_flush` therefore keeps the counted row's `event_id` and `at` next to the
-  cursor, and every flush first reads that row by id (`CURSOR_ROW`, one rowid lookup). A missing or
-  different row logs `{"metrics": "cursor_reset"}` and takes the lost-storage path: the switch day and
-  the days since the last written one stay `recorded: false`. Cursor 0 (an empty ledger) is not checked.
-
-### Ops queries (read-only)
-
-For checking production from the owner's machine (`npx wrangler login`). None of these prints row
-content; keep it that way (the repository and its logs are public).
-
-| Question | Where |
-|---|---|
-| Last backup, its key, rows, size, next run, last failure | owner UI → 健康 → 备份 (ServiceStatus `backup`, todofy.ui.v1 `BackupStatus`) |
-| What the bucket holds | `npx wrangler r2 bucket info todofy-backups` (object count and size; wrangler 4.142.0 has no `r2 object list`, the dashboard's R2 browser lists keys) |
-| One backup's tables, row counts and part hashes | `npx wrangler r2 object get todofy-backups/<key>manifest.json --file manifest.json --remote` (names, counts and SHA-256 only) |
-| Backup job progress or errors | Workers Logs of `todofy-core`, filter on the `backup` field: `planned`, `done` (rows, bytes), `deleted`, `error` (exception type, step), `failed` (`storage_error`, `lease_expired`, `tasks_unavailable`), `retention_error` |
-| Legacy text size (drives backup size and time) | `SELECT count(*) AS n, sum(length(CAST(text AS BLOB))) AS bytes FROM legacy_mail_text` via `npx wrangler d1 execute <database> --remote --command "..."` (reads each legacy row once) |
-| Account-wide D1 rows read/written today (shared with Mail Hero) | Cloudflare dashboard → D1 → metrics, or Workers & Pages → usage; a backup reads each row of every table once |
-| Daily metrics as stored (counts only, no content) | `SELECT day, key, value FROM daily_metrics WHERE day >= '<YYYY-MM-DD>' ORDER BY day, key` via `npx wrangler d1 execute <database> --remote --command "..."` (the primary-key index; a dozen rows a day) |
-| Metrics write failures or a cursor restart | Workers Logs of `todofy-core`, filter on the `metrics` field: `write_failed` (Analytics Engine), `count_failed` (the object's counters), `cursor_reset` (the ledger database changed, §6); the gateway drops a failed write without a log line |
-
-### Analytics Engine SQL API
-
-Create an account API token with **Account Analytics: Read** only, keep it out of the repo and the
-Workers, and query:
-
-```sh
-curl -s "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/analytics_engine/sql" \
-  -H "Authorization: Bearer $CF_ANALYTICS_TOKEN" --data-binary @query.sql
-```
-
-Rows are sampled at high volume, so always count with `SUM(_sample_interval)` and weight quantiles by it.
-
-1. Gateway traffic and wait per route over the last day (spot a slow or failing path):
-   ```sql
-   SELECT blob1 AS host, blob3 AS route, blob4 AS status, SUM(_sample_interval) AS requests,
-          quantileExactWeighted(0.5)(double1, _sample_interval) AS p50_ms,
-          quantileExactWeighted(0.95)(double1, _sample_interval) AS p95_ms
-   FROM todofy_metrics
-   WHERE timestamp > NOW() - INTERVAL '1' DAY AND blob1 IN ('owner', 'hooks', 'unknown', 'cron')
-   GROUP BY host, route, status
-   ORDER BY requests DESC
-   ```
-2. Failures of upstream steps by code, per hour over the last week:
-   ```sql
-   SELECT toStartOfInterval(timestamp, INTERVAL '1' HOUR) AS hour, blob1 AS step, blob3 AS code,
-          SUM(_sample_interval) AS steps
-   FROM todofy_metrics
-   WHERE timestamp > NOW() - INTERVAL '7' DAY
-     AND blob1 IN ('summary', 'canary', 'report', 'backup') AND blob3 != ''
-   GROUP BY hour, step, code
-   ORDER BY hour DESC, steps DESC
-   ```
-3. Gemini tokens and latency by model and step, per day over the last month:
-   ```sql
-   SELECT toStartOfInterval(timestamp, INTERVAL '1' DAY) AS day, blob4 AS model, blob1 AS step,
-          SUM(_sample_interval) AS calls, SUM(double2 * _sample_interval) AS tokens_in,
-          SUM(double3 * _sample_interval) AS tokens_out,
-          quantileExactWeighted(0.9)(double1, _sample_interval) AS p90_ms
-   FROM todofy_metrics
-   WHERE timestamp > NOW() - INTERVAL '30' DAY AND blob1 IN ('summary', 'report')
-   GROUP BY day, model, step
-   ORDER BY day DESC, tokens_in DESC
-   ```
-These queries were written against Cloudflare's SQL reference and have not been run against the account.
+Operational views show counts/status, not private content. Use owner health for backup state, Home for shared usage
+and Workers logs for safe error types/codes. A production content read or a real model/recompute requires its own
+current authorization; local fixtures do not prove business success.

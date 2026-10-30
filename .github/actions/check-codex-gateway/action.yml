@@ -7,40 +7,13 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Install the selected Node workspaces
-      uses: ./.github/actions/setup-workspace
-      with:
-        root: .
-        filters: ''
-    - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-      with:
-        version: '0.12.10'
-        cache-dependency-glob: |
-          uv.lock
-          pyproject.toml
-          .python-version
-          **/pyproject.toml
-        cache-suffix: personal-codex-gateway
-        working-directory: .
-        enable-cache: true
-    - name: Check the locked gateway and synthetic inference contract
-      working-directory: .
-      shell: bash -e {0}
-      run: |
-        node proto/tools/ensure.mjs
-        uv sync --package personal-codex-gateway --locked
-        uv run --package personal-codex-gateway --locked ruff check codex-gateway/src codex-gateway/tests
-        uv run --package personal-codex-gateway --locked ruff format --check codex-gateway/src codex-gateway/tests
-        uv run --package personal-codex-gateway --locked python -m unittest discover -s codex-gateway/tests -v
+    - uses: ./.github/actions/setup-bazel
     - name: Build the tested inference image
       if: ${{ fromJSON(inputs.build-image) }}
       working-directory: .
       shell: bash -e {0}
       run: |
-        docker build --platform linux/amd64 --file codex-gateway/Dockerfile \
-          --build-arg SOURCE_SHA="$GITHUB_SHA" \
-          --build-arg SOURCE_REPOSITORY="https://github.com/$GITHUB_REPOSITORY" \
-          --tag "codex-gateway-ci:$GITHUB_SHA" .
+        python3 tools/container-release/build.py --service codex-gateway --sha "$GITHUB_SHA"
         tested_image=$(docker image inspect --format '{{.Id}}' "codex-gateway-ci:$GITHUB_SHA")
         docker run --rm --network none --env EXPECTED_SHA="$GITHUB_SHA" --entrypoint python "$tested_image" \
           -c 'import codex_gateway.app, codex_gateway.runtime, openai_codex; import importlib.resources, json, os; assert json.loads(importlib.resources.files("codex_gateway").joinpath("build-info.json").read_text())["source_sha"] == os.environ["EXPECTED_SHA"]'

@@ -9,7 +9,7 @@ import tomllib
 import unittest
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).absolute().parents[2]
 WORKFLOW = REPO / ".github/workflows/personal-cloud-reconcile.yml"
 
 
@@ -218,14 +218,12 @@ class ReconcileWorkflow(unittest.TestCase):
         workers = constant("tools/cloud-release/control.py", "WORKERS")
         self.assertEqual(sorted(apps), sorted(workers))
         pending = constant("tools/service-catalog/inventory.py", "FIRST_DEPLOY_PENDING")
-        check_only = constant(".github/scripts/ci_changes.py", "CHECK_ONLY")
         scripts = {app: {tomllib.loads((REPO / path).read_text())["name"] for path in paths}
                    for app, paths in workers.items()}
         self.assertLessEqual(pending, set().union(*scripts.values()))
         excluded = re.findall(r"^          - app: (\S+)$", matrix, re.M)
-        self.assertLessEqual(check_only, set(workers))
-        self.assertEqual(excluded, sorted(check_only))
-        self.assertEqual("        exclude:" in matrix, bool(excluded))
+        self.assertEqual(excluded, [])
+        self.assertNotIn("        exclude:", matrix)
 
     def test_vps_uses_only_typed_api_and_records_actual_evidence(self):
         block = job(self.text, "vps")

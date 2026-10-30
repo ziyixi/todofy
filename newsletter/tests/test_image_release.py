@@ -12,8 +12,9 @@ import pytest
 
 import tests.support.workflows as workflows
 
-ROOT = pathlib.Path(__file__).resolve().parents[1]
+ROOT = pathlib.Path(__file__).absolute().parents[1]
 IMAGE_ID = "sha256:" + "a" * 64
+HEALTHCHECK = json.loads((ROOT / "container-healthcheck.json").read_text())
 
 
 @pytest.fixture
@@ -123,6 +124,8 @@ def source_root(tmp_path):
         + "c" * 64
         + '"\n'
     )
+    (root / "container-healthcheck.json").write_text(json.dumps(HEALTHCHECK))
+    (tmp_path / ".python-version").write_text("3.14.7\n")
     return root
 
 
@@ -136,6 +139,7 @@ def docker(smoke, monkeypatch):
             "os": "linux",
             "architecture": "amd64",
             "user": "newsletter",
+            "healthcheck": HEALTHCHECK,
         },
     )
 
@@ -180,6 +184,7 @@ def test_smoke_uses_fixed_inspected_id_without_mounts_network_or_credentials(
         "source_hashes",
         "startup_source",
         "console_audience",
+        "python_version",
     }
     assert payload["console_audience"] == "c" * 64
     name = command[command.index("--name") + 1]
@@ -201,6 +206,7 @@ def test_smoke_uses_fixed_inspected_id_without_mounts_network_or_credentials(
         ("user", ""),
         ("user", "root"),
         ("user", "0:0"),
+        ("healthcheck", None),
     ],
 )
 def test_wrong_image_metadata_is_rejected_before_container_start(
@@ -209,7 +215,10 @@ def test_wrong_image_metadata_is_rejected_before_container_start(
     docker.metadata[field] = value
     with pytest.raises(
         ValueError,
-        match=r"fixed image ID|architecture does not match|nonroot user",
+        match=(
+            r"fixed image ID|architecture does not match|nonroot user"
+            r"|HTTP HEALTHCHECK"
+        ),
     ):
         smoke.verify("fixture", "linux/amd64", root=source_root)
     assert len(docker.calls) == 1
@@ -282,21 +291,23 @@ def test_source_audit_hashes_package_inputs_but_ignores_bytecode(
 
 def test_ci_smokes_native_amd64_before_publish_without_rebuild():
     jobs = workflows.load("ci.yml")["jobs"]
-    image = jobs["newsletter-image"]
+    image = jobs["artifacts"]
     assert image["runs-on"] == "ubuntu-24.04"
-    assert "newsletter-checks" in image["needs"]
+    assert image["needs"] == "changes"
+    assert "artifact_matrix" in image["strategy"]["matrix"]
     commands = "\n".join(step.get("run", "") for step in image["steps"])
-    assert commands.count("docker build") == 1
+    builder = "container-release/build.py --service newsletter"
+    assert commands.count(builder) == 1
+    assert "docker build" not in commands
     assert "--platform linux/amd64" in commands
-    assert commands.index("--audit-source") < commands.index("docker build")
-    assert commands.index("docker build") < commands.index(
-        "smoke_image.py --image"
-    )
+    assert commands.index("--audit-source") < commands.index(builder)
+    assert commands.index(builder) < commands.index("smoke_image.py --image")
     assert commands.index("smoke_image.py --image") < commands.index(
         "image.py save"
     )
     publication = jobs["newsletter-deploy"]
-    assert "newsletter-image" in publication["needs"]
+    assert "gate" in publication["needs"]
+    assert "needs.gate.result == 'success'" in publication["if"]
     assert "github.ref == 'refs/heads/main'" in publication["if"]
     steps = publication["steps"]
     login = next(
@@ -330,7 +341,9 @@ def test_daily_workflow_never_schedules_or_sends():
     )
 
 
-def test_git_ignore_protects_variants_but_keeps_blank_templates():
+def test_git_ignore_protects_variants_but_keeps_blank_templates(tmp_path):
+    (tmp_path / ".gitignore").write_bytes((ROOT / ".gitignore").read_bytes())
+    subprocess.run(["git", "init", "--quiet", str(tmp_path)], check=True)
     ignored = [
         ".env",
         ".env.local",
@@ -347,7 +360,7 @@ def test_git_ignore_protects_variants_but_keeps_blank_templates():
     allowed = [".env.example", ".env.production.example", "nested/.env.example"]
     result = subprocess.run(
         ["git", "check-ignore", "--no-index", "--stdin"],
-        cwd=ROOT,
+        cwd=tmp_path,
         input="\n".join(ignored + allowed) + "\n",
         text=True,
         capture_output=True,
@@ -361,13 +374,3 @@ def test_git_ignore_protects_variants_but_keeps_blank_templates():
         timeout=10,
     )
     assert set(result.stdout.splitlines()) == set(ignored)
-
-
-def test_docker_secret_rules_follow_source_reinclusion(smoke):
-    rules = (ROOT / ".dockerignore").read_text().splitlines()
-    source_allow = rules.index("!src/newsletter/**")
-    for pattern in smoke.PRIVATE_NAMES:
-        rule = "**/" + pattern
-        if pattern in {".codex-auth", "codex-auth"}:
-            rule += "/"
-        assert rules.index(rule) > source_allow

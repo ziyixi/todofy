@@ -14,7 +14,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { createHttpClient, type HttpCall } from '@ziyixi/proto/http-client';
 import { MailsortUiService } from '@ziyixi/proto/mailsort/ui/v2/mailsort_ui_service_pb';
 import { MailFlow_Outcome, MailFlow_Stage } from '@ziyixi/proto/mailsort/ui/v2/flow_pb';
@@ -67,10 +67,13 @@ async function main(): Promise<void> {
     GMAIL_CLIENT_SECRET: 'synthetic-secret',
     GMAIL_REFRESH_TOKEN: REFRESH_TOKEN,
   };
-  const args = ['--no-install', 'wrangler', 'dev', '--config', '../wrangler.test.toml', '--ip', '127.0.0.1', '--port', String(port), '--local-upstream', `127.0.0.1:${String(port)}`, '--persist-to', persist, '--inspector-port', '0', '--show-interactive-dev-session=false'];
+  const wrangler = process.env.BAZEL_WRANGLER
+    ? resolve(process.env.TEST_SRCDIR ?? '', process.env.TEST_WORKSPACE ?? '', process.env.BAZEL_WRANGLER)
+    : undefined;
+  const args = [...(wrangler ? [] : ['--no-install', 'wrangler']), 'dev', '--config', '../wrangler.test.toml', '--ip', '127.0.0.1', '--port', String(port), '--local-upstream', `127.0.0.1:${String(port)}`, '--persist-to', persist, '--inspector-port', '0', '--show-interactive-dev-session=false'];
   for (const [name, value] of Object.entries(vars)) args.push('--var', `${name}:${value}`);
   // Its own process group: npx, wrangler and workerd stop together, or the survivors hold the pipes and this never exits.
-  const dev: ChildProcess = spawn('npx', args, { cwd: WORKER, env: { ...process.env, WRANGLER_SEND_METRICS: 'false', CI: 'true' }, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+  const dev: ChildProcess = spawn(wrangler ?? 'npx', args, { cwd: WORKER, env: { ...process.env, WRANGLER_SEND_METRICS: 'false', CI: 'true' }, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
   let output = '';
   dev.stdout?.on('data', (chunk: Uint8Array) => {
     output += new TextDecoder().decode(chunk);

@@ -9,6 +9,9 @@ import { randomBytes } from 'node:crypto'
 import { FREE_LIMIT_GZIP_BYTES } from '../../../tools/bundle-size/bundle-size.mjs'
 import { BUDGET_GZIP_BYTES } from '../bundle-size.mjs'
 
+// CLI children keep their minimal environment and use the pinned interpreter directly.
+const NODE_EXECUTABLE = process.env.JS_BINARY__NODE_BINARY ?? process.execPath
+
 const SCRIPT = fileURLToPath(new URL('../bundle-size.mjs', import.meta.url))
 
 /** Runs the script CI runs on a dry-run directory holding one module of `bytes` incompressible bytes. */
@@ -16,7 +19,7 @@ function run(bytes) {
   const dir = mkdtempSync(join(tmpdir(), 'home-bundle-'))
   try {
     writeFileSync(join(dir, 'index.js'), randomBytes(bytes))
-    return spawnSync(process.execPath, [SCRIPT, dir], { encoding: 'utf8' })
+    return spawnSync(NODE_EXECUTABLE, [SCRIPT, dir], { encoding: 'utf8' })
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -34,5 +37,5 @@ test('the script passes a bundle within the budget and fails one over it', () =>
   const over = run(BUDGET_GZIP_BYTES + 4096)
   assert.equal(over.status, 1)
   assert.match(over.stderr, /^The dashboard's Worker bundle is over its bundle budget/m)
-  assert.equal(spawnSync(process.execPath, [SCRIPT], { encoding: 'utf8' }).status, 2)
+  assert.equal(spawnSync(NODE_EXECUTABLE, [SCRIPT], { encoding: 'utf8' }).status, 2)
 })

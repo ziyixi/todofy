@@ -1,11 +1,15 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library")
-load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
 load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@npm//links/worker:eslint/package_json.bzl", eslint = "bin")
 load("@npm//links/worker:vitest/package_json.bzl", vitest = "bin")
+load("@npm//links/worker:wrangler/package_json.bzl", wrangler = "bin")
 load("//proto/bazel:ts_package.bzl", "proto_package")
-load("//tools/bazel:js.bzl", "proto_vitest_test", "workspace_package_link")
+load("//tools/bazel:js.bzl", "proto_vitest_test", "workerd_vitest_test", "workspace_package_link")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/lint:defs.bzl", "eslint_test")
 
-package(default_visibility = ["//visibility:public"])
+package(default_visibility = ["//links:__subpackages__"])
 
 npm_link_all_packages(name = "node_modules")
 
@@ -18,14 +22,37 @@ js_library(
 
 js_library(
     name = "module_group_1",
-    srcs = ["src/backup-alarm.ts", "src/backup-runner.ts", "src/env.ts"],
-    types = ["src/backup-alarm.ts", "src/backup-runner.ts", "src/env.ts"],
-    deps = ["//proto/ops/v1:ts", ":backup"],
+    srcs = [
+        "src/backup-alarm.ts",
+        "src/backup-runner.ts",
+        "src/env.ts",
+    ],
+    types = [
+        "src/backup-alarm.ts",
+        "src/backup-runner.ts",
+        "src/env.ts",
+    ],
+    deps = [
+        ":backup",
+        "//proto/ops/v1:ts",
+    ],
 )
 
-alias(name = "backup-alarm", actual = ":module_group_1")
-alias(name = "backup-runner", actual = ":module_group_1")
-alias(name = "env", actual = ":module_group_1")
+alias(
+    name = "backup-alarm",
+    actual = ":module_group_1",
+)
+
+alias(
+    name = "backup-runner",
+    actual = ":module_group_1",
+)
+
+alias(
+    name = "env",
+    actual = ":module_group_1",
+)
+
 js_library(
     name = "limits",
     srcs = ["src/limits.ts"],
@@ -44,139 +71,632 @@ js_library(
     name = "targets",
     srcs = ["src/targets.ts"],
     types = ["src/targets.ts"],
-    deps = [":keys", ":limits"],
+    deps = [
+        ":keys",
+        ":limits",
+    ],
 )
 
 js_library(
     name = "model",
     srcs = ["src/model.ts"],
     types = ["src/model.ts"],
-    deps = ["//proto/links/ui/v1:ts", "//proto/ts:protobuf", "//proto/ts:protobuf-wkt", "//proto/ts:wire-json", ":targets"],
+    deps = [
+        ":targets",
+        "//proto/links/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+    ],
 )
 
 js_library(
     name = "store",
     srcs = ["src/store.ts"],
     types = ["src/store.ts"],
-    deps = [":limits", ":model"],
+    deps = [
+        ":limits",
+        ":model",
+    ],
 )
 
 js_library(
     name = "api",
     srcs = ["src/api.ts"],
     types = ["src/api.ts"],
-    deps = ["//proto/common/errors/v1:ts", "//proto/links/ui/v1:ts", "//proto/ts:field-mask", "//proto/ts:filter", "//proto/ts:http-transcoder", "//proto/ts:page-token", "//proto/ts:protobuf", "//proto/ts:protobuf-wkt", "//proto/ts:rpc-status", "//proto/ts:wire-json", ":keys", ":limits", ":model", ":module_group_1", ":store", ":targets"],
+    deps = [
+        ":keys",
+        ":limits",
+        ":model",
+        ":module_group_1",
+        ":store",
+        ":targets",
+        "//proto/common/errors/v1:ts",
+        "//proto/links/ui/v1:ts",
+        "//proto/ts:field-mask",
+        "//proto/ts:filter",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:page-token",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+        "//proto/ts:wire-json",
+    ],
 )
 
 js_library(
     name = "auth",
     srcs = ["src/auth.ts"],
     types = ["src/auth.ts"],
-    deps = ["//packages/edge-auth:lib", ":module_group_1"],
+    deps = [
+        ":module_group_1",
+        "//packages/edge-auth:lib",
+    ],
 )
 
 js_library(
     name = "resolve",
     srcs = ["src/resolve.ts"],
     types = ["src/resolve.ts"],
-    deps = [":keys", ":model", ":targets"],
+    deps = [
+        ":keys",
+        ":model",
+        ":targets",
+    ],
 )
 
 js_library(
     name = "pages",
     srcs = ["src/pages.ts"],
     types = ["src/pages.ts"],
-    deps = [":resolve", ":targets"],
+    deps = [
+        ":resolve",
+        ":targets",
+    ],
 )
 
 js_library(
     name = "http",
     srcs = ["src/http.ts"],
     types = ["src/http.ts"],
-    deps = ["//packages/edge-auth:lib", "//proto/links/ui/v1:ts", "//proto/ts:http-transcoder", "//proto/ts:rpc-status", ":api", ":auth", ":keys", ":limits", ":module_group_1", ":pages", ":resolve"],
+    deps = [
+        ":api",
+        ":auth",
+        ":keys",
+        ":limits",
+        ":module_group_1",
+        ":pages",
+        ":resolve",
+        "//packages/edge-auth:lib",
+        "//proto/links/ui/v1:ts",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:rpc-status",
+    ],
 )
 
 js_library(
     name = "ops-status",
     srcs = ["src/ops-status.ts"],
     types = ["src/ops-status.ts"],
-    deps = ["//proto/ops/v1:ts", "//proto/ts:protobuf", "//proto/ts:wire-json", ":module_group_1"],
+    deps = [
+        ":module_group_1",
+        "//proto/ops/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
 )
 
 js_library(
     name = "ops",
     srcs = ["src/ops.ts"],
     types = ["src/ops.ts"],
-    deps = ["//proto/ops/v1:ts", ":module_group_1", ":ops-status"],
+    deps = [
+        ":module_group_1",
+        ":ops-status",
+        "//proto/ops/v1:ts",
+    ],
 )
 
 js_library(
     name = "index",
     srcs = ["src/index.ts"],
     types = ["src/index.ts"],
-    deps = [":http", ":module_group_1", ":ops"],
+    deps = [
+        ":http",
+        ":module_group_1",
+        ":ops",
+    ],
 )
 
-js_library(name = "lib", deps = [":api", ":auth", ":backup", ":http", ":index", ":keys", ":limits", ":model", ":module_group_1", ":ops", ":ops-status", ":pages", ":resolve", ":store", ":targets"])
+js_library(
+    name = "lib",
+    deps = [
+        ":api",
+        ":auth",
+        ":backup",
+        ":http",
+        ":index",
+        ":keys",
+        ":limits",
+        ":model",
+        ":module_group_1",
+        ":ops",
+        ":ops-status",
+        ":pages",
+        ":resolve",
+        ":store",
+        ":targets",
+    ],
+)
 
-proto_package(name = "proto_types_package", deps = ["//proto/common/errors/v1:ts", "//proto/links/ui/v1:ts", "//proto/ops/v1:ts", "//proto/ts:field-mask", "//proto/ts:filter", "//proto/ts:http-transcoder", "//proto/ts:page-token", "//proto/ts:protobuf", "//proto/ts:protobuf-wkt", "//proto/ts:rpc-status", "//proto/ts:wire-json", ":lib"])
-workspace_package_link(name = "proto_types_link", src = ":proto_types_package", runtime_dependencies = ["@bufbuild/protobuf"])
-workspace_package_link(name = "edge_auth_types_link", src = "//packages/edge-auth:pkg")
+proto_package(
+    name = "proto_types_package",
+    deps = [
+        ":lib",
+        "//proto/common/errors/v1:ts",
+        "//proto/links/ui/v1:ts",
+        "//proto/ops/v1:ts",
+        "//proto/ts:field-mask",
+        "//proto/ts:filter",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:page-token",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+        "//proto/ts:wire-json",
+    ],
+)
+
+workspace_package_link(
+    name = "proto_types_link",
+    src = ":proto_types_package",
+    runtime_dependencies = ["@bufbuild/protobuf"],
+)
+
+workspace_package_link(
+    name = "edge_auth_types_link",
+    src = "//packages/edge-auth:pkg",
+)
+
 proto_vitest_test(
     name = "keys_test",
+    data = [
+        "package.json",
+        ":node_modules/vitest",
+    ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/keys.test.ts"],
-    deps = [":keys", ":limits"],
-    data = [":node_modules/vitest", "package.json"],
+    deps = [
+        ":keys",
+        ":limits",
+    ],
 )
 
 proto_vitest_test(
     name = "model_test",
+    data = [
+        "package.json",
+        ":node_modules/vitest",
+    ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/model.test.ts"],
-    deps = ["//proto/links/ui/v1:ts", "//proto/ts:wire-json", ":model"],
-    data = [":node_modules/vitest", "package.json"],
+    deps = [
+        ":model",
+        "//proto/links/ui/v1:ts",
+        "//proto/ts:wire-json",
+    ],
 )
 
 proto_vitest_test(
     name = "ops-status_test",
+    data = [
+        "package.json",
+        ":node_modules/vitest",
+        "//contracts:ops-v1/fixtures/OpsStatus/links-degraded.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/links-ok.json_data",
+        "//contracts:ops-v1/ops-v1.schema.json_data",
+    ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/ops-status.test.ts"],
-    deps = ["//contracts:ops-v1/validate", ":ops-status"],
-    data = ["//contracts:ops-v1/fixtures/OpsStatus/links-degraded.json_data", "//contracts:ops-v1/fixtures/OpsStatus/links-ok.json_data", "//contracts:ops-v1/ops-v1.schema.json_data", ":node_modules/vitest", "package.json"],
+    deps = [
+        ":ops-status",
+        "//contracts:ops-v1/validate",
+    ],
 )
 
 proto_vitest_test(
     name = "pages_test",
+    data = [
+        "package.json",
+        ":node_modules/vitest",
+    ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/pages.test.ts"],
     deps = [":pages"],
-    data = [":node_modules/vitest", "package.json"],
 )
 
 proto_vitest_test(
     name = "resolve_test",
+    data = [
+        "package.json",
+        ":node_modules/vitest",
+    ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/resolve.test.ts"],
-    deps = [":keys", ":resolve"],
-    data = [":node_modules/vitest", "package.json"],
+    deps = [
+        ":keys",
+        ":resolve",
+    ],
 )
 
 proto_vitest_test(
     name = "targets_test",
+    data = [
+        "package.json",
+        ":node_modules/vitest",
+    ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/targets.test.ts"],
-    deps = [":limits", ":targets"],
-    data = [":node_modules/vitest", "package.json"],
+    deps = [
+        ":limits",
+        ":targets",
+    ],
 )
 
 ts_project(
     name = "types",
-    srcs = ["vitest.config.ts", "vitest.runtime.config.ts", "src/api.ts", "src/auth.ts", "src/backup-alarm.ts", "src/backup-runner.ts", "src/backup.ts", "src/env.ts", "src/http.ts", "src/index.ts", "src/keys.ts", "src/limits.ts", "src/model.ts", "src/ops-status.ts", "src/ops.ts", "src/pages.ts", "src/resolve.ts", "src/store.ts", "src/targets.ts", "test/jwt.ts", "test/keys.test.ts", "test/model.test.ts", "test/ops-status.test.ts", "test/pages.test.ts", "test/resolve.test.ts", "test/targets.test.ts", "test/validate.d.ts"],
+    srcs = [
+        "src/api.ts",
+        "src/auth.ts",
+        "src/backup.ts",
+        "src/backup-alarm.ts",
+        "src/backup-runner.ts",
+        "src/env.ts",
+        "src/http.ts",
+        "src/index.ts",
+        "src/keys.ts",
+        "src/limits.ts",
+        "src/model.ts",
+        "src/ops.ts",
+        "src/ops-status.ts",
+        "src/pages.ts",
+        "src/resolve.ts",
+        "src/store.ts",
+        "src/targets.ts",
+        "test/jwt.ts",
+        "test/keys.test.ts",
+        "test/model.test.ts",
+        "test/ops-status.test.ts",
+        "test/pages.test.ts",
+        "test/resolve.test.ts",
+        "test/targets.test.ts",
+        "test/validate.d.ts",
+        "vitest.config.ts",
+        "vitest.runtime.config.ts",
+    ],
+    data = [
+        "vitest.config.ts",
+        "vitest.runtime.config.ts",
+    ],
     no_emit = True,
     resolve_json_module = True,
-    data = ["vitest.config.ts", "vitest.runtime.config.ts"],
-    deps = [":edge_auth_types_link", ":lib", ":node_modules/@cloudflare/workers-types", ":node_modules/@types/node", ":node_modules/vitest", ":proto_types_link"],
+    deps = [
+        ":edge_auth_types_link",
+        ":lib",
+        ":node_modules/@cloudflare/workers-types",
+        ":node_modules/@types/node",
+        ":node_modules/vitest",
+        ":proto_types_link",
+    ],
 )
 
-alias(name = "typecheck", actual = ":types_typecheck")
+alias(
+    name = "typecheck",
+    actual = ":types_typecheck",
+)
+
+ts_project(
+    name = "web_limits_types",
+    srcs = ["src/limits.ts"],
+    declaration = True,
+    emit_declaration_only = True,
+    extends = "tsconfig.json",
+    resolve_json_module = True,
+    tsconfig = {
+        "compilerOptions": {"noEmit": False},
+        "include": [],
+        "exclude": [],
+    },
+    deps = [":node_modules/@cloudflare/workers-types"],
+)
+
+js_library(
+    name = "limits_web",
+    srcs = ["src/limits.ts"],
+    deps = [":web_limits_types"],
+)
+
+wrangler.wrangler_binary(name = "wrangler")
+
+js_library(
+    name = "application_sources",
+    srcs = glob([
+        "src/**",
+        "package.json",
+        "tsconfig.json",
+    ]),
+)
+
+test_suite(name = "check")
+
+js_library(
+    name = "runtime_helpers",
+    srcs = [
+        "test/runtime/harness.ts",
+        "test/runtime/tsconfig.json",
+    ],
+    types = glob(
+        ["test/runtime/**/*.ts"],
+        exclude = ["**/*.test.ts"],
+    ),
+)
+
+workerd_vitest_test(
+    name = "runtime_access_test",
+    data = [
+        "test/jwt.ts",
+        ":test_support",
+        "//links:config",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/access.test.ts"],
+)
+
+workerd_vitest_test(
+    name = "runtime_api_test",
+    data = [
+        ":test_support",
+        "//links:config",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/api.test.ts"],
+    deps = [
+        "//proto/links/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_backup_test",
+    data = [
+        ":test_support",
+        ":wrangler",
+        "//links:config",
+        "//links/tools:backup-restore",
+    ],
+    env = {"BAZEL_WRANGLER": "$(rootpath :wrangler)"},
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/backup.test.ts"],
+    deps = ["//proto/ops/v1:ts"],
+)
+
+workerd_vitest_test(
+    name = "runtime_budget_test",
+    data = [
+        ":test_support",
+        "//links:config",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/budget.test.ts"],
+    deps = [
+        "//proto/links/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_cpu_test",
+    data = [
+        "test/jwt.ts",
+        ":test_support",
+        "//links:config",
+        "//tools/workerd-cpu:lib",
+    ],
+    runner = vitest.vitest_test,
+    tags = [
+        "cpu",
+        "exclusive",
+        "workerd",
+    ],
+    tests = ["test/runtime/cpu.test.ts"],
+    deps = ["//proto/ops/v1:ts"],
+)
+
+workerd_vitest_test(
+    name = "runtime_redirect_test",
+    data = [
+        ":test_support",
+        "//links:config",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/redirect.test.ts"],
+)
+
+workerd_vitest_test(
+    name = "runtime_schema_test",
+    data = [
+        ":test_support",
+        "//links:config",
+    ],
+    runner = vitest.vitest_test,
+    tests = ["test/runtime/schema.test.ts"],
+)
+
+ts_config(
+    name = "worker_config",
+    src = "tsconfig.json",
+)
+
+ts_config(
+    name = "runtime_config",
+    src = "test/runtime/tsconfig.json",
+    deps = [":worker_config"],
+)
+
+ts_project(
+    name = "runtime_types",
+    srcs = [":proto_types_package_wire_types"] + glob(
+        [
+            "test/runtime/**/*.ts",
+            "test/runtime/**/*.mts",
+        ],
+        allow_empty = True,
+    ),
+    extends = ":runtime_config",
+    no_emit = True,
+    resolve_json_module = True,
+    tsconfig = {
+        "compilerOptions": {"noEmit": True},
+        "include": [],
+        "exclude": [],
+    },
+    deps = [
+        ":edge_auth_types_link",
+        ":lib",
+        ":node_modules/@cloudflare/workers-types",
+        ":node_modules/@types/node",
+        ":node_modules/esbuild",
+        ":node_modules/miniflare",
+        ":node_modules/vitest",
+        ":proto_types_link",
+        ":test_support",
+        "//:node_modules/@cloudflare/workers-types",
+        "//links/tools:restore_types",
+        "//tools/workerd-cpu:types",
+    ],
+)
+
+js_library(
+    name = "test_support",
+    srcs = glob(
+        ["test/**"],
+        exclude = [
+            "test/runtime/**",
+            "test/smoke/**",
+            "**/*.test.ts",
+        ],
+    ),
+    types = glob(
+        ["test/**/*.ts"],
+        exclude = [
+            "test/runtime/**",
+            "test/smoke/**",
+            "**/*.test.ts",
+        ],
+    ),
+)
+
+eslint_test(
+    name = "lint",
+    data = [
+        "package.json",
+        "test/runtime/tsconfig.json",
+        "tsconfig.json",
+        ":application_sources",
+        ":edge_auth_types_link",
+        ":lib",
+        ":node_modules/@cloudflare/workers-types",
+        ":node_modules/@eslint/js",
+        ":node_modules/@types/node",
+        ":node_modules/esbuild",
+        ":node_modules/eslint",
+        ":node_modules/miniflare",
+        ":node_modules/typescript",
+        ":node_modules/typescript-eslint",
+        ":node_modules/vitest",
+        ":node_modules/wrangler",
+        ":proto_types_link",
+        ":runtime_helpers",
+        ":test_support",
+        "//:node_modules/@cloudflare/workers-types",
+        "//links/tools:restore_types",
+        "//tools/workerd-cpu:types",
+    ],
+    runner = eslint.eslint_test,
+    sources = glob(
+        [
+            "src/**/*.ts",
+            "src/**/*.tsx",
+            "test/**/*.ts",
+            "test/**/*.mts",
+            "scripts/**/*.mjs",
+            "*.js",
+            "*.ts",
+        ],
+        allow_empty = True,
+    ),
+)
+
+js_library(
+    name = "package_metadata",
+    srcs = ["package.json"],
+)
+
+js_library(
+    name = "entry_metadata",
+    srcs = ["src/index.ts"],
+)
+
+js_library(
+    name = "runtime_metadata",
+    srcs = ["test/runtime/harness.ts"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        [
+            "*",
+            "src/**",
+            "test/**",
+        ],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)
+
+test_suite(
+    name = "typecheck_tests",
+    tests = [
+        ":runtime_types_typecheck_test",
+        ":types_typecheck_test",
+    ],
+)
+
+test_suite(
+    name = "runtime_tests",
+    tests = [":runtime_" + file.removeprefix("test/runtime/").removesuffix(".test.ts") + "_test" for file in glob(["test/runtime/*.test.ts"])],
+)

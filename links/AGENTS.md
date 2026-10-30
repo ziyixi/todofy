@@ -2,7 +2,7 @@
 
 The root [`AGENTS.md`](../AGENTS.md) applies here too. Rules of the links app:
 
-- **Deployed by CI only (L2).** `Links deploy` (`.github/workflows/ci.yml`) is the only way to production: never a
+- **Deployed by CI only.** `Links deploy` (`.github/workflows/ci.yml`) is the only way to production: never a
   plain `wrangler deploy` (it deletes `BUILD_SHA`) and never a D1 command with `--remote` by hand. The one hostname is
   the Custom Domain `s.ziyixi.science`; only `/_` and `/_/*` are behind the path-scoped Access application `links`.
   Never add a hostname that this Access application does not cover in the same way, and never widen the application
@@ -40,6 +40,6 @@ The root [`AGENTS.md`](../AGENTS.md) applies here too. Rules of the links app:
   `proto/ts`). Change the IDL there first (`npm run lint && npm run api-lint` in `proto/`), never hand-write a route
   under `/_/api/`.
 - **Auth** is `packages/edge-auth` (`src/auth.ts`, SPEC §5.4): Access on everything under `/_/`, exact Origin, a nonempty custom CSRF header and JSON media type on every mutation. Do not reimplement or copy auth code.
-- **Style.** English code comments; small modules. Before committing run, in `worker/`, `npm run lint`, `npm run
-  typecheck`, `npm test` and `npm run test:runtime`; in `web/`, `npm run lint`, `npm run typecheck`, `npm test` and
-  `npm run build`; in `links/`, `node --test deploy/test/*.test.mjs tools/test/*.test.mjs`.
+- **Style and checks.** English comments, small cohesive modules. Run `bazel test //links:check` and
+  `bazel build //links`; package build/test/type/lint commands use those declared targets. Interactive dev keeps local
+  bindings. Explicitly authorized recovery is described separately in the backup runbook.

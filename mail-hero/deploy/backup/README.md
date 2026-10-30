@@ -71,7 +71,7 @@ python3 mailhero_backup.py restore \
 在 `mail-hero/` 执行：
 
 ```sh
-python3 -m unittest discover -s deploy/backup -p 'test_*.py' -v
+bazel test //mail-hero/deploy/backup:check
 ```
 
 原生测试不依赖 GPG，覆盖原子下载、文件与清单损坏、重复/缺失/多余文件、路径穿越、符号链接、最新删除记录、冻结事件及缺少仍被数据库引用的对象。旧版 GPG 验证只属于旧格式。生产备份、独立恢复和部署证据见 [验收记录](../../docs/verification-native.md)。

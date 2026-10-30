@@ -69,89 +69,27 @@ node tasks/tools/prepare-import.ts \
 
 The prepared SQL requires an empty target or the same frozen snapshot's unfinished import. It rejects a different snapshot and rejects a target where an owner or application has already written. Repeating the same file preserves IDs and does not duplicate completion occurrences. Do not use it as an ongoing sync mechanism.
 
-## Production cutover
+## Import into a new empty destination
 
-These commands describe the operator sequence; HANDOFF records which steps were performed and their actual final digest, counts, Actions run and verification. Keep `PRIVATE_DIR` an absolute private path outside the repository; use new final filenames rather than overwriting the preview.
+The original October 2026 cutover is complete. Its FlowDay/Plus/Todofy task-source switches are retired; do not repeat
+those steps against the live Tasks database. Todoist import is neither ongoing sync nor recovery of subsequent native
+writes. Use [backup/restore](backup.md) for the current task state.
 
-1. Ask the owner to stop editing Todoist and close the old Plus interface for this window. Record the previous three production variable values, then set `TODOFY_MAINTENANCE_MODE`, `TODOFY_PROCESSING_PAUSED` and `TODOFY_FORCE_PAUSE_TODOIST` to `true`. Maintenance also stops Plus's local planning writes. Deploy the pause through the existing workflow:
+For a separately authorized new migration:
 
-   ```sh
-   gh variable set TODOFY_MAINTENANCE_MODE --env production --repo ziyixi/todofy --body true
-   gh variable set TODOFY_PROCESSING_PAUSED --env production --repo ziyixi/todofy --body true
-   gh variable set TODOFY_FORCE_PAUSE_TODOIST --env production --repo ziyixi/todofy --body true
-   gh workflow run ci.yml --ref main --repo ziyixi/todofy -f app=todofy
-   ```
+1. Pause source editing/project-owned writers and keep the destination empty. Repeat the read-only export and its
+   exact coverage window; separate API reads are not an atomic snapshot.
+2. Generate final SQL without the preview override. Require zero issues/coverage gaps and check its statement sizes
+   against current D1 limits without printing SQL or content.
+3. Apply the existing destination migrations and frozen SQL only to that authorized empty database. Capture any
+   diagnostics privately because provider errors may contain SQL.
+4. Read destination IDs, counts, hierarchy, dates, completion occurrences and frozen import digest back privately and
+   compare with the final source snapshot. Local SQLite or one count alone does not prove complete migration.
+5. Activate consumers through the normal checked configuration/release flow only after those comparisons succeed.
+   Keep the original account intact. After native writes begin, the import guard refuses a repeat.
 
-   Wait for that deployment to succeed, verify all three live switches, and let in-flight writes finish. Keep the new Tasks UI unused until import finishes. GitHub variable changes alone do not pause an already running Worker.
-
-2. Repeat the read-only export with output `$PRIVATE_DIR/todoist-final.json`, using the same earliest history date. Then generate the final SQL with no preview override:
-
-   ```sh
-   node tasks/tools/prepare-import.ts --input "$PRIVATE_DIR/todoist-final.json" \
-     --output "$PRIVATE_DIR/tasks-final.sql"
-   node --input-type=module - "$PRIVATE_DIR/tasks-final.sql" <<'JS'
-   import { readFile } from 'node:fs/promises';
-   const sql = await readFile(process.argv[2], 'utf8');
-   const sizes = sql.split('\n').filter(Boolean).map(line => Buffer.byteLength(line));
-   const maximum = Math.max(...sizes);
-   console.log(JSON.stringify({file_bytes: Buffer.byteLength(sql), max_statement_bytes: maximum}));
-   if (maximum > 100000) throw new Error('D1_STATEMENT_TOO_LARGE');
-   JS
-   ```
-
-   Require zero issues and zero coverage gaps. The earlier private preview had a largest statement of 4,774 bytes and a file of about 5.9 MB; remeasure the final file. D1 allows a 100,000-byte statement and a 5 GiB file import. Hex literals keep each generated statement on one line, so this check does not expose contents. [D1 limits](https://developers.cloudflare.com/d1/platform/limits/)
-
-3. From `tasks/worker`, use the installed, locked Wrangler. Existing migrations must already be applied by Actions. Capture raw output privately; a failed import can include SQL in its diagnostics:
-
-   ```sh
-   umask 077
-   cd tasks/worker
-   WRANGLER_WRITE_LOGS=false ./node_modules/.bin/wrangler d1 execute DB --remote \
-     --config ../wrangler.toml --file "$PRIVATE_DIR/tasks-final.sql" --yes \
-     > "$PRIVATE_DIR/tasks-import.log" 2>&1
-   ```
-
-   This uses D1's [file import](https://developers.cloudflare.com/d1/best-practices/import-export-data/), rather than sending thousands of statements through a normal Worker invocation. If interrupted, inspect the private result and resume only the same frozen SQL while writers remain stopped. A new snapshot has a different digest; do not import it over a partial one.
-
-4. Before enabling native writers, export destination identities into separate private files, from the same `tasks/worker` directory. These single-table queries have been verified on D1; a combined seven-way `UNION` failed there:
-
-   ```sh
-   for kind in projects sections labels filters tasks completions; do
-     WRANGLER_WRITE_LOGS=false ./node_modules/.bin/wrangler d1 execute DB --remote \
-       --config ../wrangler.toml --json --command "SELECT '$kind' kind,id FROM $kind" \
-       > "$PRIVATE_DIR/$kind-identities.json" 2>> "$PRIVATE_DIR/tasks-verification.log" || exit 1
-   done
-   WRANGLER_WRITE_LOGS=false ./node_modules/.bin/wrangler d1 execute DB --remote \
-     --config ../wrangler.toml --json --command "SELECT 'snapshot' kind,fingerprint id FROM requests WHERE id='native-import'" \
-     > "$PRIVATE_DIR/snapshot-identities.json" 2>> "$PRIVATE_DIR/tasks-verification.log"
-   cd ../..
-   node --input-type=module - "$PRIVATE_DIR/todoist-final.json" "$PRIVATE_DIR" <<'JS'
-   import { readFile } from 'node:fs/promises';
-   import { join } from 'node:path';
-   import { prepareImport } from './tasks/tools/import-model.ts';
-   const plan = prepareImport(JSON.parse(await readFile(process.argv[2], 'utf8')));
-   const kinds = ['projects', 'sections', 'labels', 'filters', 'tasks', 'completions', 'snapshot'];
-   const pages = await Promise.all(kinds.map(async kind =>
-     JSON.parse(await readFile(join(process.argv[3], `${kind}-identities.json`), 'utf8'))));
-   const rows = pages.flatMap(page => page.flatMap(result => result.results ?? []));
-   const counts = {};
-   for (const kind of kinds) {
-     const expected = (kind === 'snapshot' ? [plan.digest] : plan[kind].map(row => row.id)).sort();
-     const actual = rows.filter(row => row.kind === kind).map(row => row.id).sort();
-     if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error('IMPORT_IDENTITIES_DIFFER');
-     counts[kind] = actual.length;
-   }
-   console.log(JSON.stringify({identities_match: true, counts}));
-   JS
-   ```
-
-   Compare the safe counts with the final preflight, not the older preview. Re-run the planning-provider dry run below using fresh paused metadata and this final snapshot. The current preview matched zero planning rows; if the final result still matches zero, skip the provider SQL. Otherwise apply only its checked statement and verify the returned identities privately.
-
-5. Commit the reviewed source/binding configuration and release the same branch-green SHA on `main` through Actions, keeping the three pauses in place. Core and gateway use `TASK_SOURCE=tasks`; core binds Tasks, Tasks binds the private Planning entrypoint, and FlowDay binds the read-only Tasks entrypoint. Verify the deployed SHA and binding identities before resuming.
-
-   In the existing authenticated FlowDay UI, use Sync now until the actual `SyncTasks` response is `SYNCED`. Each native request processes at most 100 changes; `PARTIAL` continues immediately, and `THROTTLED` waits until its returned next time. The initial feed contains completed imports as well as active tasks, so one UI attempt may not drain it. This uses the existing `POST /api/v1/tasks:sync` and its owner/CSRF transport, with no task-source writes.
-
-   Restore the three recorded variable values and redeploy Todofy from that same green main SHA. Confirm native Tasks lists, Plan, Focus and Mail, a synthetic task's edit/completion, and preserved FlowDay queues/timer history before ending the owner editing window. Keep the source Todoist account intact. After native writes begin, the import replay guard refuses further import; it is not a refresh command.
+Operator data stays outside Git. A failed partial import continues only the same frozen file; a different snapshot
+must not be applied over it. The full historical execution record remains in Git and [verification](verification.md).
 
 ## What is preserved
 
@@ -169,25 +107,13 @@ The supported recurrence grammar includes named weekdays, weekdays/workdays, int
 ## Local evidence
 
 ```sh
-node --test tasks/tools/test/*.test.mjs
-npm run test:runtime --prefix tasks/worker
+bazel test //tasks/tools:check
 ```
 
-The synthetic D1 roundtrip checks preserved IDs, Unicode and quoting, archived visibility, completion history and lifetime counts, identical replay, and refusal after an owner write. A case with 120 task snapshots and 120 differently timed activity occurrences checks that history has 120 rows, with the latest 100 followed by the next 20. It also checks history for an unavailable task and a new native completion increasing only the source baseline. Separate tests cover full-project identity mismatches, limited account history, pagination failures, form-encoded Sync, unresolved relationships and unsupported rules. No real account export or production data import has been performed by these tests.
+Synthetic tests cover actual D1 roundtrip, IDs, Unicode/quoting, archived visibility, completion history/counts,
+identical replay and refusal after an owner write, pagination, unavailable history, relationships and unsupported
+rules. They never export the real account or run a production import.
 
-## Keep planning identities during cutover
-
-This check was part of step 4 of the production cutover above: `tools/prepare-planning-cutover.ts` matched
-Todofy's planning identities (`plan_tasks`) with the imported tasks and, for any that matched, prepared one
-statement that changed their provider from `todoist` to `tasks` in place, so dependencies and marks kept their IDs.
-Planning moved into Tasks on 2026-10-20 and Todofy's store was copied there once
-([backup.md](backup.md#one-time-planning-import)), so the tool has nothing left to rewrite. It was deleted and is at
-`777d5f01` (`git show 777d5f01:tasks/tools/planning-cutover.ts`).
-
-## Convert the old planning labels once
-
-This phase ran once, after the original task import in October 2026: Todofy's `tools/prepare_native_plan.py`
-turned the old planning labels into Todofy's planning state and retired the replaced labels and filters. Planning
-moved into Tasks on 2026-10-20 (`tasks/migrations/0006_planning.sql`, with a one-time copy of Todofy's planning
-store: [backup.md](backup.md#one-time-planning-import)), and the tool left with Todofy's planning code; its procedure
-is in the repository's history before that release.
+Old planning-provider and label conversion tools were one-time migrations and have been removed. Their imported
+identities remain stored; current planning is native task data. Historical copy boundaries are documented in
+[backup](backup.md#one-time-planning-import).

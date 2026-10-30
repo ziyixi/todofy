@@ -65,6 +65,7 @@ export interface CoreAnswers {
 let bundle: Promise<string> | undefined;
 function gatewayBundle(): Promise<string> {
   bundle ??= build({
+    ...(process.env.TEST_SRCDIR ? { nodePaths: [`${process.cwd()}/node_modules`] } : {}),
     entryPoints: [join(ROOT, 'src/index.ts')],
     bundle: true,
     format: 'esm',

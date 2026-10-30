@@ -56,11 +56,11 @@ through the application lifespan. Status and release authorization remain separa
 }
 ```
 
-The current daemon starts its deployment controller with both workloads above. Bootstrap generates
+The current profile also registers the independent `codex-gateway` workload. Bootstrap generates
 this profile from public configuration; the fixed application resource names and private service URLs
 remain part of the supported deployment boundary.
 
-Adapters are `newsletter`, `personal-cloud` or `deployment`. The generic deployment adapter reports
+Adapters are `newsletter`, `personal-cloud`, `codex-gateway` or `deployment`. The generic deployment adapter reports
 unsupported business capabilities and cannot invent image provenance. Newsletter's URL is the fixed
 private `http://newsletter:8080/internal/monitoring/status`; its only credential is
 `NEWSLETTER_MONITOR_TOKEN`. The local adapter uses `PLATFORM_RELEASE_REQUEST_ID` and the immutable

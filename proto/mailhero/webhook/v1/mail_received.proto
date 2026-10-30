@@ -28,7 +28,7 @@
 // ECMAScript's trim() too, so it sends no event with a U+FEFF-only subject and text, as before; one made only of
 // U+001C-U+001F or U+0085, which Todofy has always refused (400), is now refused before it is frozen.
 //
-// Google's api-linter runs on this file (scripts/api-lint.sh). The rules it cannot meet without changing the event's
+// Google's api-linter runs on this file (//proto:api_lint_test). The rules it cannot meet without changing the event's
 // frozen wire are disabled where they apply, each with its reason. File-wide (api-linter reads them from this
 // header):
 //

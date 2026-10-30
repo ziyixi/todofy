@@ -23,7 +23,8 @@ Home is the daily starting point. Services run and release independently, sharin
 | Website | Notion 驱动的个人网站 / Personal website from Notion | Cloudflare static assets + relay | [website/](website/README.md) |
 | Newsletter | 生成并发送简报 / Build and send the newsletter | VPS k3s, separate image | [newsletter/](newsletter/README.md) |
 | Fleet | VPS、daemon 与发布状态 / VPS, daemons and release status | Cloudflare Worker + DO | [fleet/](fleet/README.md) |
-| Newsletter 控制台 / Newsletter console | 简报的只读控制台（建设中）/ Read-only newsletter console (in progress) | Cloudflare Worker, reads from Newsletter | [newsletter-console/](newsletter-console/README.md) |
+| Personal MCP | Dots 工具、工作记录与订阅 / Dots tools, work memory and events | Cloudflare Worker + DO | [personal-mcp/](personal-mcp/README.md) |
+| Newsletter 控制台 / Newsletter console | 简报的只读控制台 / Read-only newsletter console | Cloudflare Worker, reads from Newsletter | [newsletter-console/](newsletter-console/README.md) |
 
 Tasks 是任务与规划入口，也保存 Focus 的每日队列与计时；Todofy 处理邮件和每日提醒。Todoist 只是 2026-10-17 的一次性迁移来源，现在没有代码读写它。
 
@@ -38,32 +39,23 @@ Cloudflare hosts the daily applications. VPS k3s runs Newsletter, Codex Gateway 
 Actions pushes tested images through an authenticated API; Fleet and Home show observed runtime state.
 Release progress, business health and observation freshness stay separate. See [rebuild](docs/rebuild.md).
 
-## 从这里开始 · Getting started
+## 构建与开发 · Build and develop
 
-1. 查看 [HANDOFF](HANDOFF.md)：正在做什么、合并顺序、待验收和待 owner 处理的事项。
-   Read HANDOFF for active work, merge order, outstanding verification and owner actions.
-2. 阅读根 [AGENTS.md](AGENTS.md)，以及目标应用自己的规则与 README。
-   Read the repository rules and the target application's instructions and README.
-3. 在根 workspace 安装依赖，再进入目标应用目录开发与检查；本地只使用本地绑定和合成数据。
-   Install dependencies at the workspace root, then run the application's scripts with local bindings and synthetic data.
-
-全仓共用 Node 26 / pnpm catalog 与一个 Node 锁文件、Python 3.14 / uv workspace 与一个 Python 锁文件。
-安装和版本更新命令见 [依赖管理](docs/dependencies.md)。
-
-构建与检查正在分批迁入 Bazel，第三方版本继续由现有锁文件固定；当前覆盖范围见 [Bazel](docs/bazel.md)。
-
-The repository shares one pnpm catalog/lock and one uv workspace/lock. See [dependencies](docs/dependencies.md).
-Builds and checks are migrating to Bazel; dependency versions remain in the existing locks. See [Bazel](docs/bazel.md).
+先读 [HANDOFF](HANDOFF.md) 和目标应用的规则。Bazel 固定工具链并按真实依赖构建、检查，不需要先安装每个应用。
+Read HANDOFF and the target application's rules. Bazel supplies pinned toolchains and follows declared dependencies.
 
 ```sh
-cd mail-hero    # 或 / or todofy, tasks, dashboard, links, watch, mailsort, recall, website, newsletter, fleet, platform
+bazel build //tasks        # 完整 Worker/UI/config archive
+bazel test //tasks:check   # 该应用的检查 / application checks
+bazel test //...           # 全仓检查 / repository checks
 ```
 
-仓库没有“一条命令启动所有服务”的要求。Cloudflare TypeScript 应用安装时生成 proto；Todofy 的 Python 代码由 `uv` 构建时生成。
-不要提交生成代码或把本地开发连接到生产数据库。
+每个应用根 BUILD 提供最终产物、`:check`、`:config` 和独立发布输入。交互式开发仍可用各应用脚本，
+Node 26/pnpm 与 Python 3.14/uv 分别共享一份锁文件；生成代码不提交。本地只使用合成数据和本地绑定。
 
-There is no requirement to start every service together. Cloudflare TypeScript installs generate proto code;
-Todofy's Python build generates it through `uv`. Generated code is not committed; development uses local data.
+Application roots expose final artifacts, checks, configuration and release inputs. Interactive development keeps
+app scripts and shared pnpm/uv locks. Generated code stays uncommitted; local development uses synthetic data.
+See [Bazel](docs/bazel.md) and [dependencies](docs/dependencies.md).
 
 ## 仓库地图 · Repository map
 

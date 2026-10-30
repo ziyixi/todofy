@@ -9,6 +9,12 @@ from pathlib import Path
 import pytest
 
 if __name__ == "__main__":
+    if binaries := os.environ.get("BAZEL_TEST_BIN"):
+        os.environ["PATH"] = (
+            str(Path(binaries).absolute())
+            + os.pathsep
+            + os.environ.get("PATH", os.defpath)
+        )
     if font := os.environ.get("NEWSLETTER_CHART_FONT"):
         os.environ["NEWSLETTER_CHART_FONT"] = str(Path(font).absolute())
     if os.environ.get("BAZEL_COPY_WORKSPACE") == "1":

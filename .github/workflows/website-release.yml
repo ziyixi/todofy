@@ -105,6 +105,7 @@ jobs:
           result = json.loads(subprocess.check_output(["python3", "tools/cloud-config/outputs.py"]))
           print("SITE_URL=" + result["website_url"])
           PYTHON
+      - uses: ./.github/actions/setup-bazel
       - name: Install the selected Node workspaces
         uses: ./.github/actions/setup-workspace
         with:
@@ -123,29 +124,9 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           WEBSITE_BOOTSTRAP_APPROVAL: ${{ vars.WEBSITE_BOOTSTRAP_APPROVAL }}
         run: pnpm release gate
-      # The browser download is cached by the locked Playwright version (as in CI's Website checks); the
-      # system libraries are installed on every run, so a cache hit only skips the download.
-      - name: Read the locked Playwright version
-        id: playwright
+      - name: Prepare the pinned verification browser's OS dependencies
         if: steps.gate.outputs.bootstrap_required != 'true'
-        run: echo "version=$(pnpm exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
-      - name: Restore the Playwright browser
-        id: playwright-cache
-        if: steps.gate.outputs.bootstrap_required != 'true'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-chromium-${{ runner.os }}-${{ steps.playwright.outputs.version }}
-      - name: Install the pinned browser
-        if: steps.gate.outputs.bootstrap_required != 'true'
-        env:
-          CACHE_HIT: ${{ steps.playwright-cache.outputs.cache-hit }}
-        run: |
-          if [ "$CACHE_HIT" = true ]; then
-            pnpm exec playwright install-deps chromium
-          else
-            pnpm exec playwright install --with-deps chromium
-          fi
+        run: bazel run //tools/bazel/browser:install_chromium_dependencies
       - name: Reconcile a blocked release with what production serves
         if: steps.gate.outputs.bootstrap_required != 'true' && inputs.operation == 'recovery'
         env:
@@ -157,11 +138,6 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
         run: pnpm release check-baseline
-      - name: Run the no-secret checks
-        if: steps.gate.outputs.bootstrap_required != 'true'
-        run: |
-          pnpm content:prepare:empty
-          pnpm check
       - name: Prepare the Notion snapshot
         id: prepare
         if: steps.gate.outputs.bootstrap_required != 'true'
@@ -186,7 +162,7 @@ jobs:
         if: steps.decision.outputs.deploy_required == 'true'
         env:
           CODE_SHA: ${{ steps.code.outputs.code_sha }}
-        run: pnpm build:site
+        run: pnpm release build
       - name: Verify the export under wrangler dev
         id: artifact
         if: steps.decision.outputs.deploy_required == 'true'

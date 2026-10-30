@@ -5,18 +5,17 @@
   "type": "module",
   "description": "The pinned protobuf toolchain of this repository (buf, protoc-gen-es, the protobuf-es runtime) and the checks of the proto/ module. Apps consume ./ts (TypeScript) and ./python (Python), never this package.",
   "scripts": {
-    "generate": "node tools/ensure.mjs --force",
     "ensure": "node tools/ensure.mjs",
-    "lint": "buf format --diff --exit-code && buf lint",
-    "api-lint": "sh scripts/api-lint.sh",
-    "breaking": "sh scripts/breaking.sh",
-    "typecheck": "node tools/ensure.mjs && tsc --noEmit -p tsconfig.json",
-    "test": "node tools/ensure.mjs && vitest run && pnpm run test:python && node tools/schema.mjs --check",
-    "test:python": "node tools/ensure.mjs && uv run --locked --package ziyixi-proto python -m unittest discover -s test/python -t test/python",
-    "check:deterministic": "node tools/ensure.mjs --check-deterministic",
-    "schema": "node tools/ensure.mjs && node tools/schema.mjs",
-    "check:schema": "node tools/ensure.mjs && node tools/schema.mjs --check",
-    "selftest": "sh scripts/rules-selftest.sh"
+    "lint": "bazel test //proto:format_test //proto:lint_test",
+    "api-lint": "bazel test //proto:api_lint_test //proto/tools/api-linter/googleapis:googleapis_test",
+    "breaking": "bazel run //proto:breaking --",
+    "typecheck": "bazel build //proto:typecheck",
+    "test": "bazel test //proto:check",
+    "test:python": "bazel test //proto/test/python:tests",
+    "check:deterministic": "bazel test //proto:determinism_test",
+    "schema": "bazel run //proto:write_schemas",
+    "check:schema": "bazel test //proto:schema_test",
+    "selftest": "bazel test //proto:rules_selftest"
   },
   "dependencies": {
     "@bufbuild/buf": "catalog:",

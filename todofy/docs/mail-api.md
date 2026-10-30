@@ -3,9 +3,7 @@
 `MailService` (`proto/todofy/mail/v1/mail_service.proto`, package `todofy.mail.v1`) is the mail Todofy summarised
 and keeps, for the Workers that bind it: Tasks (its Mail page, mail conversion and weekly review) and the Personal
 MCP. Todofy creates, reads and changes no task here. Tasks turns a mail into a task itself and then marks the mail
-converted; it owns the Mail categories a conversion files with. Todofy keeps the summaries, the ledger and the Gemini
-work. Until 2026-10-21 the same mail was served as `PlusService` (`/api/plus/v1/*`, named after the retired Todoist
-Plus extension, [history](../../docs/history/todoist-plus.md)), with Todofy writing the converted task itself.
+converted; it owns the Mail categories. Todofy keeps summaries, the ledger and model coordination through Router.
 
 ## Binding and access
 

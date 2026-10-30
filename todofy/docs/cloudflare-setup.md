@@ -1,266 +1,36 @@
-# Cloudflare setup (one-time bootstrap)
+# Todofy setup and recovery
 
-What the owner sets up once before the first deploy. Everything after that goes through GitHub Actions
-([ci-cd.md](ci-cd.md)). This file names settings and how to derive them; it never holds values. The
-repository and its Actions logs are public, so no secret, owner email or database content belongs in it.
+The root [rebuild guide](../../docs/rebuild.md) owns first-account/bootstrap steps. Use its public profile, resource
+exporter and gated infrastructure flow; do not create a second set of D1/R2/Access resources manually.
 
-Cloudflare compute uses Workers Free. Both Workers, D1 and Durable Object requests share the account's free daily
-allowances with Mail Hero. Model usage is billed separately through the provider connections in Model Router.
+## Configuration
 
-Todofy is two Workers ([gateway-contract.md](gateway-contract.md)):
+`wrangler.toml` owns the private Python core and D1/backups bindings. `gateway/wrangler.toml` owns public hosts, Access,
+assets and cron. Generated identities come from the root public cloud/resource configuration. The core has no public
+route. The owner host is behind Access; hooks hosts use their own machine credentials and must not redirect to Access.
 
-- `todofy`, the TypeScript gateway: the custom domains, Access and CSRF checks, webhook and newsletter
-  credential checks, the UI assets and the cron. It holds the credential digests and the owner emails.
-- `todofy-core`, the Python Worker that hosts the Durable Object. It has no public route; it holds D1 and the
-  `MODEL_ROUTER` binding (`Inference`, `props.app=todofy`), and does the work inside the object (30 s CPU per call instead of
-  a plain Worker's 10 ms on Workers Free).
+GitHub's production environment is main-only and requires `CI gate`. Deployment injects the explicit
+`TODOFY_MAINTENANCE_MODE` and `TODOFY_PROCESSING_PAUSED` variables and the selected source SHA. The gateway receives
+owner identity through its declared Worker secret map. Provider connections stay only in Model Router.
 
-## 1. D1 database
+The gateway's machine interface uses the existing webhook token digest and report Basic credential digest. Their
+names and optional rotation inputs are declared in [app.toml](../app.toml). Configure them through the owner secret
+flow, not source files or printed command arguments. A missing digest refuses that interface; it does not open it.
 
-```sh
-npx wrangler d1 create todofy
-```
-
-Put the printed `database_id` into `[[d1_databases]]` of the committed `wrangler.toml` and commit it (a
-D1 ID is not a secret). The schema is applied
-by every deploy (`wrangler d1 migrations apply DB --remote`); do not apply it by hand.
-
-Backup bucket (weekly D1 backups, §7), before the first deploy that binds it; a deploy whose config
-names a missing bucket fails:
+## Publication and checks
 
 ```sh
-npx wrangler r2 bucket create todofy-backups
+bazel test //todofy:check
+bazel build //todofy
 ```
 
-Keep it private: no public access, no `r2.dev` URL, no custom domain, no lifecycle rule (the core's
-own retention deletes old backups). It holds mail content (summaries, todo bodies, payloads of unfinished
-events, the imported legacy text). The deploy token (§3) has no R2 permission: wrangler 4.142.0 looks the
-bucket up on the first deploy that binds it and, on a 403, skips that check (read from its source); that
-Cloudflare's upload then accepts the binding without R2 permission is unverified. If the first deploy
-fails on the `BACKUPS` binding, add "Workers R2 Storage: Read" to the token rather than Edit.
+Actions verifies and stages the compiled artifact, runs hostname guards, applies migrations, deploys core then
+gateway and checks actual identity, machine-path behavior and Access. The main reconcile must also pass. See
+[CI/CD](ci-cd.md). Never run a bare production deploy or apply a recovery SQL file against the production config.
 
-Metrics dataset: both Workers bind the Workers Analytics Engine dataset `todofy_metrics` (binding
-`METRICS`, docs/dev-notes.md §6). The dataset needs no create command, but check once in the dashboard
-(Workers & Pages → Analytics Engine) that Analytics Engine is available on the account before the
-first deploy that binds it.
-
-## 2. Cloudflare Access (UI host only)
-
-Zero Trust → Access → Applications → Self-hosted:
-
-- Domain: exactly `TODOFY_PUBLIC_HOST` (e.g. `todofy.ziyixi.science`), whole host, no path. Visible in
-  the App Launcher.
-- Policies: Allow, by exact email per identity provider, one policy per provider (for example the owner's
-  mailbox login and the owner's GitHub login). No Bypass rules.
-- Copy the application's AUD tag (64 hex) into the variable `TODOFY_ACCESS_AUDIENCE`, and the team
-  domain `https://<team>.cloudflareaccess.com` into `TODOFY_ACCESS_ISSUER`.
-- Do not create any Access application for the hooks hosts: Mail Hero and the newsletter authenticate
-  with their own credentials, and an Access redirect would break them.
-
-The Worker verifies the Access JWT itself and accepts only `ACCESS_OWNER` or an address in
-`ACCESS_OWNER_ALIASES` (up to 8). Put every login the Access policies allow for the owner there, e.g. a
-GitHub-login email that differs from the owner email; all of them map to the one owner identity.
-
-## 3. GitHub `production` environment
-
-Repository → Settings → Environments → `production`, deployment branches: `main` only. Branch protection
-on `main`: require the `Todofy checks` status check.
-
-Environment secrets:
-
-| Secret | What |
-|---|---|
-| `CF_API_TOKEN` | Cloudflare API token: Workers Scripts edit (covers both Workers), D1 edit, zone Workers Routes / Custom Domains and DNS edit for the zone, account settings read. No billing permissions. |
-| `TODOFY_ACCESS_OWNER` | the owner's primary Access email |
-| `TODOFY_ACCESS_OWNER_ALIASES` | comma-separated other logins of the owner (may be empty) |
-
-The secrets `TODOFY_TODOIST_DEFAULT_PROJECT_ID`, `TODOFY_TODOIST_OPS_PROJECT_ID` and
-`TODOFY_TODOIST_REVIEW_PROJECT_ID` (Tasks projects of the mail tasks, the reminder and the Sunday review) are
-retired since 2026-10-21: nothing reads them, so delete them. The core declares no Worker secret any more, so delete
-its retired `TODOIST_API_KEY` and `TODOIST_*_PROJECT_ID` secrets too
-(`npx wrangler secret delete <NAME> --name todofy-core`): a Todofy release stops at any undeclared binding.
-
-These are secrets rather than variables because the repository is public and wrangler prints every plain
-var with its value in the deploy log (pywrangler also echoes its command line). The deploy's "Write the
-Worker secrets files" step writes each Worker's own owner-only file, and the deploy passes it as Worker
-secrets (`--secrets-file`, hidden in the Cloudflare dashboard and API): the owner emails to the gateway
-`todofy` only (the core has no personal value).
-
-Environment variables: only the operational switches, stated at every deploy so a release never overwrites
-the operational state ([ci-cd.md](ci-cd.md) "Changing a switch"). `deploy/deploy_vars.py` validates them
-(a bad or missing one fails the deploy and names only the variable) and adds them with `--var` (plain
-vars, as is `BUILD_SHA`):
-
-| Variable | Value |
-|---|---|
-| `TODOFY_MAINTENANCE_MODE` | `true` / `false` (required); set on both Workers |
-| `TODOFY_PROCESSING_PAUSED` | `true` / `false` (required); core |
-
-The variables `TODOFY_REMINDER_ENABLED`, `TODOFY_FORCE_PAUSE_TODOIST` and `TODOFY_GTD_REVIEW_ENABLED` are retired
-since 2026-10-21; no deploy reads them, so delete them once that release is live.
-
-Every other setting is committed in the two production configs (top level = production; the repository
-is public, so nothing personal or secret goes there), and changing one is a commit:
-
-| Setting | Where |
-|---|---|
-| account ID | `account_id` in both |
-| D1 name and ID (step 1) | `wrangler.toml` `[[d1_databases]]` |
-| UI host, hooks hosts (at most 4; `daily.ziyixi.science` since cutover) | `gateway/wrangler.toml` `routes` (the UI host first, then each hooks host) and `[vars]` `TODOFY_PUBLIC_HOST`, `TODOFY_HOOKS_HOSTS`; the core's `TODOFY_PUBLIC_HOST` (Home's tile links to the UI) must be the same |
-| Access issuer and AUD (step 2) | `gateway/wrangler.toml` `ACCESS_ISSUER`, `ACCESS_AUDIENCE` |
-| mail source ID | `wrangler.toml` `MAIL_SOURCE_ID` (`mail-hero-personal`; must equal the source ID of the imported ledger) |
-| Models and daily token budget | Choose mail/report models through the owner API; selections live in D1 `model_settings`. `wrangler.toml` keeps the existing `GEMINI_DAILY_TOKEN_BUDGET` limit (a legacy physical name). |
-| report top and precompute time | `wrangler.toml` `REPORT_DEFAULT_TOP` (must equal the newsletter's `?top=`, 10, so its report is precomputed), `REPORT_PRECOMPUTE_UTC` |
-| legacy text retention | `wrangler.toml` `LEGACY_TEXT_RETENTION_DAYS` (`0` keeps imported mail text forever) |
-| carryover | `wrangler.toml` `REPORT_CARRYOVER_DAYS` (`14`, at most 14; `0` turns the carryover off) |
-
-Provider endpoints and credentials belong to Model Router. `BUILD_SHA` (the commit) is added at deploy on both
-Workers. Each Worker gets only the vars it reads: hosts and `ACCESS_*` go to the gateway; the mail source,
-model budget, report, retention and switch settings go to the core;
-`BUILD_SHA`, `MAINTENANCE_MODE` and `TODOFY_PUBLIC_HOST` go to both. `deploy/test_wrangler_configs.py`
-checks the committed values (formats, bounds, host order, the core/gateway pairing).
-
-## 4. Worker secrets
-
-Set from the owner's machine (`npx wrangler login` first), from `todofy/`, and again only to rotate. Each
-command prompts for the value; nothing goes on the command line or into a file. Name the Worker's
-committed config (a Worker secret survives every deploy):
-
-```sh
-npx wrangler secret put <NAME> --config gateway/wrangler.toml     # the gateway todofy
-```
-
-Gateway `todofy`:
-
-| Secret | How to derive it |
-|---|---|
-| `MAIL_WEBHOOK_TOKEN_SHA256` | lowercase hex SHA-256 of the Bearer token Mail Hero's target sends: `printf '%s' "$TOKEN" \| shasum -a 256`. The token itself stays in Mail Hero and the password manager. |
-| `MAIL_WEBHOOK_TOKEN_SHA256_PREVIOUS` | optional, the previous digest while rotating the token |
-| `REPORT_BASIC_AUTH_SHA256` | SHA-256 of `user:password` the newsletter sends (`printf '%s' "$USER:$PASSWORD" \| shasum -a 256`); list two digests, comma-separated, while rotating. The password must be random, at least 128 bits (`openssl rand -hex 32`): the failure lockout never blocks a correct credential, so it does not slow guessing. |
-
-Core `todofy-core` needs no provider or Todoist key. Model Router alone holds one shared `GEMINI_API_KEY` and one
-shared `ANTHROPIC_API_KEY`; configure them on the Router after its first upload and before releasing migrated
-callers ([Model Router deployment](../../model-router/docs/deployment.md)). The core uses its private service binding.
-
-Until a gateway digest is configured, the webhook or newsletter endpoint that needs it answers 503
-`not_configured`. `ACCESS_OWNER` and `ACCESS_OWNER_ALIASES` are supplied by deployment from protected GitHub maps;
-do not put them separately. Owner mutations require authenticated Access, exact Origin, a nonempty custom header
-and JSON; they need no CSRF signing secret. Configure gateway digests after the Worker exists and before enabling
-its callers. No placeholder `todofy-core` Worker or core provider secret is needed.
-
-### Historical split migration notes (retired)
-
-The following migration-tag notes and single-Worker procedures describe the former Python-to-gateway split.
-They are retained as history, not current installation or rollback instructions. Current model keys stay only
-in Router; current task behavior belongs to Tasks. Restoring an old release needs a separate review of its schema,
-storage and credential requirements.
-
-At the original split, a fresh `todofy` script received every migration in `gateway/wrangler.toml`: only `v1`
-creating `TodofyCoordinator`, which the gateway exported as an empty retired class. The original guidance called
-for removing those blocks on fresh installs after the gateway-only class-delete release added `v2`
-([gateway-contract.md](gateway-contract.md) §6.6). The recorded `--dry-run` limitation was that it did not compute
-migrations against the account.
-
-#### Original move from the single Python Worker
-
-Before the split, one Python Worker `todofy` held every secret. The historical first-deploy procedure was:
-
-1. Before merging it to `main`: put `GEMINI_API_KEY` and `TODOIST_API_KEY` on `todofy-core` as above
-   (the same values as on `todofy`). Otherwise the new object would run the report precompute and any
-   pending work without keys as soon as the gateway's cron wakes it.
-2. The deploy applies D1 migrations, deploys `todofy-core` (creating the object class), then deploys the gateway
-   over the Python `todofy` in place: its routes, the webhook, CSRF and report secrets and the owner
-   secrets stay. It applies no migration: the old object stays as an empty exported class
-   (`gateway/src/retired.ts`) whose counters nothing reads any more (the day's Gemini token and call
-   counts, the Todoist block time, report failure counts and tick times start fresh in the new object).
-   A gateway-only release of its own deletes that class later ([gateway-contract.md](gateway-contract.md)
-   §6.6). Rows the old object left mid-step are recovered by the new one without a blind Todoist resend.
-   If the gateway deploy fails, the Python `todofy` keeps serving with its own object and the new object
-   stays idle, so nothing runs twice.
-3. After the deploy succeeds, remove the keys the gateway no longer needs:
-   `npx wrangler secret delete GEMINI_API_KEY --name todofy` and the same for `TODOIST_API_KEY`.
-4. The deploy checks `/health` (the gateway) and then sends one wrong newsletter credential, which must
-   get 401 or 429 from the object (the gateway → object → D1 path; [ci-cd.md](ci-cd.md)). Open the
-   owner UI overview once to prove the Access → owner API path.
-
-#### Original rollback to the single Python Worker
-
-The object in `todofy-core` keeps waking itself after a rollback, and two coordinators must never share
-the D1 database: each would treat the other's in-flight rows as abandoned. The full steps and the reasons
-are in [gateway-contract.md](gateway-contract.md) §6.5; in short:
-
-1. `TODOFY_MAINTENANCE_MODE=true`, redeploy the current `main` (both Workers stop ledger work).
-2. Put `GEMINI_API_KEY` and `TODOIST_API_KEY` back on `todofy` if step 3 above removed them.
-3. Deploy the last pre-split commit. Before the class-delete release, `todofy` is still at tag `v1` and
-   the pre-split config sends no migration. After it, extend that commit's migrations to `v1` new, `v2`
-   deleted, `v3` new (all `TodofyCoordinator`), so wrangler sends only `v3`; a plain pre-split config
-   would send `v1` again over the published `v2`, and Cloudflare's answer is unverified.
-4. `npx wrangler delete --name todofy-core`.
-5. Decide about the bucket `todofy-backups`: nothing rotates or deletes its backups any more, and they
-   hold mail content. Delete its objects and then the bucket (`npx wrangler r2 bucket delete
-   todofy-backups` refuses a non-empty bucket; empty it in the dashboard first), or keep it on purpose.
-6. `TODOFY_MAINTENANCE_MODE=false`, redeploy.
-
-Rolling back a later release (after the split) is a revert on `main` that CI deploys, both Workers
-together; never `wrangler rollback` one Worker ([ci-cd.md](ci-cd.md)). Two exceptions and caveats, both
-in [gateway-contract.md](gateway-contract.md):
-
-- Once the class-delete release is live (`todofy` at migration tag `v2`), a revert of an older release
-  keeps the gateway tomls' `[[migrations]]` at `v1` + `v2` and does not bring back `retired.ts` (§6.6).
-- Reverting to a release before ops-v1 canary handling: that core processes a canary like real mail
-  (Todoist task, lists). Stop the dashboard's canaries first and wait until no canary is pending in
-  either app, or set Mail Hero's `FORCE_SEND_PAUSED` and `TODOFY_PROCESSING_PAUSED=true` first and keep
-  them until those canaries are finished or cancelled (contracts/ops-v1/IMPLEMENTATION.md §4).
-
-## 5. Hosts and callers
-
-- Both hosts are Custom Domains of the gateway `todofy`, created by the deploy from the `routes` committed
-  in `gateway/wrangler.toml`.
-  `todofy-core` has no route, `workers.dev` or preview URL; only the gateway's binding reaches it.
-- Mail Hero: its webhook host allowlist must include the hooks host, and its target posts to
-  `https://<hooks host>/hooks/mail` with the Bearer token above.
-- Newsletter: `https://<hooks host>/api/summary` and `/api/recommendation?top=10` with Basic.
-- Cutover: `daily.ziyixi.science` (the old service's host, which Mail Hero's existing target and the
-  newsletter already use) is added to the committed `TODOFY_HOOKS_HOSTS` and `routes` after the old Tunnel public hostname and its
-  DNS record are removed; the Custom Domain cannot be created while another record holds the name
-  (inferred from Cloudflare's Custom Domain rules; confirm during the cutover). The digests above must
-  then be those of the credentials those callers already send.
-
-- Ops dashboard (contracts/ops-v1, not built yet): a Worker in this account binds the gateway's
-  `Ops` entrypoint (`[[services]] binding = "TODOFY" service = "todofy" entrypoint = "Ops"`). There is
-  no route or Access policy for it and nothing to configure here; `status().ui_url` is built from
-  `TODOFY_PUBLIC_HOST`. A `shed` guard it sets defers only the weekly backup (never past 7.5 days since
-  the last complete one, 12 h before `backup_stale` at 8 days), retention and the metrics rollup (never
-  past 72 h since their last complete run; once due they run until caught up); mail, canaries and report
-  precompute keep running. The guard lives in the object's storage, not in D1 or the backups.
-
-- Task intents (contracts/task-intent-v1) left Todofy on 2026-10-21: the watch app proposes its tasks to Tasks'
-  `TaskInbox`. For that one release the gateway still exports `Intents`, which answers every call `unavailable`;
-  the next release deletes it.
-
-## 6. Local checks before the first deploy
-
-The deploy's own dry-run, with local placeholder values (or the real ones exported in your shell; the
-wrapper prints names only). `GITHUB_SHA` (40 hex, set by Actions) becomes `BUILD_SHA`, so export it
-locally too. Build the UI first (`npm run build --prefix web`).
-
-```sh
-export GITHUB_SHA=$(git rev-parse HEAD) TODOFY_MAINTENANCE_MODE=false TODOFY_PROCESSING_PAUSED=false \
-  TODOFY_ACCESS_OWNER=owner@example.com TODOFY_ACCESS_OWNER_ALIASES=
-secrets=$(mktemp -d)
-uv run python deploy/deploy_vars.py secrets core "$secrets/core.json"
-uv run python deploy/deploy_vars.py secrets gateway "$secrets/gateway.json"
-uv run python deploy/deploy_vars.py exec core -- uv run pywrangler deploy --dry-run --config wrangler.toml \
-  --secrets-file "$secrets/core.json"
-uv run python deploy/deploy_vars.py exec gateway -- npx --no-install wrangler deploy --dry-run \
-  --config gateway/wrangler.toml --secrets-file "$secrets/gateway.json"
-rm -rf "$secrets"
-```
-
-The dry-run's binding table lists the projects and owner emails as `(hidden)` environment variables, as it
-lists the `--var` values: wrangler's table does not tell secrets apart; the upload sends them as
-`secret_text`. The committed configs are production: never run them without `--dry-run` from a laptop (a
-plain deploy deletes the injected vars), and run `wrangler dev` and D1 commands with local bindings only (`--local`).
+The gateway's DO migration tags are published storage history. Keep them on reverts; do not resurrect retired
+coordinators or let two writers share one D1. Historical migration decisions remain in Git, while current transport
+and storage boundaries are in the [gateway contract](gateway-contract.md).
 
 ## 7. Backups and restore
 
@@ -293,17 +63,10 @@ converted to a task, or whose task is deleted, keeps its row. Watch the database
 the unused partial index `summaries_expiring` (the old 90-day sweep's) still costs one index write a row,
 and a later migration may drop it.
 
-Cost, estimated rather than measured: a backup reads every row of every table once (about 250k D1 rows
-after a year of mail, out of the account's 5M a day shared with Mail Hero, plus one read per legacy text
-row, and each Tasks row about three times by its page query), writes a few dozen R2 objects (Class A) and
-stores a few MB per week plus the compressed legacy text (the imported text was estimated at about 76 MB
-before compression) in each of the 6 kept backups, far below R2's free 10 GB and 1M Class A operations a
-month. D1 Time Travel (7 days on Free) stays the
-first choice for a recent mistake; these backups cover older points and a lost database. They do not
-hold the Durable Object's state or any secret. Budgets and schedule times default safely. The metrics
-cursor does not simply default: it would point past the ids of a restored database, so the object
-checks the row it points at on every daily flush and restarts counting when that row changed or is
-gone (dev-notes.md §6). `daily_metrics` itself is in every backup.
+Backups consume the account's shared D1/R2 allowance. Use Home's observed usage rather than old volume forecasts.
+For a recent mistake, D1 Time Travel is the first option; complete backups cover older points or a lost database.
+They contain no provider key or DO runtime state. The coordinator detects a restored metrics cursor and resumes
+from a valid row rather than assuming the old database's row IDs still apply.
 
 Restore into a new, empty database (with `--local --persist-to <dir>` the same commands work on a
 local copy). The backup's key is on the health page (e.g. `backups/2026-10-04T100002Z/`):

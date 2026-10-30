@@ -40,11 +40,6 @@ runs:
         print("host=" + variables["PUBLIC_HOST"])
         print("access_issuer=" + variables["ACCESS_ISSUER"])
         EOF
-    - name: Build the verified private console
-      if: inputs.required == 'true'
-      working-directory: .release-source/model-router/web
-      shell: bash -e {0}
-      run: npm run build
     - name: Write the declared owner secrets file
       if: inputs.required == 'true'
       working-directory: .release-source/model-router/worker
@@ -57,7 +52,7 @@ runs:
       working-directory: .release-source/model-router/worker
       shell: bash -e {0}
       run: |
-        node ../tools/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
+        node ../tools/deploy-vars.mjs exec -- npx --no-install wrangler deploy "$PWD/../.compiled/worker/index.js" --no-bundle --dry-run --config ../wrangler.toml \
           --secrets-file "$RUNNER_TEMP/model-router-secrets.json" --outdir "$RUNNER_TEMP/model-router-bundle"
         node ../tools/bundle-size.mjs "$RUNNER_TEMP/model-router-bundle"
     - name: Check the hostnames against production
@@ -79,7 +74,7 @@ runs:
         test -n "$CLOUDFLARE_API_TOKEN"
         npx --no-install wrangler d1 migrations apply DB --remote --config ../wrangler.toml
         bash "$GITHUB_WORKSPACE/tools/cloud-release/assets-session-retry.sh" \
-          node ../tools/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml \
+          node ../tools/deploy-vars.mjs exec -- npx --no-install wrangler deploy "$PWD/../.compiled/worker/index.js" --no-bundle --config ../wrangler.toml \
           --secrets-file "$RUNNER_TEMP/model-router-secrets.json"
     - name: Check that production runs this commit
       if: inputs.required == 'true'

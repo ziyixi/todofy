@@ -1,0 +1,56 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library", "js_test")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//tasks:__subpackages__"])
+
+js_library(
+    name = "deploy_vars",
+    srcs = ["deploy-vars.mjs"],
+    deps = ["//tools/cloud-config:worker-deploy"],
+)
+
+js_test(
+    name = "deploy_vars_test",
+    data = [
+        ":deploy_vars",
+        "//tasks:public_config",
+    ],
+    entry_point = "test/deploy-vars.test.mjs",
+    node_options = ["--test"],
+    patch_node_fs = False,
+    preserve_symlinks_main = False,
+)
+
+js_test(
+    name = "bundle_size_test",
+    args = ["$(rootpath //tasks:worker_bundle)"],
+    data = [
+        "//tasks:worker_bundle",
+        "//tools/bundle-size:library",
+    ],
+    entry_point = "bundle-size.mjs",
+    patch_node_fs = False,
+    preserve_symlinks_main = False,
+)
+
+test_suite(name = "check")
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        [
+            "*",
+            "test/**",
+        ],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)

@@ -1,4 +1,4 @@
-"""Bake the Platform Dockerfile's source identity into the final image layer."""
+"""Bake the Platform source identity into the final image layer."""
 
 import argparse
 import json
@@ -12,7 +12,7 @@ if __name__ == "__main__":
     parser.add_argument("--labels", type=Path, required=True)
     args = parser.parse_args()
     status = dict(line.split(" ", 1) for line in args.status.read_text().splitlines())
-    sha = status.get("BUILD_EMBED_LABEL", "")
+    sha = status.get("BUILD_EMBED_LABEL") or "0" * 40
     if not re.fullmatch("[0-9a-f]{40}", sha):
         raise ValueError("Build the image with --embed_label=<full-source-SHA>")
     content = json.dumps({"source_sha": sha}) + "\n"

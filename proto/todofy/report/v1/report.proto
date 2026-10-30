@@ -32,7 +32,7 @@
 // so its rules are those of a report: a summary that is not blank, and a recommendation with at least one mail
 // in its window.
 //
-// Google's api-linter runs on this file (scripts/api-lint.sh). The rules it cannot meet without changing the
+// Google's api-linter runs on this file (//proto:api_lint_test). The rules it cannot meet without changing the
 // reports' frozen wire are disabled where they apply, each with its reason. File-wide (api-linter reads them
 // from this header):
 //

@@ -55,13 +55,6 @@ runs:
         print("access_issuer=" + variables["ACCESS_ISSUER"])
         EOF
     # The UI's build (web/dist) is the one that ships; its JavaScript budget is checked by the build.
-    - name: Build the verified revision
-      if: inputs.required == 'true'
-      working-directory: .release-source/fleet
-      shell: bash -e {0}
-      run: |
-        npm run build --prefix web
-    # Owner identities and the receipt HMAC key are independent production secrets.
     - name: Write the Worker secrets file
       if: inputs.required == 'true'
       working-directory: .release-source/fleet/worker
@@ -79,7 +72,7 @@ runs:
       working-directory: .release-source/fleet/worker
       shell: bash -e {0}
       run: |
-        node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
+        node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy "$PWD/../.compiled/worker/index.js" --no-bundle --dry-run --config ../wrangler.toml \
           --secrets-file "$RUNNER_TEMP/fleet-secrets.json" --outdir "$RUNNER_TEMP/fleet-bundle"
         node ../deploy/bundle-size.mjs "$RUNNER_TEMP/fleet-bundle"
     # tools/cf-guard (read-only GETs; prints listed hostnames, counts, PASS/FAIL): wrangler applies a config's Custom
@@ -104,7 +97,7 @@ runs:
       run: |
         test -n "$CLOUDFLARE_API_TOKEN"
         bash "$GITHUB_WORKSPACE/tools/cloud-release/assets-session-retry.sh" \
-          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --config ../wrangler.toml \
+          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy "$PWD/../.compiled/worker/index.js" --no-bundle --config ../wrangler.toml \
           --secrets-file "$RUNNER_TEMP/fleet-secrets.json"
     # Nothing anonymous on the host shows BUILD_SHA (all of it is behind Access), so production is read through the
     # API with the deploy token (GETs only): the Worker serves exactly one version at 100% and that version's

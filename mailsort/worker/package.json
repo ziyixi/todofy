@@ -6,18 +6,14 @@
   "description": "Worker \"mailsort\": the owner's Gmail sorting (MailsortState, one SQLite Durable Object that schedules itself with setAlarm) and its owner API (mailsort.ui.v2) behind Access.",
   "scripts": {
     "postinstall": "node ../../proto/tools/ensure.mjs",
-    "pretypecheck": "node ../../proto/tools/ensure.mjs",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p test/runtime/tsconfig.json && tsc --noEmit -p test/smoke/tsconfig.json",
-    "prelint": "node ../../proto/tools/ensure.mjs",
-    "lint": "eslint .",
-    "pretest": "node ../../proto/tools/ensure.mjs",
-    "test": "vitest run",
-    "pretest:runtime": "node ../../proto/tools/ensure.mjs",
-    "test:runtime": "vitest run --config vitest.runtime.config.ts",
+    "typecheck": "bazel test //mailsort/worker:typecheck_tests",
+    "lint": "bazel test //mailsort/worker:lint",
+    "test": "bazel test //mailsort/worker:unit_tests",
+    "test:runtime": "bazel test //mailsort/worker:runtime_tests --nocache_test_results",
     "predev": "node ../../proto/tools/ensure.mjs",
-    "dev": "wrangler dev --config ../wrangler.test.toml --ip 127.0.0.1 --port 8795 --local-upstream 127.0.0.1:8795",
-    "pretest:smoke": "node ../../proto/tools/ensure.mjs",
-    "test:smoke": "node test/smoke/smoke.mts"
+    "dev": "bazel build //mailsort/web:bundle && wrangler dev --assets ../../bazel-bin/mailsort/web/dist --config ../wrangler.test.toml --ip 127.0.0.1 --port 8795 --local-upstream 127.0.0.1:8795",
+    "test:smoke": "bazel test //mailsort/worker:smoke_test",
+    "check": "bazel test //mailsort:check"
   },
   "dependencies": {
     "@ziyixi/model-router-client": "workspace:*",

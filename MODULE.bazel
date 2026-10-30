@@ -1,5 +1,13 @@
 module(name = "personal_cloud")
 
+new_local_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:local.bzl", "new_local_repository")
+
+new_local_repository(
+    name = "website_content",
+    build_file_content = 'filegroup(name="files",srcs=glob([".generated/**","public/media/**","public/_img/**"],allow_empty=True),visibility=["//visibility:public"])',
+    path = "website/tests/fixtures/bazel-snapshot-unconfigured",
+)
+
 bazel_dep(name = "aspect_rules_js", version = "3.5.2")
 bazel_dep(name = "aspect_rules_ts", version = "3.10.1")
 bazel_dep(name = "rules_nodejs", version = "6.7.7")
@@ -16,6 +24,7 @@ bazel_dep(name = "yq.bzl", version = "0.3.4")
 node = use_extension("@rules_nodejs//nodejs:extensions.bzl", "node")
 node.toolchain(node_version = "26.9.0")
 use_repo(node, "nodejs_toolchains")
+
 register_toolchains("@nodejs_toolchains//:all")
 
 pnpm = use_extension("@aspect_rules_js//npm:extensions.bzl", "pnpm")
@@ -31,6 +40,13 @@ npm.npm_translate_lock(
         "@cloudflare/workers-types": [""],
         "@dnd-kit/state": [""],
         "@dnd-kit/geometry": [""],
+        # The locked gallery imports react-dom through pnpm's hidden public links.
+        "react": [""],
+        "react-dom": [""],
+        # eslint-config-next loads Next's compiled parser through pnpm's hidden public link.
+        "next": [""],
+        # jest-dom's module augmentation uses the hidden Vitest peer from the existing pnpm layout.
+        "vitest@5.0.1(@types/node@26.6.3)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.4(@types/node@26.6.3)(esbuild@0.28.1)(tsx@4.23.15))": [""],
     },
 )
 use_repo(npm, "npm")
@@ -57,15 +73,19 @@ use_repo(python, "python_3_14")
 
 pip = use_extension("@rules_python//python/extensions:pip.bzl", "pip")
 pip.parse(
+    enable_implicit_namespace_pkgs = True,
     hub_name = "python_deps",
     python_version = "3.14",
+    target_platforms = [
+        "osx_aarch64",
+        "linux_x86_64",
+    ],
     uv_lock = "//:uv.lock",
-    enable_implicit_namespace_pkgs = True,
-    target_platforms = ["osx_aarch64", "linux_x86_64"],
 )
 use_repo(pip, "python_deps")
 
 googleapis = use_repo_rule("//proto/bazel:repositories.bzl", "googleapis_repository")
+
 googleapis(name = "googleapis")
 
 go_sdk = use_extension("@rules_go//go:extensions.bzl", "go_sdk")
@@ -85,35 +105,123 @@ use_repo(
 oci = use_extension("@rules_oci//oci:extensions.bzl", "oci")
 oci.pull(
     name = "python_base",
-    image = "docker.io/library/python",
-    digest = "sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56",
-    platforms = ["linux/amd64"],
     config = "//tools/bazel/images:docker-public.json",
+    digest = "sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56",
+    image = "docker.io/library/python",
+    platforms = ["linux/amd64"],
 )
 use_repo(oci, "python_base", "python_base_linux_amd64")
 
 http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+http_archive(
+    name = "workers_runtime_sdk",
+    build_file_content = 'filegroup(name="files",srcs=glob(["**"],exclude=["BUILD.bazel","WORKSPACE"]),visibility=["//visibility:public"])',
+    sha256 = "36209f94984686264db4e1fd410d51ac3460f2a2ab3cc29869699b975e1e1331",
+    type = "zip",
+    urls = ["https://files.pythonhosted.org/packages/94/3d/053deb135d4db2ef6f6c3ccdeb86d7829de3c271f7ae02cec73da8f65891/workers_runtime_sdk-1.9.0-py3-none-any.whl"],
+)
+
 http_archive(
     name = "newsletter_fonts",
-    urls = ["https://deb.debian.org/debian/pool/main/f/fonts-noto-cjk/fonts-noto-cjk_20220127+repack1-1_all.deb"],
+    build_file_content = 'exports_files(["data.tar.xz"],visibility=["//visibility:public"])',
     sha256 = "4a2515eb6db3978b897fef9709ed0d2b1f4c6c4df4d83d6c4ef65f71f1b1f502",
     type = "deb",
-    build_file_content = 'exports_files(["data.tar.xz"],visibility=["//visibility:public"])',
+    urls = ["https://deb.debian.org/debian/pool/main/f/fonts-noto-cjk/fonts-noto-cjk_20220127+repack1-1_all.deb"],
 )
 
 http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
+
+http_file(
+    name = "todofy_pyodide",
+    downloaded_file_path = "pyodide_314.0.6_2026-08-17_6.capnp.bin",
+    sha256 = "3c3fd5a4179230e21e018e28b0e735e7c4abd8fe8e4ff39d2fd6bb2ea3a2e260",
+    urls = ["https://pyodide-capnp-bin.edgeworker.net/pyodide_314.0.6_2026-08-17_6.capnp.bin"],
+)
+
 http_file(
     name = "kubectl_linux_amd64",
-    urls = ["https://dl.k8s.io/release/v1.36.1/bin/linux/amd64/kubectl"],
-    sha256 = "629d3f410e09bf49b64ae7079f7f0bda1191efed311f7d37fdbab0ad5b0ec2b7",
     executable = True,
+    sha256 = "629d3f410e09bf49b64ae7079f7f0bda1191efed311f7d37fdbab0ad5b0ec2b7",
+    urls = ["https://dl.k8s.io/release/v1.36.1/bin/linux/amd64/kubectl"],
 )
+
 http_file(
     name = "kubectl_darwin_arm64",
-    urls = ["https://dl.k8s.io/release/v1.36.1/bin/darwin/arm64/kubectl"],
-    sha256 = "9092778abaef3079449da4cd70ded0e4be112480c93efcdeace3155968d1d133",
     executable = True,
+    sha256 = "9092778abaef3079449da4cd70ded0e4be112480c93efcdeace3155968d1d133",
+    urls = ["https://dl.k8s.io/release/v1.36.1/bin/darwin/arm64/kubectl"],
 )
 
 yq = use_extension("@yq.bzl//yq:extensions.bzl", "yq")
-use_repo(yq, "yq_darwin_arm64", "yq_darwin_amd64", "yq_linux_amd64", "yq_linux_arm64")
+use_repo(yq, "yq_darwin_amd64", "yq_darwin_arm64", "yq_linux_amd64", "yq_linux_arm64")
+
+browser_archive = use_repo_rule("//tools/bazel/browser:repositories.bzl", "chromium_archive")
+
+browser_archive(
+    name = "playwright_chromium_mac_arm64",
+    platform = "mac_arm64",
+)
+
+browser_archive(
+    name = "playwright_chromium_linux_amd64",
+    platform = "linux_amd64",
+)
+
+register_toolchains(
+    "//tools/bazel/browser:chromium_mac_arm64_toolchain",
+    "//tools/bazel/browser:chromium_linux_amd64_toolchain",
+)
+
+http_archive(
+    name = "tofu_darwin_arm64",
+    build_file_content = "exports_files([\"tofu\"],visibility=[\"//visibility:public\"])",
+    sha256 = "e083ee43790ab9e19ad66d9933e24a7244a1412e1d5728f37999ae2163fdac95",
+    type = "zip",
+    urls = ["https://github.com/opentofu/opentofu/releases/download/v1.12.6/tofu_1.12.6_darwin_arm64.zip"],
+)
+
+http_archive(
+    name = "tofu_linux_amd64",
+    build_file_content = "exports_files([\"tofu\"],visibility=[\"//visibility:public\"])",
+    sha256 = "5dc43da4f750f33873dc25e94587128709e819e544b7be9016b255316153c3a8",
+    type = "zip",
+    urls = ["https://github.com/opentofu/opentofu/releases/download/v1.12.6/tofu_1.12.6_linux_amd64.zip"],
+)
+
+http_archive(
+    name = "cloudflare_provider_darwin_arm64",
+    build_file_content = "filegroup(name=\"files\",srcs=glob([\"**\"],exclude=[\"BUILD.bazel\",\"WORKSPACE\"]),visibility=[\"//visibility:public\"])",
+    sha256 = "403d477c0e4c05a9f9886ef7e750dcc3488be7cd2210207e98b4a731bc499159",
+    type = "zip",
+    urls = ["https://github.com/cloudflare/terraform-provider-cloudflare/releases/download/v5.25.0/terraform-provider-cloudflare_5.25.0_darwin_arm64.zip"],
+)
+
+http_archive(
+    name = "cloudflare_provider_linux_amd64",
+    build_file_content = "filegroup(name=\"files\",srcs=glob([\"**\"],exclude=[\"BUILD.bazel\",\"WORKSPACE\"]),visibility=[\"//visibility:public\"])",
+    sha256 = "6e4a2f6ed105b5353c7b56962d00f923873dd68af6509b9b9f595057edba1915",
+    type = "zip",
+    urls = ["https://github.com/cloudflare/terraform-provider-cloudflare/releases/download/v5.25.0/terraform-provider-cloudflare_5.25.0_linux_amd64.zip"],
+)
+
+http_archive(
+    name = "playwright_webkit_mac_arm64",
+    add_prefix = "webkit-2359",
+    build_file_content = 'exports_files(["webkit-2359/pw_run.sh"],visibility=["//visibility:public"])\nfilegroup(name="files",srcs=glob(["webkit-2359/**"]),visibility=["//visibility:public"])',
+    sha256 = "f0c43ff8a566ef9cf57b5c0e349d985c60e6ffeb7416e8aac34a5c911bbb8ca7",
+    urls = ["https://cdn.playwright.dev/dbazure/download/playwright/builds/webkit/2359/webkit-mac-26-arm64.zip"],
+)
+
+http_archive(
+    name = "playwright_webkit_linux_amd64",
+    add_prefix = "webkit-2359",
+    build_file_content = 'exports_files(["webkit-2359/pw_run.sh"],visibility=["//visibility:public"])\nfilegroup(name="files",srcs=glob(["webkit-2359/**"]),visibility=["//visibility:public"])',
+    sha256 = "8c129d989a1c48d826ca11b45acbba919039de811623dc3819ccbd95b69eeb62",
+    urls = ["https://cdn.playwright.dev/dbazure/download/playwright/builds/webkit/2359/webkit-ubuntu-24.04.zip"],
+)
+
+register_toolchains(
+    "//tools/bazel/browser:webkit_mac_arm64_toolchain",
+    "//tools/bazel/browser:webkit_linux_amd64_toolchain",
+)

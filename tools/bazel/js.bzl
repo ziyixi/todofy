@@ -1,8 +1,10 @@
 """Shared invocation for the repository's file-level Vitest targets."""
 
+load("@aspect_rules_js//js:defs.bzl", "js_run_binary")
+load("@aspect_rules_js//js:providers.bzl", "JsInfo", "js_info")
 load("@aspect_rules_js//npm:providers.bzl", "NpmPackageInfo")
-load("@aspect_rules_js//js:providers.bzl", "js_info")
 load("@bazel_lib//lib:copy_directory.bzl", "copy_directory_bin_action")
+load("@bazel_lib//lib:expand_template.bzl", "expand_template")
 load("//proto/bazel:ts_package.bzl", "proto_package")
 
 def _directory_link(ctx, name, target):
@@ -39,7 +41,8 @@ def _workspace_package_link_impl(ctx):
         links.append(_directory_link(ctx, name, info.package_store_directory))
         runtime_files.append(info.transitive_files)
     files = depset(links + [directory], transitive = runtime_files)
-    return [DefaultInfo(files = files), js_info(target = ctx.label, npm_sources = files)]
+    types = depset(transitive = [ctx.attr.src[JsInfo].types, ctx.attr.src[JsInfo].transitive_types]) if JsInfo in ctx.attr.src else depset()
+    return [DefaultInfo(files = files), js_info(target = ctx.label, npm_sources = files, types = types, transitive_types = types)]
 
 workspace_package_link = rule(
     implementation = _workspace_package_link_impl,
@@ -140,4 +143,116 @@ def proto_vitest_test(name, runner, tests, deps, data = [], **kwargs):
         tests = tests,
         data = deps + data + [":" + name + "_proto_link"],
         **kwargs
+    )
+
+def workerd_vitest_test(name, runner, tests, deps = [], data = [], tags = ["workerd"], **kwargs):
+    """Run the existing whole-Worker harness with its shared runtime inputs."""
+    proto_vitest_test(
+        name = name,
+        runner = runner,
+        tests = tests,
+        deps = [":lib"] + deps,
+        data = [
+            ":application_sources",
+            ":runtime_helpers",
+            ":edge_auth_types_link",
+            ":node_modules/esbuild",
+            ":node_modules/miniflare",
+            "package.json",
+        ] + data,
+        config = "vitest.runtime.config.ts",
+        size = "large",
+        tags = tags,
+        **kwargs
+    )
+
+def _vite_build_config_impl(ctx):
+    output = ctx.actions.declare_file(ctx.label.name + ".mjs")
+    config_path = ctx.file.config.short_path[len(ctx.label.package) + 1:]
+    content = """import original from %s;
+import { realpathSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
+export default async env => {
+  const config = typeof original === 'function' ? await original(env) : await original;
+  const result = {
+    ...config,
+    root: dirname(realpathSync('index.html')),
+    build: { ...config.build, outDir: resolve(%s) },
+  };
+  if (__BAZEL_STAMPED__ && Object.hasOwn(config.define ?? {}, 'import.meta.env.VITE_BUILD_SHA')) {
+    const sha = '__BAZEL_BUILD_SHA__';
+    if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error('Stamped UI requires a full Git SHA in --embed_label');
+    result.define = { ...config.define, 'import.meta.env.VITE_BUILD_SHA': JSON.stringify(sha) };
+  }
+""" % (json.encode("./" + config_path), json.encode(ctx.attr.out_dir))
+    postbuild = ctx.file.postbuild
+    if postbuild:
+        postbuild_path = postbuild.short_path[len(ctx.label.package) + 1:]
+        if postbuild.basename == "js-budget.mjs":
+            check = """const checks = await import(%s);
+        const problem = checks.jsBudgetProblem(checks.jsSize(resolve(%s, 'assets')));
+        if (problem !== null) throw new Error(problem);""" % (json.encode("./" + postbuild_path), json.encode(ctx.attr.out_dir))
+        else:
+            check = """const check = spawnSync(process.execPath, ['--preserve-symlinks-main', resolve(%s)], { stdio: 'inherit' });
+        if (check.error) throw check.error;
+        if (check.status !== 0) throw new Error('Postbuild check failed: ' + %s);""" % (json.encode(postbuild_path), json.encode(postbuild_path))
+        content += """  result.plugins = [...(config.plugins ?? []), {
+    name: 'bazel-postbuild-checks',
+    async writeBundle() {
+        %s
+    },
+  }];
+""" % check
+    content += "  return result;\n};\n"
+    ctx.actions.write(output, content)
+    return [DefaultInfo(files = depset([output]))]
+
+_vite_build_template = rule(
+    implementation = _vite_build_config_impl,
+    attrs = {
+        "config": attr.label(mandatory = True, allow_single_file = True),
+        "out_dir": attr.string(default = "dist"),
+        "postbuild": attr.label(allow_single_file = True),
+    },
+    doc = "Adapt the app's Vite build and existing checks to declared canonical paths.",
+)
+
+def vite_build_config(name, config, out_dir = "dist", postbuild = None, stamp = -1):
+    """Stamp only the terminal Vite configuration, retaining stable ordinary builds."""
+    _vite_build_template(
+        name = name + "_template",
+        config = config,
+        out_dir = out_dir,
+        postbuild = postbuild,
+    )
+    expand_template(
+        name = name,
+        template = ":" + name + "_template",
+        out = name + ".mjs",
+        substitutions = {"__BAZEL_STAMPED__": "false", "__BAZEL_BUILD_SHA__": ""},
+        stamp_substitutions = {"__BAZEL_STAMPED__": "true", "__BAZEL_BUILD_SHA__": "{{BUILD_EMBED_LABEL}}"},
+        stamp = stamp,
+    )
+
+def vite_bundle(name, tool, deps, data = [], out_dir = "dist", postbuild = None, stamp = -1):
+    """Bundle a Vite entrypoint with its declared dependencies and original postbuild checks."""
+    config_name = name + "_config"
+    vite_build_config(
+        name = config_name,
+        config = "vite.config.ts",
+        out_dir = out_dir,
+        postbuild = postbuild,
+        stamp = stamp,
+    )
+    js_run_binary(
+        name = name,
+        tool = tool,
+        srcs = deps + data + ["index.html", "package.json", "vite.config.ts", ":" + config_name],
+        args = ["build", "--config", config_name + ".mjs"],
+        chdir = native.package_name(),
+        out_dirs = [out_dir.split("/")[0]],
+        include_types = True,
+        include_transitive_types = True,
+        patch_node_fs = False,
     )

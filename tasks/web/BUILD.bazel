@@ -1,12 +1,16 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library", "js_run_binary")
 load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
 load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@npm//tasks/web:eslint/package_json.bzl", eslint = "bin")
 load("@npm//tasks/web:vite/package_json.bzl", vite = "bin")
 load("@npm//tasks/web:vitest/package_json.bzl", vitest = "bin")
 load("//proto/bazel:ts_package.bzl", "proto_package")
-load("//tools/bazel:js.bzl", "proto_vitest_test", "vite_config", "vitest_test", "workspace_link", "workspace_package_link")
+load("//tools/bazel:js.bzl", "proto_vitest_test", "vite_bundle", "vitest_test", "workspace_link", "workspace_package_link")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/browser:defs.bzl", "tasks_browser_test")
+load("//tools/bazel/lint:defs.bzl", "eslint_test")
 
-package(default_visibility = ["//visibility:public"])
+package(default_visibility = ["//tasks:__subpackages__"])
 
 npm_link_all_packages(name = "node_modules")
 
@@ -963,6 +967,7 @@ proto_vitest_test(
         ":planning-ui_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/GoalsPage.test.tsx"],
     deps = [
         ":node_modules/@base-ui/react",
@@ -1007,6 +1012,7 @@ proto_vitest_test(
         "//:node_modules/@dnd-kit/state",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/GtdPage.test.tsx"],
     deps = [
         ":node_modules/@testing-library/react",
@@ -1042,6 +1048,7 @@ proto_vitest_test(
         ":node_modules/jsdom",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/api.test.ts"],
     deps = [
         ":node_modules/react",
@@ -1067,6 +1074,7 @@ proto_vitest_test(
         ":node_modules/jsdom",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/components/DateCalendar.test.tsx"],
     deps = [
         ":node_modules/@base-ui/react",
@@ -1098,6 +1106,7 @@ proto_vitest_test(
         ":node_modules/jsdom",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/components/ErrorBoundary.test.tsx"],
     deps = [
         ":node_modules/@testing-library/react",
@@ -1117,6 +1126,7 @@ proto_vitest_test(
         ":node_modules/jsdom",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/components/GoalEditor.test.tsx"],
     deps = [
         ":node_modules/@testing-library/react",
@@ -1146,6 +1156,7 @@ proto_vitest_test(
         ":node_modules/jsdom",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/components/GoalProgress.test.tsx"],
     deps = [
         ":node_modules/lucide-react",
@@ -1174,6 +1185,7 @@ proto_vitest_test(
         ":planning-ui_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/components/GoalRelatedTasks.test.tsx"],
     deps = [
         ":node_modules/@testing-library/react",
@@ -1212,6 +1224,7 @@ proto_vitest_test(
         ":node_modules/jsdom",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/components/LabelPicker.test.tsx"],
     deps = [
         ":node_modules/@base-ui/react",
@@ -1241,6 +1254,7 @@ proto_vitest_test(
         ":node_modules/jsdom",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/components/ProjectPicker.test.tsx"],
     deps = [
         ":node_modules/@base-ui/react",
@@ -1273,6 +1287,7 @@ proto_vitest_test(
         ":planning-ui_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/components/Sidebar.test.tsx"],
     deps = [
         ":node_modules/@base-ui/react",
@@ -1320,6 +1335,7 @@ proto_vitest_test(
         ":planning-ui_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/components/TaskDialog.test.tsx"],
     deps = [
         ":node_modules/@base-ui/react",
@@ -1388,6 +1404,7 @@ proto_vitest_test(
         ":planning-ui_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/components/TaskList.test.tsx"],
     deps = [
         ":node_modules/@base-ui/react",
@@ -1443,6 +1460,7 @@ proto_vitest_test(
         ":node_modules/jsdom",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/dates.test.ts"],
     deps = [
         ":node_modules/vitest",
@@ -1462,6 +1480,7 @@ proto_vitest_test(
         ":node_modules/jsdom",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/goals-client.test.ts"],
     deps = [
         ":node_modules/react",
@@ -1493,6 +1512,7 @@ proto_vitest_test(
         "//:node_modules/@dnd-kit/state",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/gtd/GtdTime.test.tsx"],
     deps = [
         ":node_modules/@testing-library/react",
@@ -1517,6 +1537,7 @@ proto_vitest_test(
         ":node_modules/jsdom",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/launch.test.ts"],
     deps = [
         ":node_modules/@testing-library/react",
@@ -1536,6 +1557,7 @@ proto_vitest_test(
         ":node_modules/jsdom",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/outdated.test.ts"],
     deps = [
         ":node_modules/@testing-library/react",
@@ -1558,6 +1580,7 @@ proto_vitest_test(
         ":node_modules/jsdom",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/recurrence-controls.test.ts"],
     deps = [
         ":node_modules/vitest",
@@ -1576,6 +1599,7 @@ proto_vitest_test(
         ":node_modules/jsdom",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/task-date-actions.test.ts"],
     deps = [
         ":node_modules/react",
@@ -1602,6 +1626,7 @@ proto_vitest_test(
         ":planning-ui_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/usePlanView.test.tsx"],
     deps = [
         ":node_modules/@testing-library/react",
@@ -1622,6 +1647,7 @@ proto_vitest_test(
         ":node_modules/jsdom",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/useReturnRefresh.test.tsx"],
     deps = [
         ":node_modules/@testing-library/react",
@@ -1641,6 +1667,7 @@ proto_vitest_test(
         ":node_modules/jsdom",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/useTaskActions.test.tsx"],
     deps = [
         ":node_modules/@testing-library/react",
@@ -1676,6 +1703,7 @@ proto_vitest_test(
         ":planning-ui_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/useTaskPlanning.test.tsx"],
     deps = [
         ":node_modules/@testing-library/react",
@@ -1704,6 +1732,7 @@ proto_vitest_test(
         ":node_modules/jsdom",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/useTaskView.test.tsx"],
     deps = [
         ":node_modules/@testing-library/react",
@@ -1744,18 +1773,11 @@ js_library(
 
 vite.vite_binary(name = "vite")
 
-vite_config(
-    name = "bundle_config",
-    config = "vite.config.ts",
-)
-
-js_run_binary(
+vite_bundle(
     name = "bundle",
-    srcs = [
-        "index.html",
-        "package.json",
-        "test/bazel-vite.config.ts",
-        "vite.config.ts",
+    tool = ":vite",
+    deps = [
+        ":application_sources",
         ":bundle_proto_link",
         ":node_modules/@base-ui/react",
         ":node_modules/@dnd-kit/abstract",
@@ -1768,6 +1790,7 @@ js_run_binary(
         ":node_modules/react-dom",
         ":node_modules/react-markdown",
         ":node_modules/remark-gfm",
+        ":node_modules/vitest",
         ":planning_ui_bundle_link",
         ":public_assets",
         ":src__main",
@@ -1775,18 +1798,6 @@ js_run_binary(
         "//:node_modules/@dnd-kit/geometry",
         "//:node_modules/@dnd-kit/state",
     ],
-    args = [
-        "build",
-        "--config",
-        "test/bazel-vite.config.ts",
-    ],
-    chdir = "tasks/web",
-    include_transitive_types = True,
-    include_types = True,
-    out_dirs = ["dist"],
-    # Rolldown uses native filesystem paths; keep Node canonicalization consistent with it.
-    patch_node_fs = False,
-    tool = ":vite",
 )
 
 workspace_package_link(
@@ -1838,4 +1849,413 @@ ts_project(
 alias(
     name = "typecheck",
     actual = ":types_typecheck",
+)
+
+# Browser tests use the built frontend and the original ephemeral D1 backend.
+
+_BROWSER_RUNTIME_DATA = [
+    ":bundle",
+    "//tasks:migrations",
+    "//tasks/worker:browser_server",
+    "//tasks/worker:node_modules/@ziyixi/edge-auth",
+    "//tasks/worker:typecheck_proto_link",
+    "//tasks/worker:node_modules/@ziyixi/task-dates",
+]
+
+tasks_browser_test(
+    name = "browser_catalog_detail_readiness_test",
+    data = ["package.json"] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/catalog-detail-readiness.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_category_drag_test",
+    data = [
+        "package.json",
+        "test/browser/drag.ts",
+        "test/browser/planning-stub.ts",
+    ] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/category-drag.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_color_detail_test",
+    data = ["package.json"] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/color-detail.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_date_input_help_test",
+    data = ["package.json"] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/date-input-help.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_focus_time_test",
+    data = [
+        "package.json",
+        "test/browser/planning-stub.ts",
+    ] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/focus-time.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_goals_linking_test",
+    data = ["package.json"] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/goals-linking.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_goals_page_test",
+    data = [
+        "package.json",
+        "test/browser/goals-fixture.ts",
+    ] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/goals-page.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_gtd_test",
+    data = [
+        "package.json",
+        "test/browser/planning-stub.ts",
+    ] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/gtd.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_idle_pause_test",
+    data = [
+        "package.json",
+        "test/browser/planning-stub.ts",
+    ] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/idle-pause.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_mail_test",
+    data = [
+        "package.json",
+        "test/browser/planning-stub.ts",
+    ] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/mail.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_mini_timer_test",
+    data = [
+        "package.json",
+        "test/browser/planning-stub.ts",
+    ] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/mini-timer.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_next_step_estimate_test",
+    data = [
+        "package.json",
+        "test/browser/planning-stub.ts",
+    ] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/next-step-estimate.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_noop_save_test",
+    data = ["package.json"] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/noop-save.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_outdated_test",
+    data = ["package.json"] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/outdated.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_plan_completion_test",
+    data = [
+        "package.json",
+        "test/browser/planning-stub.ts",
+    ] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/plan-completion.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_plan_layout_test",
+    data = [
+        "package.json",
+        "test/browser/planning-stub.ts",
+    ] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/plan-layout.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_planning_drag_test",
+    data = [
+        "package.json",
+        "test/browser/planning-stub.ts",
+    ] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/planning-drag.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_planning_journeys_test",
+    data = [
+        "package.json",
+        "test/browser/planning-stub.ts",
+    ] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/planning-journeys.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_planning_native_test",
+    data = [
+        "package.json",
+        "test/browser/planning-stub.ts",
+    ] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/planning-native.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_planning_quick_time_test",
+    data = [
+        "package.json",
+        "test/browser/planning-stub.ts",
+    ] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/planning-quick-time.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_planning_readiness_test",
+    data = [
+        "package.json",
+        "test/browser/planning-stub.ts",
+    ] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/planning-readiness.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_pwa_launch_test",
+    data = [
+        "package.json",
+        "test/browser/planning-stub.ts",
+    ] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/pwa-launch.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_pwa_test",
+    data = ["package.json"] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/pwa.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_refinement_test",
+    data = ["package.json"] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/refinement.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_request_counts_test",
+    data = [
+        "package.json",
+        "test/browser/planning-stub.ts",
+    ] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/request-counts.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_sidebar_resize_test",
+    data = [
+        "package.json",
+        "test/browser/planning-stub.ts",
+    ] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/sidebar-resize.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_task_context_dates_test",
+    data = ["package.json"] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/task-context-dates.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_task_delete_keyboard_test",
+    data = [
+        "package.json",
+        "test/browser/planning-stub.ts",
+    ] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/task-delete-keyboard.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_task_detail_reads_test",
+    data = ["package.json"] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/task-detail-reads.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_task_details_layout_test",
+    data = ["package.json"] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/task-details-layout.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_task_editor_save_test",
+    data = ["package.json"] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/task-editor-save.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_task_menus_test",
+    data = ["package.json"] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/task-menus.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_task_row_drag_test",
+    data = [
+        "package.json",
+        "test/browser/drag.ts",
+    ] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/task-row-drag.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_task_tree_test",
+    data = [
+        "package.json",
+        "test/browser/drag.ts",
+    ] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/task-tree.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_tasks_test",
+    data = [
+        "package.json",
+        "test/browser/drag.ts",
+    ] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/tasks.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_titlebar_test",
+    data = [
+        "package.json",
+        "test/browser/planning-stub.ts",
+    ] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/titlebar.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_view_refresh_test",
+    data = ["package.json"] + _BROWSER_RUNTIME_DATA,
+    spec = "test/browser/view-refresh.spec.ts",
+)
+
+test_suite(
+    name = "browser_tests",
+    tests = [
+        ":browser_catalog_detail_readiness_test",
+        ":browser_category_drag_test",
+        ":browser_color_detail_test",
+        ":browser_date_input_help_test",
+        ":browser_focus_time_test",
+        ":browser_goals_linking_test",
+        ":browser_goals_page_test",
+        ":browser_gtd_test",
+        ":browser_idle_pause_test",
+        ":browser_mail_test",
+        ":browser_mini_timer_test",
+        ":browser_next_step_estimate_test",
+        ":browser_noop_save_test",
+        ":browser_outdated_test",
+        ":browser_plan_completion_test",
+        ":browser_plan_layout_test",
+        ":browser_planning_drag_test",
+        ":browser_planning_journeys_test",
+        ":browser_planning_native_test",
+        ":browser_planning_quick_time_test",
+        ":browser_planning_readiness_test",
+        ":browser_pwa_launch_test",
+        ":browser_pwa_test",
+        ":browser_refinement_test",
+        ":browser_request_counts_test",
+        ":browser_sidebar_resize_test",
+        ":browser_task_context_dates_test",
+        ":browser_task_delete_keyboard_test",
+        ":browser_task_detail_reads_test",
+        ":browser_task_details_layout_test",
+        ":browser_task_editor_save_test",
+        ":browser_task_menus_test",
+        ":browser_task_row_drag_test",
+        ":browser_task_tree_test",
+        ":browser_tasks_test",
+        ":browser_titlebar_test",
+        ":browser_view_refresh_test",
+    ],
+)
+
+# Vite's terminal bundle reads the application tree, including dynamically imported modules and assets.
+js_library(
+    name = "application_sources",
+    srcs = glob(
+        ["src/**"],
+        exclude = ["**/*.test.*"],
+    ),
+)
+
+# The native suite includes the package's existing non-manual test rules.
+test_suite(name = "check")
+
+# Original ESLint config and source scope, with generated Bazel launchers kept outside the file list.
+eslint_test(
+    name = "lint",
+    data = [
+        "package.json",
+        ":node_modules/@eslint/js",
+        ":node_modules/typescript-eslint",
+    ],
+    runner = eslint.eslint_test,
+    sources = glob([
+        "src/**/*.ts",
+        "src/**/*.tsx",
+        "public/**/*.js",
+        "test/**/*.ts",
+        "*.ts",
+        "*.js",
+    ]),
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        [
+            "*",
+            "public/**",
+            "src/**",
+            "test/**",
+        ],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + glob(
+        [
+            ".env.example",
+            ".env.*.example",
+            ".dev.vars.example",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)
+
+test_suite(
+    name = "typecheck_tests",
+    tests = [":types_typecheck_test"],
 )

@@ -663,8 +663,8 @@ def test_workflow_permissions_and_event_isolation_are_least_privilege():
     assert config["on"]["workflow_run"]["workflows"] == ["CI and deploy"]
     assert config["on"]["workflow_run"]["branches"] == ["main"]
     assert "pull_request_target" not in config["on"]
-    assert service["jobs"]["newsletter-checks"]["if"] == (
-        "needs.changes.outputs.newsletter_check == 'true'"
+    assert service["jobs"]["checks"]["if"] == (
+        "needs.changes.outputs.has_checks == 'true'"
     )
     configured_environments = []
     for job in config["jobs"].values():
@@ -683,14 +683,16 @@ def test_workflow_permissions_and_event_isolation_are_least_privilege():
         not {"NEWSLETTER_SEND_TOKEN", "RESEND_API_KEY"} & environment.keys()
         for environment in configured_environments
     )
-    image_steps = service["jobs"]["newsletter-image"]["steps"]
+    image_steps = service["jobs"]["artifacts"]["steps"]
     assert any(
         "publish_content_config.py validate" in step.get("run", "")
         for step in image_steps
     )
     publish_job = service["jobs"]["newsletter-deploy"]
     assert publish_job["name"] == "Newsletter image publish"
-    assert "newsletter-image" in publish_job["needs"]
+    assert "gate" in publish_job["needs"]
+    assert "needs.gate.result == 'success'" in publish_job["if"]
+    assert {"checks", "artifacts"} <= set(service["jobs"]["gate"]["needs"])
     assert any(
         "image.py publish" in step.get("run", "")
         for step in publish_job["steps"]

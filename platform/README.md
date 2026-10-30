@@ -1,12 +1,15 @@
 # VPS runtime · VPS 运行层
 
-GitHub Actions 主动调用 daemon 的 HTTPS 发布 API。Cloudflare Access 和独立 Bearer 同时鉴权；
-Actions 没有 SSH 私钥、Kubernetes token 或管理员 kubeconfig。daemon 使用官方 Kubernetes SDK，
-只在配置的 namespace 操作固定运行资源。共享 proto 定义请求、错误和状态。
+GitHub Actions calls the daemon's typed HTTPS release API through Access and an independent bearer. The official Kubernetes SDK applies only the configured namespace resources; the durable SQLite ledger and physical observations own release progress.
 
-GitHub Actions pushes releases to the daemon HTTPS API, protected by Cloudflare Access and a separate
-Bearer identity. The daemon uses the official Kubernetes SDK with namespace-scoped permissions.
-Actions holds no SSH key or Kubernetes credential. Shared proto defines requests, errors and status.
+Build and check from the repository root:
+
+```sh
+bazel build //platform --platforms=//tools/bazel/images:linux_amd64 --embed_label=<full-source-sha>
+bazel test //platform:check
+```
+
+`//platform:bootstrap_bundle` prepares the separate public installer input. Normal publication and deployment stay in Actions. Linux checks require Docker for the offline image probe and a separate privileged, API-only k3s fixture on loopback port 6443. The native k3s test runs the original SSA assertions and removes its unique container and volume. The image job compiles the reviewed AppArmor policy using the Ubuntu host parser.
 
 ```mermaid
 flowchart LR
@@ -32,7 +35,7 @@ resume; retrying CreateRelease alone never reopens admission or forces ambiguous
 | `src/personal_cloud/status_daemon/` | Bounded actual runtime observations and adapters |
 | `src/personal_cloud/observer/` | Read-only observations and signed receipts from the observer image |
 | `k3s/` | Standard Kustomize runtime, volumes and least-privilege bootstrap resources |
-| `systemd/` | Dedicated HTTP tunnel unit |
+| `systemd/` | Host boundary contract; unit templates are in `tools/vps-bootstrap/prepare.py` |
 | `versions.json` | Pinned k3s and manifest compiler versions/checksums |
 | `../tools/vps-release/` | Actions HTTP client; no host commands or runtime source imports |
 | `../tools/vps-bootstrap/` | One-time privileged installer and public bundle preparation |
@@ -47,7 +50,7 @@ its daily trigger, and it is the only Pod that mounts the existing Codex login v
 The existing platform Tunnel routes its exact inference prefix through a separate path-scoped
 Access application. Gateway process health is separate from login, quota and actual inference results.
 
-The owner executes one prepared bootstrap with sudo. Initial engine admission stays frozen until the
+The owner separately authorizes the prepared one-time bootstrap. Initial engine admission stays frozen until the
 first verified API release. See [rebuild](../docs/rebuild.md) for configuration, secrets and recovery limits.
 Synthetic tests do not prove Codex login, external providers or a live new server.
 The legacy editorial config-sync process downloads validated content bundles; it does not reconcile

@@ -1,139 +1,32 @@
-# links: the owner's short links
+# Links
 
-`s.ziyixi.science/<key>` redirects to a target the owner chose: `s/gh` to GitHub, `s/gh/ziyixi/todofy` to that
-repository, `s/q/some words` to a search. A launcher under `s.ziyixi.science/_/` lists, searches, creates, edits,
-deletes and restores them, on a phone as well as a desktop.
-
-Status (2026-10-01, step **L2**): the D1 database `links` and the path-scoped Access application `links`
-(`s.ziyixi.science/_/*` and the exact `s.ziyixi.science/_`, the owner's identities, a 7-day session) exist, and CI's
-`Links deploy` deploys the Worker on its one Custom Domain `s.ziyixi.science` ([Deploy](#deploy)). The rest of the host
-stays outside Access: short links reach the Worker anonymously. Next is L3, the owner's own links
-([`docs/design.md`](docs/design.md) §11).
-
-| Path | What |
-| --- | --- |
-| `wrangler.toml` | The Worker `links`: the Custom Domain `s.ziyixi.science`, D1 `links`, the backup bucket `links-backups`, the backup's Durable Object `LinksBackup` (no cron trigger), the Access issuer and AUD, static assets `web/dist` with `run_worker_first = ["/*", "!/_/assets/*"]`, invocation logs and traces off |
-| `worker/` | The Worker (TypeScript): the redirect path (`src/resolve.ts`, `targets.ts`, `keys.ts`), the owner half under `/_/` (`src/http.ts`, `auth.ts`, the transcoder handlers in `api.ts`, D1 in `store.ts`), the daily backup (`src/backup.ts`, `backup-runner.ts`) and Home's `Ops` entrypoint (`src/ops.ts`) |
-| `web/` | The launcher (TypeScript, no framework, Vite): built into `web/dist/_/` |
-| `migrations/` | D1: `links`, `link_revisions`, `request_log` |
-| `deploy/` | `deploy-vars.mjs` (the deploy wrapper: `BUILD_SHA` as a var, the owner and CSRF key as Worker secrets; refuses a real deploy with an all-zeros D1 id or AUD), `bundle-size.mjs` (the Worker's gzip budget) |
-| `tools/` | `backup-restore.ts`: download, check and restore a daily backup into a new D1 ([backup](docs/backup.md)) |
-| `../proto/links/ui/v1/` | The owner API's IDL (`links.ui.v1`, AIP-style, served by the shared transcoder) |
-
-## What it does
-
-- **Keys** are 1-63 characters of `a-z`, `0-9` and `-` (`^[a-z0-9][a-z0-9-]{0,62}$`), case-insensitive (stored in
-  lower case). Reserved: `_`, `s`, `api`, `v1`, `search`, `cdn-cgi`, `favicon.ico`, `robots.txt`, `.well-known`.
-- **Redirects** are always `302`, never `301`/`308` (a browser keeps those forever), with `Cache-Control: private,
-  no-store`, `X-Robots-Tag: noindex` and `Referrer-Policy: no-referrer`; `robots.txt` disallows everything. A redirect
-  is one D1 read by primary key and writes nothing (no click count). The Worker never logs a key, a path or a target.
-- **Visibility** is per link, **private** by default. A public link works for anyone. A private link works for the
-  owner (the Access cookie of this host, verified by the Worker); for anyone else, a private key, an unknown key, a
-  deleted one and an expired one all get the identical `302` to `/_/k/<key>` (behind Access), so keys cannot be
-  enumerated. After login, `/_/k/<key>` redirects if the link resolves, else the launcher offers to create, restore or
-  edit it.
-- **Preview**: `/<key>+` shows where a link goes instead of going there (same visibility rule).
-- **Passthrough** per link: `exact` (default; `/<key>/<rest>` is refused), `append` (`/<key>/<rest>` is appended to the
-  target's path, each segment percent-encoded), `template` (one `{path}` in the target is replaced by the rest). The
-  result must keep the target's origin, so no path turns a link into an open redirect. The query string never passes.
-- **Targets** are `https:` only, without user name or password, at most 2,048 characters, never this host.
-- **Edits** are revisions (the last 20 are kept), deletes are soft (purged 30 days later, by the next list or write),
-  and the launcher's 撤销 is the API's own: delete after a create, rollback after an edit, undelete after a delete.
-- **Import and export** as JSON Lines (one `links.ui.v1.Link` per line).
-- **Backups**: every table of the D1 database, daily at 05:25 UTC into the private bucket `links-backups`, the newest
-  30 kept; Home's 短链接 tile raises `backup_stale` and `backup_failed`. D1 Time Travel covers the last 7 days. What is
-  copied, the restore and its rehearsal: [`docs/backup.md`](docs/backup.md).
-
-## Using it
-
-Desktop Chrome (from L2, once per Chrome profile; the setting syncs with the profile): open
-`chrome://settings/searchEngines` (Settings → Search engine → Manage search engines and site search), then Site
-search → Add: name `Short links`, shortcut `s`, URL `https://s.ziyixi.science/%s`, and Add. Then type `s` and a space
-(or Tab) in the address bar, and `gh`,
-`gh/ziyixi/todofy`, `gh ziyixi/todofy` or `q some words`. Chrome puts the text into the path with `/` kept and a
-space as `%20`, and the key ends at the first `/` or space, so both spellings pass `ziyixi/todofy` on (an `append` or
-`template` link; an `exact` one refuses a path). The launcher itself is `https://s.ziyixi.science/_/` (`/` redirects
-there). A private link needs the Access cookie of this host in that profile: open the launcher once and log in, then
-private links redirect without a login page for the 7 days of the session (after it, a private key goes through the
-login and then on to its target).
-
-Phone: open `https://s.ziyixi.science/_/` once, log in through Access (the session lasts 7 days), then Share → Add to
-Home Screen (iOS) or ⋮ → Add to home screen (Android). The launcher opens with the search box focused; type a key and
-Enter (or Go) to follow it, or tap a row; a key that does not exist yet offers 新建. Short links themselves also work from
-any app on the phone: public ones always, private ones in the browser that holds the Access cookie.
-
-## Develop
+私人短链接和启动页。`/<key>` 跳转到保存的 HTTPS 目标，`/_/` 是 Access 保护的管理界面。公开短链接匿名可用；
+私有、未知、删除或过期的 key 对非 owner 给出相同响应，避免枚举。
 
 ```sh
-pnpm install --frozen-lockfile                     # shared dependencies and proto generation
-cd links/web
-npm run build                          # web/dist, which the Worker serves
-cp ../.dev.vars.example ../.dev.vars                # synthetic values only
-cd ../worker
-npx --no-install wrangler d1 migrations apply DB --local --config ../wrangler.toml   # local D1 only, never --remote
-npm run dev                                         # http://127.0.0.1:8790, loopback sign-in under /_/
+bazel test //links:check
+bazel build //links
 ```
 
-Locally, a short-link request without an Access token is anonymous and one with any `CF_Authorization` cookie is the
-owner (the dev bypass, loopback only), so both sides of the visibility rule can be tried with `curl -H 'cookie:
-CF_Authorization=dev'`. `cd web && npm run dev` serves the launcher with hot reload and proxies `/_/api` to the Worker.
+## 使用
 
-Before committing, in `worker/`: `npm run lint`, `npm run typecheck`, `npm test`, `npm run test:runtime`; in `web/`:
-`npm run lint`, `npm run typecheck`, `npm test`, `npm run build`; in `links/`: `node --test deploy/test/*.test.mjs
-tools/test/*.test.mjs`.
+管理页支持搜索、新建、编辑、软删除/恢复、修订和 JSON Lines 导入导出。链接可 exact、追加路径或用 `{path}`
+模板；不透传查询串，不允许改变目标 origin。预览用 `/<key>+`。
 
-## CI
+把配置中的主机添加为浏览器 Site Search，例如快捷字 `s`、URL `https://<host>/%s`，即可从地址栏使用。手机可
+打开管理页并添加到主屏。私有链接依赖同一浏览器的 owner Access 登录。
 
-`Links checks` (`.github/workflows/ci.yml`) runs when `links/`, `packages/edge-auth/`, `proto/`, `contracts/`, `tools/`
-or `.github/` change (the last three re-check every app and deploy none): the config, wrapper and restore tool tests,
-the Worker's lint, typecheck, unit and workerd runtime tests (real D1 and R2, a synthetic Access issuer, the backup
-and its restore, the CPU test of `tools/workerd-cpu`), the launcher's checks and build (its JavaScript budget, `web/scripts/js-budget.mjs`), an import
-guard, and a `--dry-run` of the committed config through the wrapper with placeholder values plus the bundle budget.
+跳转固定为 302/no-store，一次索引读取、零写入，不记录 key、访问路径、目标或点击统计。只有 `/_` 和 `/_/*`
+被 Access 覆盖；不能把整个主机放进 Access。规则和边界见[设计](docs/design.md)。
 
-## Deploy
+## 维护
 
-Only from GitHub Actions: `Links deploy` (`.github/workflows/ci.yml`) runs on `main` after `CI gate` when `links/`,
-`packages/edge-auth/` or a `proto/` path the app bundles (the TypeScript runtime, `proto/links/ui/`, the module and
-toolchain files) changed, or on a dispatch with `links` or `all`, in the `production` environment and the group
-`links-production`. It builds the launcher, writes the secrets file, dry-runs (the bundle held to its budget), runs the
-hostname guard (`tools/cf-guard`, no allowance: `s.ziyixi.science` had no DNS record before L2), applies the D1
-migrations (`wrangler d1 migrations apply DB --remote`), deploys through `deploy/deploy-vars.mjs`, and then checks
-production:
+一个 Worker、D1 和独立 LinksBackup Alarm；没有 KV 或 cron。日备份写私有 R2、保留完整恢复能力，跳转不触发
+备份。见[备份与恢复](docs/backup.md)。
 
-- through the API with the deploy token (nothing anonymous shows the build): the Worker serves exactly one version at
-  100%, its `BUILD_SHA` is the commit, and no migration is pending;
-- the owner's half, anonymously: `GET /_` (the Access application's exact destination), `/_/` and `/_/api/v1/links`
-  are answered by Access with a 302 to its login page for this host (the dashboard's probe);
-- the rest of the host, anonymously: `/robots.txt` is the Worker's own 200 `text/plain` "Disallow: /", and
-  `/some-unknown-key` the Worker's 302 to `https://s.ziyixi.science/_/k/some-unknown-key` (what a private, deleted or
-  expired key gets too), both `Cache-Control: private, no-store` and `X-Robots-Tag: noindex`. A 302 to the Access
-  login page there means the Access application covers more than `/_/*`. Never make a public link with that key.
+主配置是 `wrangler.toml`，owner 身份复用 Home 的声明。正常发布只走同一 green SHA 的 main Actions：检查完整
+产物、hostname guard、D1 migrations、无重新打包上传、实际版本/Access/匿名跳转验证和最终对账。不要重做旧 L1/L2
+上线清单或绕过 wrapper。
 
-The deploy token is `CF_API_TOKEN`, as for the dashboard. The wrapper writes two Worker secrets:
-
-| Worker secret | From the `production` environment secret | Why |
-| --- | --- | --- |
-| `ACCESS_OWNER` | `DASHBOARD_ACCESS_OWNER` | the links app's owner is the dashboard's owner: one person with the same Access identities, so it reuses the dashboard's secret instead of a copy that could drift |
-| `ACCESS_OWNER_ALIASES` | `DASHBOARD_ACCESS_OWNER_ALIASES` | as above |
-
-Inside the job the inputs keep their `LINKS_*` names; only the job's `env:` maps the owner's two to the dashboard's
-secrets, and `.github/scripts/test_wrangler_configs.py` checks that mapping (and that the dashboard's wrapper, the
-watch app's and this one accept the same owner values). A change to either owner secret reaches the links app only
-with its own deploy: after changing one, dispatch `all` (or `dashboard`, `links` and `watch`), as
-[`../dashboard/docs/setup.md`](../dashboard/docs/setup.md) §3 says. Owner mutations require exact Origin, `X-CSRF-Token: 1` and JSON. No CSRF signing key or cookie is used.
-
-The dashboard's daily drift check compares the live Worker with `dashboard/worker/src/drift-desired.json`
-(generated by `.github/scripts/drift_desired.py`: these two secrets, `BUILD_SHA`, the config's bindings, no cron
-trigger and the Custom Domain), and its registry names the Worker, the D1 database and the bucket under the entry
-短链接, whose tile is the app's Ops answer through Home's `LINKS` binding (`src/ops.ts`) together with an anonymous
-probe of `/robots.txt` (the Custom Domain and the route). The D1
-database and the Access application "links" are managed by `infra/` since IaC P4 (`infra/README.md`): change them there,
-not by hand, and "Infra drift" checks every day that `database_id` and `ACCESS_AUDIENCE` here equal the live objects.
-
-### Rollback
-
-A deploy without `routes` leaves an attached Custom Domain in place, so: detach `s.ziyixi.science` from the Worker
-`links` by hand in the Cloudflare dashboard (Workers & Pages → links → Settings → Domains & Routes), then revert the
-L2 commit. The D1 database and the Access application can stay, or be deleted by hand after an export through the
-launcher (导出). To roll back the code only, revert the commit that broke it: the next `Links deploy` ships the revert
-and keeps the host.
+交互式开发用原 local-only `dev` 入口；build/test/type/lint 委托 Bazel。接口在根 `links.ui.v1`，鉴权复用
+edge-auth。详见[协作规则](AGENTS.md)、[依赖](../docs/dependencies.md)与[CI/CD](../docs/ci-cd.md)。

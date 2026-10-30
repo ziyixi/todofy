@@ -1,5 +1,5 @@
 # Local development only. Copy to dashboard/.dev.vars (gitignored; wrangler reads the .dev.vars next to
-# wrangler.toml) and run, from worker/: npm run dev (docs/setup.md §5; it pins the local origin with
+# wrangler.toml) and run, from worker/: npm run dev (docs/setup.md; it pins the local origin with
 # --local-upstream, which the bypass below needs: a bare `wrangler dev` answers as the production host).
 # The committed wrangler.toml is production: local dev uses local bindings only (never --remote).
 # Synthetic values only; never a real owner address, key or token.
@@ -14,5 +14,4 @@ DEV_AUTH_BYPASS=true
 # e.g. to look at ticks run at chosen times; unset, they read the clock.
 # DEV_NOW=2026-10-01T16:30:00Z
 ACCESS_OWNER=owner@example.com
-# A locally generated 64-hex key, e.g. `openssl rand -hex 32`:
 # Without CF_ANALYTICS_TOKEN the Cloudflare view has no usage rows (the expected local state).

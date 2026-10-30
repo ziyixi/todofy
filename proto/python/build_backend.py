@@ -10,17 +10,14 @@ src/ziyixi_proto/ current, then only packages files:
 - ``build_editable`` (only for an explicit editable install, ``uv pip install -e proto/python``): a wheel
   with one ``.pth`` file that puts src/ on sys.path.
 
-"Current" means the stamp proto/tools/ensure.mjs writes (proto/.generated.json) matches the inputs and the
-generated files. This module checks the stamp itself, hashing exactly as ensure.mjs does, and runs
-ensure.mjs (Node.js) only when it does not match. That matters for pywrangler: it builds the wheel inside
-Pyodide, which cannot start processes, after ``uv sync`` on the host has already generated everything.
+Host builds materialize the canonical Bazel outputs through proto/tools/ensure.mjs. Pyodide cannot start
+processes, so its build verifies the materialized input and output hashes supplied by the host instead.
 The wheels are reproducible (fixed timestamps, sorted entries).
 """
 
 import base64
 import hashlib
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -36,7 +33,7 @@ ENSURE = PROTO / "tools" / "ensure.mjs"
 STAMP = PROTO / ".generated.json"
 # The output roots of ensure.mjs: every directory directly inside them is generated.
 TARGETS = (PROTO / "ts", SRC / NAME)
-STAMP_VERSION = 1
+STAMP_VERSION = 2
 TAG = "py3-none-any"
 # Generated top-level packages that are test fixtures (tools/gen_py.py PYTHON_PACKAGES marks them False):
 # generated for proto/test/python, never put in the wheel.
@@ -49,54 +46,43 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _proto_files(excluded: set[str]) -> list[str]:
-    """Every .proto file of the module, relative to proto/ (ensure.mjs protoFiles)."""
-    found = []
-    for directory, subdirectories, files in os.walk(PROTO):
-        top = Path(directory) == PROTO
-        subdirectories[:] = [d for d in subdirectories if not d.startswith(".") and not (top and d in excluded)]
-        relative = Path(directory).relative_to(PROTO).parts
-        found += ["/".join((*relative, name)) for name in files if name.endswith(".proto") and not name.startswith(".")]
-    return sorted(found)
-
-
 def _generated_files() -> dict[str, str]:
-    """Relative path -> sha256 of every generated file (ensure.mjs outputsHashes)."""
+    """Relative path -> sha256 of the materialized modules, excluding installed dependencies."""
     found = {}
     for root in TARGETS:
         if not root.is_dir():
             continue
         for path in root.rglob("*"):
             relative = path.relative_to(root).parts
-            if path.is_file() and len(relative) > 1 and "__pycache__" not in relative:
+            if path.is_file() and len(relative) > 1 and not {"__pycache__", "node_modules"}.intersection(relative):
                 found[path.relative_to(PROTO).as_posix()] = _sha256(path.read_bytes())
     return found
 
 
 def is_current() -> bool:
-    """True when the stamp matches every input and every generated file (ensure.mjs isCurrent)."""
+    """True when the Bazel manifest matches its declared inputs and every materialized module."""
     try:
         stamp = json.loads(STAMP.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return False
     if not isinstance(stamp, dict) or stamp.get("version") != STAMP_VERSION:
         return False
-    digest = hashlib.sha256()
     try:
-        for name in [*_proto_files(set(stamp["excluded"])), *stamp["input_files"]]:
-            digest.update(f"{name}\0".encode())
-            digest.update((PROTO / name).read_bytes())
-            digest.update(b"\0")
+        inputs = stamp["inputs"]
+        if not isinstance(inputs, dict) or not inputs:
+            return False
+        if any(_sha256((PROTO / name).read_bytes()) != expected for name, expected in inputs.items()):
+            return False
     except (KeyError, OSError, TypeError):
         return False
     outputs = stamp.get("outputs")
-    return digest.hexdigest() == stamp.get("inputs") and bool(outputs) and outputs == _generated_files()
+    return bool(outputs) and outputs == _generated_files()
 
 
 def _ensure_generated() -> None:
-    if is_current():
-        return
     if sys.platform == "emscripten":
+        if is_current():
+            return
         raise RuntimeError(
             "ziyixi-proto: the generated code is not current and Pyodide cannot run proto/tools/ensure.mjs; "
             "run `npm run ensure` in proto/ on the host, then retry"
@@ -104,9 +90,7 @@ def _ensure_generated() -> None:
     node = shutil.which("node")
     if node is None:
         raise RuntimeError("ziyixi-proto: Node.js is not on PATH; it runs proto/tools/ensure.mjs (proto/README.md)")
-    # gen_py.py runs on this interpreter; ensure.mjs logs to stderr, which uv shows when a build fails.
-    env = dict(os.environ, PROTO_PYTHON=sys.executable)
-    subprocess.run([node, str(ENSURE)], check=True, env=env, stdout=sys.stderr)
+    subprocess.run([node, str(ENSURE)], check=True, stdout=sys.stderr)
     if not is_current():
         raise RuntimeError("ziyixi-proto: proto/tools/ensure.mjs ran but its stamp does not match")
 
