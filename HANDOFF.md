@@ -5,9 +5,15 @@ Documentation entrypoints are in [docs/README](docs/README.md). Historical waiti
 
 ## Current work
 
-The complete Bazel implementation and its Website publication correction are deployed and verified.
-No implementation from this migration is awaiting release. Check the current Git status and open pull requests
-before starting new work; another agent may be working independently.
+Branch `codex/newsletter-console-readonly`: fix the Newsletter owner console's 503 on the production image's SQLite
+3.40.1. A synthetic query reproduced `json_each` virtual-table initialization being refused by the read-only authorizer;
+initializing it before installing that authorizer succeeds without changing the database. Keep `mode=ro`, `query_only`
+and the existing write refusal. Eleven related checks and the actual Linux image smoke pass, including JSON reads,
+write refusal and unchanged database bytes. Branch CI, normal main publication and matching reconcile remain.
+
+Separately, correlate the morning Newsletter `MODEL_INVALID_ANSWER` with its run's publication/assessment metadata
+before claiming no effect on content coverage or depth. The console's auth and Tunnel work; valid reads fail while invalid
+parameters return 400. No real content was recomputed, resent or used as a test fixture. Other agents may be working independently.
 
 ## Latest verified release
 

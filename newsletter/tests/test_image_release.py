@@ -37,6 +37,10 @@ def probe():
     return module
 
 
+def test_probe_reads_json_each_with_read_only_snapshot(probe, tmp_path):
+    probe.check_console_snapshot(tmp_path)
+
+
 @pytest.mark.parametrize("generated_kind", ["missing", "file", "directory"])
 def test_probe_uses_traversable_interface_for_absent_generated_package(
     probe, monkeypatch, generated_kind

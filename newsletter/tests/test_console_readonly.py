@@ -69,12 +69,14 @@ def test_reading_every_answer_changes_nothing(world):
 
 def test_the_connection_refuses_every_write(world):
     with world.reader.snapshot() as snap:
+        assert snap.one("SELECT value FROM json_each('[1]')")[0] == 1
         for statement in (
             "INSERT INTO metadata VALUES ('x','y')",
             "UPDATE editions SET state='failed'",
             "DELETE FROM collection_runs",
             "CREATE TABLE monitoring_unknowns (x)",
             "PRAGMA journal_mode=DELETE",
+            "PRAGMA query_only=OFF",
             "ATTACH DATABASE ':memory:' AS other",
         ):
             with pytest.raises(sqlite3.DatabaseError):

@@ -259,6 +259,9 @@ class ConsoleReader:
             db.execute("PRAGMA query_only=ON")
             db.execute("PRAGMA trusted_schema=OFF")
             db.execute("PRAGMA busy_timeout=2000")
+            # SQLite <3.41 authorizes json_each's initial virtual-table
+            # declaration as a schema update. Initialize it before the guard.
+            db.execute("SELECT 1 FROM json_each('{}')")
             db.set_authorizer(_authorize)
             db.execute("BEGIN")
             try:
