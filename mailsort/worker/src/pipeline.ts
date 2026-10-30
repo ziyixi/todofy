@@ -160,16 +160,20 @@ async function sync(store: Store, gmail: GmailClient, budget: Budget, now: () =>
   return { queued, more: true };
 }
 
-/** A recent Inbox listing recovers old non-model eligibility skips; valid decisions remain frozen. Transactional. */
-function enqueueRecent(store: Store, ids: readonly string[], now: number): void {
+/** Recent intake also recovers optional-accounting failures once; valid decisions remain frozen. Transactional. */
+function enqueueRecent(store: Store, ids: readonly string[], now: number, recoverFailures = false): void {
+  const recover = recoverFailures && store.getMeta('optional_accounting_recovery') === null;
   for (const id of ids) {
     const prior = store.decision(id);
     if (prior?.outcome === 'skipped' && prior.decider === 'skip' && ['not_inbox', 'before_install'].includes(prior.unsure_reason) && prior.label_id === null) {
       countFlow(store, prior.decided_at, 'skipped', skipOutcome(prior.unsure_reason), null, -1);
       store.run(`DELETE FROM decisions WHERE message_id = ?`, id);
     }
-    store.enqueue(id, now);
+    if (recover && prior?.outcome === 'unsure' && prior.decider === 'none' && prior.unsure_reason === 'model_unavailable' && prior.label_id === null && prior.verdict === null) {
+      store.run(`INSERT OR IGNORE INTO pending (message_id, added_at) VALUES (?, ?)`, id, now);
+    } else store.enqueue(id, now);
   }
+  if (recover) store.setMeta('optional_accounting_recovery', String(now));
 }
 
 /**
@@ -501,7 +505,7 @@ export async function runPass(deps: PassDeps): Promise<PassResult> {
         WHERE b.state = 'pending' AND (b.ledger_id IS NULL OR l.state = 'intended') LIMIT 1`) !== undefined;
       if (!manualBatchPending && budget.has(MAIL_SUBREQUESTS + 2)) {
         const recent = await gmail.recentUnclassifiedInbox(RESYNC_MAX);
-        transact(() => { enqueueRecent(store, recent, deps.now()); });
+        transact(() => { enqueueRecent(store, recent, deps.now(), true); });
       }
       const prepared: PreparedMail[] = [];
       const due = store.due(deps.now(), DRAIN_MAX);

@@ -75,6 +75,115 @@ it('recovers consumed-history recent mail and an old read skip without reopening
   expect(modifies(h)).toHaveLength(3);
 });
 
+it('recovers recent read and unread model failures once without reopening valid decisions or owner verdicts', async () => {
+  await ready();
+  await h.sql(`DELETE FROM meta WHERE key = 'optional_accounting_recovery'`);
+  const own = h.up.gmail.createUserLabel('Personal');
+  const read = mail(51, ['INBOX', 'STARRED', own]);
+  const unread = mail(52, ['INBOX', 'UNREAD', 'STARRED', own]);
+  for (const input of [read, unread, mail(53), mail(54), mail(55), mail(56), mail(57)]) deliver(h, input, T0 + MINUTE);
+  for (const input of [read, unread, mail(55), mail(56), mail(57)]) {
+    await h.sql(`INSERT INTO decisions (message_id, thread_id, received_at, decided_at, outcome, decider, unsure_reason)
+      VALUES (?, ?, ?, ?, 'unsure', 'none', 'model_unavailable')`, input.id, input.id, T0 + MINUTE, T0 + 2 * MINUTE);
+  }
+  for (const [id, outcome] of [[53, 'suggested'], [54, 'applied']] as const) {
+    await h.sql(`INSERT INTO decisions (message_id, thread_id, received_at, decided_at, outcome, decider, label_id)
+      VALUES (?, ?, ?, ?, ?, 'claude', 'p2')`, mail(id).id, mail(id).id, T0 + MINUTE, T0 + 2 * MINUTE, outcome);
+  }
+  await h.sql(`UPDATE decisions SET verdict = 'corrected', verdict_label = 'p1', verdict_source = 'owner' WHERE message_id = ?`, mail(55).id);
+  await h.sql(`UPDATE decisions SET unsure_reason = 'historical_uncertainty' WHERE message_id = ?`, mail(56).id);
+  await h.sql(`UPDATE decisions SET label_id = 'p1' WHERE message_id = ?`, mail(57).id);
+  const frozen = await h.sql(`SELECT * FROM decisions WHERE message_id NOT IN (?, ?) ORDER BY message_id`, read.id, unread.id);
+  await h.sql(`UPDATE meta SET value = ? WHERE key = 'history_cursor'`, String(h.up.gmail.historyId));
+  expect(await h.step(T0 + 3 * MINUTE)).toMatchObject({ decided: 2, applied: 2 });
+  expect(inputs()).toEqual([read.id, unread.id]);
+  const priority = h.up.gmail.labelIdByName('P2');
+  expect(gmailLabels(h, read.id)).toEqual(['STARRED', own, priority].sort());
+  expect(gmailLabels(h, unread.id)).toEqual(['UNREAD', 'STARRED', own, priority].sort());
+  for (const input of [read, unread]) expect(await decision(h, input.id)).toMatchObject({ outcome: 'applied', label_id: 'p2', decider: 'claude' });
+  expect(await h.sql(`SELECT * FROM decisions WHERE message_id NOT IN (?, ?) ORDER BY message_id`, read.id, unread.id)).toEqual(frozen);
+  expect(await h.sql(`SELECT value FROM meta WHERE key = 'optional_accounting_recovery'`)).toEqual([{ value: String(T0 + 3 * MINUTE) }]);
+});
+
+it('preserves pending backoff during recovery and does not revive future model failures', async () => {
+  await ready();
+  await h.sql(`DELETE FROM meta WHERE key = 'optional_accounting_recovery'`);
+  const waiting = mail(61, ['INBOX']);
+  deliver(h, waiting, T0 + MINUTE);
+  await h.sql(`INSERT INTO decisions (message_id, thread_id, received_at, decided_at, outcome, decider, unsure_reason)
+    VALUES (?, ?, ?, ?, 'unsure', 'none', 'model_unavailable')`, waiting.id, waiting.id, T0 + MINUTE, T0 + 2 * MINUTE);
+  await h.sql(`INSERT INTO pending (message_id, added_at, attempts, not_before) VALUES (?, ?, 2, ?)`, waiting.id, T0 + MINUTE, T0 + 20 * MINUTE);
+  const pending = await h.sql(`SELECT * FROM pending`);
+  const prior = await decision(h, waiting.id);
+  await h.step(T0 + 3 * MINUTE);
+  expect(await h.sql(`SELECT * FROM pending`)).toEqual(pending);
+  expect(await decision(h, waiting.id)).toEqual(prior);
+  expect(inputs()).toEqual([]);
+  const later = mail(62, ['INBOX', 'UNREAD']);
+  deliver(h, later, T0 + 4 * MINUTE);
+  await h.sql(`INSERT INTO decisions (message_id, thread_id, received_at, decided_at, outcome, decider, unsure_reason)
+    VALUES (?, ?, ?, ?, 'unsure', 'none', 'model_unavailable')`, later.id, later.id, T0 + 4 * MINUTE, T0 + 4 * MINUTE);
+  await h.sql(`UPDATE meta SET value = '0' WHERE key = 'next_model_at'`);
+  await h.step(T0 + 5 * MINUTE);
+  expect(await h.sql(`SELECT * FROM pending`)).toEqual(pending);
+  await h.step(T0 + 20 * MINUTE);
+  await h.step(T0 + 35 * MINUTE);
+  expect(inputs()).toEqual([waiting.id]);
+  expect(await decision(h, later.id)).toMatchObject({ outcome: 'unsure', decider: 'none', unsure_reason: 'model_unavailable' });
+  expect(gmailLabels(h, later.id)).toEqual(['INBOX', 'UNREAD']);
+  expect(await h.sql(`SELECT count(*) AS n FROM pending`)).toEqual([{ n: 0 }]);
+  expect(await h.sql(`SELECT value FROM meta WHERE key = 'optional_accounting_recovery'`)).toEqual([{ value: String(T0 + 3 * MINUTE) }]);
+});
+
+it('waits for filtered normal catch-up to complete recovery after a history resync', async () => {
+  await ready();
+  await h.sql(`DELETE FROM meta WHERE key = 'optional_accounting_recovery'`);
+  const input = mail(71, ['INBOX']);
+  deliver(h, input, T0 + MINUTE);
+  await h.sql(`INSERT INTO decisions (message_id, thread_id, received_at, decided_at, outcome, decider, unsure_reason)
+    VALUES (?, ?, ?, ?, 'unsure', 'none', 'model_unavailable')`, input.id, input.id, T0 + MINUTE, T0 + 2 * MINUTE);
+  await h.sql(`UPDATE meta SET value = ? WHERE key = 'next_model_at'`, String(T0 + 15 * MINUTE));
+  h.up.gmail.oldestHistoryId = h.up.gmail.historyId + 1;
+  await h.step(T0 + 3 * MINUTE);
+  expect(await h.sql(`SELECT value FROM meta WHERE key = 'optional_accounting_recovery'`)).toEqual([]);
+  expect(await h.sql(`SELECT count(*) AS n FROM pending`)).toEqual([{ n: 0 }]);
+  expect(inputs()).toEqual([]);
+  h.up.gmail.oldestHistoryId = 0;
+  expect(await h.step(T0 + 15 * MINUTE)).toMatchObject({ decided: 1, applied: 1 });
+  expect(inputs()).toEqual([input.id]);
+  expect(await h.sql(`SELECT value FROM meta WHERE key = 'optional_accounting_recovery'`)).toEqual([{ value: String(T0 + 15 * MINUTE) }]);
+});
+
+it('uses the existing Inbox and priority checks when recovered mail changes after listing', async () => {
+  await ready();
+  await h.sql(`DELETE FROM meta WHERE key = 'optional_accounting_recovery'`);
+  const archived = mail(81, ['INBOX']);
+  const graded = mail(82, ['INBOX', 'UNREAD']);
+  for (const input of [archived, graded]) {
+    deliver(h, input, T0 + MINUTE);
+    await h.sql(`INSERT INTO decisions (message_id, thread_id, received_at, decided_at, outcome, decider, unsure_reason)
+      VALUES (?, ?, ?, ?, 'unsure', 'none', 'model_unavailable')`, input.id, input.id, T0 + MINUTE, T0 + 2 * MINUTE);
+  }
+  const prior = await h.sql(`SELECT * FROM decisions ORDER BY message_id`);
+  const priority = h.up.gmail.labelIdByName('P1') ?? '';
+  let changed = false;
+  h.up.gmail.afterCall = (method, url) => {
+    if (!changed && method === 'GET' && url.pathname.endsWith('/messages') && url.searchParams.get('q')?.includes('-label:P1')) {
+      changed = true;
+      h.up.gmail.ownerModify(archived.id, [], ['INBOX']);
+      h.up.gmail.ownerModify(graded.id, [priority], []);
+    }
+  };
+  await h.step(T0 + 3 * MINUTE);
+  expect(changed).toBe(true);
+  expect(inputs()).toEqual([]);
+  expect(modifies(h)).toEqual([]);
+  expect(await h.sql(`SELECT count(*) AS n FROM pending`)).toEqual([{ n: 0 }]);
+  expect(await h.sql(`SELECT * FROM decisions ORDER BY message_id`)).toEqual(prior);
+  expect(gmailLabels(h, archived.id)).toEqual([]);
+  expect(gmailLabels(h, graded.id)).toEqual(['INBOX', 'UNREAD', priority].sort());
+});
+
 it('rejects intake outside the 48-hour window or with unknown dates and excludes archived or already graded mail', async () => {
   await ready();
   const at = T0 + 3 * DAY;
