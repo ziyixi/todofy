@@ -31,6 +31,9 @@ The earlier full Bazel migration and Website acceptance are in the same archive;
 
 ## Operating boundaries
 
+The repository introduction is available in [Chinese](README.md) and [English](README.en.md), with matching application
+and documentation links. Its editorial update is recorded in the [October 30 archive](docs/history/handoff-2026-10-30.md#repository-introduction).
+
 The [architecture](docs/architecture.md), [CI/CD](docs/ci-cd.md), [Bazel](docs/bazel.md), [resource catalog](docs/service-catalog.md)
 and [rebuild](docs/rebuild.md) guides are current entrypoints. Application runbooks own recovery and runtime semantics.
 
