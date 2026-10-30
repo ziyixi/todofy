@@ -676,6 +676,7 @@ vite_bundle(
         ":application_sources",
         ":build_checks",
         ":bundle_proto_link",
+        ":lib",
         ":node_modules/vite",
         ":node_modules/vitest",
     ],

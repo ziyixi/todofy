@@ -595,6 +595,7 @@ vite_bundle(
         ":application_sources",
         ":build_checks",
         ":bundle_proto_link",
+        ":lib",
         ":node_modules/d3-sankey",
         ":node_modules/d3-shape",
         ":node_modules/vite",

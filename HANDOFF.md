@@ -43,7 +43,9 @@ Local evidence so far:
   instructions removed, and dated evidence links to fixed originals. File and heading links and command labels were checked.
 - The full native Linux run for the preceding core snapshot passed all eight check groups, seventeen artifacts and
   CI gate. The native real-k3s leaf also passed on Linux. Final cleanup exposed Home's old document-bound assertions
-  and an incorrectly timed Vite postbuild hook; their focused checks pass, but the final Linux gate is still required.
+  and an incorrectly timed Vite postbuild hook; their focused checks pass. UI terminals now consume their existing
+  library closures: action-input inspection caught and corrected previously hidden cross-Worker source inputs.
+  Standalone UI, full Links archive and the other Vite terminals pass locally; the final Linux gate is still required.
 
 Still required before completion:
 

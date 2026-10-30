@@ -840,6 +840,7 @@ vite_bundle(
         ":application_sources",
         ":build_checks",
         ":bundle_proto_link",
+        ":lib",
         ":node_modules/@tanstack/react-query",
         ":node_modules/@vitejs/plugin-react",
         ":node_modules/react",
