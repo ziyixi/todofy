@@ -3,11 +3,22 @@ load("@npm//:defs.bzl", "npm_link_all_packages")
 load("@npm//proto:vitest/package_json.bzl", vitest = "bin")
 load("@rules_python//python:defs.bzl", "py_binary", "py_test")
 load("@rules_python//python:packaging.bzl", "py_package", "py_wheel")
-load("//proto/bazel:codegen.bzl", "proto_codegen", "proto_image")
+load("//proto/bazel:codegen.bzl", "proto_codegen", "proto_image", "proto_source_files")
+load("//proto/bazel:materialize.bzl", "materialized_proto")
 load("//tools/bazel:js.bzl", "vitest_test")
 load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
 package(default_visibility = ["//visibility:public"])
+
+materialized_proto(
+    name = "materialized",
+    inputs = [":generation_inputs"],
+    python = [
+        ":python",
+        "//proto/prototest/v1:python",
+    ],
+    typescript = "//proto/ts:pkg",
+)
 
 ts_config(
     name = "compiler_config",
@@ -103,6 +114,42 @@ PROTO_SOURCES = [
 
 PROTO_LIBRARIES = sorted({"//proto/" + source.rsplit("/", 1)[0] + ":proto": True for source in PROTO_SOURCES})
 
+proto_source_files(
+    name = "all_proto_sources",
+    protos = PROTO_LIBRARIES,
+)
+
+filegroup(
+    name = "generation_inputs",
+    srcs = [
+        "BUILD.bazel",
+        "buf.gen.yaml",
+        "buf.lock",
+        "buf.yaml",
+        "package.json",
+        ":sources",
+        "//:.bazelrc",
+        "//:.bazelversion",
+        "//:.python-version",
+        "//:MODULE.bazel",
+        "//:MODULE.bazel.lock",
+        "//:package.json",
+        "//:pnpm-lock.yaml",
+        "//:pnpm-workspace.yaml",
+        "//:uv.lock",
+        "//proto/bazel:BUILD.bazel",
+        "//proto/bazel:codegen.bzl",
+        "//proto/bazel:materialize.bzl",
+        "//proto/bazel:repositories.bzl",
+        "//proto/bazel:ts_package.bzl",
+        "//proto/python:source_audit_files",
+        "//proto/python/src/ziyixi_proto:source_audit_files",
+        "//proto/tools:generation_inputs",
+        "//proto/ts:source_audit_files",
+        "//tools/bazel:BUILD.bazel",
+    ] + [label.removesuffix(":proto") + ":BUILD.bazel" for label in PROTO_LIBRARIES],
+)
+
 py_binary(
     name = "breaking",
     srcs = ["//proto/tools:bazel_breaking.py"],
@@ -168,7 +215,7 @@ proto_codegen(
     name = "fleet_telemetry_v1_schema",
     outs = ["schema/fleet-report-v1.schema.json"],
     format = "schema",
-    output_paths = {'schema/fleet-report-v1.schema.json': '../contracts/fleet-report-v1/fleet-report-v1.schema.json'},
+    output_paths = {"schema/fleet-report-v1.schema.json": "../contracts/fleet-report-v1/fleet-report-v1.schema.json"},
     proto_package = "fleet.telemetry.v1",
     protos = ["//proto/fleet/telemetry/v1:proto"],
     sources = ["fleet/telemetry/v1/host_report.proto"],
@@ -178,7 +225,7 @@ proto_codegen(
     name = "mailhero_webhook_v1_schema",
     outs = ["schema/mail-received-v1.schema.json"],
     format = "schema",
-    output_paths = {'schema/mail-received-v1.schema.json': '../contracts/mail-received-v1/mail-received-v1.schema.json'},
+    output_paths = {"schema/mail-received-v1.schema.json": "../contracts/mail-received-v1/mail-received-v1.schema.json"},
     proto_package = "mailhero.webhook.v1",
     protos = ["//proto/mailhero/webhook/v1:proto"],
     sources = ["mailhero/webhook/v1/mail_received.proto"],
@@ -188,7 +235,7 @@ proto_codegen(
     name = "ops_v1_schema",
     outs = ["schema/ops-v1.schema.json"],
     format = "schema",
-    output_paths = {'schema/ops-v1.schema.json': '../contracts/ops-v1/ops-v1.schema.json'},
+    output_paths = {"schema/ops-v1.schema.json": "../contracts/ops-v1/ops-v1.schema.json"},
     proto_package = "ops.v1",
     protos = ["//proto/ops/v1:proto"],
     sources = ["ops/v1/ops.proto"],
@@ -198,7 +245,7 @@ proto_codegen(
     name = "platform_runtime_v1_schema",
     outs = ["schema/platform-runtime-v1.schema.json"],
     format = "schema",
-    output_paths = {'schema/platform-runtime-v1.schema.json': '../contracts/platform-runtime-v1/platform-runtime-v1.schema.json'},
+    output_paths = {"schema/platform-runtime-v1.schema.json": "../contracts/platform-runtime-v1/platform-runtime-v1.schema.json"},
     proto_package = "platform.runtime.v1",
     protos = ["//proto/platform/runtime/v1:proto"],
     sources = [
@@ -212,7 +259,7 @@ proto_codegen(
     name = "recall_archive_v1_schema",
     outs = ["schema/recall-archive-v1.schema.json"],
     format = "schema",
-    output_paths = {'schema/recall-archive-v1.schema.json': '../contracts/recall-archive-v1/recall-archive-v1.schema.json'},
+    output_paths = {"schema/recall-archive-v1.schema.json": "../contracts/recall-archive-v1/recall-archive-v1.schema.json"},
     proto_package = "recall.archive.v1",
     protos = ["//proto/recall/archive/v1:proto"],
     sources = ["recall/archive/v1/archive.proto"],
@@ -225,7 +272,10 @@ proto_codegen(
         "schema/summary-v1.schema.json",
     ],
     format = "schema",
-    output_paths = {'schema/recommendation-v1.schema.json': '../todofy/api/recommendation-v1.schema.json', 'schema/summary-v1.schema.json': '../todofy/api/summary-v1.schema.json'},
+    output_paths = {
+        "schema/recommendation-v1.schema.json": "../todofy/api/recommendation-v1.schema.json",
+        "schema/summary-v1.schema.json": "../todofy/api/summary-v1.schema.json",
+    },
     proto_package = "todofy.report.v1",
     protos = ["//proto/todofy/report/v1:proto"],
     sources = ["todofy/report/v1/report.proto"],
@@ -853,11 +903,97 @@ vitest_test(
     tests = ["test/wire-rules.test.ts"],
 )
 
+vitest_test(
+    name = "ts_ensure_test",
+    data = ["//proto/tools:materialize_js"],
+    runner = vitest.vitest_test,
+    tests = ["test/ensure.test.ts"],
+)
+
+py_binary(
+    name = "write_schemas",
+    srcs = ["//proto/tools:write_schemas.py"],
+    args = ["$(locations :schemas)"],
+    data = [":schemas"],
+    legacy_create_init = False,
+    main = "//proto/tools:write_schemas.py",
+    deps = ["//proto/tools:schema_generator"],
+)
+
+py_test(
+    name = "rules_selftest",
+    timeout = "long",
+    srcs = ["//proto/tools:bazel_selftest.py"],
+    args = [
+        "--buf",
+        "$(location //tools/bazel:buf)",
+        "--config",
+        "$(location :buf.yaml)",
+        "--retired",
+        "$(location :retired.json)",
+        "--script",
+        "$(location :scripts/rules-selftest.sh)",
+        "--source",
+        "$(locations :all_proto_sources)",
+    ],
+    data = [
+        "scripts/rules-selftest.sh",
+        ":all_proto_sources",
+        ":buf.yaml",
+        ":retired.json",
+        ":reviewed-rules.json",
+        "//tools/bazel:buf",
+    ],
+    legacy_create_init = False,
+    main = "//proto/tools:bazel_selftest.py",
+    deps = [
+        "//proto/tools:breaking_rules",
+        "@python_deps//pyyaml",
+    ],
+)
+
+py_test(
+    name = "determinism_test",
+    srcs = [
+        "//proto/tools:bazel_codegen.py",
+        "//proto/tools:determinism_test.py",
+    ],
+    args = [
+        "--buf",
+        "$(location //tools/bazel:buf)",
+        "--plugin",
+        "$(location //tools/bazel:protoc-gen-es)",
+        "--config",
+        "$(location :buf.gen.yaml)",
+        "--image",
+        "$(location :image)",
+        "--google-rpc-image",
+        "$(location :google_rpc_image)",
+        "--materialized",
+        "$(location :materialized)",
+    ],
+    data = [
+        ":buf.gen.yaml",
+        ":google_rpc_image",
+        ":image",
+        ":materialized",
+        "//tools/bazel:buf",
+        "//tools/bazel:protoc-gen-es",
+    ],
+    legacy_create_init = False,
+    main = "//proto/tools:determinism_test.py",
+    deps = [
+        "//proto/tools:generators",
+        "@python_deps//pyyaml",
+    ],
+)
+
 test_suite(
     name = "ts_tests",
     tests = [
         ":ts_cross_language_test",
         ":ts_doubles_and_maps_test",
+        ":ts_ensure_test",
         ":ts_field_mask_test",
         ":ts_filter_test",
         ":ts_http_cases_test",
@@ -900,14 +1036,18 @@ test_suite(
     name = "tests",
     tests = [
         ":api_lint_test",
+        ":determinism_test",
         ":format_test",
         ":lint_test",
+        ":rules_selftest",
         ":schema_test",
         ":ts_project_typecheck_test",
         ":ts_tests",
         "//proto/test/python:tests",
         "//proto/tools:bazel_inputs_test",
         "//proto/tools:generated_identity_test",
+        "//proto/tools:materialization_inputs_test",
+        "//proto/tools:materialization_test",
         "//proto/tools/api-linter/googleapis:googleapis_test",
         "//proto/ts:recall_ingest_v1_types_typecheck_test",
     ],

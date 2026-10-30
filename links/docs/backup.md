@@ -140,10 +140,16 @@ afterwards.
    - From a clean checkout of that commit, deploy the links app once by hand as `.github/actions/release-links`
      does, but without `--secrets-file`, so the Worker keeps its secrets:
      ```sh
-     pnpm install --frozen-lockfile
-     npm run build --prefix links/web
-     (cd links/worker && GITHUB_SHA=$(git rev-parse HEAD) node ../deploy/deploy-vars.mjs exec -- \
-       npx --no-install wrangler deploy --config ../wrangler.toml)
+     pnpm install --frozen-lockfile --ignore-scripts
+     source_sha=$(git rev-parse HEAD)
+     bazel build //links --stamp --embed_label="$source_sha"
+     archive=$(bazel cquery //links --stamp --embed_label="$source_sha" --output=files)
+     mkdir "$PRIV/compiled-links"
+     tar -xzf "$archive" -C "$PRIV/compiled-links"
+     node tools/cf-guard/cf-guard.mjs --config links/wrangler.toml
+     (cd links/worker && GITHUB_SHA="$source_sha" node ../deploy/deploy-vars.mjs exec -- \
+       npx --no-install wrangler deploy "$PRIV/compiled-links/worker/index.js" --no-bundle \
+       --config ../wrangler.toml --assets "$PRIV/compiled-links/web/dist")
      ```
      From `links/worker`, `npx wrangler deployments status --config ../wrangler.toml` names the version, and
      `npx wrangler versions view <that version> --config ../wrangler.toml` lists `DB` with the new id.
@@ -168,7 +174,7 @@ Keep the old database until the restored one has run for a while, then delete it
 - The backup's own `state.json` is not restored: a new bucket, or a lost state, starts a new job at Home's next
   status call (or the owner's next visit) that arms the Alarm.
 - The Worker, its secrets, the Custom Domain and the Access application are not data: `infra/` and `Links deploy`
-  recreate them ([README](../README.md#deploy)). In another account, pass that account's bucket with
+  recreate them ([publication](../../docs/ci-cd.md#production-ordering-and-recovery)). In another account, pass that account's bucket with
   `download --bucket <name>` and restore into its own new database the same way.
 
 ## Rehearse locally

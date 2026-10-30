@@ -7,41 +7,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Install the selected Node workspaces
-      uses: ./.github/actions/setup-workspace
-      with:
-        root: .
-        filters: ''
     - uses: ./.github/actions/setup-bazel
-      if: ${{ fromJSON(inputs.build-image) }}
-    - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-      with:
-        version: '0.12.10'
-        cache-dependency-glob: |
-          uv.lock
-          pyproject.toml
-          .python-version
-          **/pyproject.toml
-        cache-suffix: todofy-personal-cloud
-        working-directory: .
-        enable-cache: true
-    - name: Install locked contracts and daemon dependencies
-      working-directory: .
-      shell: bash -e {0}
-      run: |
-        node proto/tools/ensure.mjs
-        uv sync --package todofy-personal-cloud --locked
-    - name: Install the pinned manifest compiler
-      working-directory: .
-      shell: bash -e {0}
-      run: |
-        mkdir -p "$RUNNER_TEMP/kubectl-bin"
-        version=$(python3 -c 'import json; print(json.load(open("platform/versions.json"))["kubectl"]["version"])')
-        checksum=$(python3 -c 'import json; print(json.load(open("platform/versions.json"))["kubectl"]["linux_amd64_sha256"])')
-        curl --fail --silent --show-error --location "https://dl.k8s.io/release/$version/bin/linux/amd64/kubectl" --output "$RUNNER_TEMP/kubectl-bin/kubectl"
-        printf '%s  %s\n' "$checksum" "$RUNNER_TEMP/kubectl-bin/kubectl" | sha256sum --check --status
-        chmod 755 "$RUNNER_TEMP/kubectl-bin/kubectl"
-        echo "$RUNNER_TEMP/kubectl-bin" >> "$GITHUB_PATH"
     - name: Compile the pinned observer AppArmor policy without loading it
       working-directory: .
       shell: bash -e {0}
@@ -49,13 +15,6 @@ runs:
         test -x /usr/sbin/apparmor_parser
         /usr/sbin/apparmor_parser --skip-kernel-load --skip-cache --quiet \
           platform/apparmor/personal-cloud-systemd-observer-v1
-    - name: Check deployment, status and observer contracts
-      working-directory: .
-      shell: bash -e {0}
-      run: |
-        uv run --package todofy-personal-cloud --locked ruff check platform/src platform/tests tools/platform-build tools/vps-release tools/vps-bootstrap
-        uv run --package todofy-personal-cloud --locked ruff format --check platform/src platform/tests tools/platform-build tools/vps-release tools/vps-bootstrap
-        uv run --package todofy-personal-cloud --locked pytest platform/tests tools/vps-release/tests tools/vps-bootstrap/tests
     - name: Build and verify the independent runtime image
       if: ${{ fromJSON(inputs.build-image) }}
       working-directory: .
@@ -104,7 +63,9 @@ runs:
         docker exec --env KUBECONFIG=/etc/rancher/k3s/k3s.yaml k3s-acceptance /bin/kubectl -n personal-cloud create token platform-controller \
           --duration=10m > "$K3S_ACCEPTANCE_DIR/token"
         chmod 600 "$K3S_ACCEPTANCE_DIR/"*
-        uv run --package todofy-personal-cloud --locked pytest -q platform/tests/deployment/test_k3s_acceptance.py
+        bazel test //platform:tests_deployment_test_k3s_acceptance \
+          --test_env="K3S_ACCEPTANCE_DIR=$K3S_ACCEPTANCE_DIR" \
+          --strategy=TestRunner=local --nocache_test_results --test_output=errors
     - name: Remove the isolated k3s fixture
       if: always()
       working-directory: .

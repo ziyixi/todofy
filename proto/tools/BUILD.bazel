@@ -1,7 +1,33 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
 load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
 load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
 package(default_visibility = ["//visibility:public"])
+
+js_library(
+    name = "materialize_js",
+    srcs = ["ensure.mjs"],
+)
+
+filegroup(
+    name = "generation_inputs",
+    srcs = [
+        "BUILD.bazel",
+        "bazel_codegen.py",
+        "bazel_image.py",
+        "ensure.mjs",
+        "gen_py.py",
+        "gen_wire_ts.py",
+        "materialize.py",
+        "wire_rules.py",
+    ],
+)
+
+py_binary(
+    name = "materialize",
+    srcs = ["materialize.py"],
+    legacy_create_init = False,
+)
 
 py_test(
     name = "bazel_inputs_test",
@@ -20,6 +46,10 @@ exports_files([
     "schema_golden.py",
     "bazel_checks.py",
     "bazel_breaking.py",
+    "write_schemas.py",
+    "bazel_selftest.py",
+    "determinism_test.py",
+    "bazel_codegen.py",
 ])
 
 py_library(
@@ -103,8 +133,43 @@ filegroup(
 py_test(
     name = "generated_identity_test",
     srcs = ["generated_identity_test.py"],
-    main = "generated_identity_test.py",
+    args = [
+        "$(locations //proto/ts:todofy_ui_v1_ts_generate)",
+        "$(locations //proto/ts:modelrouter_inference_v1_ts_generate)",
+        "$(locations //proto/python/src/ziyixi_proto:todofy_ui_v1_py_generate)",
+        "$(locations //proto/python/src/ziyixi_proto:modelrouter_inference_v1_py_generate)",
+    ],
+    data = [
+        "//proto/python/src/ziyixi_proto:modelrouter_inference_v1_py_generate",
+        "//proto/python/src/ziyixi_proto:todofy_ui_v1_py_generate",
+        "//proto/ts:modelrouter_inference_v1_ts_generate",
+        "//proto/ts:todofy_ui_v1_ts_generate",
+    ],
     legacy_create_init = False,
-    args = ['$(locations //proto/ts:todofy_ui_v1_ts_generate)', '$(locations //proto/ts:modelrouter_inference_v1_ts_generate)', '$(locations //proto/python/src/ziyixi_proto:todofy_ui_v1_py_generate)', '$(locations //proto/python/src/ziyixi_proto:modelrouter_inference_v1_py_generate)'],
-    data = ['//proto/ts:todofy_ui_v1_ts_generate', '//proto/ts:modelrouter_inference_v1_ts_generate', '//proto/python/src/ziyixi_proto:todofy_ui_v1_py_generate', '//proto/python/src/ziyixi_proto:modelrouter_inference_v1_py_generate'],
+    main = "generated_identity_test.py",
+)
+
+py_test(
+    name = "materialization_test",
+    srcs = ["test_materialization.py"],
+    legacy_create_init = False,
+    main = "test_materialization.py",
+    deps = ["//proto/python:build_backend"],
+)
+
+py_test(
+    name = "materialization_inputs_test",
+    srcs = ["materialization_inputs_test.py"],
+    args = [
+        "--manifest",
+        "$(location //proto:materialized)/manifest.json",
+        "--project",
+        "$(location //proto/python:pyproject.toml)",
+    ],
+    data = [
+        "//proto:materialized",
+        "//proto/python:pyproject.toml",
+    ],
+    legacy_create_init = False,
+    main = "materialization_inputs_test.py",
 )

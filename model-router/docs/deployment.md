@@ -1,106 +1,49 @@
 # Model Router deployment
 
-The private console uses the configured Models host. The production config is
-[`../wrangler.toml`](../wrangler.toml); account, domain, Access audience, D1 and namespace identities come from
-`config/cloud.toml` and `config/resources.toml`. `workers.dev` and preview URLs remain disabled.
+Production is declared in [wrangler.toml](../wrangler.toml), generated from the existing public cloud/resource
+configuration. The private console is behind owner Access; `workers.dev` and preview URLs are disabled.
 
-The Worker owns the request-history D1 database, private `REQUEST_BODIES` and `BACKUPS` buckets, one SQLite
-`RouterEngine`, Workers AI and the console assets. Metadata is retained for ninety days and live request bodies
-for seven days. The existing daily `04:47 UTC` trigger starts bounded cleanup and backup work; the engine Alarm
-copies completed history and retained bodies into one dated snapshot. Daily snapshots have seven-day retention
-in the backup bucket, so copied bodies can remain for roughly fourteen days from their original creation.
-Provider credentials, SDK state and live contexts are excluded. See [backup and restore](backup.md).
+## Resources and connections
 
-## Resources
+Router owns its request-history D1, private request-body and backup buckets, one SQLite `RouterEngine`, Workers AI
+and static console assets. Create/adopt resources through the existing [bootstrap](../../tools/cloud-bootstrap/README.md),
+then publish their generated identities. Do not hand-edit provider resources to bypass the infrastructure gate.
 
-Provision resources through the existing [additive bootstrap](../../tools/cloud-bootstrap/README.md#向现有账户新增应用),
-using the protected private input, original encrypted-state passphrase and existing owner policy values.
-The Router's original resources and namespace are registered. Adding its backup storage needs only these
-create addresses:
+The protected GitHub Worker map contains only owner identity inputs. The connections declared in [app.toml](../app.toml)
+remain Router secrets and survive normal publication:
 
-```json
-[
-  "cloudflare_r2_bucket.app[\"model-router-backups\"]",
-  "cloudflare_r2_bucket_lifecycle.model_router_backups"
-]
-```
+- One `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` and `OPENAI_API_KEY`, shared by every caller.
+- Executor Access client identity for the existing private Codex endpoint.
+- Newsletter's inference-only credential; it may use Codex models, not other providers or embeddings.
 
-From the repository root:
+Application bindings use immutable `props.app`; request JSON cannot choose caller identity. Home binds the
+content-free Ops API. Owner mutations validate Access, Origin, CSRF header and JSON before reading the body.
+Backups contain no connection credentials or SDK state.
+
+`OPENAI_MONTHLY_LIMIT_USD` stops new API calls at the known UTC-month estimate. Unknown usage and in-flight calls
+can differ from this total; it is not a supplier invoice hard cap. See [design](design.md).
+
+## Check and publish
 
 ```sh
-python3 tools/cloud-bootstrap/bootstrap.py plan --mode extend --private-file <protected-private-file>
-python3 tools/cloud-bootstrap/bootstrap.py cloud --mode extend --private-file <same-private-file>
+bazel test //model-router:check
+bazel build //model-router
 ```
 
-Review the create-only plan before the second command. The existing bootstrap gate rejects updates,
-replacements and deletions of existing resources, and backs up the encrypted remote state before writing.
-The exporter records public resource identities and regenerates configuration. The backup bucket and live body
-bucket each expire their own objects after seven days; existing mail, archive, backup and infrastructure-state
-buckets retain their policies.
+The check closure includes Worker/UI types and tests, real workerd flows, backup/restore, deploy-wrapper checks and
+original bundle limits. Tests use synthetic providers and read no production request body or provider key.
 
-## Invocation and credentials
+Publish through root Actions after the same SHA passes CI. The publisher stages the checked compiled archive,
+validates its config and hostname, applies existing migrations and uploads with `--no-bundle`. Operational variables
+still go through the existing wrapper; a bare Wrangler deploy can erase them and must not be used.
 
-All applications use the root `modelrouter.inference.v1` types and shared clients. Model IDs are native provider
-IDs. Generate has flat invocation options and returns one final result; it exposes no public token stream,
-provider payload or caller-chosen execution identity. Newsletter alone uses the bounded Codex context:
-Create, up to two Generate calls on the same SDK thread, then Close with an empty cleanup acknowledgement.
-Owner request history and usage use the separate console API in `console.proto`.
+The Codex gateway releases before Router, and Router before its callers. The connection-name gate checks declared
+secret names even when preflight needs no upload. It does not prove credential validity or model inference.
 
-Owner UI, request history and usage stay behind owner Access. A narrow Bypass application
-covers only ModelService's catalog, generation, embedding and context paths. The Worker authenticates each call
-with the owner Access assertion or exact Newsletter token. Owner JSON mutations require exact Origin,
-`X-CSRF-Token: 1` and `application/json` before body parsing. The Newsletter token reaches only Codex models:
-other providers and embeddings answer `PERMISSION_DENIED` with `MODEL_NOT_ALLOWED` before a request is recorded,
-so synthetic Claude, Gemini and embedding checks use the owner's Access identity.
+For a coordinated interface change, let active turns settle, use the existing explicit maintenance switch, publish
+executor/Router/callers in order and restore the switch through Actions. Maintenance rejects new Generate, Embed and
+Create calls; catalog, context cleanup, history and backups remain available. Business pause/archive settings do not
+change with transport deployment.
 
-Cloudflare callers use the `Inference` binding with immutable `props.app` naming `mailsort` or `todofy`.
-Home binds the content-free `Ops` entrypoint. Application request fields cannot choose either identity.
-
-`MODEL_ROUTER_WORKER_SECRETS` in GitHub's protected production environment contains only `ACCESS_OWNER` and
-optional `ACCESS_OWNER_ALIASES`. The connections named in [app.toml](../app.toml) are Router secrets that normal
-publication preserves:
-
-- `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` and `OPENAI_API_KEY`: one shared key per provider for every caller, Playground included.
-  Provider keys are Router secrets; spending is capped at the provider. Application budgets and history remain
-  in their applications.
-- `CODEX_ACCESS_CLIENT_ID` and `CODEX_ACCESS_CLIENT_SECRET`: the executor's Access service credential. The backend
-  verifies Access JWTs. Its public issuer/audience are baked into the gateway image.
-- `MODEL_ROUTER_NEWSLETTER_TOKEN`: Newsletter's inference-only credential, sent as `NEWSLETTER_MODEL_ROUTER_TOKEN`
-  with `NEWSLETTER_MODEL_ROUTER_URL` naming the Models origin.
-
-Backups do not export any credentials. Gmail grants stay with Mailsort.
-Playground calls record source `console` and perform no application business action.
-OpenAI API uses Responses; signed-in Codex keeps its independent subscription connection. Catalog IDs beginning
-with `openai/` select the API. `OPENAI_MONTHLY_LIMIT_USD` stops new API calls when the existing ledger's known
-estimate reaches that amount in the UTC month. In-flight calls and unknown usage can differ from it; this is not
-an invoice hard cap. Supplier-enforced spend controls are configured separately when available.
-
-## Checks and coordinated release
-
-`Model Router checks` runs deployment-boundary checks, Worker lint/types/synthetic tests, backup/restore tests,
-console tests/build and a production-config dry run. Gateway checks use synthetic JWTs, a fake SDK and offline
-process tests; Linux CI also verifies image imports and parent-death cleanup. These checks do not read provider
-keys or private request bodies. Lifecycle ages use seconds with the pinned provider's
-[lifecycle schema](https://github.com/cloudflare/terraform-provider-cloudflare/blob/v5.25.0/docs/resources/r2_bucket_lifecycle.md).
-
-`BUILD_SHA` and `MAINTENANCE_MODE` are injected by the normal release wrapper. Set the explicit GitHub production
-variable `MODEL_ROUTER_MAINTENANCE_MODE` to `true` or `false`; publication rejects a missing value. Use the normal
-Actions path so the deployed maintenance value is preserved.
-
-For a coordinated invocation-schema change, allow current calls and contexts to settle before enabling
-maintenance. While enabled, Generate, Embed and CreateConversation return `MODEL_MAINTENANCE`.
-The read-only model catalog and CloseConversation remain available for Newsletter startup and cleanup.
-Owner history and backup work
-remain available. Keep maintenance enabled while the executor, Router and callers move to the same checked
-contract. This does not change application pause/archive modes or release their queued business work.
-
-The existing release order is gateway, Router, then migrated Workers and the paired VPS/Newsletter release.
-After the complete same-SHA gate passes, the reusable Worker release builds the checked console, validates the
-bundle and hostname, applies the D1 migrations and publishes. Its connection-name gate also runs when preflight
-selects no upload; it checks names, and does not prove that credentials or inference work. A fresh installation
-can upload Router first, install its declared connections through the owner flow, then rerun the same SHA.
-
-After all callers use the new contract, publish the explicit maintenance-off value and perform the authorized
-synthetic model and application checks. Verify provider identity, pending migrations and anonymous Access
-probes, then require the matching main `Personal cloud reconcile` with resolved infrastructure drift.
-Deployment, backup completion, model inference, application business success and cloud restore remain separate evidence.
+Require actual provider identity, no pending migration, Access probes and the matching Personal cloud reconcile.
+An upload, completed backup and successful model/business call remain separate evidence.

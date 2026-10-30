@@ -5,8 +5,24 @@ load("@rules_python//python:defs.bzl", "py_library", "py_test")
 load("@rules_python//python:packaging.bzl", "py_package")
 load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 load("//tools/bazel/images:images.bzl", "platform_image_identity", "platform_image_resources", "python_runtime_tree")
+load("//tools/bazel/python:bootstrap_bundle.bzl", "bootstrap_bundle")
+load("//tools/bazel/python:container_test.bzl", "container_image_test")
 
 package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "release",
+    srcs = [
+        ":platform",
+        "//:.github/actions/publish-platform/action.yml",
+        "//tools/container-release:release_inputs",
+    ],
+    tags = [
+        "artifact://platform:platform",
+        "release:image:platform",
+    ],
+    visibility = ["//visibility:public"],
+)
 
 py_library(
     name = "__main__",
@@ -1184,6 +1200,9 @@ alias(
 test_suite(
     name = "check",
     tests = [
+        ":container_test",
+        ":ruff_check_test",
+        ":ruff_format_test",
         ":tests",
         "//tools/container-release:build_identity_test",
     ],
@@ -1192,7 +1211,6 @@ test_suite(
 filegroup(
     name = "config",
     srcs = [
-        "Dockerfile",
         "apparmor/LICENSE",
         "apparmor/personal-cloud-systemd-observer-v1",
         "pyproject.toml",
@@ -1234,4 +1252,74 @@ filegroup(
         allow_empty = True,
     ),
     visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "python_lint_inputs",
+    srcs = glob([
+        "src/**/*.py",
+        "tests/**/*.py",
+    ]) + ["pyproject.toml"],
+)
+
+[
+    py_test(
+        name = "ruff_" + command + "_test",
+        srcs = ["//tools/bazel/python:check_ruff.py"],
+        args = [
+            "$(rootpath @python_deps//ruff:data)",
+            "$(rootpath //:pyproject.toml)",
+            command,
+        ] + (["--check"] if command == "format" else []) + [
+            "platform/src",
+            "platform/tests",
+            "tools/platform-build",
+            "tools/vps-release",
+            "tools/vps-bootstrap",
+        ],
+        data = [
+            ":python_lint_inputs",
+            "//:cloud_profile_inputs",
+            "//:pyproject.toml",
+            "@python_deps//ruff:data",
+        ] + [
+            "//tools/platform-build:python_lint_inputs",
+            "//tools/vps-bootstrap:python_sources",
+            "//tools/vps-release:python_sources",
+        ],
+        legacy_create_init = False,
+        main = "//tools/bazel/python:check_ruff.py",
+    )
+    for command in [
+        "check",
+        "format",
+    ]
+]
+
+filegroup(
+    name = "bootstrap_sources",
+    srcs = [
+        ":static_deployment_inputs",
+        "//:config/cloud.toml",
+        "//newsletter:bootstrap_settings",
+        "//tools/cloud-config:python_sources",
+        "//tools/vps-bootstrap:python_sources",
+        "//tools/vps-release:python_sources",
+    ],
+)
+
+bootstrap_bundle(
+    name = "bootstrap_bundle",
+    srcs = ":bootstrap_sources",
+)
+
+filegroup(
+    name = "container_probe_inputs",
+    srcs = ["//tools/platform-build:probe_sources"],
+)
+
+container_image_test(
+    name = "container_test",
+    service = "platform",
+    sources = ":container_probe_inputs",
 )

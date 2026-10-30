@@ -46,7 +46,10 @@ tsx.tsx_test(
 
 test_suite(
     name = "check",
-    tests = [":backup-restore_test"],
+    tests = [
+        ":backup-restore_test",
+        ":restore_types_typecheck_test",
+    ],
 )
 
 js_library(

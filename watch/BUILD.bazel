@@ -5,6 +5,22 @@ load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
 package(default_visibility = ["//visibility:private"])
 
+filegroup(
+    name = "release",
+    srcs = [
+        ":watch",
+        "//:.github/actions/release-watch/action.yml",
+        "//tools:release_probes",
+        "//tools/cloud-release:release_inputs",
+        "//watch/deploy:source_deploy_vars_mjs",
+    ],
+    tags = [
+        "artifact://watch:watch",
+        "release:worker:watch",
+    ],
+    visibility = ["//visibility:public"],
+)
+
 js_library(
     name = "config",
     srcs = [

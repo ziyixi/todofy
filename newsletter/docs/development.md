@@ -33,17 +33,19 @@
 
 ## 验证与目录卫生
 
+在 `newsletter/` 目录使用 Makefile 薄别名；也可在仓库根直接调用同名 Bazel target：
+
 ```sh
 make format
 make check
-make proto-check
 make build
-make smoke
-uv run --locked python scripts/smoke_wheel.py
 ```
 
-`make format` 运行 Ruff formatter，不修业务逻辑或关闭规则。`make check` 依次执行
-锁检查、`make lint`、`make typecheck` 和完整离线测试；CI 使用相同入口。
+`make check` 对应 `//newsletter:check`，包含原有测试、Ruff、严格 mypy、结构门禁、
+合成 HTTP/共享客户端 smoke，以及源码目录外的 wheel 安装验收。Linux Docker 主机还执行
+声明镜像归档的真实离线容器与内容配置校验；macOS 按目标兼容声明跳过该环境检查。
+`make build` 生成 Linux OCI 镜像归档；`make format` 使用锁定 Ruff 修改工作区。
+`make setup` 仅用于需要本地交互式 Python 环境的开发，不是 CI 的检查或构建入口。
 
 - Ruff 统一80列、Google 风格公开 docstring、模块级绝对导入、命名、异常边界与
   pytest 断言；McCabe 复杂度上限15。docstring 写调用契约、返回/失败边界，
@@ -75,7 +77,7 @@ schema、模板安全与冻结配置校验仍留在各自调用边界。
 是另外两个只读 HTTP 入口。维护命令不回到 HTTP 层，参数和停机要求见
 [维护说明](maintenance.md)。
 
-GitHub wheel URL 属于 `tool.uv.sources`，不是 PyPI 索引。只把 newsletter wheel 交给普通 `pip install`，无法自动发现这个仅在 GitHub 发布的依赖；部署使用本仓库的 `uv.lock`。安装包 smoke 会先从同一锁导出带 hash 的依赖并安装，再在源码目录外安装 newsletter wheel，验证真实分包边界。
+GitHub wheel URL 属于 `tool.uv.sources`，不是 PyPI 索引。只把 newsletter wheel 交给普通 `pip install`，无法自动发现这个仅在 GitHub 发布的依赖；部署使用本仓库的 `uv.lock`。Bazel wheel smoke 使用声明的锁定运行依赖层和三个共享/应用 wheel，在源码目录外的新空环境中验证分包、资源和合成 demo，不调用安装解析器或下载。
 
 移动渲染逻辑时，在同一环境保留改动前的 HTML/text/PNG/hash 并逐字比较；字体差异意味着跨系统 PNG hash 不宜硬编码成统一 golden。模型流程重构同时比较提示词、公共模型参数和 schema 字段顺序，不能只看新代码自己的测试是否通过。
 

@@ -2,8 +2,7 @@
 
 A small, typed RPC surface on each app so that one dashboard Worker (`home`, in
 [`dashboard/`](../../dashboard/)) can show health, run a daily end-to-end canary and apply quota guardrails. It is a
-contract between each app and that dashboard, and names no app: any app answers it under its own name. The apps
-still never call or import each other.
+contract between each app and that dashboard, and names no app: any app answers it under its own name. Applications do not import one another's implementation code.
 
 The source of truth is the IDL [`proto/ops/v1/ops.proto`](../../proto/ops/v1/ops.proto): its services
 are the methods, its messages and enums the values, and its `common.wire.v1` options every value rule
@@ -11,21 +10,20 @@ are the methods, its messages and enums the values, and its `common.wire.v1` opt
 rules"](../../proto/README.md#value-rules)). Every producer and the dashboard read and write ops-v1 with
 the code generated from it and the wire JSON codec (`proto/ts/wire-json.ts`,
 `ziyixi_proto.wire_json`), which checks those rules on every read and every write, so a value that
-breaks the contract never leaves an app. The bytes on the wire are the ones of the hand-written
-contract this replaced (each app's golden test, below).
+breaks the contract never leaves an app. Frozen producer and consumer golden tests protect the published wire bytes.
 
 | File | Purpose |
 | --- | --- |
 | [`proto/ops/v1/ops.proto`](../../proto/ops/v1/ops.proto) | The contract: services, messages, enums and value rules |
-| `ops-v1.schema.json` | JSON Schema 2020-12 **generated** from the IDL (`proto/tools/gen_schema.py`), one `$defs` entry per input and output (table below), per format and per enum; never edited by hand, `npm run check:schema` in `proto/` fails when stale. Kept for readers outside the monorepo and as the oracle the tests check the codec against. The names the hand-written schema had (`App`, `Counters`, `Metrics`, `Modes`, `OpsErrorCode`) still resolve, as aliases of what the IDL generates (`ALIASES` in `gen_schema.py`) |
+| `ops-v1.schema.json` | JSON Schema 2020-12 **generated** from the IDL (`proto/tools/gen_schema.py`), one `$defs` entry per input and output (table below), per format and per enum; never edited by hand, `//proto:schema_test` fails when stale. Kept for readers outside the monorepo and as the oracle the tests check the codec against. The names the hand-written schema had (`App`, `Counters`, `Metrics`, `Modes`, `OpsErrorCode`) still resolve, as aliases of what the IDL generates (`ALIASES` in `gen_schema.py`) |
 | `ops-v1.ts` | `OPS_LIMITS`: the rules no codec can check (relative to a clock or to a whole message); the TS Workers import it by relative path, `todofy-core` keeps the same numbers |
 | `legacy/ops-v1.schema.json` | The hand-written schema the dashboards deployed before the move validate answers with, frozen: the golden tests prove every answer still passes it (rollout) |
 | `validate.mjs` | Dependency-free validator for the JSON Schema keywords the contracts use; the golden tests check answers against the legacy schema with it |
 | `fixtures/<Def>/*.json` | Valid examples of each input/output; `fixtures/invalid/<Def>/*.json` must fail |
 | `deployment-modes.json` | The modes each app writes even on a `status_unavailable` status (its deployment variables, "modes" below); `proto/test/ops.test.ts` checks every `OpsStatus` fixture against it, and each app's own tests check only its own |
-| `IMPLEMENTATION.md` | Per app: files, migrations, guard keep/defer table, canary state machine, digest, query budgets, tests |
+| `IMPLEMENTATION.md` | Current adapter read budgets, counters, guard and canary behavior |
 
-Checks (the `Contracts` CI job, `Proto checks`, and each app's own tests):
+Checks belong to `//proto:check` and the producer/Home application `:check` roots:
 
 - `proto/test/ops.test.ts` and `proto/test/python/test_ops.py`: every valid fixture round-trips byte for
   byte through both codecs (strict and lenient reads), every invalid one is refused by a strict read,
@@ -38,9 +36,8 @@ Checks (the `Contracts` CI job, `Proto checks`, and each app's own tests):
 - Golden tests (`mail-hero/cloudflare/test/ops-golden.test.mjs`,
   `todofy/tests/unit/test_ops_golden.py`, `dashboard/worker/test/ops-golden.test.ts`): the exact bytes
   each app answers (or the dashboard sends and keeps) for fixed synthetic state, written by the code
-  before the move, and every one valid under the legacy schema. The watch app joined after the move
-  (`watch/worker/test/ops-golden.test.ts`): its answers are held to the generated schema and to its own
-  fixtures, not the legacy one, which no dashboard that binds it ever used.
+  before the move, and every one valid under the legacy schema. Watch
+  (`watch/worker/test/ops-golden.test.ts`) is held to the generated schema and its frozen fixtures.
   The links app follows the same pattern: `links/worker/test/ops-status.test.ts` fixes its answers to
   `OpsStatus/links-ok.json` and `OpsStatus/links-degraded.json`.
 - `dashboard/worker/test/ops-client.test.ts` checks the caller: only the methods of the generated
@@ -60,6 +57,12 @@ next to its unchanged default handlers:
 | the links app | `links` | `links/worker/src/index.ts` | in the Worker: one D1 read and its backup's `state.json` (its own bucket) |
 | Fleet | `fleet` | `fleet/worker/src/index.ts` (`Ops`) | read-only receipt projection in `FleetState` SQLite |
 | Newsletter | `fleet` | `fleet/worker/src/index.ts` (`NewsletterOps`) | independently observed VPS process/release metadata; no VPS command surface |
+| Codex gateway | `fleet` | `fleet/worker/src/index.ts` (`CodexGatewayOps`) | independent VPS observation |
+| Recall | `recall` | `recall/worker/src/index.ts` | RecallState SQLite |
+| Tasks | `tasks` | `tasks/worker/src/index.ts` | bounded D1 reads and TaskJobs backup facts |
+| Personal MCP | `personal-mcp` | `personal-mcp/worker/src/index.ts` | SubscriptionStore status and restore/backup facts |
+| Model Router | `model-router` | `model-router/worker/src/index.ts` | request aggregates and RouterEngine backup facts |
+| Website relay | `ziyixi-notion-publish` | `website/relay/src/index.ts` | website synchronization observation |
 
 The dashboard binds them with service bindings:
 
@@ -87,8 +90,7 @@ entrypoint = "Ops"
 
 The method signatures are the generated services' wire types (`@ziyixi/proto/ops/v1/ops_wire`, types
 only): `OpsService` on every app, `CanaryProducerService` on Mail Hero and `CanaryConsumerService` on Todofy.
-`OpsDigestService` (`reportOps`) left the IDL on 2026-10-27 (`proto/retired.json`): Home creates the digest's daily task
-in Tasks itself since 2026-10-21 (`dashboard/docs/design.md` §5.5). An app's `Ops` class `implements` its services;
+Home creates the digest's daily task in Tasks (`dashboard/docs/design.md` §5.5); there is no `reportOps` service. An app's `Ops` class `implements` its services;
 the dashboard types its bindings with them:
 
 ```ts
@@ -110,7 +112,7 @@ only JSON values.
 
 Website synchronization (`notion-publish`) answers `status()` with its signals only. Its evidence and owner requests
 are the relay's own contract, `proto/website/sync/v1/sync.proto`, on a second entrypoint `WebsiteSync` (Home's
-`WEBSITE_SYNC` binding; `OpsStatus.website_sync` until 2026-10-27): complete content checks, active Actions runs and
+`WEBSITE_SYNC` binding): complete content checks, active Actions runs and
 verified publications have separate timestamps. Home reads `getSyncStatus()` with each `status()` poll, sends owner
 actions by UUID and persists their receipts before dispatch. `accepted` identifies an Actions run; it does not
 assert deployment success. Website request receipts do not expire. A repeated uncertain UUID looks up that exact
@@ -127,7 +129,7 @@ refreshes do not reopen a dismissed incident and a different failed run can aler
 | Method | App | Input (`$defs`) | Output (`$defs`) | Writes |
 | --- | --- | --- | --- | --- |
 | `status()` | every app | – | `OpsStatus` | none (an app may re-arm its own missing scheduler alarm, below) |
-| `setGuard(input)` | every app | `SetGuardInput` | `GuardState` | the app's Durable Object storage |
+| `setGuard(input)` | guard-capable apps | `SetGuardInput` | `GuardState` | the app's Durable Object storage |
 | `startCanary(input)` | Mail Hero | `StartCanaryInput` | `StartCanaryResult` | one synthetic message and delivery (D1, R2) when queued |
 | `canaryDelivery(eventId)` | Mail Hero | `EventId` | `CanaryDelivery` | none |
 | `canaryResult(eventId)` | Todofy | `EventId` | `CanaryResult` | none |
@@ -156,14 +158,14 @@ lost alarm; `IMPLEMENTATION.md` §3c). Poll it no more often than every 10 minut
 
 - `health`: `down` when maintenance mode is on or the snapshot could not be read (signal
   `status_unavailable`, `counters` then empty); otherwise `degraded` when any signal is `warning` or
-  `critical`; otherwise `ok` (`info` signals allowed).
+  `critical`; otherwise `ok` (`info` signals allowed). Model Router currently reports its maintenance flag only
+  in `modes` and derives health from request/backup signals, an implementation mismatch tracked in HANDOFF.
 - `modes`: booleans; `maintenance` always present. Mail Hero: `force_send_paused` (deployment variable),
   `send_paused` (owner switch), `forwarding` (mode forward with a current endpoint), `backup_active`.
-  Todofy: `processing_paused`, `backup_active` (`force_pause_todoist` and `reminder_enabled` until 2026-10-21, when it
-  stopped writing tasks). The watch app: `maintenance` (always false: it has no maintenance switch)
+  Todofy: `processing_paused`, `backup_active`. The watch app: `maintenance` (always false: it has no maintenance switch)
   and `notifications` (its TASKS binding is configured: the daily digest and urgent changes go to Tasks). mailsort:
   `maintenance` (always false), `mode_limited` (the deployment variable MODE is below live), `live`, `sorting_off`,
-  `breaker` (read from storage; a `status_unavailable` status has only `maintenance` and `mode_limited`). recall:
+  `breaker` (legacy field, currently false; a `status_unavailable` status has only `maintenance` and `mode_limited`). recall:
   `maintenance` (always false: it has no maintenance switch). Personal MCP: `maintenance` (true while a
   restore of its store is unfinished; it then refuses every request). The links app: `maintenance` (always
   false). A
@@ -178,7 +180,7 @@ lost alarm; `IMPLEMENTATION.md` §3c). Poll it no more often than every 10 minut
 - `last_backup_at`: the app's last complete backup, or null.
 - `ui_url`: `https://<owner UI host>/`, or null when the Worker does not know its host.
 - `capabilities`: what this release supports. Mail Hero `canary_producer`, `guard`; Todofy
-  `canary_consumer`, `guard` (`ops_digest` until 2026-10-21); the watch app and mailsort `guard`. The dashboard checks them before
+  `canary_consumer`, `guard`; Watch `guard`. The dashboard checks them before
   using a feature. Fleet and Newsletter monitoring, recall and the links app expose no capabilities and never accept a
   quota guard mutation.
 
@@ -189,16 +191,16 @@ Signal codes (severity):
 | every app | `maintenance_mode` (critical; never raised by the watch app), `guard_shed` (info, `seconds_left`), `status_unavailable` (critical) |
 | Mail Hero | the alert signals of `alerts.ts` with their metrics: `capacity_70` (warning), `capacity_85`, `capacity_95`, `backup_stale`, `endpoint_blocked` (critical), `pending_stale`, `parse_failed`, `endpoint_paused`, `delivery_failed`, `policy_error` (warning); plus `force_send_paused`, `send_paused`, `ingest_quota_80` (warning), `forwarding_off`, `backup_active` (info) |
 | watch | `backup_stale` (critical, `age_seconds`, `has_backup`: no complete daily backup for 3 days; without one, 3 days after its first step), `backup_failed` (warning: the last daily backup job failed), `watches_broken` (warning, `count`: watches failing their third check in a row or more), `scheduler_stale` (warning, `hours`: no scheduler pass for over 12 h while a watch is to be checked; no metric when none ever ran), `notify_unsettled` (warning, `open`, `failed`: a notification whose task Tasks has not created 24 h after it was frozen, or one given up or refused in the last 7 days) |
-| mailsort | `backup_stale` (critical, `age_seconds`, `has_backup`: no complete daily backup for 3 days; without one, 3 days after its first job), `gmail_auth_failed` (critical, `failures`: Google refused the grant three times and the Worker stopped calling it), `backup_failed` (warning: the last backup job failed), `gmail_not_configured` (warning: the owner has not put the Gmail grant), `breaker_tripped` (warning, `applied_today`), `sync_stale` (warning, `minutes`: no complete sync for 30 min while the mode reads Gmail and the grant works), `ai_quota_exhausted` (info, `deferred`); `label_live_revoked` was raised until 2026-10-10, when per-label live gating was removed |
+| mailsort | `backup_stale` (critical, `age_seconds`, `has_backup`: no complete daily backup for 3 days; without one, 3 days after its first job), `gmail_auth_failed` (critical, `failures`: Google refused the grant three times and the Worker stopped calling it), `backup_failed` (warning: the last backup job failed), `gmail_not_configured` (warning: the owner has not put the Gmail grant), `sync_stale` (warning, `minutes`: no complete sync for 30 min while the mode reads Gmail and the grant works), `<provider>_not_configured`, `<provider>_auth`, `<provider>_unavailable`, `codex_quota` and `claude_spend_limit` (warning); legacy Clef-era codes remain valid open-list values |
 | recall | `device_stale` (warning, `count`, `hours`: a device seen in the last 30 days without an upload for 24 h), `archive_not_connected` (warning: the Dropbox backup is not connected, or Dropbox refused its token), `archive_behind` (warning, `hours`, `since`: a change has waited more than 24 h for Dropbox, counted from the connection at the earliest), `no_captures` (warning, `visits`: yesterday had visits of ten seconds or more on pages that keep their text and no capture of them arrived), `items_rejected` (warning, `count`: uploads lost items in the last 24 h), `storage_high` (warning past 850 MiB, critical at the 900 MiB budget; `used_mib`, `budget_mib`), `upload_over_budget` (warning: today's row budget ran out), `reads_over_budget` (warning, `rows_read`, `budget`: today's rows read stopped the change feed, or the searches too), `no_device` (info: before the first upload) |
 | Tasks | `backup_stale` (critical, `age_seconds`, `has_backup`: no complete weekly backup for 8 days; without one, 8 days after its first step), `gtd_stale` (warning, `age_hours`: no day counted for 48 h; without one, 48 h after the jobs object first ran), `backup_failed` (warning: the last backup job failed), `review_overdue` (info, `days`: no weekly review completed for more than 10 days) |
 | links | `backup_stale` (critical, `age_seconds`, `has_backup`: no complete daily backup for 3 days; without one, 3 days after its first step), `backup_failed` (warning: the last backup job failed) |
-| Todofy | `attention`, `due_backlog`, `processing_paused`, `gemini_budget_80`, `backup_failed` (warning); `gemini_budget_95`, `backup_stale` (critical); `backup_disabled`, `backup_active` (info) (retired on 2026-10-21, when Todofy stopped writing tasks: todoist_paused, reminder_failed, gtd_snapshot_stale, reminder_disabled and review_overdue) |
+| Todofy | `attention`, `due_backlog`, `processing_paused`, `gemini_budget_80`, `backup_failed` (warning); `gemini_budget_95`, `backup_stale` (critical); `backup_disabled`, `backup_active` (info) |
 | Fleet | `host_never_seen`, `host_stale`, `host_missing`, `daemon_k3s_inactive`, `daemon_k3s_failed`, `daemon_k3s_missing`, `daemon_k3s_unknown`, `daemon_k3s_activating`, `daemon_k3s_deactivating`, `daemon_cloudflared_inactive`, `daemon_cloudflared_failed`, `daemon_cloudflared_missing`, `daemon_cloudflared_unknown`, `daemon_cloudflared_activating`, `daemon_cloudflared_deactivating`, `daemon_ssh_inactive`, `daemon_ssh_failed`, `daemon_ssh_missing`, `daemon_ssh_unknown`, `daemon_ssh_activating`, `daemon_ssh_deactivating`, `daemon_cloudflared_platform_inactive`, `daemon_cloudflared_platform_failed`, `daemon_cloudflared_platform_missing`, `daemon_cloudflared_platform_unknown`, `daemon_cloudflared_platform_activating`, `daemon_cloudflared_platform_deactivating`, `cluster_degraded`, `cluster_unavailable`, `cluster_unknown`, `disk_high`, `memory_high`, `deployment_pending`, `release_held`, `release_failed`, `release_in_progress` (daemon failures, missing heartbeat, held/failed release critical; in-progress release info; other readiness/capacity conditions warning) |
 | Newsletter | `host_never_seen`, `host_stale`, `host_missing`, `newsletter_unavailable` (critical), `newsletter_side_effect_unknown` (warning, `count`: unknown delivery, packet and Notion records; `unknown_revision` when reported), `newsletter_delivery_rejected`, `newsletter_delivery_overdue` (warning: no delivery evidence, the last accepted one older than 28 h, or an unknown one older than 2.5 h), `deployment_pending` (warning), `newsletter_unknown` (info, `unknown_count`, `unknown_revision`), `newsletter_paused`, `newsletter_delivery_accepted` (info) |
 | Codex gateway | `host_never_seen`, `host_stale`, `host_missing`, `codex_gateway_unavailable` (critical), `deployment_pending` (warning). Process and deployment evidence only; inference authentication and quota are checked by callers. |
 | Personal MCP | `backup_stale` (critical, `age_seconds`, `has_backup`: no complete daily backup for 3 days; without one, 3 days after its first job), `maintenance_mode` (critical: a restore is unfinished), `backup_failed` (warning: the last backup job failed), `delivery_failed` (warning, `count`: callbacks that failed for good), `source_unavailable` (warning, `count`: subscribed sources whose last check failed, or not yet checked since a restore), `subscription_rejected` (warning, `rpc_code`: the last subscription request was refused) |
-| Model Router | `model_execution_unknown` (warning, `count`: today's requests still running more than 15 minutes after acceptance), `backup_stale` (warning, `age_hours`: no completed daily backup for over 26 hours; `last_backup_at` and `backup_age_seconds` report the last completed copy) |
+| Model Router | `model_execution_unknown` (warning, `count`: requests still running more than 15 minutes after acceptance in the bounded two-day window), `backup_stale` (warning, `age_hours`: no completed daily backup for over 26 hours; `last_backup_at` and `backup_age_seconds` report the last completed copy) |
 
 Counter names are listed per app in `IMPLEMENTATION.md`. New codes and counters may be added in ops-v1;
 the dashboard shows unknown ones generically.
@@ -281,7 +283,7 @@ failure), `ok` (the summary call answered and the result passed Todofy's validat
   names no app (the format `AppName`, since 2026-10-27; an open list from 2026-10-01): a dashboard reads a status
   naming an app it was built without, and keeps only the answer of the app whose binding it called, so a new app
   needs its `Ops` entrypoint and the dashboard's binding to it, and no change here. They land in `ops.proto`
-  together with the regenerated schema (`npm run schema` in `proto/`) and fixtures in one change;
+  together with the regenerated schema (`bazel run //proto:write_schemas`) and fixtures in one change;
   `buf breaking` and the wire profile check (`proto/tools/profile_breaking.py`) refuse a change that
   would alter the bytes of an existing field. Consumers ignore unknown fields and show unknown codes
   generically.

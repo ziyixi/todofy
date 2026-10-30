@@ -31,7 +31,7 @@ Exactly k3s/cloudflared/ssh aliases are required; cloudflared_platform is option
 configured. Kubernetes state, readiness, daemon state and Newsletter process/drain state are distinct. None proves
 Codex, Notion or email success. `unknown_count` means provider outcomes need reconciliation, not a retry permission.
 
-Optional `metrics` (2026-10-28) carries numbers only: cumulative CPU milliseconds from `/proc/stat`, load averages,
+Optional `metrics` carries numbers only: cumulative CPU milliseconds from `/proc/stat`, load averages,
 memory and swap bytes (available memory includes the ZFS ARC above `c_min`), statvfs of fixed filesystem roles
 (`root`, `k3s`, `state`), summed byte counters of physical
 interfaces (never their names), the kernel boot ID with uptime, and up to 16 workloads' CPU cores and working-set bytes
@@ -41,6 +41,8 @@ absent, never zero. Fleet refuses impossible relations (idle above total, availa
 and derives rates only between two reports of one boot. `node_metrics.json` is the synthetic fixture.
 
 Normal state snapshots overwrite one row. Only state transitions enter history (256 retained, 32 returned).
-No billing hard cap, remote control surface, cron or public health telemetry is created.
 
-Newsletter monitoring v2 adds optional category counts, a monotonic unknown-record revision, and the latest delivery record state/update time. Legacy receipts remain valid. Process health and provider outcomes are independent: `provider_accepted` means the provider accepted the send, without claiming inbox arrival. Historical records remain auditable; Home reminder dismissal uses the revision so a reduced count does not reopen a dismissed batch. See [Dashboard state](../../docs/dashboard-state.md).
+Newsletter observations include optional category counts, a monotonic unknown-record revision and the latest
+delivery state/update time. Legacy receipts remain valid. `provider_accepted` means the provider accepted the send;
+it does not prove inbox arrival. Home uses the revision for reminder dismissal, so a reduced count does not reopen
+a dismissed batch. See [Dashboard state](../../docs/dashboard-state.md).

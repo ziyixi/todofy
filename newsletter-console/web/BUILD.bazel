@@ -279,6 +279,7 @@ proto_vitest_test(
         "//newsletter-console/deploy:public-navigation",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/App.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -332,6 +333,7 @@ proto_vitest_test(
         "//newsletter-console/deploy:public-navigation",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/Backup.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -383,6 +385,7 @@ proto_vitest_test(
         "//newsletter-console/deploy:public-navigation",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/Issues.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -434,6 +437,7 @@ proto_vitest_test(
         "//newsletter-console/deploy:public-navigation",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/Models.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -485,6 +489,7 @@ proto_vitest_test(
         "//newsletter-console/deploy:public-navigation",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/Overview.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -536,6 +541,7 @@ proto_vitest_test(
         "//newsletter-console/deploy:public-navigation",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/Reader.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -587,6 +593,7 @@ proto_vitest_test(
         "//newsletter-console/deploy:public-navigation",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/RunDetail.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -638,6 +645,7 @@ proto_vitest_test(
         "//newsletter-console/deploy:public-navigation",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/Sources.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -689,6 +697,7 @@ proto_vitest_test(
         "//newsletter-console/deploy:public-navigation",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/chart.test.ts"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -729,6 +738,7 @@ proto_vitest_test(
         "//newsletter-console/deploy:public-navigation",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/format.test.ts"],
     deps = [
         ":node_modules/@testing-library/jest-dom",
@@ -754,6 +764,7 @@ proto_vitest_test(
         "//newsletter-console/deploy:public-navigation",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/test/layout.test.ts"],
     deps = [":node_modules/@testing-library/jest-dom"],
 )
@@ -776,6 +787,7 @@ proto_vitest_test(
         "//newsletter-console/deploy:public-navigation",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/test/no-external.test.ts"],
     deps = [":node_modules/@testing-library/jest-dom"],
 )
@@ -974,4 +986,14 @@ filegroup(
         allow_empty = True,
     ),
     visibility = ["//visibility:public"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)
+
+test_suite(
+    name = "typecheck_tests",
+    tests = [":typecheck_project_typecheck_test"],
 )

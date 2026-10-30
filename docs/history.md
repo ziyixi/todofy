@@ -5,6 +5,8 @@ current production state; [HANDOFF](../HANDOFF.md) names the current rollout and
 
 ## Archived handoffs
 
+- [October 30](history/handoff-2026-10-30.md): build migration context and historical acceptance boundaries.
+
 [Handoff of October 28, 2026](history/handoff-2026-10-28.md) keeps the released notes of October 28: the review
 cleanup wave, the fixed K3s node address and DNS, the backups wave and its links follow-up, Fleet node telemetry
 with the ZFS ARC correction, the Newsletter researcher and Brief's retirement.
@@ -133,10 +135,8 @@ Frozen bytes prove compatibility with events persisted by older code, including 
 
 ## Historical designs
 
-The TypeScript-only [first Todofy migration proposal](../todofy/docs/cloudflare-migration-plan-v1.md) was
-superseded by the [Python-core migration plan](../todofy/docs/cloudflare-migration-plan.md). The latter also
-records assumptions that have changed; the [development notes](../todofy/docs/dev-notes.md),
-[gateway contract](../todofy/docs/gateway-contract.md) and [release runbook](../todofy/docs/ci-cd.md) govern current work.
+The September 2026 Todofy migration proposals are superseded. Their full text is available in Git history;
+current behavior is described by Todofy's developer notes, gateway contract and setup/recovery guide.
 
 [Home's original design](../dashboard/docs/design.md) still governs storage, tick, guard, canary and digest.
 [Its current views](../dashboard/docs/design-v2.md) and `dashboard.ui.v1` replaced the old UI/routes. Keep the

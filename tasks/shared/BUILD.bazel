@@ -47,3 +47,9 @@ filegroup(
     ),
     visibility = ["//visibility:public"],
 )
+
+test_suite(
+    name = "check",
+    tests = [":types_typecheck_test"],
+    visibility = ["//tasks:__subpackages__"],
+)

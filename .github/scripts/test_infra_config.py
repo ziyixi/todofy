@@ -15,7 +15,7 @@ What they keep true (infra/README.md):
 - The state lives in the R2 bucket infra-state through a partial S3 backend (no key, endpoint or credentials
   committed), encrypted with the state_passphrase variable only, no fallback.
 - Every Access application gates a Custom Domain its app's wrangler.toml declares (an application created ahead of
-  its Worker's first deploy, AHEAD_OF_DEPLOY, the host its undeployed config names), and every Worker with an
+  its Worker's first deploy), and every Worker with an
   ACCESS_AUDIENCE has an application whose key is its name, so the access_aud output covers it.
 - The D1 databases and R2 buckets are exactly those the production configs bind, and each D1 import id is
   the database_id committed there (ids.tf). The production configs are test_wrangler_configs.py's, minus the Workers
@@ -25,7 +25,7 @@ What they keep true (infra/README.md):
   FROZEN object's id is the id ids.tf records, and its OUTPUTS are the outputs outputs.tf declares.
 - The count of managed objects is one number: README.md "Managed here (N objects)", bootstrap_state.py's
   EXPECTED_OBJECTS (a rebuild by import must cover each) and the resources the configuration declares (each for_each
-  map's keys) agree; ids.tf records the id of every application except one still AHEAD_OF_DEPLOY (never the all-zeros
+  map's keys) agree; ids.tf records the id of every application (never the all-zeros
   placeholder), so a rebuild by import can name it.
 - No account or zone id (32 hex digits) and no email address is committed under infra/.
 """
@@ -70,12 +70,6 @@ _spec = importlib.util.spec_from_file_location("cloud_config_generate", REPO / "
 generate = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(generate)
 
-# An app's first phase is explicit in ci_changes.CHECK_ONLY: its production config already names the intended host,
-# but carries no invented AUD, and its deploy stays disabled. The activation commit records the real Access ID/AUD
-# and removes CHECK_ONLY in the same change, and with it the app's entry here.
-AHEAD_OF_DEPLOY: dict[str, str] = {}
-if "newsletter-console" in test_wrangler_configs.ci_changes.CHECK_ONLY:
-    AHEAD_OF_DEPLOY["newsletter-console"] = "news." + load_profile(REPO)["zone"]
 # Owner applications that also gate a path of the platform runtime host (the catalog's runtime_paths): the console's
 # read path into Newsletter, which the platform tunnel routes to a loopback port with that application's audience.
 RUNTIME_HOST = load_profile(REPO)["vps"]["platform_runtime_host"]
@@ -230,7 +224,7 @@ class Coverage(unittest.TestCase):
         uuid = re.compile(r'^"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"$')
         placeholder = '"00000000-0000-0000-0000-000000000000"'
         owner_ids = hcl_map(ids, "access_app_ids")
-        self.assertEqual(set(owner_ids), set(hcl_map(code, "owner_apps")) - set(AHEAD_OF_DEPLOY))
+        self.assertEqual(set(owner_ids), set(hcl_map(code, "owner_apps")))
         for key, value in owner_ids.items():
             with self.subTest(app=key):
                 self.assertRegex(value, uuid)
@@ -256,10 +250,7 @@ class MatchesTheApps(unittest.TestCase):
         }
         self.assertEqual(set(owner), {"mail-hero", "todofy", "home", "links", "watch", "fleet", "mailsort", "recall", "tasks", "personal-mcp", "model-router", "newsletter-console"})
         for worker, uris in destinations.items():
-            if worker in AHEAD_OF_DEPLOY:
-                hosts = {AHEAD_OF_DEPLOY[worker]}  # no Custom Domain before the first deploy
-            else:
-                hosts = {route["pattern"] for route in config(worker).get("routes", []) if route.get("custom_domain")}
+            hosts = {route["pattern"] for route in config(worker).get("routes", []) if route.get("custom_domain")}
             with self.subTest(app=worker):
                 self.assertTrue(uris)
                 self.assertIn(uris[0].split("/")[0], hosts, "the first destination is the app's own host")
@@ -310,25 +301,6 @@ class MatchesTheApps(unittest.TestCase):
                 on_access_host = any(uri.split("/")[0] == host for uris in destinations.values() for uri in uris)
                 self.assertEqual("outside_access: true" in body, on_access_host)
 
-    def test_ahead_of_deploy_is_exact(self):
-        """A first-phase app (one in CHECK_ONLY) has no fake AUD and cannot deploy before the gated Access creation,
-        and neither can Home while it binds the app."""
-        owner = hcl_map((INFRA / "access.tf").read_text(), "owner_apps")
-        self.assertEqual(set(AHEAD_OF_DEPLOY), set(test_wrangler_configs.ci_changes.CHECK_ONLY))
-        for worker, host in AHEAD_OF_DEPLOY.items():
-            with self.subTest(worker=worker):
-                planned = config(worker)
-                self.assertEqual(planned["name"], worker)
-                self.assertEqual(planned["vars"]["PUBLIC_HOST"], host)
-                self.assertFalse(planned["vars"].get("ACCESS_AUDIENCE"))
-                self.assertEqual(planned["routes"], [{"pattern": host, "custom_domain": True}])
-                more = sorted(RUNTIME_PATHS.get(worker, {}))
-                self.assertIn(f'domain = "{host}", more = {json.dumps(more)}', owner[worker])
-                outputs = [f"{test_wrangler_configs.ci_changes.PREFIX[worker]}_deploy"]
-                if worker in test_wrangler_configs.ci_changes.HOME_BOUND:
-                    outputs.append("dashboard_deploy")
-                for output in outputs:
-                    self.assertFalse(test_wrangler_configs.ci_changes.everything()[output])
 
     def test_recall_machine_routes_bypass_only_their_three_exact_paths(self):
         """The Bypass of recall's machine routes (recall/docs/design.md section 2.1): its own everyone-bypass policy, the

@@ -59,6 +59,7 @@ ts_project(
             ":lib",
         ],
         runner = vitest.vitest_test,
+        tags = ["unit"],
         tests = [test],
     )
     for test in glob(["test/*.test.ts"])
@@ -104,4 +105,17 @@ filegroup(
         allow_empty = True,
     ),
     visibility = ["//visibility:public"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)
+
+test_suite(
+    name = "typecheck_tests",
+    tests = [
+        ":types_dom_typecheck_test",
+        ":types_typecheck_test",
+    ],
 )

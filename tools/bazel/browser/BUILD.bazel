@@ -1,3 +1,4 @@
+load("@npm//website:@playwright/test/package_json.bzl", playwright = "bin")
 load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 load(":defs.bzl", "browser_toolchain")
 
@@ -59,4 +60,57 @@ filegroup(
         allow_empty = True,
     ),
     visibility = ["//visibility:public"],
+)
+
+playwright.playwright_binary(
+    name = "install_dependencies",
+    args = [
+        "install-deps",
+        "chromium",
+        "webkit",
+    ],
+)
+
+toolchain_type(name = "webkit_toolchain_type")
+
+browser_toolchain(
+    name = "webkit_mac_arm64",
+    executable = "@playwright_webkit_mac_arm64//:webkit-2359/pw_run.sh",
+    files = ["@playwright_webkit_mac_arm64//:files"],
+    playwright_version = "1.63.0",
+)
+
+toolchain(
+    name = "webkit_mac_arm64_toolchain",
+    exec_compatible_with = [
+        "@platforms//os:macos",
+        "@platforms//cpu:aarch64",
+    ],
+    toolchain = ":webkit_mac_arm64",
+    toolchain_type = ":webkit_toolchain_type",
+)
+
+browser_toolchain(
+    name = "webkit_linux_amd64",
+    executable = "@playwright_webkit_linux_amd64//:webkit-2359/pw_run.sh",
+    files = ["@playwright_webkit_linux_amd64//:files"],
+    playwright_version = "1.63.0",
+)
+
+toolchain(
+    name = "webkit_linux_amd64_toolchain",
+    exec_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+    toolchain = ":webkit_linux_amd64",
+    toolchain_type = ":webkit_toolchain_type",
+)
+
+playwright.playwright_binary(
+    name = "install_chromium_dependencies",
+    args = [
+        "install-deps",
+        "chromium",
+    ],
 )

@@ -12,4 +12,5 @@ to the 30th in March; completing it late skips past occurrences and keeps the fi
 `clampMonthEnd` gives typed or imported monthly and yearly interval rules (`every month`, `quarterly`,
 `every year`) anchored after the 28th the same last-day behaviour, so a rule on the 31st or on Feb 29 never
 skips a month or a year. `daysBetween` lets the Worker move a deadline with its occurrence.
-Run `pnpm install --frozen-lockfile`, `pnpm run typecheck` and `pnpm test` in this directory.
+Run `bazel test //packages/task-dates:check` for acceptance and `bazel build //packages/task-dates` for the package.
+The `check` script uses that suite; typecheck/test scripts delegate to Bazel as well; a frozen pnpm workspace install supports source-level development.

@@ -17,6 +17,14 @@ was the separate repository `ziyixi/ziyixi.science` until 2026-09-30; its histor
 Chinese planning and operations notes in [`doc/`](doc/) describe the Vercel era where they mention Vercel;
 the files in `docs/` supersede them.
 
+## Bazel checks
+
+Run `bazel test //website:check` and `bazel build //website` from the repository workspace.
+The root target packages the application; `:check` collects its declared checks. Package build, test, type and lint scripts
+delegate to the corresponding Bazel targets. Interactive Vite/Wrangler commands remain available for local development;
+their no-argument proto hook materializes Bazel outputs into the existing development imports.
+See [workspace dependencies](../docs/dependencies.md) for the Bazel prerequisite and installation commands.
+
 ## Local development
 
 Use Node 26 and pnpm 11.25.0, declared in the root `package.json`. The root workspace catalog and

@@ -272,6 +272,7 @@ proto_vitest_test(
         ":node_modules/vite",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/api/client.test.ts"],
     deps = [
         ":node_modules/vitest",
@@ -293,6 +294,7 @@ proto_vitest_test(
         ":node_modules/vite",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/app/App.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -333,6 +335,7 @@ proto_vitest_test(
         ":node_modules/vite",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/components/attemptResults.test.ts"],
     deps = [
         ":node_modules/vitest",
@@ -355,6 +358,7 @@ proto_vitest_test(
         ":node_modules/vite",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/pages/DashboardPage.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -386,6 +390,7 @@ proto_vitest_test(
         ":node_modules/vite",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/pages/DeliveriesPage.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -416,6 +421,7 @@ proto_vitest_test(
         ":node_modules/vite",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/pages/DeliveryPage.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -446,6 +452,7 @@ proto_vitest_test(
         ":node_modules/vite",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/pages/EndpointsPage.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -476,6 +483,7 @@ proto_vitest_test(
         ":node_modules/vite",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/pages/InboxPage.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -507,6 +515,7 @@ proto_vitest_test(
         ":node_modules/vite",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/pages/MessagePage.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -538,6 +547,7 @@ proto_vitest_test(
         ":node_modules/vite",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/pages/SettingsPage.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -707,4 +717,29 @@ filegroup(
         allow_empty = True,
     ),
     visibility = ["//visibility:public"],
+)
+
+proto_vitest_test(
+    name = "scripts_js_budget_test",
+    data = [
+        "package.json",
+        "vite.config.ts",
+        ":node_modules/@vitejs/plugin-react",
+        ":node_modules/jsdom",
+        ":node_modules/vite",
+    ],
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = ["scripts/js-budget.test.mjs"],
+    deps = [":build_checks"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)
+
+test_suite(
+    name = "typecheck_tests",
+    tests = [":typecheck_project_typecheck_test"],
 )

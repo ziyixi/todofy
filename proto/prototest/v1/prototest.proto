@@ -8,7 +8,7 @@
 // now, Python when a Python Worker needs a transcoder) run the same JSON cases against these descriptors.
 //
 // The bindings are deliberately varied rather than AIP-shaped, so api-linter does not run on this package
-// (scripts/api-lint.sh); buf lint does.
+// (//proto:api_lint_test); buf lint does.
 
 syntax = "proto3";
 

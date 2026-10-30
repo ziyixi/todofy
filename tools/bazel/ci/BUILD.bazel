@@ -5,6 +5,7 @@ py_library(
     name = "planner",
     srcs = [
         "plan.py",
+        "releases.py",
         "run.py",
     ],
     imports = ["."],
@@ -20,8 +21,16 @@ py_test(
 
 test_suite(
     name = "check",
-    tests = [":tests"],
+    tests = [":tests", ":release_tests"],
     visibility = ["//visibility:public"],
+)
+
+py_test(
+    name = "release_tests",
+    srcs = ["test_releases.py"],
+    main = "test_releases.py",
+    deps = [":planner"],
+    legacy_create_init = False,
 )
 
 filegroup(

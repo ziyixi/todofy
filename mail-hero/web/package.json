@@ -7,13 +7,11 @@
     "postinstall": "node ../../proto/tools/ensure.mjs",
     "predev": "node ../../proto/tools/ensure.mjs",
     "dev": "vite",
-    "prebuild": "node ../../proto/tools/ensure.mjs",
-    "build": "tsc --noEmit && vite build && node scripts/js-budget.mjs",
-    "pretypecheck": "node ../../proto/tools/ensure.mjs",
-    "typecheck": "tsc --noEmit",
-    "pretest": "node ../../proto/tools/ensure.mjs",
-    "test": "vitest run",
-    "check:budget": "node scripts/js-budget.mjs"
+    "build": "bazel build //mail-hero/web:bundle",
+    "typecheck": "bazel test //mail-hero/web:typecheck_tests",
+    "test": "bazel test //mail-hero/web:unit_tests",
+    "check:budget": "bazel build //mail-hero/web:bundle",
+    "check": "bazel test //mail-hero:check"
   },
   "dependencies": {
     "@tanstack/react-query": "catalog:",

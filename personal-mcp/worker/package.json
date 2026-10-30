@@ -5,14 +5,11 @@
   "type": "module",
   "scripts": {
     "postinstall": "node ../../proto/tools/ensure.mjs",
-    "prelint": "node ../../proto/tools/ensure.mjs",
-    "lint": "eslint .",
-    "pretypecheck": "node ../../proto/tools/ensure.mjs",
-    "typecheck": "tsc --noEmit",
-    "pretest": "node ../../proto/tools/ensure.mjs",
-    "test": "vitest run --config vitest.config.ts",
-    "pretest:runtime": "node ../../proto/tools/ensure.mjs",
-    "test:runtime": "vitest run --config vitest.runtime.config.ts"
+    "lint": "bazel test //personal-mcp/worker:lint",
+    "typecheck": "bazel test //personal-mcp/worker:typecheck_tests",
+    "test": "bazel test //personal-mcp/worker:unit_tests",
+    "test:runtime": "bazel test //personal-mcp/worker:runtime_tests --nocache_test_results",
+    "check": "bazel test //personal-mcp:check"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "catalog:",

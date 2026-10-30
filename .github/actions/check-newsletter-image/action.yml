@@ -3,16 +3,7 @@ description: "check-newsletter-image; called by the repository workflow."
 runs:
   using: composite
   steps:
-    - name: Install the shared proto build tools
-      uses: ./.github/actions/setup-workspace
-      with:
-        root: .
-        filters: ''
     - uses: ./.github/actions/setup-bazel
-    - name: Generate shared contracts before the Python-only image build
-      working-directory: .
-      shell: bash -e {0}
-      run: node proto/tools/ensure.mjs
     - name: Test the independent image without credentials or external calls
       working-directory: newsletter
       shell: bash -e {0}

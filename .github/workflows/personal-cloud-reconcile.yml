@@ -225,6 +225,7 @@ jobs:
         app: [todofy, mail-hero, dashboard, links, watch, fleet, mailsort, recall, tasks, personal-mcp, model-router, newsletter-console, website-relay]
     permissions:
       contents: read
+      actions: read
       deployments: write
     uses: ./.github/workflows/worker-release.yml
     with:
@@ -252,26 +253,7 @@ jobs:
         with:
           ref: ${{ needs.context.outputs.source_sha }}
           persist-credentials: false
-      - name: Install the selected Node workspaces
-        uses: ./.github/actions/setup-workspace
-        with:
-          root: .
-          filters: ''
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-        with:
-          version: '0.12.10'
-          working-directory: .
-          cache-dependency-glob: |
-            uv.lock
-            pyproject.toml
-            .python-version
-            **/pyproject.toml
-          cache-suffix: todofy-personal-cloud
-          enable-cache: true
-      - name: Install the locked typed client
-        run: |
-          node proto/tools/ensure.mjs
-          uv sync --package todofy-personal-cloud --locked
+      - uses: ./.github/actions/setup-bazel
       - name: Recheck main under the VPS lock
         env:
           GH_TOKEN: ${{ github.token }}
@@ -290,7 +272,7 @@ jobs:
           args=()
           if [ "$operation" = check ]; then operation=plan; fi
           if [ "$operation" = resume ]; then args+=(--release-name "$RESUME_RELEASE"); fi
-          uv run --package todofy-personal-cloud --locked python tools/vps-release/reconcile.py \
+          bazel run //tools/vps-release:reconcile_cli -- \
             --operation "$operation" --request-id "$request_id" \
             --evidence-file "$RUNNER_TEMP/vps-release-evidence.json" "${args[@]}"
       - name: Record only a physically verified changed or resumed VPS release

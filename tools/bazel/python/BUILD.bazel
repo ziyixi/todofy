@@ -1,3 +1,4 @@
+load("@aspect_rules_js//js:defs.bzl", "js_binary")
 load("@bazel_lib//lib:copy_to_directory.bzl", "copy_to_directory")
 load("@rules_python//python:defs.bzl", "py_binary", "py_test")
 load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
@@ -94,5 +95,53 @@ filegroup(
         ],
         allow_empty = True,
     ),
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    ["todofy_runtime_main.py"],
+    visibility = ["//visibility:public"],
+)
+
+js_binary(
+    name = "workerd_path",
+    data = ["//todofy:node_modules/workerd"],
+    entry_point = "workerd_path.mjs",
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    ["check_ruff.py"],
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    ["newsletter_smoke_test.py"],
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    ["newsletter_wheel_smoke.py"],
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    ["bootstrap_bundle.bzl"],
+    visibility = ["//visibility:public"],
+)
+
+py_binary(
+    name = "bootstrap_bundle_tool",
+    srcs = ["bootstrap_bundle.py"],
+    legacy_create_init = False,
+    main = "bootstrap_bundle.py",
+    deps = ["//tools/vps-bootstrap:prepare"],
+)
+
+exports_files(
+    [
+        "container_test.bzl",
+        "container_test.py",
+    ],
     visibility = ["//visibility:public"],
 )

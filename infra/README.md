@@ -846,11 +846,9 @@ plan only. Nothing was applied and nothing was written to Cloudflare, R2 or GitH
 
 ## CI: "Infra checks"
 
-The job runs when `infra/`, `tools/infra-plan-summary/` or `.github/` changes
-([`ci_changes.py`](../.github/scripts/ci_changes.py) output `infra`; another `tools/` directory does not
-run it), and `CI gate` requires it. A push to `main` may reuse a green branch run of the same commit only
-if that run's `Infra checks` succeeded (`CHECK_JOBS`), as for every other check job. It uses no
-Cloudflare token, no state and no plan. Steps:
+The native `//infra:check` facade participates in the affected Bazel graph and `CI gate`. It uses fixed OpenTofu
+and the locked provider with a local mirror, no Cloudflare token, no backend state and no plan. Infrastructure apply
+and actual provider verification remain in their separately gated workflows. Checks:
 
 - **Guards.** Fail on:
   - `external` or `http` data sources, which can run code or send data out (quoted or bare labels);

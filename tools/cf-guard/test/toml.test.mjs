@@ -8,7 +8,9 @@ import { fileURLToPath } from "node:url";
 
 import { parseToml } from "../toml.mjs";
 
-const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+const REPO = process.env.BAZEL_CONFIG_FIXTURE
+  ? path.resolve(process.env.TEST_SRCDIR, process.env.TEST_WORKSPACE, process.env.BAZEL_CONFIG_FIXTURE)
+  : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
 function wranglerConfigs(directory = REPO, found = []) {
   for (const entry of readdirSync(directory)) {

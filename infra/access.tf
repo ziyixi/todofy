@@ -42,7 +42,7 @@ resource "cloudflare_zero_trust_access_policy" "github_owner" {
 #
 # mailsort's application ("mailsort", sort.ziyixi.science) is created the same way, ahead of its Worker's first deploy:
 # the apply creates it, then its AUD goes into config/resources.toml (tools/cloud-config/generate.py writes it into
-# mailsort/wrangler.toml), its id into ids.tf, and mailsort leaves CHECK_ONLY in .github/scripts/ci_changes.py.
+# mailsort/wrangler.toml) and its id into ids.tf before enabling the application root release target.
 #
 # recall's application ("recall", recall.ziyixi.science) is created the same way (recall/docs/design.md section 11),
 # with the Bypass application of its three machine routes below.

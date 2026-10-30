@@ -16,18 +16,6 @@ runs:
     - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
       with:
         package_json_file: ${{ inputs.root }}/package.json
-    - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-      with:
-        version: '0.12.10'
-        working-directory: ${{ inputs.root }}
-        enable-cache: true
-        cache-python: true
-        cache-dependency-glob: .python-version
-        cache-suffix: proto-python
-    - name: Install the shared Python interpreter for proto generation
-      working-directory: ${{ inputs.root }}
-      shell: bash -e {0}
-      run: uv python install
     - name: Locate the pnpm content store
       id: store
       working-directory: ${{ inputs.root }}
@@ -43,7 +31,7 @@ runs:
       working-directory: ${{ inputs.root }}
       shell: bash -e {0}
       run: |
-        args=(--filter @ziyixi/personal-cloud --filter @ziyixi/proto-toolchain --filter @ziyixi/proto)
+        args=(--filter @ziyixi/personal-cloud)
         read -r -a selectors <<< "$WORKSPACE_FILTERS"
         for selector in "${selectors[@]}"; do args+=(--filter "$selector"); done
-        pnpm "${args[@]}" install --frozen-lockfile
+        pnpm "${args[@]}" install --frozen-lockfile --ignore-scripts

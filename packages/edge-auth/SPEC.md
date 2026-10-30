@@ -6,10 +6,8 @@ formats that must never change (§3), why each difference between the apps is a 
 unified (§4), the API (§5) with each app's values (§5.4), and how the package is consumed, checked and
 rolled out (§6–§9). Section numbers are referenced from the apps' code and docs; keep them.
 
-Status: implemented in `src/` with its vitest suite in `test/`, and used by every TypeScript app through
-their adapters (§5.4). What has been verified in production is recorded per app (Mail Hero
-`docs/verification-native.md`, Todofy `docs/verification.md`, dashboard `docs/verification.md`);
-the one check that needs a real login is in §9.
+Implementation lives in `src/`, with synthetic JWT, mutation and header cases in `test/`. Application adapters own
+their failure mappings and production acceptance.
 
 ## 1. Scope and form
 
@@ -67,7 +65,7 @@ Owner JSON clients send `X-CSRF-Token: 1` directly. Authenticated compatibility 
 clients do not call them. A bounded nonempty old header remains accepted for cached clients, subject
 to the same exact Origin and JSON checks; the old cookie/signature is ignored.
 
-This deliberate keyless change supersedes the signed-CSRF rules below as of the owner's request.
+The retired signed-CSRF decisions remain numbered in §4 for compatibility references.
 Access JWT formats, Mail Hero preview/action signatures and encryption
 keys retain their existing contracts.
 
@@ -245,7 +243,7 @@ ignores a pair without `=`.
 Each app's adapter is the only place these values live: Mail Hero
 `mail-hero/cloudflare/src/native/security.ts`, Todofy `todofy/gateway/src/access.ts` and `csrf.ts`
 (`http.ts` for headers), the dashboard `dashboard/worker/src/http.ts`, the links app `links/worker/src/auth.ts`
-(deployed since its step L2), the watch app `watch/worker/src/auth.ts` (deployed since its step W2). On a short link (outside its path-scoped Access
+(deployed since its step L2), the watch app `watch/worker/src/auth.ts`. On a short link (outside its path-scoped Access
 application) the links app verifies only a request that carries a token, and reads every failure there as anonymous;
 under `/_/` it maps the failures as the table below says. The watch app verifies every path but `/health` (its whole
 host is behind Access), checks CSRF in its fetch handler and forwards the owner API to its Durable Object. The
@@ -279,6 +277,14 @@ The dashboard (and the links app and the watch app, which copy its adapter) also
 its generator and keeps the error envelope of Todofy (`{error: {code, message, request_id}}`, one log line with ID,
 status and code); the links app's and the watch app's owner APIs answer the same failures as google.rpc.Status
 bodies whose ErrorInfo reason is the code in upper case (`UNAUTHORIZED`).
+
+Additional adapters are in `tasks/worker/src/auth.ts`, `mailsort/worker/src/auth.ts`,
+`recall/worker/src/auth.ts`, `fleet/worker/src/http.ts`, `model-router/worker/src/http.ts` and
+`personal-mcp/worker/src/auth.ts`. They use case-insensitive ASCII owner matching and 60 seconds of nbf leeway.
+Tasks, Mailsort, Recall, Fleet and Model Router use empty-header fallback with the last cookie; their key cache is
+10 minutes with a 60-second refresh cooldown. Personal MCP strips cookies before verification and accepts only the
+Access assertion header; its `missing`/`first` token-source setting therefore never enables cookie authentication.
+Each adapter retains its own development principal, Origin list, route gates and error mapping.
 
 ### 5.5 Bounds and edge cases
 
@@ -316,14 +322,10 @@ Its dev dependencies use the same root catalog as every application.
 
 ## 7. CI
 
-`.github/scripts/ci_changes.py` maps each package to the apps that compile it in
-(`PACKAGE_USERS = {"edge-auth": ("todofy", "mail-hero", "dashboard", "links", "watch", "fleet", "mailsort", "recall", "tasks", "personal-mcp", "model-router", "newsletter-console"), ...}`).
-Any change inside
-`packages/edge-auth/` (this file included) runs the `Shared packages` job (`pnpm install --frozen-lockfile`, `npm run
-typecheck`, `pnpm test` in every `packages/*/`) and **checks and deploys** every user; an unmapped
-package counts as used by every app. `test_ci_changes.py` fails until `PACKAGE_USERS` matches every
-`"workspace:*"` dependency. `CI gate` requires `Shared packages` when it ran. No
-production secret reaches the package job.
+Each package and consumer declares its real Bazel dependencies. Public application `:check` and `:release` facades
+expose those edges to CI. A source change checks and publishes its actual consumers; documentation is selected only
+when a build/check reads it. No manual `PACKAGE_USERS` registry is maintained. `CI gate` requires selected checks and
+their release artifacts before publication. Production credentials stay outside build/test jobs.
 
 ## 8. Tests
 
@@ -345,20 +347,14 @@ production secret reaches the package job.
   Origin, private headers) and the runtime suite's end-to-end Access check with the JWKS served
   through Miniflare's outbound handler.
 
-## 9. Rollout, verification, rollback
+## 9. Release verification and rollback
 
-- A package change redeploys every user in one CI run, each in its own concurrency group. Access
-  sessions remain Cloudflare's cookies. Cached clients' nonempty old headers remain accepted with
-  exact Origin and JSON checks. New clients send `1` without a token-fetch roundtrip. Remove obsolete
-  Worker signing secrets only after verifying the keyless release; an older signed-CSRF revision
-  would need its key restored. Mail Hero preview tokens are unchanged.
-- The tightenings (#6–#12, #14, #19, #20, #36) should be invisible for real Access tokens. After a
-  deploy that changes them, the owner opens each UI and makes one write that passes Origin and CSRF
-  (for example a Mail Hero settings save, a Todofy dismiss, a confirmed 解除降载 on the dashboard,
-  which is harmless when nothing is shed; a refresh is a GET and checks neither), with the primary
-  login and, where configured, an alias login. Before releasing #36, check that no configured owner or alias contains
-  a non-ASCII character (the generators refuse one).
-- A 401 on a real login means reverting the package commit, which redeploys every user, and comparing
-  the real token's header and claims (never logged) against §2 and §5.1.
-- Optional Access-policy unifications remain #16 (Todofy JWKS TTL down to 10 min) and #17 (token source).
-  This mutation change does not alter them.
+A behavior change releases every consumer selected by its actual dependencies, through each application's existing
+release gate. Cached clients retain the bounded old-header compatibility in §3.1; Access sessions and preview/action
+signature formats keep their own contracts.
+
+After an authorized authentication release, the owner checks a real login and one intended JSON mutation in each
+affected UI, including an alias where configured. Local synthetic JWT tests do not establish that production login
+works. An authentication regression uses the application's normal rollback procedure and compares claims privately
+against §2 and §5.1; tokens and claims never enter logs or public evidence. Policy changes such as JWKS TTL or token
+source remain separate reviewed behavior changes.

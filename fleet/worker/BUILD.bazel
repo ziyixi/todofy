@@ -188,6 +188,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/codex-gateway.test.ts"],
     deps = [
         ":health",
@@ -203,6 +204,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/deploy.test.ts"],
     deps = ["//fleet/deploy:vars"],
 )
@@ -214,6 +216,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/metrics.test.ts"],
     deps = [
         ":metrics",
@@ -231,6 +234,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/newsletter-config.test.ts"],
     deps = [
         ":health",
@@ -247,6 +251,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/report.test.ts"],
     deps = [
         ":health",
@@ -502,4 +507,22 @@ filegroup(
         allow_empty = True,
     ),
     visibility = ["//visibility:public"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)
+
+test_suite(
+    name = "typecheck_tests",
+    tests = [
+        ":runtime_types_typecheck_test",
+        ":types_typecheck_test",
+    ],
+)
+
+test_suite(
+    name = "runtime_tests",
+    tests = [":runtime_" + file.removeprefix("test/runtime/").removesuffix(".test.ts") + "_test" for file in glob(["test/runtime/*.test.ts"])],
 )

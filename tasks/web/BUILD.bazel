@@ -967,6 +967,7 @@ proto_vitest_test(
         ":planning-ui_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/GoalsPage.test.tsx"],
     deps = [
         ":node_modules/@base-ui/react",
@@ -1011,6 +1012,7 @@ proto_vitest_test(
         "//:node_modules/@dnd-kit/state",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/GtdPage.test.tsx"],
     deps = [
         ":node_modules/@testing-library/react",
@@ -1046,6 +1048,7 @@ proto_vitest_test(
         ":node_modules/jsdom",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/api.test.ts"],
     deps = [
         ":node_modules/react",
@@ -1071,6 +1074,7 @@ proto_vitest_test(
         ":node_modules/jsdom",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/components/DateCalendar.test.tsx"],
     deps = [
         ":node_modules/@base-ui/react",
@@ -1102,6 +1106,7 @@ proto_vitest_test(
         ":node_modules/jsdom",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/components/ErrorBoundary.test.tsx"],
     deps = [
         ":node_modules/@testing-library/react",
@@ -1121,6 +1126,7 @@ proto_vitest_test(
         ":node_modules/jsdom",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/components/GoalEditor.test.tsx"],
     deps = [
         ":node_modules/@testing-library/react",
@@ -1150,6 +1156,7 @@ proto_vitest_test(
         ":node_modules/jsdom",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/components/GoalProgress.test.tsx"],
     deps = [
         ":node_modules/lucide-react",
@@ -1178,6 +1185,7 @@ proto_vitest_test(
         ":planning-ui_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/components/GoalRelatedTasks.test.tsx"],
     deps = [
         ":node_modules/@testing-library/react",
@@ -1216,6 +1224,7 @@ proto_vitest_test(
         ":node_modules/jsdom",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/components/LabelPicker.test.tsx"],
     deps = [
         ":node_modules/@base-ui/react",
@@ -1245,6 +1254,7 @@ proto_vitest_test(
         ":node_modules/jsdom",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/components/ProjectPicker.test.tsx"],
     deps = [
         ":node_modules/@base-ui/react",
@@ -1277,6 +1287,7 @@ proto_vitest_test(
         ":planning-ui_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/components/Sidebar.test.tsx"],
     deps = [
         ":node_modules/@base-ui/react",
@@ -1324,6 +1335,7 @@ proto_vitest_test(
         ":planning-ui_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/components/TaskDialog.test.tsx"],
     deps = [
         ":node_modules/@base-ui/react",
@@ -1392,6 +1404,7 @@ proto_vitest_test(
         ":planning-ui_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/components/TaskList.test.tsx"],
     deps = [
         ":node_modules/@base-ui/react",
@@ -1447,6 +1460,7 @@ proto_vitest_test(
         ":node_modules/jsdom",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/dates.test.ts"],
     deps = [
         ":node_modules/vitest",
@@ -1466,6 +1480,7 @@ proto_vitest_test(
         ":node_modules/jsdom",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/goals-client.test.ts"],
     deps = [
         ":node_modules/react",
@@ -1497,6 +1512,7 @@ proto_vitest_test(
         "//:node_modules/@dnd-kit/state",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/gtd/GtdTime.test.tsx"],
     deps = [
         ":node_modules/@testing-library/react",
@@ -1521,6 +1537,7 @@ proto_vitest_test(
         ":node_modules/jsdom",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/launch.test.ts"],
     deps = [
         ":node_modules/@testing-library/react",
@@ -1540,6 +1557,7 @@ proto_vitest_test(
         ":node_modules/jsdom",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/outdated.test.ts"],
     deps = [
         ":node_modules/@testing-library/react",
@@ -1562,6 +1580,7 @@ proto_vitest_test(
         ":node_modules/jsdom",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/recurrence-controls.test.ts"],
     deps = [
         ":node_modules/vitest",
@@ -1580,6 +1599,7 @@ proto_vitest_test(
         ":node_modules/jsdom",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/task-date-actions.test.ts"],
     deps = [
         ":node_modules/react",
@@ -1606,6 +1626,7 @@ proto_vitest_test(
         ":planning-ui_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/usePlanView.test.tsx"],
     deps = [
         ":node_modules/@testing-library/react",
@@ -1626,6 +1647,7 @@ proto_vitest_test(
         ":node_modules/jsdom",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/useReturnRefresh.test.tsx"],
     deps = [
         ":node_modules/@testing-library/react",
@@ -1645,6 +1667,7 @@ proto_vitest_test(
         ":node_modules/jsdom",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/useTaskActions.test.tsx"],
     deps = [
         ":node_modules/@testing-library/react",
@@ -1680,6 +1703,7 @@ proto_vitest_test(
         ":planning-ui_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/useTaskPlanning.test.tsx"],
     deps = [
         ":node_modules/@testing-library/react",
@@ -1708,6 +1732,7 @@ proto_vitest_test(
         ":node_modules/jsdom",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/useTaskView.test.tsx"],
     deps = [
         ":node_modules/@testing-library/react",
@@ -2223,4 +2248,14 @@ filegroup(
         allow_empty = True,
     ),
     visibility = ["//visibility:public"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)
+
+test_suite(
+    name = "typecheck_tests",
+    tests = [":types_typecheck_test"],
 )

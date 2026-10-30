@@ -16,28 +16,8 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Install the selected Node workspaces
-      uses: ./.github/actions/setup-workspace
-      with:
-        root: .
-        filters: ''
-    - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-      with:
-        version: '0.12.10'
-        cache-dependency-glob: |
-          uv.lock
-          pyproject.toml
-          .python-version
-          **/pyproject.toml
-        cache-suffix: todofy-personal-cloud
-        working-directory: .
-    - name: Install the locked bundle renderer
-      working-directory: .
-      shell: bash -e {0}
-      run: |
-        node proto/tools/ensure.mjs
-        uv sync --package todofy-personal-cloud --locked
-    # The gateway image is empty unless this run built it; prepare.py then leaves it out of the bundle.
+    - uses: ./.github/actions/setup-bazel
+    # The gateway image is empty unless this run built it; the original renderer omits it then.
     - name: Package this commit and its verified image digests
       env:
         NEWSLETTER_IMAGE: ${{ inputs.newsletter-image }}
@@ -46,10 +26,20 @@ runs:
       working-directory: .
       shell: bash -e {0}
       run: |
-        uv run --package todofy-personal-cloud --locked python tools/vps-bootstrap/prepare.py --sha "$GITHUB_SHA" \
-          --newsletter-image "$NEWSLETTER_IMAGE" --platform-image "$PLATFORM_IMAGE" \
-          --codex-gateway-image "$CODEX_GATEWAY_IMAGE" \
-          --output "$RUNNER_TEMP/vps-bootstrap-bundle"
+        set -uo pipefail
+        test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+        options=(
+          "--embed_label=$GITHUB_SHA"
+          "--define=TODOFY_NEWSLETTER_IMAGE=$NEWSLETTER_IMAGE"
+          "--define=TODOFY_PLATFORM_IMAGE=$PLATFORM_IMAGE"
+          "--define=TODOFY_CODEX_GATEWAY_IMAGE=$CODEX_GATEWAY_IMAGE"
+          "--repository_cache=$HOME/.cache/personal-cloud-bazel/repository"
+          "--disk_cache=$HOME/.cache/personal-cloud-bazel/actions"
+        )
+        bazel build //platform:bootstrap_bundle "${options[@]}"
+        bundle=$(bazel cquery //platform:bootstrap_bundle "${options[@]}" --output=files)
+        test -d "$bundle"
+        cp -a "$bundle" "$RUNNER_TEMP/vps-bootstrap-bundle"
     - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: vps-bootstrap-${{ github.sha }}

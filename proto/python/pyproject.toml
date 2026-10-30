@@ -2,7 +2,7 @@
 #   [project] dependencies "ziyixi-proto"   (a Worker that imports it; pywrangler vendors it), or
 #   [dependency-groups] "ziyixi-proto"      (an app whose tests alone use it)
 #   [tool.uv.sources] ziyixi-proto = { path = "../proto/python" }   (not editable: pywrangler needs files)
-# Its build backend (build_backend.py) runs proto/tools/ensure.mjs, which generates the modules under
+# Its build backend (build_backend.py) runs proto/tools/ensure.mjs, which materializes Bazel's modules under
 # src/ziyixi_proto/ (never committed); the metadata below is static, so resolving needs no build.
 [build-system]
 requires = []
@@ -18,16 +18,15 @@ requires-python = ">=3.14"
 dependencies = []
 
 [tool.uv]
-# uv rebuilds the package (and so regenerates) when any of these change: the generator's inputs as
-# proto/tools/ensure.mjs hashes them, and its stamp. The stamp is gitignored like the generated code: a
-# clean (`git clean -fdX`) deletes both, and uv must then rebuild instead of reinstalling a cached wheel and
-# leaving the source tree, which pywrangler vendors from, without generated code. A generation rewrites
-# the stamp, so the run after it rebuilds once more; ensure.mjs skips the work then (its stamp matches).
+# uv rebuilds after changes to the IDL, Bazel graph, locked toolchains or materialization manifest.
+# The ignored manifest also makes a clean checkout rebuild the source tree used by pywrangler.
 cache-keys = [
   { file = "../.generated.json" },
   { file = "pyproject.toml" },
   { file = "build_backend.py" },
   { file = "src/ziyixi_proto/*.py" },
+  { file = "src/ziyixi_proto/py.typed" },
+  { file = "../ts/*.ts" },
   { file = "../**/*.proto" },
   { file = "../buf.yaml" },
   { file = "../buf.lock" },
@@ -36,10 +35,17 @@ cache-keys = [
   { file = "../../pnpm-workspace.yaml" },
   { file = "../../package.json" },
   { file = "../../.python-version" },
+  { file = "../../.bazelversion" },
+  { file = "../../.bazelrc" },
+  { file = "../../MODULE.bazel" },
+  { file = "../../MODULE.bazel.lock" },
+  { file = "../../uv.lock" },
+  { file = "../../tools/bazel/*.bzl" },
+  { file = "../../tools/bazel/BUILD.bazel" },
+  { file = "../**/BUILD.bazel" },
+  { file = "../bazel/*.bzl" },
   { file = "../package.json" },
   { file = "../ts/package.json" },
   { file = "../tools/ensure.mjs" },
-  { file = "../tools/gen_py.py" },
-  { file = "../tools/gen_wire_ts.py" },
-  { file = "../tools/wire_rules.py" },
+  { file = "../tools/*.py" },
 ]

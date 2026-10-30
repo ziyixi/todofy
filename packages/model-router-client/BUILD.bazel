@@ -71,6 +71,7 @@ vitest_test(
         ":proto_test_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/index.test.ts"],
 )
 
@@ -79,8 +80,14 @@ alias(
     actual = ":types_typecheck",
 )
 
+test_suite(name = "typescript_checks")
+
 test_suite(
     name = "check",
+    tests = [
+        ":typescript_checks",
+        "//packages/model-router-client/python:tests_test_client",
+    ],
     visibility = ["//visibility:public"],
 )
 
@@ -109,4 +116,14 @@ filegroup(
         allow_empty = True,
     ),
     visibility = ["//visibility:public"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)
+
+test_suite(
+    name = "typecheck_tests",
+    tests = [":types_typecheck_test"],
 )

@@ -40,8 +40,8 @@ allow only the owner's exact e-mail addresses on the matching identity providers
   answers an unauthenticated request. It accepts only a 302 to Access's login page for this host
   (`https://<team>.cloudflareaccess.com/cdn-cgi/access/login/home.ziyixi.science…`); any other redirect
   fails it, including one to the team domain itself.
-- No zone Redirect Rule or Page Rule may match `home.ziyixi.science` (for example the App Launcher
-  redirect suggested in `todofy/docs/ui-and-portal-research.md`): such rules run before Access and the
+- No zone Redirect Rule or Page Rule may match `home.ziyixi.science` (including an App Launcher
+  redirect): such rules run before Access and the
   Worker and would make the dashboard unreachable. Check the zone's Rules pages (read only) before the
   first merge; the probe would now fail on such a rule, but only after the deploy.
 

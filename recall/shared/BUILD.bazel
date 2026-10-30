@@ -88,3 +88,15 @@ filegroup(
     ),
     visibility = ["//visibility:public"],
 )
+
+test_suite(
+    name = "check",
+    tests = [
+        ":denylist_types_typecheck_test",
+        ":diagnostic_types_typecheck_test",
+        ":scrub_types_typecheck_test",
+        ":segment_types_typecheck_test",
+        ":url_types_typecheck_test",
+    ],
+    visibility = ["//recall:__subpackages__"],
+)

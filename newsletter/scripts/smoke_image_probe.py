@@ -31,6 +31,7 @@ class ProbeInput(TypedDict):
     """Audited hashes and credential-free startup code supplied by CI."""
 
     source_hashes: dict[str, str]
+    python_version: str
     startup_source: str
     console_audience: str | None
 
@@ -258,6 +259,7 @@ def check_http(root: pathlib.Path, *, console_configured: bool) -> None:
 
 def main(payload: ProbeInput) -> None:
     """Verify the final image without credentials, email or external network."""
+    assert sys.version.split()[0] == payload["python_version"]
     check_package(payload["source_hashes"])
     check_console_policy(payload["console_audience"])
     with tempfile.TemporaryDirectory(

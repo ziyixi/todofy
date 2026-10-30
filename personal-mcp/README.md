@@ -1,98 +1,43 @@
 # Personal MCP
 
-Private tools, ongoing Work memory and event subscriptions for ChatGPT Dots. One Worker and one SQLite Durable
-Object; Cloudflare Access handles OAuth. Business data stays in its existing application.
-
-## Tools
-
-| Area | Tools | Behavior |
-| --- | --- | --- |
-| Work | `work_context`, `work_list`, `work_get`, `work_create`, `work_checkpoint`, `work_report`, `work_export` | Persistent continuation facts and source refs; checkpoints are silent, reports can notify |
-| Watch | `watch_preview`, `watch_create`, `watch_update`, `watch_control`, `watch_list`, `watch_get`, `watch_changes`, `watch_read`, `watch_view` | Native Watch settings, stored page evidence and actual screenshot images; dedicated Work Watches default to `NONE` |
-| Tasks | `tasks_list`, `tasks_get`, `tasks_create_inbox`, `tasks_add_steps`, `tasks_update`, `tasks_complete`, `tasks_delete` | Native Tasks fields, receipts and etags; deletion is soft |
-| Plan / Focus | `plan_get`, `plan_arrange`, `focus_get` | Native planning facts and daily queues; arranging preserves task dates and deadlines; timer is read-only |
-| Mail | `mail_list`, `mail_read`, `mail_collect` | Mail stays in Mail until explicitly collected into Inbox |
-| Recall | `recall_search`, `recall_read`, `recall_activity`, `recall_view` | Bounded search, activity and text reads; view returns an actual MCP image when available |
-| Home | `cloud_status` | Cached service states, source freshness and current undismissed issues; no refresh or controls |
-| Connection | `connection_status`, `send_test_event` | Build, source checks and delivery state; explicit synthetic connection test |
-
-Business tools require owner instructions or an explicitly authorized responsibility. Bets are weekly goals;
-Committed is a limited commitment. Steps should usually fit within two hours. Dates, commitments, completion
-and deletion remain owner decisions. Retry an uncertain write with the same request ID and identical input.
-
-## Work and follow-up
-
-Work records keep an authorized responsibility resumable across chats, waits and callbacks: goal, scope, completion
-condition, continuation summary, next action, waiting facts and refs to the real Tasks, Codex chats, Watches, Recall
-records, native schedules and artifacts. A checkpoint is silent; a report can notify. Captured Watch evidence changes
-reach linked Works as reports, and the Dot judges their relevance. The Dot-facing rules are the
-[skill](plugin/skills/personal-cloud/SKILL.md) and the tool descriptions; [Work memory](docs/work-memory.md) lists what
-the server guarantees.
-
-## Events
-
-`events/list`, `events/subscribe` and `events/unsubscribe` expose the existing four business events,
-`work.attention` and `personal_cloud.test`. Subscriptions start from current state; existing tasks, mail and Home
-issues are not replayed. Read Work context for reports already pending when a subscription begins.
-
-| Event | Payload | Source |
-| --- | --- | --- |
-| `task.changed` | Bounded task IDs, etags and deleted flags | Tasks change feed; confirmed MCP writes of the same revision are omitted |
-| `task.must_start` | Task IDs newly entering the window | Tasks' native Must start calculation, including date-only changes |
-| `mail.ready` | Mail event ID and ready time | Successfully summarized, pending Mail; excludes canaries and imports |
-| `service.attention` | Home occurrence sequence, source and code | Current undismissed issue episodes; excludes this MCP's own failures |
-| `work.attention` | Work ID, report sequence, kind, source and timestamp | Explicit reports from linked sources, including Watch evidence changes; checkpoint writes stay silent |
-
-`work.attention` accepts `{work_id}` to select one Work; omitting it subscribes to all open Works. Watch evidence
-changes become linked Work reports, so there is no separate public `watch.changed` subscription. Read `work_get` and the
-relevant source before acting, then silently checkpoint the handled report sequence.
-
-The existing DO Alarm checks subscribed sources at most once per minute. Cursor/state progress and frozen delivery
-bodies commit together. It sends at most five deliveries per Alarm and uses the existing bounded retry schedule.
-No active business subscriptions means no source polling. `accepted` means the callback accepted the event;
-it does not mean a Dot finished its work. The assistant reads current facts through tools when needed.
-
-## Runtime and source boundaries
-
-Private generated service bindings connect `TasksApi`, Todofy's read-only `Mail` entry, `RecallApi`, `HomeApi` and
-`WatchApi`.
-`mail_collect` and the category shortcuts are Tasks' (`ConvertMailItem`, `GetMailCategories`); Todofy keeps the mail.
-The DO retains subscriptions, cursor/state, delivery metadata, Step request identities, confirmed task revisions
-and Work records/logs. Work records keep bounded continuation facts and references; task bodies, mail and browsing
-documents remain in their source applications. Callback paths and signing secrets never appear in status or logs.
-Home reads this Worker's standard private Ops binding.
-
-The protocol uses the official MCP SDK's native `createMcpHandler` and Standard Webhooks signatures. It requires
-MCP 2.0 (`2026-07-28`). There is no Agents framework, server-side model call, D1, Queue or Workflow.
-
-## Backup and restore
-
-The DO backs its whole store up daily (05:23 UTC) into the private bucket `personal-mcp-backups`, keeping the newest
-30. The owner's `POST /owner/restore` loads a backup into a new, empty store from inside the object and verifies it;
-`tools/backup-restore.ts` downloads, verifies and uploads copies. See [backup and restore](docs/backup.md).
-
-## Development and release
-
-From the repository root, use Node 26:
+私人 Dots 工具、持久工作记录和事件订阅。一个 Worker、一个 SQLite DO；Access 负责 OAuth。任务、邮件和浏览
+内容留在原应用，MCP 保存继续工作所需的范围、状态和引用。
 
 ```sh
-pnpm install --frozen-lockfile
-cd personal-mcp/worker
-npm run lint
-npm run typecheck
-npm test
-npm run test:runtime
+bazel test //personal-mcp:check
+bazel build //personal-mcp
 ```
 
-Runtime tests use real workerd/SQLite and local signed callback receivers. The existing business tests cover
-discovery, baseline cursors, restart persistence, deduplication, unsubscribe and observable callback failure. See
-the verification record for checks actually completed for the expanded catalog; deployment, image viewing and
-actual Dots continuation need separate evidence.
+## 能做什么
 
-The endpoint is `https://mcp.ziyixi.science/mcp`. Reuse the existing private Personal Cloud plugin and owner OAuth
-connection. After deploying an expanded catalog, use its **Refresh tools** control. Local plugin instructions live
-in `plugin/`; account updates preserve the existing App identity and sharing.
+- Work：读取上下文、创建工作、静默 checkpoint、报告与导出。
+- Watch：指派监视、读取变化证据和实际截图，关联 Work 后由 Dot 判断意义。
+- Tasks/Plan/Focus：经原生 API 收集、修改、安排和完成；不改变真实日期来实现日队列。
+- Mail/Recall/Home：授权范围内读取、收进 Inbox、检索活动、查看截图与内容无关状态。
 
-Pass the complete branch CI, then publish the same SHA through main Actions. Deploy private source entrypoints
-before the MCP release binds them. See
-[connection and setup](docs/connection.md) and the separate [live verification](docs/verification.md).
+具体工具与权限以目录及[Dot skill](plugin/skills/personal-cloud/SKILL.md)为准。业务写入需要 owner 指令或明确
+授权的持续职责；日期、承诺、完成、删除由 owner 决定。不确定写入沿用原 request ID 和内容，不盲目再做一次。
+
+## 订阅和继续工作
+
+`task.changed`、`task.must_start`、`mail.ready`、`service.attention`、`work.attention` 从当前状态开始，不回放全部
+旧内容。订阅前已有的待处理报告从 Work context 读取。Watch 证据变化成为关联 Work 的报告，没有另一套公开
+Watch 通知协议。
+
+DO Alarm 只轮询有订阅的来源，冻结投递内容并保留原有有界重试。回调 accepted 只说明接收端接受，不代表 Dot
+完成工作。Checkpoint 不通知；显式 report 可以通知。见[工作记忆](docs/work-memory.md)。
+
+## 边界与运维
+
+私有 service bindings 分别连接 Tasks、Todofy Mail、Watch、Recall 和 Home，并使用声明的访问权限。MCP 不保存
+源应用正文、SDK context，也不运行服务端模型。协议复用官方 MCP SDK 与 Standard Webhooks。
+
+日备份和恢复不重放业务副作用。正常发布走同一 green SHA 的 main Actions，在来源入口就绪后发布。扩展工具目录
+后刷新现有私人插件，保留 App/OAuth 身份。连接路径与实际验收分别见：
+
+- [连接](docs/connection.md)、[验收](docs/verification.md)
+- [备份与恢复](docs/backup.md)、[协作规则](AGENTS.md)
+- [根构建/依赖](../docs/bazel.md)、[CI/CD](../docs/ci-cd.md)
+
+测试使用真实 workerd/SQLite 和本地签名回调，只含合成数据。构建、类型与测试脚本委托 Bazel；交互式本地开发不
+连接生产。一次投递或本地 fixture 不能代替真实 Dots 的继续工作证据。

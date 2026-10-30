@@ -27,6 +27,15 @@ Fresh ≤10分钟，stale ≤20分钟，之后 missing；k3s 或节点失联也�
 `cloudflared_platform` 仅在 `FLEET_EXPECT_PLATFORM_TUNNEL=true` 时监督。只有真实部署 daemon 的当前 ACK 和 SHA、image、request ID
 匹配，且 Newsletter worker 健康、gate active 时，部署才就绪。Pod ready 不替代 provider 业务成功。
 
+## Build and check
+
+```sh
+bazel test //fleet:check
+bazel build //fleet
+```
+
+构建/检查脚本使用相同的 Bazel 依赖；交互式开发保持本地绑定。工具安装见[根依赖指南](../docs/dependencies.md)。
+
 ## 节点遥测
 
 报告可选携带 `metrics`（`fleet.telemetry.v1.NodeMetrics`）：累计计数原样上报，Fleet 在接收时用同一 boot 的上一份报告算
@@ -49,9 +58,8 @@ Owner API（`proto/fleet/ui/v1`）：`GET /api/v1/nodes`、`GET /api/v1/nodes/{n
 `GET /api/v1/nodes/{node}:summarizeMetrics?range=&end_time=&metrics=`（每点为步长内 5 分钟样本的均值与最大值，
 一次最多读 730 行）。任一上报文件系统用量 ≥90% 沿用现有 `disk_high`；ZFS 上按数据集计算。
 
-本地先在仓库根目录运行一次 `pnpm install --frozen-lockfile`，再分别在 `worker/`、`web/` 运行 lint/typecheck/test。Worker 另运行 `test:runtime`，web 另 build。
-Observer 随平台镜像包含共享 proto；在 platform 环境运行 `python -m unittest discover -s tests/observer`，全是合成数据。
-生产只能通过 main Actions 发布；首次 Access/身份配置与 VPS 更新由根部署流程管理。
+Observer 的检查随 `//platform:check`；所有固定状态/遥测测试使用合成数据。生产仅通过 main Actions 发布，
+安装与身份配置由根部署流程管理。
 
 Fleet stores bounded VPS observations and release receipts. Its owner UI is read-only; its independent HMAC identity can only
 submit telemetry. Missing telemetry remains unknown, and process/readiness checks never claim mail or model success.

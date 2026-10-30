@@ -563,6 +563,7 @@ proto_vitest_test(
         ":task-dates_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/filters.test.ts"],
     deps = [
         ":filters",
@@ -577,6 +578,7 @@ proto_vitest_test(
         ":task-dates_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/goal-model.test.ts"],
     deps = [
         ":goal-model",
@@ -593,6 +595,7 @@ proto_vitest_test(
         ":task-dates_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/mail.test.ts"],
     deps = [
         ":mail",
@@ -609,6 +612,7 @@ proto_vitest_test(
         ":task-dates_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/planning.test.ts"],
     deps = [
         ":planning",
@@ -623,6 +627,7 @@ proto_vitest_test(
         ":task-dates_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/receipts.test.ts"],
     deps = [
         ":receipts",
@@ -639,6 +644,7 @@ proto_vitest_test(
         ":task-dates_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/review.test.ts"],
     deps = [
         ":gtd",
@@ -654,6 +660,7 @@ proto_vitest_test(
         ":task-dates_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/startup.test.ts"],
     deps = [
         ":startup",
@@ -935,4 +942,22 @@ filegroup(
         allow_empty = True,
     ),
     visibility = ["//visibility:public"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)
+
+test_suite(
+    name = "typecheck_tests",
+    tests = [
+        ":runtime_types_typecheck_test",
+        ":types_typecheck_test",
+    ],
+)
+
+test_suite(
+    name = "runtime_tests",
+    tests = [":runtime_" + file.removeprefix("test/runtime/").removesuffix(".test.ts") + "_test" for file in glob(["test/runtime/*.test.ts"])],
 )

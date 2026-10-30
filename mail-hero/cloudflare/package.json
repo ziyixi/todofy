@@ -5,15 +5,13 @@
   "type": "module",
   "scripts": {
     "postinstall": "node ../../proto/tools/ensure.mjs",
-    "pretest": "node ../../proto/tools/ensure.mjs",
-    "test": "node --test test/*.test.mjs",
-    "pretest:cpu": "node ../../proto/tools/ensure.mjs",
-    "test:cpu": "node --test --test-concurrency=1 test/cpu/*.test.mjs",
+    "test": "bazel test //mail-hero/cloudflare:unit_tests",
+    "test:cpu": "bazel test //mail-hero/cloudflare:cpu_tests --nocache_test_results",
     "contract:update": "node test/contract-fixtures.mjs --write",
-    "pretypecheck": "node ../../proto/tools/ensure.mjs",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "bazel test //mail-hero/cloudflare:typecheck_tests",
     "predev": "node ../../proto/tools/ensure.mjs",
-    "dev": "wrangler dev --config ../wrangler.toml --ip 127.0.0.1 --port 8787 --local-upstream 127.0.0.1:8787"
+    "dev": "bazel build //mail-hero/web:bundle && wrangler dev --assets ../../bazel-bin/mail-hero/web/dist --config ../wrangler.toml --ip 127.0.0.1 --port 8787 --local-upstream 127.0.0.1:8787",
+    "check": "bazel test //mail-hero:check"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",

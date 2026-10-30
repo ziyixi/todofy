@@ -1,4 +1,5 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@npm//website:tsx/package_json.bzl", tsx = "bin")
 load("@rules_python//python:defs.bzl", "py_library", "py_test")
 load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
@@ -81,7 +82,11 @@ filegroup(
 
 test_suite(
     name = "check",
-    tests = [":test_cloud_config_test"],
+    tests = [
+        ":test_cloud_config_test",
+        ":worker-deploy_test",
+        ":worker-secrets_test",
+    ],
 )
 
 filegroup(
@@ -102,4 +107,39 @@ filegroup(
         allow_empty = True,
     ),
     visibility = ["//visibility:public"],
+)
+
+tsx.tsx_test(
+    name = "worker-secrets_test",
+    args = [
+        "--test",
+        "tools/cloud-config/tests/worker-secrets.test.mjs",
+    ],
+    data = [
+        "tests/worker-secrets.test.mjs",
+        ":worker-deploy",
+        ":worker-secrets",
+        "//dashboard/deploy:source_deploy_vars_mjs",
+        "//fleet/deploy:source_deploy_vars_mjs",
+        "//links/deploy:source_deploy_vars_mjs",
+        "//mail-hero/deploy:source_deploy_vars_mjs",
+        "//watch/deploy:source_deploy_vars_mjs",
+        "//website:relay_deploy_vars",
+        "//website:relay_deployment_config",
+    ],
+)
+
+tsx.tsx_test(
+    name = "worker-deploy_test",
+    args = [
+        "--test",
+        "tools/cloud-config/tests/worker-deploy.test.mjs",
+    ],
+    data = [
+        "tests/worker-deploy.test.mjs",
+        ":worker-deploy",
+        ":worker-secrets",
+        "//website:relay_deploy_vars",
+        "//website:relay_deployment_config",
+    ],
 )

@@ -2,7 +2,7 @@
 
 Newsletter 继续使用独立 VPS 进程和原 SQLite，模型由统一 Router 执行。
 monorepo 新镜像为 `ghcr.io/ziyixi/todofy-newsletter`；源码与发布入口现在属于 Todofy monorepo。
-本合同用于以后按固定 digest 升级该服务，本次入仓不升级 VPS，不调用模型或发信。
+本合同约束固定 digest 的服务升级；构建、镜像发布和线上排空/恢复分别验收。
 
 ## 排空的含义
 

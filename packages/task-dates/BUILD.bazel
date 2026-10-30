@@ -52,6 +52,7 @@ vitest_test(
         ":lib",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/dates.test.ts"],
 )
 
@@ -90,4 +91,14 @@ filegroup(
         allow_empty = True,
     ),
     visibility = ["//visibility:public"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)
+
+test_suite(
+    name = "typecheck_tests",
+    tests = [":types_typecheck_test"],
 )

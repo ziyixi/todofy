@@ -233,14 +233,18 @@ def _cached_workerd() -> Path:
 
 
 def _wrangler(*args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [str(WRANGLER), *args],
-        cwd=ROOT,
-        env=os.environ | {"CI": "true", "WRANGLER_SEND_METRICS": "false"},
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    try:
+        return subprocess.run(
+            [str(WRANGLER), *args],
+            cwd=ROOT,
+            env=os.environ | {"CI": "true", "WRANGLER_SEND_METRICS": "false"},
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError as error:
+        print((error.stdout + error.stderr)[-4000:], file=sys.stderr)
+        raise
 
 
 # wrangler dev answers through its own proxy, which forwards each request to the Worker's workerd over a pooled

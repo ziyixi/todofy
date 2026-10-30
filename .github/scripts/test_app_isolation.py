@@ -2,8 +2,8 @@
 
 Root AGENTS.md: an app imports only its own code and the shared code in proto/ (the npm package @ziyixi/proto and the
 Python package ziyixi-proto), contracts/ and packages/. tools/ is test, build and deploy tooling: an app's tests and
-its build and deploy scripts may import it, the sources it ships never do. That is also what lets a tools/ change
-deploy nothing (ci_changes.classify). The website is stricter: of the shared code it uses only proto/.
+its build and deploy scripts may import it, the sources it ships never do. The website is stricter: of the shared
+code it uses only proto/.
 
 For every app of the service catalog this resolves
 - the relative imports of its TypeScript and JavaScript files (static, re-export, side-effect, dynamic, require),
@@ -40,7 +40,6 @@ except ModuleNotFoundError:
 REPO = Path(__file__).absolute().parents[2]
 sys.path.insert(0, str(REPO / "tools" / "service-catalog"))
 from catalog import load_catalog  # noqa: E402
-from ci_changes import APP_TEST_DIRECTORIES  # noqa: E402
 
 APPS = tuple(load_catalog(REPO).apps)
 SHARED = {"proto", "contracts", "packages"}
@@ -208,7 +207,8 @@ def violation(app: str, importer: PurePosixPath, target: Path) -> str | None:
     if not target.is_relative_to(REPO):
         return "leaves the repository"
     relative = target.relative_to(REPO)
-    if (relative.as_posix() + "/").startswith(APP_TEST_DIRECTORIES) and not NOT_SHIPPED & set(importer.parts[1:-1]):
+    test_importer = bool(NOT_SHIPPED & set(importer.parts[1:-1])) or re.search(r"\.(test|spec)\.[cm]?[jt]sx?$", importer.name)
+    if {"test", "tests", "__tests__"} & set(relative.parts) and not test_importer:
         return "ships, so it may not import a check-only test directory"
     parts = relative.parts
     top = parts[0] if parts else ""

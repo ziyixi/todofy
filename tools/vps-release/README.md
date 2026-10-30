@@ -1,79 +1,29 @@
-# Actions → daemon release
+# Actions release client
 
-`deploy.py` calls the generated `platform.runtime.v1.RuntimeService` HTTP bindings. It sends only frozen
-configured workload aliases, source SHA, image digests and UUID4 identities. Kubernetes manifests, object
-names, admission adapters and local cluster credentials belong to the daemon. Actions holds no Kubernetes
-token, SSH key, Docker socket or cluster-admin identity.
+The client uses generated `platform.runtime.v1.RuntimeService` HTTP bindings. It sends frozen workload aliases, source SHA, image digests and UUID identities. The daemon owns Kubernetes resources and admission adapters. The client receives no SSH or Kubernetes credential.
 
-The gated workflow supplies these environment secrets through normal GitHub production secret storage:
+The existing production job supplies independent Access client credentials and `PLATFORM_DEPLOY_TOKEN`. The HTTPS origin comes from the public profile. HTTP uses verified TLS, no redirects/proxies, bounded replies and one wall-clock deadline; logs contain safe codes and verified identities/counts.
 
-- `PLATFORM_ACCESS_CLIENT_ID` and `PLATFORM_ACCESS_CLIENT_SECRET`: the dedicated Cloudflare machine identity.
-- `PLATFORM_DEPLOY_TOKEN`: the independent daemon deployment Bearer.
+## Entrypoints
 
-The exact HTTPS hostname comes from the strict public profile's `vps.platform_runtime_host`. The client
-uses `httpx` with TLS verification, no redirects/proxies, a total wall-clock timeout for each request and a
-32 KiB reply bound. It logs only a safe error code or verified source/release identity and bounded business
-health/counts. It never logs credentials, upstream
-errors or response bodies. Generated bindings determine path variables, query parameters and body mapping;
-the shared strict codec and duplicate-rejecting JSON parser read replies.
-
-After the proto generation and locked platform environment are ready:
+From the repository root:
 
 ```sh
-uv run --project platform --frozen python tools/vps-release/deploy.py \
-  --source-sha VERIFIED_FULL_SHA \
-  --newsletter-image ghcr.io/OWNER/todofy-newsletter@sha256:FULL_DIGEST \
-  --platform-image ghcr.io/OWNER/todofy-platform@sha256:FULL_DIGEST
+bazel run //tools/vps-release:deploy_cli -- --help
+bazel run //tools/vps-release:reconcile_cli -- --help
+bazel test //tools/vps-release:check
 ```
 
-Both repositories must belong to the configured owner; mutable tags and partial digests are refused.
-The independent gateway uses `--codex-gateway-image ghcr.io/OWNER/todofy-codex-gateway@sha256:FULL_DIGEST`
-in place of the paired image arguments. Its creation identity is distinct from a pair release at the
-same SHA; it preserves Newsletter admission and schedule state. Status verification accepts additional
-configured workloads while requiring exact physical identities for every selected target. To resume a
-held gateway operation with the client, pass `--resume --gateway-only` and its original source SHA.
-The same SHA derives the same release/request UUID4. A transport retry repeats the identical frozen body.
-Changing images under that existing identity is a conflict, not an excuse to silently create a new release.
-The daemon acknowledges persistence first; the client polls the exact resource. Success additionally
-requires fresh `NodeStatus`, verified desired/actual source/digest/request identities and known generation,
-running processes and accepting/unsupported admission. An acknowledged desired SHA alone cannot pass.
-Newsletter can acquire unknown business operations after admission resumes. Its explicit nonzero
-`unknown_count` and `degraded` business health are reported separately when the running image, release
-identity and admission are verified; an unhealthy selected process, unknown selected evidence or degraded selected workload
-still cannot pass deployment verification.
+These binaries use the fixed Python/proto/dependency toolchain. Operator configuration is intentionally read from `BUILD_WORKSPACE_DIRECTORY`; it is not a cached build input. Real execution remains the authorized main Actions job, with the same environment secrets, evidence path and concurrency lock.
 
-Held/failed operations stop the client immediately. An explicit approved main dispatch for `platform`,
-`newsletter` or `codex-gateway` sets `resume_vps_release=true` and supplies `resume_source_sha`, the original release's full
-source SHA. The checkout commit runs current source/contract checks, but no image is built, saved, uploaded
-or published. The client uses the original source SHA to fetch the authenticated release, validates the paired
-runtime aliases or the single gateway alias, source/request identity and strict digest fields, and retains those frozen targets.
-Digests alone contain no repository: the daemon maps the fixed aliases to the profile owner's allowlisted
-repositories. Resume accepts no replacement image input. It reads the current etag and derives a stable
-continuation UUID for that exact revision; all later receipts and physical running observations must match
-the original targets. Ordinary retries never resume automatically. Client timeout does not cancel the persisted server operation. Re-run with the
-same verified input to inspect progress; make a deliberate concurrency decision before continuing held work.
+Paired deployment takes `--source-sha`, `--newsletter-image` and `--platform-image`; the independent gateway uses `--codex-gateway-image`. Images must match the profile's repositories and full immutable digests. Gateway-only release preserves Newsletter admission and schedule state.
 
-```sh
-uv run --project platform --frozen python tools/vps-release/deploy.py \
-  --source-sha ORIGINAL_HELD_FULL_SHA --resume
-```
+## Persistence and continuation
 
-Without explicit resume, `resume_source_sha` is forbidden. A new paired release requires both images;
-a gateway release requires its own image from the tested artifact/source SHA. Missing or mismatched existing releases fail rather than being
-created or replaced by the resume path.
-The one overall timeout starts before Create/Get/Resume. Temporary network/429/5xx failures, including a
-daemon Recreate rollout lasting minutes, keep retrying the identical request inside that budget. Credentials,
-schema errors and held/failed results stop immediately; retries never extend the deadline.
+The same source derives the same creation UUID. Retries repeat the frozen body; conflicting images cannot replace an existing identity. The daemon acknowledges persistence first. Completion additionally requires fresh actual Pod digest, observed generation, process source/request identity and accepting or unsupported admission.
 
-`release_identity.py` also preserves the offline renderer's canonical SHA identity. `render.py` uses
-Kustomize only for local manifest compilation; the Actions deployment client never applies its output.
-Runtime source must not import either tool. Synthetic client checks:
+Held/failed work stops. Explicit `--resume` uses the original source and current etag, without replacement images; gateway continuation additionally uses `--gateway-only`. Timeout never cancels the server's persisted operation. Network/429/5xx retry within the original deadline; authentication, schema errors and held results do not extend it or trigger automatic continuation.
 
-```sh
-uv run --project platform --frozen python -m unittest discover -s tools/vps-release/tests
-uv run --project platform --frozen ruff check tools/vps-release
-```
+Reconciliation supports `plan`, `repair` and `resume`. It selects accepted immutable targets from the ledger and keeps the existing manual-pause/drain boundary. Evidence is recorded only after physical verification. Desired annotations, stale snapshots, process health or degraded business counts alone cannot establish a new running release.
 
-The tests cover lost acknowledgements, identical retries, explicit etag continuation, redirect/size/JSON
-guards, wrong image provenance, unknown generations and a ready acknowledgement with stale observations.
-They do not prove live credentials, Tunnel connectivity or a production rollout.
+`render.py` is offline Kustomize compilation used by bundle preparation; the deployment client never applies its output. Synthetic tests cover lost acknowledgements, strict wire/JSON parsing, identical retries, etag continuation and wrong/stale physical evidence. Live credentials, connectivity and business success require separate observation.

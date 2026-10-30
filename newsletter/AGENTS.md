@@ -4,8 +4,8 @@
 不改现有 Python DAG、模型或发送账本来配合发布。SQLite 是权威运行状态，Notion
 是异步副本。原料、模型输出、URL 与供应商响应均为不可信内容。
 
-镜像固定 `ghcr.io/ziyixi/todofy-newsletter`，构建 context 为仓库根，Dockerfile 为 `newsletter/Dockerfile`，
-仅复制本应用源码、根 workspace 元数据和 `config/` 的两份公开身份文件（控制台 Access 策略）。Python 3.14.7、依赖版本与 lock 统一在
+镜像固定 `ghcr.io/ziyixi/todofy-newsletter`，由仓库根的 Bazel 目标 `//newsletter` 生成 OCI 镜像。
+构建显式依赖本应用源码、共享 Python 包、根锁文件和 `config/` 的两份公开身份文件（控制台 Access 策略）。Python 3.14.7、依赖版本与 lock 统一在
 仓库根；成员保持各自依赖职责。CI 位于根 `.github/workflows/`，不添加此目录下的嵌套 Actions。引擎接口保留锁定的外部
 `ziyixi-protos==0.1.0.dev7` 依赖；共享 proto 迁移须另行设计，不顺带替换。owner 只读接口 `newsletter.ui.v1` 使用根 proto
 生成的 Python 代码（[控制台](docs/console.md)）。
@@ -21,7 +21,7 @@
 代替测试。测试默认禁止网络，使用合成 fixture；记录检查与生产验收的区别。
 不得把 secret、个人生成内容或生产路径放日志/报告。依赖、源码和运行状态不混用。
 
-从本目录运行 `make check`、`make smoke`、`make smoke-codex`、`make build`，
-再执行 `uv run --locked python scripts/smoke_wheel.py`。
+完整检查在仓库根运行 `bazel test //newsletter:check`，包括 Ruff、mypy、结构检查、合成 HTTP/客户端 smoke 和离线安装包验收。
+本目录 Makefile 的检查、构建、格式化和 smoke 命令都是同一 Bazel 入口的薄别名；`make setup` 和本地服务 CLI 仍可用 uv。
 容器验收用 `scripts/smoke_image.py`，不手工在 VPS 构建。来源记录见
 [import-source.md](docs/import-source.md)。

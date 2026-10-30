@@ -1,297 +1,77 @@
 # Handoff
 
-Updated 2026-10-30 UTC. Current work describes in-flight and unreleased work in detail; released work moves to a
-dated record under `docs/history/` and is linked here, without run-ID ledgers. Rules are in [AGENTS](AGENTS.md);
-entry points in [README](README.md). Never put private content, credentials or raw production output here.
+Updated 2026-10-30 UTC. Read [AGENTS](AGENTS.md), then the target application's README/rules.
+Current work is unreleased; historical waiting lists are not instructions. Documentation entrypoints are in
+[docs/README](docs/README.md).
 
-Archives (their waiting lists are not instructions): [October 29](docs/history/handoff-2026-10-29.md) (business
-prompt clarity), [October 28](docs/history/handoff-2026-10-28.md) (the review
-cleanup wave, the fixed K3s node address and DNS, the backups wave, Fleet node telemetry, the Newsletter researcher,
-Brief's retirement),
-[October 27](docs/history/handoff-2026-10-27.md) (Model Router
-cutover, Codex gateway and 6.1 runtime, shared workspaces, Mailsort providers and intake, Tasks planning, GTD and
-Goals, Mail Hero backup writes, the configuration-drift fix, Watch evidence),
-[October 22](docs/history/handoff-2026-10-22.md) (Tasks UI refinement and approved interface),
-[October 21](docs/history/handoff-2026-10-21.md) (the Private MCP, Boundary B, done steps in Plan, the Tasks PWA
-features, the FlowDay retirement), [October 20](docs/history/handoff-2026-10-20.md),
-[October 19](docs/history/handoff-2026-10-19.md), [October 18](docs/history/handoff-2026-10-18.md),
-[October 11](docs/history/handoff-2026-10-11.md).
+## Current work: Bazel migration
 
-## Current work
+Branch `codex/bazel-app-entrypoints`, [PR #10](https://github.com/ziyixi/todofy/pull/10).
+The owner requested the entire monorepo's generation, builds, tests and packaging in Bazel, affected-target CI,
+removal of superseded build/check code, and a concise audit of every doc/note/README. Application root BUILD files
+must expose their complete final artifact. Do not narrow completion to the already released foundation.
 
-### Bazel migration (`codex/bazel-app-entrypoints`, in progress)
+Implemented:
 
-Owner approved the staged migration of all builds, tests, generation and packaging to Bazel. Actions retains
-credentials, production publication, deployment ordering and reconcile. Existing pnpm/uv locks remain the application
-dependency source; third-party source is downloaded with pinned integrity rather than vendored into this repository.
+- App root artifacts, public `:check`/`:config`/`:release` facades, internal import-based libraries, scoped proto
+  generation, fixed toolchains and imported existing pnpm/uv/Go locks. No vendored third-party source or paid cache.
+- One native Target Determinator comparison for affected test leaves and actual release inputs. Main publication
+  remains cumulative after failed releases; independent units, image pairing, explicit resume and same-SHA artifact
+  reuse are retained. Actions keeps credentials, per-app locks, dependency ordering and provider verification.
+- Compiled Worker upload with no publisher rebuild; exact OCI/ZIP promotion; explicit prepared-content Website build;
+  Bazel VPS bootstrap/operator entrypoints. Root CI now has check/artifact matrices and the existing production jobs.
+- Old path classifier, application check Actions, separate validation workflow, duplicate generators, custom pytest
+  shards/merger and Dockerfile build paths are replaced. Final Node/Makefile aliases and documentation are being checked.
 
-- Foundation released as `6368d063`: both branch check workflows and the matching main checks passed; the same
-  main revision's Personal cloud reconcile succeeded. This establishes toolchains, generation and affected checks,
-  not the completed migration.
-- Canonical application roots now expose the same-name release archive, `:check` closure and `:config` inputs.
-  Internal libraries follow imports; CI still selects affected test leaves. Recall keeps independent Worker and
-  extension archives, and the website keeps its content snapshot separate from its relay Worker.
-- Local verification: all 38 proto checks, the 142 original offline Python file targets, the full 37-spec / 158-case
-  Tasks browser suite, 111 other Web unit/type targets, 68 other Worker runtime targets, 14 CPU/teardown targets,
-  18 ESLint targets and 34 original Node tooling test targets passed. The 10 Worker bundle budgets were rerun with
-  their actual CLI assertions and measured output. These local results do not replace the next branch's Linux CI.
-- All three VPS applications build Linux amd64 OCI archives with the original offline probes, content-config
-  validation and exact save/verify promotion contract. Newsletter's healthcheck and the pinned Python Worker SDK
-  are preserved. The image check actions now use the shared Bazel builder; original main publishers remain.
-- Tasks' stamped full archive builds with Worker, UI and migrations. Other Worker archives build from their original
-  configs. Local Wrangler dry-runs accept the precompiled Tasks, Mailsort (including both text modules), Watch and
-  Todofy Python output without recompilation. The new artifact staging tests check identity, exact bytes and config.
-- The website's root build requires a complete prepared snapshot. Missing input fails; an explicit synthetic snapshot
-  builds the static export. Its release staging copies only validated public snapshot/media files, excluding private
-  capture inputs. The new synthetic staging test passed. Production publication is not switched yet.
-- In progress: complete website and extension browser/lint checks, Todofy's real Python workerd coverage, repository
-  audits and root-check discovery. Then replace the old CI checks and connect exact-artifact publication before
-  removing obsolete build/check scripts and documentation.
-- No product behavior, installed extension, model setting, private content, operational switch or credential is
-  changed by the migration. Branch CI must pass before merging the same revision; every cutover also requires
-  matching main publication and Personal cloud reconcile. Do not infer those from local build results.
+Local evidence so far:
 
-### Verify after the October 28 releases (read-only)
+- Proto's generated files, source wheel and Bazel wheel agree; schemas/wire/Python bytes remain unchanged. IDL comment
+  cleanup changes only corresponding generated comments. Real materialization, generation determinism, lint/breaking
+  negative cases and the proto check closure pass.
+- All 38 Python workerd files: 365 cases passed, zero skips. Tasks' 37 browser files/158 cases pass. Other original
+  unit/type/lint/runtime/CPU/bundle-limit checks have run; individual fixture/namespace omissions found by clean/Linux
+  runs were corrected without loosening limits or production types.
+- All 13 Worker application archives build together from a new output base. Three Linux OCI archives pass the original
+  offline probes. Bootstrap outputs match the original renderer byte-for-byte, including the empty gateway case.
+- Native repository/config/pipeline audits pass locally. Real Git/Bazel graph comparisons prove source-only,
+  unconsumed-document and release-input-only selection. Third-party version-change reachability still needs its
+  isolated final check.
 
-The released notes are in the [October 28 archive](docs/history/handoff-2026-10-28.md).
+Still required before completion:
 
-- Newsletter researcher: after the next 07:00 Los Angeles run, the `feeds` node succeeded (or `partial_failure`
-  with per-source codes in its artifact), its log line shows source/ok/failed/seed counts, discovery prompts carry
-  only their own direction's seeds, and new 材料库 rows with 研究员订阅源 attribution appear only for pool
-  candidates. Fix unreachable feed URLs in `newsletter/content-config/researcher.yaml`.
-- Backups: Personal MCP's, Watch's and the links app's first backups (`latest.json` and one
-  `backups/<start>/manifest.json` in each bucket, keys only); Home's tiles show `backup_age_seconds` with no
-  `backup_stale` or `backup_failed`; the links Worker has no schedule and its `LinksBackup` Alarm runs at 05:25 UTC.
-  After a day, each app's next natural run and Workers Free usage.
-- Inventory and drift: with `LinksBackup` recorded and Brief torn down, the next "Infra drift" run, the
-  account-inventory check, the Personal cloud reconcile and Home's 配置漂移 should all be clean.
-- Fleet: the per-workload charts fill in now that the RBAC rule is applied, and the PID 1 `net/dev` mount keeps
-  reporting the host's interfaces.
+1. Finish the current helper/script/container-test slice and all-file doc audit; verify relative links and current
+   commands. Keep runtime prompts, frozen fixtures, data migration bytes and recovery contracts intact.
+2. Run the complete final native Linux CI for the final branch SHA; fix genuine failures. Inspect the resulting graph
+   and artifact identities. Local tests do not substitute for this run.
+3. Merge the same green source, wait for every selected main publication and matching Personal cloud reconcile,
+   and verify resolved drift. Do not claim the migration deployed from a branch build or old main run.
+4. Archive completed migration detail only after the above. The goal remains active until the full scope is verified.
 
-### Newsletter selection budget (released `8ceaeca8`; the bundle is published)
-
-The 2026-10-28 07:00 Los Angeles run sent nothing. Selection, which cannot continue on error, reached its 150 second
-content-config budget while its Router turn was still running (the day before it took about 58 seconds on the same
-input size); nodes are never re-attempted, so no plan froze and the run stopped at `no_publishable_content`.
-
-- Done: selection `timeout_seconds` 150 → 420 in `newsletter/content-config/workflow.yaml`, a test pinning it, and
-  the production node budgets in `newsletter/docs/workflow.md`. The packaged `daily.yaml` baseline is unchanged.
-- Local checks passed: Newsletter lock, lint, format, structure, mypy and the full pytest suite; the content-config
-  bundle builds and validates offline.
-- Expected selection (`ci_changes.py`): Newsletter and Platform checks and Contracts; a non-Markdown file under
-  `newsletter/content-config/` also selects the Newsletter image, Platform publish and Platform deploy (the VPS
-  release when enabled), although only configuration changed.
-
-Release, in order, finished before 13:45 UTC on a run day (a Platform release suspends `newsletter-daily` and closes
-admission until it reports ready):
-
-1. Push, full green `CI gate`, fast-forward `main`. "CI and deploy" validates the bundle in the candidate image and
-   releases it; the Platform release must reach ready with `newsletter-daily` unsuspended.
-2. The "Newsletter Content Config" push run defers (the commit also changes a test and docs); its `workflow_run` after
-   that CI publishes the bundle to `published`, and config-sync activates it within 900 seconds unless a local pin
-   holds the old one. Each run freezes the active bundle when it starts.
-3. Verify read-only: config-sync status shows this revision active and no pin; the next run's selection succeeds and
-   its issue is accepted. Then move this section to the dated history.
-
-### Newsletter console (slices S1-S7, all released 2026-10-29)
-
-Owner request 2026-10-29: a self-consistent Newsletter dashboard with each issue's full content, sources, model calls,
-runs and failures, deliveries, config revision and Notion status, where Notion is shown only as an async backup of
-Newsletter's own SQLite. Design: a check-only Worker app `newsletter-console/` on its own Access host reads a new
-read-only listener inside the Newsletter process through the platform tunnel path `/api/newsletter/v1/*`. The owner's
-Access application covers both destinations, so the Worker forwards the owner's own token and no new secret, service
-token or owner step exists; the Worker's owner identity is Home's (`identity_from = "home"`).
-
-- S2 (`newsletter.ui.v1` in `proto/newsletter/ui/v1/`) and S3 (console scaffold, `owner["newsletter-console"]` with
-  the second destination, the tunnel path rule, `PATH_RULES` in `reconcile_policy.py`, CI wiring, `identity_from`)
-  land here. Expected selection: every check, `dashboard_deploy` only; the console stays check-only.
-- "Infra apply" ran on 2026-10-29 with `create=1,outputs=1,update=1@ab3d6240ab01`; its verify plan was 52 no-op with
-  no output change. An anonymous request to the runtime path is redirected to Access, and the Codex path still
-  answers anonymous requests with 403.
-- S1 (engine observability gaps: per-call times, purpose, failure and Router request names; per-source feed counts;
-  Notion progress time) released on 2026-10-29 after that day's run had finished; it releases the Newsletter and
-  Platform images through the paired VPS release. Old usage rows keep their totals; the email bytes are unchanged.
-  Verify after the next run: its collection and usage rows carry the new keys, and Notion rows get `progress_at`.
-- S4 (Newsletter's read-only console listener on loopback 18767, which verifies the owner's Access token for the
-  console AUD baked into the image), S5 (the console Worker, which forwards that token, plus 概览 and 运行), S6 (期刊
-  with the full issue, 来源, 模型 and 备份) and the first-deploy commit (the AUD and application id read from the
-  Access API) land together, after that day's run had finished. This releases Newsletter, Platform, the Codex
-  gateway and Todofy (generated Python), Home's desired state and the console's first deploy.
-- Verify: the same-SHA Personal cloud reconcile and "Infra drift" are green; the release's Access probes block
-  anonymous requests on `news.ziyixi.science` and the runtime path; the owner's first visit loads 概览. That visit
-  is the first real test that Access accepts the forwarded `cf-access-token` for the second destination: if
-  Newsletter answers a redirect or 4xx (the Worker logs `upstream:"3xx"` or `"4xx"`), send the token as the
-  `CF_Authorization` cookie instead.
-- S7 aligns Home and Fleet: Home's engine row 「Newsletter 引擎」 and Newsletter tile open the console, the 每日
-  Newsletter flow has no 「写入 Notion」 stage (Notion is counted as a backup), and Fleet's Newsletter section links
-  the console through its new `NEWSLETTER_URL` var. It deploys Home and Fleet only. Home's 配置漂移 shows Fleet's new
-  var until the bounded Cloudflare drift check, advanced by its cron or Home's existing refresh button, reads it.
-- Verify: the same-SHA Personal cloud reconcile is green; Home shows the tile and the row; Fleet links the console.
-  This section moves to the dated history once the owner's first console visit loads 概览.
-
-### Architecture review follow-ups (2026-10-29)
-
-The owner asked whether shared microservices could be extracted from the Workers. A read-only review found none
-worth extracting: every external credential has one holder, and the existing shared services (Model Router, Tasks'
-TaskInbox, Fleet's report ingest) each own a scarce resource or ledger with several callers. The complexity sits in
-build-time registration and cloned release recipes, so the approved follow-ups subtract there:
-
-- Released with this merge (no app deploys): Tasks, Watch and Personal MCP now refuse to ship past a selected
-  upstream deploy that failed (the SELECTED_ONLY form Router edges use); `finalize.py` APPS, `DEPLOY_JOBS`, the
-  wrapper map and Home's deploy-order test derive from configuration (the rebuild's finalize step listed 8 of 11
-  Durable Object apps); `worker-release.yml` records Tasks' environment URL; docs no longer misdescribe the links
-  backup schedule, the website sync triggers, Home's outbound bound or the infra object count.
-- Released with the `claude/deploy-core` merge (deploys those seven Workers once, with byte-identical secrets
-  files, wrangler arguments and Home desired state): one shared Worker deploy-vars core in
-  `tools/cloud-config/worker-deploy.mjs` for links, watch, recall, mailsort, fleet, tasks and personal-mcp; each
-  wrapper now declares its differences as data. Model Router, Mail Hero, Home, Todofy and the relay keep their own
-  wrappers for now; the console migrates after its slices land. A core change is proven at each app's next release.
-- Released with the `claude/ci-base-ancestry` merge (one website rebuild, same content): a push to main now diffs
-  from the newest green ancestor through every parent (`git rev-list --date-order <push>^@`), not the first-parent
-  line. Landings that merged main into the branch and fast-forwarded main had sent the base back to the branch's
-  old base, so `ee7c0e2f` and `26dab066` redeployed nine Workers and the paired VPS release for small changes.
-  The website release's green-commit pick had the same flaw when main's head was not green yet. Land with main as
-  the first parent anyway (`git merge --no-ff <branch>` on top of origin/main), which keeps `--first-parent` logs
-  readable. Verify: the next main push's Changes job prints the previous main head as its base.
-
-### CI flakes (2026-10-29)
-
-The owner asked why CI so often showed "RPC" failures. A census of 316 ci.yml runs from 10-19 to 10-29, counting
-the first attempts of reruns, found these causes, all now fixed at their root:
-
-- "Network connection lost" in Todofy runtime: `wrangler dev`'s ProxyWorker reuses a keep-alive connection that
-  workerd drops after about 5 s idle, and it resends only GET and HEAD, so a POST after a pause failed before reaching
-  the Worker. The harness now refreshes the connection with a GET before any other method after 1 s idle
-  (`9648a9fe`, `todofy/docs/dev-notes.md`); Mailsort's smoke refusal no longer sends a body; codex-gateway's cleanup
-  test treats a process reaped mid-read as gone. Proof: 0 of 216 delayed POSTs failed locally (18 before), and 9 of
-  9 Linux runtime shards passed with no proxy error.
-- CPU-budget tests whose cold first run sat at the bound: TaskInbox's create hashed every request twice and
-  double-encoded its subtasks (`4d18f591`, CI first run 7.1, was 8.5-10.5); Tasks' goal catalog now warms at
-  startup; the console answers Newsletter's bytes without decoding and re-encoding them, and its 2 MiB cap is a
-  median of three isolates. No bound changed.
-- Recall's WebKit install timed out on slow Azure apt mirrors (6 times): apt's `.deb` files are now cached.
-- Cloudflare's asset upload session answered `10013` at deploy (3 times, before anything reached production):
-  `tools/cloud-release/assets-session-retry.sh` repeats that one deploy once after 60 s, for that code only.
-- Verify: Recall's first run on main saves the `.deb` set and the next shows "Need to get 0 B"; the Tasks and
-  console CPU lines stay below their bounds; the census signatures stay absent.
-- Todofy's `test_reports_alarm` and `test_backup` lost a SQLite lock race: `wrangler d1 execute` and `wrangler r2
-  object` ran as a second workerd beside the test server, and local D1 writes its file on every query, so either
-  side could fail with "internal error" (the alarm then retried its report 10 minutes later, past the 30 s wait).
-  `Worker.d1()` now runs SQL in the server through wrangler dev's Local Explorer, and the backup test reads its
-  bucket with the server stopped. Production is unaffected: a transient D1 error delays a report tick, never drops it.
-- Tasks' sidebar drag tests failed when a project landed in the sidebar's bottom fifth: dnd-kit auto-scrolled the
-  sidebar away under the pointer, and a target that scrolled under a still pointer never lit. That was a real UI bug
-  too. The sidebar now holds still during a task drag (wheel-scroll to reach a project below the fold; the task list
-  keeps its auto-scroll), targets are re-detected when measured, and the test helper centres its targets.
+No installed Chrome/phone extension, private content, model selection, budget, operational switch or credential is
+changed by this migration. Use synthetic fixtures; do not manually recompute business content for acceptance.
 
 ## Latest verified release
 
-`84e64144`, Mailsort's one-time recovery of mail stranded by the optional-accounting failure:
-[main release](https://github.com/ziyixi/todofy/actions/runs/40986530938). Its matching Personal cloud reconcile
-passed with resolved drift, resource registration and VPS gates. The existing Alarm classified all 12 selected
-recent Inbox messages; Gmail P-label membership and the eight unchanged unread flags were checked by message ID.
-The queue is empty and both real model batches have cost estimates.
-[Acceptance](mailsort/docs/verification.md#optional-accounting-and-recovery-2026-10-29).
-Per-app identities are in GitHub production Deployments.
+Bazel foundation `6368d063`: both check workflows and the matching main Personal cloud reconcile succeeded.
+This verifies the foundation, not the unreleased full migration above. Earlier business releases and their dated
+acceptance are in [October 29](docs/history/handoff-2026-10-29.md) and [history](docs/history.md).
 
-## Verify after deploy
+## Separate acceptance and follow-ups
 
-- Model Router's daily 04:47 UTC backup: the next natural run. A fresh-account cloud restore is a separate exercise
-  ([backup](model-router/docs/backup.md)).
-- Mail Hero's daily 04:17 UTC backup after the write reduction (`d1a6e526`): the next natural run and its daily
-  usage ([backup write verification](mail-hero/docs/backup-write-verification.md)).
-- Sunday backups: Tasks' weekly backup now holding the GTD and Goals tables, and Todofy's first Sunday backup after
-  Boundary B and the FlowDay release (its health page shows it complete with no `tasks` section).
-- Merged ahead of the Router releases without a publication record of their own: Tasks' Sunday-first week and shared
-  estimate editing (`a048ba34` to `f5cd8bbe`). Confirm the `deploy:tasks` Deployment is at or after those commits and
-  check the behaviour read-only. Mailsort's recent read Inbox intake has since been observed in the recovery above.
-- Native hourly Work review: catalog refresh and Work event continuation passed in the owner's existing Dot
-  ([evidence](docs/work-memory-verification.md)); the first natural run of the
-  saved shared review is unverified (the host's next-run field is null). Do not substitute a Codex heartbeat, an
-  accepted delivery count or a local fake callback for client execution. Existing user Watches and the old stopped
-  automations stay as they are.
-- Recall: the first production file removal after seven days and one Dropbox cold read, recording metadata only.
-  The phone still reports build `337`; `451` needs phone acceptance, and the cause of `page_probe_invalid_reply_type`
-  is not established ([verification](recall/docs/verification.md#phone-evidence)). The cost estimates in
-  [design §5.3](recall/docs/design.md#53-budgets) predate minute snapshots with screenshots.
-- Links and the website relay have not released through their composites since `dd7a6e8` removed the direct `vars`
-  expressions; check each one's first natural release (a preflight or no-op does not load the composite).
-- Not rechecked since: Watch's first real changed-watch digest and Newsletter's natural provider/send acceptance.
-  Check fresh status before treating an old waiting item as open; do not restart Compose, replay a send or request
-  credentials solely from an archived note.
-- Bootstrap and safe drift repair are verified in the existing environment. Empty-account / clean-VPS setup, DNS and
-  host-entry recovery and full historical data recovery remain separate exercises; follow [rebuild](docs/rebuild.md)
-  and [its verification table](docs/rebuild-verification.md).
-- The two scheduler observations the owner stopped on October 17 (email models, website daily sync) stay stopped
-  ([October 18 archive](docs/history/handoff-2026-10-18.md#stopped-scheduler-observations)).
-
-## Code follow-ups
-
-- Mailsort's `AI` binding removal was confirmed by provider readback ([verification](mailsort/docs/verification.md#claude-provider)):
-  drop `AI` from Mailsort's `RETIRED_BINDINGS` entry in `tools/cloud-release/control.py` in a push that deploys
-  Mailsort anyway.
-- Boundary B ([archive](docs/history/handoff-2026-10-21.md#boundary-b-released-claudeboundary-b)): once Todofy's
-  Sunday backup above is confirmed, in a push that deploys them anyway, drop the completed `TASKS` name from Todofy's
-  `RETIRED_BINDINGS` entry in `tools/cloud-release/control.py` and reword `proto/buf.yaml`'s header comment, which
-  still names the retired `todofy/taskintent/v1` (a change to that file alone deploys every app and the VPS).
-
-## Owner items
-
-- Install Recall Orion `2026.1015.451` on the phone; renewed phone acceptance follows it.
-- Read-only checks for Boundary B: Tasks › Mail lists mail and its categories; Plan's weekly review shows the
-  pending-mail count; Tasks › GTD shows the copied trend; Mail Hero's 提醒 card names Home's digest task.
-- Remove the installed FlowDay PWA from each device (optionally, with the owner's OK, its stopped Compose service and
-  tunnel rule in `self-host-on-vultr`). By hand on the Mac: the Tasks PWA's Dock menu, a `?task=` link opening in the
-  app window, the title-bar toggle, the mini timer and a real lock with Keep and Discard.
-- Remove Todoist Plus from `chrome://extensions` (its variable, releases and merged branches are gone).
-- Decided 2026-10-15, do not re-ask: Recall keeps its seven-day cloud file window, and native weekly rollover stays
-  enabled; a commitment for an ended week reads as weekly in Tasks ([Tasks design](tasks/docs/design.md)).
-- Home host, whenever convenient (it runs headless; no login screen):
-  `sudo systemctl set-default multi-user.target`, `sudo systemctl stop gdm`, `sudo systemctl restart polkit`. Then
-  Fleet's memory reading and swap use should drop.
-- Brief is retired (2026-10-28); Newsletter is the one daily briefing. If the private bootstrap input still holds
-  `worker_secrets.brief` or `BRIEF_*` entries, delete them before the next bootstrap (a leftover
-  `worker_secrets.brief` makes it fail); `private_input.py` keeps ignoring an old `BRIEF_CSRF_SIGNING_KEY`.
+- Natural Newsletter/send/researcher runs, daily/weekly backup observations, Recall cold archive reads and a complete
+  clean-account/clean-VPS historical restore remain distinct from this build migration. Follow their app verification
+  pages and [rebuild verification](docs/rebuild-verification.md); do not infer them from uploads or replay real work.
+- Recall phone acceptance is paused by the owner's choice. Existing stopped scheduler observations remain stopped.
+  Do not ask for device reinstallation or restart retired Compose services for this task.
+- Model Router's Ops implementation currently reports maintenance in `modes` while deriving health from request/backup
+  signals; that differs from the general ops-v1 maintenance/down rule. Documentation records the difference. Any
+  behavior correction is a separate change, not a hidden part of build/doc cleanup.
 
 ## Operating boundaries
 
-- Workers release independently from committed Wrangler configuration. `config/cloud.toml` is the public deployment
-  profile; generated `config/resources.toml` records resource identities. Use the configuration/bootstrap tools and
-  `infra/` for their declared resources. Preserve root mail records and unrelated resources.
-- GitHub Actions deploys the Newsletter/Platform images by digest through the typed daemon API; it holds no SSH key
-  or Kubernetes credential. Legacy Compose services stay stopped with their data; Newsletter remains an independent
-  VPS service until the owner retires it.
-- Mail Hero backs up natively through its DO Alarm and private R2 ([native backup](mail-hero/docs/native-backup.md)).
-  Tasks backs itself up weekly into `tasks-backups` ([Tasks backup](tasks/docs/backup.md)), and Todofy backs up only
-  its own D1 (both from release 2 of Boundary B). Model Router backs up request metadata and retained bodies daily
-  into its private bucket ([backup](model-router/docs/backup.md)). With the backups wave, Mailsort, Personal MCP, Watch
-  and the links app each back up daily into their own private bucket (see Current work).
-- Provider keys are Router secrets and never pass through GitHub; spending is capped at the provider. Application
-  budgets stay as they are; Workers Free remains in force.
-- Keep Home's persistent alert dismissal. Historical unknown business outcomes are not automatic replay permission;
-  follow current [dashboard-state semantics](docs/dashboard-state.md).
+The root [architecture](docs/architecture.md), [CI/CD](docs/ci-cd.md), [Bazel](docs/bazel.md), [resource catalog](docs/service-catalog.md)
+and [rebuild](docs/rebuild.md) guides are current entrypoints. Application runbooks own their specific recovery and
+runtime semantics. Historical releases are indexed in [history](docs/history.md).
 
-## Dated compatibility and retained data
-
-The authoritative [compatibility table](docs/history.md#owner-api-compatibility) defines the old-client responses:
-
-| Surface | Earliest removal |
-| --- | --- |
-| Mail Hero legacy owner routes (and `GET /api/csrf`) | 2026-11-01 |
-| Home and Todofy legacy owner routes (and their `GET /api/csrf`) | 2026-11-02 |
-| Mailsort v1 owner routes | 2026-11-10 |
-
-Keep Todofy core's `owner_api` RPC until the corresponding gateway compatibility window is complete. Dates permit a
-reviewed follow-up; they do not schedule deletion or authorise changing frozen webhook bytes or migrations. Todofy's
-retained host cutover snapshot stays through **2026-10-29**; deletion is a separate action
-([verification](todofy/docs/verification.md)).
-
-## Working and maintenance entry points
-
-- [CI/CD](docs/ci-cd.md#where-to-change-the-pipeline): checks, release selection and failure navigation. Push a
-  branch, wait for the complete gate, then promote the same green SHA. A rebase or new commits need new checks.
-- [Rebuild](docs/rebuild.md), [Cloudflare bootstrap](tools/cloud-bootstrap/README.md),
-  [VPS bootstrap/recovery](tools/vps-bootstrap/README.md), [infra](infra/README.md): current operating commands.
-- [Documentation guide](docs/README.md), [architecture](docs/architecture.md), [service catalog](docs/service-catalog.md),
-  [proto](proto/README.md), [contracts](contracts/README.md): canonical boundaries and application entry points.
-- [History](docs/history.md) and the archived handoffs above: earlier releases and evidence.
+Keep the dated [old-client compatibility windows](docs/history.md#owner-api-compatibility), frozen webhook/schema bytes,
+resource identities and database migrations. Dates do not authorize automatic data deletion or early route removal.

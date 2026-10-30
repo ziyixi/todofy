@@ -464,6 +464,7 @@ proto_vitest_test(
         "//mailsort/docs:backup",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/backup.test.ts"],
     deps = [
         ":backup",
@@ -484,6 +485,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/classification-model.test.ts"],
     deps = [
         ":module_group_17",
@@ -501,6 +503,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/gmail-guard.test.ts"],
     deps = [":gmail"],
 )
@@ -515,6 +518,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/gmail-priority.test.ts"],
     deps = [":gmail"],
 )
@@ -529,6 +533,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/gmail-recent.test.ts"],
     deps = [":gmail"],
 )
@@ -543,6 +548,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/gmail-unread.test.ts"],
     deps = [":gmail"],
 )
@@ -565,6 +571,7 @@ proto_vitest_test(
         "//contracts:ops-v1/ops-v1.schema.json_data",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/ops-golden.test.ts"],
     deps = [
         ":module_group_17",
@@ -584,6 +591,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/read.test.ts"],
     deps = [
         ":dmarc",
@@ -607,6 +615,7 @@ proto_vitest_test(
         ":replay_test_model_router_client_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/replay.test.ts"],
     deps = [
         ":limits",
@@ -632,6 +641,7 @@ proto_vitest_test(
         ":settings_test_model_router_client_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/settings.test.ts"],
     deps = [
         ":module_group_17",
@@ -647,6 +657,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/store.test.ts"],
     deps = [
         ":flow",
@@ -778,6 +789,7 @@ workerd_vitest_test(
         "test/fakes/fake-gmail.ts",
         "test/fakes/fixtures.ts",
         "test/fakes/upstream.ts",
+        ":model_router_client_types_link",
         ":test_support",
     ],
     runner = vitest.vitest_test,
@@ -799,6 +811,7 @@ workerd_vitest_test(
         "test/fakes/fake-gmail.ts",
         "test/fakes/sql.ts",
         "test/fakes/upstream.ts",
+        ":model_router_client_types_link",
         ":test_support",
     ],
     runner = vitest.vitest_test,
@@ -821,6 +834,7 @@ workerd_vitest_test(
         "test/fakes/fixtures.ts",
         "test/fakes/table.ts",
         "test/fakes/upstream.ts",
+        ":model_router_client_types_link",
         ":test_support",
         ":wrangler",
         "//mailsort:config",
@@ -845,6 +859,7 @@ workerd_vitest_test(
     data = [
         "test/fakes/fake-gmail.ts",
         "test/fakes/upstream.ts",
+        ":model_router_client_types_link",
         ":test_support",
     ],
     runner = vitest.vitest_test,
@@ -867,6 +882,7 @@ workerd_vitest_test(
         "test/fakes/fixtures.ts",
         "test/fakes/table.ts",
         "test/fakes/upstream.ts",
+        ":model_router_client_types_link",
         ":test_support",
     ],
     runner = vitest.vitest_test,
@@ -888,6 +904,7 @@ workerd_vitest_test(
         "test/fakes/fixtures.ts",
         "test/fakes/table.ts",
         "test/fakes/upstream.ts",
+        ":model_router_client_types_link",
         ":test_support",
     ],
     runner = vitest.vitest_test,
@@ -910,6 +927,7 @@ workerd_vitest_test(
         "test/fakes/fixtures.ts",
         "test/fakes/upstream.ts",
         "test/jwt.ts",
+        ":model_router_client_types_link",
         ":test_support",
         "//tools/workerd-cpu:lib",
     ],
@@ -937,6 +955,7 @@ workerd_vitest_test(
         "test/fakes/fixtures.ts",
         "test/fakes/table.ts",
         "test/fakes/upstream.ts",
+        ":model_router_client_types_link",
         ":test_support",
     ],
     runner = vitest.vitest_test,
@@ -958,6 +977,7 @@ workerd_vitest_test(
         "test/fakes/fixtures.ts",
         "test/fakes/table.ts",
         "test/fakes/upstream.ts",
+        ":model_router_client_types_link",
         ":test_support",
     ],
     runner = vitest.vitest_test,
@@ -980,6 +1000,7 @@ workerd_vitest_test(
         "test/fakes/fixtures.ts",
         "test/fakes/table.ts",
         "test/fakes/upstream.ts",
+        ":model_router_client_types_link",
         ":test_support",
     ],
     runner = vitest.vitest_test,
@@ -1001,6 +1022,7 @@ workerd_vitest_test(
         "test/fakes/fixtures.ts",
         "test/fakes/table.ts",
         "test/fakes/upstream.ts",
+        ":model_router_client_types_link",
         ":test_support",
     ],
     runner = vitest.vitest_test,
@@ -1022,6 +1044,7 @@ workerd_vitest_test(
         "test/fakes/fixtures.ts",
         "test/fakes/table.ts",
         "test/fakes/upstream.ts",
+        ":model_router_client_types_link",
         ":test_support",
     ],
     runner = vitest.vitest_test,
@@ -1041,6 +1064,7 @@ workerd_vitest_test(
     data = [
         "test/fakes/fake-gmail.ts",
         "test/fakes/upstream.ts",
+        ":model_router_client_types_link",
         ":test_support",
     ],
     runner = vitest.vitest_test,
@@ -1063,6 +1087,7 @@ workerd_vitest_test(
         "test/fakes/fixtures.ts",
         "test/fakes/table.ts",
         "test/fakes/upstream.ts",
+        ":model_router_client_types_link",
         ":test_support",
     ],
     runner = vitest.vitest_test,
@@ -1084,6 +1109,7 @@ workerd_vitest_test(
         "test/fakes/fixtures.ts",
         "test/fakes/table.ts",
         "test/fakes/upstream.ts",
+        ":model_router_client_types_link",
         ":test_support",
     ],
     runner = vitest.vitest_test,
@@ -1105,6 +1131,7 @@ workerd_vitest_test(
         "test/fakes/fixtures.ts",
         "test/fakes/table.ts",
         "test/fakes/upstream.ts",
+        ":model_router_client_types_link",
         ":test_support",
     ],
     runner = vitest.vitest_test,
@@ -1346,4 +1373,23 @@ filegroup(
         allow_empty = True,
     ),
     visibility = ["//visibility:public"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)
+
+test_suite(
+    name = "typecheck_tests",
+    tests = [
+        ":runtime_types_typecheck_test",
+        ":smoke_types_typecheck_test",
+        ":types_typecheck_test",
+    ],
+)
+
+test_suite(
+    name = "runtime_tests",
+    tests = [":runtime_" + file.removeprefix("test/runtime/").removesuffix(".test.ts") + "_test" for file in glob(["test/runtime/*.test.ts"])],
 )

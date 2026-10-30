@@ -32,3 +32,13 @@ filegroup(
     ),
     visibility = ["//visibility:public"],
 )
+
+filegroup(
+    name = "python_lint_inputs",
+    srcs = ["smoke_systemd.py"],
+)
+
+filegroup(
+    name = "probe_sources",
+    srcs = ["smoke_systemd.py"],
+)

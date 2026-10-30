@@ -37,7 +37,8 @@ PRIVATE_NAMES = (
 )
 IMAGE_FORMAT = (
     '{"id":{{json .Id}},"os":{{json .Os}},'
-    '"architecture":{{json .Architecture}},"user":{{json .Config.User}}}'
+    '"architecture":{{json .Architecture}},"user":{{json .Config.User}},'
+    '"healthcheck":{{json .Config.Healthcheck}}}'
 )
 
 
@@ -108,11 +109,19 @@ def verify(
         )
     if metadata["user"].split(":", 1)[0] in {"", "0", "root"}:
         raise ValueError("The image must configure a nonroot user")
+    expected_healthcheck = json.loads(
+        (root / "container-healthcheck.json").read_text()
+    )
+    if metadata.get("healthcheck") != expected_healthcheck:
+        raise ValueError(
+            "The image must preserve the configured HTTP HEALTHCHECK"
+        )
     resources = tomllib.loads(
         (root.parent / "config" / "resources.toml").read_text()
     )
     payload = {
         "source_hashes": source_hashes(root),
+        "python_version": (root.parent / ".python-version").read_text().strip(),
         "startup_source": (
             root / "scripts" / "smoke_codex_startup.py"
         ).read_text(),

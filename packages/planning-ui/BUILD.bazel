@@ -824,6 +824,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/add-step.test.tsx"],
     deps = [
         ":App",
@@ -848,6 +849,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/announce.test.tsx"],
     deps = [":announce"],
 )
@@ -867,6 +869,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/api-dependencies.test.ts"],
     deps = [
         ":api",
@@ -891,6 +894,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/api-planning.test.ts"],
     deps = [
         ":api",
@@ -916,6 +920,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/api.test.ts"],
     deps = [
         ":api",
@@ -939,6 +944,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/background-reads.test.tsx"],
     deps = [
         ":App",
@@ -965,6 +971,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/bets.test.ts"],
     deps = [
         ":api",
@@ -992,6 +999,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/components.test.tsx"],
     deps = [
         ":App",
@@ -1018,6 +1026,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/deadlines-ui.test.tsx"],
     deps = [
         ":App",
@@ -1045,6 +1054,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/deadlines.test.ts"],
     deps = [
         ":domain",
@@ -1068,6 +1078,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/dependencies-ui.test.tsx"],
     deps = [
         ":App",
@@ -1094,6 +1105,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/dependencies.test.ts"],
     deps = [
         ":bets",
@@ -1119,6 +1131,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/domain.test.ts"],
     deps = [
         ":domain",
@@ -1141,6 +1154,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/drag-announcements.test.ts"],
     deps = [
         ":FocusView",
@@ -1164,6 +1178,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/focus-entries.test.tsx"],
     deps = [
         ":FocusEntries",
@@ -1190,6 +1205,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/focus.test.tsx"],
     deps = [
         ":App",
@@ -1216,6 +1232,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/full-title.test.tsx"],
     deps = [":FullTitle"],
 )
@@ -1235,6 +1252,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/host.test.tsx"],
     deps = [
         ":App",
@@ -1260,6 +1278,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/idle-pause-ui.test.tsx"],
     deps = [
         ":App",
@@ -1282,6 +1301,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/idle-pause.test.ts"],
     deps = [":idle-pause"],
 )
@@ -1300,6 +1320,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/mail.test.ts"],
     deps = [":mail"],
 )
@@ -1318,6 +1339,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/mini-timer.test.tsx"],
     deps = [
         ":App",
@@ -1340,6 +1362,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/native-api.test.ts"],
     deps = [
         ":api",
@@ -1362,6 +1385,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/native-order.test.ts"],
     deps = [
         ":model",
@@ -1384,6 +1408,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/native-planning.test.tsx"],
     deps = [
         ":TaskEditor",
@@ -1416,6 +1441,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/native-timer.test.tsx"],
     deps = [
         ":App",
@@ -1439,6 +1465,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/optimistic.test.tsx"],
     deps = [
         ":App",
@@ -1464,6 +1491,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/plan-updates.test.ts"],
     deps = [
         ":bets",
@@ -1487,6 +1515,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/plan-view-state.test.ts"],
     deps = [":plan-view-state"],
 )
@@ -1506,6 +1535,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/plan-visibility.test.tsx"],
     deps = [
         ":App",
@@ -1534,6 +1564,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/planner.test.tsx"],
     deps = [
         ":PlanView",
@@ -1560,6 +1591,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/planning-outcomes.test.ts"],
     deps = [
         ":model",
@@ -1582,6 +1614,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/polish.test.tsx"],
     deps = [
         ":FocusView",
@@ -1610,6 +1643,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/quick.test.tsx"],
     deps = [
         ":FocusView",
@@ -1638,6 +1672,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/render-cost.test.tsx"],
     deps = [
         ":App",
@@ -1669,6 +1704,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/review-lanes.test.ts"],
     deps = [
         ":domain",
@@ -1696,6 +1732,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/row-drag.test.ts"],
     deps = [":row-drag"],
 )
@@ -1715,6 +1752,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/step-editor.test.tsx"],
     deps = [
         ":App",
@@ -1740,6 +1778,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/weekly-goals.test.tsx"],
     deps = [
         ":App",
@@ -1767,6 +1806,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/weekly-review.test.tsx"],
     deps = [
         ":App",
@@ -1932,4 +1972,14 @@ filegroup(
         allow_empty = True,
     ),
     visibility = ["//visibility:public"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)
+
+test_suite(
+    name = "typecheck_tests",
+    tests = [":types_typecheck_test"],
 )

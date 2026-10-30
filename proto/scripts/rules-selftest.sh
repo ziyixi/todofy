@@ -2,14 +2,14 @@
 # Proves that the lint and breaking rules catch what they are meant to (README.md, Rules): each case
 # copies the module to a temporary directory, applies one edit to one .proto file (task_inbox.proto unless
 # the case names another; the edit DELETE removes that file or directory instead), optionally replaces the copy's
-# retired.json, and expects a verdict. "breaking" is what scripts/breaking.sh runs against its base:
+# retired.json, and expects a verdict. "breaking" is what //proto:breaking runs against its base:
 # tools/retired.py (the copy keeps its retired elements deleted; the base without them), then buf breaking (FILE)
 # plus tools/profile_breaking.py (REQUIRED and presence, which the wire profile treats as wire, the value rules and
 # closed enums of common/wire/v1, and the HTTP APIs' bindings, signatures, resources, OUTPUT_ONLY inputs and
 # formats). Exit status 0 only when every verdict is the expected one.
 set -eu
 cd "$(dirname "$0")/.."
-BUF=$(cd node_modules/.bin && pwd)/buf
+BUF=${PROTO_BUF:?run bazel test //proto:rules_selftest}
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/proto-selftest.XXXXXX")
 trap 'rm -rf "$WORK"' EXIT
 INBOX=tasks/inbox/v1/task_inbox.proto
@@ -40,9 +40,9 @@ case_() {
   else
     got=pass
     (cd "$WORK/m" && "$BUF" build --exclude-source-info -o "$WORK/head.json#format=json") >"$WORK/out" 2>&1 || got=fail
-    python3 tools/retired.py "$WORK/m/retired.json" "$WORK/base.json" "$WORK/head.json" "$WORK/against.json" >>"$WORK/out" 2>&1 || got=fail
+    "${PROTO_PYTHON:?}" tools/retired.py "$WORK/m/retired.json" "$WORK/base.json" "$WORK/head.json" "$WORK/against.json" >>"$WORK/out" 2>&1 || got=fail
     (cd "$WORK/m" && "$BUF" breaking --error-format json --against "$WORK/against.json#format=json" >>"$WORK/out" 2>&1) || got=fail
-    python3 tools/profile_breaking.py "$WORK/against.json" "$WORK/head.json" --config buf.yaml >>"$WORK/out" 2>&1 || got=fail
+    "${PROTO_PYTHON:?}" tools/profile_breaking.py "$WORK/against.json" "$WORK/head.json" --config buf.yaml >>"$WORK/out" 2>&1 || got=fail
   fi
   if [ "$got" = "$want" ]; then
     rules=$( (grep -o '"type":"[A-Z_]*"' "$WORK/out" | cut -d'"' -f4; grep -o '^\(PROFILE\|RETIRED\)_[A-Z_]*' "$WORK/out") | sort -u | tr '\n' ' ')

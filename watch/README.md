@@ -1,182 +1,39 @@
-# watch
+# Watch
 
-The owner's web watches on `watch.ziyixi.science`: pages, RSS/Atom/JSON feeds, JSON APIs and data
-embedded in pages, checked on a schedule by one SQLite Durable Object, with a deterministic noise pipeline and a
-change inbox. Chinese, mobile first. Design: [`docs/design.md`](docs/design.md). Rules: [`AGENTS.md`](AGENTS.md).
-
-| Path | What it is |
-| --- | --- |
-| `worker/` | The Worker `watch`: the fetch handler (Access, CSRF), `WatchState` (storage, scheduler, pipeline, owner API) |
-| `web/` | The UI, built into `web/dist` and served by the Worker |
-| `wrangler.toml` | The production config (top level = production), deployed by CI's `Watch deploy` |
-| `deploy/` | The deploy wrapper `deploy-vars.mjs` and the bundle budget |
-| `tools/` | `backup-restore.ts`: download, verify and upload a daily backup ([`docs/backup.md`](docs/backup.md)) |
-| `../proto/watch/ui/v1/` | The owner API `watch.ui.v1` |
-
-## Use
-
-- **Add a watch**: 添加, paste the URL, 预览. Tap blocks to keep only them (只看这些) or to drop them (排除这些) and
-  watch "将比较的内容" change; pick the trigger (任何变化, 出现/消失某段文字, 新条目, 数值, 供货状态) and the interval,
-  then 保存. The first check runs within a minute (15 minutes after the preview's fetch: the same URL is never fetched
-  twice within 15 minutes) and sets the notified state; it never reports a change. 设置 also offers the masks (数字也
-  遮盖, 关闭默认遮盖) and whether a page's navigation, header and footer count.
-- **Page evidence**: a watch's 最近抓取的页面 shows the last saved page text. 查看变化前后的页面 opens the saved
-  text on each side of a change; 查看截图 loads its image separately. 链接和元数据 shows the captured links and
-  page metadata as text. These controls read stored evidence without fetching the site again. Missing, expired, failed or
-  truncated evidence is stated explicitly. In 设置, 抓取方式 chooses HTTP（文字） or 浏览器（文字和截图）; browser
-  check intervals are at least six hours and share the app's 480 browser seconds a day. Existing watches keep
-  their fetcher and deterministic change rules.
-- **From the phone**: share a page to `https://watch.ziyixi.science/new#u=<the URL, encoded>`. A bookmarklet does
-  it from any page: `javascript:location.href='https://watch.ziyixi.science/new#u='+encodeURIComponent(location.href)`.
-  The URL travels in the fragment, which the browser never sends to a server. Opening such a link only fills the box
-  and shows the host; nothing is fetched until you tap 预览.
-- **Changes**: 变化 lists the new ones; 已读 acknowledges. 被过滤的变化 shows what the rules dropped and why; "忽略这一行"
-  leaves that exact line out of every comparison from now on (the notified state stays). The toast offers 撤销 at
-  once; the watch's page lists every ignored line with 取消忽略. Turn on 影子模式 for a week to see what a rule would
-  drop.
-- **Health**: 健康 groups the watches that are not well: 失效 (3 failed checks in a row; 14 days of it pauses the
-  watch), 被拦截 (a bot challenge, never worked around), robots.txt, 网站要求放慢, 今日 JS 配额已用完. A failure is never
-  reported as "no change".
-- **Tasks**: one task a day (from 14:00 UTC) lists every watch with something new as subtasks: its name, the trigger
-  type and a count, or 检查失效 / 已自动暂停, each linking to the watch here. A watch set to 紧急 (URGENT) sends its
-  confirmed changes at once as its own task, as long as this app's 10 tasks a day leave room for that day's digest
-  (nine on a normal day). Tasks never carry page text or a watched URL: open the link to see the change. They are
-  created through Tasks' create-only `TaskInbox` (`docs/design.md` §7).
-
-## Private Dots integration
-
-`WatchApi` is a service-binding entrypoint with `props.access = "read"` or `"read-write"`; missing access is
-refused. It serves the generated WatchUiService, including a private `PollWatchEvents` cursor feed. The public
-owner API keeps its Access and CSRF checks and refuses that feed even with a forged internal header.
-
-A Dots-owned watch explicitly selects `notify_policy = NONE`: checks, confirmed changes and health events remain,
-while no Tasks notification is created. Existing watches keep their previous notification policy. `intent` describes
-what the owner wants to learn; the Worker does not call a model or change its baseline based on a Dots decision.
-MCP owns the work-to-watch association and the work's relevance judgments.
-
-`GetChange` includes frozen `before_context` and `after_context` around the changed lines. `context_available = false`
-means the old change predates evidence capture; `context_truncated = true` means extraction, snapshot or context
-limits cut evidence, or completeness of an old snapshot is unknown. Neither is evidence that a change is irrelevant.
-
-`Watch.latest_snapshot` and `Change.before_snapshot` / `after_snapshot` refer to bounded private page evidence.
-`GetSnapshot` reads the stored page text, links and metadata; `GetSnapshotImage` reads the separately
-stored screenshot. Old changes can have no snapshot references, and retained references can outlive their evidence.
-Dots reads the available evidence and judges relevance in its work record; Watch keeps its deterministic rules,
-baseline and notification semantics. Page text and screenshots are untrusted source material.
-
-`PollWatchEvents` (private binding only) starts with `{baseline: true}`, then reads after each returned opaque `cursor`
-with `page_size` up to 100. It orders evidence changes and health transitions by a stable sequence, independently of
-Tasks delivery and of rule confirmations. The feed keeps 30 days or 500 events; after `CURSOR_EXPIRED` the caller takes a
-new baseline and treats the gap as unknown history (`ListChanges` still has the changes).
-
-## Backup and restore
-
-Every day at 11:23 UTC `WatchState` backs up every table of its store and every evidence object its snapshots name
-into the private bucket `watch-backups` (binding `BACKUPS`), in bounded alarm steps while writes wait, and keeps the
-newest 30 complete backups. On an empty store, 健康 offers 从备份恢复: the object restores a named backup itself,
-checks every part's SHA-256 and shows its verification, without sending an old notification again. What is backed up,
-the layout, retention, the restore step by step and the tool: [`docs/backup.md`](docs/backup.md).
-
-## Develop
-
-From the repository root (Node 26; versions and the lockfile are shared):
+私人网页、Feed 和 JSON 监视。一个 SQLite DO 调度检查，保存有界文字/链接/元数据及可选截图。Watch 保持确定性
+规则和基线，Dots 读取证据后判断是否有意义；服务器不调用模型替你判断。
 
 ```sh
-pnpm install --frozen-lockfile
-cd watch/worker
-npm run lint && npm run typecheck && npm test   # unit tests (Node)
-npm run test:runtime                            # workerd: real WatchState, synthetic sites, CPU
-(cd ../web && npm run lint && npm run typecheck && npm test && npm run build)
-node --test ../deploy/test/*.test.mjs
+bazel test //watch:check
+bazel build //watch
 ```
 
-Trying the UI against synthetic sites (never the internet): copy `.dev.vars.example` to `.dev.vars` (it sets
-`DEV_FAKE_UPSTREAM`; add `DEV_MANUAL_ALARMS=true` to drive the scheduler by hand), build the UI, then in two
-terminals from `worker/`:
+## 使用
 
-```sh
-node test/runtime/serve-fake-sites.ts 8792        # the synthetic sites (see the file for their URLs)
-npm run dev                                       # wrangler dev on http://127.0.0.1:8791 (local bindings only)
-```
+添加网址后先预览，选择保留/排除块、触发规则和间隔，再保存。分享链接 `/new#u=` 只填表，不立即抓取。首次检查
+建立基线，不伪报变化；后续在变化页确认或查看过滤原因，忽略行可以撤销。
 
-Open `http://127.0.0.1:8791/new#u=https%3A%2F%2Fshop.example.com%2Fkettle`. With manual alarms,
-`curl -X POST 'http://127.0.0.1:8791/__dev/step?now=<epoch ms>'` runs a scheduler pass at that time and
-`/__dev/clock?now=` sets the API's clock; `curl -X POST http://127.0.0.1:8792/__next` moves every synthetic site to
-its next version. Local state is in `watch/.wrangler/` (delete it after a schema change).
+HTTP 是默认抓取方式；浏览器模式保存渲染内容与截图，使用既有最小检查间隔和每日浏览器秒数账本。查看变化前后
+页面或截图只读已保存证据，不重新访问网站。未记录、过期、截断、失败分别显示，不代表“无变化”。
 
-## Deploy
+健康页说明 robots、退避、人机验证、配额或失败原因。所有跳转沿用同一 URL/抓取政策，不绕过验证。详见
+[规则](AGENTS.md)和[设计](docs/design.md)。
 
-Only from GitHub Actions: `Watch deploy` (`.github/workflows/ci.yml`) runs on `main` after `CI gate` and `Tasks deploy`
-(its `TASKS` binding names Tasks' `TaskInbox` entrypoint, which must exist; a Tasks deploy this run selected must
-succeed, so a failed Todofy deploy that leaves it skipped holds Watch too) when `watch/`, `packages/edge-auth/`,
-`contracts/ops-v1/ops-v1.ts` or a `proto/` path the app bundles changed,
-or on a dispatch with `watch` or `all`, in the `production` environment and the group `watch-production`. It builds the
-UI, writes the secrets file, dry-runs (the bundle held to its budget), runs the hostname guard (`tools/cf-guard`, no
-allowance: `watch.ziyixi.science` had no DNS record before W2), deploys through `deploy/deploy-vars.mjs` (no D1), and
-then checks production:
+## Dots 与通知
 
-- through the API with the deploy token (nothing anonymous shows the build): the Worker serves exactly one version at
-  100% and its `BUILD_SHA` is the commit;
-- anonymously: `GET /`, `/api/v1/watches` and `/new` are answered by Access with a 302 to its login page for this host
-  (the dashboard's probe). The whole host is behind the Access application "watch" (`infra/access.tf`), `/health`
-  included.
+私有 WatchApi 按 binding 的 read/read-write 权限开放。Dot 指派的 Watch 可选择 `notify_policy=NONE`：仍记录
+变化/健康事件，但不创建 Tasks 通知。Intent 和判断关联在 Work；不据此自动改变抓取基线或学习忽略规则。
 
-Those probes pass whatever the committed AUD is (Access answers before the Worker runs; a wrong AUD only shows as a 403
-for the owner). The check of the AUD is "Infra drift", which the W2 push runs because it changes `infra/`
-(`infra/ids.tf`): it must be green, `no-op: 19` and `output changes: 0` with no outputs problem. Red with
-`vars.ACCESS_AUDIENCE differs from access_aud` means the AUD is wrong: read it again (`infra/README.md` "Adding an
-app" step 4), fix it here and push; this job then ships the fix.
+普通通知只含 owner 命名、触发类型/次数和 Watch 链接，不带页面正文、截图或监视 URL。摘要/紧急通知沿用原有
+TaskInbox 日额度和冻结 request ID。确认回调、形成任务与 Dot 完成工作是不同事实。
 
-The deploy token is `CF_API_TOKEN`, as for the links app. The wrapper writes two Worker secrets:
+## 维护
 
-| Worker secret | From the `production` environment secret | Why |
-| --- | --- | --- |
-| `ACCESS_OWNER` | `DASHBOARD_ACCESS_OWNER` | the watch app's owner is the dashboard's owner: one person with the same Access identities, so it reuses the dashboard's secret (as the links app does) |
-| `ACCESS_OWNER_ALIASES` | `DASHBOARD_ACCESS_OWNER_ALIASES` | as above |
+Worker 只做鉴权和对象调用；DO/私有 R2 保存状态与证据，定时工作只用 Alarm。日备份包括所有表及引用的证据，
+恢复只进入空存储，不重放旧通知。见[备份/恢复](docs/backup.md)。
 
-Owner mutations require exact Origin, `X-CSRF-Token: 1` and JSON. No CSRF signing key or cookie is used.
+构建、类型、单元、真实 workerd/CPU 和 smoke 由 Bazel 检查，测试只访问合成页面。交互开发保持 local-only
+绑定和原假站点；生产只走同一 green SHA 的 main Actions，在 Tasks 就绪后上传已检查的完整产物并核对对账。
 
-**After the first deploy** (and after any deploy that changed the scheduler), check by hand that `WatchState`
-schedules itself: CI cannot, since every anonymous request stops at Access and the alarm is armed by the object
-itself. Open `https://watch.ziyixi.science/status` signed in (the page calls `serviceStatus`, and every API call arms
-an alarm when none is set): it must show a 下次调度 time (never 未设定) within six hours, and after a minute a 上次调度 time. The
-dashboard's next tick (every 30 minutes) calls `status()`, which arms a missing alarm too, and shows `scheduler_stale`
-if passes stop. Then add a watch of a page the owner controls (W2 step 8 in `docs/design.md` §11) and see its first
-check within a minute.
-
-After the release that bound `BACKUPS` (and after any deploy that changed the backup), 健康 shows 备份 with an age of
-minutes: the first job runs at once ([`docs/backup.md`](docs/backup.md)); Home's tile then carries `backup_age_seconds`
-and raises `backup_stale` if no backup completes for three days.
-
-The dashboard's daily drift check compares the live Worker with `dashboard/worker/src/drift-desired.json` (these two
-secrets, `BUILD_SHA`, the bindings and the Custom Domain); its registry shows the 网页监视 tile (ops-v1 through the
-`WATCH` binding) and the Worker. The Access application "watch" is managed by `infra/` (`infra/README.md` "Adding an
-app"): change it there, not by hand, and "Infra drift" checks every day that `ACCESS_AUDIENCE` here equals its AUD.
-Notifications go to Tasks through its `TaskInbox` (`docs/design.md` §7). To stop only this app's tasks, ship a watch
-commit without the `TASKS` binding (below): the outbox then only fills.
-
-### Rollback
-
-**The normal path is a code-only revert:** revert the commit that broke it and push; the next `Watch deploy` ships the
-revert and keeps the host, the dashboard's view and the object's data. Never run a plain `wrangler deploy`.
-
-**Taking the app out of production is a separate decision**, in this order. A Worker without a route keeps running:
-its Durable Object keeps its alarm, so WatchState keeps checking the watched sites and creating tasks until step 1
-stops it, whatever happens to the host.
-
-1. Stop the side effects first.
-   - Tasks: while the app is still in production, ship a watch commit without the `TASKS` binding through
-     `Watch deploy`: the outbox then only fills and nothing reaches Tasks.
-   - Fetches: pause every watch in the UI (暂停, or the owner API's `pauseWatch`). A paused watch is never checked; the
-     alarm then only wakes every six hours to find nothing due.
-2. Detach the Custom Domain by hand: Cloudflare dashboard → Workers & Pages → watch → Settings → Domains & Routes →
-   `watch.ziyixi.science`. A deploy without `routes` would leave it attached. The Access application can stay.
-3. Keep the dashboard's `WATCH` binding, its registry entry and `watch` in `drift-desired.json` while the Worker
-   exists: `Ops` keeps answering over the binding without any route, so the tile goes on showing the (paused) app.
-   Do not revert the W2 commit for this: it would drop the binding while the registry entry stays (from the Ops
-   commit), and the dashboard would mark the tile unreachable after two ticks and send `app_unreachable` (critical)
-   in every daily digest, while the drift check reported the live Worker as an extra script.
-4. Deleting the Worker deletes `WatchState` and all its data (the watches, snapshots and changes) for good. If the
-   owner decides that, one commit then reverts W2 and the dashboard part of the Ops commit together (the `WATCH`
-   binding, the registry entry and flow, the drift entry), and the Worker is deleted after that commit's
-   `Dashboard deploy`; until it is deleted the drift check reports it as an extra script.
+停用/删除是单独的业务和数据决定：先暂停抓取/通知，保留恢复需要的数据与清单，再按明确计划处理资源。普通
+代码回退使用 Git/Actions，不回退单个 Worker 或直接删除对象。

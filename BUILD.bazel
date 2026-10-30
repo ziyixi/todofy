@@ -3,6 +3,11 @@ load("@npm//:defs.bzl", "npm_link_all_packages")
 load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
 exports_files([
+    ".bazelrc",
+    ".bazelversion",
+    ".python-version",
+    "MODULE.bazel",
+    "MODULE.bazel.lock",
     "package.json",
     "pnpm-lock.yaml",
     "pnpm-workspace.yaml",
@@ -10,6 +15,15 @@ exports_files([
     "config/cloud.toml",
     "config/resources.toml",
 ])
+
+exports_files(glob([
+    ".github/actions/release-*/action.yml",
+    ".github/actions/publish-*/action.yml",
+    ".github/workflows/worker-release.yml",
+    ".github/workflows/website-release.yml",
+    ".github/actions/setup-bazel/action.yml",
+    ".github/actions/setup-workspace/action.yml",
+]))
 
 npm_link_all_packages(name = "node_modules")
 
@@ -209,3 +223,7 @@ filegroup(
     ],
     visibility = ["//visibility:public"],
 )
+
+exports_files(["pyproject.toml"])
+
+exports_files([".python-version"])

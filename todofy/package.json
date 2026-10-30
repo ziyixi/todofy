@@ -3,7 +3,8 @@
   "private": true,
   "description": "Toolchain only: the Worker is Python; wrangler is driven by pywrangler.",
   "scripts": {
-    "postinstall": "node ../proto/tools/ensure.mjs"
+    "postinstall": "node ../proto/tools/ensure.mjs",
+    "check": "bazel test //todofy:check"
   },
   "devDependencies": {
     "workerd": "catalog:",

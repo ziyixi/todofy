@@ -7,33 +7,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Install the selected Node workspaces
-      uses: ./.github/actions/setup-workspace
-      with:
-        root: .
-        filters: ''
     - uses: ./.github/actions/setup-bazel
-      if: ${{ fromJSON(inputs.build-image) }}
-    - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-      with:
-        version: '0.12.10'
-        cache-dependency-glob: |
-          uv.lock
-          pyproject.toml
-          .python-version
-          **/pyproject.toml
-        cache-suffix: personal-codex-gateway
-        working-directory: .
-        enable-cache: true
-    - name: Check the locked gateway and synthetic inference contract
-      working-directory: .
-      shell: bash -e {0}
-      run: |
-        node proto/tools/ensure.mjs
-        uv sync --package personal-codex-gateway --locked
-        uv run --package personal-codex-gateway --locked ruff check codex-gateway/src codex-gateway/tests
-        uv run --package personal-codex-gateway --locked ruff format --check codex-gateway/src codex-gateway/tests
-        uv run --package personal-codex-gateway --locked python -m unittest discover -s codex-gateway/tests -v
     - name: Build the tested inference image
       if: ${{ fromJSON(inputs.build-image) }}
       working-directory: .

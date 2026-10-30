@@ -43,7 +43,7 @@ namespaced `list` of `pods.metrics.k8s.io`; there is no node proxy, kubelet stat
 Without that grant or metrics-server the report simply has no workload usage. No process
 environment, logs, mail, provider credentials or private application volumes are read.
 
-Jeepney 0.9.0 is a mature [pure Python D-Bus client](https://pypi.org/project/jeepney/)
+Jeepney 0.9.0 is a [pure Python D-Bus client](https://pypi.org/project/jeepney/)
 with [threading calls and bounded timeouts](https://jeepney.readthedocs.io/en/latest/api/threading.html).
 The adapter uses fixed `GetUnit` and `Properties.Get` calls for LoadState/ActiveState
 of k3s, cloudflared, ssh and the runtime connector. An unreadable bus/unit remains
@@ -54,7 +54,7 @@ A read-only socket mount **does not make the D-Bus protocol read-only**. The act
 permission boundary is the non-root process identity and host systemd/polkit
 policy. [systemd's official policy](https://github.com/systemd/systemd/blob/main/src/core/org.freedesktop.systemd1.policy.in)
 requires authorization for management actions; deployments must not grant the probe's UID65534
-those permissions. The probe first uses the mature
+those permissions. The probe first uses the
 [polkit CheckAuthorization API](https://www.freedesktop.org/software/polkit/docs/latest/eggdbus-interface-org.freedesktop.PolicyKit1.Authority.html)
 for its own system-bus-name subject, flags 0 (no interactive authorization), on
 manage-units, manage-unit-files, set-environment and reload-daemon. A granted action
@@ -69,5 +69,4 @@ and readonly mounts alone cannot prove it.
 
 K3s or the host failing also stops this image observer. Fleet then expires the last
 receipt to stale/missing and does not claim a current cause. Its Worker/UI remain
-independently available on Cloudflare. This is the chosen minimal image-only
-monitoring boundary rather than a second host supervisor.
+independently available on Cloudflare. This is the image-only monitoring boundary; Fleet expires missing observations independently.

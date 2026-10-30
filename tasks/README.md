@@ -1,132 +1,38 @@
 # Tasks
 
-Personal task management for the Todofy cloud. Tasks owns tasks, projects, sections, labels, filters and completion history; each task's planning facts (stage, area, start ahead, flags) and dependencies; Plan's weekly goals and lane orders; and Focus's day queues, the timer and time records; turning a mail into a task with the owner's Mail categories; and the GTD statistics and the Sunday weekly review. Todofy keeps the mail: its ledger, the summaries and the mail still awaiting a decision, read through Todofy's private Mail entry. Home and Watch create their tasks through TaskInbox, a create-only entry.
-
-## Development status
-
-Native Tasks and Todofy are live, with normal processing restored. Task/history import and native planning conversion are complete; the original Todoist account is unchanged. Plan and Focus need no extension connection. Mail holds summaries until you explicitly create a task. See the [verification record](docs/verification.md) for what each release established.
-
-The current refinement separates Tasks/Subtasks from executable Steps and brings planning controls into the
-ordinary task editor.
-
-## Interface
-
-- Desktop Inbox, Today, Upcoming, search, nested projects, sections, labels and saved filters. The sidebar groups
-  Inbox/Today/Upcoming/Mail under Tasks and Plan/Focus/GTD under Planning, with Favorites and a collapsible
-  project tree below. Search and Add task stay above them; catalog, completed and archived browsing stay in the footer. In a filter,
-  `#Inbox` matches tasks with no project as well as tasks in the Inbox project.
-- Task editing, separate Steps and Subtasks lists with Add step/Add subtask in their headers, priority, dates,
-  deadlines, structured repeat and completion history.
-- Collapsed inline subtasks in main lists; expand to edit, complete or reorder children without opening their parent.
-- Drag a task's title or row: the edges insert beside a task, the middle makes it a subtask. Drag Subtasks or Steps within their own list in the parent editor; the order is saved on drop.
-- Each row normally has one completion circle. Select task in its menu, or Ctrl/Cmd/Shift-click, enters bulk selection with checkboxes in the same position.
-- Save closes the task editor; saving a Subtask or Step opened from another task returns to that previous task. Description Done saves inline and immediately renders Markdown. Main-list subtasks can move to another parent or become independent; Steps stay in details and execution views.
-- Drag to a sidebar project/Inbox to move, a label to add it, or Today to schedule. Native task properties appear separately from ordinary labels.
-- Visible planning stage, context, Execution choice, independent Routine switch, start-ahead window and
-  Deep/Shallow effort in task details.
-- Plan and Focus reuse the existing planning components; Mail is a separate inbox that creates tasks only on request.
-- Goals connects annual Objectives and Key Results to weekly Bets and Tasks. Set a multi-month focus, keep
-  Floor/Ceiling text, confirm result milestones and record dated progress with evidence. Tasks/Subtasks can choose
-  a KR; Steps inherit their direct parent's association. Completing work does not automatically complete the KR.
-  Goal definitions load only on Goals or when its picker opens; ordinary task lists do not load goal history.
-- GTD (`#/gtd`) reviews execution through Overview, Completion and Time: Task/Step completion, Routine separately,
-  recorded time and current estimates. Week/Month and area filters are shared; a calendar day opens editable Focus
-  records. See [GTD](docs/gtd.md) for metric definitions and historical limits.
-- Plan, Focus, GTD and date pickers show Sunday first. Unfinished commitments return to Week at Saturday midnight in the account time zone; Saturday choices may be kept for the new week. Weekly goals/history retain their existing Monday IDs, and daily queues retain their dates.
-- Plan keeps the candidate columns above a full-width Committed row, with horizontal cards and completion controls for outcomes and Steps. Waiting or dependency-blocked work stays outside Plan until ready; task data and Focus queues are retained.
-- Plan and Focus cards drag by their whole row, like the task list (6px, or a 250ms hold on touch); Week's
-  commitments reorder like Review's Committed row, and Focus reorders today's steps.
-- Focus counts up by default: Start, work, then complete the step, which saves its time. Each step shows its logged
-  time, which opens its records to change or add. Focus keeps daily execution and timing; Week/Month statistics
-  live in GTD Time. A Completed checkbox shows the day's completed steps. The timer bar's Mini timer button floats the session in a
-  small always-on-top window (Document Picture-in-Picture): the Step title, a steady clock, cumulative time against
-  the estimate and visible Pause/Resume, Stop and Complete controls. The title remains visible at 64px high. It stays open on other pages and closes when the
-  session ends. With Focus' Pause when away on (a per-device setting; Chrome asks for its permission on that click),
-  a count-up pauses in Tasks at the moment the screen locked, input stopped for 10 minutes or the machine slept,
-  whichever page the window shows, and on return asks "Away for N min — count it?" in the timer bar, on the step's
-  Focus card and in the mini timer: Keep counts the time away, as if it never paused; Discard resumes from now. A
-  pomodoro is never paused.
-- A Step's planning panel edits its time estimate and can delete it after confirmation; Plan's Add steps gives each new Step a time (30 min unless
-  another is chosen). In Week a click selects a commitment and a double-click opens it; elsewhere in Plan a click opens.
-- Installable desktop PWA; an explicit offline page, with task data available online. The Dock icon's menu offers
-  Quick add (Inbox, no date, over the current page), Today, Plan and Focus. Links into Tasks (Home, mail reminders,
-  `?task=` links, the weekly review) open in the already-open app window without reloading it; a linked task waits
-  for an open task dialog to close. With Chrome's title bar hidden (Window Controls Overlay), the search field and
-  the page's refresh sit in the window's title bar.
-- Owner-only Cloudflare Worker and D1, using the repository's proto API and authentication conventions.
-- A verified Todoist import and coordinated native source for Todofy.
-
-Comments, attachments, reminders, assignment, calendar integration and voice input are excluded. Mobile-specific layouts and offline writes are not part of this release.
-
-The [design](docs/design.md) explains service boundaries and the interface. [Verification](docs/verification.md)
-records what each release established and its limits. [Import](docs/import.md) lists private
-export and identity-check commands. [Backup](docs/backup.md) describes Tasks' own weekly backup, Time Travel, the
-restore into a new database and the one-time copy of what Todofy kept for Tasks.
-
-A Task or Subtask describes an outcome. Execution selects Steps, Standalone or Quick in both task editors:
-Steps arranges the actions beneath the task, Standalone schedules the task itself, and Quick makes it a short
-standalone action. Routine is independent of that choice. Steps, Standalone and Quick share the same estimate
-panel in Plan and Focus, and all expose optional clock time and estimate fields in task details. Quick's
-calendar cards show its configured time, or Quick when no time is set, without an unknown-estimate marker. A Quick action
-with a Deadline stays out of the Quick tray until its start-ahead window opens, unless already active; zero lead opens
-on the Deadline day.
-Task editors no longer offer manual In progress, Waiting, On hold or Parked controls. Their saved flags still
-affect planning and survive unrelated edits. Task details show a saved Waiting or On hold as a chip that can only
-clear it; choosing a planning stage there takes a task out of Parked and Waiting.
-A Step cannot contain children. Task details can add, complete, reopen or delete either kind
-of child. A dependency names its prerequisite; Blocked is derived from unfinished prerequisites. A task waits
-for at most 5 tasks, the account holds at most 300 dependencies, and none may close a cycle.
-
-[Goals](docs/goals.md) describes the annual view, the optional associations and the annual private Notion import.
-Routine and exploration goals keep their own notes; exploration has no required metrics or completion score.
-
-Completing a task completes its open children, recurring ones included. Completing a recurring task records
-one occurrence, moves its date and deadline to the next one and reopens its Subtasks and Steps for that cycle,
-as Todoist does. Reopening a child also reopens its completed parents; a child under a completed parent stays
-editable.
-
-Repeat uses frequency, interval and calendar controls; imported custom rules remain intact until replaced.
-A monthly or yearly rule anchored after the 28th uses the month's last day when that date does not exist, and
-task rows show every rule in words.
-Date keeps Time and Repeat collapsed until selected; existing settings remain visible as compact summaries.
-Start ahead uses days or weeks before the real Deadline. Its open window and completed prerequisites surface
-the task in Plan Review's Parked area, ready to arrange. This does not send a timed notification or change dates.
-[Readiness and task navigation](docs/planning-readiness.md) describes acknowledgement and reverse dependencies. Effort is a task property, so it needs no technical label.
-
-## Local development
-
-From the repository root, install the shared packages and the app:
+个人任务与执行规划，替代旧 Todoist/扩展组合。Tasks 拥有任务、项目、标签、历史、Plan、Focus、Goals 和 GTD。
+Todofy 保留邮件，Tasks 的 Mail 页只在你确认转换时创建任务。
 
 ```sh
-pnpm install --frozen-lockfile
-npm run build --prefix tasks/web
-cd tasks/worker
-node test/runtime/dev-server.ts
+bazel test //tasks:check
+bazel build //tasks
 ```
 
-The synthetic preview uses an ephemeral local D1 at `http://127.0.0.1:8798`; stopping it discards its data.
-It does not read production bindings. Run the Worker's `lint`, `typecheck`, `test` and `test:runtime`; then run
-the web app's `lint`, `typecheck`, `test`, `build` and `test:browser` from their own directories.
+## 使用
 
-## Boundaries
+- 主列表：Inbox、Today、Upcoming、搜索、项目/分区、标签、筛选和完成历史。子任务默认折叠，可原地展开、完成和拖动。
+- Task/Subtask 表达结果；Step 表达可执行动作，不出现在普通任务列表。Standalone 安排任务本身，Quick 是短独立动作；Routine 是独立属性。
+- Plan：候选看板、完整宽度的 Committed 区和周安排。拖到某天只改日队列，不改真实日期或 Deadline。
+- Focus：当天执行、排序、计时和时间记录。支持迷你计时窗；周/月统计在 GTD。
+- Goals：年度 Objective/KR 与周 Bets、Tasks 的可选关联。Step 继承父任务关联，完成工作不会自动完成 KR。
+- GTD：完成与耗时回顾，区分 Tasks、Steps 和 Routine；统计口径见[说明](docs/gtd.md)。
 
-The web app depends on the public proto API, never database rows or another application's source. The Worker validates writes and owns recurrence advancement and the planning rules (the stage rollover, Review's lane, must start). A task, its planning facts and its dependencies are one resource with one etag: the task list and its details read them with the task, and one UpdateTask writes any of them. Plan is GetPlan (the weekly goals of three weeks, the arranged lanes and next week's commitments) beside the list of open tasks. Shared planning components take an explicit actions interface. A drag into a day changes Tasks' day queue (one MoveFocusStep), not the task's due date or deadline.
+日历周从周日开始，未完成承诺在周六结束后回到候选。Deadline 的提前窗口和已完成的依赖会把任务浮现到
+Parked 待安排，不发送定时提醒。保存主任务关闭详情；保存从父任务打开的子任务/Step 返回父任务。
 
-Completing a task is one Tasks write: it saves the occurrence, marks the task and its Steps done in the
-day's Focus queue (Plan and Focus send their day; the task list none, which means Tasks' today), and saves
-a related running or paused timer session as a record on that session's own day. An unrelated timer keeps
-running. Reopening opens those queue rows again.
+可安装桌面 PWA，任务数据与写入仍需在线。评论、附件、协作指派、外部日历和语音不在本应用范围内。
 
-Lists are bounded and indexed. Completion history is separate from active tasks. Consumers use a paged change feed; the browser does not poll to animate a timer. Imports run in batches. The one scheduler is the TaskJobs Durable Object's own Alarm (the GTD day and the weekly review); there is no queue, cron or multi-provider framework.
+## 边界和维护
 
-Machine callers bind one of two entrypoints. `TasksApi` gives generic `read` or `read-write` access over the owner API's messages (the Personal MCP). `TaskInbox` only creates: one task with up to 30 subtasks per call, at most 20 a day per source (`home`, `watch`), in the project routed for the source or the Inbox. Mail conversion and the categories are Tasks features over Todofy's Mail entry (`MAIL`): the task's ID is derived from the mail, so a retry never makes a second task.
+Worker/D1 是权威状态；前端只用根 proto API。任务、规划属性和依赖共享同一个资源/etag。列表分页且有索引，
+计时动画不轮询服务器。Home/Watch 用 create-only TaskInbox；私人 MCP 用声明的 TasksApi 权限。
 
-## Migration requirements
+正常发布只走同一 green SHA 的 main Actions，保留现有依赖顺序、迁移和生产对账。测试使用合成数据，覆盖真实
+D1、请求重放、编辑、循环、父子关系、拖动、计时和浏览器界面；不操作原 Todoist 账户。
 
-Keep imported task IDs so existing mail and planning references remain valid. Import active and archived projects, sections, labels, filters and accessible completion history. Repeated import must not duplicate objects. Report unavailable recurring occurrences and unsupported date rules explicitly. Ordinary CSV backups are not evidence of complete history.
+- [设计和界面](docs/design.md)、[批准的视觉基准](design-qa.md)、[协作规则](AGENTS.md)
+- [Goals](docs/goals.md)、[GTD](docs/gtd.md)、[规划就绪与导航](docs/planning-readiness.md)
+- [导入](docs/import.md)、[备份/恢复](docs/backup.md)、[验收边界](docs/verification.md)
 
-Before cutover: compare source and destination counts, hierarchy, recurrence dates and existing references; verify real UI behavior; pause and drain project-owned task writes; perform the final import; switch consumers together. Preserve the original Todoist account. Do not maintain automatic bidirectional writes.
-
-## Verification
-
-Use synthetic data for local and CI checks and public screenshots. Verify CRUD persistence, request replay, editing conflicts, current recurrence patterns, migration identity, parent relationships, filtering, drag results and timer persistence. Run actual Worker/D1 requests and Chrome interaction checks; unit tests alone do not prove the deployed system.
+原任务 ID、历史和数据迁移保持；不维护双向 Todoist 写入。交互式本地开发使用原 local-only 合成服务器和应用
+`dev` 命令，构建/检查脚本委托 Bazel。工具与依赖安装见[根指南](../docs/dependencies.md)。

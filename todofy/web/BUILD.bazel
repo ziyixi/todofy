@@ -427,6 +427,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/queryClient.test.ts"],
     deps = [
         ":node_modules/@testing-library/jest-dom",
@@ -453,6 +454,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/api/client.test.ts"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -508,6 +510,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/api/queries.test.ts"],
     deps = [
         ":node_modules/@testing-library/jest-dom",
@@ -538,6 +541,7 @@ proto_vitest_test(
         "//todofy:api_schema_data",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/api/report-schema-dialect.test.ts"],
     deps = [
         ":node_modules/@testing-library/jest-dom",
@@ -561,6 +565,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/components/ModelSettings.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -617,6 +622,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/components/StatusBanner.test.tsx"],
     deps = [
         ":node_modules/@testing-library/jest-dom",
@@ -645,6 +651,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/lib/format.test.ts"],
     deps = [
         ":node_modules/@testing-library/jest-dom",
@@ -670,6 +677,7 @@ proto_vitest_test(
         "//todofy:api_schema_data",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/lib/labels.test.ts"],
     deps = [
         ":node_modules/@testing-library/jest-dom",
@@ -698,6 +706,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/pages/eventDetail.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -755,6 +764,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/pages/health.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -810,6 +820,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/pages/lists.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -866,6 +877,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/pages/status.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -922,6 +934,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/pages/trends.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -1136,3 +1149,32 @@ filegroup(
 )
 
 test_suite(name = "check")
+
+proto_vitest_test(
+    name = "scripts_js_budget_test",
+    data = [
+        "package.json",
+        "src/test/setup.ts",
+        "vite.config.ts",
+        ":node_modules/@testing-library/jest-dom",
+        ":node_modules/@testing-library/react",
+        ":node_modules/@vitejs/plugin-react",
+        ":node_modules/jsdom",
+        ":node_modules/vite",
+        "//:node_modules/vitest",
+    ],
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = ["scripts/js-budget.test.mjs"],
+    deps = [":build_checks"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)
+
+test_suite(
+    name = "typecheck_tests",
+    tests = [":typecheck_project_typecheck_test"],
+)

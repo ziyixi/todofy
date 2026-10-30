@@ -221,6 +221,7 @@ proto_vitest_test(
         "//fleet/deploy:public-navigation",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/App.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -263,6 +264,7 @@ proto_vitest_test(
         "//fleet/deploy:public-navigation",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/NewsletterConfigView.test.tsx"],
     deps = [
         ":node_modules/@testing-library/jest-dom",
@@ -289,6 +291,7 @@ proto_vitest_test(
         "//fleet/deploy:public-navigation",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/ReconcileView.test.tsx"],
     deps = [
         ":node_modules/@testing-library/jest-dom",
@@ -316,6 +319,7 @@ proto_vitest_test(
         "//fleet/deploy:public-navigation",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/ResourcesView.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -348,6 +352,7 @@ proto_vitest_test(
         "//fleet/deploy:public-navigation",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/TimeChart.test.tsx"],
     deps = [
         ":node_modules/@testing-library/jest-dom",
@@ -376,6 +381,7 @@ proto_vitest_test(
         "//fleet/deploy:public-navigation",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/chart.test.ts"],
     deps = [
         ":node_modules/@testing-library/jest-dom",
@@ -401,6 +407,7 @@ proto_vitest_test(
         "//fleet/deploy:public-navigation",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/format.test.ts"],
     deps = [
         ":node_modules/@testing-library/jest-dom",
@@ -426,6 +433,7 @@ proto_vitest_test(
         "//fleet/deploy:public-navigation",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/metrics.test.ts"],
     deps = [
         ":node_modules/@testing-library/jest-dom",
@@ -619,4 +627,14 @@ filegroup(
         allow_empty = True,
     ),
     visibility = ["//visibility:public"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)
+
+test_suite(
+    name = "typecheck_tests",
+    tests = [":typecheck_project_typecheck_test"],
 )

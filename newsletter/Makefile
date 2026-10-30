@@ -1,6 +1,7 @@
 UV ?= uv
+BAZEL ?= bazel
 RUN := $(UV) run --locked --package personal-newsletter
-ARTIFACT_DIR ?= .artifacts
+SOURCE_SHA ?= $(shell git rev-parse HEAD)
 
 .PHONY: setup lock-check test lint format typecheck check build smoke smoke-codex demo serve proto-check
 
@@ -8,32 +9,31 @@ setup:
 	$(UV) sync --locked --package personal-newsletter
 
 lock-check:
-	$(UV) lock --check
+	$(BAZEL) test //newsletter:tests_test_tooling
 
 test:
-	$(RUN) pytest -q
+	$(BAZEL) test //newsletter:tests
 
 lint:
-	$(RUN) ruff check src tests scripts
-	$(RUN) ruff format --check src tests scripts
-	$(RUN) python scripts/check_python_structure.py
+	$(BAZEL) test //newsletter:ruff_check_test //newsletter:ruff_format_test //newsletter:python_structure_test
 
 format:
-	$(RUN) ruff format src tests scripts
+	$(BAZEL) run //newsletter:format
 
 typecheck:
-	$(RUN) mypy
+	$(BAZEL) test //newsletter:mypy_test
 
-check: lock-check lint typecheck test
+check:
+	$(BAZEL) test //newsletter:check
 
-build: lock-check
-	$(UV) build --package personal-newsletter --out-dir $(ARTIFACT_DIR)/dist
+build:
+	$(BAZEL) build //newsletter --platforms=//tools/bazel/images:linux_amd64 --embed_label=$(SOURCE_SHA)
 
 smoke:
-	$(RUN) python scripts/smoke_http.py
+	$(BAZEL) test //newsletter:smoke_http_test
 
 smoke-codex:
-	$(RUN) python scripts/smoke_codex_startup.py
+	$(BAZEL) test //newsletter:smoke_codex_startup_test
 
 demo:
 	$(RUN) newsletter demo
@@ -41,6 +41,5 @@ demo:
 serve:
 	$(RUN) newsletter serve
 
-# Consumer integrity check; generation belongs to the public protos repository.
 proto-check:
-	$(RUN) python -c 'from newsletter.preflight import check_proto_dependency; check_proto_dependency()'
+	$(BAZEL) test //newsletter:wheel_smoke_test

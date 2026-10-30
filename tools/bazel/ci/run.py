@@ -23,7 +23,8 @@ def command(
         "--disk_cache=" + str(cache / "actions"),
     ]
     args.append(
-        "--local_test_jobs=" + ("1" if group in ("workerd", "cpu", "browser") else "4")
+        "--local_test_jobs="
+        + ("1" if group in ("workerd", "cpu", "browser", "container") else "4")
     )
     if group == "cpu":
         args.append("--nocache_test_results")

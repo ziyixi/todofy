@@ -7,6 +7,7 @@ matching configuration alone does not prove a build works.
 
 from __future__ import annotations
 
+import ast
 import json
 import pathlib
 import re
@@ -66,29 +67,18 @@ def test_registry_artifacts_are_hash_locked():
         )
 
 
-def test_python_and_uv_versions_are_shared_by_local_ci_and_docker():
+def test_python_version_and_oci_base_are_fixed_by_the_repository():
     project = read_config("pyproject.toml", WORKSPACE)
     python_version = (WORKSPACE / ".python-version").read_text().strip()
     assert re.fullmatch(r"3\.14\.\d+", python_version)
     assert project["project"]["requires-python"] == ">=3.14,<3.15"
     assert read_config("uv.lock", WORKSPACE)["requires-python"] == "==3.14.*"
-    uv_version = project["tool"]["uv"]["required-version"].removeprefix("==")
-    assert re.fullmatch(r"\d+\.\d+\.\d+", uv_version)
-
-    dockerfile = (ROOT / "Dockerfile").read_text()
-    python_images = re.findall(r"(?im)^FROM python:([^\s]+)", dockerfile)
-    assert python_images and all(
-        image.startswith(python_version + "-") for image in python_images
-    )
-    assert f"ghcr.io/astral-sh/uv:{uv_version}" in dockerfile
-    steps = workflows.load("ci.yml")["jobs"]["newsletter-checks"]["steps"]
-    uv = next(
-        step
-        for step in steps
-        if step.get("uses", "").startswith("astral-sh/setup-uv@")
-    )
-    assert uv["with"].get("working-directory", ".") == "."
-    assert uv["with"]["version"] == uv_version
+    module = (WORKSPACE / "MODULE.bazel").read_text()
+    assert f'python_version = "{python_version}"' in module
+    assert re.search(r'digest = "sha256:[0-9a-f]{64}"', module)
+    # The live image probe checks the same full interpreter version.
+    probe = (ROOT / "scripts/smoke_image_probe.py").read_text()
+    assert 'sys.version.split()[0] == payload["python_version"]' in probe
 
 
 def test_mypy_checks_service_without_vendoring_proto_artifacts():
@@ -139,131 +129,121 @@ def test_public_proto_uses_a_hash_locked_github_release_not_local_source():
     )
 
 
-def test_make_has_one_locked_install_and_shared_quality_gate():
+def test_make_commands_are_thin_bazel_aliases():
     makefile = (ROOT / "Makefile").read_text()
-    setup = re.search(r"(?m)^setup:[^\n]*\n((?:\t[^\n]*\n)+)", makefile)
-    assert setup is not None
-    assert all(option in setup[1] for option in ("sync", "--locked"))
-    assert "requirements.lock" not in makefile
-    assert "pip install" not in makefile
-    gate = re.search(r"(?m)^check:([^\n]*)", makefile)
-    assert gate is not None
-    assert {"lock-check", "lint", "typecheck", "test"} <= set(gate[1].split())
-    for target in ("build", "smoke", "proto-check"):
-        assert re.search(r"(?m)^" + target + r":", makefile)
-
-
-def test_docker_context_only_allows_build_inputs():
-    rules = [
-        line.strip()
-        for line in (ROOT / "Dockerfile.dockerignore").read_text().splitlines()
-        if line.strip() and not line.lstrip().startswith("#")
-    ]
-    assert rules[0] == "**"
-    allowed = {rule[1:] for rule in rules if rule.startswith("!")}
-    assert {"pyproject.toml", "uv.lock"} <= allowed
-    assert allowed <= {
-        "pyproject.toml",
-        "uv.lock",
-        ".python-version",
-        # The public issuer and audience the console's Access check bakes.
-        "config/",
-        "config/cloud.toml",
-        "config/resources.toml",
-        "codex-gateway/",
-        "codex-gateway/pyproject.toml",
-        "platform/",
-        "platform/pyproject.toml",
-        "todofy/",
-        "todofy/pyproject.toml",
-        "proto/",
-        "proto/**",
-        "package.json",
-        "pnpm-lock.yaml",
-        "pnpm-workspace.yaml",
-        "packages/",
-        "packages/model-router-client/",
-        "packages/model-router-client/python/",
-        "packages/model-router-client/python/pyproject.toml",
-        "packages/model-router-client/python/src/",
-        "packages/model-router-client/python/src/**",
-        "newsletter/",
-        "newsletter/pyproject.toml",
-        "newsletter/MANIFEST.in",
-        "newsletter/src/",
-        "newsletter/src/newsletter/",
-        "newsletter/src/newsletter/**",
+    expected = {
+        "test": "test //newsletter:tests",
+        "lint": "test //newsletter:ruff_check_test",
+        "typecheck": "test //newsletter:mypy_test",
+        "check": "test //newsletter:check",
+        "build": "build //newsletter ",
+        "smoke": "test //newsletter:smoke_http_test",
+        "smoke-codex": "test //newsletter:smoke_codex_startup_test",
+        "format": "run //newsletter:format",
+        "proto-check": "test //newsletter:wheel_smoke_test",
     }
-    assert "**/__pycache__/" in rules and "**/*.pyc" in rules
+    for target, command in expected.items():
+        body = re.search(
+            r"(?m)^" + re.escape(target) + r":[^\n]*\n((?:\t[^\n]*\n)+)",
+            makefile,
+        )
+        assert body is not None
+        assert "$(BAZEL) " + command in body[1]
+        assert "$(RUN)" not in body[1] and "uv " not in body[1]
+    assert "--embed_label=$(SOURCE_SHA)" in makefile
 
 
-def test_image_job_generates_shared_proto_before_bazel_builder():
-    steps = workflows.load("ci.yml")["jobs"]["newsletter-image"]["steps"]
-    setup = next(
-        index
-        for index, step in enumerate(steps)
-        if step.get("uses") == "./.github/actions/setup-workspace"
+def test_root_check_includes_the_original_engine_validation():
+    tree = ast.parse((ROOT / "BUILD.bazel").read_text())
+    suite = next(
+        node.value
+        for node in tree.body
+        if isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id == "test_suite"
+        and any(
+            keyword.arg == "name"
+            and isinstance(keyword.value, ast.Constant)
+            and keyword.value.value == "check"
+            for keyword in node.value.keywords
+        )
     )
-    generate = next(
-        index
-        for index, step in enumerate(steps)
-        if "node proto/tools/ensure.mjs" in step.get("run", "")
+    tests = ast.literal_eval(
+        next(
+            keyword.value
+            for keyword in suite.keywords
+            if keyword.arg == "tests"
+        )
     )
-    build = next(
-        index
-        for index, step in enumerate(steps)
-        if "container-release/build.py --service newsletter"
-        in step.get("run", "")
-    )
-    assert setup < generate < build
+    assert {
+        ":tests",
+        ":ruff_check_test",
+        ":ruff_format_test",
+        ":python_structure_test",
+        ":mypy_test",
+        ":smoke_http_test",
+        ":smoke_codex_startup_test",
+        ":wheel_smoke_test",
+    } <= set(tests)
 
 
-def test_docker_installs_locked_production_environment_and_starts_directly():
-    dockerfile = (ROOT / "Dockerfile").read_text().replace("\\\n", " ")
-    install_lines = [
-        line for line in dockerfile.splitlines() if "uv sync" in line
-    ]
-    assert install_lines
-    for line in install_lines:
-        assert all(option in line for option in ("--locked", "--no-dev"))
-        # A dependency-cache stage may deliberately omit the project entirely.
-        assert "--no-install-workspace" in line or "--no-editable" in line
-        assert "--package personal-newsletter" in line
-    assert "--no-editable" in install_lines[-1]
-    runtime = re.split(r"(?im)^FROM ", dockerfile)[-1]
-    assert re.search(r"(?m)^USER (?!root\b|0\b)\S+", runtime)
-    entrypoint = re.search(r"(?m)^ENTRYPOINT (\[.*\])$", runtime)
-    assert entrypoint is not None
-    assert pathlib.Path(json.loads(entrypoint[1])[0]).name == "newsletter"
-    startup = "\n".join(
-        line
-        for line in runtime.splitlines()
-        if line.startswith(("RUN ", "CMD ", "ENTRYPOINT "))
-    )
-    assert not re.search(r"\b(?:uv|pip)\b", startup)
-
-
-def test_ci_uses_the_same_quality_gate_before_image_build():
-    jobs = workflows.load("ci.yml")["jobs"]
+def test_bazel_image_uses_generated_shared_wheels():
+    source = (ROOT / "BUILD.bazel").read_text()
+    assert 'whl = "//proto:python_wheel"' in source
+    assert 'whl = "//packages/model-router-client/python:wheel"' in source
     commands = "\n".join(
-        step.get("run", "") for step in jobs["newsletter-checks"]["steps"]
+        step.get("run", "")
+        for step in workflows.load("ci.yml")["jobs"]["artifacts"]["steps"]
     )
-    assert all(
-        command in commands
-        for command in ("make check", "make smoke", "make build")
+    assert "container-release/build.py --service newsletter" in commands
+
+
+def test_image_starts_the_installed_service_and_retains_http_healthcheck():
+    health = json.loads((ROOT / "container-healthcheck.json").read_text())
+    assert health == {
+        "Test": [
+            "CMD-SHELL",
+            'python -c "import urllib.request; '
+            "urllib.request.urlopen('http://127.0.0.1:8080/healthz', "
+            'timeout=3)"',
+        ],
+        "Interval": 30_000_000_000,
+        "Timeout": 5_000_000_000,
+        "StartPeriod": 90_000_000_000,
+    }
+    tree = ast.parse((ROOT / "BUILD.bazel").read_text())
+    image = next(
+        node.value
+        for node in tree.body
+        if isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id == "oci_image"
     )
-    reusable = {job["uses"] for job in jobs.values() if "uses" in job}
-    assert reusable == {"./.github/workflows/worker-release.yml"}
-    assert all(
-        "steps" in job or job.get("uses") in reusable for job in jobs.values()
+    attributes = {
+        keyword.arg: ast.literal_eval(keyword.value)
+        for keyword in image.keywords
+    }
+    assert attributes["user"] == "newsletter"
+    assert attributes["entrypoint"] == ["newsletter"]
+    assert attributes["cmd"] == ["serve", "--host", "0.0.0.0", "--port", "8080"]
+    assert "NEWSLETTER_CHART_FONT" in attributes["env"]
+
+
+def test_ci_requires_leaf_checks_and_artifacts_before_publication():
+    jobs = workflows.load("ci.yml")["jobs"]
+    assert "ci/run.py --plan" in "\n".join(
+        step.get("run", "") for step in jobs["checks"]["steps"]
     )
+    assert set(jobs["gate"]["needs"]) == {"changes", "checks", "artifacts"}
+    assert "needs.gate.result == 'success'" in jobs["newsletter-deploy"]["if"]
+    assert "github.ref == 'refs/heads/main'" in jobs["newsletter-deploy"]["if"]
     checked_jobs = [job for job in jobs.values() if "steps" in job]
     checked_jobs.extend(workflows.load("worker-release.yml")["jobs"].values())
     assert all(
-        "requirements.lock" not in command and "pip install" not in command
+        "requirements.lock" not in step.get("run", "")
+        and "pip install" not in step.get("run", "")
         for job in checked_jobs
         for step in job["steps"]
-        for command in [step.get("run", "")]
     )
-    needs = jobs["newsletter-image"]["needs"]
-    assert "newsletter-checks" in ([needs] if isinstance(needs, str) else needs)

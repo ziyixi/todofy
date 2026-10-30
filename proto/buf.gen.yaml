@@ -1,5 +1,5 @@
-# Code generation (README.md). tools/ensure.mjs runs `buf generate --output <temporary directory>` from this
-# directory with the pinned toolchain and moves the result into ts/; never commit the output.
+# Code generation (README.md). Bazel package actions preserve these options and supply pinned executable/output
+# paths. tools/ensure.mjs materializes their outputs for raw workspace consumers; never commit generated code.
 version: v2
 plugins:
   # TypeScript, protobuf-es v2 (the @bufbuild/protobuf runtime pinned in package.json). Imports end in .ts

@@ -1,185 +1,30 @@
-# `proto/`: protobuf as the IDL of the cross-app contracts and the apps' UI APIs
+# Proto IDL and shared runtimes
 
-The Bazel targets compile each IDL package as a `proto_library` with its declared imports. For example,
-`bazel build //proto/tasks/ui/v1:ts //proto/platform/runtime/v1:python //proto:schemas` generates only the
-selected packages and their dependencies. `//proto:ts` and `//proto:python` aggregate the TypeScript and shipped
-Python packages; the test-only Python package is `//proto/prototest/v1:python`. Generated files stay under
-`bazel-out`, with the same module paths and bytes as the existing generators.
+`proto/` owns the repository's cross-application contracts, owner HTTP APIs, pinned generators and shared wire JSON
+runtimes. Field shapes and value rules live in IDL; semantic contracts and frozen fixtures live in
+[contracts](../contracts/README.md). Applications use generated types and the shared codec, transcoder and client.
 
-Bazel generation uses the pinned Buf and protobuf-es tools and each package's descriptor closure. It does not
-read a developer's `node_modules`, install dependencies or run the whole-module `ensure.mjs` entrypoint.
-The Google APIs source archive is pinned to the same BSR commit as `buf.lock`, with a SHA-256 check.
-The repository rule parses that lock and refuses a commit or digest without a matching verified archive pin.
-TypeScript actions read `buf.gen.yaml` as an input and preserve its plugin options and import setting; the
-adapter only changes the executable and output path for the sandbox and checks the supported plugin identity.
-`//proto/bazel:ts_package.bzl` exposes `proto_package(name, deps)` to assemble the runtime and generated packages
-a consumer imports. Handwritten TypeScript files have individual targets such as `//proto/ts:rpc-status`;
-`//proto/ts:runtime` aggregates them. Existing pnpm/uv checks continue to use `tools/ensure.mjs` during migration.
+Bazel compiles each IDL package with its declared imports. Consumers use package-scoped providers such as
+`//proto/tasks/ui/v1:ts` and `//proto/platform/runtime/v1:python`. Generation reads the real `buf.gen.yaml`;
+the Google APIs repository validates `buf.lock` against its commit-specific archive checksum. Actions use pinned
+tools and declared inputs, without a developer's `node_modules` or a second generation lifecycle.
 
-`bazel test //proto:tests` runs both codecs, cross-language round trips, the published schema byte checks,
-Buf lint and formatting, Google's API linter and its pinned-googleapis check, and the existing strict TypeScript
-typecheck. `bazel build //proto:typecheck` selects the compiler's typecheck output group; the underlying no-emit
-project alone does not request that action. `bazel run //proto:breaking -- BASE` compares the generated current
-image with the same Git-base, retirement and wire-profile rules as the existing gate. It reads Git history at
-execution time, so this command runs independently of Bazel's test-result cache. The existing whole-module
-generation lifecycle, determinism and mutation self-tests remain in the pnpm checks during migration.
-VPS image builds can use `bazel build //proto:python_wheel`, the reproducible stdlib-only wheel of the shipped
-Python packages. It includes neither the test-only modules nor their namespace files.
-Recall's cross-package type consumers can use `//proto/ts:recall_ingest_v1_types`. It compiles the
-`recall.ingest.v1` files and their wire-codec type closure into nine declaration files under the
-existing module paths, using the shared strict compiler configuration.
+| Target | Output or check |
+| --- | --- |
+| `//proto/ts:pkg` | Complete TypeScript package; consumers can assemble smaller packages with `proto_package` in `bazel/ts_package.bzl` |
+| `//proto:python_wheel` | Reproducible stdlib-only Python wheel, excluding test-only namespaces |
+| `//proto:schemas` | Published contract schemas from package-scoped generation |
+| `//proto:check` | Format/lint, API lint and annotation agreement, strict TypeScript compilation, both codecs, golden bytes, Schema freshness, mutation guards, determinism and materialization |
+| `//proto:breaking` | Git-baseline compatibility, retirement and wire-profile checks; run with `bazel run //proto:breaking -- BASE` |
+| `//proto:materialized` | Generated-only tree for raw pnpm/uv development |
 
+Handwritten TypeScript modules have individual providers such as `//proto/ts:rpc-status`; `:runtime` aggregates them.
+Recall's declaration boundary is `//proto/ts:recall_ingest_v1_types`, limited to its ingest and wire-codec type closure.
+Raw source consumers run `node proto/tools/ensure.mjs` to copy verified Bazel outputs into the existing export paths.
 
-Newsletter retains its locked external `ziyixi-protos` dependency during its VPS engine import; its internal
-versioned JSON deployment control is documented in `newsletter/docs/deployment-drain.md`. The rules below apply
-to interfaces owned by this root IDL, including the Cloudflare owner APIs.
-
-Protobuf is the interface definition language (IDL) of every interface the repository defines: the
-cross-app contracts and each app's UI API (the HTTP/JSON between its UI and its Worker, [HTTP
-APIs](#http-apis)). The wire stays JSON: each contract keeps its JSON bytes, and every API speaks the same
-snake_case form, through a small *wire JSON profile* codec per language. The `.proto` files give every app
-generated types and enum tables, `buf lint`, `buf breaking`, the profile's own breaking rules and Google's
-api-linter make "renamed, renumbered, retyped, removed, re-routed or not AIP-shaped" a CI failure, and a
-shared transcoder and client route and call the HTTP APIs from the same descriptors.
-
-Status: every contract and API of the monorepo is IDL here, and both sides of each run on the generated code. The
-first was task-intent-v1 (`todofy/taskintent/v1`, 2026-10-01 to 2026-10-21, retired when Todofy stopped writing
-tasks; `prototest/v1/intent.proto` keeps its messages as the plain-proto fixtures of the wire profile's cases).
-Each app's owner API is served by its Worker through `ts/http-transcoder.ts`
-and called by its UI through `ts/http-client.ts` ([HTTP APIs](#http-apis)). `links/ui/v1` is the
-links app's owner API (2026-10-01, deployed since the app's step L2), under the path
-prefix `/_/api/v1/` (its host's other paths are short links). `watch/ui/v1` is the watch app's owner API (2026-10-01,
-deployed since the app's step W2), under `/api/v1/`. `mailsort/ui/v2` is mailsort's owner API (2026-10-10), under
-`/api/v2/`; it replaced `mailsort/ui/v1` (2026-10-06, retired in `retired.json`: the rules, the import and exports, the
-audit and live gating were removed, a breaking change, so a new major version), whose paths answer 410
-`RELOAD_REQUIRED` in its google.rpc.Status for one release. `recall/ui/v1` is recall's owner API (2026-10-10, served by its Worker, not deployed yet), under
-`/api/v1/`; its Worker also reads `recall/ingest/v1` (the extension's uploads) and writes `recall/archive/v1` (the change feed).
-`dashboard/ui/v1` is the dashboard's
-owner API (2026-10-02, branch `proto-dashboard-ui`): the registry and the four views are AIP-156 singletons read with
-standard Gets, the refreshes and the guard and canary actions are custom methods; HomeState still serializes each view
-once and the Worker answers those bytes through the transcoder as `PreEncoded` (with the ETag, or 304), so its views
-keep their JSON (string timestamps: they embed ops-v1's answers) and the dashboard's tests prove it byte for byte.
-`mailhero/ui/v2` is Mail Hero's owner API (2026-10-02), under `/api/v2/`. It is v2
-because Mail Hero's hand-written owner API before it already was `/api/v1` (AIP-185: a breaking change is a new major
-version); for one release every `/api/v1` path answers 410 `reload_required` in that API's envelope. Mail Hero's UI calls it through `ts/http-client.ts`. The raw-message and attachment downloads stay outside the
-transcoder (bytes, which the wire profile has no HttpBody for, with their own `Content-Disposition`), behind the same
-authentication, and the two heaviest reads (the largest parsed message, a zone's delivery dashboard) are answered by
-Mail Hero's coordinator Durable Object running the same transcoder (30 s of CPU instead of a Worker request's 10 ms).
-The webhook event and the backup machine API are not part of it.
-`todofy/ui/v1` is Todofy's owner API (2026-10-02, branch `proto-todofy-ui`): the first with a Python backend.
-Todofy's TypeScript gateway serves it through the same transcoder behind Access, Origin and CSRF, and hands each
-decoded request to its Python Durable Object as wire JSON over the existing RPC binding; the object reads it
-again strictly with the generated Python code and answers the generated response message, which the gateway
-reads leniently and writes. Todofy's UI calls it through `ts/http-client.ts`; the hand-written OpenAPI types
-(openapi-typescript) are gone, and `todofy/api/machine-api-v1.openapi.yaml` keeps only the machine routes
-(webhook, newsletter, health), whose callers keep their exact bytes ([Cost](#http-apis) has the numbers).
-`newsletter/ui/v1` is Newsletter's owner read API, under `/api/v1/` (Newsletter's reader answers it; the console Worker and UI import it): the
-issues with their full content, runs and their failures, model calls, sources, deliveries and the state of the
-Notion backup, read-only, with Newsletter's SQLite database as the record and Notion as its asynchronous backup. It
-is the second owner API with a Python producer, after Todofy's, and that producer serves HTTP itself, as the platform
-daemon does ([Personal-cloud Python runtime](#personal-cloud-python-runtime)): Newsletter's own listener routes and
-strictly decodes each request with the generated `HTTP_BINDINGS` and writes every answer with the generated Python
-codec, while the console Worker authenticates the owner, routes the same request with the shared transcoder,
-forwards it with the owner's verified Access assertion and answers Newsletter's bytes unchanged as `PreEncoded`
-([HTTP APIs](#http-apis); [`contracts/newsletter-ui-v1`](../contracts/newsletter-ui-v1/README.md)).
-
-`tasks/ui/v1` defines Tasks' owner API at `/api/tasks/v1` and the generic private `TasksApi` binding.
-`Task.kind` distinguishes ordinary Tasks/Subtasks (`task`, also the meaning of a missing value) from executable
-Steps (`step`), which require a Task/Subtask parent and cannot contain children. `Task.effort` is empty, `deep`
-or `shallow`. Both fields use the existing task CRUD, update masks, change feed and duplication contract.
-Recurrence remains the existing date-rule text on the wire; structured controls produce that value and the
-Tasks Worker advances it. Catalog counts describe the default task views. A Task also carries its planning
-facts (`stage`, `area`, `lead_days`, `planning_flags`, written by UpdateTask's mask like any field), its
-`dependencies` (the whole set, written with `update_mask=dependencies`) and what Tasks derives for its today
-(`board_stage`, `must_start`, `missing_lead`). `plan.proto` is Plan: `GetPlan` answers the weekly goals of last,
-this and next week, the Review lane orders and next week's commitments; `UpdateWeeklyBet` writes one goal, and
-`ReorderTasks.lane_order` saves a lane's order with the moved siblings' positions. `focus.proto`
-(2026-10-19) is Focus, which Tasks owns: each day's queue of steps (`ListFocusDays` reads 1 to 7 days in one bounded
-answer, `MoveFocusStep` adds, removes, reorders or moves one step), the one timer (`GetFocusTimer`,
-`CommandFocusTimer`) and its time records (`CreateFocusEntry`, `UpdateFocusEntry`, `DeleteFocusEntry`).
-`CompleteTask.focus_day` names the day whose queue a completion settles, and a related timer session is saved and
-stopped in the same batch. `mail.proto` and `gtd.proto` (2026-10-21) are what Tasks keeps of Mail and GTD:
-`ConvertMailItem` turns a mail Todofy summarised into a task, with an ID derived from the mail so that any retry
-finishes the same conversion, `GetMailCategories` and `UpdateMailCategories` the owner's category shortcuts, and
-`GetGtdReport` the GTD page's counts and time for 1 to 31 days and `GetWeeklyReview` one week's Sunday review.
-`ListGtdDays` and `ListWeeklyReviews` lost their last caller and were retired on 2026-10-27 (`retired.json`); the
-daily counts stay in D1 for the Sunday review.
-
-`todofy/mail/v1/mail_service.proto` (2026-10-21) is Todofy's private Mail entry, `todofy.mail.v1.MailService`: the mail
-summaries Todofy keeps (`ListMailItems`, `GetMailItem`), their counts (`GetMailInbox`), the readiness feed
-(`PollMailReady`) and the two writes a caller needs once it made the task itself (`MarkMailConverted`,
-`DeleteMailSummaries`), with no request_id: both are safe to repeat. Todofy serves it on its gateway's `Mail`
-entrypoint, through the shared transcoder over a service binding whose props grant `read` or `read-write`; no public
-host routes it. `tasks/inbox/v1/task_inbox.proto` (2026-10-21) is Tasks' create-only machine entry,
-`tasks.inbox.v1.TaskInboxService`: one JS RPC method, `createInboxTask`, on the `TaskInbox` entrypoint, whose binding
-props name the caller (`home` or `watch`); it creates one task with its subtasks and nothing else, and its errors are
-the wire names of `ErrorCode`. Together they replaced the paths on which Todofy wrote Tasks for another app
-(`PlusService`, below, and `todofy.taskintent.v1`), both retired on 2026-10-21 (`retired.json`).
-
-`ops/v1/ops.proto` is the IDL of `contracts/ops-v1` (2026-10-01) and its single source of validation: the
-value rules are options in the IDL ([Value rules](#value-rules)), the contract's JSON Schema is generated from
-it (`tools/gen_schema.py`), and every side runs on the generated code: Mail Hero, the watch app and Todofy's gateway
-implement the generated services (`ops_wire.ts`), Mail Hero, the watch app and todofy-core build every answer as a
-generated message written by the codec, which checks the rules before a byte leaves, and the dashboard reads
-every answer and checks every input it sends with the same rules. The wire bytes did not change: golden tests
-in each app pin them, and every answer still passes the hand-written schema the dashboards deployed before
-validate with (`contracts/ops-v1/legacy/`).
-
-`todofy/report/v1/report.proto` is the IDL of recommendation-v1 and summary-v1 (2026-10-01), the reports Todofy
-serves the external newsletter (`GET /api/recommendation`, `GET /api/summary`) and lists to its owner: every rule
-of the hand-written schemas is a value rule there (a union by `status`, whose cases bound counts and keep the task
-list empty when the window was empty or the model's answer unusable; timestamps keep `format: date-time`),
-`todofy/api/recommendation-v1.schema.json` and `summary-v1.schema.json` are generated from it as self-contained
-schemas of one message each, todofy-core builds every report as a generated message written by the codec, and
-Todofy's UI reads them as generated messages (through todofy.ui.v1 since 2026-10-02). The bytes did not change (golden tests in
-Todofy pin them, and a differential test gives the generated and the frozen hand-written schemas the same verdict
-but on `stale`, which no production Todofy ever sent; in ECMAScript's regex dialect, which JSON Schema specifies,
-the text rules also differ on purpose on U+0085 and U+FEFF, where the hand-written `\S` disagreed with the
-newsletter: `report.proto`'s header). The HTTP surface stays the gateway's: the newsletter's
-paths and Basic authentication are not an AIP API, so the file has no service. Measured on 2026-10-01 with the
-production dry run: todofy-core's upload 531.9 → 542.7 KiB (gzip 149.1 → 151.2 KiB: `report_pb.py` and the core's
-builders); Todofy's UI bundle is byte for byte the same (types only); building and writing a report takes about
-0.03 ms on the reference machine (host CPython). It ships as two changes: first the rule vocabulary it needs
-(`common.wire.v1` `CaseRules.empty` and `Format.json_schema_format`, branch `proto-wire-rules`), which reaches
-every proto user's bundle and so redeploys every proto user's Worker with no behaviour
-change ("What the case rule costs" under [Value rules](#value-rules)), then the reports themselves, which deploy Todofy only
-(`ci_changes.classify` on that diff).
-
-`mailhero/webhook/v1/mail_received.proto` is the IDL of mail.received.v1 (2026-10-01), the event Mail Hero POSTs to its
-webhook consumer (Todofy): every rule of the hand-written schema is a value rule there (the type's constant, UUIDs,
-UTC times with `format: date-time`, list sizes, closed attachment enums, the canary's run ID, and the two relations the
-vocabulary of `proto-mail-rules` adds: a subject or a text that is not blank, `Message.any_match`, and the size before
-truncation of a truncated text, `Field.present_when`); `contracts/mail-received-v1/mail-received-v1.schema.json` is
-generated from it as a consumer's schema (`Target.open`: every object takes unknown fields, as before). Mail Hero builds
-every event as a generated message written by the codec, and the bytes did not change (its golden fixtures, the canary's
-included, are rebuilt byte for byte); a delivery's retries resend the bytes frozen in R2 and never build an event again,
-so payloads frozen by older builders (`fixtures/legacy/`, which lack `warnings`, the list storage-v1 events write as
-`[]`: `Field.write_empty`) go out unchanged. todofy-core reads every body leniently with the generated Python codec and
-keeps the checks the IDL cannot say (UTF-8 byte sizes, a real calendar time, consistent sizes); on every fixture and
-about 9,000 mutations it gives the frozen parser's verdict, event and log reason but for integers above 2^31 - 1, and the
-generated schema the frozen hand-written one's verdict (formats asserted; in ECMAScript's dialect "not blank" differs on
-U+001C-U+001F, U+0085 and U+FEFF on purpose: `mail_received.proto`'s header). It ships after the vocabulary and deploys
-Mail Hero and Todofy only. Measured on 2026-10-01: Mail Hero's bundle 189.8 → 193.3 KiB gzip (the descriptors, the
-generated message and the coordinator's delivery route; budget 228 KiB);
-building an event in workerd, in reference ms, the connection test first 0.4-1.0 →
-2.2-2.6 and warm about 0.4 either way, 105 attachments first 0.6-0.8 → 3.6-3.9 and warm 0.4 → 0.8-1.0, the largest
-parsed input (a 1 MiB text truncated to 256 KiB, 105 attachments) first 3.2-3.3 → 5.9-6.6 and warm 2.4-2.6 → 2.8-2.9
-(`mail-hero/cloudflare/test/cpu/payload-cpu.test.mjs` holds the medians of three fresh isolates below 9.5 and 4.5
-ms). Only the coordinator (a Durable Object, 30 s per invocation) builds an event: its alarm for forwards, and its
-`/deliveries/create` for an owner's send, resend or connection test and the dashboard's canary, whose Worker request
-only waits for the event ID (1.4-3.7 ms first as medians of three fresh isolates, at most 2.4 warm, with the largest
-parsed record and a real Access JWT; 12-15 ms when the Worker built it: `test/cpu/delivery-request-cpu.test.mjs`);
-the email() handler builds nothing and still only streams the raw message to R2; Mail Hero's first `status()` stays
-within its noise; todofy-core's upload 542.7 → 554.0 KiB (gzip 151.2 → 153.5); parsing an event on the host (CPython)
-0.01 → 0.04 ms for a small one, 0.2 → 0.7 ms with 100 attachments, 0.9 ms either way for the largest; Todofy's UI
-bundle is unchanged (its types come from the OpenAPI document).
-
-The mail Todofy keeps is its own package, `todofy.mail.v1` (`todofy/mail/v1/mail_service.proto`): the gateway's
-`Mail` entrypoint serves it to the Workers whose binding grants `read` or `read-write`, and no public host routes it.
-See [`todofy/docs/mail-api.md`](../todofy/docs/mail-api.md). It replaced `PlusService`
-(`todofy/ui/v1/plus_service.proto`, named after the retired Todoist Plus extension) and `MailReadinessService`
-(`todofy/ui/v1/mail_ready.proto`), both retired as whole files on 2026-10-21: Tasks and the Personal MCP call
-`MailService`, and Tasks converts the mail.
+Newsletter's engine retains its independent locked `ziyixi-protos` protocol and versioned deployment JSON.
+Its owner read API, `newsletter.ui.v1`, belongs here. Model Router's internal API has the coordinated-update
+exception described [below](#internal-model-router-changes); other APIs retain normal compatibility rules.
 
 ## Rules
 
@@ -207,7 +52,7 @@ See [`todofy/docs/mail-api.md`](../todofy/docs/mail-api.md). It replaced `PlusSe
    reason in the file's header),
    because `buf.yaml` reaches every proto user's deploy (`proto_deploys` below) and a new package must not
    redeploy the other apps. Google's api-linter
-   (`scripts/api-lint.sh`, one pinned version) checks every package but `prototest/` against the AIPs; its
+   (`//proto:api_lint_test`, one pinned version) checks every package but `prototest/` against the AIPs; its
    exceptions are `(-- api-linter: ... --)` comments with a reason, next to the element. `buf breaking` uses
    `FILE`, the strictest category: names, numbers, types, removals. buf compares no custom option, so
    `tools/profile_breaking.py` adds what it cannot see but is wire here. For the wire profile: an existing
@@ -251,7 +96,7 @@ See [`todofy/docs/mail-api.md`](../todofy/docs/mail-api.md). It replaced `PlusSe
 6. **Retiring an element.** Deleting a published package, file, enum value, field, allowed value, rpc or message is
    breaking by every rule above, and that stays so. When no producer or consumer of it remains (the app that used it is removed in
    the same change), [`retired.json`](retired.json) lists it by full name with the date and the reason, and
-   `tools/retired.py` (run by `scripts/breaking.sh` and the self-test before `buf breaking` and the profile rules)
+   `tools/retired.py` (run by `//proto:breaking` and the self-test before `buf breaking` and the profile rules)
    first checks that the head keeps the promise: no file under a retired package path or of its package name, no
    retired file (`files`, by its path: buf compares at FILE level, so a file is retired whole, with every service,
    message and enum it defines, and no kept file of the base may import it, `RETIRED_FILE_IMPORTED`), no retired
@@ -264,80 +109,55 @@ See [`todofy/docs/mail-api.md`](../todofy/docs/mail-api.md). It replaced `PlusSe
    removes exactly the listed elements from the base, so their deletion is the base's state and every other difference
    is checked as before; an element the base no longer has is left alone. Once every base CI compares with is newer
    than the deletion (the first green run on `main` after it), an entry does nothing and may be removed; the `reserved`
-   lines stay. `ci_changes.py` deploys nothing for the deleted files of a listed package (every importer stopped
-   importing them in the same change).
+   lines stay. Release selection follows the candidate and baseline Bazel graphs, including removed dependencies.
 
 ## Layout
 
-| Path | What |
+| Path | Responsibility |
 | --- | --- |
-| `buf.yaml`, `buf.lock` | The module (`path: .`, tooling directories excluded), lint and breaking rules, the `buf.build/googleapis/googleapis` dependency pinned by commit and digest |
-| `retired.json` | The published elements deleted on purpose (rule 6), which `tools/retired.py` keeps deleted and leaves out of the breaking checks' base |
-| `buf.gen.yaml` | protobuf-es v2 (`target=ts`, `import_extension=ts`, `erasable_syntax=true`) into `ts/` |
-| `<package path>/*.proto` | One directory per proto package: `links/ui/v1/*.proto` is `links.ui.v1`, the links app's owner API; `watch/ui/v1/*.proto` is `watch.ui.v1`, the watch app's owner API; `mailsort/ui/v2/*.proto` is `mailsort.ui.v2`, mailsort's owner API; `dashboard/ui/v1/*.proto` is `dashboard.ui.v1`, the dashboard's owner API; `mailhero/ui/v2/*.proto` is `mailhero.ui.v2`, Mail Hero's owner API; `common/errors/v1/errors.proto` is `common.errors.v1`, the error reasons every HTTP API shares; `common/wire/v1/wire.proto` is `common.wire.v1`, the wire profile's own options ([Value rules](#value-rules), `non_null`, `closed`, `keep_order`, `positional`); `ops/v1/ops.proto` is `ops.v1`, the IDL of `contracts/ops-v1` (every app's `Ops` entrypoint), a contract several apps implement, so named by the contract, not an app ([Adding a contract](#common-tasks), step 1); `todofy/report/v1/report.proto` is `todofy.report.v1`, Todofy's newsletter reports (recommendation-v1, summary-v1); `mailhero/webhook/v1/mail_received.proto` is `mailhero.webhook.v1`, Mail Hero's webhook event (mail.received.v1); `todofy/ui/v1/*.proto` is `todofy.ui.v1`, Todofy's owner API; `recall/ui/v1/*.proto` is `recall.ui.v1`, recall's owner API, `recall/ingest/v1/ingest.proto` is `recall.ingest.v1`, the upload of recall's browser extension, and `recall/archive/v1/archive.proto` is `recall.archive.v1`, recall's change feed and archive records (`contracts/recall-archive-v1`, whose fixtures `test/recall-archive.test.ts` round-trips); recall's Worker serves all three; `tasks/ui/v1/*.proto` is `tasks.ui.v1`, Tasks' owner API and its generic `TasksApi` binding, and `tasks/inbox/v1/task_inbox.proto` is `tasks.inbox.v1`, Tasks' create-only `TaskInbox` binding; `todofy/mail/v1/mail_service.proto` is `todofy.mail.v1`, Todofy's private Mail entry; `newsletter/ui/v1/*.proto` is `newsletter.ui.v1`, Newsletter's owner read API, which Newsletter answers and its console Worker passes through |
-| `package.json`, `../pnpm-workspace.yaml`, `../pnpm-lock.yaml` | The toolchain pins (`dependencies`: buf, protoc-gen-es, the runtime) and this folder's test tools (`devDependencies`) |
-| `ts/` | The TypeScript package `@ziyixi/proto`. Committed: `package.json` (its exports), `wire-json.ts`, `wire-rules.ts` and `field-mask.ts` (the codec and its value rules), `http-path.ts`, `http-rule.ts`, `http-transcoder.ts`, `http-client.ts` and `rpc-status.ts` (the HTTP runtime, [HTTP APIs](#http-apis)), `page-token.ts` and `filter.ts` (AIP-158 page tokens and the AIP-160 subset for list methods), `protobuf.ts` / `protobuf-wkt.ts` (the runtime re-exports). Generated: every directory (`ts/todofy/...`, `ts/watch/...`, `ts/ops/...`, `ts/common/...`, `ts/google/...`): protobuf-es's `*_pb.ts`, and for the packages of `WIRE_PACKAGES` the wire JSON types `*_wire.ts` |
-| `python/` | The Python package `ziyixi-proto`. Committed: `pyproject.toml` (static metadata, uv cache keys), `build_backend.py`, `src/ziyixi_proto/__init__.py` and `wire_json.py` (the codec and its value rules). Generated: every directory under `src/ziyixi_proto/`, for the packages `tools/gen_py.py` lists in `PYTHON_PACKAGES` only; the wheel leaves the test-only ones out (`TEST_ONLY_PACKAGES`) |
-| `tools/ensure.mjs` | Installs the pinned toolchain when `node_modules/` does not match the lockfile, and generates both languages when its stamp (`.generated.json`, ignored) does not match |
-| `tools/gen_py.py` | The stdlib-only Python generator (frozen dataclasses, `IntEnum`s, field tables; a field named like a Python keyword is the attribute `<name>_`, `from_`), for `PYTHON_PACKAGES` only: `todofy.report.v1`, `ops.v1`, `mailhero.webhook.v1`, `todofy.ui.v1` and `todofy.mail.v1` (todofy-core's); `platform.runtime.v1`, `fleet.telemetry.v1` and `common.errors.v1` (the VPS package); and `prototest.v1` (this folder's Python tests). A package only TypeScript apps use (another app's UI API) is not generated, so it may use what the Python profile lacks |
-| `tools/gen_wire_ts.py` | The TypeScript wire JSON types (`ts/<package>/<file>_wire.ts`, types only) of the packages in `WIRE_PACKAGES` (`ops.v1`, `todofy.report.v1` and `todofy.ui.v1` for Todofy's UI and the fixtures of its tests, `dashboard.ui.v1`, whose views the dashboard's Worker builds and its UI renders as wire JSON, `tasks.inbox.v1`, the `TaskInbox` binding Home and Watch call, `recall.ingest.v1`, the uploads recall's browser extension builds as plain objects without a runtime dependency, and `newsletter.ui.v1`, whose answers the console Worker passes through unparsed and its UI renders as wire JSON): each message's JSON as a producer writes it, a union narrowed by its discriminator, a type of another file of these packages as a type-only import of that file's module, each service as a binding's methods (none for a service with `google.api.http` bindings: an HTTP API is called through the client), and the `WireTypes` entries that type `toWire`'s answer |
-| `tools/gen_schema.py`, `tools/schema.mjs` | A contract's JSON Schema from its IDL (`SCHEMAS`: `ops.v1` writes the `$defs` document `contracts/ops-v1/ops-v1.schema.json`, with `ALIASES` keeping the `$defs` names it had before; `todofy.report.v1` writes `todofy/api/summary-v1.schema.json` and `recommendation-v1.schema.json`, each the self-contained schema of one message, `Target.root`, described by the IDL's comments; a target marked
-`Target.open` is a consumer's schema (mail.received.v1's, and recall.archive.v1's `$defs` document `contracts/recall-archive-v1/recall-archive-v1.schema.json`), every object open to unknown properties as a lenient read is, a union whose discriminator is an open enum given one more branch for a value it does not know (the fields' own rules, no case), and the relations
-`any_match` and `present_when` are written as `anyOf` and `allOf`/`if`/`then`), run by `tools/schema.mjs` (no shell, the tools of `ensure.mjs`; the image keeps its source info for those comments); `pnpm run schema` rewrites them, `pnpm run check:schema` (Proto checks, Contracts and this folder's `pnpm test`) fails when one differs; both name what must be regenerated after a changed schema (`Target.then`, for a generator that copies one; none does since Todofy's UI reads its types from todofy.ui.v1) |
-| `tools/wire_rules.py` | The value rules of `common/wire/v1` as the generators read them from a buf image, and the check that refuses a rule that cannot apply where it is written (every package) |
-| `tools/profile_breaking.py` | The profile's breaking rules (rule 4) |
-| `scripts/breaking.sh`, `scripts/rules-selftest.sh` | The breaking gate against a base commit; the rules self-test |
-| `scripts/api-lint.sh`, `tools/api-linter/` | Google's api-linter on every package but `prototest/`: a Go tool module (`go.mod` pins api-linter, the googleapis Go code it interprets annotations with and the Go toolchain, `go.sum` every checksum) that the script builds into `.tools/` (ignored), with `googleapis/`, the check that this googleapis equals `buf.lock`'s for every file the module imports (rule 3) |
-| `prototest/v1/prototest.proto` | Test fixtures of the runtimes, never used by an app (not in the Python wheel; a change deploys nothing): a message with every field kind of the profile and a service with every kind of HTTP binding, an AIP-134 update with a field mask among them; `prototest/v1/rules.proto`, a union with every value rule and a binding service with positional and object requests |
-| `testdata/http-cases.json` | The HTTP runtime's cases on `prototest.v1.BookService`: 64 requests and what the transcoder answers, 19 request messages and what the client sends; every implementation (a Python transcoder later) runs them |
-| `testdata/wire-profile-cases.json` | 138 edge cases (timestamps, integer and double spellings, enum look-alikes, maps, field masks, missing fields, null, every value rule, `non_null`, closed enums, `keep_order`, `write_empty`, the relations `present_when` and `any_match`, a field named like a Python keyword) that both codecs must answer identically |
-| `testdata/filter-cases.json` | The AIP-160 subset of `ts/filter.ts`: 29 filters and their literals or refusal, 4 search-box texts and their quoted filter. Mail Hero's restriction parser (`mail-hero/cloudflare/src/native/api-filter.ts`) runs it too (`test/api-filter.test.mjs`) |
-| `test/*.test.ts`, `test/python/` | The codec and IDL tests, the same cases in both languages; `test/cross-language.test.ts` pipes bytes through both codecs (`test/python/roundtrip.py` in a child process); `test/ensure.test.ts` runs `tools/ensure.mjs` on a copy of this folder (a deleted toolchain, an abandoned lock, the commands Windows needs) |
+| `<domain>/<api>/v*/` | IDL and package-scoped `proto_library` declarations |
+| `buf.yaml`, `buf.lock`, `buf.gen.yaml` | Lint/breaking rules, Google APIs pin and authoritative protobuf-es options |
+| `bazel/` | Descriptor, generation, packaging and materialization rules |
+| `ts/` | Handwritten runtime at the root; generated package directories are ignored |
+| `python/` | Stdlib runtime, wheel backend and ignored generated package directories |
+| `tools/gen_py.py`, `gen_wire_ts.py`, `gen_schema.py` | Canonical generators reused by Bazel actions |
+| `tools/wire_rules.py`, `profile_breaking.py`, `retired.py` | Value-rule interpretation and compatibility checks |
+| `tools/api-linter/` | Go tool/module pins and annotation agreement check |
+| `test/`, `testdata/`, `prototest/` | Synthetic fixtures, runtime tests and cross-language cases; `prototest` never ships in the wheel |
 
-Package directories inside `ts/` and `python/src/ziyixi_proto/` are generated (`.gitignore`); top-level
-files and the workspace-managed `ts/node_modules/` are preserved.
+Published schemas are generated from `gen_schema.py`'s `SCHEMAS`. A target publishes a `$defs` document or one
+self-contained message schema; consumer schemas allow unknown fields. Legacy `$defs` names remain aliases
+(`ALIASES`). Frozen legacy schemas and wire fixtures are compatibility evidence and are never regenerated.
 
 ## How it works
 
-`tools/ensure.mjs` checks that both the generator toolchain and TypeScript runtime have their
-catalog-pinned dependencies installed, and that the IDL, generator inputs, workspace manifests/catalog,
-root lockfile and generated outputs still match `.generated.json`. A current installation and stamp
-need no network. Missing dependencies are restored by a root frozen pnpm install filtered to the shared
-toolchain/runtime, with lifecycle scripts disabled to avoid recursively entering the generator.
-Under its existing lock it runs `buf generate`, then `buf build` piped into `gen_py.py` and
-`gen_wire_ts.py`, replaces only generated package directories and writes the stamp. The actual pnpm
-workspace links, including `proto/ts/node_modules`, remain intact.
+Bazel owns compilation and generation. Each IDL directory declares a `proto_library` with its actual imports;
+package actions reuse the pinned Buf/protobuf-es tools and the existing Python, wire TypeScript and Schema generators.
+The real `buf.gen.yaml` is an action input. The Google APIs repository validates `buf.lock` before using its
+commit-specific archive checksum. Actions consume declared files and toolchains, without local `node_modules`.
 
-The lock (`.generate.lock/owner.json`) names its holder's pid and host. Parallel installs wait for it and
-say whom they wait for. A run interrupted by Ctrl-C or killed leaves the lock behind; the next run sees
-that the pid no longer runs on this host, takes the lock over at once and removes the dead run's temporary
-directories. A lock it cannot check (another host on a shared disk, or one without an owner file) is taken
-over after 10 minutes; a waiter gives up only after 15.
+For raw pnpm/uv development, `node proto/tools/ensure.mjs` runs `bazel build //proto:materialized` from the
+repository root and copies that target's generated modules into the existing source export paths. It requires
+Bazel 9.3.1 on PATH; `BAZEL` can name its executable. Bazel decides freshness using the same graph as CI.
+The script does not install dependencies or invoke generators. `materialized/manifest.json` records declared
+input hashes and generated output hashes; `.generated.json` is its ignored copy in the source tree.
 
-Every tool starts without a shell, so the same steps run on Windows: buf is its JavaScript entry point run
-by the current `node`, as is the invoking pnpm entrypoint, and
-`buf.gen.yaml` starts `protoc-gen-es` as `node <its entry point>`. `gen_py.py` runs on `PROTO_PYTHON` when
-the build backend supplies its interpreter; otherwise `uv python find` resolves the root `.python-version`.
-Run `uv python install` at the repository root before the first pnpm installation. Only the macOS and Linux
-paths are exercised (locally and in CI); the shell scripts under `scripts/` are for CI and need a POSIX
-shell.
+The existing `.generate.lock` serializes source-tree copies. Outputs are staged and verified before replacing
+only generated package directories. Handwritten runtime files and workspace `node_modules` links remain in place.
+A dead local holder is recovered; a waiter reports the current holder.
 
-**TypeScript.** An app declares `"@ziyixi/proto": "workspace:*"` and `"postinstall": "node
+### TypeScript
+
+An app declares `"@ziyixi/proto": "workspace:*"` and `"postinstall": "node
 ../../proto/tools/ensure.mjs"`. pnpm links `node_modules/@ziyixi/proto` to `proto/ts` whether or not anything
-is generated, then the postinstall generates. Every pnpm script that compiles, tests, lints with types, bundles
+is generated, then the postinstall materializes Bazel outputs. Every pnpm script that compiles, tests, lints with types, bundles
 or serves the generated code (`tsc`, `vitest`, `eslint` through typescript-eslint's project service, `wrangler`,
 `vite`) has a `pre<script>` that runs the same command, in the app and in any package that imports the app's
 sources, so `pnpm run typecheck`, `pnpm run lint`, `pnpm test` or `pnpm run dev` after a pull or a branch switch that
-changed a `.proto` file regenerates first instead of using stale types (`test_proto.py` requires those scripts).
+changed a `.proto` file materializes current outputs first (`test_proto.py` requires those scripts).
 Generated files import `@bufbuild/protobuf`, which Node, TypeScript, vitest and
 wrangler's esbuild resolve through the runtime package's explicit catalog dependency: one pnpm store version for every app, no `paths`,
-`dedupe` or alias settings. Measured on 2026-10-01 with the first proposer's production dry-run: its `index.js` grew from
-166,530 to 336,996 bytes (gzip 44,365 to 79,211; wrangler's upload total 162.63 to 329.10 KiB, gzip 43.45 to
-77.70 KiB), of which the protobuf-es runtime is about 145 KB (descriptor decoding: `descriptor_pb`, the
-registry, the binary reader) and the generated code and `wire-json.ts` about 21 KB. Todofy's gateway imports
-types only: +0.1 KiB (a new bound).
-
-```ts
+`dedupe` or alias settings. ```ts
 import { create } from '@ziyixi/proto/protobuf';
 import { CanaryResultSchema, CanaryResult_State } from '@ziyixi/proto/ops/v1/ops_pb';
 import { fromWire, toWire } from '@ziyixi/proto/wire-json';
@@ -355,20 +175,13 @@ outside a message (a D1 column, an owner API), and `WireName<typeof GuardLevel>`
 (`'normal' | 'shed'`): an app's internal records can derive from it, so a new enum value fails its typecheck
 until it maps it. Python has `wire_name(member)` and `wire_member(cls, name)`.
 
-**Python.** Todofy declares `ziyixi-proto` in its `[project] dependencies` (todofy-core imports it) with
-`[tool.uv.sources] ziyixi-proto = { path = "../proto/python" }`. uv builds it with
-`python/build_backend.py` (standard library only, no build dependencies to download), which checks the
-stamp the way `ensure.mjs` does and runs `ensure.mjs` only when it does not match, then packages
-`src/ziyixi_proto`. uv rebuilds whenever one of the package's `cache-keys` changes (the stamp's inputs, the
-hand-written runtime and the stamp itself), so `uv run pytest` after editing a `.proto` file or switching
-branches regenerates by itself. The stamp is a key because it is gitignored with the generated code: after
-`git clean -fdX` uv would otherwise reinstall its cached wheel and leave the source tree, which pywrangler
-vendors from, without generated code. A generation rewrites the stamp, so the next `uv run` rebuilds once
-more (ensure.mjs finds nothing to do). One case no key can catch: a clean when the cached wheel was built
-while the stamp was missing too (only one `uv` command since a fresh clone). So the source tree has two
-more guards: Todofy's `package.json` runs `ensure.mjs` as its postinstall (every pywrangler command needs
-that `pnpm install --frozen-lockfile` for wrangler, and a clean removes `node_modules/` too), and its runtime test harness runs
-`ensure.mjs` before `pywrangler sync`.
+### Python
+
+Python consumers declare `ziyixi-proto` through the root uv workspace as a non-editable local source.
+The stdlib build backend invokes the same Bazel materializer on the host. Its uv cache keys include the IDL,
+Bazel definitions, locked toolchains and ignored manifest. The wheel contains runtime modules and selected generated
+Python packages; test-only `prototest` modules are excluded. `bazel build //proto:python_wheel` builds the same
+package directly from Bazel providers for release images.
 
 ```python
 from ziyixi_proto.ops.v1 import ops_pb as pb
@@ -387,33 +200,31 @@ sync when they differ (after running `ensure.mjs`); for `pywrangler dev` by hand
 change, run `uv run pywrangler sync --force`. If Pyodide's build still reports that the generated code is
 not current, run `pnpm run ensure` here and retry.
 
-**Editors.** After the app's install, VS Code resolves every import: TypeScript through the linked package
+### Editors
+
+After the app's install, VS Code resolves every import: TypeScript through the linked package
 (the generated `.ts` files are real files under `proto/ts`), Python through the installed package in
 `todofy/.venv` (select that interpreter). The files of `proto/` itself resolve too, since the app's
 install put this folder's whole lockfile (vitest, Node and Workers types) in `proto/node_modules`.
 
-**Offline.** Only the first generation needs the network (npm for the toolchain, buf.build once for the
-locked googleapis module, which buf caches in `~/.cache/buf`). After that, reinstalls and regeneration
-work offline (`pnpm install --frozen-lockfile --offline`, `uv sync --offline`).
+### Offline
+
+Bazel's first build fetches pinned tools and dependencies. Later builds can reuse its repository
+and action caches. The source-tree materializer uses those outputs; it does not maintain another tool cache.
 
 ## Common tasks
 
 ```sh
-cd proto
-pnpm install --frozen-lockfile                                   # the toolchain and this folder's test tools
-pnpm run generate                         # regenerate now (workspace pnpm install / uv sync also does it)
-pnpm run lint                             # buf format + buf lint
-pnpm run api-lint                         # Google's api-linter (needs Go; tools/api-linter/go.mod)
-pnpm run breaking -- "$(git merge-base HEAD origin/main)"   # buf breaking + the profile rules
-pnpm run selftest                         # the rules still bite
-pnpm run check:deterministic              # generate twice more, compare with the installed output
-pnpm run schema                           # rewrite the contracts' generated JSON Schemas (check:schema compares)
-pnpm run typecheck && pnpm test            # both codecs (TypeScript, then Python 3.14 through uv)
+bazel test //proto:check                              # lint, types, codecs, schemas and negative guards
+bazel build //proto/ts:pkg //proto:python_wheel         # canonical TypeScript package and stdlib Python wheel
+node proto/tools/ensure.mjs                           # materialize outputs for pnpm/uv source consumers
+bazel run //proto:write_schemas                        # update published schemas from generated outputs
+bazel run //proto:breaking -- "$(git merge-base HEAD origin/main)"
 ```
 
-After editing a `.proto` file or `wire-json.ts`/`wire_json.py`, a TypeScript app's next `npm run
-typecheck|test|dev` regenerates first (its pre-scripts); Todofy's next `uv run` rebuilds by itself.
-`wire-json.ts` itself is not generated: the apps read it in place.
+Package-scoped targets such as `//proto/tasks/inbox/v1:ts` and `:python` follow their IDL import closures.
+The full `//proto/ts:pkg` is used only when a consumer needs the full package, including raw development.
+`wire-json.ts` and `wire_json.py` remain handwritten runtime sources.
 
 **Adding a contract.**
 
@@ -435,16 +246,13 @@ typecheck|test|dev` regenerates first (its pre-scripts); Todofy's next `uv run` 
    with a published JSON Schema generates it: add a `Target` to `SCHEMAS` in `tools/gen_schema.py` (with `root` for
    the self-contained schema of one message, and `then` for a generator that copies it) and run `pnpm run schema`,
    then what its `then` names, if anything.
-3. `pnpm run lint && pnpm run api-lint` until clean, then `pnpm run generate`.
+3. `pnpm run lint && pnpm run api-lint` until clean, then `pnpm run ensure`.
 4. Add the contract's fixtures to `test/` and `test/python/` (round trip byte for byte, a strict read refusing every
    invalid fixture, a lenient read tolerating what its consumers do), and a new kind of field or rule to
    `testdata/wire-profile-cases.json` first.
-5. In each app that uses it: the TypeScript dependency and postinstall above, or the Python source above;
-   then, in `.github/scripts/ci_changes.py`, add the app to `PROTO_USERS` with the languages its production
-   bundles compile in (`"ts"` once it imports a value, not only types; `"python"` once a Worker imports the
-   package) and the package directory to `PROTO_PACKAGES` with the apps that import it: a `proto/` change
-   deploys exactly the bundles it reaches. `test_proto.py` derives both from the sources and fails until they
-   agree.
+5. In each consumer, add the workspace dependency and the package-scoped Bazel dependency. Declare imported
+   IDL packages in the new `proto_library` and add generated output targets in the language package. Tests and
+   release facades inherit those edges; no central application registry needs updating.
 
 ## Wire JSON profile
 
@@ -541,67 +349,6 @@ Python runtime: about 1 MB more per Python Worker and 2.4-4 times the CPU of tod
 gzip 136.54 to 142.01 KiB; in local workerd without a memory snapshot, importing `core/intents.py` with it
 costs about 7 ms more than the hand-written version did). The protobuf-es runtime adds about 34 KB gzip to
 a TypeScript Worker that bundles it.
-
-**What ops-v1 costs** (measured 2026-10-01, the production dry runs and the workerd CPU tests, before and after
-the move). Bundles, gzip as `tools/bundle-size` counts it: Mail Hero 148.6 → 189.3 KiB (its first protobuf-es
-runtime and the codec, budget 228 KiB), the dashboard 54.3 → 89.7 KiB (the runtime replaced the hand-written
-schema and `validate.mjs`, budget 108 KiB), the links app 68.4 → 71.9 KiB (it imports no ops.v1, but the
-codec's rule checker and the `common/wire/v1` descriptors come with the runtime, budget 82 KiB); todofy-core's upload 505.9 → 530.3 KiB (gzip 143.8 →
-148.8 KiB: `ops_pb.py` and the rule tables); the gateway imports types only (38.8 → 38.7 KiB). CPU, in
-milliseconds of the reference machine: Mail Hero's `Ops` entrypoint (a Worker request, 10 ms on Free), the
-isolate's first `status()` 3.1-5.2 → 5.0-7.1 ms (24 serial runs; the test, run alone by `pnpm run test:cpu`, holds
-the median of three fresh isolates, 5.4-6.6 ms, under 8 ms: about a quarter of Free's 10 ms is left, about half
-before), warm medians at most 2.2 ms (`mail-hero/cloudflare/test/cpu/native-ops-cpu.test.mjs`); the dashboard's cron tick, which reads every answer
-inside HomeState (a Durable Object invocation, 30 s on Free), the isolate's first tick 6.2-7.3 → 9.4-11.5 ms
-(the codec's code paths and the rules read from the descriptors running for the first time), warm medians
-about 2 ms either way (`dashboard/worker/test/runtime/cpu.test.ts`). Todofy's `Ops` answers are
-built inside its Durable Object.
-
-**What the case rule costs** (`CaseRules.empty` and `Format.json_schema_format`, measured 2026-10-01 like ops-v1's,
-before and after on the same machine). It is a change to `common/wire/v1` and `ts/wire-rules.ts`, so it redeploys
-every proto user although none of their contracts uses it: Mail Hero, the dashboard and links (the new
-descriptors and one check per union case) and Todofy (the Python tables). It therefore lands on its own, before the
-first contract that needs it (todofy.report.v1), whose own change then deploys Todofy only. Bundles, gzip:
-Mail Hero 189.3 → 189.4 KiB, the dashboard 90.1 → 90.1 KiB, links 71.9 → 72.0 KiB (348
-bytes more each before compression, 74-83 after). CPU, within the runs' noise: Mail Hero's first `status()`, median
-of three isolates, 6.05 → 6.15 reference ms (bound 8); the dashboard's first tick 9.96 → 9.23 ms; links' first API
-request 4.63 → 4.78 ms; warm medians unchanged.
-
-**What the relations cost** (`Field.write_empty`, `Field.present_when`, `Message.any_match`, the Python keyword
-attribute and `uuid` as a JSON Schema format, measured 2026-10-01 the same way, three runs each of the base and of the
-change on the same machine). The vocabulary mail.received.v1 needs (branch `proto-mail-rules`), and like the case rule a
-change to `common/wire/v1` and both runtimes, so it redeploys every proto user with no behaviour change (no contract
-uses it yet): Mail Hero, the dashboard and links (the new descriptors, a list's `write_empty` and the relations'
-checks, read with the discriminator in one option read per message) and Todofy (the Python tables and attributes). It
-lands on its own, before mail.received.v1, whose change then deploys Mail Hero and Todofy only. Bundles, gzip: Mail Hero
-189.4 → 189.8 KiB, the dashboard 90.1 → 90.5 KiB, links 72.0 → 72.4 KiB (about 1.5 KiB more
-each before compression). CPU, within the runs' noise: Mail Hero's first `status()`, median of three isolates, 5.35-6.03
-→ 5.73-6.36 reference ms (bound 8); the dashboard's first tick 9.82-10.32 → 9.74-10.33 ms; links' first API request
-3.87-4.45 → 4.32-4.47 ms.
-
-**What mailhero.ui.v2 costs** (measured 2026-10-02 with the production dry run, `vite build` and the workerd CPU test
-`mail-hero/cloudflare/test/cpu/owner-api-cpu.test.mjs`; the before numbers are the same requests and data on the
-hand-written `/api/v1`, with the same meter on the same machine). It deploys Mail Hero only. Bundles, gzip: Mail Hero's
-Worker 193.3 → 229.0 KiB (the transcoder with its page-token, filter and field-mask helpers, and the service's
-descriptors; budget 228 → 274 KiB), its UI's JavaScript 121.4 → 162.4 KiB (the protobuf-es runtime and the same
-descriptors; new budget 195 KiB); the review fixes (AttemptResult, one response shape for the three methods that make
-a delivery, ETAG_MISMATCH's current resource) added 0.7 and 0.3 KiB of that. CPU, reference milliseconds, median of three fresh isolates, first run / warm: the
-isolate's first API request 5.7 → 7.6 (the transcoder's paths run once; bound 9 of Free's 10), 50 messages with a
-search 1.7 / 0.8 → 5.1 / 1.8, a settings update 3.4 / 1.4 → 4.9 / 1.7, every other Worker request at most 2.8 first
-and 1.9 warm. The two reads near or over Free's 10 ms (a message with the largest parsed record: 9.8 / 8.4 before,
-12.8 first through the transcoder; a zone's first dashboard: 13.2 before, 14.6) are answered by the coordinator: the
-Worker forwards them in under 1 ms, and the coordinator's slowest answer took 18 ms of its 30 s. **The startup
-warm-up** (`mail-hero/cloudflare/src/native/warmup.ts`): an isolate's first request of a method ran
-its share of protobuf-es and the codec before V8 compiled it, and a GitHub runner read the first SendMessage at 6.01
-reference ms against its bound of 6 (`test/cpu/delivery-request-cpu.test.mjs`; the hand-written send read 4.1-4.9
-there). The Worker's global scope now routes, reads and answers synthetic requests of the heaviest methods (the
-overview, SendMessage, ResendDelivery, TestEndpoint, the lists and reads, an update, the coordinator's two reads)
-through the transcoder's routes and the codec, five rounds: about 10 ms more startup in Miniflare (Workers allow 1 s),
-2.4 KiB more gzip (229.2 → 231.6 KiB). Four serial runs before and after, reference ms, first run / warm: SendMessage
-4.15-4.60 / 2.50-3.15 → 3.38-3.98 / 1.90-2.30 (the hand-written send 2.84-3.06 / 1.66-2.35 the same day), the
-isolate's first API request 7.1-8.2 → 5.7-6.5, 50 messages with a search 4.7-5.1 → 2.8-3.3 first, a settings update
-4.1-4.8 → 3.1-4.0 first, the coordinator's slowest delegated read 17.8-19.4 → 15.1-15.4; the event builds
-(`payload-cpu`) unchanged, and the `Ops` entrypoint's first `status()` 4.4-4.8 → 3.0-3.4 (it shares the codec).
 
 ## HTTP APIs
 
@@ -727,57 +474,10 @@ sends only the masked fields. A non-2xx answer throws `RpcStatusError` with the 
 `localizedMessage`, `requestId`, `readDetail(status, Schema)`), or `HttpResponseError` when the body is not
 one (a proxy page, an expired Access session).
 
-**Cost** (measured 2026-10-01 on the first app that adopted the runtime: a sampled DevTools CPU profile of the
-workerd isolate around each request, noisy at 0.1 ms resolution, medians of 10 warm runs, three runs each, on the
-reference machine of `tools/workerd-cpu`). The transcoder's decode, the map to messages and `toWire` add a few tenths
-of a millisecond to a warm request; the isolate's first API request about 2 ms, from running the new code paths once.
-The route table itself is built when the Worker's global scope constructs the transcoder (about 2 ms in a fresh Node
-process; Tasks' 34 methods with their codec tables about 8 ms), outside any request. The bundles grew by the
-protobuf-es runtime and the embedded descriptors of the API and `google/api`. So an app that adopts the runtime
-should expect about 27 KiB more gzip in its Worker, 36 KiB more in its UI and about 2 ms more CPU on an isolate's
-first API request. Each app's CI holds its numbers: a CPU test bounds the isolate's first API request, every other
-request's first run and every warm median in milliseconds of the reference machine (`tools/workerd-cpu` and its
-README), and its bundles are held to budgets (`tools/bundle-size`: `<app>/deploy/bundle-size.mjs` for the Worker,
-`<app>/web/scripts/js-budget.mjs` for the UI's JavaScript).
-
-**Large lists** (measured 2026-10-02 on the first API with lists of hundreds of items, a time-blocking app retired on
-2026-10-20 whose CPU and read tests remain in history at `777d5f01`; same meter and machine). Writing a message with `toWire` costs a few
-microseconds per item warm and several times that the first time an isolate runs it (300 tasks: 0.9 ms warm, 5.5-7 ms
-on the first run, in Node), so an answer's size is a CPU decision. That app's first cut answered whole lists: a page of
-500 time entries with their tasks took 7.0 ms warm (Free's 10 ms with no margin), and an isolate's first API request,
-a page of 300 tasks, 12.9 ms. Two changes keep both inside the limit. Lists are AIP-158 pages sized to the budget (200
-tasks, days or entries; the UI reads every page), and the Worker's global scope writes a few hundred synthetic messages
-once at startup, outside any request's CPU time like the transcoder's route table,
-so V8 has optimized the writer before a request needs it. An isolate's first API request, a page of 200 of 1,000
-tasks, is then 7.6 ms (median of three isolates; 11-13 ms without the warm-up; the hand-written answer of all 1,000
-tasks took 8.2 ms), and every warm request 3 ms or less (the sync's first chunk 7.3 ms cold, unchanged). The review
-of that build found two more costs, now measured for every list as an isolate's first request: an isolate's first
-run of drizzle's query building and row mapping (about 3 ms for 200 tasks), and an analytics page whose first page
-carried a whole range's flows and tasks (25.6 ms for a year). The warm-up now also builds each list's query and maps
-synthetic raw rows through it (a stub binding that is never called), and every repeated field of a page counts
-against its bound: every list's largest first page is 3.7-6.7 ms on an isolate's first request, below the bound of
-10 ms. Paging also has a D1 cost: a page that re-reads a table and slices it makes reading every page grow with the
-square of the data, so every page of that app sought to its cursor through an index and read about its own rows.
-Bundles: its Worker 56.1 → 114.3 KiB gzip (it had no
-protobuf-es runtime before; budget 140 KiB), its UI's JavaScript 362.8 → 398.9 KiB gzip (budget 480 KiB). An app
-with lists that long should expect the same: page sizes from its CPU test, keyset pages, and the warm-up.
-
-**What todofy.ui.v1 costs** (measured 2026-10-02 the same way, before and after on the same machine; the gateway's
-CPU test is `todofy/gateway/test/runtime/cpu.test.ts`, the table in `todofy/docs/gateway-contract.md` §8). Todofy's
-gateway passed the Durable Object's JSON through before; now it decodes every request and reads and writes every
-answer again with the generated code, so it pays more than an API whose Worker builds its own answers, and most for
-its largest answers. Bundles: the
-gateway 39.7 → 291.4 KiB (gzip 11.8 → 72.0 KiB: its first protobuf-es runtime, the codec, the transcoder and the
-descriptors; budget 86 KiB, `todofy/deploy/bundle-size.mjs`), the UI's JavaScript gzip 131.9 → 172.4 KiB (budget
-208 KiB, `todofy/web/scripts/js-budget.mjs`). CPU in the gateway, reference ms, medians of three fresh isolates:
-the isolate's first API request (the service status, with the first RS256 verification) 3.2 → 4.2-5.2 (7.4-8.2
-until `todofy/gateway/src/warm.ts` ran the codec once at global scope over synthetic messages, outside every
-request's limit; bound 8), a page of 100 events 0.4 → 3.2 first and 2.2 warm, 120 GTD days 0.4 → 3.2 and 2.9, a
-reconcile 1.0 → 2.1 and 1.6, the two largest answers (a 1.9 MB legacy text, every stored report at the newsletter's
-limits) 2.1 → 6.4 (1.9 million ASCII characters heavy in escapes, D1's largest row; 4.4 as Chinese text) and
-1.3 → 5.2 (bound 8); every other first run at most 3.2 (bound 6) and warm median at most 2.9
-(bound 4). todofy-core (a Durable Object, 30 s) builds the same dicts as before and maps them to generated
-dataclasses; its upload 554.1 → 633.4 KiB (gzip 153.6 → 168.4: the `todofy.ui.v1` modules and the mapping).
+List sizes and serialization work are bounded by each application's CPU and bundle checks. Lists use indexed
+keyset pagination and read only their page's rows. A repeated field in any page counts against that page's bound.
+Applications that need startup warm-up use synthetic inputs at global scope; production handlers keep the same
+validation and authentication path. Current budgets and acceptance tests belong to the application.
 
 **Adding a UI API.**
 
@@ -819,44 +519,17 @@ back and writes it again byte for byte.
 
 ## CI
 
-The **Proto checks** job (`.github/workflows/ci.yml`) runs when `proto/`, `.github/` or `tools/` changed, when a
-contract this folder's tests read changed (`PROTO_READS`: `contracts/ops-v1/` and `contracts/mail-received-v1/`, among
-others, whose fixtures both codecs round-trip and check), or on a dispatch: `pnpm install --frozen-lockfile`, `pnpm run lint`, `pnpm run api-lint` (Go from `tools/api-linter/go.mod` via
-`actions/setup-go`; the googleapis check of rule 3 first), `scripts/breaking.sh` against the **Changes** job's `base`
-output (the commit of the last successful `main` run on `main`, the merge base with `origin/main` on a
-branch; the checkout has `fetch-depth: 0`), the rules self-test, the determinism check, the generated JSON Schemas
-(`pnpm run check:schema`, also in `Contracts`, which a hand edit of a schema under `contracts/` triggers),
-and both codecs' typecheck and tests. `test_proto.py` (one version, wiring, the deploy maps) runs in the Changes job,
-which every other job needs. When Changes has no base (it runs everything: first run, unusable base, dispatch),
-`breaking.sh` compares with `HEAD~1` and says so in the log; a base that predates `proto/` has nothing to break. The job is in `CI gate`'s needs and in
-`CHECK_JOBS` (a push to `main` reuses a green branch run only if it passed Proto checks).
+Public `:check` roots expose native test closures. Target Determinator compares the candidate and baseline
+Bazel graphs and selects affected test leaves and tagged release facades in one comparison. IDL imports,
+generator inputs and runtime libraries participate through their declared dependencies; there is no separate
+proto-to-application registry. Publication and reconcile remain in Actions.
 
-A `proto/` change also re-checks every app in `PROTO_USERS` (Todofy, Mail Hero, the dashboard, the links app, the watch app,
-mailsort, recall, Fleet, Platform and the website) and runs
-`Contracts` (the contracts' tests check the codecs against the schemas and pin the wire bytes). It deploys only
-the apps whose production bundle the changed path reaches (`proto_deploys` in `.github/scripts/ci_changes.py`).
-`PROTO_USERS` names each user's bundled languages: Mail Hero and the dashboard `"ts"` (their Workers, and
-Mail Hero's and the dashboard's UIs), the links, watch, mailsort and recall apps `"ts"` (their Workers and UIs), Todofy `"ts"` and `"python"` (its gateway and UI bundle the runtime and the descriptors of todofy.ui.v1;
-todofy-core vendors the wheel). A language's runtime and generator reach that language's users (`proto/ts/` and `buf.gen.yaml`: the
-TypeScript users; `proto/python/`, `tools/gen_py.py` and `tools/wire_rules.py`: Todofy); the wire profile's own
-options (`common/wire/`) reach both; a package reaches the apps that import it (`PROTO_PACKAGES`:
-`todofy/report/` Todofy, `todofy/ui/` Todofy, `todofy/mail/` and `tasks/inbox/` the apps that serve or call them, `mailhero/webhook/` Mail Hero and Todofy, `links/ui/` the links app, `mailhero/ui/` Mail Hero, `watch/ui/` the watch app, `mailsort/ui/` mailsort, `recall/ui/`, `recall/ingest/` and `recall/archive/` recall, `dashboard/ui/` the dashboard, `ops/` the apps with an `Ops` entrypoint or caller (Mail Hero, the dashboard, Todofy, the watch app, mailsort, recall and the website relay), `newsletter/ui/` the Newsletter console and Newsletter, `common/errors/` and `prototest/` none);
-the module and toolchain files (`buf.yaml`, `buf.lock`, the root `pnpm-lock.yaml`, `tools/ensure.mjs`) and any path
-not mapped reach every user; tests, test data, the check scripts, the wire JSON types' and JSON Schema
-generators (`tools/gen_wire_ts.py`: types only; `tools/gen_schema.py`: files under `contracts/` and `todofy/api/`,
-which their own rules map), the api-linter tool module, check configs and Markdown reach none. `test_proto.py` derives
-the users' languages and each package's importers from the sources, so the maps cannot drift.
-
-## Later
-
-Every app's UI API is on the [HTTP APIs](#http-apis) pattern (the dashboard's, Mail Hero's and Todofy's moved on 2026-10-02). ops-v1 moved on 2026-10-01 as one package,
-`ops/v1`, because its four services share every message, recommendation-v1 and summary-v1 as `todofy/report/v1`
-(messages only; Todofy's owner API, which lists them, moved on 2026-10-02 as `todofy/ui/v1`), and mail-received-v1 as
-`mailhero/webhook/v1` (messages only: the webhook's path, authentication and Idempotency-Key header stay the HTTP
-transport's). Shared types come from the same googleapis dependency (`google.rpc.Status`) or a
-`common/<name>/v1` package. A new contract moves the way task-intent-v1 did: the IDL and tests first, then
-both sides on the generated code with every frozen v1 byte pinned by tests (Mail Hero's legacy fixtures are
-pinned by SHA-256).
+`//proto:check` covers Buf formatting/lint, the Go api-linter and its annotation compatibility check, real TypeScript
+compilation, both codecs and frozen wire fixtures, published Schema bytes, the original synthetic lint/breaking
+mutation cases, and two canonical generator runs compared byte for byte. `//proto:breaking` adds the baseline
+comparison, retirement rules and wire profile rules. Repository audit tests check one runtime version, package
+wiring, ignored generated paths and each `proto_library`'s source/import metadata. The native graph integration
+fixture verifies source, unconsumed-document and release-only changes with the pinned Target Determinator binary.
 
 ## Personal-cloud Python runtime
 

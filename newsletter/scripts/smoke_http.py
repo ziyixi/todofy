@@ -29,7 +29,13 @@ def main() -> None:
     ) as temporary:
         env = {
             key: os.environ[key]
-            for key in ("PATH", "HOME", "TMPDIR", "LANG")
+            for key in (
+                "PATH",
+                "HOME",
+                "TMPDIR",
+                "LANG",
+                "NEWSLETTER_CHART_FONT",
+            )
             if key in os.environ
         }
         tokens = {

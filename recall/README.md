@@ -21,6 +21,14 @@ NAS. Every owner step is a click. Chinese UI, mobile first. Design:
 | `wrangler.toml` | The production config (top level = production); `wrangler.test.toml` is for local development and the smoke run |
 | `../proto/recall/` | The owner API `recall.ui.v1`, the upload `recall.ingest.v1` and the feed `recall.archive.v1` |
 
+## Bazel checks
+
+Run `bazel test //recall:check` and `bazel build //recall` from the repository workspace.
+The root target packages the application; `:check` collects its declared checks. Package build, test, type and lint scripts
+delegate to the corresponding Bazel targets. Interactive Vite/Wrangler commands remain available for local development;
+their no-argument proto hook materializes Bazel outputs into the existing development imports.
+See [workspace dependencies](../docs/dependencies.md) for the Bazel prerequisite and installation commands.
+
 ## Use
 
 iPhone/Orion installation and the short owner check: [mobile and multiple devices](docs/mobile.md).

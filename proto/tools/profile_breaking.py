@@ -1,6 +1,6 @@
 """Breaking-change rules that `buf breaking` cannot see (proto/README.md, Rules).
 
-Usage (scripts/breaking.sh and scripts/rules-selftest.sh run it)::
+Usage (//proto:breaking and scripts/rules-selftest.sh run it)::
 
     python3 tools/profile_breaking.py BASE_IMAGE.json HEAD_IMAGE.json [--config buf.yaml]
 

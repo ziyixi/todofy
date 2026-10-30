@@ -133,6 +133,13 @@ http_archive(
 http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
 
 http_file(
+    name = "todofy_pyodide",
+    downloaded_file_path = "pyodide_314.0.6_2026-08-17_6.capnp.bin",
+    sha256 = "3c3fd5a4179230e21e018e28b0e735e7c4abd8fe8e4ff39d2fd6bb2ea3a2e260",
+    urls = ["https://pyodide-capnp-bin.edgeworker.net/pyodide_314.0.6_2026-08-17_6.capnp.bin"],
+)
+
+http_file(
     name = "kubectl_linux_amd64",
     executable = True,
     sha256 = "629d3f410e09bf49b64ae7079f7f0bda1191efed311f7d37fdbab0ad5b0ec2b7",
@@ -196,4 +203,25 @@ http_archive(
     sha256 = "6e4a2f6ed105b5353c7b56962d00f923873dd68af6509b9b9f595057edba1915",
     type = "zip",
     urls = ["https://github.com/cloudflare/terraform-provider-cloudflare/releases/download/v5.25.0/terraform-provider-cloudflare_5.25.0_linux_amd64.zip"],
+)
+
+http_archive(
+    name = "playwright_webkit_mac_arm64",
+    add_prefix = "webkit-2359",
+    build_file_content = 'exports_files(["webkit-2359/pw_run.sh"],visibility=["//visibility:public"])\nfilegroup(name="files",srcs=glob(["webkit-2359/**"]),visibility=["//visibility:public"])',
+    sha256 = "f0c43ff8a566ef9cf57b5c0e349d985c60e6ffeb7416e8aac34a5c911bbb8ca7",
+    urls = ["https://cdn.playwright.dev/dbazure/download/playwright/builds/webkit/2359/webkit-mac-26-arm64.zip"],
+)
+
+http_archive(
+    name = "playwright_webkit_linux_amd64",
+    add_prefix = "webkit-2359",
+    build_file_content = 'exports_files(["webkit-2359/pw_run.sh"],visibility=["//visibility:public"])\nfilegroup(name="files",srcs=glob(["webkit-2359/**"]),visibility=["//visibility:public"])',
+    sha256 = "8c129d989a1c48d826ca11b45acbba919039de811623dc3819ccbd95b69eeb62",
+    urls = ["https://cdn.playwright.dev/dbazure/download/playwright/builds/webkit/2359/webkit-ubuntu-24.04.zip"],
+)
+
+register_toolchains(
+    "//tools/bazel/browser:webkit_mac_arm64_toolchain",
+    "//tools/bazel/browser:webkit_linux_amd64_toolchain",
 )

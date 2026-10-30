@@ -6,14 +6,11 @@
   "description": "Todofy edge gateway (Worker \"todofy\"): routing, auth and assets; the work runs in todofy-core.",
   "scripts": {
     "postinstall": "node ../../proto/tools/ensure.mjs",
-    "pretypecheck": "node ../../proto/tools/ensure.mjs",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p test/runtime/tsconfig.json",
-    "pretest": "node ../../proto/tools/ensure.mjs",
-    "test": "vitest run",
-    "pretest:runtime": "node ../../proto/tools/ensure.mjs",
-    "test:runtime": "vitest run --config vitest.runtime.config.ts",
-    "prelint": "node ../../proto/tools/ensure.mjs",
-    "lint": "eslint ."
+    "typecheck": "bazel test //todofy/gateway:typecheck_tests",
+    "test": "bazel test //todofy/gateway:unit_tests",
+    "test:runtime": "bazel test //todofy/gateway:runtime_tests --nocache_test_results",
+    "lint": "bazel test //todofy/gateway:lint",
+    "check": "bazel test //todofy:check"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",

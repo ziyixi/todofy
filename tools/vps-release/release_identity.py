@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from uuid import UUID
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "cloud-config"))
+sys.path.insert(0, str(Path(__file__).absolute().parents[1] / "cloud-config"))
 from cloud_profile import image_repositories, load_profile
 
 

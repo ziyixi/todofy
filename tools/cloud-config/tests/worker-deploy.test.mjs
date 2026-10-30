@@ -10,6 +10,8 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { BUILD_SHA, SettingError, workerDeploy } from '../worker-deploy.mjs'
 
+const NODE_EXECUTABLE = process.env.JS_BINARY__NODE_BINARY ?? process.execPath;
+
 const CORE = new URL('../worker-deploy.mjs', import.meta.url).href
 const AUD = 'a'.repeat(64)
 const ZERO_AUD = '0'.repeat(64)
@@ -180,7 +182,7 @@ test('as a script the wrapper runs its commands, printing names only; imported, 
     const recorded = join(dir, 'argv.json')
     writeFileSync(stub, `import { writeFileSync } from 'node:fs'\nwriteFileSync(${JSON.stringify(recorded)}, JSON.stringify(process.argv.slice(2)))\n`)
     const env = { PATH: process.env.PATH, GITHUB_SHA: 'c'.repeat(40), FLEET_ACCESS_OWNER: 'owner@example.org', FLEET_ACCESS_OWNER_ALIASES: '', FLEET_REPORT_HMAC_KEY: 'd'.repeat(64) }
-    const invoke = (args, extra = {}) => spawnSync(process.execPath, [wrapper, ...args], { cwd: join(dir, 'worker'), env: { ...env, ...extra }, encoding: 'utf8' })
+    const invoke = (args, extra = {}) => spawnSync(NODE_EXECUTABLE, ['--preserve-symlinks-main', wrapper, ...args], { cwd: join(dir, 'worker'), env: { ...env, ...extra }, encoding: 'utf8' })
 
     const secrets = join(dir, 'secrets.json')
     const written = invoke(['secrets', secrets])
@@ -191,11 +193,11 @@ test('as a script the wrapper runs its commands, printing names only; imported, 
     const invalid = invoke(['check'], { FLEET_REPORT_HMAC_KEY: 'secret-looking-value' })
     assert.deepEqual([invalid.status, invalid.stderr], [1, 'Invalid or missing deploy setting: FLEET_REPORT_HMAC_KEY\n'])
     // The config has no AUD yet: a dry run runs the stub with the flag added, a real deploy is refused before it.
-    const dry = invoke(['exec', '--', process.execPath, stub, 'deploy', '--dry-run', '--config', '../wrangler.toml'])
+    const dry = invoke(['exec', '--', NODE_EXECUTABLE, stub, 'deploy', '--dry-run', '--config', '../wrangler.toml'])
     assert.equal(dry.status, 0, dry.stderr)
     assert.deepEqual(JSON.parse(readFileSync(recorded, 'utf8')), ['deploy', '--dry-run', '--config', '../wrangler.toml', '--var', `BUILD_SHA:${'c'.repeat(40)}`])
     rmSync(recorded)
-    const refused = invoke(['exec', '--', process.execPath, stub, 'deploy', '--config', '../wrangler.toml'])
+    const refused = invoke(['exec', '--', NODE_EXECUTABLE, stub, 'deploy', '--config', '../wrangler.toml'])
     assert.equal(refused.status, 2)
     assert.match(refused.stderr, /^Refused: ACCESS_AUDIENCE is missing/)
     assert.ok(!existsSync(recorded))
@@ -207,7 +209,7 @@ test('as a script the wrapper runs its commands, printing names only; imported, 
     }
 
     // Imported (as a test or drift_desired.py imports a wrapper), the same file runs no command.
-    const imported = spawnSync(process.execPath, ['--input-type=module', '-e', `await import(${JSON.stringify(pathToFileURL(wrapper).href)})`],
+    const imported = spawnSync(NODE_EXECUTABLE, ['--preserve-symlinks-main', '--input-type=module', '-e', `await import(${JSON.stringify(pathToFileURL(wrapper).href)})`],
       { cwd: join(dir, 'worker'), env, encoding: 'utf8' })
     assert.deepEqual([imported.status, imported.stdout, imported.stderr], [0, '', ''])
   })

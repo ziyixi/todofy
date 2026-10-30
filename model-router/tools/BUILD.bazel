@@ -5,6 +5,11 @@ load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
 package(default_visibility = ["//model-router:__subpackages__"])
 
+filegroup(
+    name = "connection_check",
+    srcs = ["check_connections.py"],
+)
+
 ts_project(
     name = "restore_types",
     srcs = ["backup-restore.ts"],
@@ -57,6 +62,7 @@ test_suite(
     tests = [
         ":bundle_budget_test",
         ":deploy-vars_test",
+        ":restore_types_typecheck_test",
     ],
 )
 

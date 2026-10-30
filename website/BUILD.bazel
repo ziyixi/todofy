@@ -2,6 +2,7 @@ load("@aspect_rules_js//js:defs.bzl", "js_library", "js_run_binary")
 load("@bazel_lib//lib:copy_to_directory.bzl", "copy_to_directory")
 load("@bazel_lib//lib:expand_template.bzl", "expand_template")
 load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@npm//website:@playwright/test/package_json.bzl", playwright = "bin")
 load("@npm//website:eslint/package_json.bzl", eslint = "bin")
 load("@npm//website:prettier/package_json.bzl", prettier = "bin")
 load("@npm//website:tsx/package_json.bzl", tsx = "bin")
@@ -13,8 +14,9 @@ load("//proto/bazel:ts_package.bzl", "proto_package")
 load("//tools/bazel:js.bzl", "proto_vitest_test", "vitest_test", "workspace_link", "workspace_package_link")
 load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 load("//tools/bazel/lint:defs.bzl", "eslint_test")
+load(":bazel.bzl", "website_browser_test", "website_deployment_verifier")
 
-package(default_visibility = ["//visibility:public"])
+package(default_visibility = ["//website:__subpackages__"])
 
 exports_files([
     "relay/deploy/retire-secrets.py",
@@ -921,6 +923,7 @@ js_library(
     ],
     deps = [
         ":content__site_config",
+        ":scripts__bazel__source-identity",
         ":scripts__release__cloudflare",
         ":scripts__release__content-sync",
         ":scripts__release__green-commit",
@@ -1021,6 +1024,7 @@ vitest_test(
     ],
     patch_node_fs = False,
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["tests/unit/article-body.test.ts"],
 )
 
@@ -1104,6 +1108,7 @@ vitest_test(
     ],
     patch_node_fs = False,
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["tests/unit/blog-translations-ui.test.ts"],
 )
 
@@ -1157,6 +1162,7 @@ vitest_test(
         ":tests__unit__content-block-validation_test_proto_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["tests/unit/content-block-validation.test.ts"],
 )
 
@@ -1254,6 +1260,7 @@ vitest_test(
         ":tests__unit__content-media-transaction_test_proto_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["tests/unit/content-media-transaction.test.ts"],
 )
 
@@ -1301,6 +1308,7 @@ vitest_test(
         ":tests__unit__content-mode_test_proto_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["tests/unit/content-mode.test.ts"],
 )
 
@@ -1398,6 +1406,7 @@ vitest_test(
         ":tests__unit__content-prepare_test_proto_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["tests/unit/content-prepare.test.ts"],
 )
 
@@ -1451,6 +1460,7 @@ vitest_test(
         ":tests__unit__content-primitives_test_proto_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["tests/unit/content-primitives.test.ts"],
 )
 
@@ -1500,6 +1510,7 @@ vitest_test(
         ":tests__unit__content-redirects_test_proto_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["tests/unit/content-redirects.test.ts"],
 )
 
@@ -1549,6 +1560,7 @@ vitest_test(
         ":tests__unit__content-registry-hash_test_proto_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["tests/unit/content-registry-hash.test.ts"],
 )
 
@@ -1622,6 +1634,7 @@ vitest_test(
         ":tests__unit__content-translations_test_proto_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["tests/unit/content-translations.test.ts"],
 )
 
@@ -1648,6 +1661,7 @@ vitest_test(
         ":tests__unit__deployment-contract_test_proto_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["tests/unit/deployment-contract.test.ts"],
 )
 
@@ -1717,6 +1731,7 @@ vitest_test(
         ":tests__unit__metadata_test_proto_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["tests/unit/metadata.test.ts"],
 )
 
@@ -1788,6 +1803,7 @@ vitest_test(
         ":tests__unit__notion-convert_test_proto_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["tests/unit/notion-convert.test.ts"],
 )
 
@@ -1839,6 +1855,7 @@ vitest_test(
         ":tests__unit__notion-media_test_proto_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["tests/unit/notion-media.test.ts"],
 )
 
@@ -1888,6 +1905,7 @@ vitest_test(
         ":tests__unit__notion-pagination_test_proto_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["tests/unit/notion-pagination.test.ts"],
 )
 
@@ -1983,6 +2001,7 @@ vitest_test(
         ":tests__unit__notion-withdrawal_test_proto_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["tests/unit/notion-withdrawal.test.ts"],
 )
 
@@ -2011,6 +2030,7 @@ vitest_test(
         ":tests__unit__playwright-config_test_proto_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["tests/unit/playwright-config.test.ts"],
 )
 
@@ -2054,6 +2074,7 @@ vitest_test(
         ":tests__unit__publication-schema_test_proto_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["tests/unit/publication-schema.test.ts"],
 )
 
@@ -2129,6 +2150,7 @@ vitest_test(
         ":tests__unit__publication-state-route_test_proto_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["tests/unit/publication-state-route.test.ts"],
 )
 
@@ -2184,6 +2206,7 @@ vitest_test(
         ":tests__unit__publication-state_test_proto_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["tests/unit/publication-state.test.ts"],
 )
 
@@ -2219,6 +2242,7 @@ vitest_test(
         "//proto/website/sync/v1:ts",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["tests/unit/relay-sync.test.ts"],
 )
 
@@ -2272,6 +2296,7 @@ vitest_test(
         ":tests__unit__release-content-sync_test_proto_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["tests/unit/release-content-sync.test.ts"],
 )
 
@@ -2299,6 +2324,7 @@ vitest_test(
         ":tests__unit__release-green-commit_test_proto_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["tests/unit/release-green-commit.test.ts"],
 )
 
@@ -2358,6 +2384,7 @@ vitest_test(
     ],
     patch_node_fs = False,
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["tests/unit/release-hostname-guard.test.ts"],
 )
 
@@ -2421,6 +2448,7 @@ vitest_test(
         ":tests__unit__release-steps_test_proto_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["tests/unit/release-steps.test.ts"],
 )
 
@@ -2482,6 +2510,7 @@ vitest_test(
         ":tests__unit__release-verify_test_proto_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["tests/unit/release-verify.test.ts"],
 )
 
@@ -2549,6 +2578,7 @@ vitest_test(
         ":tests__unit__static-export_test_proto_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["tests/unit/static-export.test.ts"],
 )
 
@@ -2576,6 +2606,7 @@ vitest_test(
         ":tests__unit__video-embed_test_proto_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["tests/unit/video-embed.test.ts"],
 )
 
@@ -2635,6 +2666,10 @@ js_library(
         exclude = [
             "public/media/**",
             "public/_img/**",
+            "scripts/bazel/build-relay.ts",
+            "scripts/bazel/build-fixture.ts",
+            "scripts/bazel/format.ts",
+            "scripts/bazel/typecheck.ts",
         ],
     ),
 )
@@ -2762,19 +2797,24 @@ filegroup(
         "relay/wrangler.toml",
         "wrangler.toml",
     ],
+    visibility = ["//visibility:public"],
 )
 
 pkg_tar(
     name = "website",
     srcs = [
-        ":config",
         ":site",
+        ":site_config",
     ],
     extension = "tar.gz",
     stamp = 0,
+    visibility = ["//visibility:public"],
 )
 
-test_suite(name = "check")
+test_suite(
+    name = "check",
+    visibility = ["//visibility:public"],
+)
 
 expand_template(
     name = "site_identity",
@@ -2829,6 +2869,7 @@ proto_vitest_test(
         ":content_data",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["tests/unit/bazel-snapshot.test.ts"],
     deps = [
         ":scripts__bazel__snapshot",
@@ -2955,11 +2996,13 @@ pkg_tar(
     ],
     extension = "tar.gz",
     stamp = 0,
+    visibility = ["//visibility:public"],
 )
 
 alias(
     name = "relay",
     actual = ":relay_artifact",
+    visibility = ["//visibility:public"],
 )
 
 js_library(
@@ -2982,6 +3025,7 @@ js_library(
 
 eslint_test(
     name = "lint",
+    args = ["--max-warnings=0"],
     config = "eslint.config.mjs",
     data = [
         "package.json",
@@ -2992,6 +3036,7 @@ eslint_test(
         ":node_modules/eslint-config-next",
         ":node_modules/eslint-config-prettier",
         ":node_modules/next",
+        ":node_modules/react",
         ":node_modules/typescript",
         ":relay_proto_link",
         "//:node_modules/next",
@@ -3005,7 +3050,7 @@ eslint_test(
             "**/*.mjs",
         ],
         allow_empty = True,
-        exclude = SOURCE_AUDIT_EXCLUDES,
+        exclude = SOURCE_AUDIT_EXCLUDES + ["next-env.d.ts"],
     ),
 )
 
@@ -3049,12 +3094,11 @@ tsx.tsx_test(
     tags = ["typecheck"],
 )
 
-prettier.prettier_test(
+tsx.tsx_test(
     name = "format_test",
     size = "large",
     args = [
-        "--check",
-        "--ignore-unknown",
+        "scripts/bazel/format.ts",
     ] + glob(
         [
             "*.ts",
@@ -3079,12 +3123,204 @@ prettier.prettier_test(
         "prettier.config.mjs",
         ":check_sources",
         ":content_data",
+        ":node_modules/prettier",
         ":source_audit_files",
     ],
+    patch_node_fs = False,
     tags = [
         "format",
-        "manual",
     ],
 )
 
 prettier.prettier_binary(name = "prettier")
+
+js_library(
+    name = "site_config",
+    srcs = [
+        "app.toml",
+        "wrangler.toml",
+    ],
+)
+
+js_library(
+    name = "relay_deploy_vars",
+    srcs = ["relay/deploy/deploy-vars.mjs"],
+    visibility = ["//visibility:public"],
+    deps = ["//tools/cloud-config:worker-secrets"],
+)
+
+filegroup(
+    name = "release",
+    srcs = [
+        ":scripts__release__cli",
+        ":verify_deployment",
+        ":website",
+        "//:.github/workflows/website-release.yml",
+    ],
+    tags = [
+        "artifact://website:website",
+        "release:website:website",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "relay_release",
+    srcs = [
+        ":relay",
+        ":relay_deploy_vars",
+        "//:.github/actions/release-website-relay/action.yml",
+        "//tools:release_probes",
+        "//tools/cloud-release:release_inputs",
+    ],
+    tags = [
+        "artifact://website:relay",
+        "release:worker:website-relay",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+js_run_binary(
+    name = "fixture_site",
+    srcs = [
+        "next.config.ts",
+        "next-env.d.ts",
+        "package.json",
+        "scripts/bazel/build-fixture.ts",
+        "tsconfig.json",
+        ":application_sources",
+        ":content_data",
+        ":node_modules/@axe-core/playwright",
+        ":node_modules/@cloudflare/workers-types",
+        ":node_modules/@notionhq/client",
+        ":node_modules/@playwright/test",
+        ":node_modules/@types/katex",
+        ":node_modules/@types/node",
+        ":node_modules/@types/react",
+        ":node_modules/@types/react-dom",
+        ":node_modules/eslint",
+        ":node_modules/eslint-config-next",
+        ":node_modules/eslint-config-prettier",
+        ":node_modules/katex",
+        ":node_modules/next",
+        ":node_modules/photoswipe",
+        ":node_modules/prettier",
+        ":node_modules/react",
+        ":node_modules/react-dom",
+        ":node_modules/react-photoswipe-gallery",
+        ":node_modules/sharp",
+        ":node_modules/shiki",
+        ":node_modules/smol-toml",
+        ":node_modules/tsx",
+        ":node_modules/typescript",
+        ":node_modules/vitest",
+        ":node_modules/wrangler",
+        ":node_modules/zod",
+        "//:node_modules/@types/react",
+    ],
+    outs = ["fixture_manifest.json"],
+    args = ["scripts/bazel/build-fixture.ts"],
+    chdir = "website",
+    env = {
+        "NEXT_TELEMETRY_DISABLED": "1",
+        "CI": "true",
+    },
+    include_transitive_types = True,
+    include_types = True,
+    out_dirs = ["fixture_site"],
+    patch_node_fs = False,
+    tool = ":tsx",
+    use_execroot_entry_point = True,
+)
+
+website_browser_test(
+    name = "empty_site_browser_test",
+    mode = "empty",
+    site = ":empty_site",
+    spec = "tests/e2e/site.spec.ts",
+)
+
+website_browser_test(
+    name = "empty_translations_browser_test",
+    mode = "empty",
+    site = ":empty_site",
+    spec = "tests/e2e/translations.spec.ts",
+)
+
+website_browser_test(
+    name = "empty_deployment_browser_test",
+    mode = "empty",
+    site = ":empty_site",
+    spec = "tests/e2e/deployment.spec.ts",
+)
+
+website_browser_test(
+    name = "fixture_site_browser_test",
+    mode = "fixture",
+    site = ":fixture_site",
+    spec = "tests/e2e/site.spec.ts",
+)
+
+website_browser_test(
+    name = "fixture_translations_browser_test",
+    mode = "fixture",
+    site = ":fixture_site",
+    spec = "tests/e2e/translations.spec.ts",
+)
+
+website_browser_test(
+    name = "fixture_deployment_browser_test",
+    mode = "fixture",
+    site = ":fixture_site",
+    spec = "tests/e2e/deployment.spec.ts",
+)
+
+js_library(
+    name = "relay_deployment_config",
+    srcs = ["relay/wrangler.toml"],
+    visibility = ["//visibility:public"],
+)
+
+js_library(
+    name = "browser_content_inputs",
+    srcs = [
+        "content/profile.json",
+        "content/publications.json",
+    ],
+)
+
+playwright.playwright_binary(name = "playwright")
+
+js_library(
+    name = "scripts__bazel__source-identity",
+    srcs = ["scripts/bazel/source-identity.ts"],
+)
+
+proto_vitest_test(
+    name = "tests__unit__bazel-source-identity_test",
+    data = [
+        "package.json",
+        "vitest.config.ts",
+    ],
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = ["tests/unit/bazel-source-identity.test.ts"],
+    deps = [":scripts__bazel__source-identity"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)
+
+test_suite(
+    name = "typecheck_tests",
+    tests = [":types_test"],
+)
+
+test_suite(
+    name = "browser_tests",
+    tags = ["browser"],
+)
+
+website_deployment_verifier(name = "verify_deployment")

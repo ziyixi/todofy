@@ -17,7 +17,9 @@ describe("hostname guard (tools/cf-guard) from the release", () => {
     // The guard deliberately clears its child's environment; use the declared Node binary, not Bazel's shell shim.
     if (process.env.JS_BINARY__NODE_BINARY) process.execPath = process.env.JS_BINARY__NODE_BINARY;
   });
-  afterAll(() => { process.execPath = executable; });
+  afterAll(() => {
+    process.execPath = executable;
+  });
 
   async function withConfig(body: string, run: (file: string) => Promise<void>) {
     const directory = await mkdtemp(path.join(tmpdir(), "website-guard-"));

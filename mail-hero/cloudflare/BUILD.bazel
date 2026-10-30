@@ -500,6 +500,7 @@ js_test(
     ],
     entry_point = "test/action-reservation.test.mjs",
     node_options = ["--test"],
+    tags = ["unit"],
 )
 
 js_test(
@@ -516,6 +517,7 @@ js_test(
     ],
     entry_point = "test/api-filter.test.mjs",
     node_options = ["--test"],
+    tags = ["unit"],
 )
 
 js_test(
@@ -531,6 +533,7 @@ js_test(
     ],
     entry_point = "test/backup-artifact-capacity.test.mjs",
     node_options = ["--test"],
+    tags = ["unit"],
 )
 
 js_test(
@@ -547,6 +550,7 @@ js_test(
     ],
     entry_point = "test/backup-artifacts-runtime.test.mjs",
     node_options = ["--test"],
+    tags = ["unit"],
 )
 
 js_test(
@@ -561,6 +565,7 @@ js_test(
     ],
     entry_point = "test/backup-artifacts.test.mjs",
     node_options = ["--test"],
+    tags = ["unit"],
 )
 
 js_test(
@@ -577,6 +582,7 @@ js_test(
     ],
     entry_point = "test/configure-webhook.test.mjs",
     node_options = ["--test"],
+    tags = ["unit"],
 )
 
 js_test(
@@ -591,6 +597,7 @@ js_test(
     ],
     entry_point = "test/content-policy.test.mjs",
     node_options = ["--test"],
+    tags = ["unit"],
 )
 
 js_test(
@@ -627,6 +634,7 @@ js_test(
     ],
     entry_point = "test/contract-fixtures.test.mjs",
     node_options = ["--test"],
+    tags = ["unit"],
 )
 
 js_test(
@@ -659,6 +667,7 @@ js_test(
     ],
     entry_point = "test/contract-schema-dialect.test.mjs",
     node_options = ["--test"],
+    tags = ["unit"],
 )
 
 js_test(
@@ -682,6 +691,7 @@ js_test(
     ],
     entry_point = "test/native-api-v2.test.mjs",
     node_options = ["--test"],
+    tags = ["unit"],
 )
 
 js_test(
@@ -705,6 +715,7 @@ js_test(
     ],
     entry_point = "test/native-api.test.mjs",
     node_options = ["--test"],
+    tags = ["unit"],
 )
 
 js_test(
@@ -722,6 +733,7 @@ js_test(
     ],
     entry_point = "test/native-backup-artifacts-runtime.test.mjs",
     node_options = ["--test"],
+    tags = ["unit"],
 )
 
 js_test(
@@ -751,6 +763,7 @@ js_test(
         "@python_3_14//:files",
     ],
     node_options = ["--test"],
+    tags = ["unit"],
 )
 
 js_test(
@@ -770,6 +783,7 @@ js_test(
     ],
     entry_point = "test/native-backup-runtime.test.mjs",
     node_options = ["--test"],
+    tags = ["unit"],
 )
 
 js_test(
@@ -786,6 +800,7 @@ js_test(
     ],
     entry_point = "test/native-backup.test.mjs",
     node_options = ["--test"],
+    tags = ["unit"],
 )
 
 js_test(
@@ -806,6 +821,7 @@ js_test(
     ],
     entry_point = "test/native-bounded-runtime.test.mjs",
     node_options = ["--test"],
+    tags = ["unit"],
 )
 
 js_test(
@@ -823,6 +839,7 @@ js_test(
     ],
     entry_point = "test/native-large.test.mjs",
     node_options = ["--test"],
+    tags = ["unit"],
 )
 
 js_test(
@@ -841,6 +858,7 @@ js_test(
     ],
     entry_point = "test/native-lifecycle-runtime.test.mjs",
     node_options = ["--test"],
+    tags = ["unit"],
 )
 
 js_test(
@@ -859,6 +877,7 @@ js_test(
     ],
     entry_point = "test/native-lifecycle.test.mjs",
     node_options = ["--test"],
+    tags = ["unit"],
 )
 
 js_test(
@@ -882,6 +901,7 @@ js_test(
     ],
     entry_point = "test/native-ops-runtime.test.mjs",
     node_options = ["--test"],
+    tags = ["unit"],
 )
 
 js_test(
@@ -901,6 +921,7 @@ js_test(
     ],
     entry_point = "test/native-ops.test.mjs",
     node_options = ["--test"],
+    tags = ["unit"],
 )
 
 js_test(
@@ -918,6 +939,7 @@ js_test(
     ],
     entry_point = "test/native-pipeline.test.mjs",
     node_options = ["--test"],
+    tags = ["unit"],
 )
 
 js_test(
@@ -937,6 +959,7 @@ js_test(
     ],
     entry_point = "test/native-resolved-runtime.test.mjs",
     node_options = ["--test"],
+    tags = ["unit"],
 )
 
 js_test(
@@ -975,6 +998,7 @@ js_test(
     ],
     entry_point = "test/native-runtime.test.mjs",
     node_options = ["--test"],
+    tags = ["unit"],
 )
 
 js_test(
@@ -993,6 +1017,7 @@ js_test(
     ],
     entry_point = "test/ops-golden.test.mjs",
     node_options = ["--test"],
+    tags = ["unit"],
 )
 
 js_test(
@@ -1008,6 +1033,7 @@ js_test(
     ],
     entry_point = "test/signing-key.test.mjs",
     node_options = ["--test"],
+    tags = ["unit"],
 )
 
 js_test(
@@ -1026,6 +1052,7 @@ js_test(
     ],
     entry_point = "test/warmup.test.mjs",
     node_options = ["--test"],
+    tags = ["unit"],
 )
 
 js_library(
@@ -1333,4 +1360,19 @@ filegroup(
         allow_empty = True,
     ),
     visibility = ["//visibility:public"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)
+
+test_suite(
+    name = "typecheck_tests",
+    tests = [":typecheck_project_typecheck_test"],
+)
+
+test_suite(
+    name = "cpu_tests",
+    tags = ["cpu"],
 )

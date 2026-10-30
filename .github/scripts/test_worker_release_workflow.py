@@ -6,7 +6,6 @@ import sys
 import unittest
 from pathlib import Path
 
-import ci_changes
 from workflow_sources import jobs, release_jobs, workflow_data
 
 ROOT = Path(__file__).absolute().parents[2]
@@ -61,7 +60,7 @@ class WorkerReleaseWorkflow(unittest.TestCase):
         self.assertEqual(named, reporting)
 
     def test_write_permission_is_granted_by_the_real_caller_and_recipe(self):
-        permissions = {"contents": "read", "deployments": "write"}
+        permissions = {"contents": "read", "actions": "read", "deployments": "write"}
         self.assertEqual(self.release_data["permissions"], permissions)
         for app in APPS:
             with self.subTest(app=app):
@@ -150,7 +149,7 @@ class WorkerReleaseWorkflow(unittest.TestCase):
                         self.assertEqual(app, "model-router")
                         self.assertEqual(field(step, "if"), "inputs.app == 'model-router'")
                         continue
-                    self.assertEqual(field(step, "if"), REQUIRED, step.splitlines()[0])
+                    self.assertRegex(field(step, "if") or "", "^" + re.escape(REQUIRED) + r"(?: && !?inputs\.repair)?$", step.splitlines()[0])
 
     def test_success_record_requires_successful_probes_and_uses_the_selected_sha(self):
         for app in APPS:
@@ -180,17 +179,6 @@ class WorkerReleaseWorkflow(unittest.TestCase):
                     self.assertIsNone(field(probe, "continue-on-error"))
                     self.assertEqual(field(probe, "if"), REQUIRED)
 
-    def test_shared_tool_paths_reach_all_app_checks_without_publishing(self):
-        for path in ("tools/cloud-release/control.py", "tools/cloud-bootstrap/bootstrap.py",
-                     "tools/vps-bootstrap/prepare.py", "tools/cloud-config/worker-secrets.mjs",
-                     "tools/deploy-probes/production.sh", "config/cloud.toml", "config/resources.toml"):
-            with self.subTest(path=path):
-                flags = ci_changes.classify([path])
-                for app in ci_changes.APPS:
-                    self.assertTrue(flags[ci_changes.PREFIX[app] + "_check"])
-                self.assertTrue(flags["packages"])
-                self.assertTrue(flags["proto"])
-                self.assertFalse(any(value for name, value in flags.items() if name.endswith("_deploy")))
 
     def test_real_preflight_check_only_returns_false_without_any_provider_write(self):
         program = '''

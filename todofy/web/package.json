@@ -8,12 +8,10 @@
     "postinstall": "node ../../proto/tools/ensure.mjs",
     "predev": "node ../../proto/tools/ensure.mjs",
     "dev": "vite",
-    "pretypecheck": "node ../../proto/tools/ensure.mjs",
-    "typecheck": "tsc --noEmit",
-    "pretest": "node ../../proto/tools/ensure.mjs",
-    "test": "vitest run",
-    "prebuild": "node ../../proto/tools/ensure.mjs",
-    "build": "tsc --noEmit && vite build && node scripts/js-budget.mjs"
+    "typecheck": "bazel test //todofy/web:typecheck_tests",
+    "test": "bazel test //todofy/web:unit_tests",
+    "build": "bazel build //todofy/web:bundle",
+    "check": "bazel test //todofy:check"
   },
   "dependencies": {
     "@tanstack/react-query": "catalog:",

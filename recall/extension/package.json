@@ -6,16 +6,13 @@
   "description": "recall's Chrome extension (Manifest V3, no runtime dependency): visits with their focus, page texts after ten seconds of focus, scrubbed and uploaded to the Worker \"recall\". Built into dist/ and a zip; installed into ~/recall-extension.",
   "scripts": {
     "postinstall": "node ../../proto/tools/ensure.mjs",
-    "pretypecheck": "node ../../proto/tools/ensure.mjs",
-    "typecheck": "tsc --noEmit",
-    "prelint": "node ../../proto/tools/ensure.mjs",
-    "lint": "eslint .",
-    "pretest": "node ../../proto/tools/ensure.mjs",
-    "test": "vitest run",
-    "prebuild": "node ../../proto/tools/ensure.mjs",
-    "build": "tsc --noEmit && node scripts/build.mjs",
+    "typecheck": "bazel test //recall/extension:typecheck_tests",
+    "lint": "bazel test //recall/extension:lint",
+    "test": "bazel test //recall/extension:unit_tests",
+    "build": "bazel build //recall/extension:extension_artifact",
     "install-extension": "node scripts/install.mjs",
-    "test:browser": "node test/options-browser-runner.mjs"
+    "test:browser": "bazel test //recall/extension:browser_tests",
+    "check": "bazel test //recall:check"
   },
   "dependencies": {
     "@ziyixi/proto": "workspace:*"

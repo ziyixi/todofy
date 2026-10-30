@@ -1,5 +1,6 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library", "js_run_binary")
 load("@bazel_lib//lib:copy_to_directory.bzl", "copy_to_directory")
+load("@npm//:defs.bzl", "npm_link_all_packages")
 load("@rules_pkg//pkg:mappings.bzl", "REMOVE_BASE_DIRECTORY", "pkg_files", "strip_prefix")
 load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
 load("@rules_python//python:defs.bzl", "py_library", "py_test")
@@ -7,6 +8,22 @@ load("@rules_python//python:packaging.bzl", "py_package")
 load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
 package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "release",
+    srcs = [
+        ":todofy",
+        "//:.github/actions/release-todofy/action.yml",
+        "//todofy/deploy:release_wrapper",
+        "//tools:release_probes",
+        "//tools/cloud-release:release_inputs",
+    ],
+    tags = [
+        "artifact://todofy:todofy",
+        "release:worker:todofy",
+    ],
+    visibility = ["//visibility:public"],
+)
 
 js_library(
     name = "gateway_error_contract",
@@ -2112,6 +2129,11 @@ pkg_tar(
 test_suite(
     name = "check",
     tests = [
+        ":host_python_tests",
+        ":legacy_d1_roundtrip_test",
+        ":ruff_check_test",
+        ":ruff_format_test",
+        ":runtime_tests",
         ":tests",
         "//todofy/deploy:check",
         "//todofy/gateway:check",
@@ -2143,4 +2165,312 @@ filegroup(
         allow_empty = True,
     ),
     visibility = ["//visibility:public"],
+)
+
+npm_link_all_packages(name = "node_modules")
+
+py_library(
+    name = "tool_backup_restore",
+    srcs = ["tools/backup_restore.py"],
+    imports = ["."],
+)
+
+py_library(
+    name = "tool_smoke_webhook",
+    srcs = ["tools/smoke_webhook.py"],
+    imports = ["."],
+)
+
+py_library(
+    name = "legacy_migration_tools",
+    srcs = [
+        "tools/legacy_migration/fixtures/synthetic.py",
+        "tools/legacy_migration/legacy_to_d1.py",
+        "tools/legacy_migration/snapshot.py",
+        "tools/legacy_migration/verify_d1.py",
+    ],
+    imports = ["tools/legacy_migration"],
+)
+
+_HOST_PYTHON_TESTS = {
+    "fakes": (
+        "tests/fakes/test_fakes.py",
+        [
+            ":helper_tests_fakes_model_router_fake",
+            ":helper_tests_fakes_server",
+            "@python_deps//httpx",
+        ],
+    ),
+    "backup_restore": (
+        "tools/test_backup_restore.py",
+        [
+            ":tool_backup_restore",
+            ":core_backup",
+            ":core_sql_backup",
+        ],
+    ),
+    "smoke_webhook": (
+        "tools/test_smoke_webhook.py",
+        [
+            ":tool_smoke_webhook",
+            ":core_contract",
+        ],
+    ),
+    "legacy_to_d1": (
+        "tools/legacy_migration/test_legacy_to_d1.py",
+        [
+            ":legacy_migration_tools",
+            ":core_render",
+            ":core_vocab",
+        ],
+    ),
+    "legacy_snapshot": (
+        "tools/legacy_migration/test_snapshot.py",
+        [":legacy_migration_tools"],
+    ),
+}
+
+[
+    py_test(
+        name = "host_" + name + "_test",
+        srcs = [
+            "//tools/bazel/python:pytest_main.py",
+            entry[0],
+        ],
+        args = [
+            "-c",
+            "$(rootpath pyproject.toml)",
+            "-p",
+            "no:cacheprovider",
+            "-p",
+            "xdist.plugin",
+            "-p",
+            "xdist.looponfail",
+            "$(rootpath " + entry[0] + ")",
+        ],
+        data = [
+            "conftest.py",
+            "pyproject.toml",
+            "tools/legacy_migration/conftest.py",
+            ":api_schemas",
+            ":config",
+            ":migrations",
+        ] + glob(["tools/legacy_migration/fixtures/*.sql"]),
+        env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"} | ({"BAZEL_COPY_WORKSPACE": "1"} if name in ("backup_restore", "legacy_to_d1") else {}),
+        imports = [
+            ".",
+            "tools/legacy_migration",
+            "worker",
+        ],
+        legacy_create_init = False,
+        main = "//tools/bazel/python:pytest_main.py",
+        deps = entry[1] + [
+            "@python_deps//pytest",
+            "@python_deps//pytest_xdist",
+        ],
+    )
+    for name, entry in _HOST_PYTHON_TESTS.items()
+]
+
+test_suite(
+    name = "host_python_tests",
+    tests = [":host_" + name + "_test" for name in _HOST_PYTHON_TESTS],
+)
+
+py_library(
+    name = "runtime_harness",
+    srcs = glob(
+        ["tests/runtime/**/*.py"],
+        exclude = [
+            "**/test_*.py",
+            "tests/runtime/warm_up.py",
+        ],
+    ),
+    imports = [
+        ".",
+        "worker",
+    ],
+    deps = [
+        ":helper_tests_fakes_model_router_fake",
+        ":helper_tests_mail_contract",
+        ":tool_backup_restore",
+        "//proto:python",
+        "@python_deps//cryptography",
+        "@python_deps//httpx",
+        "@python_deps//jsonschema",
+        "@python_deps//pytest",
+        "@python_deps//pyyaml",
+    ],
+)
+
+filegroup(
+    name = "runtime_data",
+    srcs = [
+        "conftest.py",
+        "package.json",
+        "pyproject.toml",
+        "wrangler.test.toml",
+        ":api_schemas",
+        ":core_application_sources",
+        ":core_python_modules",
+        ":migrations",
+        "//contracts:fixtures",
+        "//todofy/gateway:runtime_test_inputs",
+        "//todofy/web:bundle",
+    ],
+)
+
+[
+    py_test(
+        name = "runtime_" + source.split("/")[-1].removesuffix(".py"),
+        size = "large",
+        srcs = [
+            source,
+            "//tools/bazel/python:todofy_runtime_main.py",
+        ],
+        args = [
+            "-c",
+            "$(rootpath pyproject.toml)",
+            "-p",
+            "no:cacheprovider",
+            "-p",
+            "xdist.plugin",
+            "-p",
+            "xdist.looponfail",
+            "$(rootpath " + source + ")",
+        ],
+        data = [
+            "pyproject.toml",
+            ":runtime_data",
+            "//tools/bazel:wrangler",
+            "//tools/bazel/python:workerd_path",
+            "@todofy_pyodide//file",
+        ] + (glob(["tests/runtime/test_*.py"]) if source.endswith("test_scenarios_coverage.py") else []),
+        env = {
+            "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+            "BAZEL_WRANGLER": "$(rootpath //tools/bazel:wrangler)",
+            "BAZEL_WORKERD": "$(rootpath //tools/bazel/python:workerd_path)",
+            "BAZEL_PYODIDE": "$(rootpath @todofy_pyodide//file)",
+        },
+        imports = [
+            ".",
+            "worker",
+        ],
+        legacy_create_init = False,
+        main = "//tools/bazel/python:todofy_runtime_main.py",
+        tags = [
+            "exclusive",
+            "workerd",
+        ],
+        deps = [
+            ":runtime_harness",
+            "@python_deps//pytest_xdist",
+        ],
+    )
+    for source in glob(["tests/runtime/test_*.py"])
+]
+
+filegroup(
+    name = "python_lint_inputs",
+    srcs = glob([
+        "worker/**/*.py",
+        "tests/**/*.py",
+        "tools/**/*.py",
+    ]) + [
+        "pyproject.toml",
+        "//todofy/deploy:python_lint_inputs",
+    ],
+)
+
+[
+    py_test(
+        name = "ruff_" + command + "_test",
+        srcs = ["//tools/bazel/python:check_ruff.py"],
+        args = [
+            "$(rootpath @python_deps//ruff:data)",
+            "$(rootpath pyproject.toml)",
+            command,
+        ] + (["--check"] if command == "format" else []) + [
+            "worker",
+            "tests",
+            "tools",
+            "deploy",
+        ],
+        data = [
+            "pyproject.toml",
+            ":python_lint_inputs",
+            "@python_deps//ruff:data",
+        ],
+        legacy_create_init = False,
+        main = "//tools/bazel/python:check_ruff.py",
+    )
+    for command in [
+        "check",
+        "format",
+    ]
+]
+
+exports_files([
+    "pyproject.toml",
+    "conftest.py",
+])
+
+test_suite(
+    name = "runtime_tests",
+    tests = [":runtime_" + source.split("/")[-1].removesuffix(".py") for source in glob(["tests/runtime/test_*.py"])],
+)
+
+py_test(
+    name = "legacy_d1_roundtrip_test",
+    size = "large",
+    srcs = [
+        "tools/legacy_migration/test_roundtrip_d1.py",
+        "//tools/bazel/python:todofy_runtime_main.py",
+    ],
+    args = [
+        "-c",
+        "$(rootpath pyproject.toml)",
+        "-p",
+        "no:cacheprovider",
+        "-p",
+        "xdist.plugin",
+        "-p",
+        "xdist.looponfail",
+        "$(rootpath tools/legacy_migration/test_roundtrip_d1.py)",
+    ],
+    data = [
+        "pyproject.toml",
+        "tools/legacy_migration/conftest.py",
+        ":runtime_data",
+        "//tools/bazel:wrangler",
+        "//tools/bazel/python:workerd_path",
+        "@todofy_pyodide//file",
+    ] + glob(["tools/legacy_migration/fixtures/*.sql"]),
+    env = {
+        "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+        "BAZEL_WRANGLER": "$(rootpath //tools/bazel:wrangler)",
+        "BAZEL_WORKERD": "$(rootpath //tools/bazel/python:workerd_path)",
+        "BAZEL_PYODIDE": "$(rootpath @todofy_pyodide//file)",
+    },
+    imports = [
+        ".",
+        "tools/legacy_migration",
+        "worker",
+    ],
+    legacy_create_init = False,
+    main = "//tools/bazel/python:todofy_runtime_main.py",
+    tags = [
+        "exclusive",
+        "workerd",
+    ],
+    deps = [
+        ":legacy_migration_tools",
+        "@python_deps//pytest",
+        "@python_deps//pytest_xdist",
+    ],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
 )

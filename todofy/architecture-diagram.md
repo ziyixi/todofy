@@ -3,11 +3,11 @@
 Two Cloudflare Workers on the Workers Free plan: a thin TypeScript gateway (`todofy`) and a Python
 Worker (`todofy-core`) that hosts one SQLite-backed Durable Object, plus one D1 database and a private R2
 bucket for its weekly backups. Mail Hero delivers each received mail as a `mail.received.v1` webhook; Todofy
-summarizes it with Gemini and keeps the summary for Tasks' Mail page, where the owner turns it into a task, and
+summarizes it through Model Router and keeps the summary for Tasks' Mail page, where the owner turns it into a task, and
 serves a daily summary and recommendation to the newsletter. It writes and reads no task and binds no other app:
 Tasks reads the mail and marks it converted through the gateway's private `Mail` entrypoint. The owner UI is a
 React app served by the gateway behind Cloudflare Access. The gateway only checks credentials and routes (a plain
-Worker request has 10 ms of CPU); everything that touches D1 or Gemini runs in the Durable Object (30 s per call).
+Worker request has 10 ms of CPU); everything that touches D1 or model invocation runs in the Durable Object (30 s per call).
 
 ```mermaid
 flowchart LR
@@ -32,7 +32,7 @@ flowchart LR
         MCP["Worker personal-mcp<br/>(TODOFY_MAIL, read only)"]
     end
 
-    Gemini["Gemini API"]
+    Router["Model Router<br/>provider-neutral inference"]
 
     MH -->|webhook| Hooks
     NL --> Hooks
@@ -44,7 +44,7 @@ flowchart LR
     MCP -->|list, read| Mail
     DO --> D1
     DO -->|weekly backup| R2
-    DO -->|summary, reports| Gemini
+    DO -->|summary, reports| Router
 ```
 
 Event lifecycle (one ledger step per alarm; every step is a compare-and-set on `(state, version)`). A
@@ -57,7 +57,7 @@ stateDiagram-v2
     [*] --> pending: webhook stored (204)
     pending --> summarizing
     pending --> failed_summary: needs review / unreadable payload
-    summarizing --> complete: Gemini ok (summary kept for Mail)
+    summarizing --> complete: model succeeded (summary kept for Mail)
     summarizing --> pending: retry with backoff
     summarizing --> failed_summary: gave up (errors or 3 interruptions)
     failed_summary --> pending: owner retry_summary

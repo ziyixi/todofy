@@ -5,6 +5,22 @@ load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
 package(default_visibility = ["//visibility:private"])
 
+filegroup(
+    name = "release",
+    srcs = [
+        ":worker_artifact",
+        "//:.github/actions/release-recall/action.yml",
+        "//recall/deploy:source_deploy_vars_mjs",
+        "//tools:release_probes",
+        "//tools/cloud-release:release_inputs",
+    ],
+    tags = [
+        "artifact://recall:worker_artifact",
+        "release:worker:recall",
+    ],
+    visibility = ["//visibility:public"],
+)
+
 js_library(
     name = "config",
     srcs = [
@@ -19,6 +35,7 @@ test_suite(
     tests = [
         "//recall/deploy:check",
         "//recall/extension:check",
+        "//recall/shared:check",
         "//recall/web:check",
         "//recall/worker:check",
     ],
@@ -138,5 +155,15 @@ filegroup(
         ],
         allow_empty = True,
     ),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "extension_release",
+    srcs = [":extension_artifact"],
+    tags = [
+        "artifact://recall:extension_artifact",
+        "release:extension:recall",
+    ],
     visibility = ["//visibility:public"],
 )

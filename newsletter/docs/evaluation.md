@@ -41,13 +41,13 @@
 工具仍是 [scripts/evaluate_prompts.py](../scripts/evaluate_prompts.py)。它读取你提供的测试集，不扫描某个提示词目录，也不修改生产配置。可先查看参数，这一步不调用模型：
 
 ```sh
-uv run --locked python scripts/evaluate_prompts.py --help
+bazel run //newsletter:evaluate_prompts -- --help
 ```
 
 实际对比会使用模型额度，必须另行批准。测试集和输出放在仓库、云同步目录及登录目录之外的私有位置；输出目录必须尚不存在，但其父目录应已创建。通过环境配置 `NEWSLETTER_MODEL_ROUTER_URL` 和 `NEWSLETTER_MODEL_ROUTER_TOKEN`；提供方登录由 Router 执行层维护：
 
 ```sh
-uv run --locked python scripts/evaluate_prompts.py \
+bazel run //newsletter:evaluate_prompts -- \
   --suite /private/path/suite.json \
   --output /private/path/new-comparison \
   --allow-model-calls
@@ -98,9 +98,4 @@ uv run --locked python scripts/evaluate_prompts.py \
 也接受对应示例。2,388 项测试、mypy、Ruff、结构检查、配置包验证、模拟 HTTP 投递和 wheel 冒烟均通过。
 已构建 wheel 中的示例模块与源码一致，内置配置包含相同的发现与选题示例。
 
-同一通过分支 CI 的提交已完成镜像发布与 VPS 就绪核验；独立
-[配置包发布](https://github.com/ziyixi/todofy/actions/runs/40827033478)也成功。
-Owner 提供的只读状态回执确认：2026-10-29 06:19:48 UTC，活动版本和目标版本均为
-`61e4206d`，两份 digest 与公开发布包一致，`error`、`pinned_digest` 均为空。
-首份回执的检查时间早于发布，下一轮正常轮询已启用新包，无需重启或手动激活。
-这次没有调用真实来源或重新生成、发送真实简报，因此不把这些检查当作采编质量提高的证据。
+该提交随后完成镜像与配置发布。2026-10-29 06:19:48 UTC 的 owner 只读回执记录活动和目标均为 `61e4206d`，digest 匹配、无错误或 pin。这是当次发布证据；没有执行新的真实采编或发信，不能据此推断内容质量改善。

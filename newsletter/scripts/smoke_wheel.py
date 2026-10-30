@@ -6,6 +6,7 @@ The exported requirements file is disposable, never a second maintained lock.
 """
 
 import argparse
+import collections.abc as collections_abc
 import os
 import pathlib
 import shutil
@@ -16,7 +17,13 @@ import tempfile
 import zipfile
 
 
-def main() -> None:
+def main(
+    *,
+    install_runtime: collections_abc.Callable[
+        [pathlib.Path, list[pathlib.Path], pathlib.Path], None
+    ]
+    | None = None,
+) -> None:
     """Install locked artifacts outside the repo and run an offline demo."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -25,11 +32,15 @@ def main() -> None:
     parser.add_argument(
         "--dist", type=pathlib.Path, default=pathlib.Path(".artifacts/dist")
     )
+    parser.add_argument("--bazel-dependencies", type=pathlib.Path)
+    parser.add_argument(
+        "--shared-wheel", action="append", type=pathlib.Path, default=[]
+    )
     args = parser.parse_args()
     uv = shutil.which(args.uv)
-    if not uv:
+    if not uv and not args.bazel_dependencies:
         parser.error("uv is required")
-    root = pathlib.Path(__file__).resolve().parents[1]
+    root = pathlib.Path(__file__).absolute().parents[1]
     dist = args.dist.resolve()
     wheels = sorted(dist.glob("personal_newsletter-*.whl"))
     if len(wheels) != 1:
@@ -90,6 +101,7 @@ def main() -> None:
             "LANG",
             "UV_CACHE_DIR",
             "UV_OFFLINE",
+            "NEWSLETTER_CHART_FONT",
         )
         if key in os.environ
     }
@@ -102,69 +114,79 @@ def main() -> None:
         prefix="newsletter-wheel-smoke-"
     ) as directory:
         temporary = pathlib.Path(directory).resolve()
-        requirements = temporary / "requirements.txt"
-        run(
-            uv,
-            "export",
-            "--locked",
-            "--package",
-            "personal-newsletter",
-            "--no-dev",
-            "--no-emit-project",
-            "--no-emit-package",
-            "ziyixi-proto",
-            "--no-emit-package",
-            "ziyixi-model-router-client",
-            "--output-file",
-            str(requirements),
-            "--quiet",
-            cwd=root,
-        )
-        shared = temporary / "shared-wheels"
-        for package in ("ziyixi-proto", "ziyixi-model-router-client"):
+        environment = temporary / "venv"
+        python = str(environment / "bin" / "python")
+        if args.bazel_dependencies:
+            if install_runtime is None:
+                parser.error("Bazel artifacts require the Bazel test installer")
+            install_runtime(
+                args.bazel_dependencies,
+                [*args.shared_wheel, wheels[0]],
+                environment,
+            )
+        else:
+            assert uv is not None
+            requirements = temporary / "requirements.txt"
             run(
                 uv,
-                "build",
+                "export",
+                "--locked",
                 "--package",
-                package,
-                "--wheel",
-                "--out-dir",
-                str(shared),
+                "personal-newsletter",
+                "--no-dev",
+                "--no-emit-project",
+                "--no-emit-package",
+                "ziyixi-proto",
+                "--no-emit-package",
+                "ziyixi-model-router-client",
+                "--output-file",
+                str(requirements),
+                "--quiet",
                 cwd=root,
             )
-        environment = temporary / "venv"
-        run(
-            uv,
-            "venv",
-            "--python",
-            sys.executable,
-            str(environment),
-            cwd=temporary,
-        )
-        python = str(environment / "bin" / "python")
-        run(
-            uv,
-            "pip",
-            "sync",
-            "--python",
-            python,
-            "--require-hashes",
-            str(requirements),
-            cwd=temporary,
-        )
-        run(
-            uv,
-            "pip",
-            "install",
-            "--python",
-            python,
-            "--no-deps",
-            "--no-index",
-            *(str(path) for path in sorted(shared.glob("*.whl"))),
-            str(wheels[0]),
-            cwd=temporary,
-        )
-        run(uv, "pip", "check", "--python", python, cwd=temporary)
+            shared = temporary / "shared-wheels"
+            for package in ("ziyixi-proto", "ziyixi-model-router-client"):
+                run(
+                    uv,
+                    "build",
+                    "--package",
+                    package,
+                    "--wheel",
+                    "--out-dir",
+                    str(shared),
+                    cwd=root,
+                )
+            run(
+                uv,
+                "venv",
+                "--python",
+                sys.executable,
+                str(environment),
+                cwd=temporary,
+            )
+            run(
+                uv,
+                "pip",
+                "sync",
+                "--python",
+                python,
+                "--require-hashes",
+                str(requirements),
+                cwd=temporary,
+            )
+            run(
+                uv,
+                "pip",
+                "install",
+                "--python",
+                python,
+                "--no-deps",
+                "--no-index",
+                *(str(path) for path in sorted(shared.glob("*.whl"))),
+                str(wheels[0]),
+                cwd=temporary,
+            )
+            run(uv, "pip", "check", "--python", python, cwd=temporary)
         run(
             python,
             "-c",

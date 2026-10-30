@@ -33,7 +33,7 @@ runs:
       if: inputs.required == 'true'
       working-directory: .release-source/website
       shell: bash -e {0}
-      run: node relay/deploy/deploy-vars.mjs exec -- pnpm exec wrangler deploy --dry-run --config relay/wrangler.toml --secrets-file "$RUNNER_TEMP/website-relay-secrets.json"
+      run: node relay/deploy/deploy-vars.mjs exec -- pnpm exec wrangler deploy "$PWD/.compiled/worker/index.js" --no-bundle --dry-run --config relay/wrangler.toml --secrets-file "$RUNNER_TEMP/website-relay-secrets.json"
     - name: Deploy the relay Worker
       if: inputs.required == 'true'
       env:
@@ -42,7 +42,7 @@ runs:
       shell: bash -e {0}
       run: |
         test -n "$CLOUDFLARE_API_TOKEN"
-        node relay/deploy/deploy-vars.mjs exec -- pnpm exec wrangler deploy --config relay/wrangler.toml --secrets-file "$RUNNER_TEMP/website-relay-secrets.json"
+        node relay/deploy/deploy-vars.mjs exec -- pnpm exec wrangler deploy "$PWD/.compiled/worker/index.js" --no-bundle --config relay/wrangler.toml --secrets-file "$RUNNER_TEMP/website-relay-secrets.json"
     - name: Retire the old Notion button and detector secrets
       if: inputs.required == 'true'
       env:

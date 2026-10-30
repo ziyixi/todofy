@@ -32,7 +32,6 @@ except ModuleNotFoundError:
     ) from None
 
 sys.path.insert(0, str(Path(__file__).parent))
-import ci_changes  # noqa: E402
 import drift_desired  # noqa: E402
 
 REPO = Path(__file__).absolute().parents[2]
@@ -769,18 +768,11 @@ class Workflow(unittest.TestCase):
 
     def test_no_job_before_the_deploys_can_reach_production(self):
         """Every branch push runs "Changes", the check jobs and "CI gate" with no environment, and a push to main
-        takes their verdict from a green branch run of the same commit (ci_changes.find_reusable: "no check job
-        uses a secret"). So none of them, nor the workflow's top level, may read a secret, run in an environment,
+        publishes only checked artifacts. None of these jobs, nor the workflow's top level, may read a secret, run in an environment,
         deploy for real or touch the account with wrangler."""
         self.assertEqual(production_reach(effective_ci().split("\njobs:\n", 1)[0]), [])
         before = {name: block for name, block in self.jobs.items() if name == "gate" or "gate" not in needs(block)}
-        # They include every job whose result a reused run vouches for (ci.yml names; a matrix is "<name> (*)").
-        names = {
-            re.sub(r" \(\$\{\{ matrix\.shard \}\}/\d+\)$", " (*)", re.search(r"^    name: (.+)$", block, re.M).group(1))
-            for block in before.values()
-        }
-        reused = {name for jobs in ci_changes.CHECK_JOBS.values() for name in jobs}
-        self.assertLessEqual({*ci_changes.ALWAYS_JOBS, *reused}, names)
+        self.assertEqual(set(before), {"changes", "checks", "artifacts", "gate"})
         for name, block in before.items():
             with self.subTest(job=name):
                 self.assertEqual(production_reach(block), [])
@@ -957,7 +949,7 @@ class Workflow(unittest.TestCase):
 
     def test_links_holds_the_bundle_it_dry_runs_to_its_budget(self):
         """Links checks and Links deploy measure the dry run's bundle (deploy/bundle-size.mjs) in the step that writes it."""
-        for job in ("links-checks", "links-deploy"):
+        for job in ("links-deploy",):
             [dry] = [s for s in steps(self.jobs[job]) if "--dry-run" in s["run"] and "deploy-vars.mjs exec" in s["run"]]
             with self.subTest(job=job):
                 self.assertIn('--outdir "$RUNNER_TEMP/links-bundle"', dry["run"])
@@ -1001,7 +993,7 @@ class Workflow(unittest.TestCase):
 
     def test_watch_holds_the_bundle_it_dry_runs_to_its_budget(self):
         """Watch checks and Watch deploy measure the dry run's bundle (deploy/bundle-size.mjs) in the step that writes it."""
-        for job in ("watch-checks", "watch-deploy"):
+        for job in ("watch-deploy",):
             [dry] = [s for s in steps(self.jobs[job]) if "--dry-run" in s["run"] and "deploy-vars.mjs exec" in s["run"]]
             with self.subTest(job=job):
                 self.assertIn('--outdir "$RUNNER_TEMP/watch-bundle"', dry["run"])
@@ -1020,7 +1012,7 @@ class Workflow(unittest.TestCase):
         })
         runs = "\n".join(step["run"] for step in deploy_steps)
         guard = runs.index("cf-guard.mjs --config fleet/wrangler.toml")
-        deploy = runs.index("wrangler deploy --config ../wrangler.toml")
+        deploy = runs.index('wrangler deploy "$PWD/../.compiled/worker/index.js" --no-bundle --config ../wrangler.toml')
         version = runs.index("production.sh")
         probe = runs.index("access.sh")
         self.assertLess(guard, deploy)
@@ -1029,7 +1021,7 @@ class Workflow(unittest.TestCase):
         self.assertIn("access.sh\" / /api/v1/fleetStatus", runs)
         self.assertNotIn("--remote", runs)
         self.assertNotIn("--var", runs)
-        for name in ("fleet-checks", "fleet-deploy"):
+        for name in ("fleet-deploy",):
             [dry] = [step for step in steps(self.jobs[name]) if "--dry-run" in step["run"]]
             self.assertIn('node ../deploy/bundle-size.mjs "$RUNNER_TEMP/fleet-bundle"', dry["run"])
         self.assertIn("fleet-deploy", needs(self.jobs["dashboard-deploy"]))
@@ -1064,7 +1056,7 @@ class Workflow(unittest.TestCase):
         self.assertNotIn("NEWSLETTER_CONSOLE_WORKER_SECRETS", effective_ci())
         runs = "\n".join(step["run"] for step in deploy_steps)
         guard = runs.index("cf-guard.mjs --config newsletter-console/wrangler.toml")
-        deploy = runs.index("wrangler deploy --config ../wrangler.toml")
+        deploy = runs.index('wrangler deploy "$PWD/../.compiled/worker/index.js" --no-bundle --config ../wrangler.toml')
         version = runs.index("production.sh")
         probe = runs.index("access.sh\" / /api/v1/overview")
         self.assertLess(guard, deploy)

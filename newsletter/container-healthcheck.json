@@ -1,0 +1,9 @@
+{
+  "Test": [
+    "CMD-SHELL",
+    "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)\""
+  ],
+  "Interval": 30000000000,
+  "Timeout": 5000000000,
+  "StartPeriod": 90000000000
+}

@@ -48,6 +48,7 @@ test_suite(
     name = "check",
     tests = [
         ":backup-restore_test",
+        ":restore_types_typecheck_test",
         ":types_typecheck_test",
     ],
 )

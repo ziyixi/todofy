@@ -1,4 +1,6 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@bazel_lib//lib:copy_to_directory.bzl", "copy_to_directory")
+load("@npm//website:tsx/package_json.bzl", tsx = "bin")
 load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
 js_library(
@@ -34,4 +36,67 @@ filegroup(
         allow_empty = True,
     ),
     visibility = ["//visibility:public"],
+)
+
+tsx.tsx_test(
+    name = "toml_test",
+    args = [
+        "--test",
+        "tools/cf-guard/test/toml.test.mjs",
+    ],
+    data = [
+        "test/toml.test.mjs",
+        ":cli",
+        ":config_fixture",
+        "@python_3_14//:files",
+        "@python_3_14//:python3",
+    ],
+    env = {
+        "BAZEL_CONFIG_FIXTURE": "$(rootpath :config_fixture)",
+        "PYTHON": "$(rootpath @python_3_14//:python3)",
+    },
+    no_copy_to_bin = [
+        "@python_3_14//:python3",
+        "@python_3_14//:files",
+    ],
+)
+
+tsx.tsx_test(
+    name = "cf-guard_test",
+    args = [
+        "--test",
+        "tools/cf-guard/test/cf-guard.test.mjs",
+    ],
+    data = [
+        "test/cf-guard.test.mjs",
+        ":cli",
+        ":config_fixture",
+        "@python_3_14//:files",
+        "@python_3_14//:python3",
+    ],
+    env = {
+        "BAZEL_CONFIG_FIXTURE": "$(rootpath :config_fixture)",
+        "PYTHON": "$(rootpath @python_3_14//:python3)",
+    },
+    no_copy_to_bin = [
+        "@python_3_14//:python3",
+        "@python_3_14//:files",
+    ],
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        ":cf-guard_test",
+        ":toml_test",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+copy_to_directory(
+    name = "config_fixture",
+    srcs = ["//:repository_audit_files"],
+    out = "config_fixture",
+    include_srcs_patterns = ["**/wrangler*.toml"],
+    root_paths = ["."],
 )

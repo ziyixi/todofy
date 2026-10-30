@@ -3,6 +3,20 @@ load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
 package(default_visibility = ["//visibility:public"])
 
+filegroup(
+    name = "release_inputs",
+    srcs = [
+        "assets-session-retry.sh",
+        ":artifact",
+        "//:.github/actions/setup-bazel/action.yml",
+        "//:.github/actions/setup-workspace/action.yml",
+        "//:.github/workflows/worker-release.yml",
+        "//tools/cf-guard:cli",
+        "//tools/cloud-config:worker-deploy",
+        "//tools/cloud-config:worker-secrets",
+    ],
+)
+
 py_library(
     name = "api",
     srcs = ["api.py"],

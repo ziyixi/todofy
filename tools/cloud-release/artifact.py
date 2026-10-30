@@ -20,7 +20,7 @@ def digest(path: Path) -> str:
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def build(app: str, sha: str, directory: Path) -> None:
+def build(app: str, sha: str, directory: Path, target: str) -> None:
     """Save the canonical Bazel target and its source identity for the release job."""
     if app not in WORKERS or not re.fullmatch(r"[0-9a-f]{40}", sha):
         raise ValueError("A Worker application and full source SHA are required")
@@ -29,10 +29,6 @@ def build(app: str, sha: str, directory: Path) -> None:
     ).strip()
     if head != sha:
         raise ValueError("The release SHA must match the checked-out source")
-    target = {
-        "recall": "//recall:worker_artifact",
-        "website-relay": "//website:relay",
-    }.get(app, "//" + app)
     cache = Path.home() / ".cache/personal-cloud-bazel"
     options = [
         "--stamp",
@@ -93,7 +89,9 @@ def stage(app: str, sha: str, directory: Path, source: Path) -> None:
             root / "python_modules",
             dirs_exist_ok=True,
         )
-        shutil.copytree(destination / "assets", root / "web/dist", dirs_exist_ok=True)
+        gateway = tomllib.loads((root / "gateway/wrangler.toml").read_text())
+        assets = root / "gateway" / gateway["assets"]["directory"]
+        shutil.copytree(destination / "assets", assets, dirs_exist_ok=True)
     else:
         config = tomllib.loads((source / WORKERS[app][0]).read_text())
         if assets := config.get("assets"):
@@ -107,9 +105,17 @@ if __name__ == "__main__":
     parser.add_argument("--app", choices=sorted(WORKERS), required=True)
     parser.add_argument("--sha", required=True)
     parser.add_argument("--directory", type=Path, required=True)
+    parser.add_argument(
+        "--target",
+        help="The archive target declared by the application's release facade",
+    )
     parser.add_argument("--source-root", type=Path, default=Path(".release-source"))
     args = parser.parse_args()
     if args.command == "build":
-        build(args.app, args.sha, args.directory)
+        if not args.target:
+            parser.error(
+                "--target is required when building the declared release archive"
+            )
+        build(args.app, args.sha, args.directory, args.target)
     else:
         stage(args.app, args.sha, args.directory, args.source_root)

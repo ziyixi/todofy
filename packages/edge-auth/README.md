@@ -1,7 +1,6 @@
 # `@ziyixi/edge-auth`
 
-The auth code compiled into every Worker in this repository (the Todofy gateway, Mail Hero and the home
-dashboard): Cloudflare Access JWT verification, same-origin JSON mutation checks and the private response
+Shared owner authentication compiled into its Worker consumers: Cloudflare Access JWT verification, same-origin JSON mutation checks and the private response
 headers. It is TypeScript source with no runtime dependencies (Web Crypto only). It is not a separate
 Worker: each app depends on it with `"@ziyixi/edge-auth": "workspace:*"` and its
 bundler compiles it in.
@@ -26,17 +25,12 @@ and each app maps it to its own status, code and message.
 ## Checks
 
 ```sh
-cd packages/edge-auth
-pnpm install --frozen-lockfile
-pnpm run typecheck   # against Todofy's lib set (ES2024) and Mail Hero's (ES2022 + DOM)
-pnpm test            # vitest
+bazel test //packages/edge-auth:check
+bazel build //packages/edge-auth
 ```
 
-CI runs the same three commands in the `Shared packages` job. Any change in this directory also checks
-**and deploys** every app that compiles it in (`PACKAGE_USERS` in `.github/scripts/ci_changes.py`:
-Todofy, Mail Hero, the dashboard, the links app, the watch app, Fleet, mailsort, recall, Tasks, personal-mcp, Model Router and the
-Newsletter console); a new app that depends on this package must be
-added there, and `test_ci_changes.py` fails until it is.
+The package `check` script invokes the same suite. The typecheck and test scripts also delegate to Bazel. A frozen pnpm workspace install supports source-level development. A consumer declares its package dependency in its BUILD file; public `:check` and `:release`
+facades expose those edges to CI. No manual consumer map is maintained.
 
 Source rules (every app's toolchain compiles it, SPEC §6): relative imports end in `.ts`; erasable
 TypeScript only (no `enum`, `namespace` or parameter properties); no DOM-only type names; no `Buffer`

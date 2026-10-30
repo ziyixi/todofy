@@ -19,7 +19,7 @@
 
 这些接口不服务 owner 浏览。owner 的只读视图是另一个端口上的[控制台读接口](console.md)（`/api/newsletter/v1/`），只认控制台 Access 应用的 owner 登录，不接受上表 token。
 
-生产 Compose 不开放宿主机端口，触发器通过私有 Docker 网络访问 `http://newsletter:8080`。标准客户端仅在显式设置 `NEWSLETTER_ALLOW_INTERNAL_HTTP=1` 时接受这个内部地址；访问公网服务须使用固定 HTTPS 地址，不跟随重定向。不要把 token 放进 URL 或日志。
+生产触发器通过 K3s 私有服务地址 `http://newsletter:8080` 访问引擎。标准客户端仅在显式设置 `NEWSLETTER_ALLOW_INTERNAL_HTTP=1` 时接受这个内部地址；访问公网服务须使用固定 HTTPS 地址，不跟随重定向。不要把 token 放进 URL 或日志。
 
 ## 生成一期
 
@@ -73,7 +73,7 @@ Content-Type: application/json
 - 服务不自带 cron。现有部署的外部触发器每天按洛杉矶时间 07:00 启动，运行预算 90 分钟，客户端最多等待两小时。
 - 同一个 SQLite 数据目录只能由一个服务进程占用。不要启动多个 Uvicorn worker，也不要把真实数据放在云同步目录。
 - SQLite 是运行、内容和发送记录的权威来源；Notion 是在后台写入的异步副本（材料与简报），在 Notion 中的修改不会回写。Notion 暂时不可用不会阻塞新流程的邮件投递，旧刊期仍遵循其保存时的规则。
-- 启动前检查本地存储、依赖、proto、模板和中文绘图资源；真实模式还检查专用 Codex 登录、模型目录及已启用的 Notion、Todofy 连接。
+- 启动前检查本地存储、依赖、proto、模板和中文绘图资源；真实模式还检查 Router 模型目录及已启用的 Notion、Todofy 连接。
 - 本地运行条件或授权配置错误会使启动失败。Notion、Todofy 的临时网络故障可以降级运行并记录诊断，详情见 [接入指南](live-acceptance.md)。
 
 健康检查通过只说明服务可以接收任务，不证明后续模型额度充足、来源可读或邮件一定送达。需要实际调用模型检查输出格式时，使用另行授权的 [供应商兼容检查](provider-acceptance.md)，不把它当作普通启动步骤。

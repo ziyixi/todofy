@@ -8,14 +8,11 @@
     "postinstall": "node ../../proto/tools/ensure.mjs",
     "predev": "node ../../proto/tools/ensure.mjs",
     "dev": "vite",
-    "pretypecheck": "node ../../proto/tools/ensure.mjs",
-    "typecheck": "tsc --noEmit",
-    "prelint": "node ../../proto/tools/ensure.mjs",
-    "lint": "eslint .",
-    "pretest": "node ../../proto/tools/ensure.mjs",
-    "test": "vitest run",
-    "prebuild": "node ../../proto/tools/ensure.mjs",
-    "build": "tsc --noEmit && vite build"
+    "typecheck": "bazel test //fleet/web:typecheck_tests",
+    "lint": "bazel test //fleet/web:lint",
+    "test": "bazel test //fleet/web:unit_tests",
+    "build": "bazel build //fleet/web:bundle",
+    "check": "bazel test //fleet:check"
   },
   "dependencies": {
     "@tanstack/react-query": "catalog:",

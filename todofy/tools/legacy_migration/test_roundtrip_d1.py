@@ -11,7 +11,7 @@ from fixtures import synthetic
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).parent
-WRANGLER = ROOT / "node_modules" / ".bin" / "wrangler"
+WRANGLER = Path(os.environ.get("BAZEL_WRANGLER", ROOT / "node_modules" / ".bin" / "wrangler"))
 CONFIG = "wrangler.test.toml"
 ENV = {**os.environ, "CI": "true", "WRANGLER_SEND_METRICS": "false"}
 

@@ -319,6 +319,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/auth.test.ts"],
     deps = [":module_group_15"],
 )
@@ -330,6 +331,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/backup.test.ts"],
     deps = [
         ":backup",
@@ -345,6 +347,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/content.test.ts"],
     deps = [
         ":content",
@@ -359,6 +362,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/events.test.ts"],
     deps = [
         ":events",
@@ -374,6 +378,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/tasks.test.ts"],
     deps = [":tasks"],
 )
@@ -385,6 +390,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/watch-events.test.ts"],
     deps = [
         ":server",
@@ -403,6 +409,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/watch.test.ts"],
     deps = [
         ":watch",
@@ -426,6 +433,7 @@ proto_vitest_test(
         "//personal-mcp:config",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/webhook.test.ts"],
     deps = [":webhook"],
 )
@@ -438,6 +446,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/work.test.ts"],
     deps = [
         ":work-model",
@@ -618,4 +627,19 @@ filegroup(
         allow_empty = True,
     ),
     visibility = ["//visibility:public"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)
+
+test_suite(
+    name = "typecheck_tests",
+    tests = [":types_typecheck_test"],
+)
+
+test_suite(
+    name = "runtime_tests",
+    tests = [":runtime_" + file.removeprefix("test/runtime/").removesuffix(".test.ts") + "_test" for file in glob(["test/runtime/*.test.ts"])],
 )

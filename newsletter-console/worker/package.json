@@ -6,16 +6,13 @@
   "description": "Newsletter console: owner authentication and the read-only newsletter.ui.v1 transport",
   "scripts": {
     "postinstall": "node ../../proto/tools/ensure.mjs",
-    "pretypecheck": "node ../../proto/tools/ensure.mjs",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p test/runtime/tsconfig.json",
-    "prelint": "node ../../proto/tools/ensure.mjs",
-    "lint": "eslint .",
-    "pretest": "node ../../proto/tools/ensure.mjs",
-    "test": "vitest run",
-    "pretest:runtime": "node ../../proto/tools/ensure.mjs",
-    "test:runtime": "vitest run --config vitest.runtime.config.ts",
+    "typecheck": "bazel test //newsletter-console/worker:typecheck_tests",
+    "lint": "bazel test //newsletter-console/worker:lint",
+    "test": "bazel test //newsletter-console/worker:unit_tests",
+    "test:runtime": "bazel test //newsletter-console/worker:runtime_tests --nocache_test_results",
     "predev": "node ../../proto/tools/ensure.mjs",
-    "dev": "wrangler dev --config ../wrangler.toml --ip 127.0.0.1 --port 8796 --local-upstream 127.0.0.1:8796"
+    "dev": "bazel build //newsletter-console/web:bundle && wrangler dev --assets ../../bazel-bin/newsletter-console/web/dist --config ../wrangler.toml --ip 127.0.0.1 --port 8796 --local-upstream 127.0.0.1:8796",
+    "check": "bazel test //newsletter-console:check"
   },
   "dependencies": {
     "@ziyixi/edge-auth": "workspace:*",

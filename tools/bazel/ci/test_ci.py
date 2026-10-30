@@ -1,7 +1,13 @@
 """The CI selector forwards impact calculation and preserves check evidence and CPU semantics."""
 
+import contextlib
+import io
+import json
 import subprocess
+import sys
+import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from unittest.mock import patch
 
@@ -21,6 +27,7 @@ class GroupsTest(unittest.TestCase):
                     ("cpu", "js_test", ["cpu", "workerd"]),
                     ("browser", "js_test", ["browser"]),
                     ("worker", "js_test", ["workerd"]),
+                    ("container", "py_test", ["container"]),
                     ("node", "js_test", []),
                     ("python", "py_test", []),
                     ("go", "go_test", []),
@@ -36,6 +43,7 @@ class GroupsTest(unittest.TestCase):
                 "cpu",
                 "browser",
                 "worker",
+                "container",
                 "node",
                 "python",
                 "go",
@@ -64,7 +72,7 @@ class GroupsTest(unittest.TestCase):
             self.assertEqual("--nocache_test_results" in command, group == "cpu")
             self.assertIn(
                 "--local_test_jobs="
-                + ("1" if group in ("workerd", "cpu", "browser") else "4"),
+                + ("1" if group in ("workerd", "cpu", "browser", "container") else "4"),
                 command,
             )
             self.assertIn("--target_pattern_file=/tmp/targets.txt", command)
@@ -177,6 +185,337 @@ class ScopeTest(unittest.TestCase):
             self.assertRaisesRegex(RuntimeError, "No public :check"),
         ):
             plan.check_scope("bazel", [])
+
+
+class DispatchTest(unittest.TestCase):
+    def setUp(self):
+        self.catalog = {
+            "//" + app + ":release": {
+                "app": app,
+                "kind": kind,
+                "target": "//" + app + ":artifact",
+            }
+            for app, kind in [
+                ("tasks", "worker"),
+                ("todofy", "worker"),
+                ("mail-hero", "worker"),
+                ("newsletter", "image"),
+                ("platform", "image"),
+                ("codex-gateway", "image"),
+            ]
+        }
+        self.common = [
+            "//proto:check",
+            "//packages/new-lib:check",
+            "//tools/bazel/ci:check",
+            "//.github/scripts:check",
+            "//infra:check",
+        ]
+        self.roots = self.common + [
+            "//" + app + ":check"
+            for app in [
+                "tasks",
+                "todofy",
+                "mail-hero",
+                "newsletter",
+                "platform",
+                "codex-gateway",
+            ]
+        ]
+
+    def roots_for(self, app, resume=False):
+        return plan.dispatch_check_roots(
+            self.roots, plan.dispatch_releases(self.catalog, app), app, resume
+        )
+
+    def test_worker_dispatch_keeps_common_checks_and_only_that_application(self):
+        self.assertEqual(set(self.roots_for("tasks")), {*self.common, "//tasks:check"})
+        chosen = plan.dispatch_releases(self.catalog, "tasks")
+        self.assertEqual(set(chosen), {"//tasks:release"})
+        query = plan.selection_query(plan.leaf_query(self.roots_for("tasks")), chosen)
+        self.assertNotIn("//newsletter", query)
+        self.assertNotIn("//platform", query)
+        self.assertNotIn("//codex-gateway", query)
+
+    def test_both_means_todofy_and_mail_hero_and_all_keeps_all_roots(self):
+        self.assertEqual(
+            set(self.roots_for("both")),
+            {*self.common, "//todofy:check", "//mail-hero:check"},
+        )
+        self.assertEqual(self.roots_for("all"), self.roots)
+
+    def test_newsletter_and_platform_checks_follow_the_existing_image_pair(self):
+        for app in ("newsletter", "platform"):
+            with self.subTest(app=app):
+                self.assertEqual(
+                    set(self.roots_for(app)),
+                    {*self.common, "//newsletter:check", "//platform:check"},
+                )
+
+    def test_gateway_resume_checks_platform_source_without_a_container_scope(self):
+        roots = self.roots_for("codex-gateway", resume=True)
+        self.assertEqual(
+            set(roots), {*self.common, "//codex-gateway:check", "//platform:check"}
+        )
+        self.assertIn('except attr("tags", "container",', plan.leaf_query(roots, True))
+        self.assertNotIn('"container"', plan.leaf_query(roots))
+
+    def test_unknown_application_and_missing_public_facade_fail(self):
+        with self.assertRaisesRegex(ValueError, "no release target"):
+            self.roots_for("missing")
+        with self.assertRaisesRegex(ValueError, "no public :check"):
+            plan.dispatch_check_roots(
+                self.common, plan.dispatch_releases(self.catalog, "tasks"), "tasks"
+            )
+
+    def test_resume_removes_images_before_the_single_td_call_but_keeps_the_catalog(
+        self,
+    ):
+        xml = '<query><rule name="//newsletter:source_test" class="py_test"/></query>'
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "plan.json"
+            with (
+                patch.object(
+                    sys,
+                    "argv",
+                    [
+                        "plan.py",
+                        "--base",
+                        "base",
+                        "--app",
+                        "newsletter",
+                        "--resume-vps-release",
+                        "--release-input-query",
+                        "--output",
+                        str(output),
+                    ],
+                ),
+                patch.dict(plan.os.environ, {"GITHUB_OUTPUT": ""}),
+                patch.object(plan, "release_scope", return_value=self.catalog),
+                patch.object(plan, "run", side_effect=["\n".join(self.roots), xml]),
+                patch.object(
+                    plan,
+                    "affected_targets",
+                    return_value=({"//newsletter:source_test"}, "native TD"),
+                ) as affected,
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                plan.main()
+            result = json.loads(output.read_text())
+        affected.assert_called_once()
+        candidates, query = affected.call_args.args[4:]
+        self.assertEqual(candidates, {"//newsletter:source_test"})
+        self.assertNotIn(":release", query)
+        self.assertEqual(query, "set(//newsletter:source_test)")
+        self.assertEqual(result["groups"], {"python": ["//newsletter:source_test"]})
+        self.assertEqual(len(result["release_catalog"]), len(self.catalog))
+        self.assertEqual(result["releases"], [])
+
+    def test_normal_changed_selection_keeps_container_checks(self):
+        xml = '<query><rule name="//newsletter:image_test" class="py_test"><list name="tags"><string value="container"/></list></rule></query>'
+        selected, _ = plan.affected_targets(
+            "",
+            "bazel",
+            "td",
+            [],
+            {"//newsletter:image_test"},
+            plan.leaf_query(self.roots),
+        )
+        self.assertEqual(
+            plan.target_groups(xml, selected),
+            {"container": ["//newsletter:image_test"]},
+        )
+
+
+class ReleaseTest(unittest.TestCase):
+    def metadata_xml(self, entries):
+        root = ET.Element("query")
+        for label, tags, kind in entries:
+            rule = ET.SubElement(root, "rule", name=label, **{"class": kind})
+            values = ET.SubElement(rule, "list", name="tags")
+            for tag in tags:
+                ET.SubElement(values, "string", value=tag)
+        return ET.tostring(root, encoding="unicode")
+
+    def test_native_metadata_declares_worker_image_extension_and_website(self):
+        entries = [
+            (
+                "//tasks:release",
+                ["release:worker:tasks", "artifact://tasks:tasks"],
+                "filegroup",
+            ),
+            (
+                "//newsletter:release",
+                ["release:image:newsletter", "artifact://newsletter:newsletter"],
+                "filegroup",
+            ),
+            (
+                "//recall:release_extension",
+                ["release:extension:recall", "artifact://recall:extension_artifact"],
+                "filegroup",
+            ),
+            (
+                "//website:release_site",
+                ["release:website:website", "artifact://website:website"],
+                "filegroup",
+            ),
+            (
+                "//website:release_relay",
+                ["release:worker:website-relay", "artifact://website:relay"],
+                "filegroup",
+            ),
+        ]
+        records = plan.release_metadata(self.metadata_xml(entries))
+        self.assertEqual(
+            {record["kind"] for record in records.values()}, plan.RELEASE_KINDS
+        )
+        self.assertEqual(
+            records["//website:release_relay"],
+            {"app": "website-relay", "kind": "worker", "target": "//website:relay"},
+        )
+
+    def test_missing_ambiguous_or_cross_app_tags_fail(self):
+        cases = [
+            ("//tasks:release", ["release:worker:tasks"], "filegroup"),
+            ("//tasks:release", ["artifact://tasks:tasks"], "filegroup"),
+            (
+                "//tasks:release",
+                [
+                    "release:worker:tasks",
+                    "release:image:tasks",
+                    "artifact://tasks:tasks",
+                ],
+                "filegroup",
+            ),
+            (
+                "//tasks:release",
+                ["release:unknown:tasks", "artifact://tasks:tasks"],
+                "filegroup",
+            ),
+            (
+                "//tasks:release",
+                ["release:worker:bad_app", "artifact://tasks:tasks"],
+                "filegroup",
+            ),
+            (
+                "//tasks:release",
+                ["release:worker:tasks", "artifact://other:other"],
+                "filegroup",
+            ),
+            (
+                "//tasks:release",
+                ["release:worker:tasks", "artifact://tasks/worker:bundle"],
+                "filegroup",
+            ),
+            (
+                "//tasks/worker:release",
+                ["release:worker:tasks", "artifact://tasks:tasks"],
+                "filegroup",
+            ),
+            (
+                "//tasks:release",
+                ["release:worker:tasks", "artifact://tasks:tasks"],
+                "genrule",
+            ),
+        ]
+        for entry in cases:
+            with self.subTest(entry=entry), self.assertRaises(ValueError):
+                plan.release_metadata(self.metadata_xml([entry]))
+
+    def test_duplicate_release_identity_fails(self):
+        entries = [
+            (
+                "//tasks:release_one",
+                ["release:worker:tasks", "artifact://tasks:one"],
+                "filegroup",
+            ),
+            (
+                "//tasks:release_two",
+                ["release:worker:tasks", "artifact://tasks:two"],
+                "filegroup",
+            ),
+        ]
+        with self.assertRaisesRegex(ValueError, "duplicate release"):
+            plan.release_metadata(self.metadata_xml(entries))
+
+    def test_test_and_release_candidates_use_one_determinator_comparison(self):
+        records = {
+            "//tasks:release": {
+                "app": "tasks",
+                "kind": "worker",
+                "target": "//tasks:tasks",
+            }
+        }
+        query = plan.selection_query("tests(//tasks:check)", records)
+        with (
+            patch.object(
+                plan.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)
+            ),
+            patch.object(plan.shutil, "which", return_value="/bin/bazel"),
+            patch.object(
+                plan,
+                "run",
+                side_effect=[
+                    plan.TD_VERSION,
+                    "//tasks/private:leaf_test\n//tasks:release",
+                ],
+            ) as run,
+        ):
+            selected, _ = plan.affected_targets(
+                "base",
+                "bazel",
+                "td",
+                [],
+                {"//tasks/private:leaf_test", "//tasks:release"},
+                query,
+            )
+        self.assertEqual(selected, {"//tasks/private:leaf_test", "//tasks:release"})
+        self.assertEqual(run.call_count, 2)  # version check and one native comparison
+        self.assertIn("--targets=" + query, run.call_args.args[0])
+
+    def test_release_only_change_schedules_no_test_group(self):
+        records = {
+            "//tasks:release": {
+                "app": "tasks",
+                "kind": "worker",
+                "target": "//tasks:tasks",
+            }
+        }
+        xml = '<query><rule name="//tasks/private:leaf_test" class="js_test"/></query>'
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "plan.json"
+            with (
+                patch.object(
+                    sys,
+                    "argv",
+                    [
+                        "plan.py",
+                        "--base",
+                        "base",
+                        "--release-input-query",
+                        "--output",
+                        str(output),
+                    ],
+                ),
+                patch.dict(plan.os.environ, {"GITHUB_OUTPUT": ""}),
+                patch.object(
+                    plan,
+                    "check_scope",
+                    return_value=(["//tasks:check"], "tests(//tasks:check)", xml),
+                ),
+                patch.object(plan, "release_scope", return_value=records),
+                patch.object(
+                    plan,
+                    "affected_targets",
+                    return_value=({"//tasks:release"}, "native TD"),
+                ) as affected,
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                plan.main()
+            result = json.loads(output.read_text())
+        affected.assert_called_once()
+        self.assertEqual(result["groups"], {})
+        self.assertEqual(result["releases"], [records["//tasks:release"]])
 
 
 class BaselineTest(unittest.TestCase):

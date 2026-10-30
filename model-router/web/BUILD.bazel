@@ -227,6 +227,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/App.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -266,6 +267,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/Playground.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -297,6 +299,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/RequestDetail.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -328,6 +331,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/UsageTrends.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -358,6 +362,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/api.test.ts"],
     deps = [
         ":node_modules/@testing-library/jest-dom",
@@ -382,6 +387,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/usage.test.ts"],
     deps = [
         ":node_modules/@testing-library/jest-dom",
@@ -567,4 +573,14 @@ filegroup(
         allow_empty = True,
     ),
     visibility = ["//visibility:public"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)
+
+test_suite(
+    name = "typecheck_tests",
+    tests = [":typecheck_project_typecheck_test"],
 )

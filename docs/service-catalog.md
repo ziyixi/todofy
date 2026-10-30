@@ -18,17 +18,13 @@ boundaries; adding metadata does not deploy an application or create a resource.
 
 ## Validate and regenerate
 
-Use Python 3.11 or newer, from the repository root:
+The catalog/configuration checks run through Bazel:
 
 ```sh
-python3 tools/service-catalog/catalog.py --check
-python3 -m unittest discover -s tools/service-catalog/tests
+bazel test //tools/service-catalog:check //.github/scripts:generated_config_test
 ```
 
-On a Mac whose `python3` is older, prefix those commands with `uv run --no-project --python 3.12`.
-The existing `Changes` job discovers these tests through
-[`.github/scripts/test_service_catalog.py`](../.github/scripts/test_service_catalog.py).
-No additional package is required.
+Regeneration remains an explicit source update; it performs no provider call or deployment.
 
 After reviewing a metadata change, regenerate with:
 
@@ -171,12 +167,9 @@ catalog.workers                # normalized Worker mapping, in position order
 catalog.access                 # public paths plus Wrangler-derived destinations
 ```
 
-CI uses `apps` to distinguish Cloudflare checks from VPS image checks. Newsletter, Platform and Codex gateway must not enter
-Worker hostname guards or Wrangler deploy steps. Platform's separately declared machine infrastructure is
-owned by infra, rather than inferred from its image manifest. CI prefixes include `newsletter`, `platform`
-and `codex_gateway`. A paired runtime release publishes the Newsletter and Platform images; its bootstrap
-bundle includes the gateway image only when the same run built it. Gateway-only changes release only the
-gateway. Changing a catalog row alone does not start a release.
+CI discovers check/release facades in native Bazel metadata. The catalog owns service identity/presentation, not
+another dependency map. Newsletter/Platform/Codex gateway keep independent images and the existing paired versus
+gateway-only rollout rules. A metadata edit is published only where actual build/release dependencies consume it.
 
 ## Adding or changing a service
 
@@ -188,8 +181,9 @@ gateway. Changing a catalog row alone does not start a release.
    paths. A Worker with `ACCESS_AUDIENCE` must have its exact Access application key in the manifest.
 3. Regenerate, inspect both output diffs and run the catalog, Wrangler and infrastructure checks.
    Resource creation, identities and secrets remain explicit work in their existing owning files.
-4. Change CI jobs only when the application has its real check and release contract. A catalog row
-   alone does not authorize deployment, billing, data import or access to another service.
+4. Add the application's public root `:check` and tagged `:release` facades with actual dependencies. The static
+   publication job and ordering must also match its real release contract. Metadata alone never authorizes billing,
+   data import or access to another service.
 
 Special policies remain explicit: the backup application is frozen; Email Routing and the root mailbox are outside this catalog. Keep
 those exceptions in their owning contracts rather than adding general-purpose escape hatches here.

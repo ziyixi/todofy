@@ -19,25 +19,25 @@ flowchart LR
 
 首次初始化时仅归档且强制暂停自动投递，不自动删除邮件。唯一收信地址通过 Worker 的 `RECEIVE_ADDRESS` 配置；没有地址管理平台，也不需要原邮箱密码。UI 支持邮件列表/正文/附件、解析状态、交付尝试、目标配置、重试和删除。消费者接入与转发验收见 [Mail Hero → Todofy](docs/todofy-integration.md)。
 
+## Build and check
+
+```sh
+bazel test //mail-hero:check
+bazel build //mail-hero
+```
+
+构建/检查脚本使用相同的 Bazel 依赖；交互式开发保持本地绑定。工具安装见[根依赖指南](../docs/dependencies.md)。
+
 ## 开发与部署
 
 需要 Node.js 26 与仓库根目录固定的 pnpm。生产配置是提交的 [`wrangler.toml`](wrangler.toml)（顶层即生产）；个人值与运维开关不提交，由 CI 部署时经 `deploy/deploy-vars.mjs` 注入。本地开发只用本地绑定，把 [`.dev.vars.example`](.dev.vars.example) 复制为 `.dev.vars`。
-
-以下命令从单仓库根目录执行：
-
-```sh
-pnpm install --frozen-lockfile
-cd mail-hero
-npm --prefix web run build
-npm --prefix cloudflare run typecheck
-npm --prefix cloudflare test
-```
 
 实际账户准备、D1/R2 创建、Access、唯一 Email Routing 规则、Wrangler 命令、验收和备份恢复步骤见 [Cloudflare 设置说明](docs/cloudflare-setup.md)。原生模块与配置合同见 [cloudflare/README.md](cloudflare/README.md)。
 
 正式发布使用单仓库根目录的 [GitHub Actions CI/CD](docs/ci-cd.md)：`main` 上 `mail-hero/` 或共享鉴权包 [`packages/edge-auth/`](../packages/edge-auth/) 有改动且 `CI gate` 通过后发布原生 Worker 和网页。应用无需自建服务器；[原生备份](docs/native-backup.md)复用 Cloudflare DO/R2 执行；[离线恢复工具](deploy/backup/README.md)保留旧格式兼容，不依赖 VPS。Todofy 位于同一仓库的 [`todofy/`](../todofy/)，是独立的 webhook 消费者，单独检查和发布。
 
-本次部署的 UI 为 [mail-hero.ziyixi.science](https://mail-hero.ziyixi.science)，固定收件地址（`inbox` 子域上的专用地址，值只保存在 GitHub secret `MAIL_HERO_RECEIVE_ADDRESS`，公开仓库不写明）。GitHub 登录与单封真实纯文本收件已验证；Todofy 完整业务链路仍需用户测试信验收。实际资源和检查范围见 [部署验收记录](docs/verification-native.md)，验收完成后再由用户切换原邮箱自动转发。
+当前来源、部署和业务验收边界见[验收记录](docs/verification-native.md)。日常使用不需要重做旧上线测试清单，
+转发或恢复变更仍按运行手册单独验收。
 
 目标是使用免费额度，把日常增量费用控制在每月 $0–2；**这不是 Cloudflare 的硬账单上限**。不需要 Workers Paid 的 $5/月订阅。R2 仍须单独开通订阅，超额会计费；免费额度由账户内所有项目共享。具体限额、容量预警和停止条件在设置说明中列出。
 

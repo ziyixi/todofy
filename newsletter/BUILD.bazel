@@ -1,13 +1,29 @@
 load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
 load("@rules_pkg//pkg:mappings.bzl", "REMOVE_BASE_DIRECTORY", "pkg_attributes", "pkg_files", "pkg_mkdirs", "strip_prefix")
 load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
-load("@rules_python//python:defs.bzl", "py_library", "py_test")
+load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
 load("@rules_python//python:packaging.bzl", "py_package", "py_wheel")
 load("@rules_python//python:pip.bzl", "whl_filegroup")
+load("@rules_python//python/entry_points:py_console_script_binary.bzl", "py_console_script_binary")
 load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 load("//tools/bazel/images:images.bzl", "newsletter_healthcheck", "newsletter_image_identity", "python_runtime_tree")
+load("//tools/bazel/python:container_test.bzl", "container_image_test")
 
 package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "release",
+    srcs = [
+        ":newsletter",
+        "//:.github/actions/publish-newsletter/action.yml",
+        "//tools/container-release:release_inputs",
+    ],
+    tags = [
+        "artifact://newsletter:newsletter",
+        "release:image:newsletter",
+    ],
+    visibility = ["//visibility:public"],
+)
 
 py_library(
     name = "adapters",
@@ -2911,6 +2927,7 @@ py_test(
         ":build_test_data",
         ":test_fixtures",
         "//:python_repository_test_data",
+        "//:toolchain_version_inputs",
         "//tools/bazel/python:noto_cjk_font",
     ],
     env = {
@@ -5061,6 +5078,7 @@ py_test(
         ":build_test_data",
         ":test_fixtures",
         "//:python_repository_test_data",
+        "//:toolchain_version_inputs",
         "//tools/bazel/python:noto_cjk_font",
     ],
     env = {
@@ -5866,9 +5884,8 @@ filegroup(
     srcs = glob(
         [
             "content-config/**",
-            "Dockerfile",
-            "Dockerfile.dockerignore",
-            ".dockerignore",
+            "BUILD.bazel",
+            "container-healthcheck.json",
             ".gitignore",
             "Makefile",
             "MANIFEST.in",
@@ -6165,7 +6182,7 @@ oci_image(
 newsletter_healthcheck(
     name = "image",
     base = ":image_raw",
-    dockerfile = "Dockerfile",
+    config = "container-healthcheck.json",
     tags = ["manual"],
     target_compatible_with = [
         "@platforms//os:linux",
@@ -6203,7 +6220,15 @@ alias(
 test_suite(
     name = "check",
     tests = [
+        ":container_test",
+        ":mypy_test",
+        ":python_structure_test",
+        ":ruff_check_test",
+        ":ruff_format_test",
+        ":smoke_codex_startup_test",
+        ":smoke_http_test",
         ":tests",
+        ":wheel_smoke_test",
         "//tools/container-release:build_identity_test",
     ],
 )
@@ -6211,9 +6236,9 @@ test_suite(
 filegroup(
     name = "config",
     srcs = [
-        "Dockerfile",
         "MANIFEST.in",
         "app.toml",
+        "container-healthcheck.json",
         "pyproject.toml",
         "//:config/cloud.toml",
         "//:config/resources.toml",
@@ -6242,4 +6267,250 @@ filegroup(
         allow_empty = True,
     ),
     visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "python_lint_inputs",
+    srcs = glob([
+        "src/**/*.py",
+        "tests/**/*.py",
+        "scripts/**/*.py",
+    ]) + ["pyproject.toml"],
+)
+
+[
+    py_test(
+        name = "ruff_" + command + "_test",
+        srcs = ["//tools/bazel/python:check_ruff.py"],
+        args = [
+            "$(rootpath @python_deps//ruff:data)",
+            "$(rootpath pyproject.toml)",
+            command,
+        ] + (["--check"] if command == "format" else []) + [
+            "src",
+            "tests",
+            "scripts",
+        ],
+        data = [
+            "pyproject.toml",
+            ":python_lint_inputs",
+            "@python_deps//ruff:data",
+        ],
+        legacy_create_init = False,
+        main = "//tools/bazel/python:check_ruff.py",
+    )
+    for command in [
+        "check",
+        "format",
+    ]
+]
+
+py_test(
+    name = "python_structure_test",
+    srcs = ["scripts/check_python_structure.py"],
+    data = [":python_lint_inputs"],
+    legacy_create_init = False,
+    main = "scripts/check_python_structure.py",
+)
+
+py_console_script_binary(
+    name = "mypy_test",
+    args = [
+        "--config-file",
+        "$(rootpath pyproject.toml)",
+        "--cache-dir=/dev/null",
+        "newsletter/src/newsletter",
+        "newsletter/scripts",
+        "newsletter/tests/support",
+    ],
+    binary_rule = py_test,
+    config_settings = {"@rules_python//python/config_settings:venvs_site_packages": "yes"},
+    data = [
+        "pyproject.toml",
+        ":python_lint_inputs",
+    ],
+    legacy_create_init = False,
+    pkg = "@python_deps//mypy",
+    script = "mypy",
+    deps = [
+        ":library",
+        "@python_deps//pytest",
+        "@python_deps//types_protobuf",
+        "@python_deps//types_pyyaml",
+    ],
+)
+
+[
+    py_library(
+        name = "script_" + module,
+        srcs = ["scripts/" + module + ".py"],
+        imports = ["scripts"],
+    )
+    for module in [
+        "smoke_http",
+        "smoke_codex_startup",
+    ]
+]
+
+[
+    py_test(
+        name = module + "_test",
+        srcs = [
+            "//tools/bazel/python:newsletter_smoke_test.py",
+            "//tools/bazel/python:pytest_main.py",
+        ],
+        args = [
+            "-c",
+            "$(rootpath pyproject.toml)",
+            "-p",
+            "no:cacheprovider",
+            "$(rootpath //tools/bazel/python:newsletter_smoke_test.py)",
+        ],
+        data = [
+            "pyproject.toml",
+            "//tools/bazel/python:noto_cjk_font",
+        ],
+        env = {
+            "BAZEL_COPY_WORKSPACE": "1",
+            "BAZEL_CHILD_PYTHON": "1",
+            "NEWSLETTER_SMOKE_MODULE": module,
+            "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)",
+        },
+        imports = ["."],
+        legacy_create_init = False,
+        main = "//tools/bazel/python:pytest_main.py",
+        deps = [
+            ":script_" + module,
+            ":library",
+            "@python_deps//pytest",
+        ],
+    )
+    for module in [
+        "smoke_http",
+        "smoke_codex_startup",
+    ]
+]
+
+pkg_files(
+    name = "source_distribution_files",
+    srcs = [
+        "MANIFEST.in",
+        "README.md",
+        "pyproject.toml",
+        ":wheel_files",
+    ],
+    strip_prefix = strip_prefix.from_root("newsletter"),
+)
+
+pkg_tar(
+    name = "source_distribution",
+    srcs = [":source_distribution_files"],
+    extension = "tar.gz",
+    package_dir = "personal_newsletter-0.1.0",
+)
+
+py_library(
+    name = "script_smoke_wheel",
+    srcs = ["scripts/smoke_wheel.py"],
+    imports = ["scripts"],
+)
+
+py_test(
+    name = "wheel_smoke_test",
+    srcs = [
+        "//tools/bazel/python:newsletter_wheel_smoke.py",
+        "//tools/bazel/python:pytest_main.py",
+    ],
+    args = [
+        "-c",
+        "$(rootpath pyproject.toml)",
+        "-p",
+        "no:cacheprovider",
+        "$(rootpath //tools/bazel/python:newsletter_wheel_smoke.py)",
+    ],
+    data = [
+        "MANIFEST.in",
+        "pyproject.toml",
+        ":image_dependency_layer",
+        ":source_distribution",
+        ":wheel",
+        ":wheel_files",
+        "//packages/model-router-client/python:wheel",
+        "//proto:python_wheel",
+        "//tools/bazel/python:noto_cjk_font",
+    ],
+    env = {
+        "NEWSLETTER_PROJECT": "$(rootpath pyproject.toml)",
+        "NEWSLETTER_WHEEL": "$(rootpath :wheel)",
+        "NEWSLETTER_SDIST": "$(rootpath :source_distribution)",
+        "NEWSLETTER_DEPENDENCIES": "$(rootpath :image_dependency_layer)",
+        "NEWSLETTER_PROTO_WHEEL": "$(rootpath //proto:python_wheel)",
+        "NEWSLETTER_CLIENT_WHEEL": "$(rootpath //packages/model-router-client/python:wheel)",
+        "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)",
+    },
+    legacy_create_init = False,
+    main = "//tools/bazel/python:pytest_main.py",
+    deps = [
+        ":script_smoke_wheel",
+        "@python_deps//packaging",
+        "@python_deps//pytest",
+    ],
+)
+
+filegroup(
+    name = "bootstrap_settings",
+    srcs = ["src/newsletter/settings.py"],
+)
+
+py_binary(
+    name = "format",
+    srcs = ["//tools/bazel/python:check_ruff.py"],
+    args = [
+        "$(rootpath @python_deps//ruff:data)",
+        "$(rootpath pyproject.toml)",
+        "format",
+        "src",
+        "tests",
+        "scripts",
+    ],
+    data = [
+        "pyproject.toml",
+        "@python_deps//ruff:data",
+    ],
+    legacy_create_init = False,
+    main = "//tools/bazel/python:check_ruff.py",
+)
+
+filegroup(
+    name = "container_probe_inputs",
+    srcs = [
+        "container-healthcheck.json",
+        "scripts/publish_content_config.py",
+        "scripts/smoke_codex_startup.py",
+        "scripts/smoke_image.py",
+        "scripts/smoke_image_probe.py",
+        ":content_configuration_sources",
+        ":wheel_files",
+        "//:.python-version",
+        "//:config/resources.toml",
+    ],
+)
+
+container_image_test(
+    name = "container_test",
+    service = "newsletter",
+    sources = ":container_probe_inputs",
+)
+
+filegroup(
+    name = "content_configuration_sources",
+    srcs = glob(["content-config/**"]),
+)
+
+py_binary(
+    name = "evaluate_prompts",
+    srcs = ["scripts/evaluate_prompts.py"],
+    legacy_create_init = False,
+    main = "scripts/evaluate_prompts.py",
+    deps = [":library"],
 )

@@ -5,8 +5,23 @@ load("@rules_python//python:defs.bzl", "py_library", "py_test")
 load("@rules_python//python:packaging.bzl", "py_package")
 load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 load("//tools/bazel/images:images.bzl", "gateway_image_identity", "python_runtime_tree")
+load("//tools/bazel/python:container_test.bzl", "container_image_test")
 
 package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "release",
+    srcs = [
+        ":codex-gateway",
+        "//:.github/actions/publish-codex-gateway/action.yml",
+        "//tools/container-release:release_inputs",
+    ],
+    tags = [
+        "artifact://codex-gateway:codex-gateway",
+        "release:image:codex-gateway",
+    ],
+    visibility = ["//visibility:public"],
+)
 
 py_library(
     name = "__main__",
@@ -527,6 +542,9 @@ alias(
 test_suite(
     name = "check",
     tests = [
+        ":container_test",
+        ":ruff_check_test",
+        ":ruff_format_test",
         ":tests",
         "//tools/container-release:build_identity_test",
     ],
@@ -535,7 +553,6 @@ test_suite(
 filegroup(
     name = "config",
     srcs = [
-        "Dockerfile",
         "app.toml",
         "pyproject.toml",
         "//:config/cloud.toml",
@@ -562,4 +579,49 @@ filegroup(
         allow_empty = True,
     ),
     visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "python_lint_inputs",
+    srcs = glob([
+        "src/**/*.py",
+        "tests/**/*.py",
+    ]) + ["pyproject.toml"],
+)
+
+[
+    py_test(
+        name = "ruff_" + command + "_test",
+        srcs = ["//tools/bazel/python:check_ruff.py"],
+        args = [
+            "$(rootpath @python_deps//ruff:data)",
+            "$(rootpath //:pyproject.toml)",
+            command,
+        ] + (["--check"] if command == "format" else []) + [
+            "codex-gateway/src",
+            "codex-gateway/tests",
+        ],
+        data = [
+            ":python_lint_inputs",
+            "//:pyproject.toml",
+            "@python_deps//ruff:data",
+        ] + [],
+        legacy_create_init = False,
+        main = "//tools/bazel/python:check_ruff.py",
+    )
+    for command in [
+        "check",
+        "format",
+    ]
+]
+
+filegroup(
+    name = "container_probe_inputs",
+    srcs = ["tests/image_probe.py"],
+)
+
+container_image_test(
+    name = "container_test",
+    service = "codex-gateway",
+    sources = ":container_probe_inputs",
 )

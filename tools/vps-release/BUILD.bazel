@@ -1,4 +1,4 @@
-load("@rules_python//python:defs.bzl", "py_library", "py_test")
+load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
 load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
 package(default_visibility = ["//visibility:public"])
@@ -177,3 +177,17 @@ filegroup(
     ),
     visibility = ["//visibility:public"],
 )
+
+[
+    py_binary(
+        name = command + "_cli",
+        srcs = [command + ".py"],
+        legacy_create_init = False,
+        main = command + ".py",
+        deps = [":" + command],
+    )
+    for command in [
+        "deploy",
+        "reconcile",
+    ]
+]

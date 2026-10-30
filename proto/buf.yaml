@@ -36,7 +36,7 @@ lint:
   disallow_comment_ignores: false
   # The AIP-shaped HTTP APIs (README.md, "Adding a UI API") follow AIP-131/133/134/135/136: Get, Create and
   # Update return the resource, Delete returns google.protobuf.Empty, so one message answers several RPCs.
-  # Google's api-linter (scripts/api-lint.sh) checks their request and response names instead. prototest
+  # Google's api-linter (//proto:api_lint_test) checks their request and response names instead. prototest
   # mirrors those shapes for the transcoder's tests.
   ignore_only:
     RPC_RESPONSE_STANDARD_NAME:
@@ -45,7 +45,7 @@ lint:
       - prototest
 breaking:
   # FILE is the strictest category: it also protects generated code (names, packages, files), not only
-  # the binary and JSON wire formats. scripts/breaking.sh adds the wire profile's own rules
+  # the binary and JSON wire formats. //proto:breaking adds the wire profile's own rules
   # (tools/profile_breaking.py).
   use:
     - FILE

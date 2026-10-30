@@ -1,9 +1,11 @@
 load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
 exports_files([
+    "BUILD.bazel",
     "codegen.bzl",
     "repositories.bzl",
     "ts_package.bzl",
+    "materialize.bzl",
 ])
 
 filegroup(

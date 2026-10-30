@@ -1,16 +1,4 @@
-# One workflow for every app of the service catalog (*/app.toml, docs/service-catalog.md); ci_changes.py KEYS names
-# the "changes" outputs, one check and one deploy output per app.
-# "changes" decides what changed since a cumulative base (.github/scripts/ci_changes.py), each app's checks run
-# from its own directory, "Shared packages" checks packages/* (compiled into the apps), "Contracts" runs both
-# sides of mail.received.v1 and ops-v1 plus the dashboard's ops-v1 caller tests, "Proto checks"
-# gates the protobuf IDL in proto/, and "CI gate" is the single status check to require.
-# Deploys run only on main, only for the app that changed (itself, a shared package it compiles in, a contract
-# file it bundles, or was dispatched), after the gate passes; Tasks deploys after Todofy (its MAIL binding), the watch
-# app after Tasks (its TASKS binding) and the dashboard after every app whose Ops entrypoint it binds. A push to main whose commit already passed every
-# needed check in a branch push run reuses that run: the checks are skipped, the gate and the deploys still run
-# (ci_changes.py find_reusable). Every deploy that applies routes runs tools/cf-guard first. recall's Chrome extension
-# is never deployed: each new version is kept as a GitHub Release (Recall extension release).
-# See docs/ci-cd.md.
+# Bazel selects affected checks and declared release inputs. Actions publishes the checked artifacts.
 name: CI and deploy
 
 on:
@@ -19,17 +7,16 @@ on:
   workflow_dispatch:
     inputs:
       app:
-        description: App to check and (on main) deploy
+        description: Application to publish after its checks
         type: choice
-        # both = Todofy and Mail Hero (as before the dashboard existed); all = every app.
         options: [both, all, todofy, mail-hero, dashboard, website, links, watch, newsletter, fleet, platform, codex-gateway, mailsort, recall, tasks, personal-mcp, model-router, newsletter-console]
         default: both
       resume_vps_release:
-        description: Explicitly resume a held VPS release after investigating its safe error
+        description: Resume the investigated held VPS release without rebuilding its images
         type: boolean
         default: false
       resume_source_sha:
-        description: Original held release's full source SHA (required only for resume)
+        description: Original held release's full source SHA
         type: string
         default: ''
 
@@ -48,714 +35,221 @@ jobs:
   changes:
     name: Changes
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 30
     permissions:
       contents: read
-      # Read this workflow's own past runs: the last successful main run is the change-detection base.
       actions: read
     outputs:
-      todofy_check: ${{ steps.decide.outputs.todofy_check }}
-      mail_hero_check: ${{ steps.decide.outputs.mail_hero_check }}
-      dashboard_check: ${{ steps.decide.outputs.dashboard_check }}
-      website_check: ${{ steps.decide.outputs.website_check }}
-      links_check: ${{ steps.decide.outputs.links_check }}
-      watch_check: ${{ steps.decide.outputs.watch_check }}
-      newsletter_check: ${{ steps.decide.outputs.newsletter_check }}
-      fleet_check: ${{ steps.decide.outputs.fleet_check }}
-      platform_check: ${{ steps.decide.outputs.platform_check }}
-      codex_gateway_check: ${{ steps.decide.outputs.codex_gateway_check }}
-      mailsort_check: ${{ steps.decide.outputs.mailsort_check }}
-      recall_check: ${{ steps.decide.outputs.recall_check }}
-      tasks_check: ${{ steps.decide.outputs.tasks_check }}
-      model_router_check: ${{ steps.decide.outputs.model_router_check }}
-      model_router_deploy: ${{ steps.decide.outputs.model_router_deploy }}
-      personal_mcp_check: ${{ steps.decide.outputs.personal_mcp_check }}
-      personal_mcp_deploy: ${{ steps.decide.outputs.personal_mcp_deploy }}
-      newsletter_console_check: ${{ steps.decide.outputs.newsletter_console_check }}
-      newsletter_console_deploy: ${{ steps.decide.outputs.newsletter_console_deploy }}
-      tasks_deploy: ${{ steps.decide.outputs.tasks_deploy }}
-      contracts: ${{ steps.decide.outputs.contracts }}
-      packages: ${{ steps.decide.outputs.packages }}
-      infra: ${{ steps.decide.outputs.infra }}
-      proto: ${{ steps.decide.outputs.proto }}
-      todofy_deploy: ${{ steps.decide.outputs.todofy_deploy }}
-      mail_hero_deploy: ${{ steps.decide.outputs.mail_hero_deploy }}
-      dashboard_deploy: ${{ steps.decide.outputs.dashboard_deploy }}
-      website_deploy: ${{ steps.decide.outputs.website_deploy }}
-      website_relay_deploy: ${{ steps.decide.outputs.website_relay_deploy }}
-      links_deploy: ${{ steps.decide.outputs.links_deploy }}
-      watch_deploy: ${{ steps.decide.outputs.watch_deploy }}
-      newsletter_deploy: ${{ steps.decide.outputs.newsletter_deploy }}
-      fleet_deploy: ${{ steps.decide.outputs.fleet_deploy }}
-      platform_publish: ${{ steps.decide.outputs.platform_publish }}
-      platform_deploy: ${{ steps.decide.outputs.platform_deploy }}
-      codex_gateway_deploy: ${{ steps.decide.outputs.codex_gateway_deploy }}
-      mailsort_deploy: ${{ steps.decide.outputs.mailsort_deploy }}
-      recall_deploy: ${{ steps.decide.outputs.recall_deploy }}
-      recall_extension_publish: ${{ steps.decide.outputs.recall_extension_publish }}
-      # A push to main that reuses a green branch run of the same commit (all check outputs above are false).
-      checks_reused: ${{ steps.decide.outputs.checks_reused }}
-      reused_run_url: ${{ steps.decide.outputs.reused_run_url }}
-      reused_jobs: ${{ steps.decide.outputs.reused_jobs }}
-      reused_run_id: ${{ steps.decide.outputs.reused_run_id }}
-      # The commit the diff started from (empty when everything runs): Proto checks compares the IDL with it.
-      base: ${{ steps.decide.outputs.base }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+      has_checks: ${{ steps.plan.outputs.has_work }}
+      has_artifacts: ${{ steps.releases.outputs.has_artifacts }}
+      artifact_matrix: ${{ steps.releases.outputs.artifact_matrix }}
+      artifact_run_id: ${{ steps.releases.outputs.artifact_run_id }}
+      artifact_run_url: ${{ steps.releases.outputs.artifact_run_url }}
+      artifacts_reused: ${{ steps.releases.outputs.artifacts_reused }}
+      base: ${{ steps.baseline.outputs.base }}
+      # Per-application outputs keep the production dependency ordering explicit below.
+      codex_gateway_deploy: ${{ steps.releases.outputs.codex_gateway_deploy }}
+      dashboard_deploy: ${{ steps.releases.outputs.dashboard_deploy }}
+      fleet_deploy: ${{ steps.releases.outputs.fleet_deploy }}
+      links_deploy: ${{ steps.releases.outputs.links_deploy }}
+      mail_hero_deploy: ${{ steps.releases.outputs.mail_hero_deploy }}
+      mailsort_deploy: ${{ steps.releases.outputs.mailsort_deploy }}
+      model_router_deploy: ${{ steps.releases.outputs.model_router_deploy }}
+      newsletter_console_deploy: ${{ steps.releases.outputs.newsletter_console_deploy }}
+      newsletter_deploy: ${{ steps.releases.outputs.newsletter_deploy }}
+      personal_mcp_deploy: ${{ steps.releases.outputs.personal_mcp_deploy }}
+      platform_deploy: ${{ steps.releases.outputs.platform_deploy }}
+      platform_publish: ${{ steps.releases.outputs.platform_publish }}
+      recall_deploy: ${{ steps.releases.outputs.recall_deploy }}
+      recall_extension_publish: ${{ steps.releases.outputs.recall_extension_publish }}
+      tasks_deploy: ${{ steps.releases.outputs.tasks_deploy }}
+      todofy_deploy: ${{ steps.releases.outputs.todofy_deploy }}
+      watch_deploy: ${{ steps.releases.outputs.watch_deploy }}
+      website_deploy: ${{ steps.releases.outputs.website_deploy }}
+      website_relay_deploy: ${{ steps.releases.outputs.website_relay_deploy }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          persist-credentials: false
-          # The full history of every branch: the base (last successful main run, or the merge base
-          # with origin/main) must be in the clone.
           fetch-depth: 0
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-        with:
-          version: '0.12.10'
-          enable-cache: false
-      - name: Test the change detection, public configuration and Wrangler configs
+          persist-credentials: false
+      - uses: ./.github/actions/setup-bazel
+      - name: Install fixed Target Determinator
         run: |
-          uv run --locked --only-group ci python -m unittest discover -s .github/scripts
-          python3 -m unittest discover -s tools/cloud-config/tests
-          python3 -m unittest discover -s tools/cloud-release/tests
-          python3 -m unittest discover -s tools/cloud-bootstrap/tests
-          python3 tools/cloud-config/generate.py --check
-          python3 -m unittest discover -s tools/service-catalog/tests
-          python3 tools/service-catalog/catalog.py --check
-          python3 tools/service-catalog/inventory.py --check
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+          curl -fsSL https://github.com/bazel-contrib/target-determinator/releases/download/v0.34.0/target-determinator.linux.amd64 -o "$RUNNER_TEMP/bazel-tools/target-determinator"
+          echo "115e1c63d39e2cd0d0b011c9fadc80f059f021176a4ae0de2232cdd83b1f8011  $RUNNER_TEMP/bazel-tools/target-determinator" | sha256sum --check --status
+          chmod +x "$RUNNER_TEMP/bazel-tools/target-determinator"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          node-version-file: package.json
-      # The deploy hostname guard every deploy job runs, and the Worker secret maps and deploy-vars core that the apps'
-      # deploy wrappers import (dependency-free; synthetic API and values, no token).
-      - name: Test the deploy hostname guard
-        run: node --test tools/cf-guard/test/*.test.mjs tools/cloud-config/tests/worker-secrets.test.mjs tools/cloud-config/tests/worker-deploy.test.mjs
-      # The shared test and build tools the apps' checks import by relative path (dependency-free, synthetic data):
-      # the bundle-size budgets and the CPU meter of the workerd CPU tests, whose workerd side runs in the apps' own
-      # suites (Tasks, Todofy, Mail Hero, Home, links, watch, mailsort and recall).
-      - name: Test the shared bundle-size and CPU test tools
-        run: node --test tools/bundle-size/test/*.test.mjs tools/workerd-cpu/test/*.test.mts
-      # On a push to main it reads this workflow's runs with the read-only token: the newest earlier commit, through
-      # every parent, whose push run on main succeeded is the diff base (ci_changes.py last_successful_main; any
-      # error runs everything), and a green branch push run of this exact commit may be reused. It prints only
-      # commits, run URLs and job names.
-      - name: Decide which apps to check and deploy
-        id: decide
+          path: ~/.cache/personal-cloud-bazel
+          key: bazel-9.3.1-${{ runner.os }}-plan-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-${{ github.sha }}
+          restore-keys: |
+            bazel-9.3.1-${{ runner.os }}-plan-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-
+      - name: Select the cumulative comparison base
+        id: baseline
         env:
           GH_TOKEN: ${{ github.token }}
-          EVENT_NAME: ${{ github.event_name }}
-          REF: ${{ github.ref }}
-          AFTER: ${{ github.sha }}
-          DISPATCH_APP: ${{ inputs.app }}
-          DISPATCH_RESUME: ${{ inputs.resume_vps_release && 'true' || 'false' }}
-          RESUME_SOURCE_SHA: ${{ inputs.resume_source_sha }}
-        run: python3 .github/scripts/ci_changes.py
-
-  # Each shared package's own typecheck and tests, using the root workspace lock. The apps'
-  # checks compile the same source through their workspace dependency, so they run too (ci_changes.py).
-  shared-packages:
-    name: Shared packages
-    needs: changes
-    if: needs.changes.outputs.packages == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Run shared-packages steps
-        uses: ./.github/actions/check-shared-packages
-
-  todofy-static:
-    name: Todofy static checks
-    needs: changes
-    if: needs.changes.outputs.todofy_check == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: todofy
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Run todofy-static steps
-        uses: ./.github/actions/check-todofy-static
-
-  todofy-runtime:
-    name: Todofy runtime (${{ matrix.shard }}/3)
-    needs: changes
-    if: needs.changes.outputs.todofy_check == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    strategy:
-      # Every shard reports; any failed shard still fails this job, "Todofy checks" and the gate.
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3]
-    defaults:
-      run:
-        working-directory: todofy
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Run todofy-runtime steps
-        uses: ./.github/actions/check-todofy-runtime
-        with:
-          shard-index: ${{ strategy.job-index }}
-          shard-total: ${{ strategy.job-total }}
-
-  todofy-checks:
-    name: Todofy checks
-    needs: [changes, todofy-static, todofy-runtime]
-    # !cancelled(), not always(): a cancelled run must not produce a passing "Todofy checks". It runs when
-    # a needed job failed, so that the failure is reported here too.
-    if: ${{ !cancelled() && needs.changes.outputs.todofy_check == 'true' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: todofy
-    steps:
-      - name: Require the static checks and every runtime shard
-        working-directory: .
+        run: python3 tools/bazel/ci/releases.py baseline
+      - name: Select affected checks and release targets
+        id: plan
         env:
-          STATIC: ${{ needs.todofy-static.result }}
-          RUNTIME: ${{ needs.todofy-runtime.result }}
+          BASE: ${{ steps.baseline.outputs.base }}
+          RELEASE_APP: ${{ github.event_name == 'workflow_dispatch' && inputs.app || '' }}
+          RESUME: ${{ inputs.resume_vps_release && 'true' || 'false' }}
         run: |
-          echo "Todofy static checks=$STATIC"
-          echo "Todofy runtime=$RUNTIME"
-          [ "$STATIC" = success ] && [ "$RUNTIME" = success ]
+          args=()
+          if [ -n "$RELEASE_APP" ]; then args+=(--app "$RELEASE_APP"); fi
+          if [ "$RESUME" = true ]; then args+=(--resume-vps-release); fi
+          python3 tools/bazel/ci/plan.py --base "$BASE" --output bazel-plan.json \
+            --release-input-query 'attr(tags, "release:", //...)' "${args[@]}"
+      - name: Select independent publications and checked artifact reuse
+        id: releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_APP: ${{ github.event_name == 'workflow_dispatch' && inputs.app || '' }}
+          RESUME: ${{ inputs.resume_vps_release && 'true' || 'false' }}
+          RESUME_SHA: ${{ inputs.resume_source_sha }}
+        run: |
+          args=()
+          if [ "$RESUME" = true ]; then args+=(--resume); fi
+          python3 tools/bazel/ci/releases.py select --plan bazel-plan.json --app "$RELEASE_APP" \
+            --resume-sha "$RESUME_SHA" "${args[@]}"
+      - name: Compare proto compatibility against the actual Git base
+        if: steps.baseline.outputs.proto_breaking == 'true'
+        env:
+          BASE: ${{ steps.baseline.outputs.base }}
+        run: bazel run //proto:breaking -- "$BASE"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bazel-plan-${{ github.sha }}
+          path: bazel-plan.json
+          retention-days: 7
+
+  checks:
+    name: Bazel (${{ matrix.group }})
+    needs: changes
+    if: needs.changes.outputs.has_checks == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
+    steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
-      # The Python proto build uses the shared Node toolchain from the root lock.
-      - name: Install the selected Node workspaces
-        uses: ./.github/actions/setup-workspace
+      - uses: ./.github/actions/setup-bazel
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          root: .
-          filters: 'todofy...'
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-        with:
-          version: '0.12.10'
-          working-directory: .
-          enable-cache: true
-          cache-dependency-glob: |
-            uv.lock
-            pyproject.toml
-            .python-version
-            **/pyproject.toml
-            todofy/pylock.toml
-          cache-suffix: todofy
-      - name: Install locked dependencies
-        run: uv sync --locked --package todofy
+          path: ~/.cache/personal-cloud-bazel
+          key: bazel-9.3.1-${{ runner.os }}-${{ matrix.group }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-${{ github.sha }}
+          restore-keys: |
+            bazel-9.3.1-${{ runner.os }}-${{ matrix.group }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: todofy-runtime-junit-*
-          path: ${{ runner.temp }}/junit
-          merge-multiple: true
-      - name: Every collected runtime test ran exactly once and passed
-        run: |
-          uv run --locked --package todofy pytest tests/runtime --collect-only -q -p no:cacheprovider > "$RUNNER_TEMP/collected.txt"
-          python3 ../.github/scripts/pytest_completeness.py --collected "$RUNNER_TEMP/collected.txt" \
-            --junit-dir "$RUNNER_TEMP/junit" --shards 3 --test-root tests/runtime \
-            --serial ../.github/scripts/todofy-runtime-serial.txt \
-            --expected-skips ../.github/scripts/todofy-runtime-expected-skips.txt
-
-  mail-hero-checks:
-    name: Mail Hero checks
-    needs: changes
-    if: needs.changes.outputs.mail_hero_check == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: mail-hero
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Run mail-hero-checks steps
-        uses: ./.github/actions/check-mail-hero
-
-  dashboard-checks:
-    name: Dashboard checks
-    needs: changes
-    if: needs.changes.outputs.dashboard_check == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: dashboard
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Run dashboard-checks steps
-        uses: ./.github/actions/check-dashboard
-
-  tasks-checks:
-    name: Tasks checks
-    needs: changes
-    if: needs.changes.outputs.tasks_check == 'true'
-    runs-on: ubuntu-24.04
-    # A hosted runner spent 8m18s fetching Chromium's Ubuntu libraries. Keep all browser checks;
-    # the extra wall time covers downloads, without changing any application performance budget.
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/check-tasks
-
-  links-checks:
-    name: Links checks
-    needs: changes
-    if: needs.changes.outputs.links_check == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: links
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Run links-checks steps
-        uses: ./.github/actions/check-links
-
-  watch-checks:
-    name: Watch checks
-    needs: changes
-    if: needs.changes.outputs.watch_check == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: watch
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Run watch-checks steps
-        uses: ./.github/actions/check-watch
-
-  mailsort-checks:
-    name: Mailsort checks
-    needs: changes
-    if: needs.changes.outputs.mailsort_check == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: mailsort
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Run mailsort-checks steps
-        uses: ./.github/actions/check-mailsort
-      - name: Smoke run against wrangler dev with the fake Gmail and fake Workers AI
-        working-directory: mailsort/worker
-        timeout-minutes: 5
-        shell: bash -e {0}
-        run: npm run test:smoke
-      - name: Dry-run the committed config and check the bundle size
-        working-directory: mailsort/worker
+          name: bazel-plan-${{ github.sha }}
+      - name: Prepare the isolated browser environment
+        if: matrix.group == 'browser'
+        run: bazel run //tools/bazel/browser:install_dependencies
+      - name: Run selected leaf checks
         env:
-          MAILSORT_ACCESS_OWNER: owner@example.com
-          MAILSORT_ACCESS_OWNER_ALIASES: ''
-          MAILSORT_MODE: shadow
-        shell: bash -e {0}
-        run: |
-          node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/mailsort-secrets.json"
-          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
-            --secrets-file "$RUNNER_TEMP/mailsort-secrets.json" --outdir "$RUNNER_TEMP/mailsort-bundle"
-          node ../deploy/bundle-size.mjs "$RUNNER_TEMP/mailsort-bundle"
-      - name: Remove the placeholder secrets file
-        if: always()
-        working-directory: mailsort
-        shell: bash -e {0}
-        run: rm -f "$RUNNER_TEMP/mailsort-secrets.json"
+          BAZEL_GROUP: ${{ matrix.group }}
+        run: python3 tools/bazel/ci/run.py --plan bazel-plan.json --group "$BAZEL_GROUP"
 
-  recall-checks:
-    name: Recall checks
+  artifacts:
+    name: Build artifact (${{ matrix.kind }}, ${{ matrix.app }})
     needs: changes
-    if: needs.changes.outputs.recall_check == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: recall
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Run recall-checks steps
-        uses: ./.github/actions/check-recall
-      - name: Smoke run from the extension through wrangler dev to the archive
-        working-directory: recall/worker
-        timeout-minutes: 5
-        shell: bash -e {0}
-        run: npm run test:smoke
-      - name: Dry-run the committed config and check the bundle size
-        working-directory: recall/worker
-        env:
-          RECALL_ACCESS_OWNER: owner@example.com
-          RECALL_ACCESS_OWNER_ALIASES: ''
-        shell: bash -e {0}
-        run: |
-          node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/recall-secrets.json"
-          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy --dry-run --config ../wrangler.toml \
-            --secrets-file "$RUNNER_TEMP/recall-secrets.json" --outdir "$RUNNER_TEMP/recall-bundle"
-          node ../deploy/bundle-size.mjs "$RUNNER_TEMP/recall-bundle"
-      - name: Remove the placeholder secrets file
-        if: always()
-        working-directory: recall
-        shell: bash -e {0}
-        run: rm -f "$RUNNER_TEMP/recall-secrets.json"
-      # The focus state machine, visits, captures, the outbox and every upload answer over a hand-written fake of
-      # chrome.* and fake-indexeddb; the uploads read by recall.ingest.v1's strict codec as the Worker reads them; the
-      # update check, the manifest, the build and install-extension's swap.
-      - name: Lint, typecheck and test the extension
-        working-directory: recall/extension
-        shell: bash -e {0}
-        run: |
-          npm run lint
-          npm run typecheck
-          npm test
-      # The unpacked build, nothing personal in it (recall's host is a public constant; the token is pasted in the
-      # options later). GitHub serves the artifact as recall-extension-<sha>.zip, which `npm run install-extension`
-      # takes as it is (recall/docs/design.md section 3.10). It carries every commit's build, branches included, for 30
-      # days, and it is what "Recall extension release" publishes on main (no rebuild); the releases are the lasting
-      # record.
-      - name: Build the extension
-        working-directory: recall/extension
-        shell: bash -e {0}
-        run: npm run build
-      # WebKit needs 181 Ubuntu packages this runner image lacks (GStreamer with its codecs, GTK 4, fonts): 114 MB of
-      # .debs. The Azure mirror sends them in about 13 s on most runs and at 40-350 kB/s on about one in twenty, which
-      # no bound on this step outlasts. So apt keeps its .debs in the Actions cache: a run restores the newest set saved
-      # on its branch or on main for this Playwright and runner image, and fetches only what Ubuntu has updated since.
-      # A run that restored nothing saves its set, and main also saves a set that changed, each 114 MB of the
-      # repository's cache and keyed by its files; a branch's first run before main has a set still fetches it all. A
-      # stalled restore gives up after a minute, as a miss. Playwright still chooses the packages, and apt still checks
-      # every .deb against Ubuntu's signed index.
-      - name: Read the locked Playwright version and the runner image
-        id: webkit-debs
-        working-directory: recall/extension
-        shell: bash -e {0}
-        run: |
-          version=$(npx --no-install playwright --version | awk '{print $2}')
-          echo "prefix=webkit-debs-$ImageOS-$version-" >> "$GITHUB_OUTPUT"
-      - name: Restore WebKit's system packages
-        id: webkit-debs-restore
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        env:
-          SEGMENT_DOWNLOAD_TIMEOUT_MINS: 1
-        with:
-          path: ~/.cache/webkit-debs/*.deb
-          key: ${{ steps.webkit-debs.outputs.prefix }}
-          restore-keys: ${{ steps.webkit-debs.outputs.prefix }}
-      - name: Install the pinned WebKit test browser
-        id: webkit-install
-        working-directory: recall/extension
-        timeout-minutes: 5
-        shell: bash -e {0}
-        env:
-          PREFIX: ${{ steps.webkit-debs.outputs.prefix }}
-        run: |
-          debs="$HOME/.cache/webkit-debs"
-          mkdir -p "$debs/partial"
-          echo "Dir::Cache::Archives \"$debs/\";" | sudo tee /etc/apt/apt.conf.d/99webkit-debs > /dev/null
-          npx --no-install playwright install --with-deps webkit
-          sudo apt-get autoclean
-          echo "key=$PREFIX$(cd "$debs" && ls *.deb | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
-      - name: Keep WebKit's system packages
-        if: >-
-          steps.webkit-install.outputs.key != steps.webkit-debs-restore.outputs.cache-matched-key
-          && (steps.webkit-debs-restore.outputs.cache-matched-key == '' || github.ref == 'refs/heads/main')
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/webkit-debs/*.deb
-          key: ${{ steps.webkit-install.outputs.key }}
-      - name: Test the actual Orion build in WebKit
-        working-directory: recall/extension
-        timeout-minutes: 5
-        shell: bash -e {0}
-        run: npm run test:browser
-      - name: Keep the extension's build
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: recall-extension-${{ github.sha }}
-          path: recall/extension/dist/extension/
-          if-no-files-found: error
-          retention-days: 30
-      - name: Keep the Orion build
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: recall-orion-${{ github.sha }}
-          path: recall/extension/dist/orion/
-          if-no-files-found: error
-          retention-days: 30
-
-  fleet-checks:
-    name: Fleet checks
-    needs: changes
-    if: needs.changes.outputs.fleet_check == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: fleet
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Run fleet-checks steps
-        uses: ./.github/actions/check-fleet
-
-  model-router-checks:
-    name: Model Router checks
-    needs: changes
-    if: needs.changes.outputs.model_router_check == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Run Model Router checks
-        uses: ./.github/actions/check-model-router
-
-  personal-mcp-checks:
-    name: Personal MCP checks
-    needs: changes
-    if: needs.changes.outputs.personal_mcp_check == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Run personal-mcp checks
-        uses: ./.github/actions/check-personal-mcp
-
-  newsletter-console-checks:
-    name: Newsletter console checks
-    needs: changes
-    if: needs.changes.outputs.newsletter_console_check == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Run newsletter-console checks
-        uses: ./.github/actions/check-newsletter-console
-
-  contracts:
-    name: Contracts
-    needs: changes
-    if: needs.changes.outputs.contracts == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Run contracts steps
-        uses: ./.github/actions/check-contracts
-
-  website-checks:
-    name: Website checks
-    needs: changes
-    if: needs.changes.outputs.website_check == 'true'
+    if: needs.changes.outputs.has_artifacts == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    defaults:
-      run:
-        working-directory: website
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.changes.outputs.artifact_matrix) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Run website-checks steps
-        uses: ./.github/actions/check-website
-
-  infra-checks:
-    name: Infra checks
-    needs: changes
-    if: needs.changes.outputs.infra == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: infra
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-bazel
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          persist-credentials: false
-      - name: Run infra-checks steps
-        uses: ./.github/actions/check-infra
-
-  proto-checks:
-    name: Proto checks
-    needs: changes
-    if: needs.changes.outputs.proto == 'true'
-    runs-on: ubuntu-24.04
-    # Typical runs took 5.5-9 minutes by 2026-10-29 as packages and breaking self-test cases grew; 10 cut a healthy run.
-    timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: proto
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+          path: ~/.cache/personal-cloud-bazel
+          key: bazel-9.3.1-${{ runner.os }}-artifact-${{ matrix.app }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-${{ github.sha }}
+          restore-keys: |
+            bazel-9.3.1-${{ runner.os }}-artifact-${{ matrix.app }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-
+      - name: Build the declared Worker archive
+        if: matrix.kind == 'worker'
+        env:
+          RELEASE_APP: ${{ matrix.app }}
+          RELEASE_TARGET: ${{ matrix.target }}
+        run: |
+          python3 tools/cloud-release/artifact.py build --app "$RELEASE_APP" --sha "$GITHUB_SHA" \
+            --target "$RELEASE_TARGET" --directory "$RUNNER_TEMP/worker-artifact"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: matrix.kind == 'worker'
         with:
-          persist-credentials: false
-          # The breaking-change base (the Changes job's diff base) must be in the clone.
-          fetch-depth: 0
-      - name: Run proto-checks steps
-        uses: ./.github/actions/check-proto
-        with:
-          base-sha: ${{ needs.changes.outputs.base }}
-
-  newsletter-checks:
-    name: Newsletter checks
-    needs: changes
-    if: needs.changes.outputs.newsletter_check == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: newsletter
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Run newsletter-checks steps
-        uses: ./.github/actions/check-newsletter
-
-  newsletter-image:
-    name: Newsletter image checks
-    needs: [changes, newsletter-checks]
-    if: needs.changes.outputs.newsletter_check == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    defaults:
-      run:
-        working-directory: newsletter
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Run newsletter-image steps
+          name: worker-${{ matrix.app }}-${{ github.sha }}
+          path: ${{ runner.temp }}/worker-artifact
+          if-no-files-found: error
+          retention-days: 7
+      - name: Check and save Newsletter's image
+        if: matrix.kind == 'image' && matrix.app == 'newsletter'
         uses: ./.github/actions/check-newsletter-image
-
-  platform-checks:
-    name: Platform checks
-    needs: changes
-    if: needs.changes.outputs.platform_check == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Run platform-checks steps
+      - name: Check and save Platform's image
+        if: matrix.kind == 'image' && matrix.app == 'platform'
         uses: ./.github/actions/check-platform
         with:
-          build-image: ${{ !(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release) }}
-
-  codex-gateway-checks:
-    name: Codex gateway checks
-    needs: changes
-    if: needs.changes.outputs.codex_gateway_check == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Run codex-gateway-checks steps
+          build-image: 'true'
+      - name: Check and save Codex Gateway's image
+        if: matrix.kind == 'image' && matrix.app == 'codex-gateway'
         uses: ./.github/actions/check-codex-gateway
         with:
-          build-image: ${{ !(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release) }}
+          build-image: 'true'
+      - name: Build Recall's independent extension archive
+        if: matrix.kind == 'extension'
+        env:
+          RELEASE_TARGET: ${{ matrix.target }}
+        run: |
+          options=(--stamp "--embed_label=$GITHUB_SHA" "--repository_cache=$HOME/.cache/personal-cloud-bazel/repository" "--disk_cache=$HOME/.cache/personal-cloud-bazel/actions")
+          bazel build "$RELEASE_TARGET" "${options[@]}"
+          archive=$(bazel cquery "$RELEASE_TARGET" "${options[@]}" --output=files)
+          mkdir "$RUNNER_TEMP/recall-extensions"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/recall-extensions"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: matrix.kind == 'extension'
+        with:
+          name: recall-extensions-${{ github.sha }}
+          path: ${{ runner.temp }}/recall-extensions/extension
+          if-no-files-found: error
+          retention-days: 7
 
   gate:
     name: CI gate
-    needs: [changes, shared-packages, todofy-static, todofy-runtime, todofy-checks, mail-hero-checks, dashboard-checks, website-checks, tasks-checks, links-checks, watch-checks, fleet-checks, mailsort-checks, recall-checks, newsletter-checks, newsletter-image, platform-checks, codex-gateway-checks, personal-mcp-checks, model-router-checks, newsletter-console-checks, contracts, infra-checks, proto-checks]
+    needs: [changes, checks, artifacts]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Require every needed job to pass or be skipped as unchanged
+      - name: Require all selected checks and compiled artifacts
         env:
           CHANGES: ${{ needs.changes.result }}
-          PACKAGES: ${{ needs.shared-packages.result }}
-          TODOFY_STATIC: ${{ needs.todofy-static.result }}
-          TODOFY_RUNTIME: ${{ needs.todofy-runtime.result }}
-          TODOFY: ${{ needs.todofy-checks.result }}
-          MAIL_HERO: ${{ needs.mail-hero-checks.result }}
-          DASHBOARD: ${{ needs.dashboard-checks.result }}
-          WEBSITE: ${{ needs.website-checks.result }}
-          TASKS: ${{ needs.tasks-checks.result }}
-          LINKS: ${{ needs.links-checks.result }}
-          WATCH: ${{ needs.watch-checks.result }}
-          FLEET: ${{ needs.fleet-checks.result }}
-          MODEL_ROUTER: ${{ needs.model-router-checks.result }}
-          PERSONAL_MCP: ${{ needs.personal-mcp-checks.result }}
-          NEWSLETTER_CONSOLE: ${{ needs.newsletter-console-checks.result }}
-          MAILSORT: ${{ needs.mailsort-checks.result }}
-          RECALL: ${{ needs.recall-checks.result }}
-          NEWSLETTER: ${{ needs.newsletter-checks.result }}
-          NEWSLETTER_IMAGE: ${{ needs.newsletter-image.result }}
-          PLATFORM: ${{ needs.platform-checks.result }}
-          CODEX_GATEWAY: ${{ needs.codex-gateway-checks.result }}
-          CONTRACTS: ${{ needs.contracts.result }}
-          INFRA: ${{ needs.infra-checks.result }}
-          PROTO: ${{ needs.proto-checks.result }}
-          CHECKS_REUSED: ${{ needs.changes.outputs.checks_reused }}
-          REUSED_RUN_URL: ${{ needs.changes.outputs.reused_run_url }}
-          REUSED_JOBS: ${{ needs.changes.outputs.reused_jobs }}
-          REUSED_RUN_ID: ${{ needs.changes.outputs.reused_run_id }}
+          CHECKS: ${{ needs.checks.result }}
+          ARTIFACTS: ${{ needs.artifacts.result }}
+          HAS_CHECKS: ${{ needs.changes.outputs.has_checks }}
+          HAS_ARTIFACTS: ${{ needs.changes.outputs.has_artifacts }}
         run: |
-          # A push to main that reused a branch run of the same commit: its checks are skipped here because that
-          # run passed them (ci_changes.py find_reusable checked each job's conclusion).
-          if [ "$CHECKS_REUSED" = true ]; then
-            echo "Checks reused from $REUSED_RUN_URL (same commit, branch push, CI gate passed): $REUSED_JOBS"
-            echo "::notice::Checks reused from $REUSED_RUN_URL"
-          fi
-          failed=0
-          for pair in "Changes=$CHANGES" "Shared packages=$PACKAGES" "Todofy static checks=$TODOFY_STATIC" \
-            "Todofy runtime=$TODOFY_RUNTIME" "Todofy checks=$TODOFY" "Mail Hero checks=$MAIL_HERO" \
-            "Dashboard checks=$DASHBOARD" "Website checks=$WEBSITE" "Links checks=$LINKS" "Watch checks=$WATCH" "Fleet checks=$FLEET" "Mailsort checks=$MAILSORT" \
-            "Tasks checks=$TASKS" "Recall checks=$RECALL" "Personal MCP checks=$PERSONAL_MCP" "Model Router checks=$MODEL_ROUTER" \
-            "Newsletter console checks=$NEWSLETTER_CONSOLE" \
-            "Newsletter checks=$NEWSLETTER" "Newsletter image checks=$NEWSLETTER_IMAGE" "Platform checks=$PLATFORM" "Codex gateway checks=$CODEX_GATEWAY" \
-            "Contracts=$CONTRACTS" "Infra checks=$INFRA" "Proto checks=$PROTO"; do
-            echo "$pair"
-            case "${pair#*=}" in
-              success|skipped) ;;
-              *) failed=1 ;;
-            esac
-          done
-          # "changes" must itself succeed: without it every other job is skipped.
-          [ "$CHANGES" = success ] || failed=1
-          exit "$failed"
+          test "$CHANGES" = success
+          if [ "$HAS_CHECKS" = true ]; then test "$CHECKS" = success; fi
+          if [ "$HAS_ARTIFACTS" = true ]; then test "$ARTIFACTS" = success; fi
 
-  # Publish the same checked artifact; VPS deploy receives only its pullable registry digest.
   newsletter-deploy:
     name: Newsletter image publish
     outputs:
       image: ${{ steps.publish.outputs.image }}
-    needs: [changes, newsletter-checks, newsletter-image, gate]
+    needs: [changes, gate]
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
-      && (needs.newsletter-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.newsletter-checks.result == 'skipped'))
-      && (needs.newsletter-image.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.newsletter-image.result == 'skipped'))
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
@@ -779,15 +273,14 @@ jobs:
         id: publish
         uses: ./.github/actions/publish-newsletter
         with:
-          artifact-run-id: ${{ needs.changes.outputs.reused_run_id || github.run_id }}
+          artifact-run-id: ${{ needs.changes.outputs.artifact_run_id || github.run_id }}
 
   platform-image:
     name: Platform image
-    needs: [changes, platform-checks, gate]
+    needs: [changes, gate]
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
-      && (needs.platform-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.platform-checks.result == 'skipped'))
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
@@ -813,15 +306,14 @@ jobs:
         id: publish
         uses: ./.github/actions/publish-platform
         with:
-          artifact-run-id: ${{ needs.changes.outputs.reused_run_id || github.run_id }}
+          artifact-run-id: ${{ needs.changes.outputs.artifact_run_id || github.run_id }}
 
   codex-gateway-image:
     name: Codex gateway image
-    needs: [changes, codex-gateway-checks, gate]
+    needs: [changes, gate]
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
-      && (needs.codex-gateway-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.codex-gateway-checks.result == 'skipped'))
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
@@ -847,7 +339,7 @@ jobs:
         id: publish
         uses: ./.github/actions/publish-codex-gateway
         with:
-          artifact-run-id: ${{ needs.changes.outputs.reused_run_id || github.run_id }}
+          artifact-run-id: ${{ needs.changes.outputs.artifact_run_id || github.run_id }}
 
   vps-bootstrap-bundle:
     name: VPS bootstrap bundle
@@ -875,11 +367,10 @@ jobs:
 
   vps-deploy:
     name: VPS deploy
-    needs: [changes, platform-checks, newsletter-deploy, platform-image, vps-bootstrap-bundle, fleet-deploy, gate, model-router-deploy]
+    needs: [changes, newsletter-deploy, platform-image, vps-bootstrap-bundle, fleet-deploy, gate, model-router-deploy]
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
-      && (needs.platform-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.platform-checks.result == 'skipped'))
       && ((github.event_name == 'workflow_dispatch' && inputs.resume_vps_release
           && needs.newsletter-deploy.result == 'skipped' && needs.platform-image.result == 'skipped'
           && needs.vps-bootstrap-bundle.result == 'skipped')
@@ -921,10 +412,9 @@ jobs:
 
   codex-gateway-deploy:
     name: Codex gateway deploy
-    needs: [changes, codex-gateway-checks, codex-gateway-image, fleet-deploy, gate]
+    needs: [changes, codex-gateway-image, fleet-deploy, gate]
     if: >-
       ${{ !cancelled() && needs.changes.result == 'success'
-      && (needs.codex-gateway-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.codex-gateway-checks.result == 'skipped'))
       && ((github.event_name == 'workflow_dispatch' && inputs.resume_vps_release
           && needs.codex-gateway-image.result == 'skipped')
         || (!(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release)
@@ -962,20 +452,10 @@ jobs:
 
   todofy-deploy:
     name: Todofy deploy
-    # Every Todofy job, named here even though "Todofy checks" already requires the other two. Before Tasks: Tasks
-    # binds Todofy's Mail entry, which Todofy serves first.
-    needs: [changes, todofy-static, todofy-runtime, todofy-checks, gate, model-router-deploy]
-    # Keep the status function and the results explicit. "gate" needs Mail Hero checks (and Dashboard checks),
-    # which are skipped when only Todofy changed; a bare condition gets an implicit success() that looks at the whole needs
-    # chain, sees that skipped job and skips this deploy too (actions/runner#491, #2205).
-    # .github/scripts/test_ci_changes.py checks this shape. A check job may be skipped only when this push to main
-    # reuses a green branch run of the same commit (checks_reused); the gate must still pass.
+    needs: [changes, gate, model-router-deploy]
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
-      && (needs.todofy-static.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.todofy-static.result == 'skipped'))
-      && (needs.todofy-runtime.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.todofy-runtime.result == 'skipped'))
-      && (needs.todofy-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.todofy-checks.result == 'skipped'))
       && (needs.model-router-deploy.result == 'success' || needs.changes.outputs.model_router_deploy != 'true')
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
@@ -983,45 +463,42 @@ jobs:
       && needs.changes.outputs.todofy_deploy == 'true' }}
     permissions:
       contents: read
+      actions: read
       deployments: write
     uses: ./.github/workflows/worker-release.yml
     with:
       app: todofy
       source_sha: ${{ github.sha }}
+      artifact_run_id: ${{ needs.changes.outputs.artifact_run_id || github.run_id }}
     secrets: inherit
 
   mail-hero-deploy:
     name: Mail Hero deploy
-    needs: [changes, mail-hero-checks, gate]
-    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
+    needs: [changes, gate]
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
-      && (needs.mail-hero-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.mail-hero-checks.result == 'skipped'))
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.mail_hero_deploy == 'true' }}
     permissions:
       contents: read
+      actions: read
       deployments: write
     uses: ./.github/workflows/worker-release.yml
     with:
       app: mail-hero
       source_sha: ${{ github.sha }}
+      artifact_run_id: ${{ needs.changes.outputs.artifact_run_id || github.run_id }}
     secrets: inherit
 
   dashboard-deploy:
     name: Dashboard deploy
-    # After the app deploys: Home's service bindings (dashboard/wrangler.toml) name each app's "Ops" entrypoint, the
-    # website relay's "WebsiteSync" and Tasks' "TaskInbox", which must be live first. An app deploy that did not run
-    # (nothing of that app changed) is fine; one that failed or was cancelled stops this job.
-    needs: [changes, dashboard-checks, gate, todofy-deploy, mail-hero-deploy, links-deploy, watch-deploy, fleet-deploy, mailsort-deploy, recall-deploy, tasks-deploy, website-relay-deploy, personal-mcp-deploy, model-router-deploy]
-    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
+    needs: [changes, gate, todofy-deploy, mail-hero-deploy, links-deploy, watch-deploy, fleet-deploy, mailsort-deploy, recall-deploy, tasks-deploy, website-relay-deploy, personal-mcp-deploy, model-router-deploy]
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
-      && (needs.dashboard-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.dashboard-checks.result == 'skipped'))
       && (needs.model-router-deploy.result == 'success' || needs.changes.outputs.model_router_deploy != 'true')
       && needs.gate.result == 'success'
       && (needs.todofy-deploy.result == 'success' || needs.todofy-deploy.result == 'skipped')
@@ -1039,45 +516,43 @@ jobs:
       && needs.changes.outputs.dashboard_deploy == 'true' }}
     permissions:
       contents: read
+      actions: read
       deployments: write
     uses: ./.github/workflows/worker-release.yml
     with:
       app: dashboard
       source_sha: ${{ github.sha }}
+      artifact_run_id: ${{ needs.changes.outputs.artifact_run_id || github.run_id }}
     secrets: inherit
 
   links-deploy:
     name: Links deploy
-    needs: [changes, links-checks, gate]
-    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
+    needs: [changes, gate]
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
-      && (needs.links-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.links-checks.result == 'skipped'))
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.links_deploy == 'true' }}
     permissions:
       contents: read
+      actions: read
       deployments: write
     uses: ./.github/workflows/worker-release.yml
     with:
       app: links
       source_sha: ${{ github.sha }}
+      artifact_run_id: ${{ needs.changes.outputs.artifact_run_id || github.run_id }}
     secrets: inherit
 
 
   tasks-deploy:
     name: Tasks deploy
-    # After Todofy: Tasks binds Todofy's Mail entry, and Todofy no longer calls Tasks' retired TasksApi.call.
-    needs: [changes, tasks-checks, gate, todofy-deploy]
-    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors). A selected
-    # Todofy deploy must succeed: a failed Router leaves it skipped, and Tasks must not ship ahead of it.
+    needs: [changes, gate, todofy-deploy]
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
-      && (needs.tasks-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.tasks-checks.result == 'skipped'))
       && needs.gate.result == 'success'
       && (needs.todofy-deploy.result == 'success' || needs.changes.outputs.todofy_deploy != 'true')
       && github.ref == 'refs/heads/main'
@@ -1085,23 +560,21 @@ jobs:
       && needs.changes.outputs.tasks_deploy == 'true' }}
     permissions:
       contents: read
+      actions: read
       deployments: write
     uses: ./.github/workflows/worker-release.yml
     with:
       app: tasks
       source_sha: ${{ github.sha }}
+      artifact_run_id: ${{ needs.changes.outputs.artifact_run_id || github.run_id }}
     secrets: inherit
 
   watch-deploy:
     name: Watch deploy
-    # After Tasks: the watch app's TASKS binding names Tasks' TaskInbox entry.
-    needs: [changes, watch-checks, gate, tasks-deploy]
-    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors). A selected
-    # Tasks deploy must succeed, so a failed Todofy (which leaves Tasks skipped) also holds Watch.
+    needs: [changes, gate, tasks-deploy]
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
-      && (needs.watch-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.watch-checks.result == 'skipped'))
       && needs.gate.result == 'success'
       && (needs.tasks-deploy.result == 'success' || needs.changes.outputs.tasks_deploy != 'true')
       && github.ref == 'refs/heads/main'
@@ -1109,21 +582,21 @@ jobs:
       && needs.changes.outputs.watch_deploy == 'true' }}
     permissions:
       contents: read
+      actions: read
       deployments: write
     uses: ./.github/workflows/worker-release.yml
     with:
       app: watch
       source_sha: ${{ github.sha }}
+      artifact_run_id: ${{ needs.changes.outputs.artifact_run_id || github.run_id }}
     secrets: inherit
 
   mailsort-deploy:
     name: Mailsort deploy
-    needs: [changes, mailsort-checks, gate, model-router-deploy]
-    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
+    needs: [changes, gate, model-router-deploy]
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
-      && (needs.mailsort-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.mailsort-checks.result == 'skipped'))
       && (needs.model-router-deploy.result == 'success' || needs.changes.outputs.model_router_deploy != 'true')
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
@@ -1131,52 +604,42 @@ jobs:
       && needs.changes.outputs.mailsort_deploy == 'true' }}
     permissions:
       contents: read
+      actions: read
       deployments: write
     uses: ./.github/workflows/worker-release.yml
     with:
       app: mailsort
       source_sha: ${{ github.sha }}
+      artifact_run_id: ${{ needs.changes.outputs.artifact_run_id || github.run_id }}
     secrets: inherit
 
-  # recall: deployed since "Infra apply" created its Access applications and its bucket and the go-live commit added the
-  # AUD (recall/docs/design.md section 11). Home binds its Ops entrypoint (RECALL), so Home's deploy waits for this job.
   recall-deploy:
     name: Recall deploy
-    needs: [changes, recall-checks, gate]
-    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
+    needs: [changes, gate]
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
-      && (needs.recall-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.recall-checks.result == 'skipped'))
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.recall_deploy == 'true' }}
     permissions:
       contents: read
+      actions: read
       deployments: write
     uses: ./.github/workflows/worker-release.yml
     with:
       app: recall
       source_sha: ${{ github.sha }}
+      artifact_run_id: ${{ needs.changes.outputs.artifact_run_id || github.run_id }}
     secrets: inherit
 
-  # recall's Chrome extension, kept for good: each new version becomes the GitHub Release recall-extension-v<version>
-  # with its zip (owner request 2026-10-11, recall/extension/README.md). On main, after the gate, when recall/extension/
-  # or recall/shared/ changed (recall_extension_publish), it publishes the build "Recall checks" tested: its artifact,
-  # from the reused branch run when the checks were reused. A version whose tag exists is skipped, so a rerun publishes
-  # nothing twice. The build holds nothing personal (recall's host is public; the token is pasted into the installed
-  # extension) and the job reads no secret: GITHUB_TOKEN and the runner's gh. No job needs this one, so neither the gate
-  # nor a deploy waits for it; a failure fails the run, so the next push to main retries it (cumulative diff). It lives
-  # here, not in a workflow_run file, because only this run knows whether the extension changed and which run built it.
   recall-extension-release:
     name: Recall extension release
-    needs: [changes, recall-checks, gate]
-    # Explicit status function and results, as for the deploys (implicit success() and skipped ancestors).
+    needs: [changes, gate]
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
-      && (needs.recall-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.recall-checks.result == 'skipped'))
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
@@ -1184,33 +647,26 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
-      # The tag and the release; actions: read for the artifact of a reused branch run.
       contents: write
       actions: read
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: recall-extension-${{ github.sha }}
+          name: recall-extensions-${{ github.sha }}
           path: ${{ runner.temp }}/recall-extension
           github-token: ${{ github.token }}
-          run-id: ${{ needs.changes.outputs.reused_run_id || github.run_id }}
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: recall-orion-${{ github.sha }}
-          path: ${{ runner.temp }}/recall-orion
-          github-token: ${{ github.token }}
-          run-id: ${{ needs.changes.outputs.reused_run_id || github.run_id }}
+          run-id: ${{ needs.changes.outputs.artifact_run_id || github.run_id }}
       - name: Publish the extension's version unless its tag exists
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          BUILD_DIR: ${{ runner.temp }}/recall-extension
-          ORION_DIR: ${{ runner.temp }}/recall-orion
+          ARCHIVE_DIR: ${{ runner.temp }}/recall-extension
+          BUILD_DIR: ${{ runner.temp }}/recall-extension/extension
+          ORION_DIR: ${{ runner.temp }}/recall-extension/orion
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          REUSED_RUN_URL: ${{ needs.changes.outputs.reused_run_url }}
+          REUSED_RUN_URL: ${{ needs.changes.outputs.artifact_run_url }}
         run: |
           set -euo pipefail
-          # The version is the build's UTC time (recall/extension/scripts/manifest.mjs), its name the short commit.
           version=$(jq -r '.version' "$BUILD_DIR/manifest.json")
           version_name=$(jq -r '.version_name' "$BUILD_DIR/manifest.json")
           if [[ ! "$version" =~ ^[0-9]+(\.[0-9]+){0,3}$ || "$version_name" != "${GITHUB_SHA:0:7}" ]]; then
@@ -1222,16 +678,15 @@ jobs:
             exit 1
           fi
           tag="recall-extension-v$version"
-          # The API lists every tag that starts with the name; only the exact one counts.
           refs=$(gh api "repos/$GH_REPO/git/matching-refs/tags/$tag" --jq '.[].ref')
           if grep -Fxq "refs/tags/$tag" <<< "$refs"; then
             echo "::notice::$tag exists: nothing to publish"
             exit 0
           fi
           zip="$RUNNER_TEMP/recall-extension-v$version.zip"
-          (cd "$BUILD_DIR" && zip -X -D -q -r "$zip" .)
+          cp "$ARCHIVE_DIR/recall-extension-${GITHUB_SHA:0:7}.zip" "$zip"
           orion_zip="$RUNNER_TEMP/recall-orion-v$version.zip"
-          (cd "$ORION_DIR" && zip -X -D -q -r "$orion_zip" .)
+          cp "$ARCHIVE_DIR/recall-orion-${GITHUB_SHA:0:7}.zip" "$orion_zip"
           {
             echo "recall Chrome and Orion extensions $version, built from commit $GITHUB_SHA."
             echo
@@ -1249,35 +704,31 @@ jobs:
 
   fleet-deploy:
     name: Fleet deploy
-    needs: [changes, fleet-checks, gate]
-    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
+    needs: [changes, gate]
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
-      && (needs.fleet-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.fleet-checks.result == 'skipped'))
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.fleet_deploy == 'true' }}
     permissions:
       contents: read
+      actions: read
       deployments: write
     uses: ./.github/workflows/worker-release.yml
     with:
       app: fleet
       source_sha: ${{ github.sha }}
+      artifact_run_id: ${{ needs.changes.outputs.artifact_run_id || github.run_id }}
     secrets: inherit
 
   model-router-deploy:
     name: Model Router deploy
-    needs: [changes, model-router-checks, gate, codex-gateway-deploy]
-    # After its executor: a gateway release this run selected (with VPS releases enabled) must succeed, since a failed
-    # one leaves this job's need skipped. Its callers (Todofy, Mailsort, Home, VPS deploy) likewise accept a
-    # skipped Router only when this run did not select it.
+    needs: [changes, gate, codex-gateway-deploy]
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
-      && (needs.model-router-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.model-router-checks.result == 'skipped'))
       && (needs.codex-gateway-deploy.result == 'success' || needs.changes.outputs.codex_gateway_deploy != 'true' || vars.VPS_DEPLOY_ENABLED != 'true')
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
@@ -1285,23 +736,21 @@ jobs:
       && needs.changes.outputs.model_router_deploy == 'true' }}
     permissions:
       contents: read
+      actions: read
       deployments: write
     uses: ./.github/workflows/worker-release.yml
     with:
       app: model-router
       source_sha: ${{ github.sha }}
+      artifact_run_id: ${{ needs.changes.outputs.artifact_run_id || github.run_id }}
     secrets: inherit
 
   personal-mcp-deploy:
     name: Personal MCP deploy
-    needs: [changes, personal-mcp-checks, gate, tasks-deploy, todofy-deploy, recall-deploy, watch-deploy]
-    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors). Selected
-    # Tasks, Todofy and Watch deploys must succeed, since each is skipped when a release before it fails; Recall has
-    # no deploy before it.
+    needs: [changes, gate, tasks-deploy, todofy-deploy, recall-deploy, watch-deploy]
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
-      && (needs.personal-mcp-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.personal-mcp-checks.result == 'skipped'))
       && needs.gate.result == 'success'
       && (needs.tasks-deploy.result == 'success' || needs.changes.outputs.tasks_deploy != 'true')
       && (needs.todofy-deploy.result == 'success' || needs.changes.outputs.todofy_deploy != 'true')
@@ -1312,24 +761,21 @@ jobs:
       && needs.changes.outputs.personal_mcp_deploy == 'true' }}
     permissions:
       contents: read
+      actions: read
       deployments: write
     uses: ./.github/workflows/worker-release.yml
     with:
       app: personal-mcp
       source_sha: ${{ github.sha }}
+      artifact_run_id: ${{ needs.changes.outputs.artifact_run_id || github.run_id }}
     secrets: inherit
 
   newsletter-console-deploy:
     name: Newsletter console deploy
-    # After the VPS release: Newsletter answers the console's reads, so a push carrying both its read API and the
-    # console ships the Worker once the server runs the new image. A VPS release that did not run is fine; one that
-    # failed or was cancelled stops this job.
-    needs: [changes, newsletter-console-checks, gate, vps-deploy]
-    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
+    needs: [changes, gate, vps-deploy]
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
-      && (needs.newsletter-console-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.newsletter-console-checks.result == 'skipped'))
       && needs.gate.result == 'success'
       && (needs.vps-deploy.result == 'success' || needs.vps-deploy.result == 'skipped')
       && github.ref == 'refs/heads/main'
@@ -1337,27 +783,21 @@ jobs:
       && needs.changes.outputs.newsletter_console_deploy == 'true' }}
     permissions:
       contents: read
+      actions: read
       deployments: write
     uses: ./.github/workflows/worker-release.yml
     with:
       app: newsletter-console
       source_sha: ${{ github.sha }}
+      artifact_run_id: ${{ needs.changes.outputs.artifact_run_id || github.run_id }}
     secrets: inherit
 
-  # The site release: dispatches website-release.yml (docs in website/docs/release.md), the same workflow the
-  # daily Cron and Home's sync button dispatch, and returns at once. The release's job holds the one
-  # concurrency group "website-production" and the production environment; this CI run neither waits for a
-  # queued release nor ties other apps' deploys to it, and the relay sees the release like any other run.
-  # The release builds the newest main commit whose push run passed the CI gate (this one, once it is green).
-  # A push releases only when the website's code identity or the Notion content changed.
   website-deploy:
     name: Website deploy
-    needs: [changes, website-checks, gate]
-    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
+    needs: [changes, gate]
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
-      && (needs.website-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.website-checks.result == 'skipped'))
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
@@ -1365,7 +805,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
-      # workflow_dispatch of website-release.yml (a dispatch by GITHUB_TOKEN does start a run).
       actions: write
       contents: read
     steps:
@@ -1377,21 +816,21 @@ jobs:
 
   website-relay-deploy:
     name: Website relay deploy
-    needs: [changes, website-checks, gate]
-    # Explicit status function and results, as for Todofy deploy (implicit success() and skipped ancestors).
+    needs: [changes, gate]
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
-      && (needs.website-checks.result == 'success' || (needs.changes.outputs.checks_reused == 'true' && needs.website-checks.result == 'skipped'))
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.website_relay_deploy == 'true' }}
     permissions:
       contents: read
+      actions: read
       deployments: write
     uses: ./.github/workflows/worker-release.yml
     with:
       app: website-relay
       source_sha: ${{ github.sha }}
+      artifact_run_id: ${{ needs.changes.outputs.artifact_run_id || github.run_id }}
     secrets: inherit

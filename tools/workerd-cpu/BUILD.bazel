@@ -1,5 +1,6 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library")
 load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("@npm//website:tsx/package_json.bzl", tsx = "bin")
 load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
 exports_files(
@@ -52,5 +53,26 @@ filegroup(
         ],
         allow_empty = True,
     ),
+    visibility = ["//visibility:public"],
+)
+
+tsx.tsx_test(
+    name = "workerd-cpu_test",
+    args = [
+        "--test",
+        "tools/workerd-cpu/test/workerd-cpu.test.mts",
+    ],
+    data = [
+        "test/workerd-cpu.test.mts",
+        ":lib",
+    ],
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        ":types_typecheck_test",
+        ":workerd-cpu_test",
+    ],
     visibility = ["//visibility:public"],
 )

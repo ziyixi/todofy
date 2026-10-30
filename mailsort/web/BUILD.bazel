@@ -206,6 +206,7 @@ proto_vitest_test(
         ":node_modules/vite",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/app.test.ts"],
     deps = [
         ":node_modules/vitest",
@@ -243,6 +244,7 @@ proto_vitest_test(
         ":node_modules/vite",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/check-layout.test.ts"],
     deps = [
         ":node_modules/vitest",
@@ -279,6 +281,7 @@ proto_vitest_test(
         ":node_modules/vite",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/classification-interval.test.ts"],
     deps = [
         ":node_modules/vitest",
@@ -315,6 +318,7 @@ proto_vitest_test(
         ":node_modules/vite",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/labels.test.ts"],
     deps = [
         ":node_modules/vitest",
@@ -351,6 +355,7 @@ proto_vitest_test(
         ":node_modules/vite",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/overview.test.ts"],
     deps = [
         ":node_modules/vitest",
@@ -387,6 +392,7 @@ proto_vitest_test(
         ":node_modules/vite",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/prompt.test.ts"],
     deps = [
         ":node_modules/vitest",
@@ -423,6 +429,7 @@ proto_vitest_test(
         ":node_modules/vite",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/provider.test.ts"],
     deps = [
         ":node_modules/vitest",
@@ -459,6 +466,7 @@ proto_vitest_test(
         ":node_modules/vite",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/replay.test.ts"],
     deps = [
         ":node_modules/vitest",
@@ -488,6 +496,7 @@ proto_vitest_test(
         ":node_modules/vite",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/unread-classification.test.ts"],
     deps = [
         ":node_modules/vitest",
@@ -525,6 +534,7 @@ proto_vitest_test(
         ":node_modules/vite",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/test/no-external.test.ts"],
     deps = [":node_modules/vitest"],
 )
@@ -710,4 +720,14 @@ filegroup(
         allow_empty = True,
     ),
     visibility = ["//visibility:public"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)
+
+test_suite(
+    name = "typecheck_tests",
+    tests = [":typecheck_project_typecheck_test"],
 )

@@ -5,16 +5,13 @@
   "type": "module",
   "scripts": {
     "postinstall": "node ../../proto/tools/ensure.mjs",
-    "pretypecheck": "node ../../proto/tools/ensure.mjs",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p test/runtime/tsconfig.json",
-    "test": "vitest run",
-    "test:runtime": "vitest run --config vitest.runtime.config.ts",
-    "dev": "wrangler dev --config ../wrangler.toml --ip 127.0.0.1 --port 8798 --local-upstream 127.0.0.1:8798",
-    "lint": "eslint .",
-    "pretest": "node ../../proto/tools/ensure.mjs",
-    "pretest:runtime": "node ../../proto/tools/ensure.mjs",
+    "typecheck": "bazel test //tasks/worker:typecheck_tests",
+    "test": "bazel test //tasks/worker:unit_tests",
+    "test:runtime": "bazel test //tasks/worker:runtime_tests --nocache_test_results",
+    "dev": "bazel build //tasks/web:bundle && wrangler dev --assets ../../bazel-bin/tasks/web/dist --config ../wrangler.toml --ip 127.0.0.1 --port 8798 --local-upstream 127.0.0.1:8798",
+    "lint": "bazel test //tasks/worker:lint",
     "predev": "node ../../proto/tools/ensure.mjs",
-    "prelint": "node ../../proto/tools/ensure.mjs"
+    "check": "bazel test //tasks:check"
   },
   "dependencies": {
     "@ziyixi/edge-auth": "workspace:*",

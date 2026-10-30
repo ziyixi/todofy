@@ -232,6 +232,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/access.test.ts"],
     deps = [
         ":index",
@@ -255,6 +256,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/hooks.test.ts"],
     deps = [
         ":index",
@@ -278,6 +280,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/mail.test.ts"],
     deps = [
         ":index",
@@ -304,6 +307,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/metrics.test.ts"],
     deps = [
         ":index",
@@ -328,6 +332,7 @@ proto_vitest_test(
         ":ops_test_edge_auth_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/ops.test.ts"],
     deps = [
         ":index",
@@ -358,6 +363,7 @@ proto_vitest_test(
         ":owner_test_edge_auth_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/owner.test.ts"],
     deps = [
         ":index",
@@ -406,6 +412,7 @@ proto_vitest_test(
         ":routing_test_edge_auth_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/routing.test.ts"],
     deps = [
         ":index",
@@ -695,4 +702,33 @@ filegroup(
         allow_empty = True,
     ),
     visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "runtime_test_inputs",
+    srcs = [
+        ":application_sources",
+        ":edge_auth_types_link",
+        ":lib",
+        ":proto_types_link",
+    ] + glob(["wrangler.test*.toml"]),
+    visibility = ["//visibility:public"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)
+
+test_suite(
+    name = "typecheck_tests",
+    tests = [
+        ":runtime_types_typecheck_test",
+        ":types_typecheck_test",
+    ],
+)
+
+test_suite(
+    name = "runtime_tests",
+    tests = [":runtime_" + file.removeprefix("test/runtime/").removesuffix(".test.ts") + "_test" for file in glob(["test/runtime/*.test.ts"])],
 )

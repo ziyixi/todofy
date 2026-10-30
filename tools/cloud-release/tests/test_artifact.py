@@ -77,7 +77,7 @@ class WorkerArtifactTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             core = b'main="worker/todofy/runtime/entry.py"\nbase_dir="worker"\n'
-            gateway = b'main="src/index.ts"\n'
+            gateway = b'main="src/index.ts"\n[assets]\ndirectory="../uiassets/dist"\n'
             source, artifact = self.bundle(
                 root,
                 "todofy",
@@ -103,6 +103,10 @@ class WorkerArtifactTests(unittest.TestCase):
             self.assertEqual(
                 (source / "todofy/python_modules/sdk.py").read_bytes(),
                 b"pinned runtime",
+            )
+            self.assertEqual(
+                (source / "todofy/uiassets/dist/index.html").read_bytes(),
+                b"compiled assets",
             )
             self.assertEqual((source / "todofy/wrangler.toml").read_bytes(), core)
 

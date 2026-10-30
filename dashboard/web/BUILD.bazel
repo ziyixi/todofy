@@ -500,6 +500,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/App.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -565,6 +566,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/refresh.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -629,6 +631,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/router.test.ts"],
     deps = [
         ":node_modules/@testing-library/jest-dom",
@@ -653,6 +656,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/api/attention-cache.test.ts"],
     deps = [
         ":node_modules/@testing-library/jest-dom",
@@ -695,6 +699,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/api/client.test.ts"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -759,6 +764,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/components/ActionsSection.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -823,6 +829,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/components/AppDetails.test.tsx"],
     deps = [
         ":node_modules/@testing-library/jest-dom",
@@ -861,6 +868,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/components/AttentionActions.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -925,6 +933,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/components/NewsletterConfigDetails.test.tsx"],
     deps = [
         ":node_modules/@testing-library/jest-dom",
@@ -954,6 +963,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/components/PersonalMcpDetails.test.tsx"],
     deps = [
         ":node_modules/@testing-library/jest-dom",
@@ -983,6 +993,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/components/WebsiteSyncPanel.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -1047,6 +1058,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/lib/format.test.ts"],
     deps = [
         ":node_modules/@testing-library/jest-dom",
@@ -1071,6 +1083,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/lib/labels.test.ts"],
     deps = [
         ":node_modules/@testing-library/jest-dom",
@@ -1109,6 +1122,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/styles/layout.test.ts"],
     deps = [
         ":node_modules/@testing-library/jest-dom",
@@ -1132,6 +1146,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/test/fixtures.test.ts"],
     deps = [
         ":node_modules/@testing-library/jest-dom",
@@ -1169,6 +1184,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/test/no-external.test.ts"],
     deps = [
         ":node_modules/@testing-library/jest-dom",
@@ -1192,6 +1208,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/views/CloudflareView.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -1257,6 +1274,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/views/FlowsView.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -1322,6 +1340,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/views/HomeView.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -1388,6 +1407,7 @@ proto_vitest_test(
         "//:node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/views/OpsView.test.tsx"],
     deps = [
         ":node_modules/@tanstack/react-query",
@@ -1566,7 +1586,14 @@ ts_project(
     no_emit = True,
     resolve_json_module = True,
     tsconfig = {
-        "compilerOptions": {"noEmit": True},
+        "compilerOptions": {
+            "noEmit": True,
+            # Worker declaration imports and the client use the original single workspace namespace.
+            "paths": {
+                "@ziyixi/proto/protobuf/wkt": ["./bundle_proto/protobuf-wkt.ts"],
+                "@ziyixi/proto/*": ["./bundle_proto/*"],
+            },
+        },
         "include": [],
         "exclude": [],
     },
@@ -1697,4 +1724,33 @@ filegroup(
         allow_empty = True,
     ),
     visibility = ["//visibility:public"],
+)
+
+proto_vitest_test(
+    name = "scripts_js_budget_test",
+    data = [
+        "package.json",
+        "src/test/setup.ts",
+        "vite.config.ts",
+        ":node_modules/@testing-library/jest-dom",
+        ":node_modules/@testing-library/react",
+        ":node_modules/@vitejs/plugin-react",
+        ":node_modules/jsdom",
+        ":node_modules/vite",
+        "//:node_modules/vitest",
+    ],
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = ["scripts/js-budget.test.mjs"],
+    deps = [":build_checks"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)
+
+test_suite(
+    name = "typecheck_tests",
+    tests = [":typecheck_project_typecheck_test"],
 )

@@ -6,16 +6,13 @@
   "description": "Worker \"home\": the owner's ops dashboard for Mail Hero and Todofy (HomeState Durable Object, Ops service bindings).",
   "scripts": {
     "postinstall": "node ../../proto/tools/ensure.mjs",
-    "pretypecheck": "node ../../proto/tools/ensure.mjs",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p test/runtime/tsconfig.json",
-    "prelint": "node ../../proto/tools/ensure.mjs",
-    "lint": "eslint .",
-    "pretest": "node ../../proto/tools/ensure.mjs",
-    "test": "vitest run",
-    "pretest:runtime": "node ../../proto/tools/ensure.mjs",
-    "test:runtime": "vitest run --config vitest.runtime.config.ts",
+    "typecheck": "bazel test //dashboard/worker:typecheck_tests",
+    "lint": "bazel test //dashboard/worker:lint",
+    "test": "bazel test //dashboard/worker:unit_tests",
+    "test:runtime": "bazel test //dashboard/worker:runtime_tests --nocache_test_results",
     "predev": "node ../../proto/tools/ensure.mjs",
-    "dev": "wrangler dev --config ../wrangler.toml --ip 127.0.0.1 --port 8787 --local-upstream 127.0.0.1:8787"
+    "dev": "bazel build //dashboard/web:bundle && wrangler dev --assets ../../bazel-bin/dashboard/web/dist --config ../wrangler.toml --ip 127.0.0.1 --port 8787 --local-upstream 127.0.0.1:8787",
+    "check": "bazel test //dashboard:check"
   },
   "dependencies": {
     "@ziyixi/edge-auth": "workspace:*",

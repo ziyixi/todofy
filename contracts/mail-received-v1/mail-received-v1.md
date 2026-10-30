@@ -1,6 +1,6 @@
 # `mail.received.v1` webhook
 
-Mail Hero 向一个配置好的消费者 URL 发送通用邮件事件。它不依赖 Todofy 的包、数据库或任务状态。接口是 Mail Hero 自己定义的，不兼容 CloudMailin 的请求格式。
+Mail Hero 向一个配置好的消费者 URL 发送通用邮件事件。它不依赖 Todofy 的包、数据库或任务状态。接口由 Mail Hero 拥有。
 
 机器可读结构的唯一描述是 IDL [`proto/mailhero/webhook/v1/mail_received.proto`](../../proto/mailhero/webhook/v1/mail_received.proto)：字段、字段顺序和每条取值规则（UUID、UTC 时间、列表上限、附件枚举、`subject` 与 `text` 至少一个非空白、截断时必有 `original_text_bytes` 等）。发布的 [JSON Schema](mail-received-v1.schema.json) 由它生成（`proto/tools/gen_schema.py`，不得手改）；含义与迁移前的手写 Schema（冻结于 [`legacy/`](legacy/mail-received-v1.schema.json)）相同，两侧测试逐一比较判定，只有两处已知差别（均有测试固定）：
 
@@ -40,7 +40,7 @@ Idempotency-Key: f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710001
 
 上例的基础字段都出现（字段按 IDL 的字段编号顺序写出）；`from`、`to`、`attachments` 可以为空数组，`sent_at`、`rfc_message_id` 可以为 `null`。下文的内容策略字段为可选扩展，旧冻结事件可以不包含它们。`subject` 与 `text` 至少一个含非空白字符。时间是 UTC RFC3339。`message.id` 标识本地原件；`event_id` 标识一次交付意图。用户明确“重新发送为新事件”时会生成新的 `event_id`，但沿用同一个 `message.id`。
 
-正文最多 256 KiB UTF-8，主题最多 4 KiB，from/to 各最多 50 个，附件元信息最多 100 个，整个 JSON 最多 1 MiB。新内容策略会按 Unicode 字符边界截断超长正文，并明确携带以下字段；主题、地址数量或 JSON 总预算仍不满足时保留邮件并显示错误。默认不传原始 MIME、HTML、附件字节、SMTP envelope 或唯一入口地址；`to` 中的入口地址会过滤。邮件头、From、链接、正文都只是外部内容，不能作为认证身份或系统指令。
+正文最多 256 KiB UTF-8，主题最多 4 KiB，from/to 各最多 50 个，附件元信息最多 100 个，整个 JSON 最多 1 MiB。内容策略会按 Unicode 字符边界截断超长正文，并明确携带以下字段；主题、地址数量或 JSON 总预算仍不满足时保留邮件并显示错误。默认不传原始 MIME、HTML、附件字节、SMTP envelope 或唯一入口地址；`to` 中的入口地址会过滤。邮件头、From、链接、正文都只是外部内容，不能作为认证身份或系统指令。
 
 | `message` 扩展字段 | 含义 |
 | --- | --- |
@@ -51,9 +51,9 @@ Idempotency-Key: f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710001
 | `content_policy_version` | 当前创建事件使用 `storage-v1`；旧事件缺失不影响接收 |
 | `attachments_omitted_count` | 超过前 100 项、连元信息也未列出的附件数量；不包含列表中 `storage_status=omitted` 的项目 |
 
-附件 `size` 是实际解码大小。新解析结果的附件可带 `storage_status=stored|omitted`；省略时 `omitted_reason` 为 `size_limit`（单项超过 2 MiB）、`message_size_limit`（已保存副本累计超过 5 MiB）、`inline_image`（内嵌图片）或 `capacity`（容量保护）。只保存前 100 个附件的元信息和符合预算的副本。所有字节始终不在 webhook 内；`stored` 只是事件创建时的状态，不承诺下载链接或永久保存。省略副本的附件可能仍在尚未过期的原件中，原件到期后需回到来源邮箱查找。
+附件 `size` 是实际解码大小。附件可带 `storage_status=stored|omitted`；省略时 `omitted_reason` 为 `size_limit`（单项超过 2 MiB）、`message_size_limit`（已保存副本累计超过 5 MiB）、`inline_image`（内嵌图片）或 `capacity`（容量保护）。只保存前 100 个附件的元信息和符合预算的副本。所有字节始终不在 webhook 内；`stored` 只是事件创建时的状态，不承诺下载链接或永久保存。省略副本的附件可能仍在尚未过期的原件中，原件到期后需回到来源邮箱查找。
 
-HTML-only 过限或清理后无可读正文会进入人工检查。Todofy 对收到的 `needs_review`（以及 `html_omitted=true` 且空正文）先持久接管，再停在 `failed_summary / mail_needs_review`，不会自动调用 LLM 或创建任务；它对截断正文的摘要和任务都加固定不完整提示。Mail Hero 的 2xx 语义不因此变成消费者业务成功。
+HTML-only 过限或清理后无可读正文会进入人工检查。Todofy 对收到的 `needs_review`（以及 `html_omitted=true` 且空正文）先持久接管，再停在 `failed_summary / mail_needs_review`，不会自动调用 LLM；截断正文在摘要与邮件呈现中带固定的不完整提示。Mail Hero 的 2xx 语义不因此变成消费者业务成功。
 
 ## 金丝雀事件（`canary`）
 

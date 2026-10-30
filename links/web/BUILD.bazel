@@ -78,6 +78,7 @@ proto_vitest_test(
         ":node_modules/vite",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/api.test.ts"],
     deps = [
         ":node_modules/vitest",
@@ -96,6 +97,7 @@ proto_vitest_test(
         ":node_modules/vite",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/launcher.test.ts"],
     deps = [
         ":node_modules/vitest",
@@ -118,6 +120,7 @@ proto_vitest_test(
         ":node_modules/vite",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/view.test.ts"],
     deps = [
         ":node_modules/vitest",
@@ -147,6 +150,7 @@ proto_vitest_test(
         ":node_modules/vite",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["src/test/no-external.test.ts"],
     deps = [":node_modules/vitest"],
 )
@@ -305,4 +309,14 @@ filegroup(
         allow_empty = True,
     ),
     visibility = ["//visibility:public"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)
+
+test_suite(
+    name = "typecheck_tests",
+    tests = [":typecheck_project_typecheck_test"],
 )

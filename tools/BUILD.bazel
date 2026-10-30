@@ -3,6 +3,11 @@ load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 package(default_visibility = ["//visibility:public"])
 
 filegroup(
+    name = "release_probes",
+    srcs = glob(["deploy-probes/*.sh"]),
+)
+
+filegroup(
     name = "repository_test_sources",
     srcs = [
         "//tools/cloud-release:python_sources",

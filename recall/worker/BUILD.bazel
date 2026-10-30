@@ -526,6 +526,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/api-tokens.test.ts"],
     deps = [
         ":api",
@@ -568,6 +569,7 @@ proto_vitest_test(
         "//contracts:recall-archive-v1/fixtures/invalid/ChangePage/without-feed-id.json_data",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/archive.test.ts"],
     deps = [
         ":archive",
@@ -582,6 +584,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/denylist.test.ts"],
     deps = ["//recall/shared:denylist"],
 )
@@ -594,6 +597,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/devices.test.ts"],
     deps = [":store"],
 )
@@ -605,6 +609,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/dropbox.test.ts"],
     deps = [":dropbox"],
 )
@@ -640,6 +645,7 @@ proto_vitest_test(
         "//contracts:recall-archive-v1/fixtures/invalid/ChangePage/without-feed-id.json_data",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/feed.test.ts"],
     deps = [
         ":blobs",
@@ -669,6 +675,7 @@ proto_vitest_test(
         "//contracts:ops-v1/ops-v1.schema.json_data",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/ops-golden.test.ts"],
     deps = [
         ":limits",
@@ -692,6 +699,7 @@ proto_vitest_test(
         ":retention_test_edge_auth_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/retention.test.ts"],
     deps = [
         ":fts",
@@ -710,6 +718,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/screenshot.test.ts"],
     deps = [
         ":screenshot",
@@ -724,6 +733,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/scrub.test.ts"],
     deps = ["//recall/shared:scrub"],
 )
@@ -735,6 +745,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/search.test.ts"],
     deps = [
         ":search",
@@ -756,6 +767,7 @@ proto_vitest_test(
         ":tokens_test_edge_auth_link",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/tokens.test.ts"],
     deps = [
         ":limits",
@@ -773,6 +785,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/url.test.ts"],
     deps = ["//recall/shared:url"],
 )
@@ -1423,4 +1436,23 @@ filegroup(
         allow_empty = True,
     ),
     visibility = ["//visibility:public"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)
+
+test_suite(
+    name = "typecheck_tests",
+    tests = [
+        ":runtime_types_typecheck_test",
+        ":smoke_types_typecheck_test",
+        ":types_typecheck_test",
+    ],
+)
+
+test_suite(
+    name = "runtime_tests",
+    tests = [":runtime_" + file.removeprefix("test/runtime/").removesuffix(".test.ts") + "_test" for file in glob(["test/runtime/*.test.ts"])],
 )

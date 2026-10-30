@@ -1,7 +1,6 @@
 services:
   newsletter:
-    build: .
-    image: personal-newsletter:service
+    image: todofy-newsletter:bazel
     restart: unless-stopped
     init: true
     read_only: true

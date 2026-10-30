@@ -101,3 +101,9 @@ filegroup(
     ),
     visibility = ["//visibility:public"],
 )
+
+test_suite(
+    name = "check",
+    tests = [":ops_v1_types_typecheck_test"],
+    visibility = ["//visibility:public"],
+)

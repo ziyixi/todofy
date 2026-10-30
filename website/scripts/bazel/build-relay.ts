@@ -1,12 +1,12 @@
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 
 const require = createRequire(import.meta.url);
 const result = spawnSync(
   process.execPath,
   [
-    require.resolve("wrangler/bin/wrangler.js"),
+    resolve(dirname(require.resolve("wrangler/package.json")), "bin/wrangler.js"),
     "deploy",
     "--dry-run",
     "--config",

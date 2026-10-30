@@ -295,6 +295,7 @@ proto_vitest_test(
         "//model-router/migrations:all",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/array-output.test.ts"],
     deps = [
         ":lib",
@@ -311,6 +312,7 @@ proto_vitest_test(
         "//model-router/migrations:0001_router.sql_data",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/backup.test.ts"],
     deps = [
         ":backup",
@@ -333,6 +335,7 @@ proto_vitest_test(
         "//model-router/migrations:all",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/cost-backfill.test.ts"],
     deps = [
         ":lib",
@@ -348,6 +351,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/executor.test.ts"],
     deps = [":executor"],
 )
@@ -366,6 +370,7 @@ proto_vitest_test(
         "//model-router/migrations:all",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/failure-reason.test.ts"],
     deps = [
         ":lib",
@@ -388,6 +393,7 @@ proto_vitest_test(
         "//model-router/migrations:all",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/openai-runtime.test.ts"],
     deps = [
         ":lib",
@@ -403,6 +409,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/openai.test.ts"],
     deps = [
         ":module_group_2",
@@ -421,6 +428,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/pricing.test.ts"],
     deps = [
         ":module_group_2",
@@ -436,6 +444,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/providers.test.ts"],
     deps = [
         ":module_group_2",
@@ -463,6 +472,7 @@ proto_vitest_test(
         "//model-router/migrations:all",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/runtime.test.ts"],
     deps = [
         ":backup",
@@ -640,4 +650,14 @@ filegroup(
         allow_empty = True,
     ),
     visibility = ["//visibility:public"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)
+
+test_suite(
+    name = "typecheck_tests",
+    tests = [":typecheck_project_typecheck_test"],
 )

@@ -12,8 +12,9 @@
     "rrule": "catalog:"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "typecheck": "bazel test //packages/task-dates:typecheck_tests",
+    "test": "bazel test //packages/task-dates:unit_tests",
+    "check": "bazel test //packages/task-dates:check"
   },
   "devDependencies": {
     "typescript": "catalog:",

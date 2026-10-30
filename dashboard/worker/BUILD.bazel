@@ -425,6 +425,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/attention-rollup.test.ts"],
     deps = [":attention-rollup"],
 )
@@ -437,6 +438,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/attention-state.test.ts"],
     deps = [
         ":api-types",
@@ -453,6 +455,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/canary.test.ts"],
     deps = [
         ":api-types",
@@ -487,6 +490,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/config.test.ts"],
     deps = [":module_group_18"],
 )
@@ -499,6 +503,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/digest.test.ts"],
     deps = [
         ":api-types",
@@ -524,6 +529,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/discovery.test.ts"],
     deps = [
         ":api-types",
@@ -543,6 +549,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/drift.test.ts"],
     deps = [
         ":api-types",
@@ -563,6 +570,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/evaluate.test.ts"],
     deps = [
         ":api-types",
@@ -598,6 +606,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/guard.test.ts"],
     deps = [
         ":api-types",
@@ -629,6 +638,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/http.test.ts"],
     deps = [
         ":api",
@@ -651,6 +661,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/idl.test.ts"],
     deps = [
         ":api-types",
@@ -669,6 +680,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/limits.test.ts"],
     deps = [
         ":idl",
@@ -685,6 +697,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/mcp.test.ts"],
     deps = [
         ":mcp",
@@ -704,6 +717,7 @@ proto_vitest_test(
         "//contracts:ops-v1/invalid",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/ops-client.test.ts"],
     deps = [
         ":api-types",
@@ -764,6 +778,7 @@ proto_vitest_test(
         "//contracts:ops-v1/ops-v1.schema.json_data",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/ops-golden.test.ts"],
     deps = [
         ":api-types",
@@ -781,6 +796,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/probe.test.ts"],
     deps = [
         ":api-types",
@@ -802,6 +818,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/registry.test.ts"],
     deps = [
         ":account-inventory_json",
@@ -842,6 +859,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/usage.test.ts"],
     deps = [
         ":api-types",
@@ -866,6 +884,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/views.test.ts"],
     deps = [
         ":api-types",
@@ -905,6 +924,7 @@ proto_vitest_test(
         ":node_modules/vitest",
     ],
     runner = vitest.vitest_test,
+    tags = ["unit"],
     tests = ["test/wire-conformance.test.ts"],
     deps = [
         ":api-types",
@@ -1684,4 +1704,22 @@ filegroup(
         allow_empty = True,
     ),
     visibility = ["//visibility:public"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)
+
+test_suite(
+    name = "typecheck_tests",
+    tests = [
+        ":runtime_types_typecheck_test",
+        ":types_typecheck_test",
+    ],
+)
+
+test_suite(
+    name = "runtime_tests",
+    tests = [":runtime_" + file.removeprefix("test/runtime/").removesuffix(".test.ts") + "_test" for file in glob(["test/runtime/*.test.ts"])],
 )

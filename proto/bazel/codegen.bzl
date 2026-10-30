@@ -96,3 +96,11 @@ proto_image = rule(
         "_buf": attr.label(default = "//tools/bazel:buf", executable = True, cfg = "exec"),
     },
 )
+
+def _proto_sources_impl(ctx):
+    return [DefaultInfo(files = depset(transitive = [dep[ProtoInfo].transitive_sources for dep in ctx.attr.protos]))]
+
+proto_source_files = rule(
+    implementation = _proto_sources_impl,
+    attrs = {"protos": attr.label_list(providers = [ProtoInfo], mandatory = True)},
+)

@@ -77,6 +77,10 @@ js_test(
 js_library(
     name = "source_deploy_vars_mjs",
     srcs = ["deploy-vars.mjs"],
+    visibility = [
+        "//dashboard:__subpackages__",
+        "//tools/cloud-config:__pkg__",
+    ],
     deps = ["//tools/cloud-config:worker-secrets"],
 )
 

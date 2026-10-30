@@ -3,10 +3,10 @@
 The shared part of the apps' CPU tests: each Worker's `worker/test/runtime/cpu.test.ts` (the links app's, the
 dashboard's, the watch app's and the others'), and Mail Hero's `cloudflare/test/cpu/native-ops-cpu.test.mjs`. Test
 tooling only: tests import [`workerd-cpu.mts`](workerd-cpu.mts) by relative path, no bundle carries it, and a change here
-re-checks every app and deploys none (`.github/scripts/ci_changes.py`). Its own tests need no workerd:
+selects the CPU checks that declare this dependency, without publishing their applications. Its own tests run with:
 
 ```sh
-node --test tools/workerd-cpu/test/*.test.mts
+bazel test //tools/workerd-cpu:check
 ```
 
 ## How a CPU test measures

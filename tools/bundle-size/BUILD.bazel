@@ -1,4 +1,5 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@npm//website:tsx/package_json.bzl", tsx = "bin")
 load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
 package(default_visibility = ["//visibility:public"])
@@ -25,5 +26,23 @@ filegroup(
         ],
         allow_empty = True,
     ),
+    visibility = ["//visibility:public"],
+)
+
+tsx.tsx_test(
+    name = "bundle-size_test",
+    args = [
+        "--test",
+        "tools/bundle-size/test/bundle-size.test.mjs",
+    ],
+    data = [
+        "test/bundle-size.test.mjs",
+        ":library",
+    ],
+)
+
+test_suite(
+    name = "check",
+    tests = [":bundle-size_test"],
     visibility = ["//visibility:public"],
 )
