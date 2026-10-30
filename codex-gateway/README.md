@@ -28,6 +28,9 @@ have no consumers.
 Each generation defaults to 110 seconds and can request up to 840 seconds, bounded by the remaining context
 lifetime. Concurrent operations on one context are rejected. Close can cancel an active turn or pending setup,
 then waits for cleanup. Standalone generations also use a temporary workspace and ephemeral SDK thread.
+A completed context turn with `INTERNAL / MODEL_INVALID_ANSWER` keeps its thread for a caller's format
+correction within the original context lifetime. Its failed output stays empty; reported usage and web
+observations remain available. Other execution failures close the context. The executor never retries a turn.
 The transport accepts at most 3 MiB of request JSON and 2 MiB of final output. JSON Schema validation fetches no
 external references. Ordered instruction blocks are joined in order; cache hints do not promise cache control.
 

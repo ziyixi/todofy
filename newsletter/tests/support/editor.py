@@ -102,7 +102,8 @@ class FakeTurn:
             else json.dumps(self.bundle),
             usage=self.usage,
             error=models.ModelError(
-                code=self.failure["code"], reason="MODEL_FAILURE"
+                code=self.failure["code"],
+                reason=str(self.failure.get("reason", "MODEL_FAILURE")),
             )
             if self.failure
             else None,

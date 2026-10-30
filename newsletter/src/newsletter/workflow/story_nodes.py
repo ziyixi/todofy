@@ -203,6 +203,18 @@ class StoryNodes(nodes.EditorialNodes):
             on_checkpoint=checkpoint,
         )
         checkpoint(result)
+        if (
+            mode == "deep"
+            and result["content"] is None
+            and result["reason"] in {"invalid_output", "editor_unavailable"}
+        ):
+            # Keep the immutable result and earlier approvals while exposing
+            # the optional deep job's technical failure in the node ledger.
+            raise engine.NodeError(
+                "invalid_output"
+                if result["reason"] == "invalid_output"
+                else "unavailable"
+            )
         return result
 
     async def _publish(
