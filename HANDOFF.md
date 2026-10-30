@@ -5,24 +5,18 @@ Documentation entrypoints are in [docs/README](docs/README.md). Historical waiti
 
 ## Current work
 
-Branch `codex/newsletter-console-readonly`: fix the Newsletter owner console's 503 on the production image's SQLite
-3.40.1. A synthetic query reproduced `json_each` virtual-table initialization being refused by the read-only authorizer;
-initializing it before installing that authorizer succeeds without changing the database. Keep `mode=ro`, `query_only`
-and the existing write refusal. Eleven related checks and the actual Linux image smoke pass, including JSON reads,
-write refusal and unchanged database bytes. Branch CI, normal main publication and matching reconcile remain.
-
-Separately, correlate the morning Newsletter `MODEL_INVALID_ANSWER` with its run's publication/assessment metadata
-before claiming no effect on content coverage or depth. The console's auth and Tunnel work; valid reads fail while invalid
-parameters return 400. No real content was recomputed, resent or used as a test fixture. Other agents may be working independently.
+The Newsletter console repair is deployed and its morning model-failure impact is verified. No implementation in
+this handoff is awaiting release. Check current Git status and open pull requests before starting independent work.
 
 ## Latest verified release
 
-Native build migration `eee152de` and Website snapshot correction `477f66b5`: complete branch/main checks,
-Worker publications, physical VPS readiness, live Website identity, complete resource registration and matching
-Personal cloud reconciliation passed. Per-application release identities remain independent.
+Newsletter console `5db4f86e`: related branch/main checks, actual Linux image regression, VPS readiness and matching
+Personal cloud reconciliation passed. Authenticated production overview/run reads and the actual console UI recovered.
+The morning failure was a deep writer's invalid output; all five topics published as independently reviewed briefs.
+The planned deep article was not delivered. No completed content was recomputed or resent.
 
-The [October 30 record](docs/history/handoff-2026-10-30.md#full-bazel-migration) holds the scope and actual acceptance.
-Earlier business releases are indexed in [history](docs/history.md).
+See the [October 30 record](docs/history/handoff-2026-10-30.md#newsletter-console-sqlite-and-morning-model-failure).
+The earlier full Bazel migration and Website acceptance are in the same archive; per-application source identities remain independent.
 
 ## Separate acceptance and follow-ups
 
