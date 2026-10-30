@@ -119,6 +119,117 @@ class ModelRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("features.code_mode_host=true", sdk.config.config_overrides)
         self.assertIn("features.shell_tool=false", sdk.config.config_overrides)
 
+    async def test_invalid_answer_keeps_context_for_correction_and_explicit_close(self):
+        url = "https://synthetic.example/article"
+        schema = '{"type":"object","required":["ok"]}'
+        sdk = FakeSdk(
+            FakeTurn(
+                1,
+                output="not JSON",
+                tools=(
+                    {"type": "webSearch", "action": {"type": "search"}},
+                    {"type": "webSearch", "action": {"type": "openPage", "url": url}},
+                ),
+            ),
+            FakeTurn(2, output='{"ok":true}'),
+        )
+        executor = self.executor(sdk)
+        name = await self.create(executor, web_research=True, output_schema_json=schema)
+        context = executor.contexts[name]
+        directory = pathlib.Path(context.directory.name)
+        deadline = context.deadline
+
+        failed = await executor.generate(
+            GenerateRequest(conversation=name, input="synthetic research"), self.home
+        )
+        self.assertEqual(
+            (failed.error.code, failed.error.reason), (13, "MODEL_INVALID_ANSWER")
+        )
+        self.assertEqual(failed.output, "")
+        self.assertTrue(failed.observations.searched)
+        self.assertEqual(failed.observations.opened_urls, (url,))
+        self.assertIs(executor.contexts[name], context)
+        self.assertFalse(sdk.closed)
+
+        corrected = await executor.generate(
+            GenerateRequest(conversation=name, input="correct the JSON format"),
+            self.home,
+        )
+        self.assertIsNone(corrected.error)
+        self.assertEqual(json.loads(corrected.output), {"ok": True})
+        self.assertFalse(corrected.observations.searched)
+        self.assertEqual(corrected.observations.opened_urls, ())
+        for answer in (failed, corrected):
+            self.assertTrue(answer.usage.available)
+            self.assertEqual(
+                (answer.usage.input_tokens, answer.usage.output_tokens), (101, 21)
+            )
+        self.assertNotEqual(failed.name, corrected.name)
+        self.assertEqual(sdk.started, 1)
+        self.assertEqual(len(sdk.calls), 2)
+        self.assertEqual(
+            [call[1]["output_schema"] for call in sdk.calls],
+            [json.loads(schema), json.loads(schema)],
+        )
+        self.assertEqual(context.deadline, deadline)
+        self.assertIsNone(await executor.close(name))
+        self.assertTrue(sdk.closed)
+        self.assertFalse(directory.exists())
+        self.assertNotIn(name, executor.contexts)
+
+    async def test_invalid_answer_context_expires_without_another_turn(self):
+        sdk = FakeSdk(FakeTurn(output="not JSON"))
+        executor = self.executor(sdk)
+        name = await self.create(
+            executor, timeout_ms=100, output_schema_json='{"type":"object"}'
+        )
+        directory = pathlib.Path(executor.contexts[name].directory.name)
+        failed = await executor.generate(
+            GenerateRequest(conversation=name, input="synthetic"), self.home
+        )
+        self.assertEqual(failed.error.reason, "MODEL_INVALID_ANSWER")
+        self.assertIn(name, executor.contexts)
+        await asyncio.wait_for(sdk.close_started.wait(), 1)
+        await asyncio.sleep(0)
+        self.assertTrue(sdk.closed)
+        self.assertFalse(directory.exists())
+        self.assertNotIn(name, executor.contexts)
+        with self.assertRaises(RpcError) as closed:
+            await executor.generate(
+                GenerateRequest(conversation=name, input="late correction"), self.home
+            )
+        self.assertEqual(closed.exception.reason, "CONVERSATION_CLOSED")
+        self.assertEqual(len(sdk.calls), 1)
+
+    async def test_other_context_failures_still_close_context(self):
+        for turn, reason in (
+            (FakeTurn(output="x" * 33), "MODEL_OUTPUT_LIMIT"),
+            (
+                FakeTurn(tools=({"type": "commandExecution"},)),
+                "MODEL_UNSUPPORTED_TOOL",
+            ),
+            (FakeTurn(failure_info="unauthorized"), "MODEL_AUTH"),
+            (
+                FakeTurn(error=InvalidParamsError(-32602, "Synthetic rejection")),
+                "MODEL_INVALID_REQUEST",
+            ),
+            (FakeTurn(error=ServerBusyError(-32000, "Synthetic busy")), "MODEL_BUSY"),
+        ):
+            with self.subTest(reason=reason):
+                sdk = FakeSdk(turn)
+                executor = self.executor(sdk)
+                name = await self.create(executor)
+                directory = pathlib.Path(executor.contexts[name].directory.name)
+                with patch("codex_gateway.modelrouter.MAX_GENERATION_OUTPUT_BYTES", 32):
+                    answer = await executor.generate(
+                        GenerateRequest(conversation=name, input="synthetic"), self.home
+                    )
+                self.assertEqual(answer.error.reason, reason)
+                self.assertEqual(answer.output, "")
+                self.assertTrue(sdk.closed)
+                self.assertFalse(directory.exists())
+                self.assertNotIn(name, executor.contexts)
+
     async def test_unknown_snapshot_does_not_turn_into_zero_or_cumulative_usage(self):
         sdk = FakeSdk(FakeTurn(1, usage=False), FakeTurn(2), FakeTurn(3))
         executor = self.executor(sdk)

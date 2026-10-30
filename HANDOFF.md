@@ -5,8 +5,13 @@ Documentation entrypoints are in [docs/README](docs/README.md). Historical waiti
 
 ## Current work
 
-The Newsletter console repair is deployed and its morning model-failure impact is verified. No implementation in
-this handoff is awaiting release. Check current Git status and open pull requests before starting independent work.
+`codex/newsletter-format-recovery` adds one same-context correction for a completed model response rejected by its
+JSON Schema. It shares the existing second-turn opportunity with provenance correction and preserves original
+deadlines, observations, usage and independent review. The Gateway keeps only this recoverable context open.
+An exhausted deep-article technical failure retains the approved brief and reports partial failure through existing
+run/console fields. Local Newsletter/Gateway checks passed (101 targets; the two Linux image probes await Actions).
+Not yet released. Do not recompute or resend the completed morning edition. Merge after branch CI, then verify both
+VPS images and matching reconciliation.
 
 ## Latest verified release
 

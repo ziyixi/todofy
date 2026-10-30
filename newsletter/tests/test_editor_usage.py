@@ -39,6 +39,38 @@ async def test_correction_reuses_context_and_adds_per_call_usage(
     assert "failure" not in records[-1] and records[-1]["finished_at"]
 
 
+@pytest.mark.parametrize("first_usage_available", [True, False])
+async def test_format_recovery_retains_both_usage_receipts(
+    tmp_path, fake_router, first_usage_available
+):
+    first = editor.FakeTurn(
+        "", failure={"code": 13, "reason": "MODEL_INVALID_ANSWER"}
+    )
+    if first_usage_available:
+        first.usage = models.Usage(
+            available=True, input_tokens=100, output_tokens=20
+        )
+    second = editor.FakeTurn({})
+    second.usage = models.Usage(
+        available=True, input_tokens=150, output_tokens=50
+    )
+    fake_router.turns = [first, second]
+    records = []
+    with usage.usage_scope(records.append, "writer"):
+        await editor.live_editor(tmp_path).execute(
+            "{}", {}, "synthetic", tmp_path / "workspace"
+        )
+    summary = usage.summarize_usage(records)
+    assert summary["usage"]["total_tokens"] == (
+        320 if first_usage_available else 200
+    )
+    assert records[-1]["turns_started"] == 2
+    assert records[-1]["turns_completed"] == 2
+    assert len(records[-1]["requests"]) == 2
+    assert records[-1]["status"] == "completed"
+    assert summary["partial"] is not first_usage_available
+
+
 async def test_bad_output_retains_known_usage(tmp_path, fake_router):
     fake_router.turn.bundle = "not JSON"
     fake_router.turn.usage = models.Usage(

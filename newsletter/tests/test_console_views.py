@@ -143,6 +143,46 @@ def test_a_degraded_node_then_the_runs_own_code():
     assert _failure([]) is None
 
 
+@pytest.mark.parametrize("code", ["invalid_output", "unavailable"])
+def test_optional_deep_technical_failure_remains_visible_in_ready_run(code):
+    definition = [
+        {
+            "id": "deep",
+            "type": "story_deep",
+            "on_error": "continue",
+            "params": {"timeout_seconds": 420},
+        }
+    ]
+    nodes = {
+        "deep": {
+            "state": "skipped",
+            "degraded": True,
+            "error_code": "partial_failure",
+            "items": [{"id": "story-1", "state": "failed", "error_code": code}],
+        }
+    }
+    attempts = [
+        _attempt("deep", "failed", code, "2026-10-28T14:01:00Z", "story-1")
+    ]
+    failure = views.run_failure(
+        run_id="r",
+        definition=definition,
+        nodes=nodes,
+        attempts=attempts,
+        calls=[],
+        stop_reason="",
+        started_at="2026-10-28T14:00:00Z",
+        deadline_seconds=5400,
+    )
+    assert failure is not None
+    assert (failure.node_id, failure.error_code) == ("deep", "partial_failure")
+    node = views.run_nodes(definition, nodes, attempts)[0]
+    assert node.state == run_pb.RunNode_State.SKIPPED
+    assert node.degraded and node.failed_item_count == 1
+    assert node.items[0].state == run_pb.RunNode_State.FAILED
+    assert node.items[0].error_code == code
+
+
 @pytest.mark.parametrize(
     ("entity", "versions", "outdated", "state"),
     [

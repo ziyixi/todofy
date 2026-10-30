@@ -311,8 +311,18 @@ async def test_interrupted_handler_checkpoint_remains_publishable(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("deep_reason", "expected_error"),
+    [
+        ("approved", ""),
+        ("invalid_output", "invalid_output"),
+        ("editor_unavailable", "unavailable"),
+        ("withheld", ""),
+        ("confirmed_signal", ""),
+    ],
+)
 async def test_default_graph_freezes_briefs_before_deepening_and_render(
-    rig_factory, monkeypatch
+    rig_factory, monkeypatch, deep_reason, expected_error
 ):
     rig = rig_factory()
     candidates = [
@@ -354,7 +364,13 @@ async def test_default_graph_freezes_briefs_before_deepening_and_render(
         else:
             assert kwargs["prior"] is None
         assert kwargs["is_fixture"] is True
-        value = tests_support_publication.result(number, mode)
+        value = tests_support_publication.result(
+            number,
+            mode,
+            content=mode == "brief" or deep_reason == "approved",
+            signal=mode == "deep" and deep_reason == "confirmed_signal",
+            reason="approved" if mode == "brief" else deep_reason,
+        )
         kwargs["on_checkpoint"](value)
         return value
 
@@ -375,18 +391,51 @@ async def test_default_graph_freezes_briefs_before_deepening_and_render(
     assert (
         len(rig.publications.results(run["id"])) == 6
     )  # Duplicate callback/final save is idempotent.
+    assert [
+        result
+        for result in rig.publications.results(run["id"])
+        if result["mode"] == "brief"
+    ] == [
+        tests_support_publication.result(number, reason="approved")
+        for number in range(1, 4)
+    ]
     graph = rig.pipeline.repository.get(run["id"])
     assert graph["state"] == "succeeded"
     assert len(graph["nodes"]) == 9
+    technical_failure = bool(expected_error)
+    deep = graph["nodes"]["deep"]
+    assert deep["state"] == ("skipped" if technical_failure else "succeeded")
+    assert deep["degraded"] is technical_failure
+    assert deep["error_code"] == (
+        "partial_failure" if technical_failure else ""
+    )
+    deep_attempts = [
+        attempt
+        for attempt in rig.pipeline.repository.attempts(run["id"])
+        if attempt["node_id"] == "deep"
+    ]
+    assert [attempt["state"] for attempt in deep_attempts] == [
+        "failed" if technical_failure else "succeeded"
+    ] * 3
+    assert [attempt["error_code"] for attempt in deep_attempts] == [
+        expected_error
+    ] * 3
+    progress = next(
+        node
+        for node in rig.pipeline.receipt(run["id"])["workflow"]["nodes"]
+        if node["id"] == "deep"
+    )
+    assert progress["failed_items"] == (3 if technical_failure else 0)
+    assert progress["error_code"] == deep["error_code"]
     edition = rig.store.get(run["edition_id"])
     assert edition["state"] == "ready"
     assert [
         story["disposition"] for story in edition["publication"]["stories"]
-    ] == [
-        "deep",
-        "deep",
-        "brief",
-    ]
+    ] == (
+        ["deep", "deep", "brief"]
+        if deep_reason == "approved"
+        else ["brief"] * 3
+    )
     assert edition["publication"]["mode"] == "complete"
     assert "Synthetic result 1" in edition["rendered"]["text"]
     assert "Synthetic result 2" in edition["rendered"]["text"]
@@ -394,11 +443,13 @@ async def test_default_graph_freezes_briefs_before_deepening_and_render(
     assert not rig.notion.calls
     assert rig.store.db.execute("SELECT COUNT(*) FROM sends").fetchone()[0] == 0
     attempts = copy.deepcopy(rig.pipeline.repository.attempts(run["id"]))
+    frozen = copy.deepcopy(rig.publications.get_publication(run["id"]))
     while await rig.worker.step():
         # Only background projections remain; none retries or edits the issue.
         pass
     assert len(calls) == 6
     assert rig.pipeline.repository.attempts(run["id"]) == attempts
+    assert rig.publications.get_publication(run["id"]) == frozen
     assert len(rig.notion.calls) == len(set(rig.notion.calls)) == 4
 
 

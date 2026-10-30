@@ -1,4 +1,4 @@
-"""Test one provenance correction with synthetic SDK events and no network.
+"""Test one shared format/provenance correction without a real model.
 
 Approval claims come only from the story review: a component assessment with
 status=approved. Writer output carries no approval, so it is corrected only
@@ -14,6 +14,94 @@ import newsletter.errors as newsletter_errors
 import tests.support.editor as editor
 
 EVIDENCE_URL = "https://example.com/evidence"
+INVALID_ANSWER = {"code": 13, "reason": "MODEL_INVALID_ANSWER"}
+
+
+async def test_format_correction_reuses_research_and_context(
+    tmp_path, fake_router, packet
+):
+    value = {"packets": [packet["content"]]}
+    fake_router.turns = [
+        editor.FakeTurn("", failure=INVALID_ANSWER),
+        editor.FakeTurn(value, research=False),
+    ]
+    text, opened, searched = await editor.live_editor(tmp_path).execute(
+        "{}", {}, "synthetic", tmp_path / "job"
+    )
+    assert json.loads(text) == value
+    assert opened == {EVIDENCE_URL} and searched
+    assert fake_router.thread_starts == 1 and len(fake_router.prompts) == 2
+    assert "JSON Schema" in fake_router.prompts[1]["task"]
+    assert fake_router.closed
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        {"code": 13, "reason": "MODEL_INTERNAL"},
+        {"code": 13, "reason": "MODEL_OUTPUT_LIMIT"},
+        {"code": 8, "reason": "MODEL_QUOTA_EXCEEDED"},
+        {"code": 4, "reason": "MODEL_TIMEOUT"},
+        {"code": 16, "reason": "MODEL_UNAUTHENTICATED"},
+    ],
+)
+async def test_other_failures_do_not_spend_a_correction(
+    tmp_path, fake_router, failure
+):
+    fake_router.turn.failure = failure
+    with pytest.raises(newsletter_errors.EditorError):
+        await editor.live_editor(tmp_path).execute(
+            "{}", {}, "synthetic", tmp_path / "job"
+        )
+    assert fake_router.thread_starts == 1 and len(fake_router.prompts) == 1
+    assert fake_router.closed
+
+
+@pytest.mark.parametrize("first_failure", [True, False])
+async def test_format_and_provenance_share_the_second_turn(
+    tmp_path, fake_router, packet, first_failure
+):
+    value = {"packets": [packet["content"]]}
+    invalid = editor.FakeTurn("", failure=INVALID_ANSWER, research=False)
+    unverified = editor.FakeTurn(value, research=False)
+    fake_router.turns = (
+        [invalid, unverified] if first_failure else [unverified, invalid]
+    )
+    with pytest.raises(newsletter_errors.EditorError) as error:
+        await editor.live_editor(tmp_path).execute(
+            "{}", {}, "synthetic", tmp_path / "job"
+        )
+    assert error.value.code == "invalid_output"
+    assert fake_router.thread_starts == 1 and len(fake_router.prompts) == 2
+    assert fake_router.closed
+
+
+async def test_two_invalid_answers_stop_without_a_third_turn(
+    tmp_path, fake_router
+):
+    fake_router.turn.failure = INVALID_ANSWER
+    with pytest.raises(newsletter_errors.EditorError) as error:
+        await editor.live_editor(tmp_path).execute(
+            "{}", {}, "synthetic", tmp_path / "job"
+        )
+    assert error.value.code == "invalid_output"
+    assert fake_router.thread_starts == 1 and len(fake_router.prompts) == 2
+    assert fake_router.closed
+
+
+async def test_format_correction_uses_original_timeout(tmp_path, fake_router):
+    hanging = editor.FakeTurn({}, hang=True)
+    fake_router.turns = [
+        editor.FakeTurn("", failure=INVALID_ANSWER),
+        hanging,
+    ]
+    with pytest.raises(newsletter_errors.EditorError) as error:
+        await editor.live_editor(tmp_path, timeout_seconds=0.05).execute(
+            "{}", {}, "synthetic", tmp_path / "job"
+        )
+    assert error.value.code == "timeout" and hanging.interrupted
+    assert fake_router.thread_starts == 1 and len(fake_router.prompts) == 2
+    assert fake_router.closed
 
 
 def approval(component, *, passed=True):

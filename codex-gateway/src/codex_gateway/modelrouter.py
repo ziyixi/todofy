@@ -385,7 +385,18 @@ class ModelExecutor:
                 await self._cleanup(context)
             context.turn = None
             context.task = None
-        if not standalone and error and not context.closing:
+        # A completed answer with invalid format can be corrected in this thread.
+        # Its original expiry and explicit Close still own cleanup.
+        if (
+            not standalone
+            and error
+            and not (
+                events.completed
+                and error.code == 13
+                and error.reason == "MODEL_INVALID_ANSWER"
+            )
+            and not context.closing
+        ):
             await self._close(context)
         if cancelled:
             raise asyncio.CancelledError
