@@ -56,9 +56,11 @@ def api_fixture(
     current: str = NEW,
     runs: list | None = None,
     differences: dict | None = None,
+    unpublished: tuple[str, ...] = (),
 ):
     calls = []
     differences = differences or {}
+    unpublished_ids = {run_record(commit)["id"] for commit in unpublished}
 
     def request(method, path, value=None, **kwargs):
         calls.append((method, path, value, kwargs))
@@ -71,7 +73,9 @@ def api_fixture(
                 "jobs": [
                     {
                         "name": "Newsletter image publish",
-                        "conclusion": "success",
+                        "conclusion": "skipped"
+                        if int(path.split("/")[3]) in unpublished_ids
+                        else "success",
                     }
                 ]
             }
@@ -193,6 +197,91 @@ def test_main_engine_change_waits_for_its_own_successful_ci(release):
         "revision": NEW,
         "engine_sha": NEW,
     }
+
+
+def test_post_ci_without_new_image_uses_actual_published_engine(release):
+    api = api_fixture(
+        runs=[run_record(NEW), run_record(OLD)],
+        unpublished=(NEW,),
+        differences={
+            f"/compare/{OLD}...{NEW}": {
+                "status": "ahead",
+                "files": [{"filename": "docs/bazel.md"}],
+            }
+        },
+    )
+    assert release.plan(
+        api, "workflow_run", {"workflow_run": run_record(NEW)}
+    ) == {"ready": "true", "revision": NEW, "engine_sha": OLD}
+
+
+@pytest.mark.parametrize(
+    "filename,ready",
+    [
+        ("newsletter/content-config/editorial.yaml", True),
+        ("newsletter/src/newsletter/content_config.py", False),
+    ],
+)
+def test_config_push_uses_latest_tested_source_for_compatibility(
+    release, filename, ready
+):
+    api = api_fixture(
+        current=PR,
+        runs=[run_record(NEW), run_record(OLD)],
+        unpublished=(NEW,),
+        differences={
+            f"/compare/{NEW}...{PR}": {
+                "status": "ahead",
+                "files": [{"filename": filename}],
+            },
+            f"/compare/{OLD}...{PR}": {
+                "status": "ahead",
+                "files": [
+                    {"filename": "docs/bazel.md"},
+                    {"filename": filename},
+                ],
+            },
+        },
+    )
+    result = release.plan(api, "push", {"ref": "refs/heads/main", "after": PR})
+    if ready:
+        assert result == {"ready": "true", "revision": PR, "engine_sha": OLD}
+    else:
+        assert result == {
+            "ready": "false",
+            "reason": "candidate_engine_ci_required",
+        }
+    assert [
+        path for _, path, *_ in api.calls if path.startswith("/compare/")
+    ] == [f"/compare/{NEW}...{PR}"]
+
+
+def test_deferred_config_recovers_after_its_no_image_ci_succeeds(release):
+    differences = {
+        f"/compare/{OLD}...{PR}": {
+            "status": "ahead",
+            "files": [
+                {"filename": "docs/bazel.md"},
+                {"filename": "newsletter/content-config/editorial.yaml"},
+            ],
+        }
+    }
+    before_ci = api_fixture(current=PR, differences=differences)
+    assert (
+        release.plan(
+            before_ci, "push", {"ref": "refs/heads/main", "after": PR}
+        )["ready"]
+        == "false"
+    )
+    after_ci = api_fixture(
+        current=PR,
+        runs=[run_record(PR), run_record(NEW), run_record(OLD)],
+        unpublished=(PR, NEW),
+        differences=differences,
+    )
+    assert release.plan(
+        after_ci, "workflow_run", {"workflow_run": run_record(PR)}
+    ) == {"ready": "true", "revision": PR, "engine_sha": OLD}
 
 
 @pytest.mark.parametrize(

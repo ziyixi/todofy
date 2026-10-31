@@ -18,6 +18,8 @@
 配置 CI 用实际 `Newsletter image publish` job 已成功的固定
 `ghcr.io/ziyixi/todofy-newsletter:service-<monorepo commit>` 镜像进行离线检查，不调用模型、
 Notion 或邮件。只有整体 CI 绿色或镜像 job 被跳过时，不把该提交认作已发布引擎。
+代码兼容性以最近通过 CI 的主干为基准；Bazel 判定引擎不受影响时，继续使用此前已发布的镜像。
+CI 完成后继续验证配置，让较早暂缓的更新也能继续发布；不会把未发布镜像的提交当成引擎版本。
 发布任务的仓库内置 `GITHUB_TOKEN` 只用于写入产物分支；服务器不持有此 token，
 匿名拉取公开资源不需要 GitHub 密钥或 SSH 登录。
 

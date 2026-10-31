@@ -155,7 +155,7 @@ def config_only_difference(
         return False
     # A PR may diverge because main advanced; its merge-base diff still tells
     # whether that PR changes only configuration. Engine reuse is stricter:
-    # a tested engine must be the same commit or an ancestor of the revision.
+    # the tested source must be the same commit or an ancestor of the revision.
     # GitHub caps a compare response at 300 changed files. Treat that boundary
     # conservatively; a truncated list cannot certify engine compatibility.
     files = compared.get("files")
@@ -211,6 +211,7 @@ def compatible_engine(api: GitHub, revision: str) -> str | None:
     # months and omit recent successes (on 2026-09-30 it began at February),
     # which left every config-only push unpublishable. The unfiltered listing
     # is newest-first; the loop below keeps only successful main pushes.
+    source_checked = False
     for page in range(1, 4):
         result = api.request(
             "GET",
@@ -224,11 +225,16 @@ def compatible_engine(api: GitHub, revision: str) -> str | None:
                 or run.get("head_branch") != "main"
             ):
                 continue
-            engine = sha(run.get("head_sha"))
-            if released_image(api, run) and config_only_difference(
-                api, engine, revision
-            ):
-                return engine
+            source_sha = sha(run.get("head_sha"))
+            if not source_checked:
+                # Green CI uses Bazel to decide whether the engine needs a new
+                # image. Compare new config with that tested source, even when
+                # unrelated changes left the published image at an older SHA.
+                if not config_only_difference(api, source_sha, revision):
+                    return None
+                source_checked = True
+            if released_image(api, run):
+                return source_sha
         if len(runs) < 100:
             break
     return None
