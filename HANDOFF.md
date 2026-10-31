@@ -8,12 +8,15 @@ Documentation entrypoints are in [docs/README](docs/README.md). Historical waiti
 `codex/private-quant-data` integrates the private data platform on `private/` branch `codex/quant-data`.
 Application sources, private proto, deployment configuration and detailed handoff stay in that repository.
 Parent changes are limited to shared dependency/toolchain support and generic private build/release integration.
-No production publication or provider/data-quality verification has completed yet.
+No production publication or deployed provider/data-quality verification has completed yet.
 The private application now uses its own native Object/Alarm control; no additional Cron is required. Local
 private checks/artifacts and the generic public proto/Home/workflow checks passed. Private deployment instructions
 own the remaining exact-identity bootstrap and source/data verification; do not infer them from branch CI.
 The follow-up CI found a synthetic Newsletter read at 3.021 ms against an arbitrary 3 ms threshold. That test-only
 margin is now 5 ms, still below Free's 10 ms; the large-response 9 ms check remains. Its local runtime check passed.
+Owner confirmed main promotion/publication. A limited real-source probe identified a private catalog identity
+compatibility fix; its tests and full in-memory reference capture passed. Promote the new catalog-fix gitlink only
+after its branch CI, then continue the private infrastructure/bootstrap runbook. Source access is not deployment.
 
 ## Latest verified release
 
