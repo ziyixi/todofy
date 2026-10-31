@@ -49,11 +49,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: python3 tools/newsletter/scripts/publish_content_config.py plan
-      - name: Defer mixed engine/config changes to Service CI
+      - name: Skip unnecessary or deferred configuration publication
         if: steps.plan.outputs.ready != 'true'
+        env:
+          PLAN_REASON: ${{ steps.plan.outputs.reason }}
         run: |
-          echo '::notice::No compatible released engine yet, or this run is stale. Mixed changes are validated in the candidate image by CI and deploy; successful main CI retries publication automatically.'
-          echo 'No configuration published. See CI and deploy for candidate-engine validation.' >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice::No configuration published ($PLAN_REASON). Content-only pushes publish directly; successful Newsletter image builds retry deferred updates."
+          echo "No configuration published ($PLAN_REASON)." >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.plan.outputs.ready == 'true'
         with:

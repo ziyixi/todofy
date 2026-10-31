@@ -196,6 +196,70 @@ def test_main_engine_change_waits_for_its_own_successful_ci(release):
 
 
 @pytest.mark.parametrize(
+    "jobs",
+    [[], [{"name": "Newsletter image publish", "conclusion": "skipped"}]],
+)
+def test_post_ci_without_image_publication_skips_history_lookup(release, jobs):
+    api = api_fixture()
+    api.request.side_effect = lambda method, path, **kwargs: {"jobs": jobs}
+
+    assert release.plan(
+        api, "workflow_run", {"workflow_run": run_record(NEW)}
+    ) == {"ready": "false", "reason": "no_engine_publication"}
+    api.request.assert_called_once_with(
+        "GET",
+        f"/actions/runs/{run_record(NEW)['id']}/jobs?filter=latest&per_page=100&page=1",
+    )
+
+
+@pytest.mark.parametrize(
+    "filename,ready",
+    [
+        ("newsletter/content-config/editorial.yaml", True),
+        ("newsletter/src/newsletter/content_config.py", False),
+    ],
+)
+def test_config_push_uses_latest_tested_source_for_compatibility(
+    release, filename, ready
+):
+    api = api_fixture(
+        current=PR,
+        runs=[run_record(NEW), run_record(OLD)],
+        differences={
+            f"/compare/{NEW}...{PR}": {
+                "status": "ahead",
+                "files": [{"filename": filename}],
+            }
+        },
+    )
+    request = api.request.side_effect
+
+    def respond(method, path, value=None, **kwargs):
+        if path.startswith(f"/actions/runs/{run_record(NEW)['id']}/jobs?"):
+            return {
+                "jobs": [{"name": release.PUBLISH_JOB, "conclusion": "skipped"}]
+            }
+        if path == f"/compare/{OLD}...{PR}":
+            raise AssertionError(
+                "Use the latest tested source, not all unrelated history"
+            )
+        return request(method, path, value, **kwargs)
+
+    api.request.side_effect = respond
+    result = release.plan(api, "push", {"ref": "refs/heads/main", "after": PR})
+    if ready:
+        assert result == {"ready": "true", "revision": PR, "engine_sha": OLD}
+    else:
+        assert result == {
+            "ready": "false",
+            "reason": "candidate_engine_ci_required",
+        }
+    assert [
+        path for _, path, *_ in api.calls if path.startswith("/compare/")
+    ] == [f"/compare/{NEW}...{PR}"]
+
+
+@pytest.mark.parametrize(
     "status", ["behind", "diverged", "identical", "unknown"]
 )
 def test_tested_engine_must_be_same_commit_or_ancestor_not_diverged(

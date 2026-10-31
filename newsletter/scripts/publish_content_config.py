@@ -211,6 +211,7 @@ def compatible_engine(api: GitHub, revision: str) -> str | None:
     # months and omit recent successes (on 2026-09-30 it began at February),
     # which left every config-only push unpublishable. The unfiltered listing
     # is newest-first; the loop below keeps only successful main pushes.
+    source_checked = False
     for page in range(1, 4):
         result = api.request(
             "GET",
@@ -224,11 +225,16 @@ def compatible_engine(api: GitHub, revision: str) -> str | None:
                 or run.get("head_branch") != "main"
             ):
                 continue
-            engine = sha(run.get("head_sha"))
-            if released_image(api, run) and config_only_difference(
-                api, engine, revision
-            ):
-                return engine
+            source_sha = sha(run.get("head_sha"))
+            if not source_checked:
+                # Green CI uses Bazel to decide whether the engine needs a new
+                # image. Compare new config with that tested source, even when
+                # unrelated changes left the published image at an older SHA.
+                if not config_only_difference(api, source_sha, revision):
+                    return None
+                source_checked = True
+            if released_image(api, run):
+                return source_sha
         if len(runs) < 100:
             break
     return None
@@ -263,6 +269,8 @@ def plan(api: GitHub, event_name: str, event: dict[str, Any]) -> dict[str, str]:
                 or run.get("head_branch") != "main"
             ):
                 return {"ready": "false", "reason": "engine_ci_not_successful"}
+            if not released_image(api, run):
+                return {"ready": "false", "reason": "no_engine_publication"}
         if event_name not in {"push", "workflow_run", "workflow_dispatch"}:
             raise ReleaseError("Unsupported configuration workflow event")
         # A late engine CI may publish a newer config-only main commit, but not

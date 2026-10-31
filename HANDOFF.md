@@ -5,7 +5,12 @@ Documentation entrypoints are in [docs/README](docs/README.md). Historical waiti
 
 ## Current work
 
-No active rollout. Separate business and recovery acceptance remains listed below.
+`codex/newsletter-config-ci-noop` addresses a post-acceptance configuration workflow failure: documentation-only
+Service CI published no Newsletter image, but its follow-up still scanned historical engines. Reuse the existing
+image-publication check to skip that no-op. Compatibility compares against the latest tested main source, while
+the selected image keeps its actual publication SHA; unrelated green changes no longer block real configuration
+pushes. Direct pushes, candidate-image validation and real image-publication follow-ups remain. Native regressions
+pass; branch/main CI, the actual no-op follow-up and same-source reconciliation remain pending.
 
 ## Latest verified release
 
