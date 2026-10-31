@@ -5,18 +5,19 @@ Documentation entrypoints are in [docs/README](docs/README.md). Historical waiti
 
 ## Current work
 
-`codex/quant-production-acceptance` continues the checked Quant/Home work and runtime acceptance.
+`codex/quant-live-acceptance` continues the checked Quant/Home work and runtime acceptance.
 The owner explicitly wants normal K3s resources, including namespaces, RBAC and storage, managed through Actions.
 Use native Kubernetes tools with a dedicated short-lived Actions identity; application runtime identities stay scoped.
-The private repository owns the implementation and setup evidence. Parent main `fc19ca88` pins private `5177b8a`
+The private repository owns the implementation and setup evidence. Parent main `e627cf05` pins private `142822e`
 after exact-source branch and main checks. The reviewed shared infrastructure changes applied and the following
-plan had zero changes. The one-time cluster trust handoff remains pending before private-application deployment
-and data acceptance. The continuation PRs are merged; further source changes need a new review.
-The active follow-up preserves the private acceptance evidence and updates shared version metadata handling;
-its exact-source checks must finish before promotion. Detailed runtime handoff status remains in the private repository.
+plan had zero changes. The owner completed the one-time cluster trust handoff and real CI authorization verification
+passed. The initial private-application publication has not completed; runtime and data acceptance remain pending. The continuation PRs are merged;
+further source changes need a new review.
+The merged follow-up preserves the private acceptance evidence and updates shared version metadata handling.
+Detailed runtime handoff status remains in the private repository.
 
 The earlier `codex/quant-rollout-resume` continuation in both repositories is merged, along with the original
-`codex/private-quant-data` / `codex/quant-data` work. Initial installation, publication and data acceptance remain pending.
+`codex/private-quant-data` / `codex/quant-data` work. Initial application publication and data acceptance remain pending.
 Application sources, private proto, deployment configuration and detailed evidence stay in that repository.
 Parent changes supply shared tools/dependencies, a protected private publisher and optional Home registration.
 The continuation also opens registered background-service consoles from their Home rows. Private/Home web checks,
@@ -27,10 +28,9 @@ operations reuse prior green source evidence and the existing protected private 
 public build selection. Owner confirmed promotion and rollout; preserve that authorization.
 
 The private reviewed infrastructure applied 11 creates with no updates/deletes, followed by a clean plan. The actual
-owner audience source passed branch/main CI and was promoted. The private application image is published; its
-registry digest matches the verified installation archive and anonymous pulls are refused. The complete initial
-installation bundle is staged and verified. Continue initial installation, Worker publication, exact resource
-registration and deployed API/bulk-data acceptance. No collector installation or bulk collection has run yet.
+owner audience source passed branch/main CI and was promoted. The private application image is published and
+anonymous pulls are refused. Initial workload resources were created through Actions. Continue Worker publication,
+exact resource registration and deployed API/bulk-data acceptance. Bulk collection has not run yet.
 The private handoff owns operational details. Source-only API probes and local checks are not deployment evidence.
 
 ## Latest verified release
