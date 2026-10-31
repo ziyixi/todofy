@@ -56,9 +56,11 @@ def api_fixture(
     current: str = NEW,
     runs: list | None = None,
     differences: dict | None = None,
+    unpublished: tuple[str, ...] = (),
 ):
     calls = []
     differences = differences or {}
+    unpublished_ids = {run_record(commit)["id"] for commit in unpublished}
 
     def request(method, path, value=None, **kwargs):
         calls.append((method, path, value, kwargs))
@@ -71,7 +73,9 @@ def api_fixture(
                 "jobs": [
                     {
                         "name": "Newsletter image publish",
-                        "conclusion": "success",
+                        "conclusion": "skipped"
+                        if int(path.split("/")[3]) in unpublished_ids
+                        else "success",
                     }
                 ]
             }
@@ -195,21 +199,20 @@ def test_main_engine_change_waits_for_its_own_successful_ci(release):
     }
 
 
-@pytest.mark.parametrize(
-    "jobs",
-    [[], [{"name": "Newsletter image publish", "conclusion": "skipped"}]],
-)
-def test_post_ci_without_image_publication_skips_history_lookup(release, jobs):
-    api = api_fixture()
-    api.request.side_effect = lambda method, path, **kwargs: {"jobs": jobs}
-
+def test_post_ci_without_new_image_uses_actual_published_engine(release):
+    api = api_fixture(
+        runs=[run_record(NEW), run_record(OLD)],
+        unpublished=(NEW,),
+        differences={
+            f"/compare/{OLD}...{NEW}": {
+                "status": "ahead",
+                "files": [{"filename": "docs/bazel.md"}],
+            }
+        },
+    )
     assert release.plan(
         api, "workflow_run", {"workflow_run": run_record(NEW)}
-    ) == {"ready": "false", "reason": "no_engine_publication"}
-    api.request.assert_called_once_with(
-        "GET",
-        f"/actions/runs/{run_record(NEW)['id']}/jobs?filter=latest&per_page=100&page=1",
-    )
+    ) == {"ready": "true", "revision": NEW, "engine_sha": OLD}
 
 
 @pytest.mark.parametrize(
@@ -225,27 +228,21 @@ def test_config_push_uses_latest_tested_source_for_compatibility(
     api = api_fixture(
         current=PR,
         runs=[run_record(NEW), run_record(OLD)],
+        unpublished=(NEW,),
         differences={
             f"/compare/{NEW}...{PR}": {
                 "status": "ahead",
                 "files": [{"filename": filename}],
-            }
+            },
+            f"/compare/{OLD}...{PR}": {
+                "status": "ahead",
+                "files": [
+                    {"filename": "docs/bazel.md"},
+                    {"filename": filename},
+                ],
+            },
         },
     )
-    request = api.request.side_effect
-
-    def respond(method, path, value=None, **kwargs):
-        if path.startswith(f"/actions/runs/{run_record(NEW)['id']}/jobs?"):
-            return {
-                "jobs": [{"name": release.PUBLISH_JOB, "conclusion": "skipped"}]
-            }
-        if path == f"/compare/{OLD}...{PR}":
-            raise AssertionError(
-                "Use the latest tested source, not all unrelated history"
-            )
-        return request(method, path, value, **kwargs)
-
-    api.request.side_effect = respond
     result = release.plan(api, "push", {"ref": "refs/heads/main", "after": PR})
     if ready:
         assert result == {"ready": "true", "revision": PR, "engine_sha": OLD}
@@ -257,6 +254,34 @@ def test_config_push_uses_latest_tested_source_for_compatibility(
     assert [
         path for _, path, *_ in api.calls if path.startswith("/compare/")
     ] == [f"/compare/{NEW}...{PR}"]
+
+
+def test_deferred_config_recovers_after_its_no_image_ci_succeeds(release):
+    differences = {
+        f"/compare/{OLD}...{PR}": {
+            "status": "ahead",
+            "files": [
+                {"filename": "docs/bazel.md"},
+                {"filename": "newsletter/content-config/editorial.yaml"},
+            ],
+        }
+    }
+    before_ci = api_fixture(current=PR, differences=differences)
+    assert (
+        release.plan(
+            before_ci, "push", {"ref": "refs/heads/main", "after": PR}
+        )["ready"]
+        == "false"
+    )
+    after_ci = api_fixture(
+        current=PR,
+        runs=[run_record(PR), run_record(NEW), run_record(OLD)],
+        unpublished=(PR, NEW),
+        differences=differences,
+    )
+    assert release.plan(
+        after_ci, "workflow_run", {"workflow_run": run_record(PR)}
+    ) == {"ready": "true", "revision": PR, "engine_sha": OLD}
 
 
 @pytest.mark.parametrize(

@@ -155,7 +155,7 @@ def config_only_difference(
         return False
     # A PR may diverge because main advanced; its merge-base diff still tells
     # whether that PR changes only configuration. Engine reuse is stricter:
-    # a tested engine must be the same commit or an ancestor of the revision.
+    # the tested source must be the same commit or an ancestor of the revision.
     # GitHub caps a compare response at 300 changed files. Treat that boundary
     # conservatively; a truncated list cannot certify engine compatibility.
     files = compared.get("files")
@@ -269,8 +269,6 @@ def plan(api: GitHub, event_name: str, event: dict[str, Any]) -> dict[str, str]:
                 or run.get("head_branch") != "main"
             ):
                 return {"ready": "false", "reason": "engine_ci_not_successful"}
-            if not released_image(api, run):
-                return {"ready": "false", "reason": "no_engine_publication"}
         if event_name not in {"push", "workflow_run", "workflow_dispatch"}:
             raise ReleaseError("Unsupported configuration workflow event")
         # A late engine CI may publish a newer config-only main commit, but not
