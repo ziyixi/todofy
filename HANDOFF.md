@@ -5,24 +5,17 @@ Documentation entrypoints are in [docs/README](docs/README.md). Historical waiti
 
 ## Current work
 
-`codex/private-submodule-ci` is adding the approved private repository as the root `private/` submodule.
-Root toolchains and dependencies remain authoritative. The synthetic private target and repository/CI audits pass
-locally; all 12,356 public query targets are identical with and without an initialized submodule. Private CI checks
-the recorded commit, gates publication and restores public caches without saving private outputs. Actual GitHub
-checkout/build/test has passed, including exact commit verification and no cache-save post-step. A Newsletter CI
-assertion that assumed exactly three gate dependencies has been updated to require its own dependencies; the root
-CI tests own the complete gate membership and private-failure cases. Updated branch/main CI and reconciliation
-remain pending.
+No implementation changes in progress.
 
 ## Latest verified release
 
-Root Go module `60460b21`: all Go packages share root go.mod/go.sum, imported by the existing Bazel toolchain.
-Go, dependency versions and checksums remain. Native Go/API-lint/repository checks, affected branch/main CI,
-actual configuration validation/publication and same-source reconciliation passed. Application artifacts and
-deployments were skipped.
-Application runtime sources, dependency locks, credentials, business content and installed owner extensions remain unchanged.
+Private submodule CI `f4463dfd`: `private/` pins the private repository and builds through native `@private`
+with root toolchains and dependency locks. Real GitHub checkout/build/test, exact commit checks, branch/main CI,
+configuration validation/publication and same-source reconciliation passed. Private CI restores public caches
+without saving caches or uploading artifacts. Public targets work with the submodule initialized or absent.
+Application artifacts and deployments were skipped; the private repository contains only a synthetic acceptance target.
 
-See the [October 31 record](docs/history/handoff-2026-10-31.md#root-go-module) for verification and the earlier
+See the [October 31 record](docs/history/handoff-2026-10-31.md#private-submodule-and-public-ci) for verification and the earlier
 package-ownership and configuration-publishing changes.
 The earlier build migration and Newsletter correction remain in the [October 30 archive](docs/history/handoff-2026-10-30.md).
 Per-application source identities remain independent.

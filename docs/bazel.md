@@ -55,7 +55,7 @@ declares `@private` through native `local_repository(path = "private")`; `.bazel
 the public `//...` graph. Public targets work without initializing the submodule.
 
 Root toolchains and dependency manifests/locks remain authoritative. The private repository has `REPO.bazel` and
-per-directory `BUILD.bazel` files, with no separate `MODULE.bazel` or dependency manifests. Run its targets from the
+per-directory `BUILD.bazel` files, with no separate `MODULE.bazel` or dependency locks. Run its targets from the
 parent repository:
 
 ```sh
