@@ -350,6 +350,29 @@ class MatchesTheApps(unittest.TestCase):
         self.assertIn('service  = "http://127.0.0.1:18766"', code)
         self.assertIn('aud_tag   = [cloudflare_zero_trust_access_application.codex_gateway.aud]', code)
 
+    def test_k3s_transport_reuses_the_runtime_access_identity_and_preserves_http_routes(self):
+        code = (INFRA / "platform.tf").read_text()
+        self.assertEqual(hcl_map(code, "platform_machine_hosts"), {"runtime": "local.platform_runtime_hostname"})
+        self.assertEqual(hcl_map(code, "platform_tunnel_hosts"), {
+            "runtime": "local.platform_runtime_hostname", "k3s-api": "local.platform_k3s_api_hostname"})
+        application = re.search(r'resource "cloudflare_zero_trust_access_application" "platform_machine" \{(.*?)^\}',
+                                code, re.S | re.M).group(1)
+        self.assertIn("for_each = local.platform_machine_hosts", application)
+        self.assertRegex(application, r"domain\s*= each.value")
+        self.assertIn('{ type = "public", uri = each.value }', application)
+        self.assertIn('{ type = "public", uri = local.platform_k3s_api_hostname }', application)
+        ingress = re.search(r"ingress = \[\n(.*?)^    \]", code, re.S | re.M).group(1)
+        rules = re.findall(r"^      \{\n(.*?)^      \},?$", ingress, re.S | re.M)
+        self.assertEqual([re.search(r'service  = "([^"]+)"', rule).group(1) for rule in rules], [
+            "http://127.0.0.1:18766", "http://127.0.0.1:18767", "http://127.0.0.1:18765", "tcp://127.0.0.1:6443"])
+        api = rules[-1]
+        self.assertIn("hostname = local.platform_k3s_api_hostname", api)
+        self.assertNotIn("path", api)
+        self.assertIn("required  = true", api)
+        self.assertIn('aud_tag   = [cloudflare_zero_trust_access_application.platform_machine["runtime"].aud]', api)
+        self.assertIn("team_name = local.platform_access_team", api)
+        self.assertTrue(ingress.rstrip().endswith('{ service = "http_status:404" },'))
+
     def test_each_runtime_path_of_an_owner_application_has_its_pinned_tunnel_rule(self):
         """An owner application's destination on the platform runtime host (the console's read path into Newsletter)
         is routed by exactly one tunnel rule: that path, its own loopback port, and the connector requiring that same

@@ -288,11 +288,14 @@ jobs:
       CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
       INFRA_STATE_PASSPHRASE: ${{ secrets.INFRA_STATE_PASSPHRASE }}
       INFRA_TFVARS: ${{ secrets.INFRA_TFVARS }}
+      PLATFORM_ACCESS_CLIENT_ID: ${{ secrets.PLATFORM_ACCESS_CLIENT_ID }}
+      PLATFORM_ACCESS_CLIENT_SECRET: ${{ secrets.PLATFORM_ACCESS_CLIENT_SECRET }}
     permissions:
       contents: read
       checks: read
       packages: write
       deployments: write
+      id-token: write
 
   newsletter-deploy:
     name: Newsletter image publish

@@ -398,7 +398,8 @@ class Cloud(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(tofu_bootstrap, "verify_target"), \
                 mock.patch.object(tofu_bootstrap, "prepare"), mock.patch.object(tofu_bootstrap, "ensure_workers_subdomain"), \
                 mock.patch.object(tofu_bootstrap, "refuse_conflicts"):
-            report, credentials = tofu_bootstrap.run(private, {"zone": "example.invalid", "workers_dev_subdomain": "desired"},
+            report, credentials = tofu_bootstrap.run(private, {"zone": "example.invalid", "workers_dev_subdomain": "desired",
+                "vps": {"k3s_api_host": "k3s-api.example.invalid"}},
                                                      resources, "extend", Path(directory), session_factory=Session, check_only=True)
         self.assertEqual(report["creates"], [address])
         self.assertFalse(credentials)

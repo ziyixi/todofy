@@ -12,10 +12,17 @@ on:
           - infra-apply
           - publish
           - release
+          - k3s-check
+          - k3s-plan
+          - k3s-apply
       expect:
         description: Reviewed infrastructure plan fingerprint for infra-apply
         type: string
         default: ''
+      manifests:
+        description: Checked repository Kustomize directory for K3s plan/apply
+        type: string
+        default: private/k3s/manifests
 
 permissions:
   contents: read
@@ -62,13 +69,17 @@ jobs:
       revision: ${{ needs.context.outputs.revision }}
       operation: ${{ inputs.operation }}
       expect: ${{ inputs.expect }}
+      manifests: ${{ inputs.manifests }}
     secrets:
       private_ssh_key: ${{ secrets.TODOFY_PRIVATE_SSH_KEY }}
       CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
       INFRA_STATE_PASSPHRASE: ${{ secrets.INFRA_STATE_PASSPHRASE }}
       INFRA_TFVARS: ${{ secrets.INFRA_TFVARS }}
+      PLATFORM_ACCESS_CLIENT_ID: ${{ secrets.PLATFORM_ACCESS_CLIENT_ID }}
+      PLATFORM_ACCESS_CLIENT_SECRET: ${{ secrets.PLATFORM_ACCESS_CLIENT_SECRET }}
     permissions:
       contents: read
       checks: read
       packages: write
       deployments: write
+      id-token: write

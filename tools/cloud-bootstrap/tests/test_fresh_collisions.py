@@ -7,6 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).absolute().parents[3]
 sys.path.insert(0, str(ROOT / "tools/cloud-bootstrap"))
 from fresh_collisions import ENDPOINTS, MAX_PAGES, PAGE_SIZE, refuse_conflicts  # noqa: E402
+import fresh_collisions  # noqa: E402
 from private_input import BootstrapError  # noqa: E402
 
 ACCOUNT, ZONE = "a" * 32, "b" * 32
@@ -37,6 +38,73 @@ def page(rows, *, number=1, total=None):
 
 
 class FreshCollisions(unittest.TestCase):
+    def hostname_plan(self, *, dns_actions=None, app_actions=None):
+        application = {"id": "managed-app", "domain": "runtime.example.invalid", "destinations": [
+            {"type": "public", "uri": "runtime.example.invalid"}]}
+        result = {"resource_changes": []}
+        if dns_actions:
+            result["resource_changes"].append({"address": 'cloudflare_dns_record.platform["k3s-api"]',
+                "type": "cloudflare_dns_record", "change": {"actions": dns_actions,
+                "after": {"id": "managed-dns", "name": "k3s-api.example.invalid"}}})
+        if app_actions:
+            result["resource_changes"].append({
+                "address": 'cloudflare_zero_trust_access_application.platform_machine["runtime"]',
+                "type": "cloudflare_zero_trust_access_application", "change": {
+                    "actions": app_actions, "before": application,
+                    "after": {**application, "destinations": application["destinations"] + [
+                        {"type": "public", "uri": "k3s-api.example.invalid"}]}}})
+        return result
+
+    def hostname_guard(self, target, documents):
+        self.calls = []
+        responses = iter(documents)
+
+        def fetch(token, path, parameters):
+            self.assertEqual(token, "synthetic-private-token")
+            self.calls.append((path, parameters))
+            return next(responses)
+
+        fresh_collisions.refuse_hostname_conflicts(target, "synthetic-private-token", ACCOUNT, ZONE,
+            "k3s-api.example.invalid", page_fetch=fetch)
+
+    def test_new_platform_hostname_checks_dns_worker_domains_and_other_access_apps(self):
+        target = self.hostname_plan(dns_actions=["create"], app_actions=["update"])
+        self.hostname_guard(target, [page([]), page([]), page([{"id": "managed-app",
+            "domain": "k3s-api.example.invalid"}])])
+        self.assertEqual([path for path, _ in self.calls], [f"/zones/{ZONE}/dns_records",
+            f"/accounts/{ACCOUNT}/workers/domains", f"/accounts/{ACCOUNT}/access/apps"])
+        conflicts = ([page([{"name": "K3S-API.example.invalid.", "type": "TXT"}])],
+                     [page([]), page([{"hostname": "k3s-api.example.invalid"}])],
+                     [page([]), page([]), page([{"id": "another-app", "destinations": [
+                         {"type": "public", "uri": "k3s-api.example.invalid/api/*"}]}])])
+        for documents in conflicts:
+            with self.subTest(documents=documents), self.assertRaises(BootstrapError) as error:
+                self.hostname_guard(target, documents)
+            self.assertEqual(str(error.exception), "PLATFORM_HOSTNAME_CONFLICT")
+            self.assertNotIn("example.invalid", str(error.exception))
+
+    def test_existing_platform_hostname_does_not_scan_or_reject_its_managed_dns(self):
+        self.hostname_guard(self.hostname_plan(dns_actions=["no-op"], app_actions=["no-op"]), [])
+        self.assertEqual(self.calls, [])
+        target = self.hostname_plan(dns_actions=["no-op"], app_actions=["update"])
+        self.hostname_guard(target, [page([{"id": "managed-dns", "name": "k3s-api.example.invalid"}]),
+                                    page([]), page([])])
+
+    def test_hostname_preflight_requires_complete_inventories_and_checks_later_pages(self):
+        target = self.hostname_plan(dns_actions=["create"])
+        with self.assertRaisesRegex(BootstrapError, "FRESH_RESOURCE_INVENTORY_INCOMPLETE"):
+            self.hostname_guard(target, [{"success": True, "result": []}])
+        with self.assertRaisesRegex(BootstrapError, "PLATFORM_HOSTNAME_CONFLICT"):
+            self.hostname_guard(target, [page([]), page([]), page([{"domain": "unrelated.example.invalid"}], total=2),
+                page([{"domain": "k3s-api.example.invalid"}], number=2, total=2)])
+        with self.assertRaisesRegex(BootstrapError, "PLATFORM_HOSTNAME_CONFLICT"):
+            self.hostname_guard(target, [page([]), page([]), page([{"domain": "*.example.invalid"}])])
+
+    def test_worker_domains_use_the_documented_single_page_exact_hostname_query(self):
+        target = self.hostname_plan(dns_actions=["create"])
+        self.hostname_guard(target, [page([]), {"success": True, "result": []}, page([])])
+        self.assertEqual(self.calls[1], (f"/accounts/{ACCOUNT}/workers/domains", {"hostname": "k3s-api.example.invalid"}))
+
     def guard(self, target, documents):
         self.calls = []
         responses = iter(documents)

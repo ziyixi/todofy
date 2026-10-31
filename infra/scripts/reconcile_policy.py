@@ -8,6 +8,7 @@ from pathlib import Path
 
 WORKFLOW = "Personal cloud reconcile"
 DNS = 'cloudflare_dns_record.platform["runtime"]'
+K3S_DNS = 'cloudflare_dns_record.platform["k3s-api"]'
 TUNNEL_CONFIG = "cloudflare_zero_trust_tunnel_cloudflared_config.platform"
 # The tunnel's path rules on the runtime host, in their order before the daemon's catch-all (infra/platform.tf): the
 # path, its loopback service, the Access application whose audience the connector requires, and that application's
@@ -20,7 +21,7 @@ PATH_RULES = (
 )
 
 
-def manual_reasons(plan: dict, team: str = "") -> list[dict[str, str]]:
+def manual_reasons(plan: dict, team: str = "", k3s_api_host: str = "") -> list[dict[str, str]]:
     """Return addresses and fixed reasons only; provider values never leave here."""
     reasons = []
     resources = plan.get("planned_values", {}).get("root_module", {}).get("resources", [])
@@ -33,13 +34,14 @@ def manual_reasons(plan: dict, team: str = "") -> list[dict[str, str]]:
         if change.get("actions") in ([], ["no-op"]):
             continue
         address = item.get("address", "")
-        reason = _manual_reason(item, change, tunnel, app, team, path_apps)
+        reason = _manual_reason(item, change, tunnel, app, team, path_apps, k3s_api_host)
         if reason:
             reasons.append({"address": address, "reason": reason})
     return reasons
 
 
-def _manual_reason(item: dict, change: dict, tunnel: str, app: dict, team: str, path_apps: dict | None = None) -> str | None:
+def _manual_reason(item: dict, change: dict, tunnel: str, app: dict, team: str, path_apps: dict | None = None,
+                   k3s_api_host: str = "") -> str | None:
     if item.get("mode") != "managed" or change.get("actions") != ["update"]:
         return "IDENTITY_OR_RESOURCE_CHANGE"
     if change.get("importing") or _unknown_required(change.get("after_unknown", {})):
@@ -48,10 +50,12 @@ def _manual_reason(item: dict, change: dict, tunnel: str, app: dict, team: str, 
     if not isinstance(before, dict) or not isinstance(after, dict):
         return "UNKNOWN_PROVIDER_SHAPE"
     address = item.get("address")
-    if address == DNS:
+    if address in {DNS, K3S_DNS}:
         allowed = {"content", "proxied", "ttl", "modified_on"}
         if not all(before.get(key) == after.get(key) and after.get(key)
                    for key in ("id", "zone_id", "name", "type")):
+            return "DNS_IDENTITY_CHANGE"
+        if address == K3S_DNS and (not k3s_api_host or after.get("name") != k3s_api_host):
             return "DNS_IDENTITY_CHANGE"
         if (after.get("type") != "CNAME" or after.get("proxied") is not True
                 or not _tunnel_target(after.get("content"))
@@ -62,7 +66,7 @@ def _manual_reason(item: dict, change: dict, tunnel: str, app: dict, team: str, 
         if not all(before.get(key) == after.get(key) and after.get(key)
                    for key in ("id", "account_id", "tunnel_id")):
             return "CONNECTOR_IDENTITY_CHANGE"
-        if not _loopback_ingress(after.get("config"), app, team, path_apps):
+        if not _loopback_ingress(after.get("config"), app, team, path_apps, k3s_api_host):
             return "CONNECTOR_TARGET_UNSAFE"
     else:
         return "SENSITIVE_OR_UNSUPPORTED_RESOURCE"
@@ -70,9 +74,10 @@ def _manual_reason(item: dict, change: dict, tunnel: str, app: dict, team: str, 
     return None if changed <= allowed else "UNSUPPORTED_ATTRIBUTE_CHANGE"
 
 
-def _loopback_ingress(config: object, app: dict, team: str, path_apps: dict | None = None) -> bool:
+def _loopback_ingress(config: object, app: dict, team: str, path_apps: dict | None = None,
+                      k3s_api_host: str = "") -> bool:
     """The runtime host's path rules in PATH_RULES order (each present one exact and pinned to its application's
-    audience), then the daemon's catch-all, then 404. Any other rule, order or target needs review."""
+    audience), then the daemon, its declared Kubernetes transport, then 404. Any other rule needs review."""
     if not isinstance(config, dict):
         return False
     ingress = config.get("ingress")
@@ -92,16 +97,26 @@ def _loopback_ingress(config: object, app: dict, team: str, path_apps: dict | No
                 or not _destination(path_app, str(app.get("domain")) + destination)
                 or rule.get("hostname") != app.get("domain") or not app.get("domain")
                 or rule.get("service") != service
-                or not _authenticated_origin(rule.get("origin_request", {}).get("access"), path_app, team)):
+                or not _authenticated_origin(rule.get("origin_request"), path_app, team)):
             return False
         ingress = ingress[1:]
+    if k3s_api_host and _destination(app, k3s_api_host):
+        if len(ingress) != 3 or not isinstance(ingress[1], dict):
+            return False
+        api = ingress[1]
+        if (k3s_api_host == app.get("domain") or api.get("hostname") != k3s_api_host
+                or api.get("path") or api.get("service") != "tcp://127.0.0.1:6443"
+                or not _authenticated_origin(api.get("origin_request"), app, team)):
+            return False
+        ingress = [ingress[0], ingress[2]]
     return (len(ingress) == 2
             and isinstance(ingress[0], dict) and isinstance(ingress[1], dict)
             and isinstance(ingress[0].get("hostname"), str) and not ingress[0].get("path")
             and ingress[0]["hostname"] == app.get("domain") and bool(app.get("domain"))
             and ingress[0].get("service") == "http://127.0.0.1:18765"
             and ingress[1].get("service") == "http_status:404"
-            and _authenticated_origin(ingress[0].get("origin_request", {}).get("access"), app, team))
+            and not ingress[1].get("hostname") and not ingress[1].get("path")
+            and _authenticated_origin(ingress[0].get("origin_request"), app, team))
 
 
 def _destination(app: dict, uri: str) -> bool:
@@ -111,7 +126,10 @@ def _destination(app: dict, uri: str) -> bool:
         isinstance(item, dict) and item.get("type") == "public" and item.get("uri") == uri for item in destinations))
 
 
-def _authenticated_origin(access: object, app: dict, team: str) -> bool:
+def _authenticated_origin(origin: object, app: dict, team: str) -> bool:
+    if not isinstance(origin, dict):
+        return False
+    access = origin.get("access")
     return (isinstance(access, dict) and access.get("required") is True
             and isinstance(access.get("team_name"), str) and access["team_name"] == team and bool(team)
             and isinstance(access.get("aud_tag"), list) and len(access["aud_tag"]) == 1

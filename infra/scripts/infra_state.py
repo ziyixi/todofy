@@ -153,7 +153,8 @@ FINGERPRINT_DIGITS = 12
 
 # --- outputs against the apps' configs ---
 # The catalog supplies only public config paths, never credentials or state.
-sys.path[:0] = [str(REPO / "tools" / "cloud-config"), str(REPO / "tools" / "service-catalog")]
+sys.path[:0] = [str(REPO / "tools" / "cloud-config"), str(REPO / "tools" / "service-catalog"),
+               str(REPO / "tools" / "cloud-bootstrap")]
 from generate import production_workers  # noqa: E402
 from cloud_profile import load_profile, load_resources  # noqa: E402
 
@@ -937,6 +938,7 @@ def type_violations(plan_json: Any) -> list[str]:
               or (item.get("type") in PLATFORM_TYPES and _base_address(item.get("address")) not in PLATFORM_OBJECTS)
               or (item.get("type") == "cloudflare_dns_record" and item.get("address") not in {
                   'cloudflare_dns_record.platform["runtime"]',
+                  'cloudflare_dns_record.platform["k3s-api"]',
               })):
             found.append(_type_name(item.get("type")))
     return sorted(set(found))
@@ -1113,8 +1115,9 @@ def command_reconcile(args: argparse.Namespace, env: dict[str, str]) -> int:
         code, summary, rendered, document = session.plan_full("reconcile")
         report(rendered, env)
         problems = check_outputs(document, env)
-        team = load_profile(REPO)["access_issuer"].removeprefix("https://").removesuffix(".cloudflareaccess.com")
-        reasons = manual_reasons(document, team)
+        profile = load_profile(REPO)
+        team = profile["access_issuer"].removeprefix("https://").removesuffix(".cloudflareaccess.com")
+        reasons = manual_reasons(document, team, profile["vps"]["k3s_api_host"])
         module = load_summary_module()
         keys = module.Keys(module.config_keys(str(INFRA)))
         reasons = [{"address": module.safe_address(item["address"], keys), "reason": item["reason"]}
@@ -1172,6 +1175,7 @@ def command_approved_apply(args: argparse.Namespace, env: dict[str, str]) -> int
         if exact_fingerprint(current, session.passphrase) != fingerprint:
             raise Refused("REVIEWED_PLAN_CHANGED_REVIEW_AGAIN")
         apply_gate(summary, current, expected, fingerprint, False, check_outputs(current, env), exact=fingerprint)
+        require_hostname_availability(current, env, values["account_id"])
         backup_state(session, args.environment, env)
         session.tofu.apply(saved, diagnostic_plan=approved)
         code, summary, rendered, current = session.plan_full("verify")
@@ -1210,6 +1214,7 @@ def command_apply(args: argparse.Namespace, env: dict[str, str]) -> int:
             print("apply: nothing to apply")
             export_platform_credentials(session, env)
             return EXIT_OK
+        require_hostname_availability(plan_json, env, values["account_id"])
         print("apply: every gate passed; applying exactly the saved plan")
         session.tofu.apply(work / "apply.tfplan", diagnostic_plan=plan_json)
         tofu_code, summary, rendered, plan_json = session.plan_full("verify")
@@ -1235,6 +1240,18 @@ def command_apply(args: argparse.Namespace, env: dict[str, str]) -> int:
             session.cleanup()
         if not args.keep_work_dir:
             shutil.rmtree(work, ignore_errors=True)
+
+
+def require_hostname_availability(plan: dict, env: dict[str, str], account: str) -> None:
+    from fresh_collisions import refuse_hostname_conflicts
+    from private_input import BootstrapError
+
+    profile, resources = load_profile(REPO), load_resources(REPO)
+    try:
+        refuse_hostname_conflicts(plan, env.get("CLOUDFLARE_API_TOKEN", ""), account,
+                                  resources["zone_id"], profile["vps"]["k3s_api_host"])
+    except BootstrapError as error:
+        raise Refused(str(error)) from None
 
 
 def export_platform_credentials(session: "Session", env: dict[str, str]) -> None:

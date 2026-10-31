@@ -48,7 +48,7 @@ def request(token: str, path: str, method: str = "GET", body: dict | None = None
 def list_page(token: str, path: str, parameters: dict | None = None) -> dict:
     """Read one page with its completion metadata; collision checks must prove the list is complete."""
     parameters = parameters or {}
-    if set(parameters) - {"page", "per_page", "cursor", "is_deleted"} or any(
+    if set(parameters) - {"page", "per_page", "cursor", "is_deleted", "hostname"} or any(
         not isinstance(value, (str, int)) or isinstance(value, bool) for value in parameters.values()
     ):
         raise BootstrapError("CLOUDFLARE_PAGINATION_INVALID")

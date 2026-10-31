@@ -12,7 +12,7 @@ Current resource identities are in `config/resources.toml`; application membersh
 | Owner Access apps and the two shared owner policies | `access.tf` |
 | Selected GitHub and email-PIN identity providers | `identity.tf` |
 | Exact Mail Hero receiving-address rule | `mail-routing.tf`; enabled after its Worker exists |
-| Dedicated runtime Tunnel, ingress, CNAME and machine Access apps | `platform.tf` |
+| Dedicated runtime Tunnel, runtime/API CNAMEs and machine Access apps | `platform.tf` |
 | D1 databases and private R2 buckets | `storage.tf`; existence and identities, not application data |
 | Router request-body and backup expiry | `storage.tf`; seven days in each of the two Router buckets |
 | Retired resource transitions | `retired.tf`, paired with the guard's explicit retirement list |
@@ -20,7 +20,13 @@ Current resource identities are in `config/resources.toml`; application membersh
 Wrangler owns Workers, their bindings, variables, secrets, schedules, domains and D1 schema migrations.
 Each application owns its data and backup/retention logic. Other buckets do not inherit Router's expiry rules.
 The receiving subdomain's Email Routing setup and root mailbox DNS remain outside this directory.
-Unrelated Access apps, identity providers, tunnels, DNS and account settings are not adopted or read.
+Unrelated Access apps, identity providers, tunnels, DNS and account settings are not adopted. Creation-time
+collision checks read only the bounded inventories needed to refuse an existing name or hostname.
+
+The Kubernetes hostname is a second destination of the existing runtime machine Access application. Its Tunnel
+route carries TCP to the local API with that application's audience required; Kubernetes verifies the separate
+short-lived Actions identity. Existing runtime application, Tunnel and DNS identities remain unchanged.
+Introducing this hostname checks bounded DNS, Worker-domain and Access inventories before applying the saved plan.
 
 The optional legacy Mail Hero backup Access app is frozen for existing accounts; new accounts omit it and use
 Worker-native backups. Its historical machine policy and token are not managed here. Shared owner policies can
@@ -83,7 +89,7 @@ action or fail the drift check. A successful source test is not a current Cloudf
 
 There are three existing write paths, all on main and under the same infrastructure lock:
 
-1. Routine reconcile repairs only the dedicated runtime CNAME and authenticated loopback Tunnel ingress, preserving
+1. Routine reconcile repairs only the dedicated runtime/API CNAMEs and authenticated loopback Tunnel ingress, preserving
    the Tunnel target and exact route/audience policy in [reconcile_policy.py](scripts/reconcile_policy.py).
 2. Reviewed reconcile applies the original saved plan through the protected `infra-review` environment. Its source
    revision and current differences must still match the review.

@@ -5,6 +5,13 @@ Documentation entrypoints are in [docs/README](docs/README.md). Historical waiti
 
 ## Current work
 
+`codex/k3s-actions-control` continues the checked Quant/Home work and adds owner-requested cluster-wide CI management.
+The owner explicitly wants normal K3s resources, including namespaces, RBAC and storage, managed through Actions.
+Use native Kubernetes tools with a dedicated short-lived Actions identity; application runtime identities stay scoped.
+The private repository owns the implementation and setup evidence. This replaces the pending per-application
+installation path; no new cluster authority has been granted yet. Complete source checks and the one-time trust
+handoff before continuing private-application deployment and data acceptance.
+
 Continuation branch `codex/quant-rollout-resume` in both repositories finishes the private application rollout.
 It starts from the checked main and pinned private source; the earlier `codex/private-quant-data` /
 `codex/quant-data` work remains merged. Initial installation, publication and data acceptance remain pending.

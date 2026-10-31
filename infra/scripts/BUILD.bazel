@@ -31,6 +31,8 @@ py_library(
         ":apply_diagnostics",
         ":platform_export",
         ":reconcile_policy",
+        "//tools/cloud-bootstrap:fresh_collisions",
+        "//tools/cloud-bootstrap:private_input",
         "//tools/cloud-config:cloud_profile",
         "//tools/cloud-config:generate",
     ],

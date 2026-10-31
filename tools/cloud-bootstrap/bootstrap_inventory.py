@@ -34,6 +34,7 @@ PLATFORM_ADDRESSES = {
     "cloudflare_zero_trust_tunnel_cloudflared.platform",
     "cloudflare_zero_trust_tunnel_cloudflared_config.platform",
     'cloudflare_dns_record.platform["runtime"]',
+    'cloudflare_dns_record.platform["k3s-api"]',
 }
 MANAGED_ADDRESSES = PLATFORM_ADDRESSES | {
     "cloudflare_zero_trust_access_identity_provider.github[0]",

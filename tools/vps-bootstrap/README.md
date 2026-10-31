@@ -26,7 +26,7 @@ The supported host is Ubuntu 24.04 Linux amd64 with its existing Python stdlib, 
 
 Host installation and recovery require the owner's separate authorization and controlled runbook. The public bundle contains no credentials or private state. Private inputs remain outside Git, images and logs; their shape and independent-token checks are enforced by `config.py` and generated `allowedkeys.json`. They cannot override controlled paths, release identities, service URLs or loader variables.
 
-The installer preserves the stopped source state, creates only its declared services/resources, and refuses foreign managed files or nonempty conflicting destinations. The existing SSH connector stays outside its scope. It uses namespace-scoped rotating Kubernetes identities; the deployment client never receives cluster-admin credentials.
+The installer preserves the stopped source state, creates only its declared services/resources, and refuses foreign managed files or nonempty conflicting destinations. The existing SSH connector stays outside its scope. The runtime daemon uses namespace-scoped Kubernetes identities. The separately authorized native Actions identity manages cluster-scoped resources; its handoff belongs to the private runbook.
 
 Initial Newsletter admission remains held and its daily trigger suspended. `complete_held` records completion of bootstrap only. The first verified Actions release must use the bootstrap source identity, check drain/freeze, actual digest/generation/process provenance, then resume admission and the trigger. Unknown business outcomes and frozen inputs stay intact.
 

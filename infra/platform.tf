@@ -1,4 +1,4 @@
-# The authenticated daemon HTTPS API; the Kubernetes API is not routed. This tunnel is independent of the existing SSH tunnel.
+# The authenticated runtime HTTPS API and Kubernetes TCP transport. Independent of the existing SSH tunnel.
 # Credentials live only in the encrypted state and the owner's encrypted bootstrap artifact.
 resource "cloudflare_zero_trust_access_service_token" "platform_deploy" {
   account_id = var.account_id
@@ -27,16 +27,23 @@ locals {
   platform_machine_hosts = {
     "runtime" = local.platform_runtime_hostname
   }
+  platform_tunnel_hosts = {
+    "runtime" = local.platform_runtime_hostname
+    "k3s-api" = local.platform_k3s_api_hostname
+  }
 }
 
 resource "cloudflare_zero_trust_access_application" "platform_machine" {
   for_each = local.platform_machine_hosts
 
-  account_id                 = var.account_id
-  name                       = "Todofy ${each.key} machine API"
-  type                       = "self_hosted"
-  domain                     = each.value
-  destinations               = [{ type = "public", uri = each.value }]
+  account_id = var.account_id
+  name       = "Todofy ${each.key} machine API"
+  type       = "self_hosted"
+  domain     = each.value
+  destinations = [
+    { type = "public", uri = each.value },
+    { type = "public", uri = local.platform_k3s_api_hostname },
+  ]
   app_launcher_visible       = false
   auto_redirect_to_identity  = false
   enable_binding_cookie      = false
@@ -142,6 +149,17 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "platform" {
           }
         }
       },
+      {
+        hostname = local.platform_k3s_api_hostname
+        service  = "tcp://127.0.0.1:6443"
+        origin_request = {
+          access = {
+            required  = true
+            aud_tag   = [cloudflare_zero_trust_access_application.platform_machine["runtime"].aud]
+            team_name = local.platform_access_team
+          }
+        }
+      },
       { service = "http_status:404" },
     ]
   }
@@ -152,7 +170,7 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "platform" {
 }
 
 resource "cloudflare_dns_record" "platform" {
-  for_each = local.platform_machine_hosts
+  for_each = local.platform_tunnel_hosts
 
   zone_id = local.platform_zone_id
   name    = each.value

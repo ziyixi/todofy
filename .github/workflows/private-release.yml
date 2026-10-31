@@ -15,6 +15,9 @@ on:
       fingerprint:
         type: string
         default: ''
+      manifests:
+        type: string
+        default: private/k3s/manifests
     secrets:
       private_ssh_key:
         required: true
@@ -24,12 +27,17 @@ on:
         required: true
       INFRA_TFVARS:
         required: true
+      PLATFORM_ACCESS_CLIENT_ID:
+        required: true
+      PLATFORM_ACCESS_CLIENT_SECRET:
+        required: true
 
 permissions:
   contents: read
   checks: read
   packages: write
   deployments: write
+  id-token: write
 
 concurrency:
   group: private-production
@@ -68,6 +76,10 @@ jobs:
           PRIVATE_RELEASE_OPERATION: ${{ inputs.operation }}
           PRIVATE_INFRA_EXPECT: ${{ inputs.expect }}
           PRIVATE_BUILD_FINGERPRINT: ${{ inputs.fingerprint }}
+          PRIVATE_K3S_MANIFESTS: ${{ inputs.manifests }}
+          K3S_CLUSTER_CA: ${{ vars.K3S_CLUSTER_CA }}
+          PLATFORM_ACCESS_CLIENT_ID: ${{ secrets.PLATFORM_ACCESS_CLIENT_ID }}
+          PLATFORM_ACCESS_CLIENT_SECRET: ${{ secrets.PLATFORM_ACCESS_CLIENT_SECRET }}
           GITHUB_TOKEN: ${{ github.token }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           INFRA_STATE_PASSPHRASE: ${{ secrets.INFRA_STATE_PASSPHRASE }}

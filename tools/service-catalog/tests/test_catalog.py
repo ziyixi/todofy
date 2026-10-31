@@ -50,6 +50,7 @@ workers_dev_subdomain = "cloudflare-579"
 platform_hostname = "fleet.ziyixi.science"
 [vps]
 platform_runtime_host = "platform-runtime.ziyixi.science"
+k3s_api_host = "k3s-api.ziyixi.science"
 namespace = "personal-cloud"
 state_root = "/srv/todofy"
 observer_node_key = "vps"

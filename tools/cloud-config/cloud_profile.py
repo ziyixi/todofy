@@ -23,6 +23,7 @@ MANAGED_ADDRESSES = frozenset({
     "cloudflare_zero_trust_tunnel_cloudflared.platform",
     "cloudflare_zero_trust_tunnel_cloudflared_config.platform",
     'cloudflare_dns_record.platform["runtime"]',
+    'cloudflare_dns_record.platform["k3s-api"]',
     "cloudflare_zero_trust_access_identity_provider.github[0]",
     "cloudflare_zero_trust_access_identity_provider.email[0]",
     "cloudflare_email_routing_rule.mail_hero[0]",
@@ -83,10 +84,12 @@ def load_profile(root: Path) -> dict:
     require(isinstance(value["workers_dev_subdomain"], str) and re.fullmatch(
         r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", value["workers_dev_subdomain"]) is not None,
         "cloud.workers_dev_subdomain")
-    vps = fields(value["vps"], {"platform_runtime_host", "namespace", "state_root", "observer_node_key", "expected_daemons"}, "cloud.vps")
+    vps = fields(value["vps"], {"platform_runtime_host", "k3s_api_host", "namespace", "state_root", "observer_node_key", "expected_daemons"}, "cloud.vps")
     runtime_host = hostname(vps["platform_runtime_host"], "cloud.vps.platform_runtime_host")
     require(runtime_host.endswith("." + zone) and runtime_host != platform,
             "cloud.vps.platform_runtime_host")
+    api_host = hostname(vps["k3s_api_host"], "cloud.vps.k3s_api_host")
+    require(api_host.endswith("." + zone) and api_host not in {runtime_host, platform}, "cloud.vps.k3s_api_host")
     for key in ("namespace", "observer_node_key"):
         require(isinstance(vps[key], str) and re.fullmatch(r"[a-z][a-z0-9-]{0,62}", vps[key]) is not None,
                 "cloud.vps." + key)

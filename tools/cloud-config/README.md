@@ -1,7 +1,7 @@
 # Public cloud configuration
 
 Edit `config/cloud.toml` for the public zone, repository, Access issuer, `workers_dev_subdomain`, Fleet hostname
-and `vps.platform_runtime_host`. The VPS section also declares its namespace, state directory, node alias and
+and `vps.platform_runtime_host` / `vps.k3s_api_host`. The VPS section also declares its namespace, state directory, node alias and
 expected system daemons. `config/resources.toml` records the account, zone and provider-issued resource IDs.
 Neither file may hold credentials, owner emails, mailbox addresses, private node IPs or business data.
 

@@ -169,6 +169,24 @@ class BazelCI(unittest.TestCase):
         )
         self.assertEqual(release["environment"]["name"], "production")
 
+    def test_cluster_identity_is_available_only_in_the_protected_private_publisher(self):
+        for name in ("changes", "checks", "artifacts", "gate", "private"):
+            self.assertNotIn("id-token", self.jobs[name].get("permissions", {}))
+        caller = self.jobs["private-release"]
+        self.assertEqual(caller["permissions"]["id-token"], "write")
+        publisher = workflow_data(ROOT / ".github/workflows/private-release.yml")
+        self.assertEqual(publisher["permissions"]["id-token"], "write")
+        job = publisher["jobs"]["release"]
+        self.assertIn("github.ref == 'refs/heads/main'", job["if"])
+        self.assertEqual(job["environment"], "production")
+        environment = job["steps"][-1]["env"]
+        self.assertEqual(environment["K3S_CLUSTER_CA"], "${{ vars.K3S_CLUSTER_CA }}")
+        self.assertNotIn("KUBECONFIG", environment)
+        operations = workflow_data(ROOT / ".github/workflows/private-ops.yml")
+        choices = operations["on"]["workflow_dispatch"]["inputs"]["operation"]["options"]
+        self.assertTrue({"k3s-check", "k3s-plan", "k3s-apply"} <= set(choices))
+        self.assertEqual(operations["jobs"]["operate"]["permissions"]["id-token"], "write")
+
     def test_service_binding_predecessors_still_release_first(self):
         for app, predecessors in {
             "todofy-deploy": {"model-router-deploy"},

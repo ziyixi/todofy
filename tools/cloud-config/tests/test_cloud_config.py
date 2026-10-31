@@ -24,6 +24,7 @@ workers_dev_subdomain = "synthetic-workers"
 platform_hostname = "fleet.example.test"
 [vps]
 platform_runtime_host = "platform-runtime.example.test"
+k3s_api_host = "k3s-api.example.test"
 namespace = "personal-cloud"
 state_root = "/srv/personal-cloud"
 observer_node_key = "vps"
@@ -86,6 +87,18 @@ class CloudConfigurationTests(unittest.TestCase):
         (root / "demo/app.toml").write_text(MANIFEST)
         (root / "demo/wrangler.toml").write_text(CONFIG)
         return root
+
+    def test_k3s_api_hostname_is_generated_from_the_validated_profile(self):
+        root = self.fixture()
+        output = generate.generated_files(root)[generate.PLATFORM_IDENTITY]
+        self.assertRegex(output, r'platform_k3s_api_hostname\s*= "k3s-api.example.test"')
+        for hostname in ("192.0.2.1", "https://k3s-api.example.test", "k3s-api.outside.test",
+                         "fleet.example.test", "platform-runtime.example.test"):
+            with self.subTest(hostname=hostname):
+                (root / "config/cloud.toml").write_text(CLOUD.replace("k3s-api.example.test", hostname))
+                with self.assertRaises(cloud_profile.ProfileError) as error:
+                    cloud_profile.load_profile(root)
+                self.assertNotIn(hostname, str(error.exception))
 
     def test_generate_only_declared_identity_fields_and_preserve_comments(self):
         root = self.fixture()

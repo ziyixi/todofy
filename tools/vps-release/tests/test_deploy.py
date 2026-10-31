@@ -710,6 +710,7 @@ workers_dev_subdomain="example"
 platform_hostname="fleet.example.test"
 [vps]
 platform_runtime_host="platform-runtime.example.test"
+k3s_api_host="k3s-api.example.test"
 namespace="personal-cloud"
 state_root="/srv/personal-cloud"
 observer_node_key="vps"

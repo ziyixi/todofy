@@ -18,7 +18,7 @@ from cloud_api import (
     request,
     verify_target,
 )
-from fresh_collisions import refuse_conflicts
+from fresh_collisions import refuse_conflicts, refuse_hostname_conflicts
 from generate import bootstrap_infra_files
 from bootstrap_inventory import exported_resources, import_hcl, known_imports
 from private_input import BootstrapError
@@ -127,6 +127,8 @@ def run(private: dict, profile: dict, resources: dict, mode: str, parent: Path,
         bootstrap_gate(plan, mode, tuple(creates))
         if mode in ("fresh", "extend"):
             refuse_conflicts(plan, token, values["account_id"], resources["zone_id"], page_fetch=page_fetch)
+            refuse_hostname_conflicts(plan, token, values["account_id"], resources["zone_id"],
+                                     profile["vps"]["k3s_api_host"], page_fetch=page_fetch)
         if check_only:
             return {"actions": dict(infra_state.counts(summary)), "state_exists": existed,
                     "creates": sorted(item["address"] for item in plan.get("resource_changes", [])

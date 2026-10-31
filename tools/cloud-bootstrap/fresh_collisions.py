@@ -178,3 +178,46 @@ def refuse_conflicts(plan, token, account, zone, *, page_fetch=list_page):
                 raise BootstrapError("FRESH_RESOURCE_NAME_CONFLICT")
         except BootstrapError as error:
             raise BootstrapError(str(error), {"address": address}) from None
+
+
+def refuse_hostname_conflicts(plan, token, account, zone, hostname, *, page_fetch=list_page):
+    """Check the Kubernetes hostname only when its DNS or Access destination is introduced."""
+    changes = {item.get("address"): item.get("change", {}) for item in plan.get("resource_changes", [])}
+    dns = changes.get('cloudflare_dns_record.platform["k3s-api"]', {})
+    app = changes.get('cloudflare_zero_trust_access_application.platform_machine["runtime"]', {})
+    before, after = app.get("before") or {}, app.get("after") or {}
+    added = hostname in _domains(after) and hostname not in _domains(before)
+    if dns.get("actions") != ["create"] and not (app.get("actions") == ["update"] and added):
+        return
+    dns_id = None if dns.get("actions") == ["create"] else (dns.get("after") or {}).get("id")
+    app_id = before.get("id") or after.get("id")
+    records = _inventory(token, f"/zones/{zone}/dns_records", "cloudflare_dns_record", page_fetch)
+    for record in records:
+        name = record.get("name")
+        if not isinstance(name, str):
+            raise BootstrapError("FRESH_RESOURCE_INVENTORY_INVALID")
+        if name.rstrip(".").lower() == hostname and (not dns_id or record.get("id") != dns_id):
+            raise BootstrapError("PLATFORM_HOSTNAME_CONFLICT")
+    # Worker Domains is a SinglePage endpoint; hostname is documented, page/per_page are not.
+    document = page_fetch(token, f"/accounts/{account}/workers/domains", {"hostname": hostname})
+    domains = document.get("result") if isinstance(document, dict) else None
+    if (not isinstance(document, dict) or document.get("success") is not True
+            or not isinstance(domains, list) or len(domains) > PAGE_SIZE
+            or any(not isinstance(domain, dict) for domain in domains)):
+        raise BootstrapError("FRESH_RESOURCE_INVENTORY_INVALID")
+    info = document.get("result_info") or {}
+    if not isinstance(info, dict) or info.get("cursor") or info.get("total_pages") not in (None, 0, 1):
+        raise BootstrapError("FRESH_RESOURCE_INVENTORY_INCOMPLETE")
+    for domain in domains:
+        name = domain.get("hostname")
+        if not isinstance(name, str):
+            raise BootstrapError("FRESH_RESOURCE_INVENTORY_INVALID")
+        if name.rstrip(".").lower() == hostname:
+            raise BootstrapError("PLATFORM_HOSTNAME_CONFLICT")
+    applications = _inventory(token, f"/accounts/{account}/access/apps", "cloudflare_zero_trust_access_application", page_fetch)
+    for application in applications:
+        if app_id and application.get("id") == app_id:
+            continue
+        hosts = {uri.partition("/")[0] for uri in _domains(application)}
+        if any(host == hostname or (host.startswith("*.") and hostname.endswith(host[1:])) for host in hosts):
+            raise BootstrapError("PLATFORM_HOSTNAME_CONFLICT")

@@ -5,5 +5,6 @@ locals {
   platform_zone             = "ziyixi.science"
   fleet_hostname            = "fleet.ziyixi.science"
   platform_runtime_hostname = "platform-runtime.ziyixi.science"
+  platform_k3s_api_hostname = "k3s-api.ziyixi.science"
   platform_access_team      = "ziyixi"
 }

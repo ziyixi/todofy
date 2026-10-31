@@ -55,3 +55,8 @@ first verified API release. See [rebuild](../docs/rebuild.md) for configuration,
 Synthetic tests do not prove Codex login, external providers or a live new server.
 The legacy editorial config-sync process downloads validated content bundles; it does not reconcile
 infrastructure or choose executable releases. System installation and disaster recovery remain privileged.
+
+The owner-authorized native Actions connection manages cluster-scoped Kubernetes resources and new application
+resources. Its short-lived CI identity is separate from the namespace-scoped runtime daemon and business Pods.
+Existing Newsletter and gateway releases retain their drain and physical verification contracts. The private
+runbook owns the initial trust handoff and connection checks.

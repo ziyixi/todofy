@@ -113,6 +113,7 @@ def platform_identity(profile: dict, resources: dict) -> str:
     values = {"platform_zone_id": resources["zone_id"], "platform_zone": profile["zone"],
               "fleet_hostname": profile["platform_hostname"],
               "platform_runtime_hostname": profile["vps"]["platform_runtime_host"],
+              "platform_k3s_api_hostname": profile["vps"]["k3s_api_host"],
               "platform_access_team": profile["access_issuer"].removeprefix("https://").removesuffix(".cloudflareaccess.com")}
     width = max(map(len, values))
     rows = "\n".join("  " + name.ljust(width) + " = " + json.dumps(value) for name, value in values.items())

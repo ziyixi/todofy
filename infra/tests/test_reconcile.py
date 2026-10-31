@@ -14,6 +14,50 @@ import reviewed_plans
 
 
 class Classification(unittest.TestCase):
+    def test_k3s_api_route_uses_only_its_declared_hostname_loopback_and_runtime_audience(self):
+        app, apps, gateway, console, runtime, missing = self.path_rules()
+        hostname = "k3s-api.example.invalid"
+        app = {**app, "destinations": [{"type": "public", "uri": app["domain"]},
+                                      {"type": "public", "uri": hostname}]}
+        api = {"hostname": hostname, "path": None, "service": "tcp://127.0.0.1:6443",
+               "origin_request": runtime["origin_request"]}
+
+        def check(rules, application=app, expected_host=hostname):
+            return reconcile_policy._loopback_ingress(
+                {"ingress": rules}, application, "synthetic", apps, expected_host)
+
+        self.assertTrue(check([gateway, console, runtime, api, missing]))
+        self.assertFalse(check([gateway, console, runtime, missing]))
+        self.assertFalse(check([gateway, console, runtime, api, missing], expected_host="other.example.invalid"))
+        self.assertFalse(check([gateway, console, runtime, api, missing], application={**app, "destinations": []}))
+        for field, value in (("hostname", "*.example.invalid"), ("hostname", app["domain"]),
+                             ("service", "tcp://10.43.0.1:443"), ("service", "https://127.0.0.1:6443"),
+                             ("path", "/.*"), ("origin_request", {}), ("origin_request", None),
+                             ("origin_request", {"access": None})):
+            with self.subTest(field=field, value=value):
+                self.assertFalse(check([gateway, console, runtime, {**api, field: value}, missing]))
+        for changed in ({"required": False}, {"team_name": "foreign"}, {"aud_tag": ["b" * 64]},
+                        {"aud_tag": [app["aud"], "b" * 64]}):
+            with self.subTest(access=changed):
+                origin = {"access": {**api["origin_request"]["access"], **changed}}
+                self.assertFalse(check([gateway, console, runtime, {**api, "origin_request": origin}, missing]))
+        for rules in ([api, gateway, console, runtime, missing], [gateway, console, api, runtime, missing],
+                      [gateway, console, runtime, api, api, missing], [gateway, console, runtime, missing, api]):
+            with self.subTest(order=[rule["service"] for rule in rules]):
+                self.assertFalse(check(rules))
+
+    def test_k3s_api_dns_repair_keeps_the_exact_declared_name_and_tunnel(self):
+        plan = self.dns()
+        record = plan["resource_changes"][0]
+        record["address"] = 'cloudflare_dns_record.platform["k3s-api"]'
+        for side in ("before", "after"):
+            record["change"][side]["name"] = "k3s-api.example.invalid"
+        self.assertEqual(reconcile_policy.manual_reasons(plan, "synthetic", "k3s-api.example.invalid"), [])
+        self.assertTrue(reconcile_policy.manual_reasons(plan, "synthetic", "other.example.invalid"))
+        record["change"]["after"]["content"] = "foreign.example.invalid"
+        self.assertEqual(reconcile_policy.manual_reasons(plan, "synthetic", "k3s-api.example.invalid")[0]["reason"],
+                         "DNS_TARGET_UNSAFE")
+
     def test_gateway_route_keeps_the_exact_path_loopback_and_origin_access(self):
         app = {"domain": "runtime.example.invalid", "aud": "a" * 64}
         gateway_app = {"domain": app["domain"] + "/api/codex/v1/*", "aud": "b" * 64}

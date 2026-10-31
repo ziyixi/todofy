@@ -749,6 +749,14 @@ class ApplyGates(unittest.TestCase):
         document["resource_changes"][0]["type"] = f"weird {SENTINEL_EMAIL}"
         self.assertNotIn(SENTINEL_EMAIL, "".join(infra_state.type_violations(document)))
 
+    def test_only_the_two_declared_platform_dns_instances_are_allowed(self):
+        for key in ("runtime", "k3s-api"):
+            with self.subTest(key=key):
+                document = plan_at([(f'cloudflare_dns_record.platform["{key}"]', ["create"], False)])
+                self.assertEqual(infra_state.type_violations(document), [])
+        document = plan_at([('cloudflare_dns_record.platform["unrelated"]', ["create"], False)])
+        self.assertEqual(infra_state.type_violations(document), ["cloudflare_dns_record"])
+
     def test_frozen_objects_may_be_imported_but_never_written(self):
         for actions, importing, frozen in ((["no-op"], False, []), (["no-op"], True, []), (["update"], False, [BACKUP]),
                                            (["update"], True, [BACKUP]), (["delete", "create"], False, [BACKUP])):
