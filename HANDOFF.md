@@ -9,7 +9,10 @@ Documentation entrypoints are in [docs/README](docs/README.md). Historical waiti
 Root toolchains and dependencies remain authoritative. The synthetic private target and repository/CI audits pass
 locally; all 12,356 public query targets are identical with and without an initialized submodule. Private CI checks
 the recorded commit, gates publication and restores public caches without saving private outputs. Actual GitHub
-checkout/build/test, branch/main CI and reconciliation remain pending.
+checkout/build/test has passed, including exact commit verification and no cache-save post-step. A Newsletter CI
+assertion that assumed exactly three gate dependencies has been updated to require its own dependencies; the root
+CI tests own the complete gate membership and private-failure cases. Updated branch/main CI and reconciliation
+remain pending.
 
 ## Latest verified release
 

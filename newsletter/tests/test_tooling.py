@@ -236,7 +236,7 @@ def test_ci_requires_leaf_checks_and_artifacts_before_publication():
     assert "ci/run.py --plan" in "\n".join(
         step.get("run", "") for step in jobs["checks"]["steps"]
     )
-    assert set(jobs["gate"]["needs"]) == {"changes", "checks", "artifacts"}
+    assert {"changes", "checks", "artifacts"} <= set(jobs["gate"]["needs"])
     assert "needs.gate.result == 'success'" in jobs["newsletter-deploy"]["if"]
     assert "github.ref == 'refs/heads/main'" in jobs["newsletter-deploy"]["if"]
     checked_jobs = [job for job in jobs.values() if "steps" in job]
