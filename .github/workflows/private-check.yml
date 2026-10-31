@@ -1,0 +1,51 @@
+name: Private Bazel
+
+on:
+  workflow_call:
+    inputs:
+      revision:
+        type: string
+        required: true
+    secrets:
+      private_ssh_key:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Build and test pinned private sources
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ziyixi/todofy-private
+          path: private
+          ref: ${{ inputs.revision }}
+          ssh-key: ${{ secrets.private_ssh_key }}
+          persist-credentials: false
+      - name: Verify the parent submodule revision
+        env:
+          PRIVATE_REVISION: ${{ inputs.revision }}
+        run: |
+          test "$(git rev-parse HEAD:private)" = "$PRIVATE_REVISION"
+          test "$(git -C private rev-parse HEAD)" = "$PRIVATE_REVISION"
+      - uses: ./.github/actions/setup-bazel
+      # Restore public dependencies/actions; private outputs never enter an uploaded cache.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/personal-cloud-bazel
+          key: bazel-9.3.1-${{ runner.os }}-go-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-${{ github.sha }}
+          restore-keys: |
+            bazel-9.3.1-${{ runner.os }}-go-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-
+            bazel-9.3.1-${{ runner.os }}-go-
+      - name: Build and test private targets
+        run: |
+          options=("--repository_cache=$HOME/.cache/personal-cloud-bazel/repository" "--disk_cache=$HOME/.cache/personal-cloud-bazel/actions")
+          bazel build @private//:private "${options[@]}"
+          bazel test @private//:check "${options[@]}"

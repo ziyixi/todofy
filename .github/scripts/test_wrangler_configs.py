@@ -768,14 +768,17 @@ class Workflow(unittest.TestCase):
 
     def test_no_job_before_the_deploys_can_reach_production(self):
         """Every branch push runs "Changes", the check jobs and "CI gate" with no environment, and a push to main
-        publishes only checked artifacts. None of these jobs, nor the workflow's top level, may read a secret, run in an environment,
-        deploy for real or touch the account with wrangler."""
+        publishes only checked artifacts. Public checks have no secrets; the private check only receives its
+        repository-read key. No pre-gate job may deploy or touch the Cloudflare account."""
         self.assertEqual(production_reach(effective_ci().split("\njobs:\n", 1)[0]), [])
         before = {name: block for name, block in self.jobs.items() if name == "gate" or "gate" not in needs(block)}
-        self.assertEqual(set(before), {"changes", "checks", "artifacts", "gate"})
+        self.assertEqual(set(before), {"changes", "checks", "artifacts", "private", "gate"})
         for name, block in before.items():
             with self.subTest(job=name):
-                self.assertEqual(production_reach(block), [])
+                self.assertEqual(
+                    production_reach(block),
+                    ["reads a secret", "passes secrets to a called workflow"] if name == "private" else [],
+                )
 
     def test_the_production_reach_detector(self):
         """production_reach sees each way into production, and not the checks' dry-run with a secrets *file*."""

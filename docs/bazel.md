@@ -48,6 +48,25 @@ Node remains 26.9.0 and Python 3.14.7. Python uses the pinned standalone archive
 Worker keeps its own existing `pylock.toml` runtime contract. Package installation is separate from Bazel execution;
 checks do not depend on a local `node_modules` or `.venv`.
 
+## Private submodule
+
+The private repository `ziyixi/todofy-private` is pinned at `private/` by a Git submodule. Root `MODULE.bazel`
+declares `@private` through native `local_repository(path = "private")`; `.bazelignore` keeps that directory out of
+the public `//...` graph. Public targets work without initializing the submodule.
+
+Root toolchains and dependency manifests/locks remain authoritative. The private repository has `REPO.bazel` and
+per-directory `BUILD.bazel` files, with no separate `MODULE.bazel` or dependency manifests. Run its targets from the
+parent repository:
+
+```sh
+git submodule update --init private
+bazel build @private//:private
+bazel test @private//:check
+```
+
+Push a private commit before updating the parent's gitlink to it, so every recorded revision can be checked out.
+[CI/CD](ci-cd.md#private-checks) describes its separate check and cache boundary.
+
 ## Targets
 
 | Target | Result |

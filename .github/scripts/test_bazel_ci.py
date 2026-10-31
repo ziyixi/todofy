@@ -32,16 +32,21 @@ class BazelCI(unittest.TestCase):
 
     def test_gate_requires_selected_checks_and_artifacts(self):
         gate = self.jobs["gate"]
-        self.assertEqual(set(gate["needs"]), {"changes", "checks", "artifacts"})
+        self.assertEqual(
+            set(gate["needs"]), {"changes", "checks", "artifacts", "private"}
+        )
         script = gate["steps"][0]["run"]
-        for checks, artifacts, expected in (
-            ("success", "success", 0),
-            ("failure", "success", 1),
-            ("cancelled", "success", 1),
-            ("skipped", "success", 1),
-            ("success", "failure", 1),
+        for checks, artifacts, private, expected in (
+            ("success", "success", "success", 0),
+            ("failure", "success", "success", 1),
+            ("cancelled", "success", "success", 1),
+            ("skipped", "success", "success", 1),
+            ("success", "failure", "success", 1),
+            ("success", "success", "failure", 1),
+            ("success", "success", "cancelled", 1),
+            ("success", "success", "skipped", 1),
         ):
-            with self.subTest(checks=checks, artifacts=artifacts):
+            with self.subTest(checks=checks, artifacts=artifacts, private=private):
                 result = subprocess.run(
                     ["bash", "-e", "-c", script],
                     env={
@@ -51,6 +56,8 @@ class BazelCI(unittest.TestCase):
                         "ARTIFACTS": artifacts,
                         "HAS_CHECKS": "true",
                         "HAS_ARTIFACTS": "true",
+                        "PRIVATE": private,
+                        "HAS_PRIVATE": "true",
                     },
                     check=False,
                 )
@@ -65,11 +72,56 @@ class BazelCI(unittest.TestCase):
                     "ARTIFACTS": "skipped",
                     "HAS_CHECKS": "false",
                     "HAS_ARTIFACTS": "false",
+                    "PRIVATE": "skipped",
+                    "HAS_PRIVATE": "false",
                 },
                 check=False,
             ).returncode,
             0,
         )
+
+    def test_private_sources_are_pinned_and_never_saved_in_a_cache(self):
+        caller = self.jobs["private"]
+        self.assertIn("github.repository == 'ziyixi/todofy'", caller["if"])
+        self.assertEqual(
+            caller["with"]["revision"], "${{ needs.changes.outputs.private_sha }}"
+        )
+        self.assertEqual(
+            caller["secrets"],
+            {"private_ssh_key": "${{ secrets.TODOFY_PRIVATE_SSH_KEY }}"},
+        )
+        workflow = workflow_data(ROOT / ".github/workflows/private-check.yml")
+        self.assertEqual(set(workflow["on"]), {"workflow_call"})
+        self.assertEqual(workflow["permissions"], {"contents": "read"})
+        job = workflow["jobs"]["check"]
+        self.assertNotIn("environment", job)
+        steps = job["steps"]
+        checkout = next(
+            step["with"]
+            for step in steps
+            if step.get("with", {}).get("path") == "private"
+        )
+        self.assertEqual(checkout["repository"], "ziyixi/todofy-private")
+        self.assertEqual(checkout["ref"], "${{ inputs.revision }}")
+        self.assertEqual(checkout["persist-credentials"], "false")
+        cache_actions = [
+            step["uses"].split("@")[0]
+            for step in steps
+            if "cache" in step.get("uses", "")
+        ]
+        self.assertEqual(cache_actions, ["actions/cache/restore"])
+        self.assertFalse(
+            any("upload-artifact@" in step.get("uses", "") for step in steps)
+        )
+
+    def test_public_planning_skips_private_submodule_initialization(self):
+        step = next(
+            step for step in self.jobs["changes"]["steps"] if step.get("id") == "plan"
+        )
+        self.assertEqual(step["env"]["GIT_CONFIG_COUNT"], "1")
+        self.assertEqual(step["env"]["GIT_CONFIG_KEY_0"], "submodule.private.update")
+        self.assertEqual(step["env"]["GIT_CONFIG_VALUE_0"], "none")
+        self.assertIn("private", (ROOT / ".bazelignore").read_text().splitlines())
 
     def test_worker_publication_uses_checked_sha_artifacts_and_main_gate(self):
         for name, job in self.jobs.items():

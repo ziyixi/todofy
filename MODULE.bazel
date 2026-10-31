@@ -2,6 +2,13 @@ module(name = "personal_cloud")
 
 new_local_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:local.bzl", "new_local_repository")
 
+local_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:local.bzl", "local_repository")
+
+local_repository(
+    name = "private",
+    path = "private",
+)
+
 new_local_repository(
     name = "website_content",
     build_file_content = 'filegroup(name="files",srcs=glob([".generated/**","public/media/**","public/_img/**"],allow_empty=True),visibility=["//visibility:public"])',

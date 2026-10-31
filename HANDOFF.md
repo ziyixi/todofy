@@ -5,7 +5,11 @@ Documentation entrypoints are in [docs/README](docs/README.md). Historical waiti
 
 ## Current work
 
-No active rollout. Separate business and recovery acceptance remains listed below.
+`codex/private-submodule-ci` is adding the approved private repository as the root `private/` submodule.
+Root toolchains and dependencies remain authoritative. The synthetic private target and repository/CI audits pass
+locally; all 12,356 public query targets are identical with and without an initialized submodule. Private CI checks
+the recorded commit, gates publication and restores public caches without saving private outputs. Actual GitHub
+checkout/build/test, branch/main CI and reconciliation remain pending.
 
 ## Latest verified release
 

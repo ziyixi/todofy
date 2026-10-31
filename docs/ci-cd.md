@@ -37,6 +37,17 @@ publication checks execute each time; cached unit tests do not substitute for th
 interpreters, generators, dependency resolutions and OCI bases are pinned. Ubuntu/Docker integration setup remains
 an explicit CI environment requirement.
 
+## Private checks
+
+The reusable [Private Bazel](../.github/workflows/private-check.yml) workflow runs alongside public checks and is
+required by `CI gate` for builds with private access. It checks out the exact `private/` gitlink recorded by the
+parent revision, then builds `@private//:private` and tests `@private//:check` from the parent repository. Push the
+private commit before updating the parent gitlink. Fork builds without private access skip this job; public checks
+use the same public graph without an initialized submodule.
+
+The private job restores the public Bazel cache but never saves a cache or uploads build/test artifacts. Public
+cache producers run without the private checkout.
+
 ## Checked artifacts
 
 The credential-free artifact matrix builds only selected Worker archives, Linux OCI images and extension ZIPs.
