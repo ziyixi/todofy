@@ -9,8 +9,8 @@ before changing a boundary. Source and current contracts supersede the retired r
 ```sh
 bazel test //todofy:check
 bazel build //todofy
-bazel test //todofy:runtime_tests --local_test_jobs=1
-bazel test //todofy:runtime_test_routing
+bazel test //todofy/tests/runtime:runtime_tests --local_test_jobs=1
+bazel test //todofy/tests/runtime:test_routing
 ```
 
 Bazel declares the compiled UI, fixed Node/workerd/Pyodide/SDK and synthetic upstreams. A scenario file runs whole,

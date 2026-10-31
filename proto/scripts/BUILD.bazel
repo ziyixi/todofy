@@ -1,0 +1,57 @@
+load("@rules_python//python:defs.bzl", "py_test")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//proto:__subpackages__"])
+
+exports_files(
+    glob(
+        [
+            "*.ts",
+            "*.sh",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//proto:__subpackages__"],
+)
+
+py_test(
+    name = "rules_selftest",
+    timeout = "long",
+    srcs = ["//proto/tools:bazel_selftest.py"],
+    args = [
+        "--buf",
+        "$(location //tools/bazel:buf)",
+        "--config",
+        "$(location //proto:buf.yaml)",
+        "--retired",
+        "$(location //proto:retired.json)",
+        "--script",
+        "$(location :rules-selftest.sh)",
+        "--source",
+        "$(locations //proto:all_proto_sources)",
+    ],
+    data = [
+        ":rules-selftest.sh",
+        "//proto:all_proto_sources",
+        "//proto:buf.yaml",
+        "//proto:retired.json",
+        "//proto:reviewed-rules.json",
+        "//tools/bazel:buf",
+    ],
+    legacy_create_init = False,
+    main = "//proto/tools:bazel_selftest.py",
+    deps = [
+        "//proto/tools:breaking_rules",
+        "@python_deps//pyyaml",
+    ],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["*"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)

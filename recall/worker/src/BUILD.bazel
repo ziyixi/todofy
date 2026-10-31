@@ -1,0 +1,510 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//tools/bazel:js.bzl", "copied_source_files", "ts_source_library")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//recall:__subpackages__"])
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//recall:__subpackages__"],
+)
+
+copied_source_files(
+    name = "types_srcs",
+    srcs = [
+        "answers.ts",
+        "api.ts",
+        "archive.ts",
+        "auth.ts",
+        "backup.ts",
+        "blobs.ts",
+        "diagnostic.ts",
+        "dropbox.ts",
+        "env.ts",
+        "feed.ts",
+        "fts.ts",
+        "http.ts",
+        "ids.ts",
+        "index.ts",
+        "ingest.ts",
+        "limits.ts",
+        "machine.ts",
+        "model.ts",
+        "ops.ts",
+        "ops-status.ts",
+        "reasons.ts",
+        "retention.ts",
+        "screenshot.ts",
+        "search.ts",
+        "service.ts",
+        "settings.ts",
+        "state.ts",
+        "status.ts",
+        "store.ts",
+        "timeline.ts",
+        "tokens.ts",
+    ],
+)
+
+copied_source_files(
+    name = "application_sources_srcs",
+    srcs = glob(
+        ["**"],
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+copied_source_files(
+    name = "lint_sources",
+    srcs = glob(
+        [
+            "**/*.ts",
+            "**/*.tsx",
+        ],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+ts_source_library(
+    name = "reasons",
+    srcs = [":reasons.ts"],
+    deps = [
+        "//proto/common/errors/v1:ts",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+ts_source_library(
+    name = "answers",
+    srcs = [":answers.ts"],
+    deps = [
+        ":reasons",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+ts_source_library(
+    name = "blobs",
+    srcs = [":blobs.ts"],
+)
+
+ts_source_library(
+    name = "limits",
+    srcs = [":limits.ts"],
+)
+
+ts_source_library(
+    name = "store",
+    srcs = [":store.ts"],
+    deps = [":limits"],
+)
+
+ts_source_library(
+    name = "feed",
+    srcs = [":feed.ts"],
+    deps = [
+        ":answers",
+        ":blobs",
+        ":limits",
+        ":store",
+        "//proto/recall/archive/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "archive",
+    srcs = [":archive.ts"],
+    deps = [
+        ":feed",
+        ":limits",
+        ":store",
+        "//proto/recall/archive/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "screenshot",
+    srcs = [":screenshot.ts"],
+    deps = ["//recall/shared:url"],
+)
+
+ts_source_library(
+    name = "dropbox",
+    srcs = [":dropbox.ts"],
+    deps = [
+        ":blobs",
+        ":limits",
+    ],
+)
+
+ts_source_library(
+    name = "model",
+    srcs = [":model.ts"],
+    deps = [
+        ":blobs",
+        ":feed",
+        ":limits",
+        ":store",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+    ],
+)
+
+ts_source_library(
+    name = "backup",
+    srcs = [":backup.ts"],
+    deps = [
+        ":archive",
+        ":blobs",
+        ":dropbox",
+        ":feed",
+        ":limits",
+        ":model",
+        ":store",
+        "//packages/edge-auth:lib",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:protobuf",
+    ],
+)
+
+ts_source_library(
+    name = "fts",
+    srcs = [":fts.ts"],
+    deps = [
+        ":limits",
+        ":store",
+        "//recall/shared:segment",
+        "//recall/shared:url",
+    ],
+)
+
+ts_source_library(
+    name = "ids",
+    srcs = [":ids.ts"],
+)
+
+ts_source_library(
+    name = "settings",
+    srcs = [":settings.ts"],
+    deps = [
+        ":ids",
+        ":limits",
+        ":store",
+        "//recall/shared:denylist",
+    ],
+)
+
+ts_source_library(
+    name = "retention",
+    srcs = [":retention.ts"],
+    deps = [
+        ":backup",
+        ":blobs",
+        ":fts",
+        ":limits",
+        ":settings",
+        ":store",
+    ],
+)
+
+ts_source_library(
+    name = "search",
+    srcs = [":search.ts"],
+    deps = [
+        ":limits",
+        ":store",
+        "//recall/shared:segment",
+    ],
+)
+
+ts_source_library(
+    name = "diagnostic",
+    srcs = [":diagnostic.ts"],
+    deps = [
+        ":store",
+        "//proto/recall/ingest/v1:ts",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "tokens",
+    srcs = [":tokens.ts"],
+    deps = [
+        ":blobs",
+        ":limits",
+        ":model",
+        ":store",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:protobuf",
+    ],
+)
+
+ts_source_library(
+    name = "status",
+    srcs = [":status.ts"],
+    deps = [
+        ":backup",
+        ":diagnostic",
+        ":feed",
+        ":limits",
+        ":model",
+        ":settings",
+        ":store",
+        ":tokens",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:protobuf",
+    ],
+)
+
+ts_source_library(
+    name = "timeline",
+    srcs = [":timeline.ts"],
+    deps = [
+        ":limits",
+        ":store",
+    ],
+)
+
+ts_source_library(
+    name = "api",
+    srcs = [":api.ts"],
+    deps = [
+        ":archive",
+        ":backup",
+        ":blobs",
+        ":dropbox",
+        ":limits",
+        ":model",
+        ":reasons",
+        ":retention",
+        ":screenshot",
+        ":search",
+        ":settings",
+        ":status",
+        ":store",
+        ":timeline",
+        ":tokens",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:field-mask",
+        "//proto/ts:filter",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:page-token",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+        "//recall/shared:denylist",
+        "//recall/shared:url",
+    ],
+)
+
+ts_source_library(
+    name = "ingest",
+    srcs = [":ingest.ts"],
+    deps = [
+        ":answers",
+        ":blobs",
+        ":diagnostic",
+        ":feed",
+        ":fts",
+        ":limits",
+        ":screenshot",
+        ":settings",
+        ":store",
+        "//proto/recall/archive/v1:ts",
+        "//proto/recall/ingest/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+)
+
+ts_source_library(
+    name = "ops-status",
+    srcs = [":ops-status.ts"],
+    deps = [
+        ":backup",
+        ":ingest",
+        ":limits",
+        ":status",
+        ":store",
+        "//proto/ops/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "module_group_23",
+    srcs = [
+        ":env.ts",
+        ":state.ts",
+    ],
+    deps = [
+        ":answers",
+        ":api",
+        ":archive",
+        ":backup",
+        ":blobs",
+        ":dropbox",
+        ":feed",
+        ":ingest",
+        ":limits",
+        ":ops-status",
+        ":reasons",
+        ":retention",
+        ":search",
+        ":store",
+        ":tokens",
+        "//proto/ops/v1:ts",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:rpc-status",
+        "//recall/shared:denylist",
+    ],
+)
+
+alias(
+    name = "env",
+    actual = ":module_group_23",
+)
+
+alias(
+    name = "state",
+    actual = ":module_group_23",
+)
+
+ts_source_library(
+    name = "auth",
+    srcs = [":auth.ts"],
+    deps = [
+        ":module_group_23",
+        "//packages/edge-auth:lib",
+    ],
+)
+
+ts_source_library(
+    name = "machine",
+    srcs = [":machine.ts"],
+    deps = [
+        ":answers",
+        ":blobs",
+        ":limits",
+        ":module_group_23",
+        ":tokens",
+        "//packages/edge-auth:lib",
+    ],
+)
+
+ts_source_library(
+    name = "http",
+    srcs = [":http.ts"],
+    deps = [
+        ":answers",
+        ":auth",
+        ":backup",
+        ":ids",
+        ":limits",
+        ":machine",
+        ":module_group_23",
+        ":reasons",
+        "//packages/edge-auth:lib",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+ts_source_library(
+    name = "ops",
+    srcs = [":ops.ts"],
+    deps = [
+        ":module_group_23",
+        "//proto/ops/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "service",
+    srcs = [":service.ts"],
+    deps = [
+        ":ids",
+        ":module_group_23",
+        ":reasons",
+        "//packages/edge-auth:lib",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+ts_source_library(
+    name = "index",
+    srcs = [":index.ts"],
+    deps = [
+        ":http",
+        ":module_group_23",
+        ":ops",
+        ":service",
+    ],
+)
+
+js_library(
+    name = "lib",
+    deps = [
+        ":answers",
+        ":api",
+        ":archive",
+        ":auth",
+        ":backup",
+        ":blobs",
+        ":diagnostic",
+        ":dropbox",
+        ":feed",
+        ":fts",
+        ":http",
+        ":ids",
+        ":index",
+        ":ingest",
+        ":limits",
+        ":machine",
+        ":model",
+        ":module_group_23",
+        ":ops",
+        ":ops-status",
+        ":reasons",
+        ":retention",
+        ":screenshot",
+        ":search",
+        ":service",
+        ":settings",
+        ":status",
+        ":store",
+        ":timeline",
+        ":tokens",
+    ],
+)
+
+js_library(
+    name = "entry_metadata",
+    srcs = [":index.ts"],
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+)

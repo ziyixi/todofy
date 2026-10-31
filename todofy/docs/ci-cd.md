@@ -7,8 +7,8 @@ the scripts the publisher consumes. See the root [CI/CD guide](../../docs/ci-cd.
 ```sh
 bazel build //todofy
 bazel test //todofy:check
-bazel test //todofy:runtime_tests --local_test_jobs=1
-bazel test //todofy:runtime_test_routing
+bazel test //todofy/tests/runtime:runtime_tests --local_test_jobs=1
+bazel test //todofy/tests/runtime:test_routing
 ```
 
 ## Checks

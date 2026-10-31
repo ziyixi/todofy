@@ -73,8 +73,12 @@ class Guard(unittest.TestCase):
         self.assertEqual(run(), [])
 
     def test_bazel_metadata_is_not_an_opentofu_input(self):
-        self.assertEqual(run({"BUILD.bazel": 'filegroup(name = "config", srcs = ["versions.tf"])\n'}), [])
-        self.assert_flags({"values.bazel": "sensitive values\n"}, "not a file kind")
+        for name in ("BUILD.bazel", "scripts/BUILD.bazel", "tests/BUILD.bazel", "scripts/support/BUILD.bazel"):
+            with self.subTest(name=name):
+                self.assertEqual(run({name: 'filegroup(name = "config", srcs = ["versions.tf"])\n'}), [])
+        for name in ("values.bazel", "scripts/values.bazel", "tests/BUILD.bazel.bak"):
+            with self.subTest(name=name):
+                self.assert_flags({name: "sensitive values\n"}, "not a file kind")
 
     def test_bare_labels_are_read_like_quoted_ones(self):
         self.assert_flags({"extra.tf": TERRAFORM_DATA}, "resource type outside the monorepo boundary")

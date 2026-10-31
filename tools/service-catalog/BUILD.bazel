@@ -1,5 +1,5 @@
-load("@rules_python//python:defs.bzl", "py_library", "py_test")
-load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("@rules_python//python:defs.bzl", "py_library")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -15,53 +15,10 @@ py_library(
     srcs = ["inventory.py"],
     imports = ["."],
     deps = [
+        ":catalog",
         "//tools/cloud-config:cloud_profile",
         "//tools/cloud-release:api",
         "//tools/cloud-release:cloudflare",
-        "//tools/service-catalog:catalog",
-    ],
-)
-
-py_test(
-    name = "test_catalog_test",
-    srcs = [
-        "tests/test_catalog.py",
-        "//tools/bazel/python:unittest_main.py",
-    ],
-    args = ["test_catalog"],
-    data = [
-        ":python_sources",
-        "//tools:repository_test_data",
-    ],
-    imports = [
-        ".",
-        "tests",
-    ],
-    legacy_create_init = False,
-    main = "//tools/bazel/python:unittest_main.py",
-    deps = ["//tools/service-catalog:catalog"],
-)
-
-py_test(
-    name = "test_inventory_test",
-    srcs = [
-        "tests/test_inventory.py",
-        "//tools/bazel/python:unittest_main.py",
-    ],
-    args = ["test_inventory"],
-    data = [
-        ":python_sources",
-        "//tools:repository_test_data",
-    ],
-    imports = [
-        ".",
-        "tests",
-    ],
-    legacy_create_init = False,
-    main = "//tools/bazel/python:unittest_main.py",
-    deps = [
-        "//tools/service-catalog:catalog",
-        "//tools/service-catalog:inventory",
     ],
 )
 
@@ -73,37 +30,17 @@ filegroup(
             "*.sh",
             "*.mjs",
             "*.json",
-            "tests/*.py",
-            "tests/*.json",
         ],
         allow_empty = True,
-    ),
+    ) + [
+        "//tools/service-catalog/tests:fixtures",
+        "//tools/service-catalog/tests:python_sources",
+    ],
 )
 
 test_suite(
     name = "check",
-    tests = [
-        ":test_catalog_test",
-        ":test_inventory_test",
-    ],
+    tests = ["//tools/service-catalog/tests:check"],
 )
 
-filegroup(
-    name = "source_audit_files",
-    srcs = glob(
-        [
-            "*",
-            "tests/**",
-        ],
-        allow_empty = True,
-        exclude = SOURCE_AUDIT_EXCLUDES,
-    ) + glob(
-        [
-            ".env.example",
-            ".env.*.example",
-            ".dev.vars.example",
-        ],
-        allow_empty = True,
-    ),
-    visibility = ["//visibility:public"],
-)
+source_audit_files(deps = ["//tools/service-catalog/tests:source_audit_files"])

@@ -1,0 +1,201 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//tools/bazel:js.bzl", "copied_source_files", "ts_source_library")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//fleet:__subpackages__"])
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//fleet:__subpackages__"],
+)
+
+copied_source_files(
+    name = "types_srcs",
+    srcs = [
+        "env.ts",
+        "health.ts",
+        "http.ts",
+        "index.ts",
+        "metrics.ts",
+        "newsletter-config.ts",
+        "ops.ts",
+        "receipt.ts",
+        "report.ts",
+        "runtime.ts",
+        "state.ts",
+    ],
+)
+
+copied_source_files(
+    name = "web_declarations_srcs",
+    srcs = ["newsletter-config.ts"],
+)
+
+copied_source_files(
+    name = "application_sources_srcs",
+    srcs = glob(
+        ["**"],
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+copied_source_files(
+    name = "lint_sources",
+    srcs = glob(
+        ["**/*.ts"],
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+ts_source_library(
+    name = "metrics",
+    srcs = [":metrics.ts"],
+    deps = ["//proto/fleet/telemetry/v1:ts"],
+)
+
+ts_source_library(
+    name = "runtime",
+    srcs = [":runtime.ts"],
+    deps = [
+        "//proto/fleet/telemetry/v1:ts",
+        "//proto/platform/runtime/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "report",
+    srcs = [":report.ts"],
+    deps = [
+        ":metrics",
+        ":runtime",
+        "//proto/fleet/telemetry/v1:ts",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "newsletter-config",
+    srcs = [":newsletter-config.ts"],
+    deps = ["//proto/fleet/telemetry/v1:ts"],
+)
+
+ts_source_library(
+    name = "health",
+    srcs = [":health.ts"],
+    deps = [
+        ":newsletter-config",
+        ":report",
+        ":runtime",
+        "//proto/ops/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "module_group_5",
+    srcs = [
+        ":env.ts",
+        ":state.ts",
+    ],
+    deps = [
+        ":health",
+        ":metrics",
+        ":report",
+        "//proto/fleet/ui/v1:ts",
+        "//proto/ops/v1:ts",
+        "//proto/ts:wire-json",
+    ],
+)
+
+alias(
+    name = "env",
+    actual = ":module_group_5",
+)
+
+alias(
+    name = "state",
+    actual = ":module_group_5",
+)
+
+ts_source_library(
+    name = "receipt",
+    srcs = [":receipt.ts"],
+    deps = [
+        ":module_group_5",
+        ":report",
+    ],
+)
+
+ts_source_library(
+    name = "http",
+    srcs = [":http.ts"],
+    deps = [
+        ":metrics",
+        ":module_group_5",
+        ":receipt",
+        ":report",
+        "//packages/edge-auth:lib",
+        "//proto/fleet/ui/v1:ts",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+ts_source_library(
+    name = "ops",
+    srcs = [":ops.ts"],
+    deps = [
+        ":module_group_5",
+        "//proto/ops/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "index",
+    srcs = [":index.ts"],
+    deps = [
+        ":http",
+        ":module_group_5",
+        ":ops",
+    ],
+)
+
+js_library(
+    name = "lib",
+    deps = [
+        ":health",
+        ":http",
+        ":index",
+        ":metrics",
+        ":module_group_5",
+        ":newsletter-config",
+        ":ops",
+        ":receipt",
+        ":report",
+        ":runtime",
+    ],
+)
+
+js_library(
+    name = "newsletter_config_web",
+    srcs = [":newsletter-config.ts"],
+    deps = ["//fleet/worker:web_declarations"],
+)
+
+js_library(
+    name = "entry_metadata",
+    srcs = [":index.ts"],
+)
+
+js_library(
+    name = "env_metadata",
+    srcs = [":env.ts"],
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+)

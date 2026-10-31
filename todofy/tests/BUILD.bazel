@@ -1,0 +1,76 @@
+load("@rules_python//python:defs.bzl", "py_library")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//todofy:__subpackages__"])
+
+py_library(
+    name = "mail_contract",
+    srcs = ["mail_contract.py"],
+    imports = [".."],
+)
+
+filegroup(
+    name = "pytest_setup_data",
+    srcs = [
+        "//todofy/tests/runtime:python_sources",
+        "//todofy/tests/unit:test_backoff.py",
+    ],
+)
+
+test_suite(
+    name = "host_python_tests",
+    tests = [
+        "//todofy/tests/fakes:host_fakes_test",
+        "//todofy/tools:host_backup_restore_test",
+        "//todofy/tools:host_smoke_webhook_test",
+        "//todofy/tools/legacy_migration:host_legacy_snapshot_test",
+        "//todofy/tools/legacy_migration:host_legacy_to_d1_test",
+    ],
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        ":host_python_tests",
+        "//todofy/checks:ruff_check_test",
+        "//todofy/checks:ruff_format_test",
+        "//todofy/tests/fakes:check",
+        "//todofy/tests/runtime:check",
+        "//todofy/tests/unit:check",
+    ],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ) + [
+        "//todofy/tests/fakes:python_sources",
+        "//todofy/tests/runtime:python_sources",
+        "//todofy/tests/unit:python_sources",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + [
+        "//todofy/tests/fakes:source_audit_files",
+        "//todofy/tests/runtime:source_audit_files",
+        "//todofy/tests/unit:source_audit_files",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)

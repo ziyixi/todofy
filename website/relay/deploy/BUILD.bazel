@@ -1,0 +1,26 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//website:bazel.bzl", "website_sources")
+
+package(default_visibility = ["//website:__subpackages__"])
+
+exports_files(
+    glob(
+        ["*.mjs"],
+        allow_empty = True,
+    ),
+    visibility = ["//website:__subpackages__"],
+)
+
+js_library(
+    name = "vars",
+    srcs = [":deploy-vars.mjs"],
+    visibility = ["//visibility:public"],
+    deps = ["//tools/cloud-config:worker-secrets"],
+)
+
+exports_files(
+    ["retire-secrets.py"],
+    visibility = ["//visibility:public"],
+)
+
+website_sources()

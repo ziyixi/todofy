@@ -1,0 +1,595 @@
+load("//tools/bazel:js.bzl", "copied_source_files", "ts_source_library")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//tasks:__subpackages__"])
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//tasks:__subpackages__"],
+)
+
+copied_source_files(
+    name = "types_srcs",
+    srcs = glob(
+        ["*.ts"],
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+copied_source_files(
+    name = "application_sources_srcs",
+    srcs = glob(
+        ["**"],
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+copied_source_files(
+    name = "lint_sources",
+    srcs = glob(
+        ["**/*.ts"],
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+ts_source_library(
+    name = "api",
+    srcs = [":api.ts"],
+    deps = [
+        ":catalog",
+        ":env",
+        ":errors",
+        ":focus",
+        ":focus-entries",
+        ":focus-timer",
+        ":goal-model",
+        ":goal-progress",
+        ":goal-read",
+        ":goal-write",
+        ":gtd-report",
+        ":history",
+        ":mail",
+        ":model",
+        ":plan",
+        ":review",
+        ":task-copy",
+        ":task-order",
+        ":task-read",
+        ":task-write",
+        "//packages/task-dates:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+    ],
+)
+
+ts_source_library(
+    name = "auth",
+    srcs = [":auth.ts"],
+    deps = [
+        ":env",
+        "//packages/edge-auth:lib",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+alias(
+    name = "backup-runner",
+    actual = ":cycle_backup_runner",
+)
+
+ts_source_library(
+    name = "backup",
+    srcs = [":backup.ts"],
+)
+
+ts_source_library(
+    name = "catalog-counts",
+    srcs = [":catalog-counts.ts"],
+    deps = [
+        ":errors",
+        ":filters",
+        ":model",
+        "//packages/task-dates:lib",
+        "//proto/tasks/ui/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "catalog-delete",
+    srcs = [":catalog-delete.ts"],
+    deps = [
+        ":errors",
+        ":model",
+        ":receipts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+    ],
+)
+
+ts_source_library(
+    name = "catalog",
+    srcs = [":catalog.ts"],
+    deps = [
+        ":catalog-counts",
+        ":catalog-delete",
+        ":errors",
+        ":filters",
+        ":model",
+        ":receipts",
+        ":task-moves",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:field-mask",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+alias(
+    name = "env",
+    actual = ":cycle_backup_runner",
+)
+
+ts_source_library(
+    name = "errors",
+    srcs = [":errors.ts"],
+    deps = ["//proto/ts:rpc-status"],
+)
+
+ts_source_library(
+    name = "filters",
+    srcs = [":filters.ts"],
+    deps = [
+        ":errors",
+        "//packages/task-dates:lib",
+    ],
+)
+
+ts_source_library(
+    name = "focus-entries",
+    srcs = [":focus-entries.ts"],
+    deps = [
+        ":errors",
+        ":focus",
+        ":model",
+        ":receipts",
+        "//packages/task-dates:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "focus-timer",
+    srcs = [":focus-timer.ts"],
+    deps = [
+        ":errors",
+        ":focus",
+        ":model",
+        ":receipts",
+        "//packages/task-dates:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "focus",
+    srcs = [":focus.ts"],
+    deps = [
+        ":errors",
+        ":model",
+        ":planning",
+        ":receipts",
+        "//packages/task-dates:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "goal-model",
+    srcs = [":goal-model.ts"],
+    deps = [
+        ":errors",
+        ":model",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+    ],
+)
+
+ts_source_library(
+    name = "goal-progress",
+    srcs = [":goal-progress.ts"],
+    deps = [
+        ":errors",
+        ":goal-model",
+        ":goal-validation",
+        ":model",
+        ":receipts",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:page-token",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "goal-read",
+    srcs = [":goal-read.ts"],
+    deps = [
+        ":errors",
+        ":goal-model",
+        ":model",
+        "//packages/task-dates:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:protobuf",
+    ],
+)
+
+ts_source_library(
+    name = "goal-validation",
+    srcs = [":goal-validation.ts"],
+    deps = [
+        ":errors",
+        ":focus",
+        ":goal-model",
+        ":goal-read",
+        ":model",
+        "//proto/ts:field-mask",
+    ],
+)
+
+ts_source_library(
+    name = "goal-write",
+    srcs = [":goal-write.ts"],
+    deps = [
+        ":errors",
+        ":focus",
+        ":goal-model",
+        ":goal-read",
+        ":goal-validation",
+        ":model",
+        ":receipts",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "gtd-report",
+    srcs = [":gtd-report.ts"],
+    deps = [
+        ":errors",
+        ":focus",
+        ":planning",
+        "//packages/task-dates:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:protobuf",
+    ],
+)
+
+alias(
+    name = "gtd",
+    actual = ":cycle_backup_runner",
+)
+
+ts_source_library(
+    name = "history",
+    srcs = [":history.ts"],
+    deps = [
+        ":errors",
+        ":model",
+        ":task-read",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:page-token",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+    ],
+)
+
+alias(
+    name = "http",
+    actual = ":cycle_http",
+)
+
+ts_source_library(
+    name = "inbox-routes",
+    srcs = [":inbox-routes.ts"],
+    deps = [":errors"],
+)
+
+ts_source_library(
+    name = "inbox",
+    srcs = [":inbox.ts"],
+    deps = [
+        ":env",
+        ":errors",
+        ":inbox-routes",
+        ":receipts",
+        "//proto/tasks/inbox/v1:ts",
+        "//proto/ts:rpc-status",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "index",
+    srcs = [":index.ts"],
+    deps = [
+        ":env",
+        ":http",
+        ":inbox",
+        ":jobs",
+        ":ops",
+        ":startup",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+alias(
+    name = "jobs",
+    actual = ":cycle_backup_runner",
+)
+
+alias(
+    name = "mail-proxy",
+    actual = ":cycle_http",
+)
+
+alias(
+    name = "mail",
+    actual = ":cycle_backup_runner",
+)
+
+ts_source_library(
+    name = "model",
+    srcs = [":model.ts"],
+    deps = [
+        ":errors",
+        ":planning",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+    ],
+)
+
+ts_source_library(
+    name = "ops",
+    srcs = [":ops.ts"],
+    deps = [
+        ":backup-runner",
+        ":env",
+        ":gtd",
+        ":jobs",
+        "//proto/ops/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "plan",
+    srcs = [":plan.ts"],
+    deps = [
+        ":errors",
+        ":goal-validation",
+        ":planning",
+        "//packages/task-dates:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:field-mask",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+    ],
+)
+
+ts_source_library(
+    name = "planning",
+    srcs = [":planning.ts"],
+    deps = [
+        ":errors",
+        "//packages/task-dates:lib",
+    ],
+)
+
+ts_source_library(
+    name = "receipts",
+    srcs = [":receipts.ts"],
+    deps = [
+        ":errors",
+        ":model",
+        "//proto/tasks/inbox/v1:ts",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
+        "//proto/ts:wire-json",
+    ],
+)
+
+alias(
+    name = "review",
+    actual = ":cycle_backup_runner",
+)
+
+alias(
+    name = "schedule",
+    actual = ":cycle_backup_runner",
+)
+
+ts_source_library(
+    name = "startup",
+    srcs = [":startup.ts"],
+    deps = [
+        ":focus",
+        ":goal-model",
+        ":goal-read",
+        ":model",
+        ":planning",
+        ":task-read",
+        "//packages/task-dates:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "task-copy",
+    srcs = [":task-copy.ts"],
+    deps = [
+        ":errors",
+        ":model",
+        ":receipts",
+        ":task-read",
+        ":task-validation",
+        "//packages/task-dates:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "task-dependencies",
+    srcs = [":task-dependencies.ts"],
+    deps = [
+        ":errors",
+        ":focus",
+        ":model",
+        ":planning",
+    ],
+)
+
+ts_source_library(
+    name = "task-moves",
+    srcs = [":task-moves.ts"],
+    deps = [":errors"],
+)
+
+ts_source_library(
+    name = "task-order",
+    srcs = [":task-order.ts"],
+    deps = [
+        ":errors",
+        ":focus",
+        ":model",
+        ":planning",
+        ":receipts",
+        "//packages/task-dates:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:protobuf",
+    ],
+)
+
+ts_source_library(
+    name = "task-read",
+    srcs = [":task-read.ts"],
+    deps = [
+        ":errors",
+        ":filters",
+        ":model",
+        "//packages/task-dates:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:page-token",
+        "//proto/ts:protobuf",
+    ],
+)
+
+ts_source_library(
+    name = "task-validation",
+    srcs = [":task-validation.ts"],
+    deps = [
+        ":errors",
+        ":model",
+        "//packages/task-dates:lib",
+        "//proto/tasks/ui/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "task-write",
+    srcs = [":task-write.ts"],
+    deps = [
+        ":errors",
+        ":focus",
+        ":focus-timer",
+        ":goal-validation",
+        ":model",
+        ":planning",
+        ":receipts",
+        ":task-dependencies",
+        ":task-moves",
+        ":task-read",
+        ":task-validation",
+        "//packages/task-dates:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:field-mask",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "cycle_backup_runner",
+    srcs = [
+        ":backup-runner.ts",
+        ":env.ts",
+        ":gtd.ts",
+        ":jobs.ts",
+        ":mail.ts",
+        ":review.ts",
+        ":schedule.ts",
+    ],
+    deps = [
+        ":backup",
+        ":errors",
+        ":inbox-routes",
+        ":model",
+        ":receipts",
+        ":task-read",
+        ":task-write",
+        "//packages/task-dates:lib",
+        "//proto/ops/v1:ts",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/todofy/mail/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "cycle_http",
+    srcs = [
+        ":http.ts",
+        ":mail-proxy.ts",
+    ],
+    deps = [
+        ":api",
+        ":auth",
+        ":env",
+        "//packages/edge-auth:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:rpc-status",
+        "//tasks/shared:build",
+    ],
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+)

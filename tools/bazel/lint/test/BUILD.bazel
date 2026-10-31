@@ -1,0 +1,77 @@
+load("@aspect_rules_js//js:defs.bzl", "js_test")
+load("@npm//tasks/web:eslint/package_json.bzl", eslint = "bin")
+load("//tools/bazel:js.bzl", "copied_source_files")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+load("//tools/bazel/lint:defs.bzl", "eslint_test")
+
+package(default_visibility = ["//tools/bazel/lint:__subpackages__"])
+
+filegroup(
+    name = "valid_sources",
+    srcs = ["good.js"],
+)
+
+filegroup(
+    name = "invalid_sources",
+    srcs = ["bad.js"],
+)
+
+copied_source_files(
+    name = "declaration_sources",
+    srcs = ["declaration.d.ts"],
+)
+
+eslint_test(
+    name = "valid_group",
+    config = "eslint.config.mjs",
+    runner = eslint.eslint_binary,
+    sources = [
+        ":valid_sources",
+        ":declaration_sources",
+    ],
+    tags = ["manual"],
+)
+
+eslint_test(
+    name = "invalid_group",
+    config = "eslint.config.mjs",
+    runner = eslint.eslint_binary,
+    sources = [":invalid_sources"],
+    tags = ["manual"],
+)
+
+js_test(
+    name = "group_expansion_test",
+    args = [
+        "$(rootpath :valid_group)",
+        "$(rootpath :valid_group_inputs)",
+        "$(rootpath :valid_group_cli)",
+        "$(rootpath :invalid_group)",
+        "$(rootpath :invalid_group_inputs)",
+        "$(rootpath :invalid_group_cli)",
+    ],
+    data = [
+        ":invalid_group",
+        ":invalid_group_cli",
+        ":invalid_group_inputs",
+        ":valid_group",
+        ":valid_group_cli",
+        ":valid_group_inputs",
+    ],
+    entry_point = "acceptance.mjs",
+)
+
+test_suite(
+    name = "check",
+    tests = [":group_expansion_test"],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["*"],
+        exclude = SOURCE_SUBPACKAGE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)

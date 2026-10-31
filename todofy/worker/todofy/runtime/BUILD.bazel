@@ -1,0 +1,345 @@
+load("@rules_python//python:defs.bzl", "py_library")
+load("//tools/bazel:js.bzl", "copied_source_files")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//todofy:__subpackages__"])
+
+py_library(
+    name = "package",
+    srcs = ["__init__.py"],
+    imports = ["../.."],
+    deps = ["//todofy/worker/todofy:package"],
+)
+
+py_library(
+    name = "api",
+    srcs = ["api.py"],
+    imports = ["../.."],
+    deps = [
+        ":backup",
+        ":config",
+        ":http",
+        ":interop",
+        ":metrics",
+        ":package",
+        ":reports",
+        "//todofy/worker/todofy/core:api_errors",
+        "//todofy/worker/todofy/core:backoff",
+        "//todofy/worker/todofy/core:contract",
+        "//todofy/worker/todofy/core:render",
+        "//todofy/worker/todofy/core:report_schema",
+        "//todofy/worker/todofy/core:vocab",
+        "//todofy/worker/todofy/core/sql:package",
+        "//todofy/worker/todofy/core/sql:views",
+    ],
+)
+
+py_library(
+    name = "backup",
+    srcs = ["backup.py"],
+    imports = ["../.."],
+    deps = [
+        ":config",
+        ":interop",
+        ":metrics",
+        ":package",
+        "//todofy/worker/todofy/core:backoff",
+        "//todofy/worker/todofy/core:backup",
+        "//todofy/worker/todofy/core:metrics",
+        "//todofy/worker/todofy/core:package",
+        "//todofy/worker/todofy/core/sql:backup",
+        "//todofy/worker/todofy/core/sql:package",
+    ],
+)
+
+py_library(
+    name = "config",
+    srcs = ["config.py"],
+    imports = ["../.."],
+    deps = [":package"],
+)
+
+py_library(
+    name = "coordinator",
+    srcs = ["coordinator.py"],
+    imports = ["../.."],
+    deps = [
+        ":api",
+        ":backup",
+        ":config",
+        ":http",
+        ":interop",
+        ":ledger",
+        ":mail",
+        ":metrics",
+        ":model",
+        ":model_settings",
+        ":ops",
+        ":owner_ui",
+        ":package",
+        ":reports",
+        ":retention",
+        "//todofy/worker/todofy/core:api_errors",
+        "//todofy/worker/todofy/core:backoff",
+        "//todofy/worker/todofy/core:contract",
+        "//todofy/worker/todofy/core:metrics",
+        "//todofy/worker/todofy/core:model_input",
+        "//todofy/worker/todofy/core:ops",
+        "//todofy/worker/todofy/core:package",
+        "//todofy/worker/todofy/core:prompts",
+        "//todofy/worker/todofy/core:render",
+        "//todofy/worker/todofy/core:vocab",
+        "//todofy/worker/todofy/core/sql:package",
+        "//todofy/worker/todofy/core/sql:views",
+    ],
+)
+
+py_library(
+    name = "entry",
+    srcs = ["entry.py"],
+    imports = ["../.."],
+    deps = [
+        ":coordinator",
+        ":http",
+        ":package",
+    ],
+)
+
+py_library(
+    name = "http",
+    srcs = ["http.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        "//todofy/worker/todofy/core:api_errors",
+    ],
+)
+
+py_library(
+    name = "interop",
+    srcs = ["interop.py"],
+    imports = ["../.."],
+    deps = [":package"],
+)
+
+py_library(
+    name = "ledger",
+    srcs = ["ledger.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        "//todofy/worker/todofy/core:backoff",
+        "//todofy/worker/todofy/core:mailbox",
+        "//todofy/worker/todofy/core:vocab",
+        "//todofy/worker/todofy/core/sql:ledger",
+        "//todofy/worker/todofy/core/sql:package",
+    ],
+)
+
+py_library(
+    name = "mail",
+    srcs = ["mail.py"],
+    imports = ["../.."],
+    deps = [
+        ":backup",
+        ":config",
+        ":interop",
+        ":package",
+        "//proto:python_runtime",
+        "//proto/todofy/mail/v1:python",
+        "//todofy/worker/todofy/core:backoff",
+        "//todofy/worker/todofy/core:carryover",
+        "//todofy/worker/todofy/core:mailbox",
+        "//todofy/worker/todofy/core:package",
+        "//todofy/worker/todofy/core:render",
+        "//todofy/worker/todofy/core/sql:mailbox",
+        "//todofy/worker/todofy/core/sql:package",
+    ],
+)
+
+py_library(
+    name = "metrics",
+    srcs = ["metrics.py"],
+    imports = ["../.."],
+    deps = [
+        ":config",
+        ":interop",
+        ":model",
+        ":package",
+        "//todofy/worker/todofy/core:backoff",
+        "//todofy/worker/todofy/core:metrics",
+        "//todofy/worker/todofy/core:package",
+        "//todofy/worker/todofy/core:vocab",
+        "//todofy/worker/todofy/core/sql:metrics",
+        "//todofy/worker/todofy/core/sql:package",
+    ],
+)
+
+py_library(
+    name = "model",
+    srcs = ["model.py"],
+    imports = ["../.."],
+    deps = [
+        ":config",
+        ":interop",
+        ":package",
+        "//packages/model-router-client/python/src/model_router_client:package",
+        "//todofy/worker/todofy/core:model_input",
+        "//todofy/worker/todofy/core:package",
+        "//todofy/worker/todofy/core:vocab",
+    ],
+)
+
+py_library(
+    name = "model_settings",
+    srcs = ["model_settings.py"],
+    imports = ["../.."],
+    deps = [
+        ":interop",
+        ":ledger",
+        ":model",
+        ":package",
+        "//proto/todofy/ui/v1:python",
+        "//todofy/worker/todofy/core:owner_ui",
+    ],
+)
+
+py_library(
+    name = "ops",
+    srcs = ["ops.py"],
+    imports = ["../.."],
+    deps = [
+        ":backup",
+        ":config",
+        ":ledger",
+        ":package",
+        "//todofy/worker/todofy/core:backoff",
+        "//todofy/worker/todofy/core:carryover",
+        "//todofy/worker/todofy/core:ops",
+        "//todofy/worker/todofy/core:package",
+        "//todofy/worker/todofy/core:vocab",
+        "//todofy/worker/todofy/core/sql:mailbox",
+        "//todofy/worker/todofy/core/sql:package",
+        "//todofy/worker/todofy/core/sql:views",
+    ],
+)
+
+py_library(
+    name = "owner_ui",
+    srcs = ["owner_ui.py"],
+    imports = ["../.."],
+    deps = [
+        ":api",
+        ":backup",
+        ":config",
+        ":interop",
+        ":metrics",
+        ":model_settings",
+        ":package",
+        ":reports",
+        "//packages/model-router-client/python/src/model_router_client:package",
+        "//proto:python_runtime",
+        "//proto/todofy/ui/v1:python",
+        "//todofy/worker/todofy/core:api_errors",
+        "//todofy/worker/todofy/core:owner_ui",
+        "//todofy/worker/todofy/core:package",
+        "//todofy/worker/todofy/core:report_schema",
+    ],
+)
+
+py_library(
+    name = "reports",
+    srcs = ["reports.py"],
+    imports = ["../.."],
+    deps = [
+        ":config",
+        ":http",
+        ":interop",
+        ":metrics",
+        ":model",
+        ":model_settings",
+        ":package",
+        "//todofy/worker/todofy/core:api_errors",
+        "//todofy/worker/todofy/core:backoff",
+        "//todofy/worker/todofy/core:carryover",
+        "//todofy/worker/todofy/core:metrics",
+        "//todofy/worker/todofy/core:package",
+        "//todofy/worker/todofy/core:prompts",
+        "//todofy/worker/todofy/core:render",
+        "//todofy/worker/todofy/core:report_schema",
+        "//todofy/worker/todofy/core/sql:package",
+        "//todofy/worker/todofy/core/sql:reports",
+    ],
+)
+
+py_library(
+    name = "retention",
+    srcs = ["retention.py"],
+    imports = ["../.."],
+    deps = [
+        ":config",
+        ":package",
+        ":reports",
+        "//todofy/worker/todofy/core:backoff",
+        "//todofy/worker/todofy/core/sql:package",
+        "//todofy/worker/todofy/core/sql:retention",
+    ],
+)
+
+py_library(
+    name = "library",
+    deps = [
+        ":api",
+        ":backup",
+        ":config",
+        ":coordinator",
+        ":entry",
+        ":http",
+        ":interop",
+        ":ledger",
+        ":mail",
+        ":metrics",
+        ":model",
+        ":model_settings",
+        ":ops",
+        ":owner_ui",
+        ":package",
+        ":reports",
+        ":retention",
+    ],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+copied_source_files(
+    name = "node_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ),
+)

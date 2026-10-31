@@ -1,0 +1,283 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@npm//watch/web:vitest/package_json.bzl", vitest = "bin")
+load("//tools/bazel:js.bzl", "copied_source_files", "proto_vitest_test", "ts_source_library")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//watch:__subpackages__"])
+
+COMMON_TEST_DATA = [
+    "//watch/web:package_json",
+    "//watch/web/src/test:source_fakeServer_ts",
+    "//watch/web/src/test:source_setup_ts",
+    "//watch/web:test_config",
+    "//watch/web:node_modules/jsdom",
+    "//watch/web:node_modules/vite",
+]
+
+COMMON_TEST_DEPS = [
+    "//watch/web:node_modules/vitest",
+    ":src__api",
+    ":src__app",
+    ":src__dom",
+    ":src__evidence",
+    ":src__format",
+    ":src__settings",
+    "//proto/ts:field-mask",
+    "//proto/ts:http-transcoder",
+    "//proto/ts:protobuf",
+    "//proto/ts:protobuf-wkt",
+    "//proto/ts:rpc-status",
+    "//proto/ts:wire-json",
+    "//proto/watch/ui/v1:ts",
+]
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//watch:__subpackages__"],
+)
+
+copied_source_files(
+    name = "application_sources_srcs",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ) + ["//watch/web/src/test:application_sources_srcs"],
+)
+
+copied_source_files(
+    name = "typecheck_project_srcs",
+    srcs = [
+        "api.test.ts",
+        "api.ts",
+        "app.test.ts",
+        "app.ts",
+        "dom.ts",
+        "evidence.test.ts",
+        "evidence.ts",
+        "format.test.ts",
+        "format.ts",
+        "main.ts",
+        "owner-flows.test.ts",
+        "settings.ts",
+        "views/add.ts",
+        "views/changes.ts",
+        "views/detail.ts",
+        "views/health.ts",
+        "views/inbox.ts",
+        "views/watches.ts",
+    ] + ["//watch/web/src/test:typecheck_project_srcs"],
+)
+
+copied_source_files(
+    name = "lint_sources",
+    srcs = glob(
+        [
+            "**/*.ts",
+            "**/*.tsx",
+        ],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ) + ["//watch/web/src/test:lint_sources"],
+)
+
+ts_source_library(
+    name = "src__api",
+    srcs = [":api.ts"],
+    deps = [
+        "//proto/common/errors/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:rpc-status",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__dom",
+    srcs = [":dom.ts"],
+)
+
+ts_source_library(
+    name = "src__format",
+    srcs = [":format.ts"],
+    deps = [
+        "//proto/ts:protobuf-wkt",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__settings",
+    srcs = [":settings.ts"],
+    deps = [
+        ":src__dom",
+        ":src__format",
+        "//proto/ts:protobuf",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__evidence",
+    srcs = [":evidence.ts"],
+    deps = [
+        ":src__api",
+        ":src__dom",
+        ":src__format",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__app",
+    srcs = [
+        ":app.ts",
+        ":views/add.ts",
+        ":views/changes.ts",
+        ":views/detail.ts",
+        ":views/health.ts",
+        ":views/inbox.ts",
+        ":views/watches.ts",
+    ],
+    deps = [
+        ":src__api",
+        ":src__dom",
+        ":src__evidence",
+        ":src__format",
+        ":src__settings",
+        "//proto/ts:filter",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+js_library(
+    name = "src__main",
+    srcs = [
+        ":main.ts",
+        ":styles.css",
+    ],
+    types = [":main.ts"],
+    deps = [":src__app"],
+)
+
+js_library(
+    name = "lib",
+    deps = [
+        ":src__api",
+        ":src__app",
+        ":src__dom",
+        ":src__evidence",
+        ":src__format",
+        ":src__main",
+        ":src__settings",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__api_test",
+    config = "//watch/web:test_config",
+    data = [
+        "//watch/web:node_modules/jsdom",
+        "//watch/web:node_modules/vite",
+        "//watch/web:package_json",
+        "//watch/web:test_config",
+        "//watch/web/src/test:source_setup_ts",
+    ],
+    project = "watch/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":api.test.ts"],
+    deps = [
+        ":src__api",
+        "//proto/ts:rpc-status",
+        "//watch/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__app_test",
+    config = "//watch/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "watch/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":app.test.ts"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "src__evidence_test",
+    config = "//watch/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "watch/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":evidence.test.ts"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "src__format_test",
+    config = "//watch/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "watch/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":format.test.ts"],
+    deps = [
+        ":src__format",
+        "//proto/ts:field-mask",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+        "//proto/ts:wire-json",
+        "//proto/watch/ui/v1:ts",
+        "//watch/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__owner-flows_test",
+    config = "//watch/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "watch/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":owner-flows.test.ts"],
+    deps = COMMON_TEST_DEPS,
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+    deps = [] + ["//watch/web/src/test:source_audit_files"],
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        ":src__api_test",
+        ":src__app_test",
+        ":src__evidence_test",
+        ":src__format_test",
+        ":src__owner-flows_test",
+        "//watch/web/src/test:check",
+    ],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+    tests = [
+        ":src__api_test",
+        ":src__app_test",
+        ":src__evidence_test",
+        ":src__format_test",
+        ":src__owner-flows_test",
+        "//watch/web/src/test:unit_tests",
+    ],
+)

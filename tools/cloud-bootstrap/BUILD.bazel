@@ -1,5 +1,5 @@
-load("@rules_python//python:defs.bzl", "py_library", "py_test")
-load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("@rules_python//python:defs.bzl", "py_library")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -8,8 +8,8 @@ py_library(
     srcs = ["adopt_metadata.py"],
     imports = ["."],
     deps = [
-        "//tools/cloud-bootstrap:cloud_api",
-        "//tools/cloud-bootstrap:private_input",
+        ":cloud_api",
+        ":private_input",
     ],
 )
 
@@ -18,14 +18,14 @@ py_library(
     srcs = ["bootstrap.py"],
     imports = ["."],
     deps = [
-        "//infra:infra_state",
-        "//tools/cloud-bootstrap:bootstrap_inventory",
-        "//tools/cloud-bootstrap:finalize",
-        "//tools/cloud-bootstrap:github_config",
-        "//tools/cloud-bootstrap:github_secrets",
-        "//tools/cloud-bootstrap:inventory_pr",
-        "//tools/cloud-bootstrap:private_input",
-        "//tools/cloud-bootstrap:tofu_bootstrap",
+        ":bootstrap_inventory",
+        ":finalize",
+        ":github_config",
+        ":github_secrets",
+        ":inventory_pr",
+        ":private_input",
+        ":tofu_bootstrap",
+        "//infra/scripts:infra_state",
         "//tools/cloud-config:cloud_profile",
         "//tools/cloud-config:generate",
         "//tools/service-catalog:catalog",
@@ -36,14 +36,14 @@ py_library(
     name = "bootstrap_inventory",
     srcs = ["bootstrap_inventory.py"],
     imports = ["."],
-    deps = ["//tools/cloud-bootstrap:private_input"],
+    deps = [":private_input"],
 )
 
 py_library(
     name = "cloud_api",
     srcs = ["cloud_api.py"],
     imports = ["."],
-    deps = ["//tools/cloud-bootstrap:private_input"],
+    deps = [":private_input"],
 )
 
 py_library(
@@ -51,7 +51,7 @@ py_library(
     srcs = ["finalize.py"],
     imports = ["."],
     deps = [
-        "//tools/cloud-bootstrap:private_input",
+        ":private_input",
         "//tools/cloud-release:api",
         "//tools/cloud-release:cloudflare",
         "//tools/cloud-release:control",
@@ -64,8 +64,8 @@ py_library(
     srcs = ["fresh_collisions.py"],
     imports = ["."],
     deps = [
-        "//tools/cloud-bootstrap:cloud_api",
-        "//tools/cloud-bootstrap:private_input",
+        ":cloud_api",
+        ":private_input",
     ],
 )
 
@@ -73,21 +73,21 @@ py_library(
     name = "github_config",
     srcs = ["github_config.py"],
     imports = ["."],
-    deps = ["//tools/cloud-bootstrap:private_input"],
+    deps = [":private_input"],
 )
 
 py_library(
     name = "github_secrets",
     srcs = ["github_secrets.py"],
     imports = ["."],
-    deps = ["//tools/cloud-bootstrap:private_input"],
+    deps = [":private_input"],
 )
 
 py_library(
     name = "inventory_pr",
     srcs = ["inventory_pr.py"],
     imports = ["."],
-    deps = ["//tools/cloud-bootstrap:private_input"],
+    deps = [":private_input"],
 )
 
 py_library(
@@ -101,8 +101,8 @@ py_library(
     srcs = ["state_imports.py"],
     imports = ["."],
     deps = [
-        "//infra:infra_state",
-        "//tools/cloud-bootstrap:private_input",
+        ":private_input",
+        "//infra/scripts:infra_state",
     ],
 )
 
@@ -111,71 +111,15 @@ py_library(
     srcs = ["tofu_bootstrap.py"],
     imports = ["."],
     deps = [
-        "//infra:bootstrap_state",
-        "//infra:infra_state",
-        "//tools/cloud-bootstrap:adopt_metadata",
-        "//tools/cloud-bootstrap:bootstrap_inventory",
-        "//tools/cloud-bootstrap:cloud_api",
-        "//tools/cloud-bootstrap:fresh_collisions",
-        "//tools/cloud-bootstrap:private_input",
-        "//tools/cloud-bootstrap:state_imports",
+        ":adopt_metadata",
+        ":bootstrap_inventory",
+        ":cloud_api",
+        ":fresh_collisions",
+        ":private_input",
+        ":state_imports",
+        "//infra/scripts:bootstrap_state",
+        "//infra/scripts:infra_state",
         "//tools/cloud-config:generate",
-    ],
-)
-
-py_test(
-    name = "test_bootstrap_test",
-    srcs = [
-        "tests/test_bootstrap.py",
-        "//tools/bazel/python:unittest_main.py",
-    ],
-    args = ["test_bootstrap"],
-    data = [
-        ":python_sources",
-        "//tools:repository_test_data",
-    ],
-    env = {"BAZEL_COPY_WORKSPACE": "1"},
-    imports = [
-        ".",
-        "tests",
-    ],
-    legacy_create_init = False,
-    main = "//tools/bazel/python:unittest_main.py",
-    deps = [
-        "//tools/cloud-bootstrap:adopt_metadata",
-        "//tools/cloud-bootstrap:bootstrap_inventory",
-        "//tools/cloud-bootstrap:cloud_api",
-        "//tools/cloud-bootstrap:finalize",
-        "//tools/cloud-bootstrap:github_config",
-        "//tools/cloud-bootstrap:github_secrets",
-        "//tools/cloud-bootstrap:private_input",
-        "//tools/cloud-bootstrap:state_imports",
-        "//tools/cloud-bootstrap:tofu_bootstrap",
-        "//tools/cloud-config:cloud_profile",
-        "//tools/cloud-release:control",
-    ],
-)
-
-py_test(
-    name = "test_fresh_collisions_test",
-    srcs = [
-        "tests/test_fresh_collisions.py",
-        "//tools/bazel/python:unittest_main.py",
-    ],
-    args = ["test_fresh_collisions"],
-    data = [
-        ":python_sources",
-        "//tools:repository_test_data",
-    ],
-    imports = [
-        ".",
-        "tests",
-    ],
-    legacy_create_init = False,
-    main = "//tools/bazel/python:unittest_main.py",
-    deps = [
-        "//tools/cloud-bootstrap:fresh_collisions",
-        "//tools/cloud-bootstrap:private_input",
     ],
 )
 
@@ -187,36 +131,14 @@ filegroup(
             "*.sh",
             "*.mjs",
             "*.json",
-            "tests/*.py",
         ],
         allow_empty = True,
-    ),
+    ) + ["//tools/cloud-bootstrap/tests:python_sources"],
 )
 
 test_suite(
     name = "check",
-    tests = [
-        ":test_bootstrap_test",
-        ":test_fresh_collisions_test",
-    ],
+    tests = ["//tools/cloud-bootstrap/tests:check"],
 )
 
-filegroup(
-    name = "source_audit_files",
-    srcs = glob(
-        [
-            "*",
-            "tests/**",
-        ],
-        allow_empty = True,
-        exclude = SOURCE_AUDIT_EXCLUDES,
-    ) + glob(
-        [
-            ".env.example",
-            ".env.*.example",
-            ".dev.vars.example",
-        ],
-        allow_empty = True,
-    ),
-    visibility = ["//visibility:public"],
-)
+source_audit_files(deps = ["//tools/cloud-bootstrap/tests:source_audit_files"])

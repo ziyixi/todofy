@@ -74,7 +74,7 @@ py_test(
     imports = ["."],
     legacy_create_init = False,
     main = "//tools/bazel/python:unittest_main.py",
-    deps = ["//infra:guard_lib"],
+    deps = ["//infra/tests:guard_lib"],
 )
 
 test_suite(

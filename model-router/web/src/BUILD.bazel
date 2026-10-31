@@ -1,0 +1,452 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@npm//model-router/web:vitest/package_json.bzl", vitest = "bin")
+load("//tools/bazel:js.bzl", "copied_source_files", "proto_vitest_test", "ts_source_library")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//model-router:__subpackages__"])
+
+COMMON_TEST_DATA = [
+    "//model-router/web:package_json",
+    ":test/fixtures.ts",
+    ":test/harness.tsx",
+    ":test/setup.ts",
+    "//model-router/web:test_config",
+    "//model-router/web:node_modules/@testing-library/dom",
+    "//model-router/web:node_modules/@vitejs/plugin-react",
+    "//model-router/web:node_modules/jsdom",
+    "//model-router/web:node_modules/vite",
+    "//:node_modules/vitest",
+]
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//model-router:__subpackages__"],
+)
+
+copied_source_files(
+    name = "application_sources_srcs",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+copied_source_files(
+    name = "typecheck_project_srcs",
+    srcs = [
+        "App.test.tsx",
+        "App.tsx",
+        "Filters.tsx",
+        "Overview.tsx",
+        "Playground.test.tsx",
+        "Playground.tsx",
+        "RequestDetail.test.tsx",
+        "RequestDetail.tsx",
+        "RequestList.tsx",
+        "Requests.tsx",
+        "UsageTrends.test.tsx",
+        "UsageTrends.tsx",
+        "api.test.ts",
+        "api.ts",
+        "components.tsx",
+        "format.ts",
+        "main.tsx",
+        "test/fixtures.ts",
+        "test/harness.tsx",
+        "test/setup.ts",
+        "usage.test.ts",
+        "usage.ts",
+    ],
+)
+
+copied_source_files(
+    name = "lint_sources",
+    srcs = glob(
+        [
+            "**/*.ts",
+            "**/*.tsx",
+        ],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+ts_source_library(
+    name = "src__api",
+    srcs = [":api.ts"],
+    deps = [
+        "//proto/modelrouter/inference/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "src__format",
+    srcs = [":format.ts"],
+    deps = ["//proto/modelrouter/inference/v1:ts"],
+)
+
+ts_source_library(
+    name = "src__Filters",
+    srcs = [":Filters.tsx"],
+    deps = [
+        ":src__api",
+        ":src__format",
+        "//model-router/web:node_modules/lucide-react",
+        "//model-router/web:node_modules/react",
+        "//proto/modelrouter/inference/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__components",
+    srcs = [":components.tsx"],
+    deps = [
+        ":src__format",
+        "//model-router/web:node_modules/lucide-react",
+        "//model-router/web:node_modules/react",
+        "//proto/modelrouter/inference/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__RequestList",
+    srcs = [":RequestList.tsx"],
+    deps = [
+        ":src__components",
+        ":src__format",
+        "//model-router/web:node_modules/lucide-react",
+        "//model-router/web:node_modules/react",
+        "//proto/modelrouter/inference/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__usage",
+    srcs = [":usage.ts"],
+    deps = [
+        ":src__api",
+        "//proto/modelrouter/inference/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__UsageTrends",
+    srcs = [":UsageTrends.tsx"],
+    deps = [
+        ":src__api",
+        ":src__format",
+        ":src__usage",
+        "//model-router/web:node_modules/react",
+        "//proto/modelrouter/inference/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__Overview",
+    srcs = [":Overview.tsx"],
+    deps = [
+        ":src__Filters",
+        ":src__RequestList",
+        ":src__UsageTrends",
+        ":src__api",
+        ":src__components",
+        ":src__format",
+        ":src__usage",
+        "//model-router/web:node_modules/@tanstack/react-query",
+        "//model-router/web:node_modules/lucide-react",
+        "//model-router/web:node_modules/react",
+        "//proto/modelrouter/inference/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__Playground",
+    srcs = [":Playground.tsx"],
+    deps = [
+        ":src__api",
+        ":src__components",
+        ":src__format",
+        "//model-router/web:node_modules/@tanstack/react-query",
+        "//model-router/web:node_modules/lucide-react",
+        "//model-router/web:node_modules/react",
+        "//proto/modelrouter/inference/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__RequestDetail",
+    srcs = [":RequestDetail.tsx"],
+    deps = [
+        ":src__Playground",
+        ":src__api",
+        ":src__components",
+        ":src__format",
+        "//model-router/web:node_modules/@tanstack/react-query",
+        "//model-router/web:node_modules/lucide-react",
+        "//model-router/web:node_modules/react",
+        "//proto/modelrouter/inference/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__Requests",
+    srcs = [":Requests.tsx"],
+    deps = [
+        ":src__Filters",
+        ":src__Playground",
+        ":src__RequestDetail",
+        ":src__RequestList",
+        ":src__api",
+        ":src__components",
+        "//model-router/web:node_modules/@tanstack/react-query",
+        "//model-router/web:node_modules/lucide-react",
+        "//model-router/web:node_modules/react",
+        "//proto/modelrouter/inference/v1:ts",
+    ],
+)
+
+js_library(
+    name = "src__App",
+    srcs = [
+        ":App.tsx",
+        ":style.css",
+    ],
+    types = [":App.tsx"],
+    deps = [
+        ":src__Filters",
+        ":src__Overview",
+        ":src__Playground",
+        ":src__Requests",
+        ":src__api",
+        ":src__components",
+        "//model-router/web:node_modules/@tanstack/react-query",
+        "//model-router/web:node_modules/lucide-react",
+        "//model-router/web:node_modules/react",
+    ],
+)
+
+ts_source_library(
+    name = "src__main",
+    srcs = [":main.tsx"],
+    deps = [
+        ":src__App",
+        "//model-router/web:node_modules/@tanstack/react-query",
+        "//model-router/web:node_modules/react",
+        "//model-router/web:node_modules/react-dom",
+    ],
+)
+
+js_library(
+    name = "lib",
+    deps = [
+        ":src__App",
+        ":src__Filters",
+        ":src__Overview",
+        ":src__Playground",
+        ":src__RequestDetail",
+        ":src__RequestList",
+        ":src__Requests",
+        ":src__UsageTrends",
+        ":src__api",
+        ":src__components",
+        ":src__format",
+        ":src__main",
+        ":src__usage",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__App_test",
+    config = "//model-router/web:test_config",
+    data = [
+        ":style.css",
+        ":test/fixtures.ts",
+        ":test/harness.tsx",
+        ":test/setup.ts",
+        "//:node_modules/vitest",
+        "//model-router/web:node_modules/@testing-library/dom",
+        "//model-router/web:node_modules/@vitejs/plugin-react",
+        "//model-router/web:node_modules/jsdom",
+        "//model-router/web:node_modules/vite",
+        "//model-router/web:package_json",
+        "//model-router/web:test_config",
+    ],
+    project = "model-router/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":App.test.tsx"],
+    deps = [
+        ":src__App",
+        ":src__Filters",
+        ":src__Overview",
+        ":src__Playground",
+        ":src__RequestDetail",
+        ":src__RequestList",
+        ":src__Requests",
+        ":src__UsageTrends",
+        ":src__api",
+        ":src__components",
+        ":src__format",
+        ":src__usage",
+        "//model-router/web:node_modules/@tanstack/react-query",
+        "//model-router/web:node_modules/@testing-library/jest-dom",
+        "//model-router/web:node_modules/@testing-library/react",
+        "//model-router/web:node_modules/@testing-library/user-event",
+        "//model-router/web:node_modules/react",
+        "//model-router/web:node_modules/vitest",
+        "//proto/modelrouter/inference/v1:ts",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__Playground_test",
+    config = "//model-router/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "model-router/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":Playground.test.tsx"],
+    deps = [
+        ":src__Playground",
+        ":src__api",
+        ":src__components",
+        ":src__format",
+        "//model-router/web:node_modules/@tanstack/react-query",
+        "//model-router/web:node_modules/@testing-library/jest-dom",
+        "//model-router/web:node_modules/@testing-library/react",
+        "//model-router/web:node_modules/@testing-library/user-event",
+        "//model-router/web:node_modules/react",
+        "//model-router/web:node_modules/vitest",
+        "//proto/modelrouter/inference/v1:ts",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__RequestDetail_test",
+    config = "//model-router/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "model-router/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":RequestDetail.test.tsx"],
+    deps = [
+        ":src__Playground",
+        ":src__RequestDetail",
+        ":src__api",
+        ":src__components",
+        ":src__format",
+        "//model-router/web:node_modules/@tanstack/react-query",
+        "//model-router/web:node_modules/@testing-library/jest-dom",
+        "//model-router/web:node_modules/@testing-library/react",
+        "//model-router/web:node_modules/@testing-library/user-event",
+        "//model-router/web:node_modules/react",
+        "//model-router/web:node_modules/vitest",
+        "//proto/modelrouter/inference/v1:ts",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__UsageTrends_test",
+    config = "//model-router/web:test_config",
+    data = [
+        ":test/harness.tsx",
+        ":test/setup.ts",
+        "//:node_modules/vitest",
+        "//model-router/web:node_modules/@testing-library/dom",
+        "//model-router/web:node_modules/@vitejs/plugin-react",
+        "//model-router/web:node_modules/jsdom",
+        "//model-router/web:node_modules/vite",
+        "//model-router/web:package_json",
+        "//model-router/web:test_config",
+    ],
+    project = "model-router/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":UsageTrends.test.tsx"],
+    deps = [
+        ":src__UsageTrends",
+        ":src__api",
+        ":src__format",
+        ":src__usage",
+        "//model-router/web:node_modules/@tanstack/react-query",
+        "//model-router/web:node_modules/@testing-library/jest-dom",
+        "//model-router/web:node_modules/@testing-library/react",
+        "//model-router/web:node_modules/@testing-library/user-event",
+        "//model-router/web:node_modules/react",
+        "//model-router/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__api_test",
+    config = "//model-router/web:test_config",
+    data = [
+        ":test/fixtures.ts",
+        ":test/setup.ts",
+        "//:node_modules/vitest",
+        "//model-router/web:node_modules/@testing-library/dom",
+        "//model-router/web:node_modules/@testing-library/user-event",
+        "//model-router/web:node_modules/@vitejs/plugin-react",
+        "//model-router/web:node_modules/jsdom",
+        "//model-router/web:node_modules/vite",
+        "//model-router/web:package_json",
+        "//model-router/web:test_config",
+    ],
+    project = "model-router/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":api.test.ts"],
+    deps = [
+        ":src__api",
+        "//model-router/web:node_modules/@testing-library/jest-dom",
+        "//model-router/web:node_modules/@testing-library/react",
+        "//model-router/web:node_modules/vitest",
+        "//proto/modelrouter/inference/v1:ts",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__usage_test",
+    config = "//model-router/web:test_config",
+    data = [
+        ":test/setup.ts",
+        "//:node_modules/vitest",
+        "//model-router/web:node_modules/@testing-library/dom",
+        "//model-router/web:node_modules/@testing-library/user-event",
+        "//model-router/web:node_modules/@vitejs/plugin-react",
+        "//model-router/web:node_modules/jsdom",
+        "//model-router/web:node_modules/vite",
+        "//model-router/web:package_json",
+        "//model-router/web:test_config",
+    ],
+    project = "model-router/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":usage.test.ts"],
+    deps = [
+        ":src__api",
+        ":src__usage",
+        "//model-router/web:node_modules/@testing-library/jest-dom",
+        "//model-router/web:node_modules/@testing-library/react",
+        "//model-router/web:node_modules/vitest",
+        "//proto/modelrouter/inference/v1:ts",
+    ],
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+)
+
+test_suite(name = "check")
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)

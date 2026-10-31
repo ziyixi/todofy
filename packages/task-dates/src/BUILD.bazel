@@ -1,0 +1,43 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//tools/bazel:js.bzl", "copied_source_files")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//packages/task-dates:__subpackages__"])
+
+exports_files(
+    glob(
+        [
+            "*.ts",
+            "*.tsx",
+            "*.css",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//packages/task-dates:__subpackages__"],
+)
+
+js_library(
+    name = "lib",
+    srcs = [":index.ts"],
+    types = [":index.ts"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//packages/task-dates:node_modules/chrono-node",
+        "//packages/task-dates:node_modules/rrule",
+    ],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+copied_source_files(
+    name = "typecheck_sources",
+    srcs = ["index.ts"],
+)

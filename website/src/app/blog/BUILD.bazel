@@ -1,0 +1,29 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//website:bazel.bzl", "website_sources")
+
+package(default_visibility = ["//website:__subpackages__"])
+
+exports_files(
+    glob(
+        ["*.tsx"],
+        allow_empty = True,
+    ),
+    visibility = ["//website:__subpackages__"],
+)
+
+js_library(
+    name = "page",
+    srcs = [
+        ":page.tsx",
+        "//website/src/styles:site_css",
+    ],
+    deps = [
+        "//website:node_modules/next",
+        "//website/src/app:_site-data",
+        "//website/src/components:BlogList",
+        "//website/src/components:PageShell",
+        "//website/src/lib:metadata",
+    ],
+)
+
+website_sources(children = ["//website/src/app/blog/[slug]"])

@@ -1,0 +1,107 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@npm//newsletter-console/web:vitest/package_json.bzl", vitest = "bin")
+load("//tools/bazel:js.bzl", "copied_source_files", "proto_vitest_test")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//newsletter-console:__subpackages__"])
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//newsletter-console:__subpackages__"],
+)
+
+copied_source_files(
+    name = "application_sources_srcs",
+    srcs = [
+        "layout.test.ts",
+        "no-external.test.ts",
+        "world.tsx",
+    ],
+)
+
+copied_source_files(
+    name = "typecheck_project_srcs",
+    srcs = [
+        "layout.test.ts",
+        "no-external.test.ts",
+        "world.tsx",
+    ],
+)
+
+copied_source_files(
+    name = "lint_sources",
+    srcs = [
+        "layout.test.ts",
+        "no-external.test.ts",
+        "world.tsx",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__test__layout_test",
+    config = "//newsletter-console/web:test_config",
+    data = [
+        "//:node_modules/vitest",
+        "//newsletter-console/deploy:public-navigation",
+        "//newsletter-console/web:application_sources",
+        "//newsletter-console/web:node_modules/@testing-library/dom",
+        "//newsletter-console/web:node_modules/@testing-library/react",
+        "//newsletter-console/web:node_modules/@vitejs/plugin-react",
+        "//newsletter-console/web:node_modules/jsdom",
+        "//newsletter-console/web:node_modules/vite",
+        "//newsletter-console/web:node_modules/vitest",
+        "//newsletter-console/web:package_json",
+        "//newsletter-console/web:test_config",
+        "//newsletter-console/web/src:source_setup_ts",
+    ],
+    project = "newsletter-console/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":layout.test.ts"],
+    deps = ["//newsletter-console/web:node_modules/@testing-library/jest-dom"],
+)
+
+proto_vitest_test(
+    name = "src__test__no-external_test",
+    config = "//newsletter-console/web:test_config",
+    data = [
+        "//:node_modules/vitest",
+        "//newsletter-console/deploy:public-navigation",
+        "//newsletter-console/web:application_sources",
+        "//newsletter-console/web:node_modules/@testing-library/dom",
+        "//newsletter-console/web:node_modules/@testing-library/react",
+        "//newsletter-console/web:node_modules/@vitejs/plugin-react",
+        "//newsletter-console/web:node_modules/jsdom",
+        "//newsletter-console/web:node_modules/vite",
+        "//newsletter-console/web:node_modules/vitest",
+        "//newsletter-console/web:package_json",
+        "//newsletter-console/web:source_index_html",
+        "//newsletter-console/web:test_config",
+        "//newsletter-console/web/src:source_setup_ts",
+    ],
+    project = "newsletter-console/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":no-external.test.ts"],
+    deps = ["//newsletter-console/web:node_modules/@testing-library/jest-dom"],
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+)
+
+test_suite(name = "check")
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)
+
+js_library(
+    name = "source_world_tsx",
+    srcs = ["world.tsx"],
+)

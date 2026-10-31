@@ -30,7 +30,7 @@ D1 仍为一次 freshness 写入；总 R2 调用增加不到 1%，没有把节�
 复现合成配额审计：
 
 ```sh
-bazel test //mail-hero/cloudflare:native-backup-runner-runtime_test \
+bazel test //mail-hero/cloudflare/test:native-backup-runner-runtime_test \
   --test_env=MAILHERO_BACKUP_QUOTA_AUDIT=1
 ```
 

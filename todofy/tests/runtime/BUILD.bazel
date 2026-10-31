@@ -1,0 +1,125 @@
+load("@rules_python//python:defs.bzl", "py_library")
+load("//todofy/tests/runtime:defs.bzl", "todofy_runtime_test")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//todofy:__subpackages__"])
+
+_RUNTIME_DATA = [
+    ":runtime_data",
+    "//tools/bazel:wrangler",
+    "//tools/bazel/python:workerd_path",
+    "@todofy_pyodide//file",
+]
+
+_RUNTIME_ENV = {
+    "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+    "BAZEL_WRANGLER": "$(rootpath //tools/bazel:wrangler)",
+    "BAZEL_WORKERD": "$(rootpath //tools/bazel/python:workerd_path)",
+    "BAZEL_PYODIDE": "$(rootpath @todofy_pyodide//file)",
+}
+
+_RUNTIME_IMPORTS = [
+    "../..",
+    "../../worker",
+]
+
+_RUNTIME_TAGS = [
+    "exclusive",
+    "workerd",
+]
+
+_RUNTIME_DEPS = [
+    ":runtime_harness",
+    "@python_deps//pytest_xdist",
+]
+
+py_library(
+    name = "runtime_harness",
+    srcs = glob(
+        ["**/*.py"],
+        exclude = [
+            "**/test_*.py",
+            "warm_up.py",
+        ],
+    ),
+    imports = [
+        "../..",
+        "../../worker",
+    ],
+    deps = [
+        "//proto:python",
+        "//todofy/tests:mail_contract",
+        "//todofy/tests/fakes:model_router_fake",
+        "//todofy/tools:backup_restore",
+        "@python_deps//cryptography",
+        "@python_deps//httpx",
+        "@python_deps//jsonschema",
+        "@python_deps//pytest",
+        "@python_deps//pyyaml",
+    ],
+)
+
+filegroup(
+    name = "runtime_data",
+    srcs = [
+        "//contracts:fixtures",
+        "//todofy:conftest.py",
+        "//todofy:core_application_sources",
+        "//todofy:core_python_modules",
+        "//todofy:migrations",
+        "//todofy:package.json",
+        "//todofy:pyproject.toml",
+        "//todofy:wrangler.test.toml",
+        "//todofy/api:api_schemas",
+        "//todofy/gateway:runtime_test_inputs",
+        "//todofy/web:bundle",
+    ],
+)
+
+test_suite(
+    name = "runtime_tests",
+    tests = [":" + source.removesuffix(".py") for source in glob(["test_*.py"])],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+test_suite(
+    name = "check",
+    tests = [":runtime_tests"],
+)
+
+[todofy_runtime_test(
+    name = source.removesuffix(".py"),
+    size = "large",
+    data = _RUNTIME_DATA + (glob(["test_*.py"]) if source.endswith("test_scenarios_coverage.py") else []),
+    env = _RUNTIME_ENV,
+    imports = _RUNTIME_IMPORTS,
+    source = source,
+    tags = _RUNTIME_TAGS,
+    deps = _RUNTIME_DEPS,
+) for source in glob(["test_*.py"])]

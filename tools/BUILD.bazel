@@ -1,4 +1,4 @@
-load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES", "source_audit_files")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -36,7 +36,7 @@ filegroup(
         "//:python_repository_test_data",
         "//codex-gateway:config",
         "//dashboard:config",
-        "//dashboard/worker:catalog_inputs",
+        "//dashboard/worker/src:catalog_inputs",
         "//fleet:config",
         "//infra:config",
         "//links:config",
@@ -53,27 +53,12 @@ filegroup(
         "//todofy:config",
         "//watch:config",
         "//website:config",
-        "//website:content/site.config.ts",
-        "//website:relay/deploy/retire-secrets.py",
+        "//website/content:site.config.ts",
+        "//website/relay/deploy:retire-secrets.py",
     ],
 )
 
-filegroup(
-    name = "source_audit_files",
-    srcs = glob(
-        [
-            "*",
-            "deploy-probes/**",
-        ],
-        allow_empty = True,
-        exclude = SOURCE_AUDIT_EXCLUDES,
-    ) + glob(
-        [
-            ".env.example",
-            ".env.*.example",
-            ".dev.vars.example",
-        ],
-        allow_empty = True,
-    ),
-    visibility = ["//visibility:public"],
-)
+source_audit_files(patterns = [
+    "*",
+    "deploy-probes/**",
+])

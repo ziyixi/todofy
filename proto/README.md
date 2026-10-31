@@ -52,7 +52,7 @@ exception described [below](#internal-model-router-changes); other APIs retain n
    reason in the file's header),
    because `buf.yaml` reaches every proto user's deploy (`proto_deploys` below) and a new package must not
    redeploy the other apps. Google's api-linter
-   (`//proto:api_lint_test`, one pinned version) checks every package but `prototest/` against the AIPs; its
+   (`//proto/tools:api_lint_test`, one pinned version) checks every package but `prototest/` against the AIPs; its
    exceptions are `(-- api-linter: ... --)` comments with a reason, next to the element. `buf breaking` uses
    `FILE`, the strictest category: names, numbers, types, removals. buf compares no custom option, so
    `tools/profile_breaking.py` adds what it cannot see but is wire here. For the wire profile: an existing

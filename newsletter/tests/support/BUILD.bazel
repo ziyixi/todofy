@@ -1,0 +1,255 @@
+load("@rules_python//python:defs.bzl", "py_library")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//newsletter:__subpackages__"])
+
+py_library(
+    name = "package",
+    srcs = ["__init__.py"],
+    imports = ["../.."],
+    deps = ["//newsletter/tests:package"],
+)
+
+py_library(
+    name = "charts",
+    srcs = ["charts.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        "@python_deps//pillow",
+        "@python_deps//pytest",
+    ],
+)
+
+py_library(
+    name = "console_auth",
+    srcs = ["console_auth.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        "//newsletter/src/newsletter:console_access",
+        "@python_deps//cryptography",
+        "@python_deps//pyjwt",
+    ],
+)
+
+py_library(
+    name = "console_world",
+    srcs = ["console_world.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        "//newsletter/src/newsletter:console_read",
+        "//newsletter/src/newsletter:content_config",
+        "//newsletter/src/newsletter:contracts",
+        "//newsletter/src/newsletter:drain",
+        "//newsletter/src/newsletter:notion_journal",
+        "//newsletter/src/newsletter:package",
+        "//newsletter/src/newsletter:settings",
+        "//newsletter/src/newsletter/collection:repository",
+        "//newsletter/src/newsletter/workflow:definition",
+        "//newsletter/src/newsletter/workflow:publication",
+        "//newsletter/src/newsletter/workflow:repository",
+        "//newsletter/src/newsletter/workflow:state",
+        "//newsletter/src/newsletter/workflow:story_replay_repository",
+    ],
+)
+
+py_library(
+    name = "editor",
+    srcs = ["editor.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        "//newsletter/src/newsletter:contracts",
+        "//newsletter/src/newsletter:editor",
+        "//newsletter/src/newsletter:model_client",
+        "//newsletter/src/newsletter:settings",
+        "//newsletter/src/newsletter:types",
+        "//packages/model-router-client/python/src/model_router_client:package",
+        "@python_deps//pytest",
+    ],
+)
+
+py_library(
+    name = "news_first_policy",
+    srcs = ["news_first_policy.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        ":workflow_content",
+        "//newsletter/src/newsletter:types",
+    ],
+)
+
+py_library(
+    name = "notion_content",
+    srcs = ["notion_content.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        ":rendering",
+        "//newsletter/src/newsletter:contracts",
+        "//newsletter/src/newsletter:notion_content",
+        "//newsletter/src/newsletter:types",
+    ],
+)
+
+py_library(
+    name = "publication",
+    srcs = ["publication.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        "//newsletter/src/newsletter:contracts",
+        "//newsletter/src/newsletter:rendering",
+        "//newsletter/src/newsletter:types",
+        "//newsletter/src/newsletter/workflow:components",
+        "//newsletter/src/newsletter/workflow:publication",
+    ],
+)
+
+py_library(
+    name = "publication_delivery",
+    srcs = ["publication_delivery.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        "//newsletter/src/newsletter:drain",
+        "//newsletter/src/newsletter:types",
+    ],
+)
+
+py_library(
+    name = "rendering",
+    srcs = ["rendering.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        "//newsletter/src/newsletter:types",
+    ],
+)
+
+py_library(
+    name = "researcher",
+    srcs = ["researcher.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        "@python_deps//httpx",
+        "@python_deps//pyyaml",
+    ],
+)
+
+py_library(
+    name = "story_editor",
+    srcs = ["story_editor.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        "//newsletter/src/newsletter:contracts",
+        "//newsletter/src/newsletter:editor",
+        "//newsletter/src/newsletter:model_client",
+        "//newsletter/src/newsletter:settings",
+        "//newsletter/src/newsletter:types",
+        "//newsletter/src/newsletter/workflow:components",
+        "@python_deps//pytest",
+    ],
+)
+
+py_library(
+    name = "story_pipeline",
+    srcs = ["story_pipeline.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        ":publication",
+        "//newsletter/src/newsletter:adapters",
+        "//newsletter/src/newsletter:contracts",
+        "//newsletter/src/newsletter:drain",
+        "//newsletter/src/newsletter:editor",
+        "//newsletter/src/newsletter:model_client",
+        "//newsletter/src/newsletter:package",
+        "//newsletter/src/newsletter:settings",
+        "//newsletter/src/newsletter:types",
+        "//newsletter/src/newsletter:worker",
+        "//newsletter/src/newsletter/collection:collector",
+        "//newsletter/src/newsletter/collection:instructions",
+        "//newsletter/src/newsletter/collection:repository",
+        "//newsletter/src/newsletter/workflow:definition",
+        "//newsletter/src/newsletter/workflow:pipeline",
+        "//newsletter/src/newsletter/workflow:publication",
+        "@python_deps//protobuf",
+        "@python_deps//pytest",
+    ],
+)
+
+py_library(
+    name = "usage",
+    srcs = ["usage.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        "//newsletter/src/newsletter:usage",
+        "//packages/model-router-client/python/src/model_router_client:package",
+    ],
+)
+
+py_library(
+    name = "workflow_content",
+    srcs = ["workflow_content.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        "//newsletter/src/newsletter:types",
+        "//newsletter/src/newsletter/workflow:schema",
+    ],
+)
+
+py_library(
+    name = "workflow_state",
+    srcs = ["workflow_state.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        "//newsletter/src/newsletter:drain",
+        "//newsletter/src/newsletter:types",
+    ],
+)
+
+py_library(
+    name = "workflows",
+    srcs = ["workflows.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        "@python_deps//pyyaml",
+    ],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)

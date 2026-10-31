@@ -1,0 +1,69 @@
+load("@rules_python//python:defs.bzl", "py_library")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//platform:__subpackages__"])
+
+py_library(
+    name = "__main__",
+    srcs = ["__main__.py"],
+    imports = [".."],
+    deps = [
+        ":package",
+        "//platform/src/personal_cloud/observer:cli",
+        "//platform/src/personal_cloud/observer:systemd_snapshot",
+        "//platform/src/personal_cloud/status_daemon:adapters",
+        "//platform/src/personal_cloud/status_daemon:server",
+    ],
+)
+
+py_library(
+    name = "package",
+    srcs = ["__init__.py"],
+    imports = [".."],
+)
+
+py_library(
+    name = "library",
+    deps = [
+        ":__main__",
+        ":package",
+        "//platform/src/personal_cloud/deployment:library",
+        "//platform/src/personal_cloud/observer:library",
+        "//platform/src/personal_cloud/status_daemon:library",
+    ],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ) + [
+        "//platform/src/personal_cloud/deployment:python_sources",
+        "//platform/src/personal_cloud/observer:python_sources",
+        "//platform/src/personal_cloud/status_daemon:python_sources",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + [
+        "//platform/src/personal_cloud/deployment:source_audit_files",
+        "//platform/src/personal_cloud/observer:source_audit_files",
+        "//platform/src/personal_cloud/status_daemon:source_audit_files",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)

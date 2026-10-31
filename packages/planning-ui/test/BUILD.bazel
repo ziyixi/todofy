@@ -1,0 +1,848 @@
+load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("@npm//packages/planning-ui:vitest/package_json.bzl", vitest = "bin")
+load("//tools/bazel:js.bzl", "proto_vitest_test")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//packages/planning-ui:__subpackages__"])
+
+exports_files(
+    glob(
+        [
+            "*.ts",
+            "*.tsx",
+            "*.css",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//packages/planning-ui:__subpackages__"],
+)
+
+_TEST_DATA = [
+    "//packages/planning-ui:node_modules/@testing-library/react",
+    "//packages/planning-ui:node_modules/@vitejs/plugin-react",
+    "//packages/planning-ui:node_modules/jsdom",
+    "//packages/planning-ui:node_modules/react",
+    "//packages/planning-ui:node_modules/react-dom",
+    "//packages/planning-ui:node_modules/vitest",
+    "//packages/planning-ui:package_metadata",
+    "//packages/planning-ui:vitest_config",
+    ":setup.ts",
+]
+
+proto_vitest_test(
+    name = "add-step_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA + [":fixture.ts"],
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":add-step.test.tsx"],
+    deps = [
+        "//packages/planning-ui/src:App",
+        "//packages/planning-ui/src:bets",
+        "//packages/planning-ui/src:domain",
+        "//packages/planning-ui/src:model",
+        "//packages/planning-ui/src:plan-updates",
+    ],
+)
+
+proto_vitest_test(
+    name = "announce_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA,
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":announce.test.tsx"],
+    deps = ["//packages/planning-ui/src:announce"],
+)
+
+proto_vitest_test(
+    name = "api-dependencies_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA + [":transport.ts"],
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":api-dependencies.test.ts"],
+    deps = [
+        "//packages/planning-ui/src:api",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:protobuf",
+    ],
+)
+
+proto_vitest_test(
+    name = "api-planning_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA + [":transport.ts"],
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":api-planning.test.ts"],
+    deps = [
+        "//packages/planning-ui/src:api",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+proto_vitest_test(
+    name = "api_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA + [":transport.ts"],
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":api.test.ts"],
+    deps = [
+        "//packages/planning-ui/src:api",
+        "//packages/planning-ui/src:model",
+        "//proto/ts:http-client",
+    ],
+)
+
+proto_vitest_test(
+    name = "background-reads_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA + [":fixture.ts"],
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":background-reads.test.tsx"],
+    deps = [
+        "//packages/planning-ui/src:App",
+        "//packages/planning-ui/src:bets",
+        "//packages/planning-ui/src:domain",
+        "//packages/planning-ui/src:model",
+        "//packages/planning-ui/src:plan-updates",
+    ],
+)
+
+proto_vitest_test(
+    name = "bets_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA + [
+        ":fixture.ts",
+        ":transport.ts",
+    ],
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":bets.test.ts"],
+    deps = [
+        "//packages/planning-ui/src:api",
+        "//packages/planning-ui/src:bets",
+        "//packages/planning-ui/src:domain",
+        "//packages/planning-ui/src:model",
+        "//packages/planning-ui/src:plan-updates",
+        "//proto/ts:http-client",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+proto_vitest_test(
+    name = "components_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA + [":fixture.ts"],
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":components.test.tsx"],
+    deps = [
+        "//packages/planning-ui/src:App",
+        "//packages/planning-ui/src:PlanView",
+        "//packages/planning-ui/src:bets",
+        "//packages/planning-ui/src:domain",
+        "//packages/planning-ui/src:model",
+        "//packages/planning-ui/src:plan-updates",
+    ],
+)
+
+proto_vitest_test(
+    name = "deadlines-ui_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA + [":fixture.ts"],
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":deadlines-ui.test.tsx"],
+    deps = [
+        "//packages/planning-ui/src:App",
+        "//packages/planning-ui/src:FocusView",
+        "//packages/planning-ui/src:PlanView",
+        "//packages/planning-ui/src:TaskEditor",
+        "//packages/planning-ui/src:bets",
+        "//packages/planning-ui/src:domain",
+        "//packages/planning-ui/src:model",
+        "//packages/planning-ui/src:plan-updates",
+    ],
+)
+
+proto_vitest_test(
+    name = "deadlines_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA,
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":deadlines.test.ts"],
+    deps = [
+        "//packages/planning-ui/src:dependency_rules",
+        "//packages/planning-ui/src:domain",
+        "//packages/planning-ui/src:model",
+    ],
+)
+
+proto_vitest_test(
+    name = "dependencies-ui_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA + [":fixture.ts"],
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":dependencies-ui.test.tsx"],
+    deps = [
+        "//packages/planning-ui/src:App",
+        "//packages/planning-ui/src:TaskDependencies",
+        "//packages/planning-ui/src:bets",
+        "//packages/planning-ui/src:domain",
+        "//packages/planning-ui/src:model",
+        "//packages/planning-ui/src:plan-updates",
+    ],
+)
+
+proto_vitest_test(
+    name = "dependencies_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA + [":fixture.ts"],
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":dependencies.test.ts"],
+    deps = [
+        "//packages/planning-ui/src:bets",
+        "//packages/planning-ui/src:dependency_rules",
+        "//packages/planning-ui/src:domain",
+        "//packages/planning-ui/src:model",
+        "//packages/planning-ui/src:plan-updates",
+        "//packages/planning-ui/src:review-lanes",
+    ],
+)
+
+proto_vitest_test(
+    name = "domain_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA,
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":domain.test.ts"],
+    deps = [
+        "//packages/planning-ui/src:domain",
+        "//packages/planning-ui/src:model",
+    ],
+)
+
+proto_vitest_test(
+    name = "drag-announcements_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA + ["//packages/planning-ui:node_modules/@dnd-kit/dom"],
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":drag-announcements.test.ts"],
+    deps = [
+        "//packages/planning-ui/src:FocusView",
+        "//packages/planning-ui/src:PlanningWeek",
+        "//packages/planning-ui/src:drag-announcements",
+    ],
+)
+
+proto_vitest_test(
+    name = "focus-entries_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA + [":fixture.ts"],
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":focus-entries.test.tsx"],
+    deps = [
+        "//packages/planning-ui/src:FocusEntries",
+        "//packages/planning-ui/src:FocusView",
+        "//packages/planning-ui/src:bets",
+        "//packages/planning-ui/src:domain",
+        "//packages/planning-ui/src:model",
+        "//packages/planning-ui/src:plan-updates",
+    ],
+)
+
+proto_vitest_test(
+    name = "focus_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA + [":fixture.ts"],
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":focus.test.tsx"],
+    deps = [
+        "//packages/planning-ui/src:App",
+        "//packages/planning-ui/src:FocusView",
+        "//packages/planning-ui/src:PlanningCalendar",
+        "//packages/planning-ui/src:bets",
+        "//packages/planning-ui/src:domain",
+        "//packages/planning-ui/src:model",
+        "//packages/planning-ui/src:plan-updates",
+    ],
+)
+
+proto_vitest_test(
+    name = "full-title_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA,
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":full-title.test.tsx"],
+    deps = ["//packages/planning-ui/src:FullTitle"],
+)
+
+proto_vitest_test(
+    name = "host_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA + [":fixture.ts"],
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":host.test.tsx"],
+    deps = [
+        "//packages/planning-ui/src:App",
+        "//packages/planning-ui/src:TaskEditor",
+        "//packages/planning-ui/src:bets",
+        "//packages/planning-ui/src:domain",
+        "//packages/planning-ui/src:model",
+        "//packages/planning-ui/src:plan-updates",
+    ],
+)
+
+proto_vitest_test(
+    name = "idle-pause-ui_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA,
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":idle-pause-ui.test.tsx"],
+    deps = [
+        "//packages/planning-ui/src:App",
+        "//packages/planning-ui/src:idle-pause",
+        "//packages/planning-ui/src:model",
+    ],
+)
+
+proto_vitest_test(
+    name = "idle-pause_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA,
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":idle-pause.test.ts"],
+    deps = ["//packages/planning-ui/src:idle-pause"],
+)
+
+proto_vitest_test(
+    name = "mail_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA,
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":mail.test.ts"],
+    deps = ["//packages/planning-ui/src:mail"],
+)
+
+proto_vitest_test(
+    name = "mini-timer_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA,
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":mini-timer.test.tsx"],
+    deps = [
+        "//packages/planning-ui/src:App",
+        "//packages/planning-ui/src:MiniTimer",
+        "//packages/planning-ui/src:model",
+    ],
+)
+
+proto_vitest_test(
+    name = "native-api_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA,
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":native-api.test.ts"],
+    deps = [
+        "//packages/planning-ui/src:api",
+        "//packages/planning-ui/src:model",
+        "//proto/ts:http-client",
+    ],
+)
+
+proto_vitest_test(
+    name = "native-order_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA,
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":native-order.test.ts"],
+    deps = [
+        "//packages/planning-ui/src:model",
+        "//packages/planning-ui/src:plan-updates",
+        "//packages/planning-ui/src:planning-outcomes",
+    ],
+)
+
+proto_vitest_test(
+    name = "native-planning_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA,
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":native-planning.test.tsx"],
+    deps = [
+        "//packages/planning-ui/src:TaskEditor",
+        "//packages/planning-ui/src:WeeklyReview",
+        "//packages/planning-ui/src:api",
+        "//packages/planning-ui/src:dependency_rules",
+        "//packages/planning-ui/src:domain",
+        "//packages/planning-ui/src:model",
+        "//packages/planning-ui/src:plan-updates",
+        "//packages/planning-ui/src:planning-outcomes",
+        "//packages/planning-ui/src:review-lanes",
+        "//packages/planning-ui/src:weekly-review",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:protobuf",
+    ],
+)
+
+proto_vitest_test(
+    name = "native-timer_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA,
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":native-timer.test.tsx"],
+    deps = [
+        "//packages/planning-ui/src:App",
+        "//packages/planning-ui/src:domain",
+        "//packages/planning-ui/src:model",
+    ],
+)
+
+proto_vitest_test(
+    name = "optimistic_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA + [":fixture.ts"],
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":optimistic.test.tsx"],
+    deps = [
+        "//packages/planning-ui/src:App",
+        "//packages/planning-ui/src:bets",
+        "//packages/planning-ui/src:domain",
+        "//packages/planning-ui/src:model",
+        "//packages/planning-ui/src:plan-updates",
+    ],
+)
+
+proto_vitest_test(
+    name = "plan-updates_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA + [":fixture.ts"],
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":plan-updates.test.ts"],
+    deps = [
+        "//packages/planning-ui/src:bets",
+        "//packages/planning-ui/src:domain",
+        "//packages/planning-ui/src:model",
+        "//packages/planning-ui/src:plan-updates",
+    ],
+)
+
+proto_vitest_test(
+    name = "plan-view-state_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA,
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":plan-view-state.test.ts"],
+    deps = ["//packages/planning-ui/src:plan-view-state"],
+)
+
+proto_vitest_test(
+    name = "plan-visibility_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA + [":fixture.ts"],
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":plan-visibility.test.tsx"],
+    deps = [
+        "//packages/planning-ui/src:App",
+        "//packages/planning-ui/src:PlanView",
+        "//packages/planning-ui/src:bets",
+        "//packages/planning-ui/src:domain",
+        "//packages/planning-ui/src:model",
+        "//packages/planning-ui/src:plan-updates",
+        "//packages/planning-ui/src:plan-visibility",
+        "//packages/planning-ui/src:review-lanes",
+    ],
+)
+
+proto_vitest_test(
+    name = "planner_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA + [":fixture.ts"],
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":planner.test.tsx"],
+    deps = [
+        "//packages/planning-ui/src:PlanView",
+        "//packages/planning-ui/src:TaskBreadcrumb",
+        "//packages/planning-ui/src:bets",
+        "//packages/planning-ui/src:domain",
+        "//packages/planning-ui/src:model",
+        "//packages/planning-ui/src:plan-updates",
+        "//packages/planning-ui/src:plan-view-state",
+    ],
+)
+
+proto_vitest_test(
+    name = "planning-outcomes_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA,
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":planning-outcomes.test.ts"],
+    deps = [
+        "//packages/planning-ui/src:model",
+        "//packages/planning-ui/src:planning-outcomes",
+    ],
+)
+
+proto_vitest_test(
+    name = "polish_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA + [":fixture.ts"],
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":polish.test.tsx"],
+    deps = [
+        "//packages/planning-ui/src:FocusView",
+        "//packages/planning-ui/src:PlanView",
+        "//packages/planning-ui/src:PlanningCalendar",
+        "//packages/planning-ui/src:ReviewBoard",
+        "//packages/planning-ui/src:bets",
+        "//packages/planning-ui/src:domain",
+        "//packages/planning-ui/src:model",
+        "//packages/planning-ui/src:plan-updates",
+    ],
+)
+
+proto_vitest_test(
+    name = "quick_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA + [":fixture.ts"],
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":quick.test.tsx"],
+    deps = [
+        "//packages/planning-ui/src:FocusView",
+        "//packages/planning-ui/src:PlanView",
+        "//packages/planning-ui/src:TaskEditor",
+        "//packages/planning-ui/src:bets",
+        "//packages/planning-ui/src:domain",
+        "//packages/planning-ui/src:model",
+        "//packages/planning-ui/src:plan-updates",
+        "//packages/planning-ui/src:weekly-review",
+    ],
+)
+
+proto_vitest_test(
+    name = "render-cost_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA + [":fixture.ts"],
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":render-cost.test.tsx"],
+    deps = [
+        "//packages/planning-ui/src:App",
+        "//packages/planning-ui/src:FocusBlock",
+        "//packages/planning-ui/src:PlanView",
+        "//packages/planning-ui/src:bets",
+        "//packages/planning-ui/src:dependency_rules",
+        "//packages/planning-ui/src:domain",
+        "//packages/planning-ui/src:model",
+        "//packages/planning-ui/src:plan-updates",
+        "//packages/planning-ui/src:plan-visibility",
+        "//packages/planning-ui/src:planning-outcomes",
+        "//packages/planning-ui/src:review-lanes",
+        "//packages/planning-ui/src:weekly-review",
+    ],
+)
+
+proto_vitest_test(
+    name = "review-lanes_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA,
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":review-lanes.test.ts"],
+    deps = [
+        "//packages/planning-ui/src:domain",
+        "//packages/planning-ui/src:model",
+        "//packages/planning-ui/src:plan-updates",
+        "//packages/planning-ui/src:plan-visibility",
+        "//packages/planning-ui/src:planning-outcomes",
+        "//packages/planning-ui/src:review-lanes",
+        "//packages/planning-ui/src:weekly-review",
+    ],
+)
+
+proto_vitest_test(
+    name = "row-drag_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA + ["//packages/planning-ui:node_modules/@dnd-kit/dom"],
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":row-drag.test.ts"],
+    deps = ["//packages/planning-ui/src:row-drag"],
+)
+
+proto_vitest_test(
+    name = "step-editor_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA + [":fixture.ts"],
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":step-editor.test.tsx"],
+    deps = [
+        "//packages/planning-ui/src:App",
+        "//packages/planning-ui/src:bets",
+        "//packages/planning-ui/src:domain",
+        "//packages/planning-ui/src:model",
+        "//packages/planning-ui/src:plan-updates",
+    ],
+)
+
+proto_vitest_test(
+    name = "weekly-goals_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA + [":fixture.ts"],
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":weekly-goals.test.tsx"],
+    deps = [
+        "//packages/planning-ui/src:App",
+        "//packages/planning-ui/src:WeeklyGoals",
+        "//packages/planning-ui/src:bets",
+        "//packages/planning-ui/src:domain",
+        "//packages/planning-ui/src:model",
+        "//packages/planning-ui/src:plan-updates",
+    ],
+)
+
+proto_vitest_test(
+    name = "weekly-review_test",
+    config = "//packages/planning-ui:vitest_config",
+    data = _TEST_DATA + [
+        ":fixture.ts",
+        ":transport.ts",
+    ],
+    project = "packages/planning-ui",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":weekly-review.test.tsx"],
+    deps = [
+        "//packages/planning-ui/src:App",
+        "//packages/planning-ui/src:PlanView",
+        "//packages/planning-ui/src:api",
+        "//packages/planning-ui/src:bets",
+        "//packages/planning-ui/src:domain",
+        "//packages/planning-ui/src:model",
+        "//packages/planning-ui/src:plan-updates",
+        "//packages/planning-ui/src:plan-view-state",
+        "//packages/planning-ui/src:weekly-review",
+        "//proto/ts:http-client",
+    ],
+)
+
+ts_project(
+    name = "types",
+    srcs = [
+        ":add-step.test.tsx",
+        ":announce.test.tsx",
+        ":api.test.ts",
+        ":api-dependencies.test.ts",
+        ":api-planning.test.ts",
+        ":background-reads.test.tsx",
+        ":bets.test.ts",
+        ":components.test.tsx",
+        ":deadlines.test.ts",
+        ":deadlines-ui.test.tsx",
+        ":dependencies.test.ts",
+        ":dependencies-ui.test.tsx",
+        ":domain.test.ts",
+        ":drag-announcements.test.ts",
+        ":fixture.ts",
+        ":focus.test.tsx",
+        ":focus-entries.test.tsx",
+        ":full-title.test.tsx",
+        ":host.test.tsx",
+        ":idle-pause.test.ts",
+        ":idle-pause-ui.test.tsx",
+        ":mail.test.ts",
+        ":mini-timer.test.tsx",
+        ":native-api.test.ts",
+        ":native-order.test.ts",
+        ":native-planning.test.tsx",
+        ":native-timer.test.tsx",
+        ":optimistic.test.tsx",
+        ":plan-updates.test.ts",
+        ":plan-view-state.test.ts",
+        ":plan-visibility.test.tsx",
+        ":planner.test.tsx",
+        ":planning-outcomes.test.ts",
+        ":polish.test.tsx",
+        ":quick.test.tsx",
+        ":render-cost.test.tsx",
+        ":review-lanes.test.ts",
+        ":row-drag.test.ts",
+        ":setup.ts",
+        ":step-editor.test.tsx",
+        ":transport.ts",
+        ":weekly-goals.test.tsx",
+        ":weekly-review.test.tsx",
+        "//packages/planning-ui/src:typecheck_sources",
+    ],
+    no_emit = True,
+    root_dir = "..",
+    tsconfig = "//packages/planning-ui:compiler_config",
+    deps = [
+        "//:node_modules/@types/react",
+        "//packages/planning-ui:node_modules/@dnd-kit/collision",
+        "//packages/planning-ui:node_modules/@dnd-kit/dom",
+        "//packages/planning-ui:node_modules/@dnd-kit/react",
+        "//packages/planning-ui:node_modules/@testing-library/react",
+        "//packages/planning-ui:node_modules/@types/node",
+        "//packages/planning-ui:node_modules/@types/react",
+        "//packages/planning-ui:node_modules/@types/react-dom",
+        "//packages/planning-ui:node_modules/@vitejs/plugin-react",
+        "//packages/planning-ui:node_modules/jsdom",
+        "//packages/planning-ui:node_modules/lucide-react",
+        "//packages/planning-ui:node_modules/react",
+        "//packages/planning-ui:node_modules/react-dom",
+        "//packages/planning-ui:node_modules/vite",
+        "//packages/planning-ui:node_modules/vitest",
+        "//packages/planning-ui:proto_typecheck_link",
+    ],
+)
+
+alias(
+    name = "typecheck",
+    actual = ":types_typecheck",
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+    tests = [
+        ":add-step_test",
+        ":announce_test",
+        ":api-dependencies_test",
+        ":api-planning_test",
+        ":api_test",
+        ":background-reads_test",
+        ":bets_test",
+        ":components_test",
+        ":deadlines-ui_test",
+        ":deadlines_test",
+        ":dependencies-ui_test",
+        ":dependencies_test",
+        ":domain_test",
+        ":drag-announcements_test",
+        ":focus-entries_test",
+        ":focus_test",
+        ":full-title_test",
+        ":host_test",
+        ":idle-pause-ui_test",
+        ":idle-pause_test",
+        ":mail_test",
+        ":mini-timer_test",
+        ":native-api_test",
+        ":native-order_test",
+        ":native-planning_test",
+        ":native-timer_test",
+        ":optimistic_test",
+        ":plan-updates_test",
+        ":plan-view-state_test",
+        ":plan-visibility_test",
+        ":planner_test",
+        ":planning-outcomes_test",
+        ":polish_test",
+        ":quick_test",
+        ":render-cost_test",
+        ":review-lanes_test",
+        ":row-drag_test",
+        ":step-editor_test",
+        ":weekly-goals_test",
+        ":weekly-review_test",
+    ],
+)
+
+test_suite(
+    name = "typecheck_tests",
+    tests = [":types_typecheck_test"],
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        ":typecheck_tests",
+        ":unit_tests",
+    ],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)

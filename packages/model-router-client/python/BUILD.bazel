@@ -1,54 +1,13 @@
-load("@rules_python//python:defs.bzl", "py_library", "py_test")
 load("@rules_python//python:packaging.bzl", "py_package", "py_wheel")
-load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files")
 
 package(default_visibility = ["//visibility:public"])
-
-py_library(
-    name = "package",
-    srcs = ["src/model_router_client/__init__.py"],
-    data = ["src/model_router_client/py.typed"],
-    imports = ["src"],
-    deps = [
-        "//proto:python_runtime",
-        "//proto/modelrouter/inference/v1:python",
-    ],
-)
-
-py_library(
-    name = "library",
-    deps = [":package"],
-)
-
-py_test(
-    name = "tests_test_client",
-    size = "small",
-    srcs = [
-        "tests/test_client.py",
-        "//tools/bazel/python:unittest_main.py",
-    ],
-    args = ["tests.test_client"],
-    data = ["pyproject.toml"],
-    imports = [
-        ".",
-        "src",
-        "tests",
-    ],
-    legacy_create_init = False,
-    main = "//tools/bazel/python:unittest_main.py",
-    deps = [":package"],
-)
-
-test_suite(
-    name = "tests",
-    tests = [":tests_test_client"],
-)
 
 py_package(
     name = "wheel_files",
     packages = ["packages/model-router-client/python/src"],
     tags = ["manual"],
-    deps = [":package"],
+    deps = ["//packages/model-router-client/python/src/model_router_client:package"],
 )
 
 py_wheel(
@@ -63,23 +22,28 @@ py_wheel(
     deps = [":wheel_files"],
 )
 
-filegroup(
-    name = "source_audit_files",
-    srcs = glob(
-        [
-            "*",
-            "src/**",
-            "tests/**",
-        ],
-        allow_empty = True,
-        exclude = SOURCE_AUDIT_EXCLUDES,
-    ) + glob(
-        [
-            ".env.example",
-            ".env.*.example",
-            ".dev.vars.example",
-        ],
-        allow_empty = True,
-    ),
-    visibility = ["//visibility:public"],
+source_audit_files(
+    patterns = [
+        "*",
+        "src/**",
+    ],
+    deps = [
+        "//packages/model-router-client/python/src/model_router_client:source_audit_files",
+        "//packages/model-router-client/python/tests:source_audit_files",
+    ],
+)
+
+alias(
+    name = "library",
+    actual = "//packages/model-router-client/python/src/model_router_client:library",
+)
+
+alias(
+    name = "package",
+    actual = "//packages/model-router-client/python/src/model_router_client:package",
+)
+
+test_suite(
+    name = "tests",
+    tests = ["//packages/model-router-client/python/tests"],
 )

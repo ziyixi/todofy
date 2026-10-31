@@ -1,0 +1,127 @@
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/python:tests.bzl", "unittest_test")
+
+package(default_visibility = ["//tools/cloud-release:__subpackages__"])
+
+unittest_test(
+    name = "test_assets_session_retry_test",
+    srcs = ["test_assets_session_retry.py"],
+    data = [
+        "//tools:repository_test_data",
+        "//tools/cloud-release:python_sources",
+    ],
+    imports = [
+        ".",
+        "..",
+    ],
+    modules = ["test_assets_session_retry"],
+)
+
+unittest_test(
+    name = "test_drift_acceptance_test",
+    srcs = ["test_drift_acceptance.py"],
+    data = [
+        "//tools:repository_test_data",
+        "//tools/cloud-release:python_sources",
+    ],
+    imports = [
+        ".",
+        "..",
+    ],
+    modules = ["test_drift_acceptance"],
+    deps = [
+        "//tools/cloud-release:api",
+        "//tools/cloud-release:control",
+    ],
+)
+
+unittest_test(
+    name = "test_release_test",
+    srcs = ["test_release.py"],
+    data = [
+        "//tools:repository_test_data",
+        "//tools/cloud-release:python_sources",
+    ],
+    imports = [
+        ".",
+        "..",
+    ],
+    modules = ["test_release"],
+    deps = [
+        "//tools/cloud-release:api",
+        "//tools/cloud-release:cloudflare",
+        "//tools/cloud-release:control",
+        "//tools/cloud-release:deployments",
+    ],
+)
+
+unittest_test(
+    name = "test_vps_record_test",
+    srcs = ["test_vps_record.py"],
+    data = [
+        "//tools:repository_test_data",
+        "//tools/cloud-release:python_sources",
+    ],
+    imports = [
+        ".",
+        "..",
+    ],
+    modules = ["test_vps_record"],
+    deps = [
+        "//tools/cloud-release:api",
+        "//tools/cloud-release:vps_record",
+    ],
+)
+
+unittest_test(
+    name = "test_website_retirement_test",
+    srcs = ["test_website_retirement.py"],
+    data = [
+        "//tools:repository_test_data",
+        "//tools/cloud-release:python_sources",
+    ],
+    imports = [
+        ".",
+        "..",
+    ],
+    modules = ["test_website_retirement"],
+    deps = ["//tools/cloud-release:api"],
+)
+
+unittest_test(
+    name = "test_artifact_test",
+    srcs = ["test_artifact.py"],
+    imports = [
+        ".",
+        "..",
+    ],
+    modules = ["test_artifact"],
+    deps = ["//tools/cloud-release:artifact"],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(["*.py"]),
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        ":test_artifact_test",
+        ":test_assets_session_retry_test",
+        ":test_drift_acceptance_test",
+        ":test_release_test",
+        ":test_vps_record_test",
+        ":test_website_retirement_test",
+    ],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)

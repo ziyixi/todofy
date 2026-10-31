@@ -1,5 +1,5 @@
 load("@npm//website:@playwright/test/package_json.bzl", playwright = "bin")
-load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES", "source_audit_files")
 load(":defs.bzl", "browser_toolchain")
 
 package(default_visibility = ["//visibility:public"])
@@ -45,22 +45,7 @@ toolchain(
     toolchain_type = ":toolchain_type",
 )
 
-filegroup(
-    name = "source_audit_files",
-    srcs = glob(
-        ["*"],
-        allow_empty = True,
-        exclude = SOURCE_AUDIT_EXCLUDES,
-    ) + glob(
-        [
-            ".env.example",
-            ".env.*.example",
-            ".dev.vars.example",
-        ],
-        allow_empty = True,
-    ),
-    visibility = ["//visibility:public"],
-)
+source_audit_files()
 
 playwright.playwright_binary(
     name = "install_dependencies",

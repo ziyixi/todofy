@@ -73,6 +73,21 @@ SOURCE_AUDIT_EXCLUDES = [
     "**/*.swo",
 ]
 
+# The repository-root Bazel output links are not exclusions for source files
+# such as a child package's scripts/bazel-build.mjs.
+SOURCE_SUBPACKAGE_AUDIT_EXCLUDES = [pattern for pattern in SOURCE_AUDIT_EXCLUDES if pattern.startswith("**/")]
+
+def source_audit_files(patterns = ["*"], deps = [], exclude = SOURCE_AUDIT_EXCLUDES):
+    """Collect the repository's public source and example-file audit inputs."""
+    native.filegroup(
+        name = "source_audit_files",
+        srcs = native.glob(patterns, allow_empty = True, exclude = exclude) + native.glob(
+            [".env.example", ".env.*.example", ".dev.vars.example"],
+            allow_empty = True,
+        ) + deps,
+        visibility = ["//visibility:public"],
+    )
+
 def _source_manifest_impl(ctx):
     files = ctx.attr.srcs[DefaultInfo].files.to_list()
     for source in files:

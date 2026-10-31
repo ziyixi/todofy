@@ -2,72 +2,45 @@ load("@aspect_rules_js//js:defs.bzl", "js_library")
 load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
 load("@npm//:defs.bzl", "npm_link_all_packages")
 load("@npm//newsletter-console/worker:eslint/package_json.bzl", eslint = "bin")
-load("@npm//newsletter-console/worker:vitest/package_json.bzl", vitest = "bin")
 load("@npm//newsletter-console/worker:wrangler/package_json.bzl", wrangler = "bin")
 load("//proto/bazel:ts_package.bzl", "proto_package")
-load("//tools/bazel:js.bzl", "proto_vitest_test", "workerd_vitest_test", "workspace_link", "workspace_package_link")
-load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel:js.bzl", "workspace_package_link")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files")
 load("//tools/bazel/lint:defs.bzl", "eslint_test")
 
 package(default_visibility = ["//newsletter-console:__subpackages__"])
 
+exports_files(
+    [
+        "package.json",
+        "tsconfig.json",
+        "vitest.config.ts",
+        "vitest.runtime.config.ts",
+    ],
+    visibility = ["//newsletter-console:__subpackages__"],
+)
+
+alias(
+    name = "package_json",
+    actual = ":package_metadata",
+)
+
+js_library(
+    name = "test_config",
+    srcs = ["vitest.config.ts"],
+)
+
+js_library(
+    name = "runtime_test_config",
+    srcs = ["vitest.runtime.config.ts"],
+)
+
 npm_link_all_packages(name = "node_modules")
-
-js_library(
-    name = "env",
-    srcs = ["src/env.ts"],
-    types = ["src/env.ts"],
-    deps = [],
-)
-
-js_library(
-    name = "upstream",
-    srcs = ["src/upstream.ts"],
-    types = ["src/upstream.ts"],
-    deps = [
-        "//proto/ts:http-transcoder",
-        "//proto/ts:rpc-status",
-    ],
-)
-
-js_library(
-    name = "http",
-    srcs = ["src/http.ts"],
-    types = ["src/http.ts"],
-    deps = [
-        ":env",
-        ":upstream",
-        "//packages/edge-auth:lib",
-        "//proto/newsletter/ui/v1:ts",
-        "//proto/ts:http-transcoder",
-        "//proto/ts:rpc-status",
-    ],
-)
-
-js_library(
-    name = "index",
-    srcs = ["src/index.ts"],
-    types = ["src/index.ts"],
-    deps = [
-        ":env",
-        ":http",
-    ],
-)
-
-js_library(
-    name = "lib",
-    deps = [
-        ":env",
-        ":http",
-        ":index",
-        ":upstream",
-    ],
-)
 
 proto_package(
     name = "proto_types_package",
     deps = [
-        ":lib",
+        "//newsletter-console/worker/src:lib",
         "//proto/newsletter/ui/v1:ts",
         "//proto/ts:http-client",
         "//proto/ts:http-transcoder",
@@ -87,107 +60,27 @@ workspace_package_link(
     src = "//packages/edge-auth:pkg",
 )
 
-workspace_link(
-    name = "http_test_edge_auth_link",
-    src = "//packages/edge-auth:pkg",
-)
-
-proto_vitest_test(
-    name = "http_test",
-    data = [
-        "package.json",
-        "test/jwt.ts",
-        ":http_test_edge_auth_link",
-        ":node_modules/vitest",
-    ],
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = ["test/http.test.ts"],
-    deps = [
-        ":env",
-        ":http",
-    ],
-)
-
-proto_vitest_test(
-    name = "upstream_test",
-    data = [
-        "package.json",
-        ":node_modules/vitest",
-    ],
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = ["test/upstream.test.ts"],
-    deps = [
-        ":upstream",
-        "//proto/ts:http-transcoder",
-        "//proto/ts:rpc-status",
-    ],
-)
-
-workspace_link(
-    name = "wire-conformance_test_edge_auth_link",
-    src = "//packages/edge-auth:pkg",
-)
-
-proto_vitest_test(
-    name = "wire-conformance_test",
-    data = [
-        "package.json",
-        "test/jwt.ts",
-        ":node_modules/vitest",
-        ":wire-conformance_test_edge_auth_link",
-        "//contracts:newsletter-ui-v1/fixtures/backup-status.json_data",
-        "//contracts:newsletter-ui-v1/fixtures/edition.json_data",
-        "//contracts:newsletter-ui-v1/fixtures/edition-rendering.json_data",
-        "//contracts:newsletter-ui-v1/fixtures/editions.json_data",
-        "//contracts:newsletter-ui-v1/fixtures/model-calls.json_data",
-        "//contracts:newsletter-ui-v1/fixtures/model-usage-30d.json_data",
-        "//contracts:newsletter-ui-v1/fixtures/overview.json_data",
-        "//contracts:newsletter-ui-v1/fixtures/run-blocked-selection-timeout.json_data",
-        "//contracts:newsletter-ui-v1/fixtures/run-ready.json_data",
-        "//contracts:newsletter-ui-v1/fixtures/runs.json_data",
-        "//contracts:newsletter-ui-v1/fixtures/source-catalog.json_data",
-    ],
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = ["test/wire-conformance.test.ts"],
-    deps = [
-        ":env",
-        ":http",
-        "//proto/newsletter/ui/v1:ts",
-        "//proto/ts:http-client",
-        "//proto/ts:wire-json",
-    ],
-)
-
 ts_project(
     name = "types",
     srcs = [
-        "src/env.ts",
-        "src/http.ts",
-        "src/index.ts",
-        "src/upstream.ts",
-        "test/http.test.ts",
-        "test/jwt.ts",
-        "test/upstream.test.ts",
-        "test/wire-conformance.test.ts",
-        "vitest.config.ts",
-        "vitest.runtime.config.ts",
+        ":vitest.config.ts",
+        ":vitest.runtime.config.ts",
+        "//newsletter-console/worker/src:types_srcs",
+        "//newsletter-console/worker/test:types_srcs",
     ],
     data = [
-        "vitest.config.ts",
-        "vitest.runtime.config.ts",
+        ":vitest.config.ts",
+        ":vitest.runtime.config.ts",
     ],
     no_emit = True,
     resolve_json_module = True,
     deps = [
         ":edge_auth_types_link",
-        ":lib",
         ":node_modules/@cloudflare/workers-types",
         ":node_modules/@types/node",
         ":node_modules/vitest",
         ":proto_types_link",
+        "//newsletter-console/worker/src:lib",
     ],
 )
 
@@ -200,99 +93,36 @@ wrangler.wrangler_binary(name = "wrangler")
 
 js_library(
     name = "application_sources",
-    srcs = glob([
-        "src/**",
+    srcs = ["//newsletter-console/worker/src:application_sources_srcs"] + glob([
         "package.json",
         "tsconfig.json",
     ]),
 )
 
-test_suite(name = "check")
-
-js_library(
-    name = "runtime_helpers",
-    srcs = [
-        "test/runtime/harness.ts",
-        "test/runtime/tsconfig.json",
+test_suite(
+    name = "check",
+    tests = [
+        ":lint",
+        ":runtime_types_typecheck_test",
+        ":types_typecheck_test",
+        "//newsletter-console/worker/test:check",
     ],
-    types = glob(
-        ["test/runtime/**/*.ts"],
-        exclude = ["**/*.test.ts"],
-    ),
-)
-
-workerd_vitest_test(
-    name = "runtime_cpu_test",
-    data = [
-        "test/jwt.ts",
-        ":test_support",
-        "//contracts:newsletter-ui-v1/fixtures/backup-status.json_data",
-        "//contracts:newsletter-ui-v1/fixtures/edition.json_data",
-        "//contracts:newsletter-ui-v1/fixtures/edition-rendering.json_data",
-        "//contracts:newsletter-ui-v1/fixtures/editions.json_data",
-        "//contracts:newsletter-ui-v1/fixtures/model-calls.json_data",
-        "//contracts:newsletter-ui-v1/fixtures/model-usage-30d.json_data",
-        "//contracts:newsletter-ui-v1/fixtures/overview.json_data",
-        "//contracts:newsletter-ui-v1/fixtures/run-blocked-selection-timeout.json_data",
-        "//contracts:newsletter-ui-v1/fixtures/run-ready.json_data",
-        "//contracts:newsletter-ui-v1/fixtures/runs.json_data",
-        "//contracts:newsletter-ui-v1/fixtures/source-catalog.json_data",
-        "//tools/workerd-cpu:lib",
-    ],
-    runner = vitest.vitest_test,
-    tags = [
-        "cpu",
-        "exclusive",
-        "workerd",
-    ],
-    tests = ["test/runtime/cpu.test.ts"],
-    deps = [
-        "//proto/ts:http-transcoder",
-        "//proto/ts:rpc-status",
-    ],
-)
-
-workerd_vitest_test(
-    name = "runtime_http_test",
-    data = [
-        "test/jwt.ts",
-        ":test_support",
-        "//contracts:newsletter-ui-v1/fixtures/backup-status.json_data",
-        "//contracts:newsletter-ui-v1/fixtures/edition.json_data",
-        "//contracts:newsletter-ui-v1/fixtures/edition-rendering.json_data",
-        "//contracts:newsletter-ui-v1/fixtures/editions.json_data",
-        "//contracts:newsletter-ui-v1/fixtures/model-calls.json_data",
-        "//contracts:newsletter-ui-v1/fixtures/model-usage-30d.json_data",
-        "//contracts:newsletter-ui-v1/fixtures/overview.json_data",
-        "//contracts:newsletter-ui-v1/fixtures/run-blocked-selection-timeout.json_data",
-        "//contracts:newsletter-ui-v1/fixtures/run-ready.json_data",
-        "//contracts:newsletter-ui-v1/fixtures/runs.json_data",
-        "//contracts:newsletter-ui-v1/fixtures/source-catalog.json_data",
-    ],
-    runner = vitest.vitest_test,
-    tests = ["test/runtime/http.test.ts"],
 )
 
 ts_config(
     name = "worker_config",
-    src = "tsconfig.json",
+    src = ":tsconfig.json",
 )
 
 ts_config(
     name = "runtime_config",
-    src = "test/runtime/tsconfig.json",
+    src = "//newsletter-console/worker/test:source_runtime_tsconfig_json",
     deps = [":worker_config"],
 )
 
 ts_project(
     name = "runtime_types",
-    srcs = [":proto_types_package_wire_types"] + glob(
-        [
-            "test/runtime/**/*.ts",
-            "test/runtime/**/*.mts",
-        ],
-        allow_empty = True,
-    ),
+    srcs = [":proto_types_package_wire_types"] + ["//newsletter-console/worker/test:runtime_types_srcs"],
     extends = ":runtime_config",
     no_emit = True,
     resolve_json_module = True,
@@ -303,48 +133,24 @@ ts_project(
     },
     deps = [
         ":edge_auth_types_link",
-        ":lib",
         ":node_modules/@cloudflare/workers-types",
         ":node_modules/@types/node",
         ":node_modules/esbuild",
         ":node_modules/miniflare",
         ":node_modules/vitest",
         ":proto_types_link",
-        ":test_support",
         "//:node_modules/@cloudflare/workers-types",
+        "//newsletter-console/worker/src:lib",
+        "//newsletter-console/worker/test:test_support",
         "//tools/workerd-cpu:types",
     ],
-)
-
-js_library(
-    name = "test_support",
-    srcs = glob(
-        ["test/**"],
-        exclude = [
-            "test/runtime/**",
-            "test/smoke/**",
-            "**/*.test.ts",
-        ],
-    ),
-    types = glob(
-        ["test/**/*.ts"],
-        exclude = [
-            "test/runtime/**",
-            "test/smoke/**",
-            "**/*.test.ts",
-        ],
-    ),
 )
 
 eslint_test(
     name = "lint",
     data = [
-        "package.json",
-        "test/runtime/tsconfig.json",
-        "tsconfig.json",
         ":application_sources",
         ":edge_auth_types_link",
-        ":lib",
         ":node_modules/@cloudflare/workers-types",
         ":node_modules/@eslint/js",
         ":node_modules/@types/node",
@@ -355,9 +161,9 @@ eslint_test(
         ":node_modules/typescript-eslint",
         ":node_modules/vitest",
         ":node_modules/wrangler",
+        ":package.json",
         ":proto_types_link",
-        ":runtime_helpers",
-        ":test_support",
+        ":tsconfig.json",
         "//:node_modules/@cloudflare/workers-types",
         "//contracts:newsletter-ui-v1/fixtures/backup-status.json_data",
         "//contracts:newsletter-ui-v1/fixtures/edition.json_data",
@@ -370,15 +176,15 @@ eslint_test(
         "//contracts:newsletter-ui-v1/fixtures/run-ready.json_data",
         "//contracts:newsletter-ui-v1/fixtures/runs.json_data",
         "//contracts:newsletter-ui-v1/fixtures/source-catalog.json_data",
+        "//newsletter-console/worker/src:lib",
+        "//newsletter-console/worker/test:lint_data",
+        "//newsletter-console/worker/test:runtime_helpers",
+        "//newsletter-console/worker/test:test_support",
         "//tools/workerd-cpu:types",
     ],
-    runner = eslint.eslint_test,
-    sources = glob(
+    runner = eslint.eslint_binary,
+    sources = ["//newsletter-console/worker/src:lint_sources"] + ["//newsletter-console/worker/test:lint_sources"] + glob(
         [
-            "src/**/*.ts",
-            "src/**/*.tsx",
-            "test/**/*.ts",
-            "test/**/*.mts",
             "scripts/**/*.mjs",
             "*.js",
             "*.ts",
@@ -389,48 +195,13 @@ eslint_test(
 
 js_library(
     name = "package_metadata",
-    srcs = ["package.json"],
-)
-
-js_library(
-    name = "entry_metadata",
-    srcs = ["src/index.ts"],
-)
-
-js_library(
-    name = "runtime_metadata",
-    srcs = ["test/runtime/harness.ts"],
-)
-
-js_library(
-    name = "env_metadata",
-    srcs = ["src/env.ts"],
-)
-
-filegroup(
-    name = "source_audit_files",
-    srcs = glob(
-        [
-            "*",
-            "src/**",
-            "test/**",
-        ],
-        allow_empty = True,
-        exclude = SOURCE_AUDIT_EXCLUDES,
-    ) + glob(
-        [
-            ".env.example",
-            ".env.*.example",
-            ".dev.vars.example",
-        ],
-        allow_empty = True,
-    ),
-    visibility = ["//visibility:public"],
+    srcs = [":package.json"],
 )
 
 test_suite(
     name = "unit_tests",
     tags = ["unit"],
+    tests = ["//newsletter-console/worker/test:unit_tests"],
 )
 
 test_suite(
@@ -443,5 +214,22 @@ test_suite(
 
 test_suite(
     name = "runtime_tests",
-    tests = [":runtime_" + file.removeprefix("test/runtime/").removesuffix(".test.ts") + "_test" for file in glob(["test/runtime/*.test.ts"])],
+    tests = ["//newsletter-console/worker/test:runtime_tests"],
+)
+
+alias(
+    name = "lib",
+    actual = "//newsletter-console/worker/src:lib",
+)
+
+source_audit_files(
+    patterns = [
+        "*",
+        "src/**",
+        "test/**",
+    ],
+    deps = [
+        "//newsletter-console/worker/src:source_audit_files",
+        "//newsletter-console/worker/test:source_audit_files",
+    ],
 )

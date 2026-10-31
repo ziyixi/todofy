@@ -1,12 +1,27 @@
 # Handoff
 
-Updated 2026-10-30 UTC. Read [AGENTS](AGENTS.md), then the target application's README/rules.
+Updated 2026-10-31 UTC. Read [AGENTS](AGENTS.md), then the target application's README/rules.
 Documentation entrypoints are in [docs/README](docs/README.md). Historical waiting lists are not instructions.
 
 ## Current work
 
-No implementation in this handoff is awaiting release. Check current Git status and open pull requests before starting
-independent work. The completed morning Newsletter remains frozen; do not recompute or resend it for verification.
+`codex/bazel-build-packages` is implementing the approved whole-repository BUILD simplification and package ownership
+correction. Application roots retain final artifacts and public check/config/release entrypoints; source, tests and
+tools move into their owning packages. Existing dependency granularity, fixtures, budgets, runtime code, locks and
+release behavior must remain. Shared macros encapsulate fixed execution conventions rather than infer dependencies.
+
+The original native graph and all 19 release/synthetic build targets are saved locally for comparison; the baseline
+Web/extension/site builds and three Linux images succeeded. Ownership changes and shared runner/archive/audit macros
+are implemented across the repository. Native loading, representative moved Python/JS tests and the real ESLint
+positive/negative/declaration-file fixture passed. Full configured analysis passed. All archive paths, modes and runtime
+payloads match; the three OCI archives are byte-identical. Recall exposed a missing compiler-config input, now declared
+and explicitly passed; corrected old/new archives match. Website repeat controls confirm pre-existing build-ID/source-map
+metadata variation. Canonical generated paths and incremental dependency links are restored without output cleanup.
+
+The first full check run exposed compiler-root, source-scan launcher placement, quality-check placement and moved
+inspection-location issues. Definitions are corrected with assertions/budgets intact; final checks follow existing CI
+group concurrency. Branch CI, publication and matching reconciliation remain pending. No real work, content, installed
+extension, dependency lock, provider model or credential is changed. Keep current service behavior and user pauses.
 
 ## Latest verified release
 

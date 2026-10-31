@@ -1,29 +1,44 @@
-"""Shared invocation for the repository's file-level Vitest targets."""
+"""JS source providers, project-scoped tests and Vite build recipes."""
 
-load("@aspect_rules_js//js:defs.bzl", "js_run_binary")
+load("@aspect_rules_js//js:defs.bzl", "js_library", "js_run_binary")
 load("@aspect_rules_js//js:providers.bzl", "JsInfo", "js_info")
 load("@aspect_rules_js//npm:providers.bzl", "NpmPackageInfo")
 load("@bazel_lib//lib:copy_directory.bzl", "copy_directory_bin_action")
 load("@bazel_lib//lib:expand_template.bzl", "expand_template")
 load("//proto/bazel:ts_package.bzl", "proto_package")
+load("//tools/bazel:paths.bzl", "module_path", "project_path", "relative_path", "source_label")
+
+def ts_source_library(name, srcs, deps = [], **kwargs):
+    """Propagate TypeScript source types without compiling or widening deps."""
+    js_library(name = name, srcs = srcs, types = srcs, deps = deps, **kwargs)
+
+def copied_source_files(name, srcs, visibility = None, testonly = False):
+    """Expose exact owner-copied files, including declarations, as data."""
+    ts_source_library(
+        name = name + "_copy",
+        srcs = srcs,
+        testonly = testonly,
+        visibility = ["//visibility:private"],
+    )
+    native.filegroup(
+        name = name,
+        srcs = [":" + name + "_copy"],
+        output_group = "types",
+        testonly = testonly,
+        visibility = visibility,
+    )
 
 def _directory_link(ctx, name, target):
     output = ctx.actions.declare_symlink("node_modules/" + name)
-    source_parts = target.path.split("/")
-    output_parts = output.dirname.split("/")
-    common = 0
-    for index in range(min(len(source_parts), len(output_parts))):
-        if source_parts[index] != output_parts[index]:
-            break
-        common += 1
-    relative = "../" * (len(output_parts) - common) + "/".join(source_parts[common:])
+    relative = relative_path(target.path, output.dirname)
     ctx.actions.symlink(output = output, target_path = relative, target_type = "directory")
     return output
 
 def _workspace_package_link_impl(ctx):
     package = ctx.attr.src[NpmPackageInfo]
     directory = package.src
-    if ctx.attr.src.label.package != ctx.label.package:
+    project = ctx.attr.project or ctx.label.package
+    if ctx.attr.src.label.package != project:
         directory = ctx.actions.declare_directory(ctx.label.name + "_package")
         copy_directory_bin_action(
             ctx,
@@ -49,6 +64,7 @@ workspace_package_link = rule(
     attrs = {
         "src": attr.label(mandatory = True, providers = [NpmPackageInfo]),
         "runtime_dependencies": attr.string_list(),
+        "project": attr.string(),
     },
     toolchains = ["@bazel_lib//lib:copy_directory_toolchain_type"],
     doc = "Materialize a selected workspace package and its runtime imports for build actions.",
@@ -56,11 +72,12 @@ workspace_package_link = rule(
 
 def _workspace_link_impl(ctx):
     package = ctx.attr.src[NpmPackageInfo]
-    path = ctx.label.package + "/node_modules/" + package.package
+    project = ctx.attr.project or ctx.label.package
+    path = project + "/node_modules/" + package.package
     links = {path: package.src}
     transitive_files = []
     for dependency in package.npm_package_store_infos.to_list():
-        links[ctx.label.package + "/node_modules/" + dependency.package] = dependency.package_store_directory
+        links[project + "/node_modules/" + dependency.package] = dependency.package_store_directory
         transitive_files.append(dependency.transitive_files)
     runfiles = ctx.runfiles(symlinks = links, transitive_files = depset(transitive = transitive_files))
     runfiles = runfiles.merge(ctx.attr.src[DefaultInfo].default_runfiles)
@@ -76,6 +93,7 @@ workspace_link = rule(
     attrs = {
         "src": attr.label(mandatory = True, providers = [NpmPackageInfo]),
         "data": attr.label_list(),
+        "project": attr.string(),
     },
     doc = "Expose a selected workspace npm package in this consumer's isolated test runfiles.",
 )
@@ -84,8 +102,7 @@ def _vitest_config_impl(ctx):
     output = ctx.actions.declare_file(ctx.label.name + ".mjs")
     config = ctx.file.config
     if config:
-        config_path = config.short_path[len(ctx.label.package) + 1:]
-        content = "import original from %s;\n" % json.encode("./" + config_path)
+        content = "import original from %s;\n" % json.encode(module_path(config.short_path, ctx.label.package))
     else:
         content = "const original = {};\n"
     content += """export default async env => {
@@ -106,9 +123,10 @@ _vitest_config = rule(
 
 vite_config = _vitest_config
 
-def vitest_test(name, runner, tests, data = [], args = [], config = None, **kwargs):
+def vitest_test(name, runner, tests, data = [], args = [], config = None, project = None, **kwargs):
     """Run explicit test files using the caller's lockfile-generated Vitest binary."""
-    if config == None:
+    project = native.package_name() if project == None else project
+    if config == None and project == native.package_name():
         config_names = [
             "vitest.config.ts",
             "vitest.config.mts",
@@ -124,43 +142,51 @@ def vitest_test(name, runner, tests, data = [], args = [], config = None, **kwar
             if path in existing:
                 config = path
                 break
+    config = source_label(config) if config else None
     _vitest_config(name = name + "_config", config = config)
+    files = [source_label(test) for test in tests]
+    config_path = relative_path(native.package_name() + "/" + name + "_config.mjs", project)
     runner(
         name = name,
-        args = ["run"] + tests + args + ["--config", name + "_config.mjs"],
-        chdir = native.package_name(),
-        data = {item: True for item in data + tests + ([config] if config else []) + [":node_modules/vitest", ":" + name + "_config"]}.keys(),
+        args = ["run"] + [project_path(test, project) for test in tests] + args + ["--config", config_path],
+        chdir = project,
+        data = {item: True for item in data + files + ([config] if config else []) + ["//" + project + ":node_modules/vitest", ":" + name + "_config"]}.keys(),
         **kwargs
     )
 
-def proto_vitest_test(name, runner, tests, deps, data = [], **kwargs):
+def proto_vitest_test(name, runner, tests, deps, data = [], project = None, **kwargs):
     """Run a file-level test with only its declared proto libraries and runtime inputs."""
     proto_package(name = name + "_proto", deps = deps)
-    workspace_link(name = name + "_proto_link", src = ":" + name + "_proto")
+    workspace_link(name = name + "_proto_link", src = ":" + name + "_proto", project = project or native.package_name())
     vitest_test(
         name = name,
         runner = runner,
         tests = tests,
         data = deps + data + [":" + name + "_proto_link"],
+        project = project,
         **kwargs
     )
 
-def workerd_vitest_test(name, runner, tests, deps = [], data = [], tags = ["workerd"], **kwargs):
+def workerd_vitest_test(name, runner, tests, deps = [], data = [], tags = ["workerd"], project = None, lib = None, runtime_helpers = None, config = None, package_json = None, **kwargs):
     """Run the existing whole-Worker harness with its shared runtime inputs."""
+    moved = project != None
+    project = project or native.package_name()
+    parent = "//" + project + ":"
     proto_vitest_test(
         name = name,
         runner = runner,
         tests = tests,
-        deps = [":lib"] + deps,
+        deps = [lib or parent + "lib"] + deps,
         data = [
-            ":application_sources",
-            ":runtime_helpers",
-            ":edge_auth_types_link",
-            ":node_modules/esbuild",
-            ":node_modules/miniflare",
-            "package.json",
+            parent + "application_sources",
+            runtime_helpers or ("//" + project + "/test:runtime_helpers" if moved else parent + "runtime_helpers"),
+            parent + "edge_auth_types_link",
+            parent + "node_modules/esbuild",
+            parent + "node_modules/miniflare",
+            package_json or parent + ("package_json" if moved else "package.json"),
         ] + data,
-        config = "vitest.runtime.config.ts",
+        config = config or parent + ("runtime_test_config" if moved else "vitest.runtime.config.ts"),
+        project = project,
         size = "large",
         tags = tags,
         **kwargs

@@ -1,5 +1,6 @@
-load("@rules_python//python:defs.bzl", "py_library", "py_test")
-load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("@rules_python//python:defs.bzl", "py_library")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files")
+load("//tools/bazel/python:tests.bzl", "unittest_test")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -13,24 +14,19 @@ py_library(
     name = "test_summary",
     srcs = ["test_summary.py"],
     imports = ["."],
-    deps = ["//tools/infra-plan-summary:summary"],
+    deps = [":summary"],
 )
 
-py_test(
+unittest_test(
     name = "test_summary_test",
-    srcs = [
-        "test_summary.py",
-        "//tools/bazel/python:unittest_main.py",
-    ],
-    args = ["test_summary"],
+    srcs = ["test_summary.py"],
     data = [
         ":python_sources",
         "//tools:repository_test_data",
     ],
     imports = ["."],
-    legacy_create_init = False,
-    main = "//tools/bazel/python:unittest_main.py",
-    deps = ["//tools/infra-plan-summary:summary"],
+    modules = ["test_summary"],
+    deps = [":summary"],
 )
 
 filegroup(
@@ -52,19 +48,4 @@ test_suite(
     tests = [":test_summary_test"],
 )
 
-filegroup(
-    name = "source_audit_files",
-    srcs = glob(
-        ["*"],
-        allow_empty = True,
-        exclude = SOURCE_AUDIT_EXCLUDES,
-    ) + glob(
-        [
-            ".env.example",
-            ".env.*.example",
-            ".dev.vars.example",
-        ],
-        allow_empty = True,
-    ),
-    visibility = ["//visibility:public"],
-)
+source_audit_files()

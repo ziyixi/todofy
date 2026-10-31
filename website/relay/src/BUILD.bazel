@@ -1,0 +1,84 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//website:bazel.bzl", "website_sources")
+
+package(default_visibility = ["//website:__subpackages__"])
+
+exports_files(
+    glob(
+        ["*.ts"],
+        allow_empty = True,
+    ),
+    visibility = ["//website:__subpackages__"],
+)
+
+js_library(
+    name = "env",
+    srcs = [":env.ts"],
+    types = [":env.ts"],
+)
+
+js_library(
+    name = "github",
+    srcs = [":github.ts"],
+    types = [":github.ts"],
+    deps = [":env"],
+)
+
+js_library(
+    name = "status",
+    srcs = [":status.ts"],
+    types = [":status.ts"],
+    deps = [
+        ":env",
+        ":github",
+        "//proto/ops/v1:ts",
+        "//proto/ts:wire-json",
+        "//proto/website/sync/v1:ts",
+    ],
+)
+
+js_library(
+    name = "request",
+    srcs = [":request.ts"],
+    types = [":request.ts"],
+    deps = [
+        ":env",
+        ":github",
+        "//proto/ts:wire-json",
+        "//proto/website/sync/v1:ts",
+    ],
+)
+
+js_library(
+    name = "index",
+    srcs = [":index.ts"],
+    types = [":index.ts"],
+    deps = [
+        ":env",
+        ":request",
+        ":status",
+        "//proto/website/sync/v1:ts",
+    ],
+)
+
+website_sources()
+
+js_library(
+    name = "env_ts_source",
+    srcs = ["env.ts"],
+)
+
+js_library(
+    name = "github_ts_source",
+    srcs = ["github.ts"],
+)
+
+js_library(
+    name = "request_ts_source",
+    srcs = ["request.ts"],
+)
+
+js_library(
+    name = "status_ts_source",
+    srcs = ["status.ts"],
+)

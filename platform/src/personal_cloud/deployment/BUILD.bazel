@@ -1,0 +1,152 @@
+load("@rules_python//python:defs.bzl", "py_library")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//platform:__subpackages__"])
+
+py_library(
+    name = "package",
+    srcs = ["__init__.py"],
+    imports = ["../.."],
+    deps = ["//platform/src/personal_cloud:package"],
+)
+
+py_library(
+    name = "admission",
+    srcs = ["admission.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        "//proto:python_runtime",
+        "@python_deps//httpx",
+    ],
+)
+
+py_library(
+    name = "controller",
+    srcs = ["controller.py"],
+    imports = ["../.."],
+    deps = [
+        ":admission",
+        ":kubernetes",
+        ":package",
+        ":reconcile",
+        ":store",
+        "//platform/src/personal_cloud/status_daemon:adapters",
+        "//proto:python_runtime",
+        "//proto/common/errors/v1:python",
+        "//proto/platform/runtime/v1:python",
+    ],
+)
+
+py_library(
+    name = "kubernetes",
+    srcs = ["kubernetes.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        "@python_deps//kubernetes",
+        "@python_deps//urllib3",
+    ],
+)
+
+py_library(
+    name = "reconcile",
+    srcs = ["reconcile.py"],
+    imports = ["../.."],
+    deps = [
+        ":admission",
+        ":kubernetes",
+        ":package",
+        "//proto:python_runtime",
+        "//proto/platform/runtime/v1:python",
+    ],
+)
+
+py_library(
+    name = "resources",
+    srcs = ["resources.py"],
+    imports = ["../.."],
+    visibility = [
+        "//platform:__subpackages__",
+        "//tools/vps-bootstrap:__subpackages__",
+        "//tools/vps-release:__pkg__",
+    ],
+    deps = [
+        ":package",
+        "//platform/src/personal_cloud/status_daemon:config",
+        "//proto/platform/runtime/v1:python",
+    ],
+)
+
+py_library(
+    name = "router",
+    srcs = ["router.py"],
+    imports = ["../.."],
+    deps = [
+        ":admission",
+        ":controller",
+        ":kubernetes",
+        ":package",
+        ":resources",
+        ":store",
+        "//proto:python_runtime",
+        "//proto/common/errors/v1:python",
+        "//proto/platform/runtime/v1:python",
+    ],
+)
+
+py_library(
+    name = "store",
+    srcs = ["store.py"],
+    imports = ["../.."],
+    visibility = [
+        "//platform:__subpackages__",
+        "//tools/vps-bootstrap:__subpackages__",
+    ],
+    deps = [
+        ":package",
+        "//proto:python_runtime",
+        "//proto/platform/runtime/v1:python",
+    ],
+)
+
+py_library(
+    name = "library",
+    deps = [
+        ":admission",
+        ":controller",
+        ":kubernetes",
+        ":package",
+        ":reconcile",
+        ":resources",
+        ":router",
+        ":store",
+    ],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)

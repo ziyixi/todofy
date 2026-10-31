@@ -1,5 +1,6 @@
-load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
-load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("@rules_python//python:defs.bzl", "py_binary", "py_library")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files")
+load("//tools/bazel/python:tests.bzl", "unittest_test")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -21,17 +22,11 @@ py_binary(
     ],
 )
 
-py_test(
+unittest_test(
     name = "test_doubles_and_maps",
-    srcs = [
-        "test_doubles_and_maps.py",
-        "//tools/bazel/python:unittest_main.py",
-    ],
-    args = ["test_doubles_and_maps"],
-    data = [],
+    srcs = ["test_doubles_and_maps.py"],
     imports = ["."],
-    legacy_create_init = False,
-    main = "//tools/bazel/python:unittest_main.py",
+    modules = ["test_doubles_and_maps"],
     deps = [
         ":support",
         "//proto:python_runtime",
@@ -39,21 +34,16 @@ py_test(
     ],
 )
 
-py_test(
+unittest_test(
     name = "test_fleet_telemetry",
-    srcs = [
-        "test_fleet_telemetry.py",
-        "//tools/bazel/python:unittest_main.py",
-    ],
-    args = ["test_fleet_telemetry"],
+    srcs = ["test_fleet_telemetry.py"],
     data = [
         "//contracts:fleet-report-v1/fixtures/healthy.json",
         "//contracts:fleet-report-v1/fixtures/node_metrics.json",
         "//contracts:fleet-report-v1/fleet-report-v1.schema.json",
     ],
     imports = ["."],
-    legacy_create_init = False,
-    main = "//tools/bazel/python:unittest_main.py",
+    modules = ["test_fleet_telemetry"],
     deps = [
         ":support",
         "//proto:python_runtime",
@@ -61,17 +51,11 @@ py_test(
     ],
 )
 
-py_test(
+unittest_test(
     name = "test_gen_py",
-    srcs = [
-        "test_gen_py.py",
-        "//tools/bazel/python:unittest_main.py",
-    ],
-    args = ["test_gen_py"],
-    data = [],
+    srcs = ["test_gen_py.py"],
     imports = ["."],
-    legacy_create_init = False,
-    main = "//tools/bazel/python:unittest_main.py",
+    modules = ["test_gen_py"],
     deps = [
         ":support",
         "//proto:python_runtime",
@@ -81,17 +65,11 @@ py_test(
     ],
 )
 
-py_test(
+unittest_test(
     name = "test_generators",
-    srcs = [
-        "test_generators.py",
-        "//tools/bazel/python:unittest_main.py",
-    ],
-    args = ["test_generators"],
-    data = [],
+    srcs = ["test_generators.py"],
     imports = ["."],
-    legacy_create_init = False,
-    main = "//tools/bazel/python:unittest_main.py",
+    modules = ["test_generators"],
     deps = [
         ":support",
         "//proto:python_runtime",
@@ -99,13 +77,9 @@ py_test(
     ],
 )
 
-py_test(
+unittest_test(
     name = "test_mail_received",
-    srcs = [
-        "test_mail_received.py",
-        "//tools/bazel/python:unittest_main.py",
-    ],
-    args = ["test_mail_received"],
+    srcs = ["test_mail_received.py"],
     data = [
         "//contracts:mail-received-v1/fixtures/attachments_capacity.json",
         "//contracts:mail-received-v1/fixtures/attachments_metadata_limit.json",
@@ -128,8 +102,7 @@ py_test(
         "//contracts:mail-received-v1/mail-received-v1.schema.json",
     ],
     imports = ["."],
-    legacy_create_init = False,
-    main = "//tools/bazel/python:unittest_main.py",
+    modules = ["test_mail_received"],
     deps = [
         ":support",
         "//proto:python_runtime",
@@ -138,13 +111,9 @@ py_test(
     ],
 )
 
-py_test(
+unittest_test(
     name = "test_ops",
-    srcs = [
-        "test_ops.py",
-        "//tools/bazel/python:unittest_main.py",
-    ],
-    args = ["test_ops"],
+    srcs = ["test_ops.py"],
     data = [
         "//contracts:ops-v1/deployment-modes.json",
         "//contracts:ops-v1/fixtures/CanaryDelivery/delivered.json",
@@ -232,8 +201,7 @@ py_test(
         "//contracts:ops-v1/ops-v1.schema.json",
     ],
     imports = ["."],
-    legacy_create_init = False,
-    main = "//tools/bazel/python:unittest_main.py",
+    modules = ["test_ops"],
     deps = [
         ":support",
         "//proto:python_runtime",
@@ -241,13 +209,9 @@ py_test(
     ],
 )
 
-py_test(
+unittest_test(
     name = "test_platform_runtime",
-    srcs = [
-        "test_platform_runtime.py",
-        "//tools/bazel/python:unittest_main.py",
-    ],
-    args = ["test_platform_runtime"],
+    srcs = ["test_platform_runtime.py"],
     data = [
         "//contracts:platform-runtime-v1/fixtures/node-missing.json",
         "//contracts:platform-runtime-v1/fixtures/node-ready.json",
@@ -256,8 +220,7 @@ py_test(
         "//proto/ts:rpc-status.ts",
     ],
     imports = ["."],
-    legacy_create_init = False,
-    main = "//tools/bazel/python:unittest_main.py",
+    modules = ["test_platform_runtime"],
     deps = [
         ":support",
         "//proto:python_runtime",
@@ -265,17 +228,11 @@ py_test(
     ],
 )
 
-py_test(
+unittest_test(
     name = "test_profile_breaking",
-    srcs = [
-        "test_profile_breaking.py",
-        "//tools/bazel/python:unittest_main.py",
-    ],
-    args = ["test_profile_breaking"],
-    data = [],
+    srcs = ["test_profile_breaking.py"],
     imports = ["."],
-    legacy_create_init = False,
-    main = "//tools/bazel/python:unittest_main.py",
+    modules = ["test_profile_breaking"],
     deps = [
         ":support",
         "//proto:python_runtime",
@@ -283,17 +240,11 @@ py_test(
     ],
 )
 
-py_test(
+unittest_test(
     name = "test_retired",
-    srcs = [
-        "test_retired.py",
-        "//tools/bazel/python:unittest_main.py",
-    ],
-    args = ["test_retired"],
-    data = [],
+    srcs = ["test_retired.py"],
     imports = ["."],
-    legacy_create_init = False,
-    main = "//tools/bazel/python:unittest_main.py",
+    modules = ["test_retired"],
     deps = [
         ":support",
         "//proto:python_runtime",
@@ -301,17 +252,11 @@ py_test(
     ],
 )
 
-py_test(
+unittest_test(
     name = "test_schema_imports",
-    srcs = [
-        "test_schema_imports.py",
-        "//tools/bazel/python:unittest_main.py",
-    ],
-    args = ["test_schema_imports"],
-    data = [],
+    srcs = ["test_schema_imports.py"],
     imports = ["."],
-    legacy_create_init = False,
-    main = "//tools/bazel/python:unittest_main.py",
+    modules = ["test_schema_imports"],
     deps = [
         ":support",
         "//proto:python_runtime",
@@ -319,17 +264,11 @@ py_test(
     ],
 )
 
-py_test(
+unittest_test(
     name = "test_wire_enum",
-    srcs = [
-        "test_wire_enum.py",
-        "//tools/bazel/python:unittest_main.py",
-    ],
-    args = ["test_wire_enum"],
-    data = [],
+    srcs = ["test_wire_enum.py"],
     imports = ["."],
-    legacy_create_init = False,
-    main = "//tools/bazel/python:unittest_main.py",
+    modules = ["test_wire_enum"],
     deps = [
         ":support",
         "//proto:python_runtime",
@@ -337,17 +276,12 @@ py_test(
     ],
 )
 
-py_test(
+unittest_test(
     name = "test_wire_profile_cases",
-    srcs = [
-        "test_wire_profile_cases.py",
-        "//tools/bazel/python:unittest_main.py",
-    ],
-    args = ["test_wire_profile_cases"],
+    srcs = ["test_wire_profile_cases.py"],
     data = ["//proto/testdata:wire-profile-cases.json"],
     imports = ["."],
-    legacy_create_init = False,
-    main = "//tools/bazel/python:unittest_main.py",
+    modules = ["test_wire_profile_cases"],
     deps = [
         ":support",
         "//proto:python_runtime",
@@ -355,17 +289,11 @@ py_test(
     ],
 )
 
-py_test(
+unittest_test(
     name = "test_wire_rules",
-    srcs = [
-        "test_wire_rules.py",
-        "//tools/bazel/python:unittest_main.py",
-    ],
-    args = ["test_wire_rules"],
-    data = [],
+    srcs = ["test_wire_rules.py"],
     imports = ["."],
-    legacy_create_init = False,
-    main = "//tools/bazel/python:unittest_main.py",
+    modules = ["test_wire_rules"],
     deps = [
         ":support",
         "//proto:python_runtime",
@@ -395,19 +323,4 @@ test_suite(
 
 exports_files(["roundtrip.py"])
 
-filegroup(
-    name = "source_audit_files",
-    srcs = glob(
-        ["*"],
-        allow_empty = True,
-        exclude = SOURCE_AUDIT_EXCLUDES,
-    ) + glob(
-        [
-            ".env.example",
-            ".env.*.example",
-            ".dev.vars.example",
-        ],
-        allow_empty = True,
-    ),
-    visibility = ["//visibility:public"],
-)
+source_audit_files()

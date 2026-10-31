@@ -1,0 +1,55 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//website:bazel.bzl", "website_sources")
+
+package(default_visibility = ["//website:__subpackages__"])
+
+exports_files(
+    glob(
+        ["*.ts"],
+        allow_empty = True,
+    ),
+    visibility = ["//website:__subpackages__"],
+)
+
+js_library(
+    name = "empty",
+    srcs = [":empty.ts"],
+    deps = ["//website/scripts/content:types"],
+)
+
+js_library(
+    name = "fixture",
+    srcs = [":fixture.ts"],
+    deps = [
+        "//website:node_modules/sharp",
+        "//website/scripts/content:types",
+        "//website/src/lib/content:date",
+        "//website/src/lib/content:hash",
+        "//website/src/lib/content:schema",
+    ],
+)
+
+js_library(
+    name = "notion",
+    srcs = [":notion.ts"],
+    deps = [
+        "//website:node_modules/@notionhq/client",
+        "//website/scripts/content:types",
+        "//website/scripts/content/notion:convert",
+        "//website/scripts/content/notion:media",
+        "//website/scripts/content/notion:pagination",
+        "//website/scripts/content/notion:types",
+        "//website/scripts/content/notion:withdrawal",
+        "//website/src/lib/content:date",
+        "//website/src/lib/content:errors",
+        "//website/src/lib/content:hash",
+        "//website/src/lib/content:schema",
+        "//website/src/lib/content:slug",
+        "//website/src/lib/content:translations",
+    ],
+)
+
+website_sources(
+    application_excludes = [],
+    children = [],
+)

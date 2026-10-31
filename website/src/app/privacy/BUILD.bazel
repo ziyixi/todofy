@@ -1,0 +1,5 @@
+load("//website:bazel.bzl", "website_sources")
+
+package(default_visibility = ["//website:__subpackages__"])
+
+website_sources(children = ["//website/src/app/privacy/mailsort"])

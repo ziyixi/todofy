@@ -1,0 +1,36 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//tools/bazel:js.bzl", "copied_source_files")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//recall:__subpackages__"])
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//recall:__subpackages__"],
+)
+
+copied_source_files(
+    name = "lint_sources",
+    srcs = glob(
+        ["**/*.mjs"],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+js_library(
+    name = "build_checks",
+    srcs = [
+        ":finish-dist.mjs",
+        ":js-budget.mjs",
+    ],
+    deps = ["//tools/bundle-size:library"],
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+)

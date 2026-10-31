@@ -1,7 +1,8 @@
-load("@aspect_rules_js//js:defs.bzl", "js_library", "js_run_binary")
+load("@aspect_rules_js//js:defs.bzl", "js_library")
 load("@rules_pkg//pkg:mappings.bzl", "pkg_files", "strip_prefix")
 load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
-load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel:cloudflare.bzl", "worker_artifact")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files")
 
 package(default_visibility = ["//visibility:private"])
 
@@ -9,7 +10,7 @@ filegroup(
     name = "release",
     srcs = [
         ":worker_artifact",
-        "//:.github/actions/release-recall/action.yml",
+        "//.github/actions:release-recall/action.yml",
         "//recall/deploy:source_deploy_vars_mjs",
         "//tools:release_probes",
         "//tools/cloud-release:release_inputs",
@@ -42,66 +43,20 @@ test_suite(
     visibility = ["//visibility:public"],
 )
 
-js_run_binary(
-    name = "worker_bundle",
+worker_artifact(
+    name = "worker_artifact",
     srcs = [
         ":config",
         "//recall/web:bundle",
         "//recall/worker:application_sources",
         "//recall/worker:edge_auth_types_link",
-        "//recall/worker:lib",
         "//recall/worker:proto_types_link",
+        "//recall/worker/src:lib",
     ],
-    args = [
-        "deploy",
-        "--dry-run",
-        "--config",
-        "wrangler.toml",
-        "--outdir",
-        "worker_bundle",
-    ],
-    chdir = "recall",
-    env = {
-        "CI": "true",
-        "WRANGLER_SEND_METRICS": "false",
-    },
-    include_transitive_types = True,
-    include_types = True,
-    out_dirs = ["worker_bundle"],
+    bundle_visibility = ["//recall:__subpackages__"],
     tool = "//recall/worker:wrangler",
-    visibility = ["//recall:__subpackages__"],
-)
-
-pkg_files(
-    name = "worker_files",
-    srcs = [":worker_bundle"],
-    prefix = "worker",
-    strip_prefix = strip_prefix.from_pkg("worker_bundle"),
-)
-
-pkg_files(
-    name = "config_files",
-    srcs = [":config"],
-    strip_prefix = strip_prefix.from_pkg(),
-)
-
-pkg_files(
-    name = "web_files",
-    srcs = ["//recall/web:bundle"],
-    prefix = "web/dist",
-    strip_prefix = strip_prefix.from_root("recall/web/dist"),
-)
-
-pkg_tar(
-    name = "worker_artifact",
-    srcs = [
-        ":config_files",
-        ":web_files",
-        ":worker_files",
-    ],
-    extension = "tar.gz",
-    stamp = 0,
     visibility = ["//visibility:public"],
+    web = "//recall/web:bundle",
 )
 
 pkg_files(
@@ -138,25 +93,10 @@ js_library(
     visibility = ["//recall:__subpackages__"],
 )
 
-filegroup(
-    name = "source_audit_files",
-    srcs = glob(
-        [
-            "*",
-            "docs/**",
-        ],
-        allow_empty = True,
-        exclude = SOURCE_AUDIT_EXCLUDES,
-    ) + glob(
-        [
-            ".env.example",
-            ".env.*.example",
-            ".dev.vars.example",
-        ],
-        allow_empty = True,
-    ),
-    visibility = ["//visibility:public"],
-)
+source_audit_files(patterns = [
+    "*",
+    "docs/**",
+])
 
 filegroup(
     name = "extension_release",

@@ -1,0 +1,127 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//website:bazel.bzl", "website_sources")
+
+package(default_visibility = ["//website:__subpackages__"])
+
+exports_files(
+    glob(
+        ["*.tsx"],
+        allow_empty = True,
+    ),
+    visibility = ["//website:__subpackages__"],
+)
+
+js_library(
+    name = "ExpandableArticleImage",
+    srcs = [
+        ":ExpandableArticleImage.tsx",
+        "//website/src/styles:article_css",
+    ],
+    deps = [
+        "//website:node_modules/next",
+        "//website:node_modules/photoswipe",
+        "//website:node_modules/react-photoswipe-gallery",
+    ],
+)
+
+js_library(
+    name = "ArticleToc",
+    srcs = [
+        ":ArticleToc.tsx",
+        "//website/src/styles:site_css",
+    ],
+    deps = ["//website/src/lib/content:index"],
+)
+
+js_library(
+    name = "ArticleBody",
+    srcs = [
+        ":ArticleBody.tsx",
+        "//website/src/styles:article_css",
+    ],
+    deps = [
+        ":ArticleToc",
+        ":ExpandableArticleImage",
+        "//website:node_modules/katex",
+        "//website:node_modules/react",
+        "//website:node_modules/shiki",
+        "//website/src/lib/content:equation",
+        "//website/src/lib/content:index",
+        "//website/src/lib/content:video-embed",
+    ],
+)
+
+js_library(
+    name = "ArticleLanguages",
+    srcs = [
+        ":ArticleLanguages.tsx",
+        "//website/src/styles:site_css",
+    ],
+    deps = [
+        "//website:node_modules/next",
+        "//website/src/lib/content:index",
+    ],
+)
+
+js_library(
+    name = "BlogList",
+    srcs = [
+        ":BlogList.tsx",
+        "//website/src/styles:site_css",
+    ],
+    deps = [
+        ":ArticleLanguages",
+        "//website:node_modules/next",
+        "//website/src/lib/content:index",
+    ],
+)
+
+js_library(
+    name = "JsonLd",
+    srcs = [":JsonLd.tsx"],
+)
+
+js_library(
+    name = "SiteHeader",
+    srcs = [
+        ":SiteHeader.tsx",
+        "//website/src/styles:site_css",
+    ],
+    deps = ["//website:node_modules/next"],
+)
+
+js_library(
+    name = "PageShell",
+    srcs = [
+        ":PageShell.tsx",
+        "//website/src/styles:site_css",
+    ],
+    deps = [
+        ":SiteHeader",
+        "//website:node_modules/react",
+        "//website/src/app:_site-data",
+    ],
+)
+
+js_library(
+    name = "ProfileIntro",
+    srcs = [
+        ":ProfileIntro.tsx",
+        "//website/src/styles:site_css",
+    ],
+    deps = [
+        "//website:node_modules/next",
+        "//website/src/lib/content:index",
+    ],
+)
+
+js_library(
+    name = "PublicationList",
+    srcs = [
+        ":PublicationList.tsx",
+        "//website/src/styles:site_css",
+    ],
+    deps = ["//website/src/lib/content:index"],
+)
+
+website_sources()

@@ -1,0 +1,576 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@npm//newsletter-console/web:vitest/package_json.bzl", vitest = "bin")
+load("//tools/bazel:js.bzl", "copied_source_files", "proto_vitest_test", "ts_source_library")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//newsletter-console:__subpackages__"])
+
+COMMON_TEST_DATA = [
+    "//newsletter-console/web:package_json",
+    ":setup.ts",
+    ":style.css",
+    "//newsletter-console/web/src/test:source_world_tsx",
+    "//newsletter-console/web:test_config",
+    "//newsletter-console/web:node_modules/@testing-library/dom",
+    "//newsletter-console/web:node_modules/@vitejs/plugin-react",
+    "//newsletter-console/web:node_modules/jsdom",
+    "//newsletter-console/web:node_modules/vite",
+    "//:node_modules/vitest",
+    "//contracts:newsletter-ui-v1/fixtures/backup-status.json_data",
+    "//contracts:newsletter-ui-v1/fixtures/edition.json_data",
+    "//contracts:newsletter-ui-v1/fixtures/edition-rendering.json_data",
+    "//contracts:newsletter-ui-v1/fixtures/editions.json_data",
+    "//contracts:newsletter-ui-v1/fixtures/model-calls.json_data",
+    "//contracts:newsletter-ui-v1/fixtures/model-usage-30d.json_data",
+    "//contracts:newsletter-ui-v1/fixtures/overview.json_data",
+    "//contracts:newsletter-ui-v1/fixtures/run-blocked-selection-timeout.json_data",
+    "//contracts:newsletter-ui-v1/fixtures/run-ready.json_data",
+    "//contracts:newsletter-ui-v1/fixtures/runs.json_data",
+    "//contracts:newsletter-ui-v1/fixtures/source-catalog.json_data",
+    "//newsletter-console/deploy:public-navigation",
+]
+
+COMMON_TEST_DEPS = [
+    "//newsletter-console/web:node_modules/@tanstack/react-query",
+    "//newsletter-console/web:node_modules/@testing-library/jest-dom",
+    "//newsletter-console/web:node_modules/@testing-library/react",
+    "//newsletter-console/web:node_modules/vitest",
+    ":src__App",
+    ":src__Backup",
+    ":src__Issues",
+    ":src__Mark",
+    ":src__Models",
+    ":src__Overview",
+    ":src__Reader",
+    ":src__RunDetail",
+    ":src__Runs",
+    ":src__Sources",
+    ":src__Timeline",
+    ":src__api",
+    ":src__chart",
+    ":src__format",
+    ":src__route",
+]
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//newsletter-console:__subpackages__"],
+)
+
+copied_source_files(
+    name = "application_sources_srcs",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ) + ["//newsletter-console/web/src/test:application_sources_srcs"],
+)
+
+copied_source_files(
+    name = "typecheck_project_srcs",
+    srcs = [
+        "App.test.tsx",
+        "App.tsx",
+        "Backup.test.tsx",
+        "Backup.tsx",
+        "Issues.test.tsx",
+        "Issues.tsx",
+        "Mark.tsx",
+        "Models.test.tsx",
+        "Models.tsx",
+        "Overview.test.tsx",
+        "Overview.tsx",
+        "Reader.test.tsx",
+        "Reader.tsx",
+        "RunDetail.test.tsx",
+        "RunDetail.tsx",
+        "Runs.tsx",
+        "Sources.test.tsx",
+        "Sources.tsx",
+        "Timeline.tsx",
+        "api.ts",
+        "chart.test.ts",
+        "chart.ts",
+        "format.test.ts",
+        "format.ts",
+        "main.tsx",
+        "route.ts",
+        "setup.ts",
+        "vite-env.d.ts",
+    ] + ["//newsletter-console/web/src/test:typecheck_project_srcs"],
+)
+
+copied_source_files(
+    name = "lint_sources",
+    srcs = glob(
+        [
+            "**/*.ts",
+            "**/*.tsx",
+        ],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ) + ["//newsletter-console/web/src/test:lint_sources"],
+)
+
+ts_source_library(
+    name = "src__api",
+    srcs = [":api.ts"],
+    deps = [
+        "//newsletter-console/web:node_modules/@tanstack/react-query",
+        "//proto/newsletter/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "src__format",
+    srcs = [":format.ts"],
+)
+
+ts_source_library(
+    name = "src__Mark",
+    srcs = [":Mark.tsx"],
+    deps = [
+        ":src__format",
+        "//newsletter-console/web:node_modules/react",
+    ],
+)
+
+ts_source_library(
+    name = "src__route",
+    srcs = [":route.ts"],
+    deps = ["//newsletter-console/web:node_modules/react"],
+)
+
+ts_source_library(
+    name = "src__Backup",
+    srcs = [":Backup.tsx"],
+    deps = [
+        ":src__Mark",
+        ":src__api",
+        ":src__format",
+        ":src__route",
+        "//newsletter-console/web:node_modules/@tanstack/react-query",
+        "//newsletter-console/web:node_modules/react",
+        "//proto/newsletter/ui/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__Issues",
+    srcs = [":Issues.tsx"],
+    deps = [
+        ":src__Mark",
+        ":src__api",
+        ":src__format",
+        ":src__route",
+        "//newsletter-console/web:node_modules/@tanstack/react-query",
+        "//newsletter-console/web:node_modules/react",
+        "//proto/newsletter/ui/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__chart",
+    srcs = [":chart.ts"],
+    deps = ["//proto/newsletter/ui/v1:ts"],
+)
+
+ts_source_library(
+    name = "src__Models",
+    srcs = [":Models.tsx"],
+    deps = [
+        ":src__api",
+        ":src__chart",
+        ":src__format",
+        ":src__route",
+        "//newsletter-console/web:node_modules/@tanstack/react-query",
+        "//newsletter-console/web:node_modules/react",
+        "//proto/newsletter/ui/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__Overview",
+    srcs = [":Overview.tsx"],
+    deps = [
+        ":src__Mark",
+        ":src__api",
+        ":src__format",
+        ":src__route",
+        "//newsletter-console/web:node_modules/@tanstack/react-query",
+        "//newsletter-console/web:node_modules/react",
+        "//proto/newsletter/ui/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__Reader",
+    srcs = [":Reader.tsx"],
+    deps = [
+        ":src__Mark",
+        ":src__api",
+        ":src__format",
+        ":src__route",
+        "//newsletter-console/web:node_modules/@tanstack/react-query",
+        "//newsletter-console/web:node_modules/react",
+        "//proto/newsletter/ui/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__Timeline",
+    srcs = [":Timeline.tsx"],
+    deps = [
+        ":src__Mark",
+        ":src__format",
+        "//newsletter-console/web:node_modules/react",
+        "//proto/newsletter/ui/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__RunDetail",
+    srcs = [":RunDetail.tsx"],
+    deps = [
+        ":src__Mark",
+        ":src__Overview",
+        ":src__Timeline",
+        ":src__api",
+        ":src__format",
+        ":src__route",
+        "//newsletter-console/web:node_modules/@tanstack/react-query",
+        "//newsletter-console/web:node_modules/react",
+        "//proto/newsletter/ui/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__Runs",
+    srcs = [":Runs.tsx"],
+    deps = [
+        ":src__Mark",
+        ":src__Overview",
+        ":src__api",
+        ":src__format",
+        ":src__route",
+        "//newsletter-console/web:node_modules/@tanstack/react-query",
+        "//newsletter-console/web:node_modules/react",
+        "//proto/newsletter/ui/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__Sources",
+    srcs = [":Sources.tsx"],
+    deps = [
+        ":src__Mark",
+        ":src__Overview",
+        ":src__api",
+        ":src__format",
+        "//newsletter-console/web:node_modules/@tanstack/react-query",
+        "//newsletter-console/web:node_modules/react",
+        "//proto/newsletter/ui/v1:ts",
+    ],
+)
+
+js_library(
+    name = "src__App",
+    srcs = [
+        ":App.tsx",
+        ":style.css",
+    ],
+    types = [":App.tsx"],
+    deps = [
+        ":src__Backup",
+        ":src__Issues",
+        ":src__Models",
+        ":src__Overview",
+        ":src__Reader",
+        ":src__RunDetail",
+        ":src__Runs",
+        ":src__Sources",
+        ":src__api",
+        ":src__format",
+        ":src__route",
+        "//newsletter-console/web:node_modules/@tanstack/react-query",
+        "//newsletter-console/web:node_modules/react",
+        "//proto/newsletter/ui/v1:ts",
+        "//proto/ts:http-client",
+    ],
+)
+
+ts_source_library(
+    name = "src__main",
+    srcs = [":main.tsx"],
+    deps = [
+        ":src__App",
+        "//newsletter-console/web:node_modules/@tanstack/react-query",
+        "//newsletter-console/web:node_modules/react",
+        "//newsletter-console/web:node_modules/react-dom",
+    ],
+)
+
+js_library(
+    name = "lib",
+    deps = [
+        ":src__App",
+        ":src__Backup",
+        ":src__Issues",
+        ":src__Mark",
+        ":src__Models",
+        ":src__Overview",
+        ":src__Reader",
+        ":src__RunDetail",
+        ":src__Runs",
+        ":src__Sources",
+        ":src__Timeline",
+        ":src__api",
+        ":src__chart",
+        ":src__format",
+        ":src__main",
+        ":src__route",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__App_test",
+    config = "//newsletter-console/web:test_config",
+    data = [
+        ":setup.ts",
+        ":style.css",
+        "//:node_modules/vitest",
+        "//contracts:newsletter-ui-v1/fixtures/backup-status.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/edition.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/edition-rendering.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/editions.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/model-calls.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/model-usage-30d.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/overview.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/run-blocked-selection-timeout.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/run-ready.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/runs.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/source-catalog.json_data",
+        "//newsletter-console/deploy:public-navigation",
+        "//newsletter-console/web:node_modules/@testing-library/dom",
+        "//newsletter-console/web:node_modules/@vitejs/plugin-react",
+        "//newsletter-console/web:node_modules/jsdom",
+        "//newsletter-console/web:node_modules/vite",
+        "//newsletter-console/web:package_json",
+        "//newsletter-console/web:source_index_html",
+        "//newsletter-console/web:test_config",
+        "//newsletter-console/web/src/test:source_world_tsx",
+    ],
+    project = "newsletter-console/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":App.test.tsx"],
+    deps = [
+        ":src__App",
+        ":src__Backup",
+        ":src__Issues",
+        ":src__Mark",
+        ":src__Models",
+        ":src__Overview",
+        ":src__Reader",
+        ":src__RunDetail",
+        ":src__Runs",
+        ":src__Sources",
+        ":src__Timeline",
+        ":src__api",
+        ":src__chart",
+        ":src__format",
+        ":src__route",
+        "//newsletter-console/web:node_modules/@tanstack/react-query",
+        "//newsletter-console/web:node_modules/@testing-library/jest-dom",
+        "//newsletter-console/web:node_modules/@testing-library/react",
+        "//newsletter-console/web:node_modules/vitest",
+        "//proto/ts:http-client",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__Backup_test",
+    config = "//newsletter-console/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "newsletter-console/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":Backup.test.tsx"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "src__Issues_test",
+    config = "//newsletter-console/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "newsletter-console/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":Issues.test.tsx"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "src__Models_test",
+    config = "//newsletter-console/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "newsletter-console/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":Models.test.tsx"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "src__Overview_test",
+    config = "//newsletter-console/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "newsletter-console/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":Overview.test.tsx"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "src__Reader_test",
+    config = "//newsletter-console/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "newsletter-console/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":Reader.test.tsx"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "src__RunDetail_test",
+    config = "//newsletter-console/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "newsletter-console/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":RunDetail.test.tsx"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "src__Sources_test",
+    config = "//newsletter-console/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "newsletter-console/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":Sources.test.tsx"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "src__chart_test",
+    config = "//newsletter-console/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "newsletter-console/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":chart.test.ts"],
+    deps = [
+        ":src__App",
+        ":src__Backup",
+        ":src__Issues",
+        ":src__Mark",
+        ":src__Models",
+        ":src__Overview",
+        ":src__Reader",
+        ":src__RunDetail",
+        ":src__Runs",
+        ":src__Sources",
+        ":src__Timeline",
+        ":src__api",
+        ":src__chart",
+        ":src__format",
+        ":src__route",
+        "//newsletter-console/web:node_modules/@tanstack/react-query",
+        "//newsletter-console/web:node_modules/@testing-library/jest-dom",
+        "//newsletter-console/web:node_modules/@testing-library/react",
+        "//newsletter-console/web:node_modules/vitest",
+        "//proto/newsletter/ui/v1:ts",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__format_test",
+    config = "//newsletter-console/web:test_config",
+    data = [
+        ":setup.ts",
+        "//:node_modules/vitest",
+        "//newsletter-console/deploy:public-navigation",
+        "//newsletter-console/web:node_modules/@testing-library/dom",
+        "//newsletter-console/web:node_modules/@testing-library/react",
+        "//newsletter-console/web:node_modules/@vitejs/plugin-react",
+        "//newsletter-console/web:node_modules/jsdom",
+        "//newsletter-console/web:node_modules/vite",
+        "//newsletter-console/web:package_json",
+        "//newsletter-console/web:test_config",
+    ],
+    project = "newsletter-console/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":format.test.ts"],
+    deps = [
+        ":src__format",
+        "//newsletter-console/web:node_modules/@testing-library/jest-dom",
+        "//newsletter-console/web:node_modules/vitest",
+    ],
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+    deps = [] + ["//newsletter-console/web/src/test:source_audit_files"],
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        ":src__App_test",
+        ":src__Backup_test",
+        ":src__Issues_test",
+        ":src__Models_test",
+        ":src__Overview_test",
+        ":src__Reader_test",
+        ":src__RunDetail_test",
+        ":src__Sources_test",
+        ":src__chart_test",
+        ":src__format_test",
+        "//newsletter-console/web/src/test:check",
+    ],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+    tests = [
+        ":src__App_test",
+        ":src__Backup_test",
+        ":src__Issues_test",
+        ":src__Models_test",
+        ":src__Overview_test",
+        ":src__Reader_test",
+        ":src__RunDetail_test",
+        ":src__Sources_test",
+        ":src__chart_test",
+        ":src__format_test",
+        "//newsletter-console/web/src/test:unit_tests",
+    ],
+)
+
+js_library(
+    name = "source_setup_ts",
+    srcs = ["setup.ts"],
+)

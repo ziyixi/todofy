@@ -1,0 +1,245 @@
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/python:tests.bzl", "unittest_test")
+
+package(default_visibility = ["//visibility:public"])
+
+unittest_test(
+    name = "test_binaries",
+    srcs = ["test_binaries.py"],
+    data = [
+        "//tools:repository_test_data",
+        "//tools/vps-bootstrap:python_sources",
+    ],
+    imports = [
+        ".",
+        "..",
+    ],
+    modules = ["test_binaries"],
+    deps = [
+        "//tools/vps-bootstrap:binaries",
+        "//tools/vps-bootstrap:cluster",
+        "//tools/vps-bootstrap:config",
+        "//tools/vps-bootstrap:host",
+        "//tools/vps-bootstrap:install",
+    ],
+)
+
+unittest_test(
+    name = "test_bootstrap",
+    srcs = ["test_bootstrap.py"],
+    data = [
+        "//tools:repository_test_data",
+        "//tools/bazel/python:test_cli_bin",
+        "//tools/vps-bootstrap:python_sources",
+    ],
+    env = {
+        "BAZEL_COPY_WORKSPACE": "1",
+        "BAZEL_TEST_BIN": "$(rootpath //tools/bazel/python:test_cli_bin)",
+    },
+    imports = [
+        ".",
+        "..",
+    ],
+    modules = ["test_bootstrap"],
+    deps = [
+        "//platform/src/personal_cloud/deployment:resources",
+        "//platform/src/personal_cloud/status_daemon:config",
+        "//proto/platform/runtime/v1:python",
+        "//tools/vps-bootstrap:binaries",
+        "//tools/vps-bootstrap:cluster",
+        "//tools/vps-bootstrap:config",
+        "//tools/vps-bootstrap:firewall",
+        "//tools/vps-bootstrap:host",
+        "//tools/vps-bootstrap:install",
+        "//tools/vps-bootstrap:node_address",
+        "//tools/vps-bootstrap:observer_policy",
+        "//tools/vps-bootstrap:prepare",
+        "@python_deps//pyyaml",
+    ],
+)
+
+unittest_test(
+    name = "test_node_address",
+    srcs = ["test_node_address.py"],
+    data = [
+        "//tools:repository_test_data",
+        "//tools/bazel/python:test_cli_bin",
+        "//tools/vps-bootstrap:python_sources",
+    ],
+    env = {
+        "BAZEL_COPY_WORKSPACE": "1",
+        "BAZEL_TEST_BIN": "$(rootpath //tools/bazel/python:test_cli_bin)",
+    },
+    imports = [
+        ".",
+        "..",
+    ],
+    modules = ["test_node_address"],
+    deps = [
+        "//tools/vps-bootstrap:config",
+        "//tools/vps-bootstrap:firewall",
+        "//tools/vps-bootstrap:host",
+        "//tools/vps-bootstrap:node_address",
+        "//tools/vps-bootstrap:prepare",
+        "//tools/vps-bootstrap:recover",
+    ],
+)
+
+unittest_test(
+    name = "test_observer_policy",
+    srcs = ["test_observer_policy.py"],
+    data = [
+        "//tools:repository_test_data",
+        "//tools/vps-bootstrap:python_sources",
+    ],
+    imports = [
+        ".",
+        "..",
+    ],
+    modules = ["test_observer_policy"],
+    deps = [
+        "//tools/vps-bootstrap:config",
+        "//tools/vps-bootstrap:observer_policy",
+    ],
+)
+
+unittest_test(
+    name = "test_reader",
+    srcs = ["test_reader.py"],
+    data = [
+        "//tools:repository_test_data",
+        "//tools/vps-bootstrap:python_sources",
+    ],
+    imports = [
+        ".",
+        "..",
+    ],
+    modules = ["test_reader"],
+    deps = [
+        "//tools/vps-bootstrap:config",
+        "//tools/vps-bootstrap:reader",
+    ],
+)
+
+unittest_test(
+    name = "test_recover",
+    srcs = ["test_recover.py"],
+    data = [
+        "//tools:repository_test_data",
+        "//tools/bazel/python:test_cli_bin",
+        "//tools/vps-bootstrap:python_sources",
+    ],
+    env = {
+        "BAZEL_COPY_WORKSPACE": "1",
+        "BAZEL_TEST_BIN": "$(rootpath //tools/bazel/python:test_cli_bin)",
+    },
+    imports = [
+        ".",
+        "..",
+    ],
+    modules = ["test_recover"],
+    deps = [
+        "//platform/src/personal_cloud/deployment:store",
+        "//tools/vps-bootstrap:config",
+        "//tools/vps-bootstrap:prepare",
+        "//tools/vps-bootstrap:recover",
+    ],
+)
+
+unittest_test(
+    name = "test_repair",
+    srcs = ["test_repair.py"],
+    data = [
+        "//tools:repository_test_data",
+        "//tools/vps-bootstrap:python_sources",
+    ],
+    imports = [
+        ".",
+        "..",
+    ],
+    modules = ["test_repair"],
+    deps = [
+        "//tools/vps-bootstrap:config",
+        "//tools/vps-bootstrap:repair",
+        "//tools/vps-bootstrap:repair_checks",
+        "//tools/vps-bootstrap:repair_kube",
+    ],
+)
+
+unittest_test(
+    name = "test_repair_cli",
+    srcs = ["test_repair_cli.py"],
+    data = [
+        "//tools:repository_test_data",
+        "//tools/vps-bootstrap:python_sources",
+    ],
+    imports = [
+        ".",
+        "..",
+    ],
+    modules = ["test_repair_cli"],
+    deps = [
+        "//tools/vps-bootstrap:config",
+        "//tools/vps-bootstrap:install",
+        "//tools/vps-bootstrap:reader",
+        "//tools/vps-bootstrap:repair",
+        "//tools/vps-bootstrap:repair_kube",
+    ],
+)
+
+unittest_test(
+    name = "test_repair_gate",
+    srcs = ["test_repair_gate.py"],
+    data = [
+        "//tools:repository_test_data",
+        "//tools/vps-bootstrap:python_sources",
+    ],
+    imports = [
+        ".",
+        "..",
+    ],
+    modules = ["test_repair_gate"],
+    deps = ["//tools/vps-bootstrap:repair_gate"],
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        ":test_binaries",
+        ":test_bootstrap",
+        ":test_node_address",
+        ":test_observer_policy",
+        ":test_reader",
+        ":test_recover",
+        ":test_repair",
+        ":test_repair_cli",
+        ":test_repair_gate",
+    ],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)

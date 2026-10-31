@@ -1,9 +1,8 @@
 load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
 load("@rules_pkg//pkg:mappings.bzl", "REMOVE_BASE_DIRECTORY", "pkg_attributes", "pkg_files", "pkg_mkdirs", "strip_prefix")
 load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
-load("@rules_python//python:defs.bzl", "py_library", "py_test")
 load("@rules_python//python:packaging.bzl", "py_package")
-load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files")
 load("//tools/bazel/images:images.bzl", "gateway_image_identity", "python_runtime_tree")
 load("//tools/bazel/python:container_test.bzl", "container_image_test")
 
@@ -13,8 +12,8 @@ filegroup(
     name = "release",
     srcs = [
         ":codex-gateway",
-        "//:.github/actions/check-codex-gateway/action.yml",
-        "//:.github/actions/publish-codex-gateway/action.yml",
+        "//.github/actions:check-codex-gateway/action.yml",
+        "//.github/actions:publish-codex-gateway/action.yml",
         "//tools/container-release:release_inputs",
     ],
     tags = [
@@ -24,314 +23,11 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
-py_library(
-    name = "__main__",
-    srcs = ["src/codex_gateway/__main__.py"],
-    imports = ["src"],
-    deps = [
-        ":app",
-        ":package",
-        "@python_deps//uvicorn",
-    ],
-)
-
-py_library(
-    name = "_launch",
-    srcs = ["src/codex_gateway/_launch.py"],
-    imports = ["src"],
-    deps = [
-        ":package",
-        "@python_deps//openai_codex_cli_bin",
-    ],
-)
-
-py_library(
-    name = "access",
-    srcs = ["src/codex_gateway/access.py"],
-    imports = ["src"],
-    deps = [
-        ":package",
-        "@python_deps//cryptography",
-        "@python_deps//pyjwt",
-    ],
-)
-
-py_library(
-    name = "app",
-    srcs = [
-        "src/codex_gateway/app.py",
-        "src/codex_gateway/model_api.py",
-    ],
-    imports = ["src"],
-    deps = [
-        ":access",
-        ":modelrouter",
-        ":package",
-        "//proto:python_runtime",
-        "//proto/modelrouter/inference/v1:python",
-        "@python_deps//fastapi",
-    ],
-)
-
-py_library(
-    name = "model_events",
-    srcs = ["src/codex_gateway/model_events.py"],
-    imports = ["src"],
-    deps = [
-        ":package",
-        "//proto/modelrouter/inference/v1:python",
-        "@python_deps//openai_codex",
-    ],
-)
-
-py_library(
-    name = "modelrouter",
-    srcs = ["src/codex_gateway/modelrouter.py"],
-    imports = ["src"],
-    deps = [
-        ":model_events",
-        ":package",
-        ":runtime",
-        "//proto:python_runtime",
-        "//proto/modelrouter/inference/v1:python",
-        "@python_deps//jsonschema",
-        "@python_deps//openai_codex",
-    ],
-)
-
-py_library(
-    name = "package",
-    srcs = ["src/codex_gateway/__init__.py"],
-    imports = ["src"],
-)
-
-py_library(
-    name = "runtime",
-    srcs = ["src/codex_gateway/runtime.py"],
-    imports = ["src"],
-    deps = [
-        ":package",
-        "//proto:python_runtime",
-        "//proto/modelrouter/inference/v1:python",
-        "@python_deps//openai_codex",
-    ],
-)
-
-py_library(
-    name = "library",
-    deps = [
-        ":__main__",
-        ":_launch",
-        ":access",
-        ":app",
-        ":model_events",
-        ":modelrouter",
-        ":package",
-        ":runtime",
-    ],
-)
-
-py_library(
-    name = "helper_tests_auth_fixtures",
-    srcs = ["tests/auth_fixtures.py"],
-    imports = ["."],
-    deps = [
-        ":access",
-        "@python_deps//cryptography",
-        "@python_deps//pyjwt",
-    ],
-)
-
-py_library(
-    name = "helper_tests_image_probe",
-    srcs = ["tests/image_probe.py"],
-    imports = ["."],
-    deps = [
-        ":app",
-        ":modelrouter",
-        "//proto/modelrouter/inference/v1:python",
-        "@python_deps//cryptography",
-        "@python_deps//pyjwt",
-    ],
-)
-
-py_library(
-    name = "helper_tests_model_fixtures",
-    srcs = ["tests/model_fixtures.py"],
-    imports = ["."],
-    deps = [
-        ":modelrouter",
-        ":runtime",
-        "//proto/modelrouter/inference/v1:python",
-    ],
-)
-
-py_test(
-    name = "tests_test_access",
-    size = "small",
-    srcs = [
-        "tests/test_access.py",
-        "//tools/bazel/python:unittest_main.py",
-    ],
-    args = ["tests.test_access"],
-    data = ["pyproject.toml"],
-    imports = [
-        ".",
-        "src",
-        "tests",
-    ],
-    legacy_create_init = False,
-    main = "//tools/bazel/python:unittest_main.py",
-    deps = [
-        ":app",
-        ":helper_tests_auth_fixtures",
-        ":helper_tests_model_fixtures",
-        "@python_deps//cryptography",
-        "@python_deps//httpx",
-        "@python_deps//pyjwt",
-    ],
-)
-
-py_test(
-    name = "tests_test_failure_errors",
-    size = "small",
-    srcs = [
-        "tests/test_failure_errors.py",
-        "//tools/bazel/python:unittest_main.py",
-    ],
-    args = ["tests.test_failure_errors"],
-    data = ["pyproject.toml"],
-    imports = [
-        ".",
-        "src",
-        "tests",
-    ],
-    legacy_create_init = False,
-    main = "//tools/bazel/python:unittest_main.py",
-    deps = [
-        ":model_events",
-        ":runtime",
-        "@python_deps//openai_codex",
-    ],
-)
-
-py_test(
-    name = "tests_test_gateway",
-    size = "small",
-    srcs = [
-        "tests/test_gateway.py",
-        "//tools/bazel/python:unittest_main.py",
-    ],
-    args = ["tests.test_gateway"],
-    data = ["pyproject.toml"],
-    imports = [
-        ".",
-        "src",
-        "tests",
-    ],
-    legacy_create_init = False,
-    main = "//tools/bazel/python:unittest_main.py",
-    deps = [
-        ":_launch",
-        ":app",
-        ":helper_tests_auth_fixtures",
-        ":helper_tests_model_fixtures",
-        ":modelrouter",
-        ":runtime",
-        "//proto:python_runtime",
-        "//proto/modelrouter/inference/v1:python",
-        "@python_deps//httpx",
-        "@python_deps//openai_codex_cli_bin",
-    ],
-)
-
-py_test(
-    name = "tests_test_home",
-    size = "small",
-    srcs = [
-        "tests/test_home.py",
-        "//tools/bazel/python:unittest_main.py",
-    ],
-    args = ["tests.test_home"],
-    data = ["pyproject.toml"],
-    imports = [
-        ".",
-        "src",
-        "tests",
-    ],
-    legacy_create_init = False,
-    main = "//tools/bazel/python:unittest_main.py",
-    deps = [
-        ":__main__",
-        ":package",
-    ],
-)
-
-py_test(
-    name = "tests_test_modelrouter",
-    size = "small",
-    srcs = [
-        "tests/test_modelrouter.py",
-        "//tools/bazel/python:unittest_main.py",
-    ],
-    args = ["tests.test_modelrouter"],
-    data = ["pyproject.toml"],
-    imports = [
-        ".",
-        "src",
-        "tests",
-    ],
-    legacy_create_init = False,
-    main = "//tools/bazel/python:unittest_main.py",
-    deps = [
-        ":helper_tests_model_fixtures",
-        ":modelrouter",
-        ":runtime",
-        "//proto:python_runtime",
-        "//proto/modelrouter/inference/v1:python",
-        "@python_deps//openai_codex",
-    ],
-)
-
-py_test(
-    name = "tests_test_process_cleanup",
-    size = "small",
-    srcs = [
-        "tests/test_process_cleanup.py",
-        "//tools/bazel/python:unittest_main.py",
-    ],
-    args = ["tests.test_process_cleanup"],
-    data = ["pyproject.toml"],
-    imports = [
-        ".",
-        "src",
-        "tests",
-    ],
-    legacy_create_init = False,
-    main = "//tools/bazel/python:unittest_main.py",
-    deps = [
-        ":_launch",
-        ":package",
-    ],
-)
-
-test_suite(
-    name = "tests",
-    tests = [
-        ":tests_test_access",
-        ":tests_test_failure_errors",
-        ":tests_test_gateway",
-        ":tests_test_home",
-        ":tests_test_modelrouter",
-        ":tests_test_process_cleanup",
-    ],
-)
-
 py_package(
     name = "image_dependencies",
     packages = ["site-packages"],
     tags = ["manual"],
-    deps = [":library"],
+    deps = ["//codex-gateway/src/codex_gateway:library"],
 )
 
 py_package(
@@ -341,7 +37,7 @@ py_package(
         "site-packages/codex_cli_bin/codex-path/",
     ],
     tags = ["manual"],
-    deps = [":library"],
+    deps = ["//codex-gateway/src/codex_gateway:library"],
 )
 
 pkg_files(
@@ -375,7 +71,7 @@ py_package(
     name = "image_source",
     packages = ["codex-gateway/src"],
     tags = ["manual"],
-    deps = [":library"],
+    deps = ["//codex-gateway/src/codex_gateway:library"],
 )
 
 pkg_files(
@@ -390,7 +86,7 @@ py_package(
     name = "image_proto",
     packages = ["proto/python/src"],
     tags = ["manual"],
-    deps = [":library"],
+    deps = ["//codex-gateway/src/codex_gateway:library"],
 )
 
 pkg_files(
@@ -404,8 +100,8 @@ pkg_files(
 pkg_files(
     name = "image_public_config",
     srcs = [
-        "//:config/cloud.toml",
-        "//:config/resources.toml",
+        "//config:cloud.toml",
+        "//config:resources.toml",
     ],
     prefix = "opt/codex-gateway/public-build-config",
     strip_prefix = strip_prefix.from_root("config"),
@@ -463,8 +159,8 @@ pkg_tar(
 
 gateway_image_identity(
     name = "image_identity",
-    profile = "//:config/cloud.toml",
-    resources = "//:config/resources.toml",
+    profile = "//config:cloud.toml",
+    resources = "//config:resources.toml",
     tags = ["manual"],
 )
 
@@ -556,73 +252,60 @@ filegroup(
     srcs = [
         "app.toml",
         "pyproject.toml",
-        "//:config/cloud.toml",
-        "//:config/resources.toml",
+        "//config:cloud.toml",
+        "//config:resources.toml",
+    ],
+)
+
+source_audit_files(
+    patterns = [
+        "*",
+        "src/**",
+        "tests/**",
+    ],
+    deps = [
+        "//codex-gateway/checks:source_audit_files",
+        "//codex-gateway/src/codex_gateway:source_audit_files",
+        "//codex-gateway/tests:source_audit_files",
     ],
 )
 
 filegroup(
-    name = "source_audit_files",
-    srcs = glob(
-        [
-            "*",
-            "src/**",
-            "tests/**",
-        ],
-        allow_empty = True,
-        exclude = SOURCE_AUDIT_EXCLUDES,
-    ) + glob(
-        [
-            ".env.example",
-            ".env.*.example",
-            ".dev.vars.example",
-        ],
-        allow_empty = True,
-    ),
-    visibility = ["//visibility:public"],
-)
-
-filegroup(
     name = "python_lint_inputs",
-    srcs = glob([
-        "src/**/*.py",
-        "tests/**/*.py",
-    ]) + ["pyproject.toml"],
+    srcs = [
+        "pyproject.toml",
+        "//codex-gateway/src/codex_gateway:python_sources",
+        "//codex-gateway/tests:python_sources",
+    ],
 )
-
-[
-    py_test(
-        name = "ruff_" + command + "_test",
-        srcs = ["//tools/bazel/python:check_ruff.py"],
-        args = [
-            "$(rootpath @python_deps//ruff:data)",
-            "$(rootpath //:pyproject.toml)",
-            command,
-        ] + (["--check"] if command == "format" else []) + [
-            "codex-gateway/src",
-            "codex-gateway/tests",
-        ],
-        data = [
-            ":python_lint_inputs",
-            "//:pyproject.toml",
-            "@python_deps//ruff:data",
-        ] + [],
-        legacy_create_init = False,
-        main = "//tools/bazel/python:check_ruff.py",
-    )
-    for command in [
-        "check",
-        "format",
-    ]
-]
 
 filegroup(
     name = "container_probe_inputs",
-    srcs = ["tests/image_probe.py"],
+    srcs = ["//codex-gateway/tests:image_probe.py"],
 )
 
 container_image_test(
     name = "container_test",
     service = "codex-gateway",
     sources = ":container_probe_inputs",
+)
+
+alias(
+    name = "library",
+    actual = "//codex-gateway/src/codex_gateway:library",
+)
+
+test_suite(
+    name = "ruff_check_test",
+    tests = ["//codex-gateway/checks:ruff_check_test"],
+)
+
+test_suite(
+    name = "ruff_format_test",
+    tests = ["//codex-gateway/checks:ruff_format_test"],
+)
+
+test_suite(
+    name = "tests",
+    tests = ["//codex-gateway/tests"],
 )

@@ -39,6 +39,7 @@
   [edge-auth SPEC §4、§5.4](packages/edge-auth/SPEC.md)。
 - 包、生成代码和使用者在 `BUILD.bazel` 声明实际依赖；CI 通过 Bazel 图选择受影响检查和发布，不维护另一份路径映射。
   应用根提供同名发布产物、公开 `:check`、`:config` 和 `:release`；子目录实现目标保持应用内可见。
+  各层保留本目录的主要入口；更深层源码、测试和脚本的实现 target 放在所属子目录的 BUILD，父层通过明确依赖聚合。
   文档只有被构建或检查实际读取时才进入相应闭包。说明见 [Bazel](docs/bazel.md) 和 [CI/CD](docs/ci-cd.md)。
 
 ## IDL 与合同

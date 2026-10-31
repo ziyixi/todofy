@@ -1,0 +1,139 @@
+load("@rules_python//python:defs.bzl", "py_library")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/python:tests.bzl", "unittest_test")
+
+package(default_visibility = ["//visibility:public"])
+
+unittest_test(
+    name = "test_apply_diagnostics",
+    srcs = ["test_apply_diagnostics.py"],
+    data = [
+        "//infra:python_sources",
+        "//infra:variables.tf",
+        "//tools:repository_test_data",
+    ],
+    imports = [
+        ".",
+        "../scripts",
+    ],
+    modules = ["test_apply_diagnostics"],
+    deps = [
+        "//infra/scripts:apply_diagnostics",
+        "//infra/scripts:infra_state",
+    ],
+)
+
+unittest_test(
+    name = "test_infra_state",
+    srcs = ["test_infra_state.py"],
+    data = [
+        "//infra:python_sources",
+        "//infra:variables.tf",
+        "//tools:repository_test_data",
+    ],
+    imports = [
+        ".",
+        "../scripts",
+    ],
+    modules = ["test_infra_state"],
+    deps = [
+        "//infra/scripts:bootstrap_state",
+        "//infra/scripts:infra_state",
+    ],
+)
+
+unittest_test(
+    name = "test_local_tfvars",
+    srcs = ["test_local_tfvars.py"],
+    data = [
+        "//infra:python_sources",
+        "//infra:variables.tf",
+        "//tools:repository_test_data",
+    ],
+    imports = [
+        ".",
+        "../scripts",
+    ],
+    modules = ["test_local_tfvars"],
+    deps = [],
+)
+
+unittest_test(
+    name = "test_platform_export",
+    srcs = ["test_platform_export.py"],
+    data = [
+        "//infra:python_sources",
+        "//infra:variables.tf",
+        "//tools:repository_test_data",
+    ],
+    imports = [
+        ".",
+        "../scripts",
+    ],
+    modules = ["test_platform_export"],
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = ["//infra/scripts:platform_export"],
+)
+
+unittest_test(
+    name = "test_reconcile",
+    srcs = ["test_reconcile.py"],
+    data = [
+        "//infra:python_sources",
+        "//infra:variables.tf",
+        "//tools:repository_test_data",
+    ],
+    imports = [
+        ".",
+        "../scripts",
+    ],
+    modules = ["test_reconcile"],
+    deps = [
+        "//infra/scripts:infra_state",
+        "//infra/scripts:reconcile_policy",
+    ],
+)
+
+py_library(
+    name = "guard_lib",
+    srcs = ["//.github/scripts:infra_guard.py"],
+    imports = ["../../.github/scripts"],
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        ":test_apply_diagnostics",
+        ":test_infra_state",
+        ":test_local_tfvars",
+        ":test_platform_export",
+        ":test_reconcile",
+    ],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)

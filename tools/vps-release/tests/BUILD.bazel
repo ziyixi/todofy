@@ -1,0 +1,99 @@
+load("@rules_python//python:defs.bzl", "py_library")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/python:tests.bzl", "unittest_test")
+
+package(default_visibility = ["//visibility:public"])
+
+py_library(
+    name = "test_deploy_module",
+    srcs = ["test_deploy.py"],
+    imports = ["."],
+    deps = [
+        "//proto:python_runtime",
+        "//proto/platform/runtime/v1:python",
+        "//tools/vps-release:deploy",
+        "//tools/vps-release:release_identity",
+        "//tools/vps-release:transport",
+        "@python_deps//httpx",
+    ],
+)
+
+unittest_test(
+    name = "test_deploy",
+    srcs = ["test_deploy.py"],
+    data = [
+        "//tools:repository_test_data",
+        "//tools/vps-release:python_sources",
+    ],
+    imports = [
+        ".",
+        "..",
+    ],
+    modules = ["test_deploy"],
+    deps = [
+        "//proto:python_runtime",
+        "//proto/platform/runtime/v1:python",
+        "//tools/vps-release:deploy",
+        "//tools/vps-release:release_identity",
+        "//tools/vps-release:transport",
+        "@python_deps//httpx",
+    ],
+)
+
+unittest_test(
+    name = "test_reconcile",
+    srcs = ["test_reconcile.py"],
+    data = [
+        "//tools:repository_test_data",
+        "//tools/vps-release:python_sources",
+    ],
+    imports = [
+        ".",
+        "..",
+    ],
+    modules = ["test_reconcile"],
+    deps = [
+        ":test_deploy_module",
+        "//proto:python_runtime",
+        "//proto/platform/runtime/v1:python",
+        "//tools/vps-release:evidence",
+        "//tools/vps-release:reconcile",
+        "//tools/vps-release:transport",
+        "@python_deps//httpx",
+    ],
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        ":test_deploy",
+        ":test_reconcile",
+    ],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)

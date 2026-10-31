@@ -1,10 +1,9 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library")
 load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
-load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES", "source_audit_files")
 
 package(default_visibility = ["//visibility:public"])
 
-# Each consumer depends on the exact schema/fixture it reads.
 _ASSETS = glob(
     [
         "**/*.json",
@@ -26,15 +25,13 @@ ts_project(
     srcs = ["ops-v1/ops-v1.ts"],
     declaration = True,
     emit_declaration_only = True,
-    tsconfig = {
-        "compilerOptions": {
-            "target": "ES2024",
-            "module": "ESNext",
-            "moduleResolution": "Bundler",
-            "strict": True,
-            "skipLibCheck": True,
-        },
-    },
+    tsconfig = {"compilerOptions": {
+        "target": "ES2024",
+        "module": "ESNext",
+        "moduleResolution": "Bundler",
+        "strict": True,
+        "skipLibCheck": True,
+    }},
 )
 
 js_library(
@@ -63,44 +60,26 @@ js_library(
     srcs = glob(["ops-v1/fixtures/invalid/*/*.json"]),
 )
 
-[
-    js_library(
-        name = asset + "_data",
-        srcs = [asset],
-        types = [asset] if asset.endswith(".json") else [],
-    )
-    for asset in _ASSETS
-]
+[js_library(
+    name = asset + "_data",
+    srcs = [asset],
+    types = [asset] if asset.endswith(".json") else [],
+) for asset in _ASSETS]
 
 filegroup(
     name = "fixtures",
     srcs = _ASSETS,
 )
 
-filegroup(
-    name = "source_audit_files",
-    srcs = glob(
-        [
-            "*",
-            "fleet-report-v1/**",
-            "mail-received-v1/**",
-            "newsletter-ui-v1/**",
-            "ops-v1/**",
-            "platform-runtime-v1/**",
-            "recall-archive-v1/**",
-        ],
-        allow_empty = True,
-        exclude = SOURCE_AUDIT_EXCLUDES,
-    ) + glob(
-        [
-            ".env.example",
-            ".env.*.example",
-            ".dev.vars.example",
-        ],
-        allow_empty = True,
-    ),
-    visibility = ["//visibility:public"],
-)
+source_audit_files(patterns = [
+    "*",
+    "fleet-report-v1/**",
+    "mail-received-v1/**",
+    "newsletter-ui-v1/**",
+    "ops-v1/**",
+    "platform-runtime-v1/**",
+    "recall-archive-v1/**",
+])
 
 test_suite(
     name = "check",

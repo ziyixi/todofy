@@ -1,0 +1,21 @@
+load("//tools/bazel:js.bzl", "copied_source_files")
+load("//website:bazel.bzl", "website_sources")
+
+package(default_visibility = ["//website:__subpackages__"])
+
+copied_source_files(
+    name = "application_sources",
+    srcs = [
+        ":files",
+        "//website:public_assets",
+        "//website/content:files",
+        "//website/scripts:application_files",
+    ],
+)
+
+website_sources(children = [
+    "//website/src/app",
+    "//website/src/components",
+    "//website/src/lib",
+    "//website/src/styles",
+])

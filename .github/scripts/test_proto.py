@@ -379,6 +379,21 @@ class ApiLinter(unittest.TestCase):
     def setUp(self):
         self.go_mod = (LINTER_MODULE / "go.mod").read_text()
 
+    def build_rule(self, build: Path, kind: str, name: str) -> dict[str, ast.expr]:
+        calls = [
+            node
+            for node in ast.walk(ast.parse(build.read_text()))
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == kind
+            and any(
+                item.arg == "name" and ast.literal_eval(item.value) == name
+                for item in node.keywords
+            )
+        ]
+        self.assertEqual(len(calls), 1, f"{build}: expected one {kind} named {name}")
+        return {item.arg: item.value for item in calls[0].keywords}
+
     def test_one_exact_version_and_toolchain_in_the_tool_module(self):
         self.assertIn(f"tool {API_LINTER}/cmd/api-linter\n", self.go_mod)
         versions = re.findall(
@@ -410,11 +425,20 @@ class ApiLinter(unittest.TestCase):
             runner.index("args.googleapis_check, str(args.image)"),
             runner.index("args.api_linter,"),
         )
-        build = (PROTO / "BUILD.bazel").read_text()
-        self.assertIn(
-            '"$(location //proto/tools/api-linter/googleapis:googleapis-check)"', build
+        rule = self.build_rule(PROTO / "tools/BUILD.bazel", "py_test", "api_lint_test")
+        args = [
+            node.value
+            for node in ast.walk(rule["args"])
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        ]
+        self.assertEqual(
+            args[args.index("--googleapis-check") + 1],
+            "$(location //proto/tools/api-linter/googleapis:googleapis-check)",
         )
-        self.assertIn('"$(location :image)"', build)
+        self.assertEqual(args[args.index("--image") + 1], "$(location //proto:image)")
+        data = ast.literal_eval(rule["data"])
+        self.assertIn("//proto:image", data)
+        self.assertIn("//proto/tools/api-linter/googleapis:googleapis-check", data)
         check = (LINTER_MODULE / "googleapis/main.go").read_text()
         self.assertIn(
             '_ "google.golang.org/genproto/googleapis/api/annotations"', check
@@ -442,12 +466,19 @@ class ApiLinter(unittest.TestCase):
         self.assertEqual(offenders, [])
 
     def test_public_proto_check_covers_linter_and_annotation_agreement(self):
-        build = (PROTO / "BUILD.bazel").read_text()
+        build = PROTO / "BUILD.bazel"
+        check = self.build_rule(build, "test_suite", "check")
+        self.assertIn(":tests", ast.literal_eval(check["tests"]))
+        suite = self.build_rule(build, "test_suite", "tests")
         for label in (
-            ":api_lint_test",
+            "//proto/tools:api_lint_test",
             "//proto/tools/api-linter/googleapis:googleapis_test",
         ):
-            self.assertIn('"' + label + '"', build)
+            self.assertIn(label, ast.literal_eval(suite["tests"]))
+        public_linter = self.build_rule(build, "test_suite", "api_lint_test")
+        self.assertEqual(
+            ast.literal_eval(public_linter["tests"]), ["//proto/tools:api_lint_test"]
+        )
         self.assertEqual(
             json.loads((PROTO / "package.json").read_text())["scripts"]["test"],
             "bazel test //proto:check",

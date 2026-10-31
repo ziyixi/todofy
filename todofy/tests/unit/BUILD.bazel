@@ -1,0 +1,1034 @@
+load("@rules_python//python:defs.bzl", "py_library")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/python:tests.bzl", "pytest_test")
+
+package(default_visibility = ["//todofy:__subpackages__"])
+
+py_library(
+    name = "host_support",
+    srcs = ["host_support.py"],
+    imports = ["../.."],
+    deps = [
+        "//todofy/worker/todofy/runtime:package",
+        "@python_deps//pytest",
+    ],
+)
+
+py_library(
+    name = "mail_cases",
+    srcs = ["mail_cases.py"],
+    imports = ["../.."],
+    deps = ["//todofy/tests:mail_contract"],
+)
+
+py_library(
+    name = "report_cases",
+    srcs = ["report_cases.py"],
+    imports = ["../.."],
+    deps = ["//todofy/worker/todofy/core:report_schema"],
+)
+
+py_library(
+    name = "test_backup_support",
+    srcs = ["test_backup.py"],
+    imports = ["../.."],
+    deps = [
+        "//todofy/worker/todofy/core:backup",
+        "//todofy/worker/todofy/core:package",
+        "//todofy/worker/todofy/core/sql:backup",
+        "//todofy/worker/todofy/core/sql:package",
+        "@python_deps//pytest",
+    ],
+)
+
+pytest_test(
+    name = "test_backoff",
+    srcs = ["test_backoff.py"],
+    args = ["$(rootpath test_backoff.py)"],
+    config = "//todofy:pyproject.toml",
+    data = [
+        "conftest.py",
+        "//todofy:conftest.py",
+    ],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+    imports = [
+        "..",
+        "../..",
+        "../../worker",
+    ],
+    plugins = [
+        "xdist.plugin",
+        "xdist.looponfail",
+    ],
+    deps = [
+        "//todofy/worker/todofy/core:backoff",
+        "//todofy/worker/todofy/core:package",
+        "@python_deps//pytest_xdist",
+    ],
+)
+
+pytest_test(
+    name = "test_backup",
+    srcs = ["test_backup.py"],
+    args = ["$(rootpath test_backup.py)"],
+    config = "//todofy:pyproject.toml",
+    data = [
+        "conftest.py",
+        ":unit_fixtures",
+        "//todofy:conftest.py",
+        "//todofy:migrations",
+    ],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+    imports = [
+        "..",
+        "../..",
+        "../../worker",
+    ],
+    plugins = [
+        "xdist.plugin",
+        "xdist.looponfail",
+    ],
+    deps = [
+        "//todofy/worker/todofy/core:backup",
+        "//todofy/worker/todofy/core:package",
+        "//todofy/worker/todofy/core/sql:backup",
+        "//todofy/worker/todofy/core/sql:package",
+        "@python_deps//pytest_xdist",
+    ],
+)
+
+pytest_test(
+    name = "test_backup_job",
+    srcs = ["test_backup_job.py"],
+    args = ["$(rootpath test_backup_job.py)"],
+    config = "//todofy:pyproject.toml",
+    data = [
+        "conftest.py",
+        "//todofy:conftest.py",
+        "//todofy:migrations",
+    ],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+    imports = [
+        "..",
+        "../..",
+        "../../worker",
+    ],
+    plugins = [
+        "xdist.plugin",
+        "xdist.looponfail",
+    ],
+    deps = [
+        ":host_support",
+        ":test_backup_support",
+        "//todofy/worker/todofy/core:backup",
+        "//todofy/worker/todofy/core:package",
+        "//todofy/worker/todofy/core/sql:backup",
+        "//todofy/worker/todofy/core/sql:package",
+        "//todofy/worker/todofy/runtime:backup",
+        "//todofy/worker/todofy/runtime:package",
+        "@python_deps//pytest_xdist",
+    ],
+)
+
+pytest_test(
+    name = "test_carryover",
+    srcs = ["test_carryover.py"],
+    args = ["$(rootpath test_carryover.py)"],
+    config = "//todofy:pyproject.toml",
+    data = [
+        "conftest.py",
+        "//todofy:conftest.py",
+        "//todofy:migrations",
+    ],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+    imports = [
+        "..",
+        "../..",
+        "../../worker",
+    ],
+    plugins = [
+        "xdist.plugin",
+        "xdist.looponfail",
+    ],
+    deps = [
+        "//todofy/worker/todofy/core:carryover",
+        "//todofy/worker/todofy/core:package",
+        "//todofy/worker/todofy/core/sql:package",
+        "//todofy/worker/todofy/core/sql:reports",
+        "@python_deps//pytest_xdist",
+    ],
+)
+
+pytest_test(
+    name = "test_contract",
+    srcs = ["test_contract.py"],
+    args = ["$(rootpath test_contract.py)"],
+    config = "//todofy:pyproject.toml",
+    data = [
+        "conftest.py",
+        ":unit_fixtures",
+        "//contracts:fixtures",
+        "//todofy:conftest.py",
+    ],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+    imports = [
+        "..",
+        "../..",
+        "../../worker",
+    ],
+    plugins = [
+        "xdist.plugin",
+        "xdist.looponfail",
+    ],
+    deps = [
+        "//proto:python_runtime",
+        "//proto/mailhero/webhook/v1:python",
+        "//todofy/tests:mail_contract",
+        "//todofy/worker/todofy/core:contract",
+        "//todofy/worker/todofy/core:package",
+        "@python_deps//pytest_xdist",
+    ],
+)
+
+pytest_test(
+    name = "test_core_isolation",
+    srcs = ["test_core_isolation.py"],
+    args = ["$(rootpath test_core_isolation.py)"],
+    config = "//todofy:pyproject.toml",
+    data = [
+        "conftest.py",
+        "//todofy:conftest.py",
+        "//todofy/worker/todofy/core:core_sources",
+    ],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+    imports = [
+        "..",
+        "../..",
+        "../../worker",
+    ],
+    plugins = [
+        "xdist.plugin",
+        "xdist.looponfail",
+    ],
+    deps = [
+        "//proto:python",
+        "//proto:python_runtime",
+        "@python_deps//pytest_xdist",
+    ],
+)
+
+pytest_test(
+    name = "test_gemini_wire",
+    srcs = ["test_gemini_wire.py"],
+    args = ["$(rootpath test_gemini_wire.py)"],
+    config = "//todofy:pyproject.toml",
+    data = [
+        "conftest.py",
+        ":unit_fixtures",
+        "//todofy:conftest.py",
+    ],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+    imports = [
+        "..",
+        "../..",
+        "../../worker",
+    ],
+    plugins = [
+        "xdist.plugin",
+        "xdist.looponfail",
+    ],
+    deps = [
+        "//todofy/worker/todofy/core:contract",
+        "//todofy/worker/todofy/core:model_input",
+        "//todofy/worker/todofy/core:render",
+        "@python_deps//pytest_xdist",
+    ],
+)
+
+pytest_test(
+    name = "test_machine_api",
+    srcs = ["test_machine_api.py"],
+    args = ["$(rootpath test_machine_api.py)"],
+    config = "//todofy:pyproject.toml",
+    data = [
+        "conftest.py",
+        "//contracts:fixtures",
+        "//todofy:conftest.py",
+        "//todofy/api:api_schemas",
+    ],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+    imports = [
+        "..",
+        "../..",
+        "../../worker",
+    ],
+    plugins = [
+        "xdist.plugin",
+        "xdist.looponfail",
+    ],
+    deps = [
+        "//todofy/tests:mail_contract",
+        "//todofy/worker/todofy/core:api_errors",
+        "@python_deps//jsonschema",
+        "@python_deps//pytest_xdist",
+        "@python_deps//pyyaml",
+    ],
+)
+
+pytest_test(
+    name = "test_mail",
+    srcs = ["test_mail.py"],
+    args = ["$(rootpath test_mail.py)"],
+    config = "//todofy:pyproject.toml",
+    data = [
+        "conftest.py",
+        ":unit_fixtures",
+        "//todofy:conftest.py",
+        "//todofy:migrations",
+    ],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+    imports = [
+        "..",
+        "../..",
+        "../../worker",
+    ],
+    plugins = [
+        "xdist.plugin",
+        "xdist.looponfail",
+    ],
+    deps = [
+        ":host_support",
+        "//todofy/worker/todofy/runtime:mail",
+        "//todofy/worker/todofy/runtime:package",
+        "@python_deps//pytest_xdist",
+    ],
+)
+
+pytest_test(
+    name = "test_mail_hero_compat",
+    srcs = ["test_mail_hero_compat.py"],
+    args = ["$(rootpath test_mail_hero_compat.py)"],
+    config = "//todofy:pyproject.toml",
+    data = [
+        "conftest.py",
+        "//contracts:fixtures",
+        "//todofy:conftest.py",
+    ],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+    imports = [
+        "..",
+        "../..",
+        "../../worker",
+    ],
+    plugins = [
+        "xdist.plugin",
+        "xdist.looponfail",
+    ],
+    deps = [
+        "//todofy/tests:mail_contract",
+        "//todofy/worker/todofy/core:contract",
+        "//todofy/worker/todofy/core:model_input",
+        "//todofy/worker/todofy/core:render",
+        "@python_deps//jsonschema",
+        "@python_deps//pytest_xdist",
+    ],
+)
+
+pytest_test(
+    name = "test_mail_received_parser_legacy",
+    srcs = ["test_mail_received_parser_legacy.py"],
+    args = ["$(rootpath test_mail_received_parser_legacy.py)"],
+    config = "//todofy:pyproject.toml",
+    data = [
+        "conftest.py",
+        "//todofy:conftest.py",
+        "//todofy/api:api_schemas",
+    ],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+    imports = [
+        "..",
+        "../..",
+        "../../worker",
+    ],
+    plugins = [
+        "xdist.plugin",
+        "xdist.looponfail",
+    ],
+    deps = [
+        ":mail_cases",
+        "//todofy/worker/todofy/core:contract",
+        "//todofy/worker/todofy/core:package",
+        "@python_deps//pytest_xdist",
+    ],
+)
+
+pytest_test(
+    name = "test_mail_received_schema_legacy",
+    srcs = ["test_mail_received_schema_legacy.py"],
+    args = ["$(rootpath test_mail_received_schema_legacy.py)"],
+    config = "//todofy:pyproject.toml",
+    data = [
+        "conftest.py",
+        "//contracts:fixtures",
+        "//todofy:conftest.py",
+    ],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+    imports = [
+        "..",
+        "../..",
+        "../../worker",
+    ],
+    plugins = [
+        "xdist.plugin",
+        "xdist.looponfail",
+    ],
+    deps = [
+        ":mail_cases",
+        "//todofy/tests:mail_contract",
+        "//todofy/worker/todofy/core:contract",
+        "//todofy/worker/todofy/core:package",
+        "@python_deps//jsonschema",
+        "@python_deps//pytest_xdist",
+    ],
+)
+
+pytest_test(
+    name = "test_mailbox",
+    srcs = ["test_mailbox.py"],
+    args = ["$(rootpath test_mailbox.py)"],
+    config = "//todofy:pyproject.toml",
+    data = [
+        "conftest.py",
+        "//todofy:conftest.py",
+        "//todofy:migrations",
+    ],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+    imports = [
+        "..",
+        "../..",
+        "../../worker",
+    ],
+    plugins = [
+        "xdist.plugin",
+        "xdist.looponfail",
+    ],
+    deps = [
+        "//todofy/worker/todofy/core:mailbox",
+        "//todofy/worker/todofy/core:package",
+        "@python_deps//pytest_xdist",
+    ],
+)
+
+pytest_test(
+    name = "test_metrics",
+    srcs = ["test_metrics.py"],
+    args = ["$(rootpath test_metrics.py)"],
+    config = "//todofy:pyproject.toml",
+    data = [
+        "conftest.py",
+        "//todofy:conftest.py",
+        "//todofy:migrations",
+    ],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+    imports = [
+        "..",
+        "../..",
+        "../../worker",
+    ],
+    plugins = [
+        "xdist.plugin",
+        "xdist.looponfail",
+    ],
+    deps = [
+        "//proto:python_runtime",
+        "//proto/todofy/ui/v1:python",
+        "//todofy/worker/todofy/core:metrics",
+        "//todofy/worker/todofy/core:owner_ui",
+        "//todofy/worker/todofy/core:package",
+        "//todofy/worker/todofy/core/sql:metrics",
+        "//todofy/worker/todofy/core/sql:package",
+        "@python_deps//pytest_xdist",
+    ],
+)
+
+pytest_test(
+    name = "test_metrics_record",
+    srcs = ["test_metrics_record.py"],
+    args = ["$(rootpath test_metrics_record.py)"],
+    config = "//todofy:pyproject.toml",
+    data = [
+        "conftest.py",
+        "//todofy:conftest.py",
+    ],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+    imports = [
+        "..",
+        "../..",
+        "../../worker",
+    ],
+    plugins = [
+        "xdist.plugin",
+        "xdist.looponfail",
+    ],
+    deps = [
+        "//todofy/worker/todofy/core:metrics",
+        "//todofy/worker/todofy/runtime:metrics",
+        "//todofy/worker/todofy/runtime:package",
+        "@python_deps//pytest_xdist",
+    ],
+)
+
+pytest_test(
+    name = "test_model_settings",
+    srcs = ["test_model_settings.py"],
+    args = ["$(rootpath test_model_settings.py)"],
+    config = "//todofy:pyproject.toml",
+    data = [
+        "conftest.py",
+        "//todofy:conftest.py",
+        "//todofy:migrations",
+    ],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+    imports = [
+        "..",
+        "../..",
+        "../../worker",
+    ],
+    plugins = [
+        "xdist.plugin",
+        "xdist.looponfail",
+    ],
+    deps = [
+        ":host_support",
+        "//packages/model-router-client/python/src/model_router_client:package",
+        "//proto:python_runtime",
+        "//proto/todofy/ui/v1:python",
+        "//todofy/worker/todofy/core:owner_ui",
+        "//todofy/worker/todofy/runtime:model",
+        "//todofy/worker/todofy/runtime:model_settings",
+        "//todofy/worker/todofy/runtime:package",
+        "@python_deps//pytest_xdist",
+    ],
+)
+
+pytest_test(
+    name = "test_native_coordinator",
+    srcs = ["test_native_coordinator.py"],
+    args = ["$(rootpath test_native_coordinator.py)"],
+    config = "//todofy:pyproject.toml",
+    data = [
+        "conftest.py",
+        "//todofy:conftest.py",
+        "//todofy:migrations",
+    ],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+    imports = [
+        "..",
+        "../..",
+        "../../worker",
+    ],
+    plugins = [
+        "xdist.plugin",
+        "xdist.looponfail",
+    ],
+    deps = [
+        ":host_support",
+        "//todofy/worker/todofy/runtime:backup",
+        "//todofy/worker/todofy/runtime:coordinator",
+        "//todofy/worker/todofy/runtime:package",
+        "@python_deps//pytest_xdist",
+    ],
+)
+
+pytest_test(
+    name = "test_ops_contract",
+    srcs = ["test_ops_contract.py"],
+    args = ["$(rootpath test_ops_contract.py)"],
+    config = "//todofy:pyproject.toml",
+    data = [
+        "conftest.py",
+        ":unit_fixtures",
+        "//contracts:fixtures",
+        "//todofy:conftest.py",
+    ],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+    imports = [
+        "..",
+        "../..",
+        "../../worker",
+    ],
+    plugins = [
+        "xdist.plugin",
+        "xdist.looponfail",
+    ],
+    deps = [
+        "//proto:python_runtime",
+        "//proto/ops/v1:python",
+        "//todofy/tests:mail_contract",
+        "@python_deps//jsonschema",
+        "@python_deps//pytest_xdist",
+    ],
+)
+
+pytest_test(
+    name = "test_ops_core",
+    srcs = ["test_ops_core.py"],
+    args = ["$(rootpath test_ops_core.py)"],
+    config = "//todofy:pyproject.toml",
+    data = [
+        "conftest.py",
+        "//contracts:fixtures",
+        "//todofy:conftest.py",
+    ],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+    imports = [
+        "..",
+        "../..",
+        "../../worker",
+    ],
+    plugins = [
+        "xdist.plugin",
+        "xdist.looponfail",
+    ],
+    deps = [
+        "//todofy/tests:mail_contract",
+        "//todofy/worker/todofy:package",
+        "//todofy/worker/todofy/core:ops",
+        "//todofy/worker/todofy/core:package",
+        "//todofy/worker/todofy/runtime:ops",
+        "@python_deps//jsonschema",
+        "@python_deps//pytest_xdist",
+    ],
+)
+
+pytest_test(
+    name = "test_ops_golden",
+    srcs = ["test_ops_golden.py"],
+    args = ["$(rootpath test_ops_golden.py)"],
+    config = "//todofy:pyproject.toml",
+    data = [
+        "conftest.py",
+        ":unit_fixtures",
+        "//contracts:fixtures",
+        "//todofy:conftest.py",
+    ],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+    imports = [
+        "..",
+        "../..",
+        "../../worker",
+    ],
+    plugins = [
+        "xdist.plugin",
+        "xdist.looponfail",
+    ],
+    deps = [
+        "//todofy/tests:mail_contract",
+        "//todofy/worker/todofy:package",
+        "//todofy/worker/todofy/core:ops",
+        "//todofy/worker/todofy/core:package",
+        "@python_deps//jsonschema",
+        "@python_deps//pytest_xdist",
+    ],
+)
+
+pytest_test(
+    name = "test_owner_ui",
+    srcs = ["test_owner_ui.py"],
+    args = ["$(rootpath test_owner_ui.py)"],
+    config = "//todofy:pyproject.toml",
+    data = [
+        "conftest.py",
+        "//todofy:conftest.py",
+        "//todofy:migrations",
+    ],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+    imports = [
+        "..",
+        "../..",
+        "../../worker",
+    ],
+    plugins = [
+        "xdist.plugin",
+        "xdist.looponfail",
+    ],
+    deps = [
+        "//proto:python_runtime",
+        "//proto/todofy/ui/v1:python",
+        "//todofy/worker/todofy/core:owner_ui",
+        "//todofy/worker/todofy/core:package",
+        "//todofy/worker/todofy/core:vocab",
+        "//todofy/worker/todofy/core/sql:package",
+        "@python_deps//pytest_xdist",
+    ],
+)
+
+pytest_test(
+    name = "test_owner_ui_handle",
+    srcs = ["test_owner_ui_handle.py"],
+    args = ["$(rootpath test_owner_ui_handle.py)"],
+    config = "//todofy:pyproject.toml",
+    data = [
+        "conftest.py",
+        "//todofy:conftest.py",
+    ],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+    imports = [
+        "..",
+        "../..",
+        "../../worker",
+    ],
+    plugins = [
+        "xdist.plugin",
+        "xdist.looponfail",
+    ],
+    deps = [
+        "//todofy/worker/todofy/core:owner_ui",
+        "//todofy/worker/todofy/core:package",
+        "//todofy/worker/todofy/runtime:owner_ui",
+        "//todofy/worker/todofy/runtime:package",
+        "@python_deps//pytest_xdist",
+    ],
+)
+
+pytest_test(
+    name = "test_prompts",
+    srcs = ["test_prompts.py"],
+    args = ["$(rootpath test_prompts.py)"],
+    config = "//todofy:pyproject.toml",
+    data = [
+        "conftest.py",
+        ":unit_fixtures",
+        "//todofy:conftest.py",
+    ],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+    imports = [
+        "..",
+        "../..",
+        "../../worker",
+    ],
+    plugins = [
+        "xdist.plugin",
+        "xdist.looponfail",
+    ],
+    deps = [
+        "//todofy/worker/todofy/core:contract",
+        "//todofy/worker/todofy/core:mailbox",
+        "//todofy/worker/todofy/core:package",
+        "//todofy/worker/todofy/core:prompts",
+        "//todofy/worker/todofy/core:render",
+        "//todofy/worker/todofy/core:report_schema",
+        "@python_deps//jsonschema",
+        "@python_deps//pytest_xdist",
+    ],
+)
+
+pytest_test(
+    name = "test_pytest_setup",
+    srcs = ["test_pytest_setup.py"],
+    args = ["$(rootpath test_pytest_setup.py)"],
+    config = "//todofy:pyproject.toml",
+    data = [
+        "conftest.py",
+        "//todofy:conftest.py",
+        "//todofy/tests:pytest_setup_data",
+    ],
+    env = {
+        "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+        "PYTEST_PLUGINS": "xdist.plugin,xdist.looponfail",
+        "BAZEL_CHILD_PYTHON": "1",
+        "BAZEL_COPY_WORKSPACE": "1",
+    },
+    imports = [
+        "..",
+        "../..",
+        "../../worker",
+    ],
+    plugins = [
+        "xdist.plugin",
+        "xdist.looponfail",
+    ],
+    deps = [
+        "//proto/todofy/ui/v1:python",
+        "//todofy/tests/fakes:model_router_fake",
+        "//todofy/tests/fakes:server",
+        "//todofy/worker/todofy/core:backoff",
+        "@python_deps//cryptography",
+        "@python_deps//httpx",
+        "@python_deps//jsonschema",
+        "@python_deps//pytest_xdist",
+        "@python_deps//pyyaml",
+    ],
+)
+
+pytest_test(
+    name = "test_render",
+    srcs = ["test_render.py"],
+    args = ["$(rootpath test_render.py)"],
+    config = "//todofy:pyproject.toml",
+    data = [
+        "conftest.py",
+        ":unit_fixtures",
+        "//todofy:conftest.py",
+    ],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+    imports = [
+        "..",
+        "../..",
+        "../../worker",
+    ],
+    plugins = [
+        "xdist.plugin",
+        "xdist.looponfail",
+    ],
+    deps = [
+        "//todofy/worker/todofy/core:contract",
+        "//todofy/worker/todofy/core:render",
+        "@python_deps//pytest_xdist",
+    ],
+)
+
+pytest_test(
+    name = "test_report_schema",
+    srcs = ["test_report_schema.py"],
+    args = ["$(rootpath test_report_schema.py)"],
+    config = "//todofy:pyproject.toml",
+    data = [
+        "conftest.py",
+        ":unit_fixtures",
+        "//todofy:conftest.py",
+    ],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+    imports = [
+        "..",
+        "../..",
+        "../../worker",
+    ],
+    plugins = [
+        "xdist.plugin",
+        "xdist.looponfail",
+    ],
+    deps = [
+        ":report_cases",
+        "//todofy/worker/todofy/core:report_schema",
+        "@python_deps//pytest_xdist",
+    ],
+)
+
+pytest_test(
+    name = "test_report_schema_legacy",
+    srcs = ["test_report_schema_legacy.py"],
+    args = ["$(rootpath test_report_schema_legacy.py)"],
+    config = "//todofy:pyproject.toml",
+    data = [
+        "conftest.py",
+        ":unit_fixtures",
+        "//todofy:conftest.py",
+        "//todofy/api:api_schemas",
+    ],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+    imports = [
+        "..",
+        "../..",
+        "../../worker",
+    ],
+    plugins = [
+        "xdist.plugin",
+        "xdist.looponfail",
+    ],
+    deps = [
+        "@python_deps//jsonschema",
+        "@python_deps//pytest_xdist",
+    ],
+)
+
+pytest_test(
+    name = "test_report_schemas",
+    srcs = ["test_report_schemas.py"],
+    args = ["$(rootpath test_report_schemas.py)"],
+    config = "//todofy:pyproject.toml",
+    data = [
+        "conftest.py",
+        "//todofy:conftest.py",
+        "//todofy/api:api_schemas",
+    ],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+    imports = [
+        "..",
+        "../..",
+        "../../worker",
+    ],
+    plugins = [
+        "xdist.plugin",
+        "xdist.looponfail",
+    ],
+    deps = [
+        ":report_cases",
+        "//todofy/worker/todofy/core:prompts",
+        "//todofy/worker/todofy/core:report_schema",
+        "@python_deps//jsonschema",
+        "@python_deps//pytest_xdist",
+    ],
+)
+
+pytest_test(
+    name = "test_report_wire",
+    srcs = ["test_report_wire.py"],
+    args = ["$(rootpath test_report_wire.py)"],
+    config = "//todofy:pyproject.toml",
+    data = [
+        "conftest.py",
+        ":unit_fixtures",
+        "//todofy:conftest.py",
+    ],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+    imports = [
+        "..",
+        "../..",
+        "../../worker",
+    ],
+    plugins = [
+        "xdist.plugin",
+        "xdist.looponfail",
+    ],
+    deps = [
+        ":report_cases",
+        "//proto:python_runtime",
+        "//proto/todofy/report/v1:python",
+        "//todofy/worker/todofy/core:report_schema",
+        "@python_deps//pytest_xdist",
+    ],
+)
+
+pytest_test(
+    name = "test_schema_sql",
+    srcs = ["test_schema_sql.py"],
+    args = ["$(rootpath test_schema_sql.py)"],
+    config = "//todofy:pyproject.toml",
+    data = [
+        "conftest.py",
+        ":unit_fixtures",
+        "//todofy:conftest.py",
+        "//todofy:migrations",
+        "//todofy/worker/todofy/core:core_sources",
+    ],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+    imports = [
+        "..",
+        "../..",
+        "../../worker",
+    ],
+    plugins = [
+        "xdist.plugin",
+        "xdist.looponfail",
+    ],
+    deps = [
+        "//proto:python",
+        "//todofy/worker/todofy/core:report_schema",
+        "//todofy/worker/todofy/core:vocab",
+        "//todofy/worker/todofy/core/sql:metrics",
+        "//todofy/worker/todofy/core/sql:package",
+        "//todofy/worker/todofy/core/sql:views",
+        "@python_deps//pytest_xdist",
+    ],
+)
+
+pytest_test(
+    name = "test_vocab",
+    srcs = ["test_vocab.py"],
+    args = ["$(rootpath test_vocab.py)"],
+    config = "//todofy:pyproject.toml",
+    data = [
+        "conftest.py",
+        "//todofy:conftest.py",
+        "//todofy:migrations",
+    ],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+    imports = [
+        "..",
+        "../..",
+        "../../worker",
+    ],
+    plugins = [
+        "xdist.plugin",
+        "xdist.looponfail",
+    ],
+    deps = [
+        "//todofy/worker/todofy/core:vocab",
+        "@python_deps//pytest_xdist",
+    ],
+)
+
+test_suite(
+    name = "tests",
+    tests = [
+        ":test_backoff",
+        ":test_backup",
+        ":test_backup_job",
+        ":test_carryover",
+        ":test_contract",
+        ":test_core_isolation",
+        ":test_gemini_wire",
+        ":test_machine_api",
+        ":test_mail",
+        ":test_mail_hero_compat",
+        ":test_mail_received_parser_legacy",
+        ":test_mail_received_schema_legacy",
+        ":test_mailbox",
+        ":test_metrics",
+        ":test_metrics_record",
+        ":test_model_settings",
+        ":test_native_coordinator",
+        ":test_ops_contract",
+        ":test_ops_core",
+        ":test_ops_golden",
+        ":test_owner_ui",
+        ":test_owner_ui_handle",
+        ":test_prompts",
+        ":test_pytest_setup",
+        ":test_render",
+        ":test_report_schema",
+        ":test_report_schema_legacy",
+        ":test_report_schemas",
+        ":test_report_wire",
+        ":test_schema_sql",
+        ":test_vocab",
+    ],
+)
+
+filegroup(
+    name = "unit_fixtures",
+    srcs = glob(["golden/**"]),
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ) + ["//todofy/tests/unit/legacy:python_sources"],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + ["//todofy/tests/unit/legacy:source_audit_files"],
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+test_suite(
+    name = "check",
+    tests = [":tests"],
+)

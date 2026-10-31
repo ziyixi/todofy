@@ -1,0 +1,264 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@npm//personal-mcp/worker:vitest/package_json.bzl", vitest = "bin")
+load("//tools/bazel:js.bzl", "copied_source_files", "proto_vitest_test", "workerd_vitest_test", "workspace_link")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//personal-mcp:__subpackages__"])
+
+COMMON_TEST_DATA = [
+    "//personal-mcp/worker:package_json",
+    "//personal-mcp/worker:node_modules/@modelcontextprotocol/server",
+    "//personal-mcp/worker:node_modules/vitest",
+]
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//personal-mcp:__subpackages__"],
+)
+
+copied_source_files(
+    name = "types_srcs",
+    srcs = glob(
+        ["**/*.ts"],
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+copied_source_files(
+    name = "lint_sources",
+    srcs = glob(
+        [
+            "**/*.ts",
+            "**/*.mts",
+        ],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+workspace_link(
+    name = "auth_test_edge_auth_link",
+    src = "//packages/edge-auth:pkg",
+    project = "personal-mcp/worker",
+)
+
+proto_vitest_test(
+    name = "auth_test",
+    config = "//personal-mcp/worker:test_config",
+    data = [
+        ":auth_test_edge_auth_link",
+        "//personal-mcp/worker:node_modules/vitest",
+        "//personal-mcp/worker:package_json",
+    ],
+    project = "personal-mcp/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":auth.test.ts"],
+    deps = ["//personal-mcp/worker/src:module_group_15"],
+)
+
+proto_vitest_test(
+    name = "backup_test",
+    config = "//personal-mcp/worker:test_config",
+    data = [
+        "//personal-mcp/worker:node_modules/vitest",
+        "//personal-mcp/worker:package_json",
+    ],
+    project = "personal-mcp/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":backup.test.ts"],
+    deps = [
+        "//personal-mcp/worker/src:backup",
+        "//proto/ops/v1:ts",
+    ],
+)
+
+proto_vitest_test(
+    name = "content_test",
+    config = "//personal-mcp/worker:test_config",
+    data = COMMON_TEST_DATA,
+    project = "personal-mcp/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":content.test.ts"],
+    deps = [
+        "//personal-mcp/worker/src:content",
+        "//proto/dashboard/mcp/v1:ts",
+    ],
+)
+
+proto_vitest_test(
+    name = "events_test",
+    config = "//personal-mcp/worker:test_config",
+    data = [
+        "//personal-mcp/worker:node_modules/vitest",
+        "//personal-mcp/worker:package_json",
+    ],
+    project = "personal-mcp/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":events.test.ts"],
+    deps = [
+        "//personal-mcp/worker/src:events",
+        "//proto/dashboard/mcp/v1:ts",
+    ],
+)
+
+proto_vitest_test(
+    name = "tasks_test",
+    config = "//personal-mcp/worker:test_config",
+    data = COMMON_TEST_DATA,
+    project = "personal-mcp/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":tasks.test.ts"],
+    deps = ["//personal-mcp/worker/src:tasks"],
+)
+
+proto_vitest_test(
+    name = "watch-events_test",
+    config = "//personal-mcp/worker:test_config",
+    data = [
+        "//personal-mcp/worker:node_modules/vitest",
+        "//personal-mcp/worker:package_json",
+    ],
+    project = "personal-mcp/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":watch-events.test.ts"],
+    deps = [
+        "//personal-mcp/worker/src:server",
+        "//personal-mcp/worker/src:watch",
+        "//personal-mcp/worker/src:watch-events",
+        "//personal-mcp/worker/src:work-model",
+        "//personal-mcp/worker/src:work-store",
+    ],
+)
+
+proto_vitest_test(
+    name = "watch_test",
+    config = "//personal-mcp/worker:test_config",
+    data = COMMON_TEST_DATA,
+    project = "personal-mcp/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":watch.test.ts"],
+    deps = [
+        "//personal-mcp/worker/src:watch",
+        "//personal-mcp/worker/src:work-model",
+        "//personal-mcp/worker/src:work-store",
+    ],
+)
+
+workspace_link(
+    name = "webhook_test_edge_auth_link",
+    src = "//packages/edge-auth:pkg",
+    project = "personal-mcp/worker",
+)
+
+proto_vitest_test(
+    name = "webhook_test",
+    config = "//personal-mcp/worker:test_config",
+    data = [
+        ":webhook_test_edge_auth_link",
+        "//personal-mcp:config",
+        "//personal-mcp/worker:node_modules/standardwebhooks",
+        "//personal-mcp/worker:node_modules/vitest",
+        "//personal-mcp/worker:package_json",
+    ],
+    project = "personal-mcp/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":webhook.test.ts"],
+    deps = ["//personal-mcp/worker/src:webhook"],
+)
+
+proto_vitest_test(
+    name = "work_test",
+    config = "//personal-mcp/worker:test_config",
+    data = COMMON_TEST_DATA,
+    project = "personal-mcp/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":work.test.ts"],
+    deps = [
+        "//personal-mcp/worker/src:work-model",
+        "//personal-mcp/worker/src:work-store",
+        "//personal-mcp/worker/src:work-tools",
+    ],
+)
+
+js_library(
+    name = "runtime_helpers",
+    srcs = [":runtime/test-store.ts"],
+)
+
+workerd_vitest_test(
+    name = "runtime_backup_test",
+    project = "personal-mcp/worker",
+    runner = vitest.vitest_test,
+    tests = [":runtime/backup.test.ts"],
+)
+
+workerd_vitest_test(
+    name = "runtime_gate_test",
+    data = ["//personal-mcp/worker:node_modules/standardwebhooks"],
+    project = "personal-mcp/worker",
+    runner = vitest.vitest_test,
+    tests = [":runtime/gate.test.ts"],
+    deps = [
+        "//proto/dashboard/mcp/v1:ts",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/todofy/mail/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_restore_test",
+    data = [
+        "//personal-mcp:config",
+        "//personal-mcp/tools:backup-restore",
+        "//personal-mcp/worker:node_modules/standardwebhooks",
+        "//personal-mcp/worker:wrangler",
+    ],
+    env = {"BAZEL_WRANGLER": "$(rootpath //personal-mcp/worker:wrangler)"},
+    project = "personal-mcp/worker",
+    runner = vitest.vitest_test,
+    tests = [":runtime/restore.test.ts"],
+    deps = [
+        "//proto/dashboard/mcp/v1:ts",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_work_test",
+    project = "personal-mcp/worker",
+    runner = vitest.vitest_test,
+    tests = [":runtime/work.test.ts"],
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+)
+
+test_suite(name = "check")
+
+test_suite(
+    name = "runtime_tests",
+    tags = ["workerd"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)

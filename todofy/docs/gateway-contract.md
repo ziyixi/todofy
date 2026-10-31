@@ -140,7 +140,7 @@ The old single-Python-Worker cutover/rollback procedures are historical, availab
 
 ```sh
 bazel test //todofy:check
-bazel test //todofy:runtime_tests --local_test_jobs=1
+bazel test //todofy/tests/runtime:runtime_tests --local_test_jobs=1
 bazel test //todofy/gateway:check
 ```
 

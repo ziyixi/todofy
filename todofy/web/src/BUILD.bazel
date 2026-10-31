@@ -1,0 +1,804 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@npm//todofy/web:vitest/package_json.bzl", vitest = "bin")
+load("//tools/bazel:js.bzl", "copied_source_files", "proto_vitest_test", "ts_source_library")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//visibility:public"])
+
+COMMON_TEST_DATA = [
+    "//todofy/web:package_json",
+    ":test/setup.ts",
+    "//todofy/web:test_config",
+    "//todofy/web:node_modules/@testing-library/dom",
+    "//todofy/web:node_modules/@testing-library/user-event",
+    "//todofy/web:node_modules/@vitejs/plugin-react",
+    "//todofy/web:node_modules/jsdom",
+    "//todofy/web:node_modules/vite",
+    "//:node_modules/vitest",
+]
+
+COMMON_TEST_DATA_2 = [
+    "//todofy/web:package_json",
+    ":test/fixtures.ts",
+    ":test/harness.tsx",
+    ":test/setup.ts",
+    "//todofy/web:test_config",
+    "//todofy/web:node_modules/@testing-library/dom",
+    "//todofy/web:node_modules/@testing-library/user-event",
+    "//todofy/web:node_modules/@vitejs/plugin-react",
+    "//todofy/web:node_modules/jsdom",
+    "//todofy/web:node_modules/vite",
+    "//:node_modules/vitest",
+]
+
+COMMON_TEST_DEPS = [
+    "//todofy/web:node_modules/@tanstack/react-query",
+    "//todofy/web:node_modules/@testing-library/jest-dom",
+    "//todofy/web:node_modules/@testing-library/react",
+    "//todofy/web:node_modules/react-router",
+    "//todofy/web:node_modules/vitest",
+    ":src__api__client",
+    ":src__api__queries",
+    ":src__api__types",
+    ":src__api__useAction",
+    ":src__components__EventList",
+    ":src__components__Modal",
+    ":src__components__ModelSettings",
+    ":src__components__Shell",
+    ":src__components__StatusBanner",
+    ":src__components__TrendChart",
+    ":src__components__ui",
+    ":src__lib__format",
+    ":src__lib__labels",
+    ":src__pages__AttentionPage",
+    ":src__pages__BudgetPage",
+    ":src__pages__DigestPage",
+    ":src__pages__EventDetailPage",
+    ":src__pages__EventsPage",
+    ":src__pages__HealthPage",
+    ":src__pages__MorePage",
+    ":src__pages__NotFoundPage",
+    ":src__pages__ReconcileDialog",
+    ":src__pages__RouteError",
+    ":src__pages__SetupPage",
+    ":src__queryClient",
+    ":src__routes",
+    "//proto/todofy/report/v1:ts",
+    "//proto/todofy/ui/v1:ts",
+    "//proto/ts:protobuf",
+    "//proto/ts:wire-json",
+]
+
+COMMON_TEST_DATA_3 = [
+    "//todofy/web:package_json",
+    ":test/fixtures.ts",
+    ":test/setup.ts",
+    "//todofy/web:test_config",
+    "//todofy/web:node_modules/@testing-library/dom",
+    "//todofy/web:node_modules/@testing-library/user-event",
+    "//todofy/web:node_modules/@vitejs/plugin-react",
+    "//todofy/web:node_modules/jsdom",
+    "//todofy/web:node_modules/vite",
+    "//:node_modules/vitest",
+]
+
+COMMON_TEST_DATA_4 = [
+    "//todofy/web:package_json",
+    ":test/fixtures.ts",
+    ":test/harness.tsx",
+    ":test/setup.ts",
+    "//todofy/web:test_config",
+    "//todofy/web:node_modules/@testing-library/dom",
+    "//todofy/web:node_modules/@vitejs/plugin-react",
+    "//todofy/web:node_modules/jsdom",
+    "//todofy/web:node_modules/vite",
+    "//:node_modules/vitest",
+]
+
+COMMON_TEST_DEPS_2 = [
+    "//todofy/web:node_modules/@tanstack/react-query",
+    "//todofy/web:node_modules/@testing-library/jest-dom",
+    "//todofy/web:node_modules/@testing-library/react",
+    "//todofy/web:node_modules/@testing-library/user-event",
+    "//todofy/web:node_modules/react-router",
+    "//todofy/web:node_modules/vitest",
+    ":src__api__client",
+    ":src__api__queries",
+    ":src__api__types",
+    ":src__api__useAction",
+    ":src__components__EventList",
+    ":src__components__Modal",
+    ":src__components__ModelSettings",
+    ":src__components__Shell",
+    ":src__components__StatusBanner",
+    ":src__components__TrendChart",
+    ":src__components__ui",
+    ":src__lib__format",
+    ":src__lib__labels",
+    ":src__pages__AttentionPage",
+    ":src__pages__BudgetPage",
+    ":src__pages__DigestPage",
+    ":src__pages__EventDetailPage",
+    ":src__pages__EventsPage",
+    ":src__pages__HealthPage",
+    ":src__pages__MorePage",
+    ":src__pages__NotFoundPage",
+    ":src__pages__ReconcileDialog",
+    ":src__pages__RouteError",
+    ":src__pages__SetupPage",
+    ":src__queryClient",
+    ":src__routes",
+    "//proto/todofy/report/v1:ts",
+    "//proto/todofy/ui/v1:ts",
+    "//proto/ts:protobuf",
+    "//proto/ts:wire-json",
+]
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+js_library(
+    name = "source_test_setup_ts",
+    srcs = ["test/setup.ts"],
+)
+
+copied_source_files(
+    name = "application_sources_srcs",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+copied_source_files(
+    name = "typecheck_project_srcs",
+    srcs = [
+        "api/client.test.ts",
+        "api/client.ts",
+        "api/queries.test.ts",
+        "api/queries.ts",
+        "api/report-schema-dialect.test.ts",
+        "api/types.ts",
+        "api/useAction.ts",
+        "components/EventList.tsx",
+        "components/Modal.tsx",
+        "components/ModelSettings.test.tsx",
+        "components/ModelSettings.tsx",
+        "components/Shell.tsx",
+        "components/StatusBanner.test.tsx",
+        "components/StatusBanner.tsx",
+        "components/TrendChart.tsx",
+        "components/ui.tsx",
+        "lib/format.test.ts",
+        "lib/format.ts",
+        "lib/labels.test.ts",
+        "lib/labels.ts",
+        "main.tsx",
+        "pages/AttentionPage.tsx",
+        "pages/BudgetPage.tsx",
+        "pages/DigestPage.tsx",
+        "pages/EventDetailPage.tsx",
+        "pages/EventsPage.tsx",
+        "pages/HealthPage.tsx",
+        "pages/MorePage.tsx",
+        "pages/NotFoundPage.tsx",
+        "pages/ReconcileDialog.tsx",
+        "pages/RouteError.tsx",
+        "pages/SetupPage.tsx",
+        "pages/eventDetail.test.tsx",
+        "pages/health.test.tsx",
+        "pages/lists.test.tsx",
+        "pages/status.test.tsx",
+        "pages/trends.test.tsx",
+        "queryClient.test.ts",
+        "queryClient.ts",
+        "routes.tsx",
+        "test/fixtures.ts",
+        "test/harness.tsx",
+        "test/setup.ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__api__client",
+    srcs = [":api/client.ts"],
+    deps = [
+        "//proto/common/errors/v1:ts",
+        "//proto/todofy/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+ts_source_library(
+    name = "src__queryClient",
+    srcs = [":queryClient.ts"],
+    deps = [
+        ":src__api__client",
+        "//todofy/web:node_modules/@tanstack/react-query",
+    ],
+)
+
+ts_source_library(
+    name = "src__api__types",
+    srcs = [":api/types.ts"],
+    deps = [
+        "//proto/todofy/report/v1:ts",
+        "//proto/todofy/ui/v1:ts",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "src__api__queries",
+    srcs = [":api/queries.ts"],
+    deps = [
+        ":src__api__client",
+        ":src__api__types",
+        "//proto/todofy/ui/v1:ts",
+        "//todofy/web:node_modules/@tanstack/react-query",
+        "//todofy/web:node_modules/react",
+    ],
+)
+
+ts_source_library(
+    name = "src__components__StatusBanner",
+    srcs = [":components/StatusBanner.tsx"],
+    deps = [
+        ":src__api__types",
+        "//todofy/web:node_modules/lucide-react",
+        "//todofy/web:node_modules/react",
+    ],
+)
+
+ts_source_library(
+    name = "src__components__Shell",
+    srcs = [":components/Shell.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__components__StatusBanner",
+        "//todofy/web:node_modules/lucide-react",
+        "//todofy/web:node_modules/react",
+        "//todofy/web:node_modules/react-router",
+    ],
+)
+
+ts_source_library(
+    name = "src__lib__format",
+    srcs = [":lib/format.ts"],
+)
+
+ts_source_library(
+    name = "src__lib__labels",
+    srcs = [":lib/labels.ts"],
+    deps = [
+        ":src__api__client",
+        ":src__api__types",
+    ],
+)
+
+ts_source_library(
+    name = "src__components__ui",
+    srcs = [":components/ui.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__lib__format",
+        ":src__lib__labels",
+        "//todofy/web:node_modules/lucide-react",
+        "//todofy/web:node_modules/react",
+    ],
+)
+
+ts_source_library(
+    name = "src__components__EventList",
+    srcs = [":components/EventList.tsx"],
+    deps = [
+        ":src__api__types",
+        ":src__components__ui",
+        ":src__lib__format",
+        ":src__lib__labels",
+        "//todofy/web:node_modules/lucide-react",
+        "//todofy/web:node_modules/react",
+        "//todofy/web:node_modules/react-router",
+    ],
+)
+
+ts_source_library(
+    name = "src__pages__AttentionPage",
+    srcs = [":pages/AttentionPage.tsx"],
+    deps = [
+        ":src__api__queries",
+        ":src__components__EventList",
+        ":src__components__ui",
+        "//todofy/web:node_modules/lucide-react",
+        "//todofy/web:node_modules/react",
+    ],
+)
+
+ts_source_library(
+    name = "src__components__TrendChart",
+    srcs = [":components/TrendChart.tsx"],
+    deps = [
+        ":src__lib__format",
+        "//todofy/web:node_modules/react",
+    ],
+)
+
+ts_source_library(
+    name = "src__pages__BudgetPage",
+    srcs = [":pages/BudgetPage.tsx"],
+    deps = [
+        ":src__api__queries",
+        ":src__api__types",
+        ":src__components__TrendChart",
+        ":src__components__ui",
+        ":src__lib__format",
+        "//todofy/web:node_modules/@tanstack/react-query",
+        "//todofy/web:node_modules/lucide-react",
+        "//todofy/web:node_modules/react",
+    ],
+)
+
+ts_source_library(
+    name = "src__api__useAction",
+    srcs = [":api/useAction.ts"],
+    deps = [
+        ":src__api__client",
+        "//todofy/web:node_modules/react",
+    ],
+)
+
+ts_source_library(
+    name = "src__components__Modal",
+    srcs = [":components/Modal.tsx"],
+    deps = [
+        ":src__components__ui",
+        "//todofy/web:node_modules/lucide-react",
+        "//todofy/web:node_modules/react",
+        "//todofy/web:node_modules/react-dom",
+    ],
+)
+
+ts_source_library(
+    name = "src__pages__DigestPage",
+    srcs = [":pages/DigestPage.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__api__types",
+        ":src__api__useAction",
+        ":src__components__Modal",
+        ":src__components__ui",
+        ":src__lib__labels",
+        "//proto/todofy/report/v1:ts",
+        "//proto/ts:wire-json",
+        "//todofy/web:node_modules/@tanstack/react-query",
+        "//todofy/web:node_modules/lucide-react",
+        "//todofy/web:node_modules/react",
+    ],
+)
+
+ts_source_library(
+    name = "src__pages__ReconcileDialog",
+    srcs = [":pages/ReconcileDialog.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__api__types",
+        ":src__api__useAction",
+        ":src__components__Modal",
+        ":src__components__ui",
+        ":src__lib__format",
+        ":src__lib__labels",
+        "//todofy/web:node_modules/@tanstack/react-query",
+        "//todofy/web:node_modules/react",
+    ],
+)
+
+ts_source_library(
+    name = "src__pages__EventDetailPage",
+    srcs = [":pages/EventDetailPage.tsx"],
+    deps = [
+        ":src__api__queries",
+        ":src__api__types",
+        ":src__components__EventList",
+        ":src__components__ui",
+        ":src__lib__format",
+        ":src__lib__labels",
+        ":src__pages__ReconcileDialog",
+        "//todofy/web:node_modules/@tanstack/react-query",
+        "//todofy/web:node_modules/lucide-react",
+        "//todofy/web:node_modules/react",
+        "//todofy/web:node_modules/react-router",
+    ],
+)
+
+ts_source_library(
+    name = "src__pages__EventsPage",
+    srcs = [":pages/EventsPage.tsx"],
+    deps = [
+        ":src__api__queries",
+        ":src__api__types",
+        ":src__components__EventList",
+        ":src__components__ui",
+        ":src__lib__labels",
+        "//todofy/web:node_modules/lucide-react",
+        "//todofy/web:node_modules/react",
+        "//todofy/web:node_modules/react-router",
+    ],
+)
+
+ts_source_library(
+    name = "src__pages__HealthPage",
+    srcs = [":pages/HealthPage.tsx"],
+    deps = [
+        ":src__api__queries",
+        ":src__api__types",
+        ":src__components__ui",
+        ":src__lib__format",
+        ":src__lib__labels",
+        ":src__pages__BudgetPage",
+        "//todofy/web:node_modules/lucide-react",
+        "//todofy/web:node_modules/react",
+    ],
+)
+
+ts_source_library(
+    name = "src__pages__MorePage",
+    srcs = [":pages/MorePage.tsx"],
+    deps = [
+        ":src__components__Shell",
+        ":src__components__ui",
+        "//todofy/web:node_modules/lucide-react",
+        "//todofy/web:node_modules/react",
+        "//todofy/web:node_modules/react-router",
+    ],
+)
+
+ts_source_library(
+    name = "src__pages__NotFoundPage",
+    srcs = [":pages/NotFoundPage.tsx"],
+    deps = [
+        ":src__components__ui",
+        "//todofy/web:node_modules/lucide-react",
+        "//todofy/web:node_modules/react",
+        "//todofy/web:node_modules/react-router",
+    ],
+)
+
+ts_source_library(
+    name = "src__pages__RouteError",
+    srcs = [":pages/RouteError.tsx"],
+    deps = [
+        ":src__components__ui",
+        "//todofy/web:node_modules/react",
+        "//todofy/web:node_modules/react-router",
+    ],
+)
+
+ts_source_library(
+    name = "src__components__ModelSettings",
+    srcs = [":components/ModelSettings.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__components__ui",
+        "//proto/todofy/ui/v1:ts",
+        "//todofy/web:node_modules/@tanstack/react-query",
+        "//todofy/web:node_modules/react",
+    ],
+)
+
+ts_source_library(
+    name = "src__pages__SetupPage",
+    srcs = [":pages/SetupPage.tsx"],
+    deps = [
+        ":src__api__queries",
+        ":src__api__types",
+        ":src__components__ModelSettings",
+        ":src__components__ui",
+        "//todofy/web:node_modules/lucide-react",
+        "//todofy/web:node_modules/react",
+    ],
+)
+
+ts_source_library(
+    name = "src__routes",
+    srcs = [":routes.tsx"],
+    deps = [
+        ":src__components__Shell",
+        ":src__pages__AttentionPage",
+        ":src__pages__BudgetPage",
+        ":src__pages__DigestPage",
+        ":src__pages__EventDetailPage",
+        ":src__pages__EventsPage",
+        ":src__pages__HealthPage",
+        ":src__pages__MorePage",
+        ":src__pages__NotFoundPage",
+        ":src__pages__RouteError",
+        ":src__pages__SetupPage",
+        "//todofy/web:node_modules/react",
+        "//todofy/web:node_modules/react-router",
+    ],
+)
+
+js_library(
+    name = "src__main",
+    srcs = [
+        ":main.tsx",
+        ":styles/app.css",
+        ":styles/tokens.css",
+    ],
+    types = [":main.tsx"],
+    deps = [
+        ":src__queryClient",
+        ":src__routes",
+        "//todofy/web:node_modules/@tanstack/react-query",
+        "//todofy/web:node_modules/react",
+        "//todofy/web:node_modules/react-dom",
+        "//todofy/web:node_modules/react-router",
+    ],
+)
+
+js_library(
+    name = "lib",
+    deps = [
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__api__types",
+        ":src__api__useAction",
+        ":src__components__EventList",
+        ":src__components__Modal",
+        ":src__components__ModelSettings",
+        ":src__components__Shell",
+        ":src__components__StatusBanner",
+        ":src__components__TrendChart",
+        ":src__components__ui",
+        ":src__lib__format",
+        ":src__lib__labels",
+        ":src__main",
+        ":src__pages__AttentionPage",
+        ":src__pages__BudgetPage",
+        ":src__pages__DigestPage",
+        ":src__pages__EventDetailPage",
+        ":src__pages__EventsPage",
+        ":src__pages__HealthPage",
+        ":src__pages__MorePage",
+        ":src__pages__NotFoundPage",
+        ":src__pages__ReconcileDialog",
+        ":src__pages__RouteError",
+        ":src__pages__SetupPage",
+        ":src__queryClient",
+        ":src__routes",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__queryClient_test",
+    config = "//todofy/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "todofy/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":queryClient.test.ts"],
+    deps = [
+        ":src__api__client",
+        ":src__queryClient",
+        "//todofy/web:node_modules/@testing-library/jest-dom",
+        "//todofy/web:node_modules/@testing-library/react",
+        "//todofy/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__api__client_test",
+    config = "//todofy/web:test_config",
+    data = COMMON_TEST_DATA_2,
+    project = "todofy/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":api/client.test.ts"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "src__api__queries_test",
+    config = "//todofy/web:test_config",
+    data = COMMON_TEST_DATA_3,
+    project = "todofy/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":api/queries.test.ts"],
+    deps = [
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__api__types",
+        "//proto/todofy/report/v1:ts",
+        "//proto/todofy/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+        "//todofy/web:node_modules/@testing-library/jest-dom",
+        "//todofy/web:node_modules/@testing-library/react",
+        "//todofy/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__api__report-schema-dialect_test",
+    config = "//todofy/web:test_config",
+    data = [
+        ":test/setup.ts",
+        "//:node_modules/vitest",
+        "//todofy/api:api_schema_data",
+        "//todofy/web:node_modules/@testing-library/dom",
+        "//todofy/web:node_modules/@testing-library/user-event",
+        "//todofy/web:node_modules/@vitejs/plugin-react",
+        "//todofy/web:node_modules/jsdom",
+        "//todofy/web:node_modules/vite",
+        "//todofy/web:package_json",
+        "//todofy/web:test_config",
+    ],
+    project = "todofy/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":api/report-schema-dialect.test.ts"],
+    deps = [
+        "//todofy/web:node_modules/@testing-library/jest-dom",
+        "//todofy/web:node_modules/@testing-library/react",
+        "//todofy/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__components__ModelSettings_test",
+    config = "//todofy/web:test_config",
+    data = COMMON_TEST_DATA_4,
+    project = "todofy/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":components/ModelSettings.test.tsx"],
+    deps = COMMON_TEST_DEPS_2,
+)
+
+proto_vitest_test(
+    name = "src__components__StatusBanner_test",
+    config = "//todofy/web:test_config",
+    data = COMMON_TEST_DATA_3,
+    project = "todofy/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":components/StatusBanner.test.tsx"],
+    deps = [
+        ":src__api__types",
+        ":src__components__StatusBanner",
+        "//proto/todofy/report/v1:ts",
+        "//proto/todofy/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+        "//todofy/web:node_modules/@testing-library/jest-dom",
+        "//todofy/web:node_modules/@testing-library/react",
+        "//todofy/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__lib__format_test",
+    config = "//todofy/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "todofy/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":lib/format.test.ts"],
+    deps = [
+        ":src__lib__format",
+        "//todofy/web:node_modules/@testing-library/jest-dom",
+        "//todofy/web:node_modules/@testing-library/react",
+        "//todofy/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__lib__labels_test",
+    config = "//todofy/web:test_config",
+    data = [
+        ":test/setup.ts",
+        "//:node_modules/vitest",
+        "//todofy/api:api_schema_data",
+        "//todofy/web:application_sources",
+        "//todofy/web:node_modules/@testing-library/dom",
+        "//todofy/web:node_modules/@testing-library/user-event",
+        "//todofy/web:node_modules/@vitejs/plugin-react",
+        "//todofy/web:node_modules/jsdom",
+        "//todofy/web:node_modules/vite",
+        "//todofy/web:package_json",
+        "//todofy/web:test_config",
+    ],
+    project = "todofy/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":lib/labels.test.ts"],
+    deps = [
+        ":src__api__client",
+        ":src__api__types",
+        ":src__lib__labels",
+        "//proto/common/errors/v1:ts",
+        "//proto/todofy/ui/v1:ts",
+        "//todofy/web:node_modules/@testing-library/jest-dom",
+        "//todofy/web:node_modules/@testing-library/react",
+        "//todofy/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__pages__eventDetail_test",
+    config = "//todofy/web:test_config",
+    data = COMMON_TEST_DATA_4,
+    project = "todofy/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":pages/eventDetail.test.tsx"],
+    deps = COMMON_TEST_DEPS_2,
+)
+
+proto_vitest_test(
+    name = "src__pages__health_test",
+    config = "//todofy/web:test_config",
+    data = COMMON_TEST_DATA_2,
+    project = "todofy/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":pages/health.test.tsx"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "src__pages__lists_test",
+    config = "//todofy/web:test_config",
+    data = COMMON_TEST_DATA_4,
+    project = "todofy/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":pages/lists.test.tsx"],
+    deps = COMMON_TEST_DEPS_2,
+)
+
+proto_vitest_test(
+    name = "src__pages__status_test",
+    config = "//todofy/web:test_config",
+    data = COMMON_TEST_DATA_4,
+    project = "todofy/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":pages/status.test.tsx"],
+    deps = COMMON_TEST_DEPS_2,
+)
+
+proto_vitest_test(
+    name = "src__pages__trends_test",
+    config = "//todofy/web:test_config",
+    data = COMMON_TEST_DATA_4,
+    project = "todofy/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":pages/trends.test.tsx"],
+    deps = COMMON_TEST_DEPS_2,
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+)
+
+test_suite(name = "check")
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)

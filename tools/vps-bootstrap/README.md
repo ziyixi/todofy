@@ -49,7 +49,7 @@ Optional diagnostics use a distinct restricted reader identity. Read access does
 ## Checks
 
 ```sh
-bazel test //tools/vps-bootstrap:check //platform:tests
+bazel test //tools/vps-bootstrap:check //platform/tests:tests
 ```
 
 Synthetic tests cover ownership refusal, partial copies, stable release identities, drain handoff, retry checkpoints and recovery. They do not establish live Tunnel connectivity, provider authentication, restored data completeness or successful delivery. The Linux image job additionally exercises isolated K3s SSA; the AppArmor parser check compiles the policy without loading it.

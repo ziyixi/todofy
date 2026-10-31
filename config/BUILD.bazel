@@ -1,0 +1,35 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(glob(
+    ["*.toml"],
+    allow_empty = True,
+))
+
+filegroup(
+    name = "files",
+    srcs = glob(
+        ["*.toml"],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+js_library(
+    name = "profile_inputs",
+    srcs = [
+        "cloud.toml",
+        "resources.toml",
+    ],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+)

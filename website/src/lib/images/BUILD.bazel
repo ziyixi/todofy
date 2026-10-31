@@ -1,0 +1,28 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//website:bazel.bzl", "website_sources")
+
+package(default_visibility = ["//website:__subpackages__"])
+
+exports_files(
+    glob(
+        ["*.ts"],
+        allow_empty = True,
+    ),
+    visibility = ["//website:__subpackages__"],
+)
+
+js_library(
+    name = "config",
+    srcs = [":config.ts"],
+)
+
+js_library(
+    name = "loader",
+    srcs = [
+        ":loader.ts",
+        "//website:.generated/images.json",
+    ],
+    deps = [":config"],
+)
+
+website_sources()

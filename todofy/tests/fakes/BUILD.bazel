@@ -1,0 +1,82 @@
+load("@rules_python//python:defs.bzl", "py_library")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/python:tests.bzl", "pytest_test")
+
+package(default_visibility = ["//todofy:__subpackages__"])
+
+py_library(
+    name = "model_router_fake",
+    srcs = ["model_router_fake.py"],
+    imports = ["../.."],
+    deps = [":server"],
+)
+
+py_library(
+    name = "server",
+    srcs = ["server.py"],
+    imports = ["../.."],
+)
+
+pytest_test(
+    name = "host_fakes_test",
+    srcs = ["test_fakes.py"],
+    args = ["$(rootpath test_fakes.py)"],
+    config = "//todofy:pyproject.toml",
+    data = [
+        "//todofy:config",
+        "//todofy:conftest.py",
+        "//todofy:migrations",
+        "//todofy/api:api_schemas",
+        "//todofy/tools/legacy_migration:conftest.py",
+        "//todofy/tools/legacy_migration:fixtures/inbox_schema.sql",
+        "//todofy/tools/legacy_migration:fixtures/todofy_schema.sql",
+    ],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+    imports = [
+        "../..",
+        "../../tools/legacy_migration",
+        "../../worker",
+    ],
+    plugins = [
+        "xdist.plugin",
+        "xdist.looponfail",
+    ],
+    deps = [
+        ":model_router_fake",
+        ":server",
+        "@python_deps//httpx",
+        "@python_deps//pytest_xdist",
+    ],
+)
+
+test_suite(
+    name = "check",
+    tests = [":host_fakes_test"],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)

@@ -1,0 +1,350 @@
+load("@rules_python//python:defs.bzl", "py_library")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//newsletter:__subpackages__"])
+
+py_library(
+    name = "package",
+    srcs = ["__init__.py"],
+    imports = ["../.."],
+    deps = ["//newsletter/src/newsletter:package"],
+)
+
+py_library(
+    name = "components",
+    srcs = ["components.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        "//newsletter/src/newsletter:types",
+    ],
+)
+
+py_library(
+    name = "content",
+    srcs = ["content.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        ":prompt_examples",
+        ":schema",
+        ":sources",
+        "//newsletter/src/newsletter:contracts",
+        "//newsletter/src/newsletter:errors",
+        "//newsletter/src/newsletter:model_io",
+        "//newsletter/src/newsletter:types",
+        "//newsletter/src/newsletter:usage",
+        "//newsletter/src/newsletter/collection:instructions",
+        "@python_deps//ziyixi_protos",
+    ],
+)
+
+py_library(
+    name = "definition",
+    srcs = ["definition.py"],
+    data = ["//newsletter/src/newsletter:workflows"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        "//newsletter/src/newsletter:contracts",
+        "@python_deps//pyyaml",
+    ],
+)
+
+py_library(
+    name = "engine",
+    srcs = ["engine.py"],
+    imports = ["../.."],
+    deps = [
+        ":definition",
+        ":package",
+        ":repository",
+        ":types",
+        "//newsletter/src/newsletter:diagnostics",
+    ],
+)
+
+py_library(
+    name = "nodes",
+    srcs = ["nodes.py"],
+    imports = ["../.."],
+    deps = [
+        ":content",
+        ":definition",
+        ":engine",
+        ":package",
+        ":researcher",
+        ":sources",
+        ":state",
+        "//newsletter/src/newsletter:contracts",
+        "//newsletter/src/newsletter:drain",
+        "//newsletter/src/newsletter:editor",
+        "//newsletter/src/newsletter:errors",
+        "//newsletter/src/newsletter:model_io",
+        "//newsletter/src/newsletter:types",
+        "//newsletter/src/newsletter:usage",
+        "//newsletter/src/newsletter/collection:instructions",
+        "@python_deps//ziyixi_protos",
+    ],
+)
+
+py_library(
+    name = "pipeline",
+    srcs = ["pipeline.py"],
+    data = ["//newsletter/src/newsletter:package_resources"],
+    imports = ["../.."],
+    deps = [
+        ":definition",
+        ":engine",
+        ":package",
+        ":publication",
+        ":repository",
+        ":sources",
+        ":state",
+        ":story_nodes",
+        ":story_recipe",
+        ":types",
+        "//newsletter/src/newsletter:content_config",
+        "//newsletter/src/newsletter:contracts",
+        "//newsletter/src/newsletter:diagnostics",
+        "//newsletter/src/newsletter:drain",
+        "//newsletter/src/newsletter:editor",
+        "//newsletter/src/newsletter:settings",
+        "//newsletter/src/newsletter:types",
+        "//newsletter/src/newsletter/collection:instructions",
+        "//newsletter/src/newsletter/collection:repository",
+        "//newsletter/src/newsletter/collection:source_guides",
+    ],
+)
+
+py_library(
+    name = "prompt_examples",
+    srcs = ["prompt_examples.py"],
+    data = ["//newsletter/src/newsletter:workflows"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        "//newsletter/src/newsletter:types",
+    ],
+)
+
+py_library(
+    name = "publication",
+    srcs = ["publication.py"],
+    imports = ["../.."],
+    deps = [
+        ":components",
+        ":package",
+        "//newsletter/src/newsletter:contracts",
+        "//newsletter/src/newsletter:drain",
+        "//newsletter/src/newsletter:types",
+        "@python_deps//ziyixi_protos",
+    ],
+)
+
+py_library(
+    name = "repository",
+    srcs = ["repository.py"],
+    imports = ["../.."],
+    deps = [
+        ":definition",
+        ":package",
+        ":types",
+        "//newsletter/src/newsletter:contracts",
+        "//newsletter/src/newsletter:drain",
+        "//newsletter/src/newsletter:types",
+    ],
+)
+
+py_library(
+    name = "researcher",
+    srcs = ["researcher.py"],
+    imports = ["../.."],
+    deps = [
+        ":content",
+        ":package",
+        ":sources",
+        "//newsletter/src/newsletter:contracts",
+        "//newsletter/src/newsletter:errors",
+        "//newsletter/src/newsletter:types",
+        "@python_deps//httpx",
+        "@python_deps//pyyaml",
+    ],
+)
+
+py_library(
+    name = "review",
+    srcs = ["review.py"],
+    imports = ["../.."],
+    deps = [
+        ":components",
+        ":package",
+        ":types",
+        "//newsletter/src/newsletter:contracts",
+        "//newsletter/src/newsletter:errors",
+        "//newsletter/src/newsletter:model_io",
+        "//newsletter/src/newsletter:types",
+    ],
+)
+
+py_library(
+    name = "schema",
+    srcs = ["schema.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        "//newsletter/src/newsletter:contracts",
+        "//newsletter/src/newsletter:types",
+    ],
+)
+
+py_library(
+    name = "sources",
+    srcs = ["sources.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        "//newsletter/src/newsletter:contracts",
+        "//newsletter/src/newsletter:types",
+    ],
+)
+
+py_library(
+    name = "state",
+    srcs = ["state.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        "//newsletter/src/newsletter:contracts",
+        "//newsletter/src/newsletter:drain",
+        "//newsletter/src/newsletter:types",
+        "//newsletter/src/newsletter:usage",
+    ],
+)
+
+py_library(
+    name = "story_nodes",
+    srcs = ["story_nodes.py"],
+    imports = ["../.."],
+    deps = [
+        ":content",
+        ":engine",
+        ":nodes",
+        ":package",
+        ":publication",
+        ":sources",
+        ":story_replay",
+        "//newsletter/src/newsletter:editor",
+        "//newsletter/src/newsletter:types",
+    ],
+)
+
+py_library(
+    name = "story_recipe",
+    srcs = ["story_recipe.py"],
+    imports = ["../.."],
+    deps = [
+        ":definition",
+        ":package",
+    ],
+)
+
+py_library(
+    name = "story_replay",
+    srcs = ["story_replay.py"],
+    imports = ["../.."],
+    deps = [
+        ":content",
+        ":definition",
+        ":engine",
+        ":package",
+        ":publication",
+        ":repository",
+        ":state",
+        ":story_recipe",
+        ":story_replay_repository",
+        ":types",
+        "//newsletter/src/newsletter:contracts",
+        "//newsletter/src/newsletter:drain",
+        "//newsletter/src/newsletter:errors",
+        "//newsletter/src/newsletter:types",
+        "//newsletter/src/newsletter/collection:instructions",
+        "//newsletter/src/newsletter/collection:repository",
+        "@python_deps//ziyixi_protos",
+    ],
+)
+
+py_library(
+    name = "story_replay_repository",
+    srcs = ["story_replay_repository.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        "//newsletter/src/newsletter:contracts",
+        "//newsletter/src/newsletter:drain",
+        "//newsletter/src/newsletter:types",
+    ],
+)
+
+py_library(
+    name = "types",
+    srcs = ["types.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        "//newsletter/src/newsletter:types",
+    ],
+)
+
+py_library(
+    name = "library",
+    deps = [
+        ":components",
+        ":content",
+        ":definition",
+        ":engine",
+        ":nodes",
+        ":package",
+        ":pipeline",
+        ":prompt_examples",
+        ":publication",
+        ":repository",
+        ":researcher",
+        ":review",
+        ":schema",
+        ":sources",
+        ":state",
+        ":story_nodes",
+        ":story_recipe",
+        ":story_replay",
+        ":story_replay_repository",
+        ":types",
+    ],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)

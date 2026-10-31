@@ -1,0 +1,41 @@
+load("@rules_python//python:defs.bzl", "py_library")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//todofy:__subpackages__"])
+
+py_library(
+    name = "library",
+    deps = ["//todofy/worker/todofy:library"],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ) + ["//todofy/worker/todofy:python_sources"],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + ["//todofy/worker/todofy:source_audit_files"],
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "node_sources",
+    srcs = ["//todofy/worker/todofy:node_sources"],
+)

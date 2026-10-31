@@ -1,6 +1,7 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library")
 load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
-load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//proto/bazel:packages.bzl", "PROTO_SOURCES")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -84,51 +85,30 @@ py_library(
     imports = ["."],
 )
 
-[
-    py_library(
-        name = language + "_generator",
-        srcs = [source],
-        imports = ["."],
-        deps = [":wire_rules"],
-    )
-    for language, source in [
-        ("ts", "gen_wire_ts.py"),
-        ("python", "gen_py.py"),
-        ("schema", "gen_schema.py"),
-    ]
-]
+[py_library(
+    name = language + "_generator",
+    srcs = [source],
+    imports = ["."],
+    deps = [":wire_rules"],
+) for (language, source) in [
+    ("ts", "gen_wire_ts.py"),
+    ("python", "gen_py.py"),
+    ("schema", "gen_schema.py"),
+]]
 
-[
-    py_binary(
-        name = "bazel_" + language + "_codegen",
-        srcs = ["bazel_codegen.py"],
-        legacy_create_init = False,
-        main = "bazel_codegen.py",
-        deps = [":" + language + "_generator"] + (["@python_deps//pyyaml"] if language == "ts" else []),
-    )
-    for language in [
-        "ts",
-        "python",
-        "schema",
-    ]
-]
+[py_binary(
+    name = "bazel_" + language + "_codegen",
+    srcs = ["bazel_codegen.py"],
+    legacy_create_init = False,
+    main = "bazel_codegen.py",
+    deps = [":" + language + "_generator"] + (["@python_deps//pyyaml"] if language == "ts" else []),
+) for language in [
+    "ts",
+    "python",
+    "schema",
+]]
 
-filegroup(
-    name = "source_audit_files",
-    srcs = glob(
-        ["*"],
-        allow_empty = True,
-        exclude = SOURCE_AUDIT_EXCLUDES,
-    ) + glob(
-        [
-            ".env.example",
-            ".env.*.example",
-            ".dev.vars.example",
-        ],
-        allow_empty = True,
-    ),
-    visibility = ["//visibility:public"],
-)
+source_audit_files()
 
 py_test(
     name = "generated_identity_test",
@@ -172,4 +152,189 @@ py_test(
     ],
     legacy_create_init = False,
     main = "materialization_inputs_test.py",
+)
+
+py_binary(
+    name = "breaking",
+    srcs = ["//proto/tools:bazel_breaking.py"],
+    args = [
+        "--buf",
+        "$(location //tools/bazel:buf)",
+        "--image",
+        "$(location //proto:image)",
+        "--config",
+        "$(location //proto:buf.yaml)",
+        "--retired",
+        "$(location //proto:retired.json)",
+    ],
+    data = [
+        "//proto:buf.yaml",
+        "//proto:image",
+        "//proto:retired.json",
+        "//tools/bazel:buf",
+    ],
+    env = {
+        "BAZEL_BINDIR": ".",
+        "JS_BINARY__NO_CD_BINDIR": "1",
+    },
+    legacy_create_init = False,
+    main = "//proto/tools:bazel_breaking.py",
+    deps = ["//proto/tools:breaking_rules"],
+)
+
+py_test(
+    name = "schema_test",
+    srcs = ["//proto/tools:schema_golden.py"],
+    args = [
+        "--generated",
+        "$(locations //proto:schemas)",
+        "--expected",
+    ] + [
+        "$(location //contracts:platform-runtime-v1/platform-runtime-v1.schema.json)",
+        "$(location //contracts:fleet-report-v1/fleet-report-v1.schema.json)",
+        "$(location //contracts:ops-v1/ops-v1.schema.json)",
+        "$(location //contracts:mail-received-v1/mail-received-v1.schema.json)",
+        "$(location //contracts:recall-archive-v1/recall-archive-v1.schema.json)",
+        "$(location //todofy/api:summary-v1.schema.json)",
+        "$(location //todofy/api:recommendation-v1.schema.json)",
+    ],
+    data = ["//proto:schemas"] + [
+        "//contracts:fleet-report-v1/fleet-report-v1.schema.json",
+        "//contracts:mail-received-v1/mail-received-v1.schema.json",
+        "//contracts:ops-v1/ops-v1.schema.json",
+        "//contracts:platform-runtime-v1/platform-runtime-v1.schema.json",
+        "//contracts:recall-archive-v1/recall-archive-v1.schema.json",
+        "//todofy/api:recommendation-v1.schema.json",
+        "//todofy/api:summary-v1.schema.json",
+    ],
+    legacy_create_init = False,
+    main = "//proto/tools:schema_golden.py",
+)
+
+py_test(
+    name = "lint_test",
+    srcs = ["//proto/tools:bazel_checks.py"],
+    args = [
+        "lint",
+        "--buf",
+        "$(location //tools/bazel:buf)",
+        "--config",
+        "$(location //proto:buf.yaml)",
+        "--image",
+        "$(location //proto:image)",
+    ],
+    data = [
+        "//proto:buf.yaml",
+        "//proto:image",
+        "//tools/bazel:buf",
+    ],
+    env = {
+        "BAZEL_BINDIR": ".",
+        "JS_BINARY__NO_CD_BINDIR": "1",
+    },
+    legacy_create_init = False,
+    main = "//proto/tools:bazel_checks.py",
+)
+
+py_test(
+    name = "format_test",
+    srcs = ["//proto/tools:bazel_checks.py"],
+    args = [
+        "format",
+        "--buf",
+        "$(location //tools/bazel:buf)",
+        "--config",
+        "$(location //proto:buf.yaml)",
+    ],
+    data = [
+        "//proto:buf.yaml",
+        "//proto:sources",
+        "//tools/bazel:buf",
+    ],
+    env = {
+        "BAZEL_BINDIR": ".",
+        "JS_BINARY__NO_CD_BINDIR": "1",
+    },
+    legacy_create_init = False,
+    main = "//proto/tools:bazel_checks.py",
+)
+
+py_test(
+    name = "api_lint_test",
+    srcs = ["//proto/tools:bazel_checks.py"],
+    args = [
+        "api-lint",
+        "--buf",
+        "$(location //tools/bazel:buf)",
+        "--config",
+        "$(location //proto:buf.yaml)",
+        "--image",
+        "$(location //proto:image)",
+        "--api-linter",
+        "$(location //proto/tools/api-linter:api-linter)",
+        "--googleapis-check",
+        "$(location //proto/tools/api-linter/googleapis:googleapis-check)",
+    ] + [arg for source in PROTO_SOURCES for arg in [
+        "--source",
+        source,
+    ]],
+    data = [
+        "//proto:buf.yaml",
+        "//proto:image",
+        "//proto/tools/api-linter",
+        "//proto/tools/api-linter/googleapis:googleapis-check",
+        "//tools/bazel:buf",
+    ],
+    env = {
+        "BAZEL_BINDIR": ".",
+        "JS_BINARY__NO_CD_BINDIR": "1",
+    },
+    legacy_create_init = False,
+    main = "//proto/tools:bazel_checks.py",
+)
+
+py_binary(
+    name = "write_schemas",
+    srcs = ["//proto/tools:write_schemas.py"],
+    args = ["$(locations //proto:schemas)"],
+    data = ["//proto:schemas"],
+    legacy_create_init = False,
+    main = "//proto/tools:write_schemas.py",
+    deps = ["//proto/tools:schema_generator"],
+)
+
+py_test(
+    name = "determinism_test",
+    srcs = [
+        "//proto/tools:bazel_codegen.py",
+        "//proto/tools:determinism_test.py",
+    ],
+    args = [
+        "--buf",
+        "$(location //tools/bazel:buf)",
+        "--plugin",
+        "$(location //tools/bazel:protoc-gen-es)",
+        "--config",
+        "$(location //proto:buf.gen.yaml)",
+        "--image",
+        "$(location //proto:image)",
+        "--google-rpc-image",
+        "$(location //proto:google_rpc_image)",
+        "--materialized",
+        "$(location //proto:materialized)",
+    ],
+    data = [
+        "//proto:buf.gen.yaml",
+        "//proto:google_rpc_image",
+        "//proto:image",
+        "//proto:materialized",
+        "//tools/bazel:buf",
+        "//tools/bazel:protoc-gen-es",
+    ],
+    legacy_create_init = False,
+    main = "//proto/tools:determinism_test.py",
+    deps = [
+        "//proto/tools:generators",
+        "@python_deps//pyyaml",
+    ],
 )

@@ -1,0 +1,253 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@npm//newsletter-console/worker:vitest/package_json.bzl", vitest = "bin")
+load("//tools/bazel:js.bzl", "copied_source_files", "proto_vitest_test", "workerd_vitest_test", "workspace_link")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//newsletter-console:__subpackages__"])
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//newsletter-console:__subpackages__"],
+)
+
+js_library(
+    name = "source_runtime_tsconfig_json",
+    srcs = ["runtime/tsconfig.json"],
+)
+
+copied_source_files(
+    name = "types_srcs",
+    srcs = [
+        "http.test.ts",
+        "jwt.ts",
+        "upstream.test.ts",
+        "wire-conformance.test.ts",
+    ],
+)
+
+copied_source_files(
+    name = "runtime_types_srcs",
+    srcs = glob(
+        [
+            "runtime/**/*.ts",
+            "runtime/**/*.mts",
+        ],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+copied_source_files(
+    name = "lint_sources",
+    srcs = glob(
+        [
+            "**/*.ts",
+            "**/*.mts",
+        ],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+copied_source_files(
+    name = "lint_data",
+    srcs = ["runtime/tsconfig.json"],
+)
+
+workspace_link(
+    name = "http_test_edge_auth_link",
+    src = "//packages/edge-auth:pkg",
+    project = "newsletter-console/worker",
+)
+
+proto_vitest_test(
+    name = "http_test",
+    config = "//newsletter-console/worker:test_config",
+    data = [
+        ":http_test_edge_auth_link",
+        ":jwt.ts",
+        "//newsletter-console/worker:node_modules/vitest",
+        "//newsletter-console/worker:package_json",
+    ],
+    project = "newsletter-console/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":http.test.ts"],
+    deps = [
+        "//newsletter-console/worker/src:env",
+        "//newsletter-console/worker/src:http",
+    ],
+)
+
+proto_vitest_test(
+    name = "upstream_test",
+    config = "//newsletter-console/worker:test_config",
+    data = [
+        "//newsletter-console/worker:node_modules/vitest",
+        "//newsletter-console/worker:package_json",
+    ],
+    project = "newsletter-console/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":upstream.test.ts"],
+    deps = [
+        "//newsletter-console/worker/src:upstream",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+workspace_link(
+    name = "wire-conformance_test_edge_auth_link",
+    src = "//packages/edge-auth:pkg",
+    project = "newsletter-console/worker",
+)
+
+proto_vitest_test(
+    name = "wire-conformance_test",
+    config = "//newsletter-console/worker:test_config",
+    data = [
+        ":jwt.ts",
+        ":wire-conformance_test_edge_auth_link",
+        "//contracts:newsletter-ui-v1/fixtures/backup-status.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/edition.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/edition-rendering.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/editions.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/model-calls.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/model-usage-30d.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/overview.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/run-blocked-selection-timeout.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/run-ready.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/runs.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/source-catalog.json_data",
+        "//newsletter-console/worker:node_modules/vitest",
+        "//newsletter-console/worker:package_json",
+    ],
+    project = "newsletter-console/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":wire-conformance.test.ts"],
+    deps = [
+        "//newsletter-console/worker/src:env",
+        "//newsletter-console/worker/src:http",
+        "//proto/newsletter/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:wire-json",
+    ],
+)
+
+js_library(
+    name = "runtime_helpers",
+    srcs = [
+        ":runtime/harness.ts",
+        ":runtime/tsconfig.json",
+    ],
+    types = glob(
+        ["runtime/**/*.ts"],
+        exclude = [
+            "**/*.test.ts",
+            "BUILD.bazel",
+        ],
+    ),
+)
+
+workerd_vitest_test(
+    name = "runtime_cpu_test",
+    data = [
+        ":jwt.ts",
+        ":test_support",
+        "//contracts:newsletter-ui-v1/fixtures/backup-status.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/edition.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/edition-rendering.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/editions.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/model-calls.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/model-usage-30d.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/overview.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/run-blocked-selection-timeout.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/run-ready.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/runs.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/source-catalog.json_data",
+        "//tools/workerd-cpu:lib",
+    ],
+    project = "newsletter-console/worker",
+    runner = vitest.vitest_test,
+    tags = [
+        "cpu",
+        "exclusive",
+        "workerd",
+    ],
+    tests = [":runtime/cpu.test.ts"],
+    deps = [
+        "//proto/ts:http-transcoder",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_http_test",
+    data = [
+        ":jwt.ts",
+        ":test_support",
+        "//contracts:newsletter-ui-v1/fixtures/backup-status.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/edition.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/edition-rendering.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/editions.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/model-calls.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/model-usage-30d.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/overview.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/run-blocked-selection-timeout.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/run-ready.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/runs.json_data",
+        "//contracts:newsletter-ui-v1/fixtures/source-catalog.json_data",
+    ],
+    project = "newsletter-console/worker",
+    runner = vitest.vitest_test,
+    tests = [":runtime/http.test.ts"],
+)
+
+js_library(
+    name = "test_support",
+    srcs = glob(
+        ["**"],
+        exclude = [
+            "runtime/**",
+            "smoke/**",
+            "**/*.test.ts",
+            "BUILD.bazel",
+        ],
+    ),
+    types = glob(
+        ["**/*.ts"],
+        exclude = [
+            "runtime/**",
+            "smoke/**",
+            "**/*.test.ts",
+            "BUILD.bazel",
+        ],
+    ),
+)
+
+js_library(
+    name = "runtime_metadata",
+    srcs = [":runtime/harness.ts"],
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+)
+
+test_suite(name = "check")
+
+test_suite(
+    name = "runtime_tests",
+    tags = ["workerd"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)

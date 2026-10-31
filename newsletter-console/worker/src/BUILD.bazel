@@ -1,0 +1,104 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//tools/bazel:js.bzl", "copied_source_files", "ts_source_library")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//newsletter-console:__subpackages__"])
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//newsletter-console:__subpackages__"],
+)
+
+copied_source_files(
+    name = "types_srcs",
+    srcs = [
+        "env.ts",
+        "http.ts",
+        "index.ts",
+        "upstream.ts",
+    ],
+)
+
+copied_source_files(
+    name = "application_sources_srcs",
+    srcs = glob(
+        ["**"],
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+copied_source_files(
+    name = "lint_sources",
+    srcs = glob(
+        [
+            "**/*.ts",
+            "**/*.tsx",
+        ],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+ts_source_library(
+    name = "env",
+    srcs = [":env.ts"],
+)
+
+ts_source_library(
+    name = "upstream",
+    srcs = [":upstream.ts"],
+    deps = [
+        "//proto/ts:http-transcoder",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+ts_source_library(
+    name = "http",
+    srcs = [":http.ts"],
+    deps = [
+        ":env",
+        ":upstream",
+        "//packages/edge-auth:lib",
+        "//proto/newsletter/ui/v1:ts",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+ts_source_library(
+    name = "index",
+    srcs = [":index.ts"],
+    deps = [
+        ":env",
+        ":http",
+    ],
+)
+
+js_library(
+    name = "lib",
+    deps = [
+        ":env",
+        ":http",
+        ":index",
+        ":upstream",
+    ],
+)
+
+js_library(
+    name = "entry_metadata",
+    srcs = [":index.ts"],
+)
+
+js_library(
+    name = "env_metadata",
+    srcs = [":env.ts"],
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+)

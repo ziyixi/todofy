@@ -1,6 +1,7 @@
 """Playwright tests with the declared browser archive and the application's real configuration."""
 
 load("@aspect_rules_js//js:defs.bzl", "js_test")
+load("//tools/bazel:paths.bzl", "module_path", "project_path", "relative_path", "source_label")
 
 def _browser_toolchain_impl(ctx):
     return [platform_common.ToolchainInfo(browser = struct(
@@ -40,21 +41,22 @@ if (specArg < 0) throw new Error('Missing declared Playwright spec argument');
 process.argv[specArg] = realpathSync(process.argv[specArg]);
 await import('@playwright/test/cli');
 """ % (json.encode(browser.playwright_version), json.encode(registry_root), json.encode(ctx.attr.spec)))
-    ctx.actions.write(config, """import original from './playwright.config.ts';
+    ctx.actions.write(config, """import original from %s;
 import { realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 if (!process.env.TEST_UNDECLARED_OUTPUTS_DIR) throw new Error('Missing Bazel test output directory');
 export default {
   ...original,
   // Playwright's discovery skips runfiles symlinks; select the same declared files in the output tree.
-  testDir: resolve(dirname(realpathSync('playwright.config.ts')), original.testDir),
+  testDir: resolve(dirname(realpathSync(%s)), original.testDir),
   outputDir: resolve(process.env.TEST_UNDECLARED_OUTPUTS_DIR, 'playwright'),
   webServer: {
     ...original.webServer,
+    cwd: original.webServer?.cwd ?? process.cwd(),
     command: JSON.stringify(process.execPath) + ' ' + JSON.stringify('../worker/test/runtime/dev-server.ts'),
   },
 };
-""")
+""" % (json.encode(module_path(ctx.file.config.short_path, ctx.label.package)), json.encode(relative_path(ctx.file.config.short_path, ctx.attr.project))))
     return [DefaultInfo(
         files = depset([bootstrap]),
         runfiles = ctx.runfiles(files = [bootstrap, config], transitive_files = browser.files),
@@ -62,18 +64,27 @@ export default {
 
 _playwright_setup = rule(
     implementation = _setup_impl,
-    attrs = {"spec": attr.string(mandatory = True)},
+    attrs = {
+        "spec": attr.string(mandatory = True),
+        "project": attr.string(mandatory = True),
+        "config": attr.label(mandatory = True, allow_single_file = True),
+    },
     toolchains = ["//tools/bazel/browser:toolchain_type"],
 )
 
-def tasks_browser_test(name, spec, data = [], **kwargs):
-    _playwright_setup(name = name + "_setup", spec = spec)
+def tasks_browser_test(name, spec, data = [], project = None, config = None, **kwargs):
+    project = native.package_name() if project == None else project
+    config = source_label(config or ("//" + project + ":playwright.config.ts"))
+    spec_label = source_label(spec)
+    spec_path = project_path(spec, project)
+    config_path = relative_path(native.package_name() + "/" + name + "_setup_config.mjs", project)
+    _playwright_setup(name = name + "_setup", spec = spec_path, config = config, project = project)
     js_test(
         name = name,
         entry_point = ":" + name + "_setup",
-        args = ["test", spec, "--config", name + "_setup_config.mjs"],
-        chdir = native.package_name(),
-        data = data + [spec, "playwright.config.ts", ":node_modules/@playwright/test", ":" + name + "_setup"],
+        args = ["test", spec_path, "--config", config_path],
+        chdir = project,
+        data = data + [spec_label, config, "//" + project + ":node_modules/@playwright/test", ":" + name + "_setup"],
         size = "large",
         # Node's TS loader must see the package symlink's canonical path outside node_modules.
         patch_node_fs = False,

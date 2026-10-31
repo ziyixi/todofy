@@ -1,0 +1,112 @@
+load("@rules_python//python:defs.bzl", "py_library")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//newsletter:__subpackages__"])
+
+py_library(
+    name = "package",
+    srcs = ["__init__.py"],
+    imports = ["../.."],
+    deps = ["//newsletter/src/newsletter:package"],
+)
+
+py_library(
+    name = "collector",
+    srcs = ["collector.py"],
+    imports = ["../.."],
+    deps = [
+        ":instructions",
+        ":package",
+        "//newsletter/src/newsletter:types",
+    ],
+)
+
+py_library(
+    name = "instructions",
+    srcs = ["instructions.py"],
+    data = ["//newsletter/src/newsletter:discovery_instructions"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        "//newsletter/src/newsletter:contracts",
+    ],
+)
+
+py_library(
+    name = "pipeline",
+    srcs = ["pipeline.py"],
+    imports = ["../.."],
+    deps = [
+        ":collector",
+        ":package",
+        ":repository",
+        "//newsletter/src/newsletter:contracts",
+        "//newsletter/src/newsletter:diagnostics",
+        "//newsletter/src/newsletter:drain",
+        "//newsletter/src/newsletter:errors",
+        "@python_deps//ziyixi_protos",
+    ],
+)
+
+py_library(
+    name = "repository",
+    srcs = ["repository.py"],
+    imports = ["../.."],
+    deps = [
+        ":instructions",
+        ":package",
+        "//newsletter/src/newsletter:contracts",
+        "//newsletter/src/newsletter:drain",
+        "//newsletter/src/newsletter:types",
+    ],
+)
+
+py_library(
+    name = "source_guides",
+    srcs = ["source_guides.py"],
+    imports = ["../.."],
+    deps = [
+        ":instructions",
+        ":package",
+        "//newsletter/src/newsletter:contracts",
+    ],
+)
+
+py_library(
+    name = "library",
+    deps = [
+        ":collector",
+        ":instructions",
+        ":package",
+        ":pipeline",
+        ":repository",
+        ":source_guides",
+    ],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)

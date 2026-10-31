@@ -1,0 +1,33 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//website:bazel.bzl", "website_sources")
+
+package(default_visibility = ["//website:__subpackages__"])
+
+exports_files(
+    glob(
+        ["*.ts"],
+        allow_empty = True,
+    ),
+    visibility = ["//website:__subpackages__"],
+)
+
+js_library(
+    name = "site-files",
+    srcs = [":site-files.ts"],
+    deps = ["//website/src/lib/content:redirect-path"],
+)
+
+js_library(
+    name = "finalize",
+    srcs = [":finalize.ts"],
+    deps = [
+        ":site-files",
+        "//website/src/lib/content:reader",
+        "//website/src/lib/content:slug",
+    ],
+)
+
+website_sources(
+    application_excludes = [],
+    children = [],
+)

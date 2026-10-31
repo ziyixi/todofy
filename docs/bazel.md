@@ -4,6 +4,31 @@ Application roots are the public build interface. `bazel build //tasks` produces
 `bazel test //tasks:check` checks it. Frontend, Worker, shared-library and generated-code targets underneath retain
 fine-grained dependencies for caching and affected-test selection.
 
+## Package ownership
+
+Each directory keeps its main interface. Implementation targets live beside the sources, tests or scripts they own:
+
+```text
+tasks/BUILD.bazel          tasks, check, config, release
+tasks/web/BUILD.bazel      bundle, lib, typecheck, check
+tasks/web/src/BUILD.bazel  source modules and colocated unit tests
+tasks/worker/BUILD.bazel   lib, compiler/configuration inputs, check
+tasks/worker/src/BUILD.bazel
+tasks/worker/test/BUILD.bazel
+```
+
+Parent targets aggregate child targets through explicit labels. Related modules with a dependency cycle stay in one
+source target. Generated proto outputs remain with their generator packages; output path components do not create
+source packages. Existing public build and operator entrypoints stay available.
+
+The shared definitions in `tools/bazel/` cover Python test runners, project-scoped JS/browser tests, Wrangler archives,
+source copies and public source audits. BUILD files still declare business dependencies, fixtures and execution limits.
+Test helpers' `project` is the original runtime working directory, independent of the test target's owning package.
+
+Cross-package JS inputs use owning libraries or `copied_source_files`; the latter retains declaration files as data.
+Compiler configs use owning `ts_config` providers. Public test aggregates use native `test_suite` targets. Audit groups
+remain raw source collections and explicitly include child audits across package boundaries.
+
 ## Setup and dependencies
 
 Install Bazelisk, or put the official Bazel version from `.bazelversion` on `PATH`. Bazelisk uses that version file.

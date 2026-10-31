@@ -1,0 +1,899 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@npm//dashboard/worker:vitest/package_json.bzl", vitest = "bin")
+load("//tools/bazel:js.bzl", "copied_source_files", "proto_vitest_test", "workerd_vitest_test", "workspace_link")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//dashboard:__subpackages__"])
+
+COMMON_TEST_DATA = [
+    "//dashboard/worker:package_json",
+    ":cloudflare-workers.ts",
+    "//dashboard/worker:node_modules/vitest",
+]
+
+COMMON_TEST_DATA_2 = [
+    "//dashboard/worker:package_json",
+    ":cloudflare-workers.ts",
+    ":fixtures/model-router-ok.json",
+    ":fixtures/personal-mcp-ok.json",
+    ":graphql-fixture.ts",
+    ":v2-fixtures.ts",
+    ":wire-conformance.ts",
+    "//dashboard/worker:node_modules/vitest",
+]
+
+COMMON_TEST_DEPS = [
+    "//proto/dashboard/ui/v1:ts",
+    "//proto/ops/v1:ts",
+    "//proto/ts:protobuf",
+    "//proto/ts:wire-json",
+    "//proto/website/sync/v1:ts",
+]
+
+COMMON_TEST_DATA_3 = [
+    ":contract.ts",
+    ":drift-fixture.ts",
+    ":fixtures/model-router-ok.json",
+    ":fixtures/personal-mcp-ok.json",
+    ":graphql-fixture.ts",
+    ":jwt.ts",
+    ":wire-conformance.ts",
+    ":runtime_fixture_data",
+    ":test_support",
+    "//contracts:ops-v1/fixtures",
+]
+
+COMMON_TEST_DATA_4 = [
+    ":contract.ts",
+    ":drift-fixture.ts",
+    ":fixtures/model-router-ok.json",
+    ":fixtures/personal-mcp-ok.json",
+    ":graphql-fixture.ts",
+    ":wire-conformance.ts",
+    ":runtime_fixture_data",
+    ":test_support",
+    "//contracts:ops-v1/fixtures",
+]
+
+COMMON_TEST_DEPS_2 = [
+    "//proto/dashboard/ui/v1:ts",
+    "//proto/ops/v1:ts",
+    "//proto/tasks/inbox/v1:ts",
+    "//proto/ts:protobuf",
+    "//proto/ts:wire-json",
+    "//proto/website/sync/v1:ts",
+]
+
+COMMON_TEST_DEPS_3 = [
+    "//proto/ops/v1:ts",
+    "//proto/ts:protobuf",
+    "//proto/ts:wire-json",
+    "//proto/website/sync/v1:ts",
+]
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//dashboard:__subpackages__"],
+)
+
+js_library(
+    name = "source_runtime_tsconfig_json",
+    srcs = ["runtime/tsconfig.json"],
+)
+
+copied_source_files(
+    name = "types_srcs",
+    srcs = [
+        "attention-rollup.test.ts",
+        "attention-state.test.ts",
+        "canary.test.ts",
+        "cloudflare-workers.ts",
+        "config.test.ts",
+        "contract.ts",
+        "digest.test.ts",
+        "discovery.test.ts",
+        "drift.test.ts",
+        "drift-fixture.ts",
+        "evaluate.test.ts",
+        "fixtures/model-router-ok.json",
+        "fixtures/personal-mcp-ok.json",
+        "golden/ops-v1.json",
+        "graphql-fixture.ts",
+        "guard.test.ts",
+        "http.test.ts",
+        "idl.test.ts",
+        "jwt.ts",
+        "limits.test.ts",
+        "mcp.test.ts",
+        "ops-client.test.ts",
+        "ops-golden.test.ts",
+        "probe.test.ts",
+        "raw.d.ts",
+        "registry.test.ts",
+        "usage.test.ts",
+        "v2-fixtures.ts",
+        "views.test.ts",
+        "wire-conformance.test.ts",
+        "wire-conformance.ts",
+    ],
+)
+
+copied_source_files(
+    name = "types_data",
+    srcs = ["cloudflare-workers.ts"],
+)
+
+copied_source_files(
+    name = "runtime_types_srcs",
+    srcs = glob(
+        [
+            "runtime/**/*.ts",
+            "runtime/**/*.mts",
+        ],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+copied_source_files(
+    name = "lint_sources",
+    srcs = glob(
+        [
+            "**/*.ts",
+            "**/*.mts",
+        ],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+copied_source_files(
+    name = "lint_data",
+    srcs = ["runtime/tsconfig.json"],
+)
+
+proto_vitest_test(
+    name = "attention-rollup_test",
+    config = "//dashboard/worker:test_config",
+    data = COMMON_TEST_DATA,
+    project = "dashboard/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":attention-rollup.test.ts"],
+    deps = ["//dashboard/worker/src:attention-rollup"],
+)
+
+proto_vitest_test(
+    name = "attention-state_test",
+    config = "//dashboard/worker:test_config",
+    data = COMMON_TEST_DATA,
+    project = "dashboard/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":attention-state.test.ts"],
+    deps = [
+        "//dashboard/worker/src:api-types",
+        "//dashboard/worker/src:attention-state",
+    ],
+)
+
+proto_vitest_test(
+    name = "canary_test",
+    config = "//dashboard/worker:test_config",
+    data = [
+        ":cloudflare-workers.ts",
+        ":contract.ts",
+        "//dashboard/worker:node_modules/vitest",
+        "//dashboard/worker:package_json",
+    ],
+    project = "dashboard/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":canary.test.ts"],
+    deps = [
+        "//contracts:ops-v1/fixtures/CanaryDelivery/delivered.json_data",
+        "//contracts:ops-v1/fixtures/CanaryDelivery/failed.json_data",
+        "//contracts:ops-v1/fixtures/CanaryDelivery/paused-endpoint-blocked.json_data",
+        "//contracts:ops-v1/fixtures/CanaryDelivery/pending-retrying.json_data",
+        "//contracts:ops-v1/fixtures/CanaryDelivery/unknown.json_data",
+        "//contracts:ops-v1/fixtures/CanaryResult/failed.json_data",
+        "//contracts:ops-v1/fixtures/CanaryResult/not-seen.json_data",
+        "//contracts:ops-v1/fixtures/CanaryResult/ok.json_data",
+        "//contracts:ops-v1/fixtures/CanaryResult/processing.json_data",
+        "//contracts:ops-v1/fixtures/CanaryResult/processing-paused.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/mail-hero-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/todofy-ok.json_data",
+        "//contracts:ops-v1/fixtures/StartCanaryResult/paused-send-paused.json_data",
+        "//contracts:ops-v1/fixtures/StartCanaryResult/queued.json_data",
+        "//contracts:ops-v1/fixtures/StartCanaryResult/unavailable-maintenance.json_data",
+        "//dashboard/worker/src:api-types",
+        "//dashboard/worker/src:module_group_18",
+        "//proto/ops/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+        "//proto/website/sync/v1:ts",
+    ],
+)
+
+proto_vitest_test(
+    name = "config_test",
+    config = "//dashboard/worker:test_config",
+    data = COMMON_TEST_DATA,
+    project = "dashboard/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":config.test.ts"],
+    deps = ["//dashboard/worker/src:module_group_18"],
+)
+
+proto_vitest_test(
+    name = "digest_test",
+    config = "//dashboard/worker:test_config",
+    data = COMMON_TEST_DATA,
+    project = "dashboard/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":digest.test.ts"],
+    deps = [
+        "//contracts:ops-v1/fixtures/OpsStatus/mail-hero-degraded.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/status-unavailable.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/todofy-ok.json_data",
+        "//dashboard/worker/src:api-types",
+        "//dashboard/worker/src:docs",
+        "//dashboard/worker/src:drift",
+        "//dashboard/worker/src:idl",
+        "//dashboard/worker/src:module_group_18",
+        "//proto/ops/v1:ts",
+        "//proto/tasks/inbox/v1:ts",
+        "//proto/ts:wire-json",
+    ],
+)
+
+proto_vitest_test(
+    name = "discovery_test",
+    config = "//dashboard/worker:test_config",
+    data = [
+        ":cloudflare-workers.ts",
+        ":graphql-fixture.ts",
+        "//dashboard/worker:node_modules/vitest",
+        "//dashboard/worker:package_json",
+    ],
+    project = "dashboard/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":discovery.test.ts"],
+    deps = [
+        "//dashboard/worker/src:api-types",
+        "//dashboard/worker/src:discovery",
+        "//dashboard/worker/src:registry",
+        "//dashboard/worker/src:registry-types",
+        "//dashboard/worker/src:usage",
+    ],
+)
+
+proto_vitest_test(
+    name = "drift_test",
+    config = "//dashboard/worker:test_config",
+    data = [
+        ":cloudflare-workers.ts",
+        ":drift-fixture.ts",
+        "//dashboard/worker:node_modules/vitest",
+        "//dashboard/worker:package_json",
+    ],
+    project = "dashboard/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":drift.test.ts"],
+    deps = [
+        "//dashboard/worker/src:api-types",
+        "//dashboard/worker/src:drift",
+        "//dashboard/worker/src:idl",
+    ],
+)
+
+proto_vitest_test(
+    name = "evaluate_test",
+    config = "//dashboard/worker:test_config",
+    data = [
+        ":cloudflare-workers.ts",
+        ":fixtures/model-router-ok.json",
+        ":fixtures/personal-mcp-ok.json",
+        ":graphql-fixture.ts",
+        ":v2-fixtures.ts",
+        "//dashboard/worker:node_modules/vitest",
+        "//dashboard/worker:package_json",
+    ],
+    project = "dashboard/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":evaluate.test.ts"],
+    deps = [
+        "//contracts:ops-v1/fixtures/OpsStatus/codex-gateway-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/fleet-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/links-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/mail-hero-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/mailsort-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/newsletter-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/notion-publish-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/recall-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/status-unavailable.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/tasks-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/todofy-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/watch-ok.json_data",
+        "//dashboard/worker/src:api-types",
+        "//dashboard/worker/src:discovery",
+        "//dashboard/worker/src:docs",
+        "//dashboard/worker/src:module_group_18",
+        "//dashboard/worker/src:registry",
+        "//dashboard/worker/src:registry-types",
+        "//dashboard/worker/src:usage",
+        "//proto/ops/v1:ts",
+    ],
+)
+
+proto_vitest_test(
+    name = "guard_test",
+    config = "//dashboard/worker:test_config",
+    data = [
+        ":cloudflare-workers.ts",
+        ":contract.ts",
+        ":graphql-fixture.ts",
+        "//dashboard/worker:node_modules/vitest",
+        "//dashboard/worker:package_json",
+    ],
+    project = "dashboard/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":guard.test.ts"],
+    deps = [
+        "//contracts:ops-v1/fixtures/GuardState/normal.json_data",
+        "//contracts:ops-v1/fixtures/GuardState/shed-mail-hero.json_data",
+        "//contracts:ops-v1/runtime",
+        "//dashboard/worker/src:api-types",
+        "//dashboard/worker/src:guard",
+        "//dashboard/worker/src:usage",
+        "//proto/ops/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+        "//proto/website/sync/v1:ts",
+    ],
+)
+
+workspace_link(
+    name = "http_test_edge_auth_link",
+    src = "//packages/edge-auth:pkg",
+    project = "dashboard/worker",
+)
+
+proto_vitest_test(
+    name = "http_test",
+    config = "//dashboard/worker:test_config",
+    data = [
+        ":cloudflare-workers.ts",
+        ":http_test_edge_auth_link",
+        ":jwt.ts",
+        ":wire-conformance.ts",
+        "//dashboard/worker:node_modules/vitest",
+        "//dashboard/worker:package_json",
+    ],
+    project = "dashboard/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":http.test.ts"],
+    deps = [
+        "//dashboard/worker/src:api",
+        "//dashboard/worker/src:api-types",
+        "//dashboard/worker/src:http",
+        "//dashboard/worker/src:index",
+        "//dashboard/worker/src:module_group_18",
+        "//proto/dashboard/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
+        "//proto/ts:wire-json",
+    ],
+)
+
+proto_vitest_test(
+    name = "idl_test",
+    config = "//dashboard/worker:test_config",
+    data = COMMON_TEST_DATA,
+    project = "dashboard/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":idl.test.ts"],
+    deps = [
+        "//dashboard/worker/src:api-types",
+        "//dashboard/worker/src:idl",
+        "//proto/dashboard/ui/v1:ts",
+        "//proto/ops/v1:ts",
+        "//proto/ts:wire-json",
+    ],
+)
+
+proto_vitest_test(
+    name = "limits_test",
+    config = "//dashboard/worker:test_config",
+    data = COMMON_TEST_DATA,
+    project = "dashboard/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":limits.test.ts"],
+    deps = [
+        "//dashboard/docs:limits",
+        "//dashboard/worker/src:idl",
+        "//dashboard/worker/src:limits",
+    ],
+)
+
+proto_vitest_test(
+    name = "mcp_test",
+    config = "//dashboard/worker:test_config",
+    data = COMMON_TEST_DATA,
+    project = "dashboard/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":mcp.test.ts"],
+    deps = [
+        "//dashboard/worker/src:mcp",
+        "//dashboard/worker/src:module_group_18",
+        "//proto/dashboard/mcp/v1:ts",
+    ],
+)
+
+proto_vitest_test(
+    name = "ops-client_test",
+    config = "//dashboard/worker:test_config",
+    data = [
+        ":cloudflare-workers.ts",
+        ":contract.ts",
+        ":fixtures/personal-mcp-ok.json",
+        "//contracts:ops-v1/invalid",
+        "//dashboard/worker:node_modules/vitest",
+        "//dashboard/worker:package_json",
+    ],
+    project = "dashboard/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":ops-client.test.ts"],
+    deps = [
+        "//contracts:ops-v1/fixtures/CanaryDelivery/delivered.json_data",
+        "//contracts:ops-v1/fixtures/CanaryDelivery/failed.json_data",
+        "//contracts:ops-v1/fixtures/CanaryDelivery/failed-window.json_data",
+        "//contracts:ops-v1/fixtures/CanaryDelivery/paused.json_data",
+        "//contracts:ops-v1/fixtures/CanaryDelivery/paused-endpoint-blocked.json_data",
+        "//contracts:ops-v1/fixtures/CanaryDelivery/pending-first-attempt.json_data",
+        "//contracts:ops-v1/fixtures/CanaryDelivery/pending-retrying.json_data",
+        "//contracts:ops-v1/fixtures/CanaryDelivery/unknown.json_data",
+        "//contracts:ops-v1/fixtures/CanaryResult/failed.json_data",
+        "//contracts:ops-v1/fixtures/CanaryResult/not-seen.json_data",
+        "//contracts:ops-v1/fixtures/CanaryResult/ok.json_data",
+        "//contracts:ops-v1/fixtures/CanaryResult/processing.json_data",
+        "//contracts:ops-v1/fixtures/CanaryResult/processing-paused.json_data",
+        "//contracts:ops-v1/fixtures/GuardState/normal.json_data",
+        "//contracts:ops-v1/fixtures/GuardState/shed-mail-hero.json_data",
+        "//contracts:ops-v1/fixtures/GuardState/shed-todofy.json_data",
+        "//contracts:ops-v1/fixtures/GuardState/shed-watch.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/codex-gateway-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/fleet-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/links-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/mail-hero-degraded.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/mail-hero-maintenance.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/mail-hero-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/newsletter-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/notion-publish-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/recall-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/status-unavailable.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/tasks-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/todofy-degraded.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/todofy-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/watch-degraded.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/watch-ok.json_data",
+        "//contracts:ops-v1/fixtures/StartCanaryResult/paused-endpoint-blocked.json_data",
+        "//contracts:ops-v1/fixtures/StartCanaryResult/paused-send-paused.json_data",
+        "//contracts:ops-v1/fixtures/StartCanaryResult/queued.json_data",
+        "//contracts:ops-v1/fixtures/StartCanaryResult/unavailable-maintenance.json_data",
+        "//contracts:ops-v1/fixtures/StartCanaryResult/unavailable-no-endpoint.json_data",
+        "//dashboard/worker/src:api-types",
+        "//dashboard/worker/src:module_group_18",
+        "//dashboard/worker/src:registry",
+        "//proto/ops/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+        "//proto/website/sync/v1:ts",
+    ],
+)
+
+proto_vitest_test(
+    name = "ops-golden_test",
+    config = "//dashboard/worker:test_config",
+    data = [
+        ":cloudflare-workers.ts",
+        ":golden/ops-v1.json",
+        "//contracts:ops-v1/fixtures",
+        "//contracts:ops-v1/ops-v1.schema.json_data",
+        "//dashboard/worker:node_modules/vitest",
+        "//dashboard/worker:package_json",
+    ],
+    project = "dashboard/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":ops-golden.test.ts"],
+    deps = [
+        "//dashboard/worker/src:api-types",
+        "//dashboard/worker/src:guard",
+        "//dashboard/worker/src:module_group_18",
+        "//proto/ops/v1:ts",
+    ],
+)
+
+proto_vitest_test(
+    name = "probe_test",
+    config = "//dashboard/worker:test_config",
+    data = COMMON_TEST_DATA,
+    project = "dashboard/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":probe.test.ts"],
+    deps = [
+        "//dashboard/worker/src:api-types",
+        "//dashboard/worker/src:probe",
+        "//dashboard/worker/src:usage",
+    ],
+)
+
+proto_vitest_test(
+    name = "registry_test",
+    config = "//dashboard/worker:test_config",
+    data = COMMON_TEST_DATA_2,
+    project = "dashboard/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":registry.test.ts"],
+    deps = [
+        "//contracts:ops-v1/fixtures/OpsStatus/codex-gateway-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/fleet-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/links-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/mail-hero-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/mailsort-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/newsletter-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/notion-publish-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/recall-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/tasks-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/todofy-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/watch-ok.json_data",
+        "//contracts:ops-v1/readme",
+        "//dashboard/worker/src:account-inventory_json",
+        "//dashboard/worker/src:api-types",
+        "//dashboard/worker/src:discovery",
+        "//dashboard/worker/src:docs",
+        "//dashboard/worker/src:idl",
+        "//dashboard/worker/src:module_group_18",
+        "//dashboard/worker/src:registry",
+        "//dashboard/worker/src:registry-check",
+        "//dashboard/worker/src:registry-types",
+        "//dashboard/worker/src:resource-identities",
+        "//dashboard/worker/src:usage",
+        "//proto/dashboard/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+proto_vitest_test(
+    name = "usage_test",
+    config = "//dashboard/worker:test_config",
+    data = [
+        ":cloudflare-workers.ts",
+        ":fixtures/usage-query-reviewed.graphql",
+        ":graphql-fixture.ts",
+        "//dashboard/worker:node_modules/vitest",
+        "//dashboard/worker:package_json",
+    ],
+    project = "dashboard/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":usage.test.ts"],
+    deps = [
+        "//dashboard/docs:limits",
+        "//dashboard/worker/src:api-types",
+        "//dashboard/worker/src:idl",
+        "//dashboard/worker/src:limits",
+        "//dashboard/worker/src:usage",
+    ],
+)
+
+proto_vitest_test(
+    name = "views_test",
+    config = "//dashboard/worker:test_config",
+    data = COMMON_TEST_DATA_2,
+    project = "dashboard/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":views.test.ts"],
+    deps = [
+        "//contracts:ops-v1/fixtures/OpsStatus/codex-gateway-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/fleet-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/links-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/mail-hero-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/mailsort-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/newsletter-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/notion-publish-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/recall-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/tasks-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/todofy-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/watch-ok.json_data",
+        "//dashboard/docs:design",
+        "//dashboard/worker/src:api-types",
+        "//dashboard/worker/src:discovery",
+        "//dashboard/worker/src:docs",
+        "//dashboard/worker/src:drift",
+        "//dashboard/worker/src:idl",
+        "//dashboard/worker/src:module_group_18",
+        "//dashboard/worker/src:registry",
+        "//dashboard/worker/src:registry-types",
+        "//dashboard/worker/src:usage",
+        "//dashboard/worker/src:view-body",
+        "//proto/dashboard/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+proto_vitest_test(
+    name = "wire-conformance_test",
+    config = "//dashboard/worker:test_config",
+    data = [
+        ":cloudflare-workers.ts",
+        ":wire-conformance.ts",
+        "//dashboard/worker:node_modules/vitest",
+        "//dashboard/worker:package_json",
+    ],
+    project = "dashboard/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":wire-conformance.test.ts"],
+    deps = [
+        "//dashboard/worker/src:api-types",
+        "//dashboard/worker/src:registry",
+        "//proto/dashboard/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+js_library(
+    name = "runtime_helpers",
+    srcs = [
+        ":runtime/flows.ts",
+        ":runtime/harness.ts",
+        ":runtime/tsconfig.json",
+    ],
+    types = glob(
+        ["runtime/**/*.ts"],
+        exclude = [
+            "**/*.test.ts",
+            "BUILD.bazel",
+        ],
+    ),
+)
+
+workerd_vitest_test(
+    name = "runtime_api-cpu_test",
+    data = [
+        ":contract.ts",
+        ":drift-fixture.ts",
+        ":fixtures/model-router-ok.json",
+        ":fixtures/personal-mcp-ok.json",
+        ":graphql-fixture.ts",
+        ":runtime_fixture_data",
+        ":test_support",
+        ":wire-conformance.ts",
+        "//contracts:ops-v1/fixtures",
+        "//tools/workerd-cpu:lib",
+    ],
+    project = "dashboard/worker",
+    runner = vitest.vitest_test,
+    tags = [
+        "cpu",
+        "exclusive",
+        "workerd",
+    ],
+    tests = [":runtime/api-cpu.test.ts"],
+    deps = COMMON_TEST_DEPS,
+)
+
+workerd_vitest_test(
+    name = "runtime_api_test",
+    data = COMMON_TEST_DATA_3,
+    project = "dashboard/worker",
+    runner = vitest.vitest_test,
+    tests = [":runtime/api.test.ts"],
+    deps = COMMON_TEST_DEPS,
+)
+
+workerd_vitest_test(
+    name = "runtime_attention_test",
+    data = COMMON_TEST_DATA_4,
+    project = "dashboard/worker",
+    runner = vitest.vitest_test,
+    tests = [":runtime/attention.test.ts"],
+    deps = COMMON_TEST_DEPS_2,
+)
+
+workerd_vitest_test(
+    name = "runtime_canary_test",
+    data = COMMON_TEST_DATA_4,
+    project = "dashboard/worker",
+    runner = vitest.vitest_test,
+    tests = [":runtime/canary.test.ts"],
+    deps = [
+        "//proto/dashboard/ui/v1:ts",
+        "//proto/ops/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
+        "//proto/ts:wire-json",
+        "//proto/website/sync/v1:ts",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_cpu_test",
+    data = [
+        ":contract.ts",
+        ":runtime_fixture_data",
+        ":test_support",
+        "//contracts:ops-v1/fixtures",
+        "//tools/workerd-cpu:lib",
+    ],
+    project = "dashboard/worker",
+    runner = vitest.vitest_test,
+    tags = [
+        "cpu",
+        "exclusive",
+        "workerd",
+    ],
+    tests = [":runtime/cpu.test.ts"],
+    deps = COMMON_TEST_DEPS_3,
+)
+
+workerd_vitest_test(
+    name = "runtime_digest_test",
+    data = COMMON_TEST_DATA_4,
+    project = "dashboard/worker",
+    runner = vitest.vitest_test,
+    tests = [":runtime/digest.test.ts"],
+    deps = COMMON_TEST_DEPS_2,
+)
+
+workerd_vitest_test(
+    name = "runtime_drift_test",
+    data = COMMON_TEST_DATA_4,
+    project = "dashboard/worker",
+    runner = vitest.vitest_test,
+    tests = [":runtime/drift.test.ts"],
+    deps = COMMON_TEST_DEPS_2,
+)
+
+workerd_vitest_test(
+    name = "runtime_guard-independence_test",
+    data = COMMON_TEST_DATA_4,
+    project = "dashboard/worker",
+    runner = vitest.vitest_test,
+    tests = [":runtime/guard-independence.test.ts"],
+    deps = COMMON_TEST_DEPS,
+)
+
+workerd_vitest_test(
+    name = "runtime_guard_test",
+    data = COMMON_TEST_DATA_4,
+    project = "dashboard/worker",
+    runner = vitest.vitest_test,
+    tests = [":runtime/guard.test.ts"],
+    deps = COMMON_TEST_DEPS,
+)
+
+workerd_vitest_test(
+    name = "runtime_harness_test",
+    data = [
+        ":contract.ts",
+        ":runtime_fixture_data",
+        ":test_support",
+        "//contracts:ops-v1/fixtures",
+    ],
+    project = "dashboard/worker",
+    runner = vitest.vitest_test,
+    tests = [":runtime/harness.test.ts"],
+    deps = COMMON_TEST_DEPS_3,
+)
+
+workerd_vitest_test(
+    name = "runtime_mcp_test",
+    data = COMMON_TEST_DATA_4,
+    project = "dashboard/worker",
+    runner = vitest.vitest_test,
+    tests = [":runtime/mcp.test.ts"],
+    deps = [
+        "//proto/dashboard/mcp/v1:ts",
+        "//proto/dashboard/ui/v1:ts",
+        "//proto/ops/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+        "//proto/website/sync/v1:ts",
+    ],
+)
+
+workerd_vitest_test(
+    name = "runtime_views_test",
+    data = COMMON_TEST_DATA_3,
+    project = "dashboard/worker",
+    runner = vitest.vitest_test,
+    tests = [":runtime/views.test.ts"],
+    deps = COMMON_TEST_DEPS,
+)
+
+workerd_vitest_test(
+    name = "runtime_website-sync_test",
+    data = COMMON_TEST_DATA_4,
+    project = "dashboard/worker",
+    runner = vitest.vitest_test,
+    tests = [":runtime/website-sync.test.ts"],
+    deps = COMMON_TEST_DEPS,
+)
+
+js_library(
+    name = "runtime_fixture_data",
+    srcs = glob(
+        [
+            "fixtures/**",
+            "stubs/**",
+        ],
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+js_library(
+    name = "test_support",
+    srcs = glob(
+        ["**"],
+        exclude = [
+            "runtime/**",
+            "smoke/**",
+            "**/*.test.ts",
+            "BUILD.bazel",
+        ],
+    ),
+    types = glob(
+        ["**/*.ts"],
+        exclude = [
+            "runtime/**",
+            "smoke/**",
+            "**/*.test.ts",
+            "BUILD.bazel",
+        ],
+    ),
+)
+
+js_library(
+    name = "runtime_metadata",
+    srcs = [":runtime/harness.ts"],
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+)
+
+test_suite(name = "check")
+
+test_suite(
+    name = "runtime_tests",
+    tags = ["workerd"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)

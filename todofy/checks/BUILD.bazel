@@ -1,0 +1,40 @@
+load("//tools/bazel/audit:sources.bzl", "source_audit_files")
+load("//tools/bazel/python:tests.bzl", "ruff_test")
+
+package(default_visibility = ["//todofy:__subpackages__"])
+
+ruff_test(
+    name = "ruff_check_test",
+    command = "check",
+    config = "//todofy:pyproject.toml",
+    data = ["//todofy:python_lint_inputs"],
+    paths = [
+        "worker",
+        "tests",
+        "tools",
+        "deploy",
+    ],
+)
+
+ruff_test(
+    name = "ruff_format_test",
+    command = "format",
+    config = "//todofy:pyproject.toml",
+    data = ["//todofy:python_lint_inputs"],
+    paths = [
+        "worker",
+        "tests",
+        "tools",
+        "deploy",
+    ],
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        ":ruff_check_test",
+        ":ruff_format_test",
+    ],
+)
+
+source_audit_files()

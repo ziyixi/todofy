@@ -1,0 +1,808 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library", "js_test")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//mail-hero:__subpackages__"])
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//mail-hero:__subpackages__"],
+)
+
+js_test(
+    name = "action-reservation_test",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":action-reservation.test.mjs",
+        ":migrations.mjs",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:migrations",
+        "//mail-hero/cloudflare:node_modules/esbuild",
+        "//mail-hero/cloudflare:node_modules/miniflare",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+        "//mail-hero/cloudflare/src:lib",
+    ],
+    entry_point = ":action-reservation.test.mjs",
+    node_options = ["--test"],
+    tags = ["unit"],
+)
+
+js_test(
+    name = "api-filter_test",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":api-filter.test.mjs",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+        "//mail-hero/cloudflare/src:native_api-filter",
+        "//proto/testdata:filter-cases.json_data",
+        "//proto/ts:filter",
+    ],
+    entry_point = ":api-filter.test.mjs",
+    node_options = ["--test"],
+    tags = ["unit"],
+)
+
+js_test(
+    name = "backup-artifact-capacity_test",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":backup-artifact-capacity.test.mjs",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+        "//mail-hero/cloudflare/src:module_group_9",
+        "//mail-hero/cloudflare/src:native_backup-artifact-capacity",
+    ],
+    entry_point = ":backup-artifact-capacity.test.mjs",
+    node_options = ["--test"],
+    tags = ["unit"],
+)
+
+js_test(
+    name = "backup-artifacts-runtime_test",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":backup-artifacts-runtime.test.mjs",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:node_modules/esbuild",
+        "//mail-hero/cloudflare:node_modules/miniflare",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+        "//mail-hero/cloudflare/src:lib",
+    ],
+    entry_point = ":backup-artifacts-runtime.test.mjs",
+    node_options = ["--test"],
+    tags = ["unit"],
+)
+
+js_test(
+    name = "backup-artifacts_test",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":backup-artifacts.test.mjs",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+        "//mail-hero/cloudflare/src:module_group_9",
+    ],
+    entry_point = ":backup-artifacts.test.mjs",
+    node_options = ["--test"],
+    tags = ["unit"],
+)
+
+js_test(
+    name = "configure-webhook_test",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":configure-webhook.test.mjs",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:migrations",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+        "//mail-hero/cloudflare/src:native_security",
+        "//mail-hero/deploy:configure-webhook",
+    ],
+    entry_point = ":configure-webhook.test.mjs",
+    node_options = ["--test"],
+    tags = ["unit"],
+)
+
+js_test(
+    name = "content-policy_test",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":content-policy.test.mjs",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+        "//mail-hero/cloudflare/src:module_group_12",
+    ],
+    entry_point = ":content-policy.test.mjs",
+    node_options = ["--test"],
+    tags = ["unit"],
+)
+
+js_test(
+    name = "contract-fixtures_test",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":contract-fixtures.mjs",
+        ":contract-fixtures.test.mjs",
+        "//contracts:mail-received-v1/fixtures/attachments_capacity.json_data",
+        "//contracts:mail-received-v1/fixtures/attachments_metadata_limit.json_data",
+        "//contracts:mail-received-v1/fixtures/attachments_stored_and_omitted.json_data",
+        "//contracts:mail-received-v1/fixtures/body_only_no_subject.json_data",
+        "//contracts:mail-received-v1/fixtures/canary_event.json_data",
+        "//contracts:mail-received-v1/fixtures/chinese.json_data",
+        "//contracts:mail-received-v1/fixtures/html_only.json_data",
+        "//contracts:mail-received-v1/fixtures/legacy/pre_storage_v1.json_data",
+        "//contracts:mail-received-v1/fixtures/max_size.json_data",
+        "//contracts:mail-received-v1/fixtures/needs_review_attached_message.json_data",
+        "//contracts:mail-received-v1/fixtures/needs_review_no_readable_body.json_data",
+        "//contracts:mail-received-v1/fixtures/no_date_no_message_id.json_data",
+        "//contracts:mail-received-v1/fixtures/plain_text.json_data",
+        "//contracts:mail-received-v1/fixtures/sent_at_extended_year.json_data",
+        "//contracts:mail-received-v1/fixtures/synthetic_test_event.json_data",
+        "//contracts:mail-received-v1/fixtures/truncated_ui_and_webhook.json_data",
+        "//contracts:mail-received-v1/fixtures/truncated_webhook.json_data",
+        "//contracts:mail-received-v1/legacy/mail-received-v1.schema.json_data",
+        "//contracts:mail-received-v1/mail-received-v1.schema.json_data",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+        "//mail-hero/cloudflare/src:module_group_12",
+        "//proto/mailhero/webhook/v1:ts",
+        "//proto/ts:wire-json",
+    ],
+    entry_point = ":contract-fixtures.test.mjs",
+    node_options = ["--test"],
+    tags = ["unit"],
+)
+
+js_test(
+    name = "contract-schema-dialect_test",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":contract-schema-dialect.test.mjs",
+        "//contracts:mail-received-v1/fixtures/attachments_capacity.json_data",
+        "//contracts:mail-received-v1/fixtures/attachments_metadata_limit.json_data",
+        "//contracts:mail-received-v1/fixtures/attachments_stored_and_omitted.json_data",
+        "//contracts:mail-received-v1/fixtures/body_only_no_subject.json_data",
+        "//contracts:mail-received-v1/fixtures/canary_event.json_data",
+        "//contracts:mail-received-v1/fixtures/chinese.json_data",
+        "//contracts:mail-received-v1/fixtures/html_only.json_data",
+        "//contracts:mail-received-v1/fixtures/legacy/pre_storage_v1.json_data",
+        "//contracts:mail-received-v1/fixtures/max_size.json_data",
+        "//contracts:mail-received-v1/fixtures/needs_review_attached_message.json_data",
+        "//contracts:mail-received-v1/fixtures/needs_review_no_readable_body.json_data",
+        "//contracts:mail-received-v1/fixtures/no_date_no_message_id.json_data",
+        "//contracts:mail-received-v1/fixtures/plain_text.json_data",
+        "//contracts:mail-received-v1/fixtures/sent_at_extended_year.json_data",
+        "//contracts:mail-received-v1/fixtures/synthetic_test_event.json_data",
+        "//contracts:mail-received-v1/fixtures/truncated_ui_and_webhook.json_data",
+        "//contracts:mail-received-v1/fixtures/truncated_webhook.json_data",
+        "//contracts:mail-received-v1/legacy/mail-received-v1.schema.json_data",
+        "//contracts:mail-received-v1/mail-received-v1.schema.json_data",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+    ],
+    entry_point = ":contract-schema-dialect.test.mjs",
+    node_options = ["--test"],
+    tags = ["unit"],
+)
+
+js_test(
+    name = "native-api-v2_test",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":native-api-v2.test.mjs",
+        ":native-env.mjs",
+        ":owner-api.mjs",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:migrations",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+        "//mail-hero/cloudflare/src:lib",
+        "//mail-hero/cloudflare/src:module_group_12",
+        "//mail-hero/cloudflare/src:native_api",
+        "//mail-hero/cloudflare/src:native_api-v2",
+        "//mail-hero/cloudflare/src:native_security",
+        "//proto/mailhero/ui/v2:ts",
+        "//proto/ts:http-client",
+    ],
+    entry_point = ":native-api-v2.test.mjs",
+    node_options = ["--test"],
+    tags = ["unit"],
+)
+
+js_test(
+    name = "native-api_test",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":native-api.test.mjs",
+        ":native-env.mjs",
+        ":owner-api.mjs",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:migrations",
+        "//mail-hero/cloudflare:node_modules/jose",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+        "//mail-hero/cloudflare/src:module_group_12",
+        "//mail-hero/cloudflare/src:module_group_13",
+        "//mail-hero/cloudflare/src:native_alerts",
+        "//mail-hero/cloudflare/src:native_api",
+        "//mail-hero/cloudflare/src:native_security",
+        "//packages/edge-auth:lib",
+    ],
+    entry_point = ":native-api.test.mjs",
+    node_options = ["--test"],
+    tags = ["unit"],
+)
+
+js_test(
+    name = "native-backup-artifacts-runtime_test",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":native-backup-artifacts-runtime.test.mjs",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:migrations",
+        "//mail-hero/cloudflare:node_modules/esbuild",
+        "//mail-hero/cloudflare:node_modules/miniflare",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+        "//mail-hero/cloudflare/src:lib",
+    ],
+    entry_point = ":native-backup-artifacts-runtime.test.mjs",
+    node_options = ["--test"],
+    tags = ["unit"],
+)
+
+js_test(
+    name = "native-backup-runner-runtime_test",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":migrations.mjs",
+        ":native-backup-runner-runtime.test.mjs",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:migrations",
+        "//mail-hero/cloudflare:node_modules/esbuild",
+        "//mail-hero/cloudflare:node_modules/miniflare",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+        "//mail-hero/cloudflare/src:lib",
+        "//mail-hero/cloudflare/src:module_group_9",
+        "//mail-hero/cloudflare/src:native_native-backup-runner",
+        "//mail-hero/deploy:vars",
+        "//mail-hero/deploy/backup:native_restore_files",
+        "@python_3_14//:files",
+        "@python_3_14//:python3",
+    ],
+    entry_point = ":native-backup-runner-runtime.test.mjs",
+    env = {"MAILHERO_TEST_PYTHON": "$(rootpath @python_3_14//:python3)"},
+    no_copy_to_bin = [
+        "@python_3_14//:python3",
+        "@python_3_14//:files",
+    ],
+    node_options = ["--test"],
+    tags = ["unit"],
+)
+
+js_test(
+    name = "native-backup-runtime_test",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":migrations.mjs",
+        ":native-backup-runtime.test.mjs",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:migrations",
+        "//mail-hero/cloudflare:node_modules/esbuild",
+        "//mail-hero/cloudflare:node_modules/miniflare",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+        "//mail-hero/cloudflare/src:lib",
+        "//mail-hero/cloudflare/src:module_group_9",
+    ],
+    entry_point = ":native-backup-runtime.test.mjs",
+    node_options = ["--test"],
+    tags = ["unit"],
+)
+
+js_test(
+    name = "native-backup_test",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":native-backup.test.mjs",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:migrations",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+        "//mail-hero/cloudflare/src:native_capacity",
+        "//mail-hero/cloudflare/src:native_coordinator",
+    ],
+    entry_point = ":native-backup.test.mjs",
+    node_options = ["--test"],
+    tags = ["unit"],
+)
+
+js_test(
+    name = "native-bounded-runtime_test",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":migrations.mjs",
+        ":native-bounded-runtime.test.mjs",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:migrations",
+        "//mail-hero/cloudflare:node_modules/esbuild",
+        "//mail-hero/cloudflare:node_modules/miniflare",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+        "//mail-hero/cloudflare/src:lib",
+        "//mail-hero/cloudflare/src:module_group_9",
+        "//mail-hero/cloudflare/src:native_lifecycle",
+    ],
+    entry_point = ":native-bounded-runtime.test.mjs",
+    node_options = ["--test"],
+    tags = ["unit"],
+)
+
+js_test(
+    name = "native-large_test",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":native-large.test.mjs",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:migrations",
+        "//mail-hero/cloudflare:node_modules/esbuild",
+        "//mail-hero/cloudflare:node_modules/miniflare",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+        "//mail-hero/cloudflare/src:lib",
+    ],
+    entry_point = ":native-large.test.mjs",
+    node_options = ["--test"],
+    tags = ["unit"],
+)
+
+js_test(
+    name = "native-lifecycle-runtime_test",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":migrations.mjs",
+        ":native-lifecycle-runtime.test.mjs",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:migrations",
+        "//mail-hero/cloudflare:node_modules/esbuild",
+        "//mail-hero/cloudflare:node_modules/miniflare",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+        "//mail-hero/cloudflare/src:lib",
+    ],
+    entry_point = ":native-lifecycle-runtime.test.mjs",
+    node_options = ["--test"],
+    tags = ["unit"],
+)
+
+js_test(
+    name = "native-lifecycle_test",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":native-lifecycle.test.mjs",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:migrations",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+        "//mail-hero/cloudflare/src:module_group_12",
+        "//mail-hero/cloudflare/src:native_alerts",
+        "//mail-hero/cloudflare/src:native_api-settings",
+        "//mail-hero/cloudflare/src:native_lifecycle",
+    ],
+    entry_point = ":native-lifecycle.test.mjs",
+    node_options = ["--test"],
+    tags = ["unit"],
+)
+
+js_test(
+    name = "native-ops-runtime_test",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":migrations.mjs",
+        ":native-ops-runtime.test.mjs",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:migrations",
+        "//mail-hero/cloudflare:node_modules/esbuild",
+        "//mail-hero/cloudflare:node_modules/miniflare",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+        "//mail-hero/cloudflare/src:lib",
+        "//mail-hero/cloudflare/src:module_group_12",
+        "//mail-hero/cloudflare/src:native_ops-core",
+        "//mail-hero/cloudflare/src:native_ops-guard",
+        "//proto/ops/v1:ts",
+        "//proto/ts:wire-json",
+    ],
+    entry_point = ":native-ops-runtime.test.mjs",
+    node_options = ["--test"],
+    tags = ["unit"],
+)
+
+js_test(
+    name = "native-ops_test",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":native-ops.test.mjs",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:migrations",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+        "//mail-hero/cloudflare/src:native_alerts",
+        "//mail-hero/cloudflare/src:native_ops-core",
+        "//mail-hero/cloudflare/src:native_ops-guard",
+        "//proto/ops/v1:ts",
+        "//proto/ts:wire-json",
+    ],
+    entry_point = ":native-ops.test.mjs",
+    node_options = ["--test"],
+    tags = ["unit"],
+)
+
+js_test(
+    name = "native-pipeline_test",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":native-pipeline.test.mjs",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:migrations",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+        "//mail-hero/cloudflare/src:module_group_12",
+        "//mail-hero/cloudflare/src:native_coordinator",
+        "//mail-hero/cloudflare/src:native_security",
+    ],
+    entry_point = ":native-pipeline.test.mjs",
+    node_options = ["--test"],
+    tags = ["unit"],
+)
+
+js_test(
+    name = "native-resolved-runtime_test",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":migrations.mjs",
+        ":native-resolved-runtime.test.mjs",
+        ":owner-api.mjs",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:migrations",
+        "//mail-hero/cloudflare:node_modules/esbuild",
+        "//mail-hero/cloudflare:node_modules/miniflare",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+        "//mail-hero/cloudflare/src:lib",
+    ],
+    entry_point = ":native-resolved-runtime.test.mjs",
+    node_options = ["--test"],
+    tags = ["unit"],
+)
+
+js_test(
+    name = "native-runtime_test",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":migrations.mjs",
+        ":native-runtime.test.mjs",
+        ":owner-api.mjs",
+        "//contracts:mail-received-v1/fixtures/attachments_capacity.json_data",
+        "//contracts:mail-received-v1/fixtures/attachments_metadata_limit.json_data",
+        "//contracts:mail-received-v1/fixtures/attachments_stored_and_omitted.json_data",
+        "//contracts:mail-received-v1/fixtures/body_only_no_subject.json_data",
+        "//contracts:mail-received-v1/fixtures/canary_event.json_data",
+        "//contracts:mail-received-v1/fixtures/chinese.json_data",
+        "//contracts:mail-received-v1/fixtures/html_only.json_data",
+        "//contracts:mail-received-v1/fixtures/legacy/pre_storage_v1.json_data",
+        "//contracts:mail-received-v1/fixtures/max_size.json_data",
+        "//contracts:mail-received-v1/fixtures/needs_review_attached_message.json_data",
+        "//contracts:mail-received-v1/fixtures/needs_review_no_readable_body.json_data",
+        "//contracts:mail-received-v1/fixtures/no_date_no_message_id.json_data",
+        "//contracts:mail-received-v1/fixtures/plain_text.json_data",
+        "//contracts:mail-received-v1/fixtures/sent_at_extended_year.json_data",
+        "//contracts:mail-received-v1/fixtures/synthetic_test_event.json_data",
+        "//contracts:mail-received-v1/fixtures/truncated_ui_and_webhook.json_data",
+        "//contracts:mail-received-v1/fixtures/truncated_webhook.json_data",
+        "//contracts:mail-received-v1/legacy/mail-received-v1.schema.json_data",
+        "//contracts:mail-received-v1/mail-received-v1.schema.json_data",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:migrations",
+        "//mail-hero/cloudflare:node_modules/esbuild",
+        "//mail-hero/cloudflare:node_modules/miniflare",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+        "//mail-hero/cloudflare/src:lib",
+    ],
+    entry_point = ":native-runtime.test.mjs",
+    node_options = ["--test"],
+    tags = ["unit"],
+)
+
+js_test(
+    name = "ops-golden_test",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":golden/ops-v1.json",
+        ":ops-golden.test.mjs",
+        "//contracts:ops-v1/legacy/ops-v1.schema.json_data",
+        "//contracts:ops-v1/validate",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+        "//mail-hero/cloudflare/src:native_ops-core",
+        "//mail-hero/cloudflare/src:native_ops-guard",
+    ],
+    entry_point = ":ops-golden.test.mjs",
+    node_options = ["--test"],
+    tags = ["unit"],
+)
+
+js_test(
+    name = "signing-key_test",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":signing-key.test.mjs",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+        "//mail-hero/cloudflare/src:native_security",
+        "//packages/edge-auth:lib",
+    ],
+    entry_point = ":signing-key.test.mjs",
+    node_options = ["--test"],
+    tags = ["unit"],
+)
+
+js_test(
+    name = "warmup_test",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":warmup.test.mjs",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+        "//mail-hero/cloudflare/src:native_api",
+        "//mail-hero/cloudflare/src:native_warmup",
+        "//proto/mailhero/ui/v2:ts",
+        "//proto/ops/v1:ts",
+        "//proto/ts:wire-json",
+    ],
+    entry_point = ":warmup.test.mjs",
+    node_options = ["--test"],
+    tags = ["unit"],
+)
+
+js_library(
+    name = "cpu_support",
+    srcs = glob(
+        ["cpu/**"],
+        exclude = [
+            "**/*.test.mjs",
+            "BUILD.bazel",
+        ],
+    ),
+)
+
+js_test(
+    name = "cpu_coordinator-samples_test",
+    size = "large",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":cpu/coordinator-samples.test.mjs",
+        ":cpu_support",
+        ":migrations.mjs",
+        "//mail-hero/cloudflare:application_sources",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:migrations",
+        "//mail-hero/cloudflare:node_modules/esbuild",
+        "//mail-hero/cloudflare:node_modules/jose",
+        "//mail-hero/cloudflare:node_modules/miniflare",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+        "//mail-hero/cloudflare/src:lib",
+        "//tools/workerd-cpu:lib",
+    ],
+    entry_point = ":cpu/coordinator-samples.test.mjs",
+    node_options = [
+        "--test",
+        "--test-concurrency=1",
+    ],
+    tags = [
+        "cpu",
+        "exclusive",
+        "workerd",
+    ],
+)
+
+js_test(
+    name = "cpu_delivery-request-cpu_test",
+    size = "large",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":cpu/delivery-request-cpu.test.mjs",
+        ":cpu_support",
+        ":migrations.mjs",
+        "//mail-hero/cloudflare:application_sources",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:migrations",
+        "//mail-hero/cloudflare:node_modules/esbuild",
+        "//mail-hero/cloudflare:node_modules/jose",
+        "//mail-hero/cloudflare:node_modules/miniflare",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+        "//mail-hero/cloudflare/src:lib",
+        "//tools/workerd-cpu:lib",
+    ],
+    entry_point = ":cpu/delivery-request-cpu.test.mjs",
+    node_options = [
+        "--test",
+        "--test-concurrency=1",
+    ],
+    tags = [
+        "cpu",
+        "exclusive",
+        "workerd",
+    ],
+)
+
+js_test(
+    name = "cpu_isolate-teardown_test",
+    size = "large",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":cpu/isolate-teardown.test.mjs",
+        ":cpu_support",
+        ":migrations.mjs",
+        "//mail-hero/cloudflare:application_sources",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:migrations",
+        "//mail-hero/cloudflare:node_modules/esbuild",
+        "//mail-hero/cloudflare:node_modules/jose",
+        "//mail-hero/cloudflare:node_modules/miniflare",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+        "//mail-hero/cloudflare/src:lib",
+        "//tools/workerd-cpu:lib",
+    ],
+    entry_point = ":cpu/isolate-teardown.test.mjs",
+    node_options = [
+        "--test",
+        "--test-concurrency=1",
+    ],
+    tags = [
+        "cpu",
+        "exclusive",
+        "workerd",
+    ],
+)
+
+js_test(
+    name = "cpu_native-ops-cpu_test",
+    size = "large",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":cpu/native-ops-cpu.test.mjs",
+        ":cpu_support",
+        ":migrations.mjs",
+        "//mail-hero/cloudflare:application_sources",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:migrations",
+        "//mail-hero/cloudflare:node_modules/esbuild",
+        "//mail-hero/cloudflare:node_modules/jose",
+        "//mail-hero/cloudflare:node_modules/miniflare",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+        "//mail-hero/cloudflare/src:lib",
+        "//tools/workerd-cpu:lib",
+    ],
+    entry_point = ":cpu/native-ops-cpu.test.mjs",
+    node_options = [
+        "--test",
+        "--test-concurrency=1",
+    ],
+    tags = [
+        "cpu",
+        "exclusive",
+        "workerd",
+    ],
+)
+
+js_test(
+    name = "cpu_owner-api-cpu_test",
+    size = "large",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":cpu/owner-api-cpu.test.mjs",
+        ":cpu_support",
+        ":migrations.mjs",
+        "//mail-hero/cloudflare:application_sources",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:migrations",
+        "//mail-hero/cloudflare:node_modules/esbuild",
+        "//mail-hero/cloudflare:node_modules/jose",
+        "//mail-hero/cloudflare:node_modules/miniflare",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+        "//mail-hero/cloudflare/src:lib",
+        "//tools/workerd-cpu:lib",
+    ],
+    entry_point = ":cpu/owner-api-cpu.test.mjs",
+    node_options = [
+        "--test",
+        "--test-concurrency=1",
+    ],
+    tags = [
+        "cpu",
+        "exclusive",
+        "workerd",
+    ],
+)
+
+js_test(
+    name = "cpu_payload-cpu_test",
+    size = "large",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":cpu/payload-cpu.test.mjs",
+        ":cpu_support",
+        ":migrations.mjs",
+        "//mail-hero/cloudflare:application_sources",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:migrations",
+        "//mail-hero/cloudflare:node_modules/esbuild",
+        "//mail-hero/cloudflare:node_modules/jose",
+        "//mail-hero/cloudflare:node_modules/miniflare",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+        "//mail-hero/cloudflare/src:lib",
+        "//tools/workerd-cpu:lib",
+    ],
+    entry_point = ":cpu/payload-cpu.test.mjs",
+    node_options = [
+        "--test",
+        "--test-concurrency=1",
+    ],
+    tags = [
+        "cpu",
+        "exclusive",
+        "workerd",
+    ],
+)
+
+js_library(
+    name = "test_config_sources",
+    srcs = glob(
+        [
+            "*.mjs",
+            "cpu/*.mjs",
+        ],
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+)
+
+test_suite(name = "check")
+
+test_suite(
+    name = "cpu_tests",
+    tags = ["cpu"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)

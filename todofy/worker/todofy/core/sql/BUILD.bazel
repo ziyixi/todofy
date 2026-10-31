@@ -1,0 +1,120 @@
+load("@rules_python//python:defs.bzl", "py_library")
+load("//tools/bazel:js.bzl", "copied_source_files")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//todofy:__subpackages__"])
+
+py_library(
+    name = "package",
+    srcs = ["__init__.py"],
+    imports = ["../../.."],
+    deps = [
+        "//todofy/worker/todofy/core:package",
+        "//todofy/worker/todofy/core:vocab",
+    ],
+)
+
+py_library(
+    name = "backup",
+    srcs = ["backup.py"],
+    imports = ["../../.."],
+    deps = [":package"],
+)
+
+py_library(
+    name = "ledger",
+    srcs = ["ledger.py"],
+    imports = ["../../.."],
+    deps = [":package"],
+)
+
+py_library(
+    name = "mailbox",
+    srcs = ["mailbox.py"],
+    imports = ["../../.."],
+    deps = [
+        ":package",
+        "//todofy/worker/todofy/core:mailbox",
+    ],
+)
+
+py_library(
+    name = "metrics",
+    srcs = ["metrics.py"],
+    imports = ["../../.."],
+    deps = [":package"],
+)
+
+py_library(
+    name = "reports",
+    srcs = ["reports.py"],
+    imports = ["../../.."],
+    deps = [
+        ":mailbox",
+        ":package",
+        "//todofy/worker/todofy/core:carryover",
+    ],
+)
+
+py_library(
+    name = "retention",
+    srcs = ["retention.py"],
+    imports = ["../../.."],
+    deps = [":package"],
+)
+
+py_library(
+    name = "views",
+    srcs = ["views.py"],
+    imports = ["../../.."],
+    deps = [":package"],
+)
+
+py_library(
+    name = "library",
+    deps = [
+        ":backup",
+        ":ledger",
+        ":mailbox",
+        ":metrics",
+        ":package",
+        ":reports",
+        ":retention",
+        ":views",
+    ],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+copied_source_files(
+    name = "node_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ),
+)

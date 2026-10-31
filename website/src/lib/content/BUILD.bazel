@@ -1,0 +1,174 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//website:bazel.bzl", "website_sources")
+
+package(default_visibility = ["//website:__subpackages__"])
+
+exports_files(
+    glob(
+        ["*.ts"],
+        allow_empty = True,
+    ),
+    visibility = ["//website:__subpackages__"],
+)
+
+js_library(
+    name = "errors",
+    srcs = [":errors.ts"],
+)
+
+js_library(
+    name = "date",
+    srcs = [":date.ts"],
+    deps = [":errors"],
+)
+
+js_library(
+    name = "equation",
+    srcs = [":equation.ts"],
+    deps = [
+        ":errors",
+        "//website:node_modules/katex",
+    ],
+)
+
+js_library(
+    name = "redirect-path",
+    srcs = [":redirect-path.ts"],
+    deps = [":errors"],
+)
+
+js_library(
+    name = "slug",
+    srcs = [":slug.ts"],
+    deps = [":errors"],
+)
+
+js_library(
+    name = "url",
+    srcs = [":url.ts"],
+    deps = [":errors"],
+)
+
+js_library(
+    name = "schema",
+    srcs = [":schema.ts"],
+    deps = [
+        ":date",
+        ":equation",
+        ":redirect-path",
+        ":slug",
+        ":url",
+        "//website:node_modules/zod",
+    ],
+)
+
+js_library(
+    name = "stable-json",
+    srcs = [":stable-json.ts"],
+)
+
+js_library(
+    name = "hash",
+    srcs = [":hash.ts"],
+    deps = [
+        ":schema",
+        ":stable-json",
+    ],
+)
+
+js_library(
+    name = "publication-state",
+    srcs = [":publication-state.ts"],
+    deps = [
+        ":errors",
+        ":hash",
+        ":schema",
+        ":slug",
+        ":stable-json",
+        "//website:node_modules/zod",
+    ],
+)
+
+js_library(
+    name = "heading",
+    srcs = [":heading.ts"],
+    deps = [":schema"],
+)
+
+js_library(
+    name = "translations",
+    srcs = [":translations.ts"],
+    deps = [
+        ":errors",
+        ":schema",
+    ],
+)
+
+js_library(
+    name = "validate",
+    srcs = [":validate.ts"],
+    deps = [
+        ":date",
+        ":errors",
+        ":heading",
+        ":schema",
+        ":translations",
+    ],
+)
+
+js_library(
+    name = "reader",
+    srcs = [":reader.ts"],
+    deps = [
+        ":errors",
+        ":hash",
+        ":schema",
+        ":validate",
+    ],
+)
+
+js_library(
+    name = "registry",
+    srcs = [":registry.ts"],
+    deps = [
+        ":errors",
+        ":schema",
+        ":url",
+    ],
+)
+
+js_library(
+    name = "site-data",
+    srcs = [":site-data.ts"],
+    deps = [
+        ":schema",
+        "//website/content:site_config",
+    ],
+)
+
+js_library(
+    name = "index",
+    srcs = [":index.ts"],
+    deps = [
+        ":date",
+        ":errors",
+        ":hash",
+        ":publication-state",
+        ":reader",
+        ":registry",
+        ":schema",
+        ":site-data",
+        ":slug",
+        ":stable-json",
+        ":translations",
+        ":url",
+        ":validate",
+    ],
+)
+
+js_library(
+    name = "video-embed",
+    srcs = [":video-embed.ts"],
+)
+
+website_sources()

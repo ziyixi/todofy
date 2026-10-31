@@ -2,263 +2,39 @@ load("@aspect_rules_js//js:defs.bzl", "js_library")
 load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
 load("@npm//:defs.bzl", "npm_link_all_packages")
 load("@npm//model-router/worker:eslint/package_json.bzl", eslint = "bin")
-load("@npm//model-router/worker:vitest/package_json.bzl", vitest = "bin")
 load("@npm//model-router/worker:wrangler/package_json.bzl", wrangler = "bin")
 load("//proto/bazel:ts_package.bzl", "proto_package")
-load("//tools/bazel:js.bzl", "proto_vitest_test", "workspace_link", "workspace_package_link")
-load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel:js.bzl", "workspace_link", "workspace_package_link")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files")
 load("//tools/bazel/lint:defs.bzl", "eslint_test")
 
 package(default_visibility = ["//model-router:__subpackages__"])
 
+exports_files(
+    [
+        "package.json",
+        "tsconfig.json",
+        "vitest.config.ts",
+    ],
+    visibility = ["//model-router:__subpackages__"],
+)
+
+alias(
+    name = "package_json",
+    actual = ":package_metadata",
+)
+
+js_library(
+    name = "test_config",
+    srcs = ["vitest.config.ts"],
+)
+
 npm_link_all_packages(name = "node_modules")
-
-js_library(
-    name = "backup",
-    srcs = ["src/backup.ts"],
-    types = ["src/backup.ts"],
-    deps = [],
-)
-
-js_library(
-    name = "errors",
-    srcs = ["src/errors.ts"],
-    types = ["src/errors.ts"],
-    deps = ["//proto/ts:rpc-status"],
-)
-
-js_library(
-    name = "module_group_2",
-    srcs = [
-        "src/catalog.ts",
-        "src/types.ts",
-    ],
-    types = [
-        "src/catalog.ts",
-        "src/types.ts",
-    ],
-    deps = [
-        ":errors",
-        "//proto/modelrouter/inference/v1:ts",
-        "//proto/ts:protobuf",
-    ],
-)
-
-alias(
-    name = "catalog",
-    actual = ":module_group_2",
-)
-
-alias(
-    name = "types",
-    actual = ":module_group_2",
-)
-
-js_library(
-    name = "store",
-    srcs = ["src/store.ts"],
-    types = ["src/store.ts"],
-    deps = [
-        ":errors",
-        ":module_group_2",
-        "//proto/modelrouter/inference/v1:ts",
-        "//proto/ts:protobuf",
-        "//proto/ts:protobuf-wkt",
-        "//proto/ts:wire-json",
-    ],
-)
-
-js_library(
-    name = "schema",
-    srcs = ["src/schema.ts"],
-    types = ["src/schema.ts"],
-    deps = [
-        ":errors",
-        ":module_group_2",
-        ":node_modules/@cfworker/json-schema",
-        "//proto/modelrouter/inference/v1:ts",
-    ],
-)
-
-js_library(
-    name = "executor",
-    srcs = ["src/executor.ts"],
-    types = ["src/executor.ts"],
-    deps = [
-        ":errors",
-        ":module_group_2",
-        "//proto/modelrouter/inference/v1:ts",
-        "//proto/ts:http-client",
-    ],
-)
-
-js_library(
-    name = "providers_pricing",
-    srcs = ["src/providers/pricing.ts"],
-    types = ["src/providers/pricing.ts"],
-    deps = [":module_group_2"],
-)
-
-js_library(
-    name = "providers_usage",
-    srcs = ["src/providers/usage.ts"],
-    types = ["src/providers/usage.ts"],
-    deps = [
-        ":module_group_2",
-        ":providers_pricing",
-    ],
-)
-
-js_library(
-    name = "providers_common",
-    srcs = ["src/providers/common.ts"],
-    types = ["src/providers/common.ts"],
-    deps = [
-        ":module_group_2",
-        ":providers_usage",
-    ],
-)
-
-js_library(
-    name = "providers_claude",
-    srcs = ["src/providers/claude.ts"],
-    types = ["src/providers/claude.ts"],
-    deps = [
-        ":module_group_2",
-        ":node_modules/@anthropic-ai/sdk",
-        ":providers_common",
-        ":providers_usage",
-        "//proto/modelrouter/inference/v1:ts",
-    ],
-)
-
-js_library(
-    name = "providers_gemini",
-    srcs = ["src/providers/gemini.ts"],
-    types = ["src/providers/gemini.ts"],
-    deps = [
-        ":module_group_2",
-        ":providers_common",
-        ":providers_usage",
-        "//proto/modelrouter/inference/v1:ts",
-    ],
-)
-
-js_library(
-    name = "providers_openai",
-    srcs = ["src/providers/openai.ts"],
-    types = ["src/providers/openai.ts"],
-    deps = [
-        ":module_group_2",
-        ":providers_common",
-        ":providers_usage",
-        "//proto/modelrouter/inference/v1:ts",
-    ],
-)
-
-js_library(
-    name = "providers_workers-ai",
-    srcs = ["src/providers/workers-ai.ts"],
-    types = ["src/providers/workers-ai.ts"],
-    deps = [
-        ":module_group_2",
-        ":providers_common",
-        ":providers_usage",
-    ],
-)
-
-js_library(
-    name = "engine",
-    srcs = ["src/engine.ts"],
-    types = ["src/engine.ts"],
-    deps = [
-        ":backup",
-        ":errors",
-        ":executor",
-        ":module_group_2",
-        ":providers_claude",
-        ":providers_common",
-        ":providers_gemini",
-        ":providers_openai",
-        ":providers_pricing",
-        ":providers_workers-ai",
-        ":schema",
-        ":store",
-        "//proto/modelrouter/inference/v1:ts",
-        "//proto/ts:http-client",
-        "//proto/ts:http-transcoder",
-        "//proto/ts:protobuf",
-        "//proto/ts:protobuf-wkt",
-    ],
-)
-
-js_library(
-    name = "http",
-    srcs = ["src/http.ts"],
-    types = ["src/http.ts"],
-    deps = [
-        ":errors",
-        ":module_group_2",
-        "//packages/edge-auth:lib",
-        "//proto/ts:rpc-status",
-    ],
-)
-
-js_library(
-    name = "ops",
-    srcs = ["src/ops.ts"],
-    types = ["src/ops.ts"],
-    deps = [
-        ":engine",
-        ":module_group_2",
-        ":store",
-        "//proto/ops/v1:ts",
-        "//proto/ts:protobuf",
-        "//proto/ts:wire-json",
-    ],
-)
-
-js_library(
-    name = "index",
-    srcs = ["src/index.ts"],
-    types = ["src/index.ts"],
-    deps = [
-        ":engine",
-        ":errors",
-        ":http",
-        ":module_group_2",
-        ":ops",
-        ":store",
-    ],
-)
-
-js_library(
-    name = "lib",
-    deps = [
-        ":backup",
-        ":engine",
-        ":errors",
-        ":executor",
-        ":http",
-        ":index",
-        ":module_group_2",
-        ":ops",
-        ":providers_claude",
-        ":providers_common",
-        ":providers_gemini",
-        ":providers_openai",
-        ":providers_pricing",
-        ":providers_usage",
-        ":providers_workers-ai",
-        ":schema",
-        ":store",
-    ],
-)
 
 proto_package(
     name = "proto_types_package",
     deps = [
-        ":lib",
+        "//model-router/worker/src:lib",
         "//proto/modelrouter/inference/v1:ts",
         "//proto/ops/v1:ts",
         "//proto/ts:http-client",
@@ -281,249 +57,18 @@ workspace_package_link(
     src = "//packages/edge-auth:pkg",
 )
 
-proto_vitest_test(
-    name = "array-output_test",
-    data = [
-        "package.json",
-        "test/runtime-entry.ts",
-        "test/runtime-harness.ts",
-        ":node_modules/esbuild",
-        ":node_modules/jose",
-        ":node_modules/miniflare",
-        ":node_modules/vitest",
-        ":runtime_edge_auth_link",
-        "//model-router/migrations:all",
-    ],
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = ["test/array-output.test.ts"],
-    deps = [
-        ":lib",
-        "//proto/modelrouter/inference/v1:ts",
-        "//proto/ts:http-client",
-    ],
-)
-
-proto_vitest_test(
-    name = "backup_test",
-    data = [
-        "package.json",
-        ":node_modules/vitest",
-        "//model-router/migrations:0001_router.sql_data",
-    ],
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = ["test/backup.test.ts"],
-    deps = [
-        ":backup",
-        "//model-router/tools:backup-restore",
-    ],
-)
-
-proto_vitest_test(
-    name = "cost-backfill_test",
-    data = [
-        "package.json",
-        "test/runtime-entry.ts",
-        "test/runtime-harness.ts",
-        ":node_modules/esbuild",
-        ":node_modules/jose",
-        ":node_modules/miniflare",
-        ":node_modules/vitest",
-        ":runtime_edge_auth_link",
-        "//model-router/migrations:0003_missing_cost_estimates.sql_data",
-        "//model-router/migrations:all",
-    ],
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = ["test/cost-backfill.test.ts"],
-    deps = [
-        ":lib",
-        "//proto/modelrouter/inference/v1:ts",
-        "//proto/ts:http-client",
-    ],
-)
-
-proto_vitest_test(
-    name = "executor_test",
-    data = [
-        "package.json",
-        ":node_modules/vitest",
-    ],
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = ["test/executor.test.ts"],
-    deps = [":executor"],
-)
-
-proto_vitest_test(
-    name = "failure-reason_test",
-    data = [
-        "package.json",
-        "test/runtime-entry.ts",
-        "test/runtime-harness.ts",
-        ":node_modules/esbuild",
-        ":node_modules/jose",
-        ":node_modules/miniflare",
-        ":node_modules/vitest",
-        ":runtime_edge_auth_link",
-        "//model-router/migrations:all",
-    ],
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = ["test/failure-reason.test.ts"],
-    deps = [
-        ":lib",
-        "//proto/modelrouter/inference/v1:ts",
-        "//proto/ts:http-client",
-    ],
-)
-
-proto_vitest_test(
-    name = "openai-runtime_test",
-    data = [
-        "package.json",
-        "test/runtime-entry.ts",
-        "test/runtime-harness.ts",
-        ":node_modules/esbuild",
-        ":node_modules/jose",
-        ":node_modules/miniflare",
-        ":node_modules/vitest",
-        ":runtime_edge_auth_link",
-        "//model-router/migrations:all",
-    ],
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = ["test/openai-runtime.test.ts"],
-    deps = [
-        ":lib",
-        "//proto/modelrouter/inference/v1:ts",
-        "//proto/ts:http-client",
-    ],
-)
-
-proto_vitest_test(
-    name = "openai_test",
-    data = [
-        "package.json",
-        ":node_modules/vitest",
-    ],
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = ["test/openai.test.ts"],
-    deps = [
-        ":module_group_2",
-        ":providers_openai",
-        ":providers_usage",
-        ":schema",
-        "//proto/modelrouter/inference/v1:ts",
-        "//proto/ts:protobuf",
-    ],
-)
-
-proto_vitest_test(
-    name = "pricing_test",
-    data = [
-        "package.json",
-        ":node_modules/vitest",
-    ],
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = ["test/pricing.test.ts"],
-    deps = [
-        ":module_group_2",
-        ":providers_pricing",
-        ":providers_usage",
-    ],
-)
-
-proto_vitest_test(
-    name = "providers_test",
-    data = [
-        "package.json",
-        ":node_modules/vitest",
-    ],
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = ["test/providers.test.ts"],
-    deps = [
-        ":module_group_2",
-        ":providers_claude",
-        ":providers_common",
-        ":providers_gemini",
-        ":providers_usage",
-        ":providers_workers-ai",
-        "//proto/modelrouter/inference/v1:ts",
-        "//proto/ts:protobuf",
-    ],
-)
-
-proto_vitest_test(
-    name = "runtime_test",
-    data = [
-        "package.json",
-        "test/runtime-entry.ts",
-        "test/runtime-harness.ts",
-        ":node_modules/esbuild",
-        ":node_modules/jose",
-        ":node_modules/miniflare",
-        ":node_modules/vitest",
-        ":runtime_edge_auth_link",
-        "//model-router/migrations:all",
-    ],
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = ["test/runtime.test.ts"],
-    deps = [
-        ":backup",
-        ":lib",
-        "//proto/modelrouter/inference/v1:ts",
-        "//proto/ts:http-client",
-        "//proto/ts:rpc-status",
-    ],
-)
-
 ts_project(
     name = "typecheck_project",
     srcs = [
-        "src/backup.ts",
-        "src/catalog.ts",
-        "src/engine.ts",
-        "src/errors.ts",
-        "src/executor.ts",
-        "src/http.ts",
-        "src/index.ts",
-        "src/ops.ts",
-        "src/providers/claude.ts",
-        "src/providers/common.ts",
-        "src/providers/gemini.ts",
-        "src/providers/openai.ts",
-        "src/providers/pricing.ts",
-        "src/providers/usage.ts",
-        "src/providers/workers-ai.ts",
-        "src/schema.ts",
-        "src/store.ts",
-        "src/types.ts",
-        "test/array-output.test.ts",
-        "test/backup.test.ts",
-        "test/cost-backfill.test.ts",
-        "test/executor.test.ts",
-        "test/failure-reason.test.ts",
-        "test/openai.test.ts",
-        "test/openai-runtime.test.ts",
-        "test/pricing.test.ts",
-        "test/providers.test.ts",
-        "test/runtime.test.ts",
-        "test/runtime-entry.ts",
-        "test/runtime-harness.ts",
-        "vitest.config.ts",
+        ":vitest.config.ts",
+        "//model-router/worker/src:typecheck_project_srcs",
+        "//model-router/worker/test:typecheck_project_srcs",
     ],
-    data = ["vitest.config.ts"],
+    data = [":vitest.config.ts"],
     no_emit = True,
     resolve_json_module = True,
     deps = [
         ":edge_auth_types_link",
-        ":lib",
         ":node_modules/@anthropic-ai/sdk",
         ":node_modules/@cfworker/json-schema",
         ":node_modules/@cloudflare/workers-types",
@@ -535,6 +80,7 @@ ts_project(
         ":proto_types_link",
         "//:node_modules/@cloudflare/workers-types",
         "//model-router/tools:backup-restore",
+        "//model-router/worker/src:lib",
     ],
 )
 
@@ -545,20 +91,18 @@ alias(
 
 ts_project(
     name = "backup_types",
-    srcs = ["src/backup.ts"],
+    srcs = ["//model-router/worker/src:backup_types_srcs"],
     declaration = True,
     emit_declaration_only = True,
-    tsconfig = {
-        "compilerOptions": {
-            "target": "ES2024",
-            "lib": ["ES2024"],
-            "module": "ESNext",
-            "moduleResolution": "Bundler",
-            "strict": True,
-            "skipLibCheck": True,
-            "types": ["@cloudflare/workers-types"],
-        },
-    },
+    tsconfig = {"compilerOptions": {
+        "target": "ES2024",
+        "lib": ["ES2024"],
+        "module": "ESNext",
+        "moduleResolution": "Bundler",
+        "strict": True,
+        "skipLibCheck": True,
+        "types": ["@cloudflare/workers-types"],
+    }},
     deps = [":node_modules/@cloudflare/workers-types"],
 )
 
@@ -571,23 +115,27 @@ wrangler.wrangler_binary(name = "wrangler")
 
 js_library(
     name = "application_sources",
-    srcs = glob([
-        "src/**",
+    srcs = ["//model-router/worker/src:application_sources_srcs"] + glob([
         "package.json",
         "tsconfig.json",
     ]),
 )
 
-test_suite(name = "check")
+test_suite(
+    name = "check",
+    tests = [
+        ":backup_types_typecheck_test",
+        ":lint",
+        ":typecheck_project_typecheck_test",
+        "//model-router/worker/test:check",
+    ],
+)
 
 eslint_test(
     name = "lint",
     data = [
-        "package.json",
-        "tsconfig.json",
         ":application_sources",
         ":edge_auth_types_link",
-        ":lib",
         ":node_modules/@anthropic-ai/sdk",
         ":node_modules/@cfworker/json-schema",
         ":node_modules/@cloudflare/workers-types",
@@ -601,18 +149,17 @@ eslint_test(
         ":node_modules/typescript-eslint",
         ":node_modules/vitest",
         ":node_modules/wrangler",
+        ":package.json",
         ":proto_types_link",
+        ":tsconfig.json",
         "//:node_modules/@cloudflare/workers-types",
         "//model-router/tools:backup-restore",
+        "//model-router/worker/src:lib",
         "//tools/workerd-cpu:types",
     ],
-    runner = eslint.eslint_test,
-    sources = glob(
+    runner = eslint.eslint_binary,
+    sources = ["//model-router/worker/src:lint_sources"] + ["//model-router/worker/test:lint_sources"] + glob(
         [
-            "src/**/*.ts",
-            "src/**/*.tsx",
-            "test/**/*.ts",
-            "test/**/*.mts",
             "scripts/**/*.mjs",
             "*.js",
             "*.ts",
@@ -623,41 +170,33 @@ eslint_test(
 
 js_library(
     name = "package_metadata",
-    srcs = ["package.json"],
-)
-
-js_library(
-    name = "entry_metadata",
-    srcs = ["src/index.ts"],
-)
-
-filegroup(
-    name = "source_audit_files",
-    srcs = glob(
-        [
-            "*",
-            "src/**",
-            "test/**",
-        ],
-        allow_empty = True,
-        exclude = SOURCE_AUDIT_EXCLUDES,
-    ) + glob(
-        [
-            ".env.example",
-            ".env.*.example",
-            ".dev.vars.example",
-        ],
-        allow_empty = True,
-    ),
-    visibility = ["//visibility:public"],
+    srcs = [":package.json"],
 )
 
 test_suite(
     name = "unit_tests",
     tags = ["unit"],
+    tests = ["//model-router/worker/test:unit_tests"],
 )
 
 test_suite(
     name = "typecheck_tests",
     tests = [":typecheck_project_typecheck_test"],
+)
+
+alias(
+    name = "lib",
+    actual = "//model-router/worker/src:lib",
+)
+
+source_audit_files(
+    patterns = [
+        "*",
+        "src/**",
+        "test/**",
+    ],
+    deps = [
+        "//model-router/worker/src:source_audit_files",
+        "//model-router/worker/test:source_audit_files",
+    ],
 )

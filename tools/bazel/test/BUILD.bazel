@@ -1,0 +1,72 @@
+load("@aspect_rules_js//js:defs.bzl", "js_test")
+load("@npm//packages/task-dates:vitest/package_json.bzl", vitest = "bin")
+load("//tools/bazel:js.bzl", "workspace_link")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//tools/bazel:__subpackages__"])
+
+exports_files(
+    glob(
+        [
+            "*.mjs",
+            "*.ts",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//tools/bazel:__subpackages__"],
+)
+
+workspace_link(
+    name = "task_dates_link",
+    src = "//packages/task-dates:pkg",
+    data = ["//packages/task-dates:lib"],
+    project = "tools/bazel",
+)
+
+vitest.vitest_test(
+    name = "workspace_link_test",
+    args = [
+        "run",
+        "test/workspace-link.test.ts",
+        "--config",
+        "test/vitest.config.mjs",
+    ],
+    chdir = "tools/bazel",
+    data = [
+        ":task_dates_link",
+        ":vitest.config.mjs",
+        ":workspace-link.test.ts",
+    ],
+)
+
+js_test(
+    name = "planning_ui_exports_test",
+    args = ["$(rootpath //packages/planning-ui:pkg)"],
+    data = ["//packages/planning-ui:pkg"],
+    entry_point = ":package-exports.mjs",
+)
+
+js_test(
+    name = "toolchain_versions_test",
+    data = ["//:toolchain_version_inputs"],
+    entry_point = ":toolchain-versions.mjs",
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        ":planning_ui_exports_test",
+        ":toolchain_versions_test",
+        ":workspace_link_test",
+    ],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)

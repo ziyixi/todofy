@@ -1,0 +1,101 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//website:bazel.bzl", "website_sources")
+
+package(default_visibility = ["//website:__subpackages__"])
+
+exports_files(
+    glob(
+        ["*.ts"],
+        allow_empty = True,
+    ),
+    visibility = ["//website:__subpackages__"],
+)
+
+js_library(
+    name = "payload",
+    srcs = [":payload.ts"],
+    deps = [
+        "//website:node_modules/zod",
+        "//website/src/lib/content:publication-state",
+        "//website/src/lib/content:schema",
+    ],
+)
+
+js_library(
+    name = "worker-config",
+    srcs = [":worker-config.ts"],
+    deps = ["//website:node_modules/smol-toml"],
+)
+
+js_library(
+    name = "cloudflare",
+    srcs = [":cloudflare.ts"],
+    deps = [
+        ":payload",
+        ":worker-config",
+    ],
+)
+
+js_library(
+    name = "content-sync",
+    srcs = [
+        ":content-sync.ts",
+        ":github.ts",
+    ],
+    deps = [
+        ":payload",
+        "//website:node_modules/zod",
+        "//website/src/lib/content:publication-state",
+    ],
+)
+
+js_library(
+    name = "green-commit",
+    srcs = [":green-commit.ts"],
+)
+
+js_library(
+    name = "steps",
+    srcs = [":steps.ts"],
+    deps = [
+        ":cloudflare",
+        ":content-sync",
+        ":payload",
+        ":worker-config",
+        "//website/src/lib/content:registry",
+        "//website/src/lib/content:schema",
+    ],
+)
+
+js_library(
+    name = "verify",
+    srcs = [":verify.ts"],
+    deps = [
+        ":payload",
+        "//website/src/lib/content:publication-state",
+    ],
+)
+
+js_library(
+    name = "cli",
+    srcs = [":cli.ts"],
+    deps = [
+        ":cloudflare",
+        ":content-sync",
+        ":green-commit",
+        ":payload",
+        ":steps",
+        ":verify",
+        ":worker-config",
+        "//website/content:site_config",
+        "//website/scripts/bazel:source-identity",
+        "//website/src/lib/content:publication-state",
+        "//website/src/lib/content:reader",
+        "//website/src/lib/content:schema",
+    ],
+)
+
+website_sources(
+    application_excludes = [],
+    children = [],
+)

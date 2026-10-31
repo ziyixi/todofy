@@ -1,0 +1,119 @@
+load("@rules_python//python:defs.bzl", "py_library")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/python:tests.bzl", "pytest_test")
+
+package(default_visibility = ["//todofy:__subpackages__"])
+
+py_library(
+    name = "backup_restore",
+    srcs = ["backup_restore.py"],
+    imports = [".."],
+)
+
+py_library(
+    name = "smoke_webhook",
+    srcs = ["smoke_webhook.py"],
+    imports = [".."],
+)
+
+pytest_test(
+    name = "host_backup_restore_test",
+    srcs = ["test_backup_restore.py"],
+    args = ["$(rootpath test_backup_restore.py)"],
+    config = "//todofy:pyproject.toml",
+    data = [
+        "//todofy:config",
+        "//todofy:conftest.py",
+        "//todofy:migrations",
+        "//todofy/api:api_schemas",
+        "//todofy/tools/legacy_migration:conftest.py",
+        "//todofy/tools/legacy_migration:fixtures/inbox_schema.sql",
+        "//todofy/tools/legacy_migration:fixtures/todofy_schema.sql",
+    ],
+    env = {
+        "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+        "BAZEL_COPY_WORKSPACE": "1",
+    },
+    imports = [
+        "..",
+        "../worker",
+        "legacy_migration",
+    ],
+    plugins = [
+        "xdist.plugin",
+        "xdist.looponfail",
+    ],
+    deps = [
+        ":backup_restore",
+        "//todofy/worker/todofy/core:backup",
+        "//todofy/worker/todofy/core/sql:backup",
+        "@python_deps//pytest_xdist",
+    ],
+)
+
+pytest_test(
+    name = "host_smoke_webhook_test",
+    srcs = ["test_smoke_webhook.py"],
+    args = ["$(rootpath test_smoke_webhook.py)"],
+    config = "//todofy:pyproject.toml",
+    data = [
+        "//todofy:config",
+        "//todofy:conftest.py",
+        "//todofy:migrations",
+        "//todofy/api:api_schemas",
+        "//todofy/tools/legacy_migration:conftest.py",
+        "//todofy/tools/legacy_migration:fixtures/inbox_schema.sql",
+        "//todofy/tools/legacy_migration:fixtures/todofy_schema.sql",
+    ],
+    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+    imports = [
+        "..",
+        "../worker",
+        "legacy_migration",
+    ],
+    plugins = [
+        "xdist.plugin",
+        "xdist.looponfail",
+    ],
+    deps = [
+        ":smoke_webhook",
+        "//todofy/worker/todofy/core:contract",
+        "@python_deps//pytest_xdist",
+    ],
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        ":host_backup_restore_test",
+        ":host_smoke_webhook_test",
+        "//todofy/tools/legacy_migration:check",
+    ],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ) + ["//todofy/tools/legacy_migration:python_sources"],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + ["//todofy/tools/legacy_migration:source_audit_files"],
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)

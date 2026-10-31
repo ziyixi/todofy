@@ -1,0 +1,234 @@
+load("@rules_python//python:defs.bzl", "py_binary", "py_library")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/python:tests.bzl", "pytest_test")
+
+package(default_visibility = ["//newsletter:__subpackages__"])
+
+py_library(
+    name = "check_python_structure",
+    srcs = ["check_python_structure.py"],
+    imports = [".."],
+    deps = [
+        "//newsletter/src/newsletter:app",
+        "//newsletter/src/newsletter:cli",
+    ],
+)
+
+py_library(
+    name = "console_fixtures",
+    srcs = ["console_fixtures.py"],
+    imports = [".."],
+    deps = [
+        "//newsletter/src/newsletter:console_api",
+        "//newsletter/src/newsletter:console_read",
+        "//newsletter/tests/support:console_world",
+        "//proto/newsletter/ui/v1:python",
+    ],
+)
+
+py_library(
+    name = "evaluate_prompts_library",
+    srcs = ["evaluate_prompts.py"],
+    imports = [".."],
+    deps = [
+        "//newsletter/src/newsletter:contracts",
+        "//newsletter/src/newsletter:diagnostics",
+        "//newsletter/src/newsletter:editor",
+        "//newsletter/src/newsletter:errors",
+        "//newsletter/src/newsletter:model_client",
+        "//newsletter/src/newsletter:model_io",
+        "//newsletter/src/newsletter:settings",
+        "//newsletter/src/newsletter:types",
+        "//newsletter/src/newsletter:usage",
+        "//newsletter/src/newsletter/workflow:content",
+        "//packages/model-router-client/python/src/model_router_client:package",
+        "@python_deps//ziyixi_protos",
+    ],
+)
+
+py_library(
+    name = "publish_content_config",
+    srcs = ["publish_content_config.py"],
+    imports = [".."],
+    deps = ["//newsletter/src/newsletter:config_cli"],
+)
+
+py_library(
+    name = "smoke_codex_startup",
+    srcs = ["smoke_codex_startup.py"],
+    imports = [".."],
+    deps = [
+        "//newsletter/src/newsletter:model_client",
+        "//packages/model-router-client/python/src/model_router_client:package",
+        "@python_deps//httpx",
+    ],
+)
+
+py_library(
+    name = "smoke_http",
+    srcs = ["smoke_http.py"],
+    imports = [".."],
+    deps = ["//newsletter/src/newsletter:cli"],
+)
+
+py_library(
+    name = "smoke_image",
+    srcs = ["smoke_image.py"],
+    imports = [".."],
+    deps = [
+        ":smoke_codex_startup",
+        ":smoke_image_probe",
+    ],
+)
+
+py_library(
+    name = "smoke_image_probe",
+    srcs = ["smoke_image_probe.py"],
+    imports = [".."],
+    deps = [
+        "//newsletter/src/newsletter:cli",
+        "//newsletter/src/newsletter:console_access",
+        "//newsletter/src/newsletter:console_read",
+        "//newsletter/src/newsletter:contracts",
+        "//newsletter/src/newsletter:package",
+        "//newsletter/src/newsletter:preflight",
+        "//newsletter/src/newsletter:rendering",
+        "//newsletter/src/newsletter:settings",
+        "//newsletter/src/newsletter:types",
+        "//newsletter/src/newsletter/collection:instructions",
+    ],
+)
+
+py_library(
+    name = "smoke_wheel",
+    srcs = ["smoke_wheel.py"],
+    imports = [".."],
+    deps = ["//newsletter/src/newsletter:cli"],
+)
+
+py_library(
+    name = "trigger_run",
+    srcs = ["trigger_run.py"],
+    imports = [".."],
+)
+
+py_library(
+    name = "script_smoke_http",
+    srcs = ["smoke_http.py"],
+    imports = ["."],
+)
+
+py_library(
+    name = "script_smoke_codex_startup",
+    srcs = ["smoke_codex_startup.py"],
+    imports = ["."],
+)
+
+pytest_test(
+    name = "smoke_http_test",
+    srcs = ["//tools/bazel/python:newsletter_smoke_test.py"],
+    args = ["$(rootpath //tools/bazel/python:newsletter_smoke_test.py)"],
+    config = "//newsletter:pyproject.toml",
+    data = ["//tools/bazel/python:noto_cjk_font"],
+    env = {
+        "BAZEL_COPY_WORKSPACE": "1",
+        "BAZEL_CHILD_PYTHON": "1",
+        "NEWSLETTER_SMOKE_MODULE": "smoke_http",
+        "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)",
+    },
+    imports = [".."],
+    deps = [
+        ":script_smoke_http",
+        "//newsletter/src/newsletter:library",
+    ],
+)
+
+pytest_test(
+    name = "smoke_codex_startup_test",
+    srcs = ["//tools/bazel/python:newsletter_smoke_test.py"],
+    args = ["$(rootpath //tools/bazel/python:newsletter_smoke_test.py)"],
+    config = "//newsletter:pyproject.toml",
+    data = ["//tools/bazel/python:noto_cjk_font"],
+    env = {
+        "BAZEL_COPY_WORKSPACE": "1",
+        "BAZEL_CHILD_PYTHON": "1",
+        "NEWSLETTER_SMOKE_MODULE": "smoke_codex_startup",
+        "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)",
+    },
+    imports = [".."],
+    deps = [
+        ":script_smoke_codex_startup",
+        "//newsletter/src/newsletter:library",
+    ],
+)
+
+py_library(
+    name = "script_smoke_wheel",
+    srcs = ["smoke_wheel.py"],
+    imports = ["."],
+)
+
+pytest_test(
+    name = "wheel_smoke_test",
+    srcs = ["//tools/bazel/python:newsletter_wheel_smoke.py"],
+    args = ["$(rootpath //tools/bazel/python:newsletter_wheel_smoke.py)"],
+    config = "//newsletter:pyproject.toml",
+    data = [
+        "//newsletter:MANIFEST.in",
+        "//newsletter:image_dependency_layer",
+        "//newsletter:source_distribution",
+        "//newsletter:wheel",
+        "//newsletter:wheel_files",
+        "//packages/model-router-client/python:wheel",
+        "//proto:python_wheel",
+        "//tools/bazel/python:noto_cjk_font",
+    ],
+    env = {
+        "NEWSLETTER_PROJECT": "$(rootpath //newsletter:pyproject.toml)",
+        "NEWSLETTER_WHEEL": "$(rootpath //newsletter:wheel)",
+        "NEWSLETTER_SDIST": "$(rootpath //newsletter:source_distribution)",
+        "NEWSLETTER_DEPENDENCIES": "$(rootpath //newsletter:image_dependency_layer)",
+        "NEWSLETTER_PROTO_WHEEL": "$(rootpath //proto:python_wheel)",
+        "NEWSLETTER_CLIENT_WHEEL": "$(rootpath //packages/model-router-client/python:wheel)",
+        "NEWSLETTER_CHART_FONT": "$(rootpath //tools/bazel/python:noto_cjk_font)",
+    },
+    deps = [
+        ":script_smoke_wheel",
+        "@python_deps//packaging",
+    ],
+)
+
+py_binary(
+    name = "evaluate_prompts",
+    srcs = ["evaluate_prompts.py"],
+    legacy_create_init = False,
+    main = "evaluate_prompts.py",
+    deps = ["//newsletter/src/newsletter:library"],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)

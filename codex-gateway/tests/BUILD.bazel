@@ -1,0 +1,198 @@
+load("@rules_python//python:defs.bzl", "py_library")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/python:tests.bzl", "unittest_test")
+
+package(default_visibility = ["//codex-gateway:__subpackages__"])
+
+py_library(
+    name = "auth_fixtures",
+    srcs = ["auth_fixtures.py"],
+    imports = [".."],
+    deps = [
+        "//codex-gateway/src/codex_gateway:access",
+        "@python_deps//cryptography",
+        "@python_deps//pyjwt",
+    ],
+)
+
+py_library(
+    name = "image_probe",
+    srcs = ["image_probe.py"],
+    imports = [".."],
+    deps = [
+        "//codex-gateway/src/codex_gateway:app",
+        "//codex-gateway/src/codex_gateway:modelrouter",
+        "//proto/modelrouter/inference/v1:python",
+        "@python_deps//cryptography",
+        "@python_deps//pyjwt",
+    ],
+)
+
+py_library(
+    name = "model_fixtures",
+    srcs = ["model_fixtures.py"],
+    imports = [".."],
+    deps = [
+        "//codex-gateway/src/codex_gateway:modelrouter",
+        "//codex-gateway/src/codex_gateway:runtime",
+        "//proto/modelrouter/inference/v1:python",
+    ],
+)
+
+unittest_test(
+    name = "test_access",
+    size = "small",
+    srcs = ["test_access.py"],
+    data = ["//codex-gateway:pyproject.toml"],
+    imports = [
+        ".",
+        "..",
+        "../src",
+    ],
+    modules = ["tests.test_access"],
+    deps = [
+        ":auth_fixtures",
+        ":model_fixtures",
+        "//codex-gateway/src/codex_gateway:app",
+        "@python_deps//cryptography",
+        "@python_deps//httpx",
+        "@python_deps//pyjwt",
+    ],
+)
+
+unittest_test(
+    name = "test_failure_errors",
+    size = "small",
+    srcs = ["test_failure_errors.py"],
+    data = ["//codex-gateway:pyproject.toml"],
+    imports = [
+        ".",
+        "..",
+        "../src",
+    ],
+    modules = ["tests.test_failure_errors"],
+    deps = [
+        "//codex-gateway/src/codex_gateway:model_events",
+        "//codex-gateway/src/codex_gateway:runtime",
+        "@python_deps//openai_codex",
+    ],
+)
+
+unittest_test(
+    name = "test_gateway",
+    size = "small",
+    srcs = ["test_gateway.py"],
+    data = ["//codex-gateway:pyproject.toml"],
+    imports = [
+        ".",
+        "..",
+        "../src",
+    ],
+    modules = ["tests.test_gateway"],
+    deps = [
+        ":auth_fixtures",
+        ":model_fixtures",
+        "//codex-gateway/src/codex_gateway:_launch",
+        "//codex-gateway/src/codex_gateway:app",
+        "//codex-gateway/src/codex_gateway:modelrouter",
+        "//codex-gateway/src/codex_gateway:runtime",
+        "//proto:python_runtime",
+        "//proto/modelrouter/inference/v1:python",
+        "@python_deps//httpx",
+        "@python_deps//openai_codex_cli_bin",
+    ],
+)
+
+unittest_test(
+    name = "test_home",
+    size = "small",
+    srcs = ["test_home.py"],
+    data = ["//codex-gateway:pyproject.toml"],
+    imports = [
+        ".",
+        "..",
+        "../src",
+    ],
+    modules = ["tests.test_home"],
+    deps = [
+        "//codex-gateway/src/codex_gateway:__main__",
+        "//codex-gateway/src/codex_gateway:package",
+    ],
+)
+
+unittest_test(
+    name = "test_modelrouter",
+    size = "small",
+    srcs = ["test_modelrouter.py"],
+    data = ["//codex-gateway:pyproject.toml"],
+    imports = [
+        ".",
+        "..",
+        "../src",
+    ],
+    modules = ["tests.test_modelrouter"],
+    deps = [
+        ":model_fixtures",
+        "//codex-gateway/src/codex_gateway:modelrouter",
+        "//codex-gateway/src/codex_gateway:runtime",
+        "//proto:python_runtime",
+        "//proto/modelrouter/inference/v1:python",
+        "@python_deps//openai_codex",
+    ],
+)
+
+unittest_test(
+    name = "test_process_cleanup",
+    size = "small",
+    srcs = ["test_process_cleanup.py"],
+    data = ["//codex-gateway:pyproject.toml"],
+    imports = [
+        ".",
+        "..",
+        "../src",
+    ],
+    modules = ["tests.test_process_cleanup"],
+    deps = [
+        "//codex-gateway/src/codex_gateway:_launch",
+        "//codex-gateway/src/codex_gateway:package",
+    ],
+)
+
+test_suite(
+    name = "tests",
+    tests = [
+        ":test_access",
+        ":test_failure_errors",
+        ":test_gateway",
+        ":test_home",
+        ":test_modelrouter",
+        ":test_process_cleanup",
+    ],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)

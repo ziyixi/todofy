@@ -8,7 +8,7 @@ normal browser cache/profile.
 
 ```sh
 bazel test //tasks/web:browser_tests
-bazel test //website:browser_tests
+bazel test //website/tests/e2e:tests
 bazel test //recall/extension:browser_tests
 ```
 

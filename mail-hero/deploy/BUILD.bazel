@@ -1,6 +1,6 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library", "js_test")
 load("@npm//website:tsx/package_json.bzl", tsx = "bin")
-load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files")
 
 package(default_visibility = ["//mail-hero:__subpackages__"])
 
@@ -8,9 +8,9 @@ js_library(
     name = "configure-webhook",
     srcs = ["configure-webhook.mjs"],
     deps = [
-        "//mail-hero/cloudflare:native_api-common",
-        "//mail-hero/cloudflare:native_api-endpoints",
-        "//mail-hero/cloudflare:native_security",
+        "//mail-hero/cloudflare/src:native_api-common",
+        "//mail-hero/cloudflare/src:native_api-endpoints",
+        "//mail-hero/cloudflare/src:native_security",
     ],
 )
 
@@ -47,10 +47,10 @@ tsx.tsx_test(
         ":source_cloudflare_admin_py",
         ":source_deploy_vars_mjs",
         "//mail-hero:config",
-        "//mail-hero/cloudflare:entry_metadata",
         "//mail-hero/cloudflare:node_modules/wrangler",
         "//mail-hero/cloudflare:package_metadata",
-        "//mail-hero/cloudflare:test_config_sources",
+        "//mail-hero/cloudflare/src:entry_metadata",
+        "//mail-hero/cloudflare/test:test_config_sources",
     ],
 )
 
@@ -118,6 +118,7 @@ js_library(
     visibility = [
         "//mail-hero:__subpackages__",
         "//tools/cloud-config:__pkg__",
+        "//tools/cloud-config/tests:__pkg__",
     ],
     deps = ["//tools/cloud-config:worker-secrets"],
 )
@@ -134,22 +135,7 @@ js_library(
     deps = [],
 )
 
-filegroup(
-    name = "source_audit_files",
-    srcs = glob(
-        [
-            "*",
-            "test/**",
-        ],
-        allow_empty = True,
-        exclude = SOURCE_AUDIT_EXCLUDES,
-    ) + glob(
-        [
-            ".env.example",
-            ".env.*.example",
-            ".dev.vars.example",
-        ],
-        allow_empty = True,
-    ),
-    visibility = ["//visibility:public"],
-)
+source_audit_files(patterns = [
+    "*",
+    "test/**",
+])
