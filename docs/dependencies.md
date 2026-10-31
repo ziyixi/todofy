@@ -7,12 +7,15 @@ imports those locks for builds and tests. Third-party source is downloaded with 
 | --- | --- | --- |
 | Node | Root pnpm catalog, Node 26.9.0, pnpm 11.25.0 | `pnpm-lock.yaml` |
 | Python | Root uv workspace/constraints, Python 3.14.7 | `uv.lock` |
-| Go API linter | Its existing `go.mod` | `go.sum` |
+| Go | Root `go.mod`, Go 1.27.1 in `MODULE.bazel` | Root `go.sum` |
 | Bazel and rules | `.bazelversion`, `MODULE.bazel` | `MODULE.bazel.lock` |
 
 Node members use `catalog:` for external packages and `workspace:*` for shared repository packages. Python members
 declare only the dependencies/extras they need. Do not add member lock files. The Python Worker retains its existing
 `pylock.toml` runtime SDK contract; the VPS executor alone owns the subscribed Codex runtime.
+
+Go packages share the root module `github.com/ziyixi/todofy`. Each package's BUILD declares its libraries, binaries
+and tests; the root Bazel module imports the shared dependency manifest with `go_deps.from_file`.
 
 ## Build and check
 
@@ -46,6 +49,9 @@ providers directly. Release-tool installation disables lifecycle scripts and doe
 For Node, edit the catalog and update `pnpm-lock.yaml` with pnpm. For Python, edit the root constraint and run
 `uv lock`. Review the lock diff and run the affected Bazel checks. Keep member dependency lists accurate rather than
 installing everything into every application.
+
+For Go, update the root `go.mod` and `go.sum` together and run the affected Bazel targets. The API linter also
+requires its compiled Google API annotations to match `proto/buf.lock`, checked by `bazel test //proto:api_lint_test`.
 
 For Bazel/rule upgrades, update the explicit pin, refresh with `bazel mod deps --lockfile_mode=update`, and commit the
 module lock. Ordinary builds use `--lockfile_mode=error`. Browser/runtime executable downloads and OCI bases retain

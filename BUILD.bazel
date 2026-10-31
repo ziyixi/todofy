@@ -8,6 +8,8 @@ exports_files([
     ".python-version",
     "MODULE.bazel",
     "MODULE.bazel.lock",
+    "go.mod",
+    "go.sum",
     "package.json",
     "pnpm-lock.yaml",
     "pnpm-workspace.yaml",

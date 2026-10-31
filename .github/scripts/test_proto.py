@@ -18,8 +18,8 @@ Repository audit checks of workspace wiring and native proto dependency declarat
 - Sources: a .proto file holds no invisible character but the space and the line feed (no other Unicode space,
   line or paragraph separator, control or format character): a pattern writes one as a \\u escape, so a reviewer
   sees it and every tool counts the same lines.
-- api-linter: one exact version, in the Go tool module proto/tools/api-linter only (go.mod pins it and
-  the Go toolchain, go.sum every checksum); Bazel builds it from that module and checks its embedded annotations against the locked descriptor image.
+- api-linter: one exact version in the shared root Go module (go.mod pins it and the Go toolchain,
+  go.sum every checksum); Bazel builds it and checks its embedded annotations against the locked descriptor image.
 """
 
 import ast
@@ -63,7 +63,7 @@ RELATIVE_IMPORT = re.compile(r"""(?:\bfrom|\bimport)\s*\(?\s*['"](\.\.?/[^'"]+)[
 EXACT = re.compile(r"\d+\.\d+\.\d+")
 SKIP_PARTS = {"node_modules", ".venv", ".venv-workers", "python_modules", ".wrangler"}
 API_LINTER = "github.com/googleapis/api-linter/v2"
-LINTER_MODULE = PROTO / "tools" / "api-linter"
+LINTER_TOOLS = PROTO / "tools" / "api-linter"
 WORKFLOW = REPO / ".github" / "workflows" / "ci.yml"
 
 
@@ -377,7 +377,7 @@ class OneVersion(unittest.TestCase):
 
 class ApiLinter(unittest.TestCase):
     def setUp(self):
-        self.go_mod = (LINTER_MODULE / "go.mod").read_text()
+        self.go_mod = (REPO / "go.mod").read_text()
 
     def build_rule(self, build: Path, kind: str, name: str) -> dict[str, ast.expr]:
         calls = [
@@ -394,7 +394,16 @@ class ApiLinter(unittest.TestCase):
         self.assertEqual(len(calls), 1, f"{build}: expected one {kind} named {name}")
         return {item.arg: item.value for item in calls[0].keywords}
 
-    def test_one_exact_version_and_toolchain_in_the_tool_module(self):
+    def test_one_exact_version_and_toolchain_in_the_root_module(self):
+        self.assertIn("module github.com/ziyixi/todofy\n", self.go_mod)
+        self.assertEqual(
+            sorted(
+                str(path.relative_to(REPO))
+                for path in tracked("*")
+                if path.name in {"go.mod", "go.sum"}
+            ),
+            ["go.mod", "go.sum"],
+        )
         self.assertIn(f"tool {API_LINTER}/cmd/api-linter\n", self.go_mod)
         versions = re.findall(
             rf"^\s*{re.escape(API_LINTER)} (v\S+)", self.go_mod, re.MULTILINE
@@ -406,18 +415,22 @@ class ApiLinter(unittest.TestCase):
             r"(?m)^toolchain go\d+\.\d+\.\d+$",
             "pin the Go toolchain exactly",
         )
-        go_sum = (LINTER_MODULE / "go.sum").read_text()
+        go_sum = (REPO / "go.sum").read_text()
         self.assertIn(f"{API_LINTER} {versions[0]} h1:", go_sum)
         self.assertIn(f"{API_LINTER} {versions[0]}/go.mod h1:", go_sum)
 
-    def test_bazel_uses_the_pinned_linter_module(self):
+    def test_bazel_uses_the_shared_root_go_module(self):
         module = (REPO / "MODULE.bazel").read_text()
-        self.assertIn('go_mod = "//proto/tools/api-linter:go.mod"', module)
-        build = (LINTER_MODULE / "BUILD.bazel").read_text()
+        self.assertIn('go_mod = "//:go.mod"', module)
+        toolchain = re.search(r"(?m)^toolchain go(\d+\.\d+\.\d+)$", self.go_mod)[1]
+        self.assertIn(f'go_sdk.download(version = "{toolchain}")', module)
+        build = (LINTER_TOOLS / "BUILD.bazel").read_text()
         self.assertIn(
             "@com_github_googleapis_api_linter_v2//cmd/api-linter:api-linter", build
         )
-        self.assertIn('"go.sum"', build)
+        root_build = (REPO / "BUILD.bazel").read_text()
+        self.assertIn('"go.mod"', root_build)
+        self.assertIn('"go.sum"', root_build)
 
     def test_the_linter_checks_its_annotations_against_the_locked_descriptor(self):
         runner = (PROTO / "tools/bazel_checks.py").read_text()
@@ -439,7 +452,7 @@ class ApiLinter(unittest.TestCase):
         data = ast.literal_eval(rule["data"])
         self.assertIn("//proto:image", data)
         self.assertIn("//proto/tools/api-linter/googleapis:googleapis-check", data)
-        check = (LINTER_MODULE / "googleapis/main.go").read_text()
+        check = (LINTER_TOOLS / "googleapis/main.go").read_text()
         self.assertIn(
             '_ "google.golang.org/genproto/googleapis/api/annotations"', check
         )
@@ -453,7 +466,7 @@ class ApiLinter(unittest.TestCase):
         offenders = []
         for path in tracked("*"):
             skipped = (
-                path.is_relative_to(LINTER_MODULE) or path == Path(__file__).absolute()
+                path.is_relative_to(LINTER_TOOLS) or path == Path(__file__).absolute()
             )
             if skipped or path.suffix in {".md", ".sum"} or not path.is_file():
                 continue

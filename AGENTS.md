@@ -46,7 +46,7 @@
 
 - Cloudflare owner API 遵循 [proto 规则与 HTTP APIs](proto/README.md#http-apis)：IDL、固定版本的工具链和手写运行时只在 `proto/`。
   使用共享转码器、类型化客户端和 wire JSON profile，不另写重复接口类型或默认 ProtoJSON。
-- Node 外部依赖版本统一在根 pnpm catalog，Python 统一在根 pyproject/uv.lock；不新增成员锁文件。
+- Node 外部依赖版本统一在根 pnpm catalog，Python 统一在根 pyproject/uv.lock，Go 统一在根 go.mod/go.sum；不新增成员锁文件。
   Node 26 与 Python 3.14 的解释器和 workspace 安装命令见 [依赖管理](docs/dependencies.md)。
 - 生成代码不提交；安装与检查前脚本运行 `ensure.mjs`，Python 由构建后端生成。应用不自带 protobuf runtime；
   通过 `@ziyixi/proto/protobuf` 使用唯一版本。新增语言/包使用者更新对应的包级 Bazel 依赖。

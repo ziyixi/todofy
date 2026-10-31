@@ -36,7 +36,7 @@ The repository imports third-party dependencies rather than vendoring their sour
 
 - Node versions live in the root pnpm catalog and `pnpm-lock.yaml`.
 - Python versions live in the root uv workspace and `uv.lock`.
-- The Go API linter keeps its module file and sums.
+- Go packages share the root `go.mod` and `go.sum`; the Go SDK is pinned in `MODULE.bazel`.
 - Bazel/rules/toolchain versions live in `.bazelversion`, `MODULE.bazel` and `MODULE.bazel.lock`.
 - Downloaded executables, browsers, runtime archives and OCI bases have fixed checksums/digests.
 
