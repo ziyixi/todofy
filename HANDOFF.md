@@ -9,13 +9,14 @@ Documentation entrypoints are in [docs/README](docs/README.md). Historical waiti
 Application sources, private proto, deployment configuration and detailed evidence stay in that repository.
 Parent changes supply shared tools/dependencies, a protected private publisher and optional Home registration.
 
-The initial integration is on main and verified below. The current follow-up separates manual `Private operations`
-from public build/release selection; it reuses the exact source's green gate and the existing private release lock.
-Its local routing and source-gate regressions passed. Owner confirmed promotion and rollout; preserve that authorization.
+The integration and main-only `Private operations` entry are on main after exact-source green checks. Manual
+operations reuse prior green source evidence and the existing protected private release lock without invoking
+public build selection. Owner confirmed promotion and rollout; preserve that authorization.
 
-The private read-only infrastructure plan has 11 creates and no updates/deletes; no private apply, deployed API
-acceptance or bulk collection has run. After this follow-up's branch CI, promote the same source and continue the
-private plan/apply, actual identity recording, image/Worker publication, initial installation and data acceptance.
+The private reviewed infrastructure applied 11 creates with no updates/deletes, followed by a clean plan. The actual
+owner audience is recorded privately. Check and promote that config source, then continue image/Worker publication,
+initial installation, exact resource registration and deployed API/bulk-data acceptance. No private application
+publication, deployed API acceptance or bulk collection has run yet.
 The private handoff owns operational details. Source-only API probes and local checks are not deployment evidence.
 
 ## Latest verified release
