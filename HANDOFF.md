@@ -5,18 +5,14 @@ Documentation entrypoints are in [docs/README](docs/README.md). Historical waiti
 
 ## Current work
 
-`codex/newsletter-config-ci-noop` addresses a post-acceptance configuration workflow failure: documentation-only
-Service CI published no Newsletter image, but its follow-up compared current configuration with unrelated history.
-Compatibility now compares against the latest tested main source, while the selected image keeps its actual
-publication SHA. Post-CI validation remains so previously deferred configuration can recover. Direct pushes,
-candidate-image validation and publication checks remain. Native publication regressions and Ruff checks passed;
-branch/main CI, the actual follow-up and same-source reconciliation remain pending.
+No active rollout. Separate business and recovery acceptance remains listed below.
 
 ## Latest verified release
 
-Bazel package ownership `eb3a983c`: implementation targets now live in their owning packages, while directories keep
-their main interfaces. Full branch/main checks, independent source/test/artifact comparisons, application publications,
-VPS rollout, Website live verification, Newsletter configuration publication and matching reconciliation passed.
+Build ownership and configuration publishing `8f5b83fb`: implementation targets live in their owning packages,
+while directories keep their main interfaces. Full migration checks, independent source/test/artifact comparisons,
+application publications, VPS rollout and Website live verification passed. The final configuration fix also passed
+affected branch/main checks, actual validation/publication using the existing image and same-source reconciliation.
 Application runtime sources, dependency locks, credentials, business content and installed owner extensions remain unchanged.
 
 See the [October 31 record](docs/history/handoff-2026-10-31.md#bazel-package-ownership-and-shared-build-recipes).
