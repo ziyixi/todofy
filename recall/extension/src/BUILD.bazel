@@ -1,0 +1,239 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//tools/bazel:js.bzl", "copied_source_files")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//recall:__subpackages__"])
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//recall:__subpackages__"],
+)
+
+copied_source_files(
+    name = "application_sources_srcs",
+    srcs = glob(
+        ["**"],
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+copied_source_files(
+    name = "types_srcs",
+    srcs = glob(
+        ["*.ts"],
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+copied_source_files(
+    name = "lint_sources",
+    srcs = glob(
+        ["**/*.ts"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+)
+
+js_library(
+    name = "src__context",
+    srcs = [":context.ts"],
+    deps = [],
+)
+
+js_library(
+    name = "src__page",
+    srcs = [":page.ts"],
+    deps = [
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+)
+
+js_library(
+    name = "src__db",
+    srcs = [":db.ts"],
+    deps = [":src__page"],
+)
+
+js_library(
+    name = "src__limits",
+    srcs = [":limits.ts"],
+    deps = [],
+)
+
+js_library(
+    name = "src__store",
+    srcs = [":store.ts"],
+    deps = [
+        ":src__limits",
+        "//recall/shared:denylist",
+    ],
+)
+
+js_library(
+    name = "src__messages",
+    srcs = [":messages.ts"],
+    deps = [
+        ":src__store",
+        "//proto/recall/ingest/v1:ts",
+    ],
+)
+
+js_library(
+    name = "src__visits",
+    srcs = [":visits.ts"],
+    deps = [
+        ":src__context",
+        ":src__db",
+        ":src__limits",
+        ":src__page",
+        "//proto/recall/ingest/v1:ts",
+    ],
+)
+
+js_library(
+    name = "src__browser",
+    srcs = [
+        ":browser.ts",
+        ":diagnostic.ts",
+        ":settings.ts",
+        ":upload.ts",
+    ],
+    deps = [
+        ":src__context",
+        ":src__db",
+        ":src__limits",
+        ":src__messages",
+        ":src__page",
+        ":src__store",
+        ":src__visits",
+        "//proto/recall/ingest/v1:ts",
+        "//recall/shared:denylist",
+    ],
+)
+
+js_library(
+    name = "src__page-text",
+    srcs = [":page-text.ts"],
+    deps = ["//recall/shared:url"],
+)
+
+js_library(
+    name = "src__capture-script",
+    srcs = [":capture-script.ts"],
+    deps = [":src__page-text"],
+)
+
+js_library(
+    name = "src__focus",
+    srcs = [":focus.ts"],
+    deps = [
+        ":src__browser",
+        ":src__context",
+        ":src__db",
+        ":src__limits",
+        ":src__page",
+        ":src__store",
+        ":src__visits",
+    ],
+)
+
+js_library(
+    name = "src__screenshot",
+    srcs = [":screenshot.ts"],
+    deps = ["//recall/shared:url"],
+)
+
+js_library(
+    name = "src__capture",
+    srcs = [":capture.ts"],
+    deps = [
+        ":src__browser",
+        ":src__context",
+        ":src__db",
+        ":src__focus",
+        ":src__limits",
+        ":src__page",
+        ":src__page-text",
+        ":src__screenshot",
+        ":src__store",
+        ":src__visits",
+        "//proto/recall/ingest/v1:ts",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+)
+
+js_library(
+    name = "src__options-view",
+    srcs = [":options-view.ts"],
+    deps = [
+        ":src__limits",
+        ":src__messages",
+        "//recall/shared:diagnostic",
+    ],
+)
+
+js_library(
+    name = "src__options",
+    srcs = [":options.ts"],
+    deps = [
+        ":src__limits",
+        ":src__messages",
+        ":src__options-view",
+        "//recall/shared:diagnostic",
+    ],
+)
+
+js_library(
+    name = "src__probe-script",
+    srcs = [":probe-script.ts"],
+    deps = [":src__page-text"],
+)
+
+js_library(
+    name = "src__update",
+    srcs = [":update.ts"],
+    deps = [":src__context"],
+)
+
+js_library(
+    name = "src__sw",
+    srcs = [":sw.ts"],
+    deps = [
+        ":src__browser",
+        ":src__capture",
+        ":src__context",
+        ":src__db",
+        ":src__focus",
+        ":src__limits",
+        ":src__messages",
+        ":src__store",
+        ":src__update",
+    ],
+)
+
+js_library(
+    name = "manifest_asset",
+    srcs = [":manifest.json"],
+)
+
+js_library(
+    name = "build_assets",
+    srcs = glob(
+        [
+            "*.html",
+            "*.css",
+        ],
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+)

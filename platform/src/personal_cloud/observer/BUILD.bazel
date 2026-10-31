@@ -1,0 +1,169 @@
+load("@rules_python//python:defs.bzl", "py_library")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//platform:__subpackages__"])
+
+py_library(
+    name = "package",
+    srcs = ["__init__.py"],
+    imports = ["../.."],
+    visibility = [
+        "//platform:__subpackages__",
+        "//tools/platform-build:__pkg__",
+    ],
+    deps = ["//platform/src/personal_cloud:package"],
+)
+
+py_library(
+    name = "cli",
+    srcs = ["cli.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        ":state",
+        ":systemd_snapshot",
+        ":transport",
+    ],
+)
+
+py_library(
+    name = "collector",
+    srcs = ["collector.py"],
+    imports = ["../.."],
+    deps = [
+        ":metrics",
+        ":newsletter_outcomes",
+        ":package",
+        ":provenance",
+        ":systemd_snapshot",
+        ":transport",
+        "//platform/src/personal_cloud/deployment:kubernetes",
+        "//proto:python_runtime",
+        "//proto/fleet/telemetry/v1:python",
+        "//proto/platform/runtime/v1:python",
+    ],
+)
+
+py_library(
+    name = "metrics",
+    srcs = ["metrics.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        "//platform/src/personal_cloud/deployment:kubernetes",
+        "@python_deps//kubernetes",
+        "@python_deps//urllib3",
+    ],
+)
+
+py_library(
+    name = "newsletter_outcomes",
+    srcs = ["newsletter_outcomes.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        ":transport",
+        "//proto:python_runtime",
+        "//proto/fleet/telemetry/v1:python",
+    ],
+)
+
+py_library(
+    name = "provenance",
+    srcs = ["provenance.py"],
+    imports = ["../.."],
+    deps = [":package"],
+)
+
+py_library(
+    name = "state",
+    srcs = ["state.py"],
+    imports = ["../.."],
+    deps = [
+        ":collector",
+        ":package",
+        ":transport",
+    ],
+)
+
+py_library(
+    name = "systemd",
+    srcs = ["systemd.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        ":transport",
+        "@python_deps//jeepney",
+    ],
+)
+
+py_library(
+    name = "systemd_snapshot",
+    srcs = ["systemd_snapshot.py"],
+    imports = ["../.."],
+    visibility = [
+        "//platform:__subpackages__",
+        "//tools/platform-build:__pkg__",
+    ],
+    deps = [
+        ":package",
+        ":systemd",
+        ":transport",
+        "//platform/src/personal_cloud/status_daemon:config",
+        "//proto:python_runtime",
+        "//proto/fleet/telemetry/v1:python",
+    ],
+)
+
+py_library(
+    name = "transport",
+    srcs = ["transport.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        "@python_deps//httpx",
+    ],
+)
+
+py_library(
+    name = "library",
+    deps = [
+        ":cli",
+        ":collector",
+        ":metrics",
+        ":newsletter_outcomes",
+        ":package",
+        ":provenance",
+        ":state",
+        ":systemd",
+        ":systemd_snapshot",
+        ":transport",
+    ],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)

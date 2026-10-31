@@ -1,6 +1,8 @@
 """Package-scoped code generation from real proto_library descriptor closures."""
 
+load("@aspect_rules_js//js:defs.bzl", "js_library")
 load("@protobuf//bazel/common:proto_info.bzl", "ProtoInfo")
+load("@rules_python//python:defs.bzl", "py_library")
 
 def _generate_impl(ctx):
     outputs = []
@@ -104,3 +106,36 @@ proto_source_files = rule(
     implementation = _proto_sources_impl,
     attrs = {"protos": attr.label_list(providers = [ProtoInfo], mandatory = True)},
 )
+
+def ts_proto_library(name, outs, proto_package, protos, sources, deps):
+    """Generate one declared TypeScript package and expose its exact dependencies."""
+    proto_codegen(
+        name = name + "_generate",
+        outs = outs,
+        format = "ts",
+        proto_package = proto_package,
+        protos = protos,
+        sources = sources,
+    )
+    js_library(
+        name = name,
+        types = [":" + name + "_generate"],
+        deps = deps,
+    )
+
+def python_proto_library(name, outs, proto_package, protos, sources, deps, srcs = []):
+    """Generate one declared Python package inside the existing runtime namespace."""
+    proto_codegen(
+        name = name + "_generate",
+        outs = outs,
+        format = "python",
+        proto_package = proto_package,
+        protos = protos,
+        sources = sources,
+    )
+    py_library(
+        name = name,
+        srcs = [":" + name + "_generate"] + srcs,
+        imports = [".."],
+        deps = deps,
+    )

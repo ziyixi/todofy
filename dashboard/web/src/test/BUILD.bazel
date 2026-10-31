@@ -1,0 +1,144 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@npm//dashboard/web:vitest/package_json.bzl", vitest = "bin")
+load("//tools/bazel:js.bzl", "copied_source_files", "proto_vitest_test")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//dashboard:__subpackages__"])
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//dashboard:__subpackages__"],
+)
+
+copied_source_files(
+    name = "application_sources_srcs",
+    srcs = [
+        "fixtures.test.ts",
+        "fixtures.ts",
+        "harness.tsx",
+        "no-external.test.ts",
+        "setup.ts",
+    ],
+)
+
+copied_source_files(
+    name = "typecheck_project_srcs",
+    srcs = [
+        "fixtures.test.ts",
+        "fixtures.ts",
+        "harness.tsx",
+        "no-external.test.ts",
+        "setup.ts",
+    ],
+)
+
+copied_source_files(
+    name = "lint_sources",
+    srcs = [
+        "fixtures.test.ts",
+        "fixtures.ts",
+        "harness.tsx",
+        "no-external.test.ts",
+        "setup.ts",
+    ],
+)
+
+COMMON_TEST_DATA_3 = [
+    "//dashboard/web:package_json",
+    ":fixtures.ts",
+    ":setup.ts",
+    "//dashboard/web:test_config",
+    "//dashboard/web:node_modules/@testing-library/dom",
+    "//dashboard/web:node_modules/@testing-library/user-event",
+    "//dashboard/web:node_modules/@vitejs/plugin-react",
+    "//dashboard/web:node_modules/jsdom",
+    "//dashboard/web:node_modules/vite",
+    "//:node_modules/vitest",
+]
+
+COMMON_TEST_DEPS_3 = [
+    "//dashboard/web:node_modules/@testing-library/jest-dom",
+    "//dashboard/web:node_modules/@testing-library/react",
+    "//dashboard/web:node_modules/vitest",
+]
+
+js_library(
+    name = "source_test_setup_ts",
+    srcs = [":setup.ts"],
+)
+
+proto_vitest_test(
+    name = "src__test__fixtures_test",
+    config = "//dashboard/web:test_config",
+    data = COMMON_TEST_DATA_3,
+    project = "dashboard/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":fixtures.test.ts"],
+    deps = [
+        "//contracts:ops-v1/fixtures/GuardState/normal.json_data",
+        "//contracts:ops-v1/fixtures/GuardState/shed-mail-hero.json_data",
+        "//contracts:ops-v1/fixtures/GuardState/shed-todofy.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/codex-gateway-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/mail-hero-degraded.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/mail-hero-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/todofy-degraded.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/todofy-ok.json_data",
+        "//dashboard/web:node_modules/@testing-library/jest-dom",
+        "//dashboard/web:node_modules/@testing-library/react",
+        "//dashboard/web:node_modules/vitest",
+        "//dashboard/worker/src:api_types_web",
+        "//dashboard/worker/src:registry_web",
+        "//proto/dashboard/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__test__no-external_test",
+    config = "//dashboard/web:test_config",
+    data = [
+        ":setup.ts",
+        "//:node_modules/vitest",
+        "//dashboard/web:application_sources",
+        "//dashboard/web:node_modules/@testing-library/dom",
+        "//dashboard/web:node_modules/@testing-library/user-event",
+        "//dashboard/web:node_modules/@vitejs/plugin-react",
+        "//dashboard/web:node_modules/jsdom",
+        "//dashboard/web:node_modules/vite",
+        "//dashboard/web:package_json",
+        "//dashboard/web:source_index_html",
+        "//dashboard/web:test_config",
+    ],
+    project = "dashboard/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":no-external.test.ts"],
+    deps = COMMON_TEST_DEPS_3,
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+)
+
+test_suite(name = "check")
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)
+
+js_library(
+    name = "source_fixtures_ts",
+    srcs = ["fixtures.ts"],
+)
+
+js_library(
+    name = "source_harness_tsx",
+    srcs = ["harness.tsx"],
+)

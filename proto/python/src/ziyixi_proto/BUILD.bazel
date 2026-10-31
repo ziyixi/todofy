@@ -1,6 +1,6 @@
 load("@rules_python//python:defs.bzl", "py_library")
-load("//proto/bazel:codegen.bzl", "proto_codegen", "python_namespace")
-load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//proto/bazel:codegen.bzl", "python_namespace", "python_proto_library")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -57,81 +57,53 @@ py_library(
     imports = [".."],
 )
 
-proto_codegen(
-    name = "common_errors_v1_py_generate",
+python_proto_library(
+    name = "common_errors_v1_py",
     outs = ["common/errors/v1/errors_pb.py"],
-    format = "python",
     proto_package = "common.errors.v1",
     protos = ["//proto/common/errors/v1:proto"],
     sources = ["common/errors/v1/errors.proto"],
-)
-
-py_library(
-    name = "common_errors_v1_py",
-    srcs = [":common_errors_v1_py_generate"],
-    imports = [".."],
     deps = [":runtime"],
 )
 
-proto_codegen(
-    name = "fleet_telemetry_v1_py_generate",
+python_proto_library(
+    name = "fleet_telemetry_v1_py",
     outs = ["fleet/telemetry/v1/host_report_pb.py"],
-    format = "python",
     proto_package = "fleet.telemetry.v1",
     protos = ["//proto/fleet/telemetry/v1:proto"],
     sources = ["fleet/telemetry/v1/host_report.proto"],
-)
-
-py_library(
-    name = "fleet_telemetry_v1_py",
-    srcs = [":fleet_telemetry_v1_py_generate"],
-    imports = [".."],
     deps = [
         ":platform_runtime_v1_py",
         ":runtime",
     ],
 )
 
-proto_codegen(
-    name = "mailhero_webhook_v1_py_generate",
+python_proto_library(
+    name = "mailhero_webhook_v1_py",
     outs = ["mailhero/webhook/v1/mail_received_pb.py"],
-    format = "python",
     proto_package = "mailhero.webhook.v1",
     protos = ["//proto/mailhero/webhook/v1:proto"],
     sources = ["mailhero/webhook/v1/mail_received.proto"],
-)
-
-py_library(
-    name = "mailhero_webhook_v1_py",
-    srcs = [":mailhero_webhook_v1_py_generate"],
-    imports = [".."],
     deps = [":runtime"],
 )
 
-proto_codegen(
-    name = "modelrouter_inference_v1_py_generate",
+python_proto_library(
+    name = "modelrouter_inference_v1_py",
     outs = [
         "modelrouter/inference/v1/console_pb.py",
         "modelrouter/inference/v1/inference_pb.py",
     ],
-    format = "python",
     proto_package = "modelrouter.inference.v1",
     protos = ["//proto/modelrouter/inference/v1:proto"],
     sources = [
         "modelrouter/inference/v1/console.proto",
         "modelrouter/inference/v1/inference.proto",
     ],
-)
-
-py_library(
-    name = "modelrouter_inference_v1_py",
-    srcs = [":modelrouter_inference_v1_py_generate"],
-    imports = [".."],
     deps = [":runtime"],
 )
 
-proto_codegen(
-    name = "newsletter_ui_v1_py_generate",
+python_proto_library(
+    name = "newsletter_ui_v1_py",
     outs = [
         "newsletter/ui/v1/backup_status_pb.py",
         "newsletter/ui/v1/edition_pb.py",
@@ -141,7 +113,6 @@ proto_codegen(
         "newsletter/ui/v1/run_pb.py",
         "newsletter/ui/v1/source_catalog_pb.py",
     ],
-    format = "python",
     proto_package = "newsletter.ui.v1",
     protos = ["//proto/newsletter/ui/v1:proto"],
     sources = [
@@ -153,39 +124,25 @@ proto_codegen(
         "newsletter/ui/v1/run.proto",
         "newsletter/ui/v1/source_catalog.proto",
     ],
-)
-
-py_library(
-    name = "newsletter_ui_v1_py",
-    srcs = [":newsletter_ui_v1_py_generate"],
-    imports = [".."],
     deps = [":runtime"],
 )
 
-proto_codegen(
-    name = "ops_v1_py_generate",
+python_proto_library(
+    name = "ops_v1_py",
     outs = ["ops/v1/ops_pb.py"],
-    format = "python",
     proto_package = "ops.v1",
     protos = ["//proto/ops/v1:proto"],
     sources = ["ops/v1/ops.proto"],
-)
-
-py_library(
-    name = "ops_v1_py",
-    srcs = [":ops_v1_py_generate"],
-    imports = [".."],
     deps = [":runtime"],
 )
 
-proto_codegen(
-    name = "platform_runtime_v1_py_generate",
+python_proto_library(
+    name = "platform_runtime_v1_py",
     outs = [
         "platform/runtime/v1/errors_pb.py",
         "platform/runtime/v1/runtime_pb.py",
         "platform/runtime/v1/runtime_service_pb.py",
     ],
-    format = "python",
     proto_package = "platform.runtime.v1",
     protos = ["//proto/platform/runtime/v1:proto"],
     sources = [
@@ -193,23 +150,17 @@ proto_codegen(
         "platform/runtime/v1/runtime.proto",
         "platform/runtime/v1/runtime_service.proto",
     ],
-)
-
-py_library(
-    name = "platform_runtime_v1_py",
-    srcs = [":platform_runtime_v1_py_generate"],
-    imports = [".."],
     deps = [":runtime"],
 )
 
-proto_codegen(
-    name = "prototest_v1_py_generate",
+python_proto_library(
+    name = "prototest_v1_py",
+    srcs = [":test_namespace"],
     outs = [
         "prototest/v1/intent_pb.py",
         "prototest/v1/prototest_pb.py",
         "prototest/v1/rules_pb.py",
     ],
-    format = "python",
     proto_package = "prototest.v1",
     protos = ["//proto/prototest/v1:proto"],
     sources = [
@@ -217,52 +168,29 @@ proto_codegen(
         "prototest/v1/prototest.proto",
         "prototest/v1/rules.proto",
     ],
-)
-
-py_library(
-    name = "prototest_v1_py",
-    srcs = [
-        ":prototest_v1_py_generate",
-        ":test_namespace",
-    ],
-    imports = [".."],
     deps = [":runtime"],
 )
 
-proto_codegen(
-    name = "todofy_mail_v1_py_generate",
+python_proto_library(
+    name = "todofy_mail_v1_py",
     outs = ["todofy/mail/v1/mail_service_pb.py"],
-    format = "python",
     proto_package = "todofy.mail.v1",
     protos = ["//proto/todofy/mail/v1:proto"],
     sources = ["todofy/mail/v1/mail_service.proto"],
-)
-
-py_library(
-    name = "todofy_mail_v1_py",
-    srcs = [":todofy_mail_v1_py_generate"],
-    imports = [".."],
     deps = [":runtime"],
 )
 
-proto_codegen(
-    name = "todofy_report_v1_py_generate",
+python_proto_library(
+    name = "todofy_report_v1_py",
     outs = ["todofy/report/v1/report_pb.py"],
-    format = "python",
     proto_package = "todofy.report.v1",
     protos = ["//proto/todofy/report/v1:proto"],
     sources = ["todofy/report/v1/report.proto"],
-)
-
-py_library(
-    name = "todofy_report_v1_py",
-    srcs = [":todofy_report_v1_py_generate"],
-    imports = [".."],
     deps = [":runtime"],
 )
 
-proto_codegen(
-    name = "todofy_ui_v1_py_generate",
+python_proto_library(
+    name = "todofy_ui_v1_py",
     outs = [
         "todofy/ui/v1/errors_pb.py",
         "todofy/ui/v1/history_pb.py",
@@ -271,7 +199,6 @@ proto_codegen(
         "todofy/ui/v1/status_pb.py",
         "todofy/ui/v1/todofy_ui_service_pb.py",
     ],
-    format = "python",
     proto_package = "todofy.ui.v1",
     protos = ["//proto/todofy/ui/v1:proto"],
     sources = [
@@ -282,12 +209,6 @@ proto_codegen(
         "todofy/ui/v1/status.proto",
         "todofy/ui/v1/todofy_ui_service.proto",
     ],
-)
-
-py_library(
-    name = "todofy_ui_v1_py",
-    srcs = [":todofy_ui_v1_py_generate"],
-    imports = [".."],
     deps = [
         ":modelrouter_inference_v1_py",
         ":runtime",
@@ -311,19 +232,4 @@ py_library(
     ],
 )
 
-filegroup(
-    name = "source_audit_files",
-    srcs = glob(
-        ["*"],
-        allow_empty = True,
-        exclude = SOURCE_AUDIT_EXCLUDES,
-    ) + glob(
-        [
-            ".env.example",
-            ".env.*.example",
-            ".dev.vars.example",
-        ],
-        allow_empty = True,
-    ),
-    visibility = ["//visibility:public"],
-)
+source_audit_files()

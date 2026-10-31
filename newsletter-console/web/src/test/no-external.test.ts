@@ -12,7 +12,7 @@ function files(dir: string): string[] {
   })
 }
 
-const shipped = () => files(join(root, 'src')).filter((path) => !/\.test\.tsx?$|[/\\]test[/\\]/.test(path))
+const shipped = () => files(join(root, 'src')).filter((path) => !/\.test\.tsx?$|[/\\]test[/\\]/.test(relative(root, path)))
 
 describe('no external requests', () => {
   it('has no absolute URL in the shipped sources or index.html', () => {

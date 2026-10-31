@@ -1,11 +1,12 @@
 load("@aspect_rules_js//js:defs.bzl", "js_binary")
 load("@bazel_lib//lib:copy_to_directory.bzl", "copy_to_directory")
 load("@rules_python//python:defs.bzl", "py_binary", "py_test")
-load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES", "source_audit_files")
 load(":node_binary.bzl", "node_binary")
 
 exports_files(
     [
+        "tests.bzl",
         "pytest_main.py",
         "unittest_main.py",
         "pyvenv.cfg",
@@ -81,22 +82,7 @@ py_test(
     deps = ["@rules_python//python/runfiles"],
 )
 
-filegroup(
-    name = "source_audit_files",
-    srcs = glob(
-        ["*"],
-        allow_empty = True,
-        exclude = SOURCE_AUDIT_EXCLUDES,
-    ) + glob(
-        [
-            ".env.example",
-            ".env.*.example",
-            ".dev.vars.example",
-        ],
-        allow_empty = True,
-    ),
-    visibility = ["//visibility:public"],
-)
+source_audit_files()
 
 exports_files(
     ["todofy_runtime_main.py"],

@@ -1,0 +1,293 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//tools/bazel:js.bzl", "copied_source_files", "ts_source_library")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//model-router:__subpackages__"])
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//model-router:__subpackages__"],
+)
+
+copied_source_files(
+    name = "typecheck_project_srcs",
+    srcs = [
+        "backup.ts",
+        "catalog.ts",
+        "engine.ts",
+        "errors.ts",
+        "executor.ts",
+        "http.ts",
+        "index.ts",
+        "ops.ts",
+        "providers/claude.ts",
+        "providers/common.ts",
+        "providers/gemini.ts",
+        "providers/openai.ts",
+        "providers/pricing.ts",
+        "providers/usage.ts",
+        "providers/workers-ai.ts",
+        "schema.ts",
+        "store.ts",
+        "types.ts",
+    ],
+)
+
+copied_source_files(
+    name = "backup_types_srcs",
+    srcs = ["backup.ts"],
+)
+
+copied_source_files(
+    name = "application_sources_srcs",
+    srcs = glob(
+        ["**"],
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+copied_source_files(
+    name = "lint_sources",
+    srcs = glob(
+        [
+            "**/*.ts",
+            "**/*.tsx",
+        ],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+ts_source_library(
+    name = "backup",
+    srcs = [":backup.ts"],
+)
+
+ts_source_library(
+    name = "errors",
+    srcs = [":errors.ts"],
+    deps = ["//proto/ts:rpc-status"],
+)
+
+ts_source_library(
+    name = "module_group_2",
+    srcs = [
+        ":catalog.ts",
+        ":types.ts",
+    ],
+    deps = [
+        ":errors",
+        "//proto/modelrouter/inference/v1:ts",
+        "//proto/ts:protobuf",
+    ],
+)
+
+alias(
+    name = "catalog",
+    actual = ":module_group_2",
+)
+
+alias(
+    name = "types",
+    actual = ":module_group_2",
+)
+
+ts_source_library(
+    name = "store",
+    srcs = [":store.ts"],
+    deps = [
+        ":errors",
+        ":module_group_2",
+        "//proto/modelrouter/inference/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "schema",
+    srcs = [":schema.ts"],
+    deps = [
+        ":errors",
+        ":module_group_2",
+        "//model-router/worker:node_modules/@cfworker/json-schema",
+        "//proto/modelrouter/inference/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "executor",
+    srcs = [":executor.ts"],
+    deps = [
+        ":errors",
+        ":module_group_2",
+        "//proto/modelrouter/inference/v1:ts",
+        "//proto/ts:http-client",
+    ],
+)
+
+ts_source_library(
+    name = "providers_pricing",
+    srcs = [":providers/pricing.ts"],
+    deps = [":module_group_2"],
+)
+
+ts_source_library(
+    name = "providers_usage",
+    srcs = [":providers/usage.ts"],
+    deps = [
+        ":module_group_2",
+        ":providers_pricing",
+    ],
+)
+
+ts_source_library(
+    name = "providers_common",
+    srcs = [":providers/common.ts"],
+    deps = [
+        ":module_group_2",
+        ":providers_usage",
+    ],
+)
+
+ts_source_library(
+    name = "providers_claude",
+    srcs = [":providers/claude.ts"],
+    deps = [
+        ":module_group_2",
+        ":providers_common",
+        ":providers_usage",
+        "//model-router/worker:node_modules/@anthropic-ai/sdk",
+        "//proto/modelrouter/inference/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "providers_gemini",
+    srcs = [":providers/gemini.ts"],
+    deps = [
+        ":module_group_2",
+        ":providers_common",
+        ":providers_usage",
+        "//proto/modelrouter/inference/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "providers_openai",
+    srcs = [":providers/openai.ts"],
+    deps = [
+        ":module_group_2",
+        ":providers_common",
+        ":providers_usage",
+        "//proto/modelrouter/inference/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "providers_workers-ai",
+    srcs = [":providers/workers-ai.ts"],
+    deps = [
+        ":module_group_2",
+        ":providers_common",
+        ":providers_usage",
+    ],
+)
+
+ts_source_library(
+    name = "engine",
+    srcs = [":engine.ts"],
+    deps = [
+        ":backup",
+        ":errors",
+        ":executor",
+        ":module_group_2",
+        ":providers_claude",
+        ":providers_common",
+        ":providers_gemini",
+        ":providers_openai",
+        ":providers_pricing",
+        ":providers_workers-ai",
+        ":schema",
+        ":store",
+        "//proto/modelrouter/inference/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+    ],
+)
+
+ts_source_library(
+    name = "http",
+    srcs = [":http.ts"],
+    deps = [
+        ":errors",
+        ":module_group_2",
+        "//packages/edge-auth:lib",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+ts_source_library(
+    name = "ops",
+    srcs = [":ops.ts"],
+    deps = [
+        ":engine",
+        ":module_group_2",
+        ":store",
+        "//proto/ops/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "index",
+    srcs = [":index.ts"],
+    deps = [
+        ":engine",
+        ":errors",
+        ":http",
+        ":module_group_2",
+        ":ops",
+        ":store",
+    ],
+)
+
+js_library(
+    name = "lib",
+    deps = [
+        ":backup",
+        ":engine",
+        ":errors",
+        ":executor",
+        ":http",
+        ":index",
+        ":module_group_2",
+        ":ops",
+        ":providers_claude",
+        ":providers_common",
+        ":providers_gemini",
+        ":providers_openai",
+        ":providers_pricing",
+        ":providers_usage",
+        ":providers_workers-ai",
+        ":schema",
+        ":store",
+    ],
+)
+
+js_library(
+    name = "entry_metadata",
+    srcs = [":index.ts"],
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+)

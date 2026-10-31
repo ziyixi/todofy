@@ -1,0 +1,50 @@
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//platform:__subpackages__"])
+
+test_suite(
+    name = "tests",
+    tests = [
+        "//platform/tests/bootstrap:tests",
+        "//platform/tests/deployment:tests",
+        "//platform/tests/observer:tests",
+        "//platform/tests/status_daemon:tests",
+    ],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ) + [
+        "//platform/tests/bootstrap:python_sources",
+        "//platform/tests/deployment:python_sources",
+        "//platform/tests/observer:python_sources",
+        "//platform/tests/status_daemon:python_sources",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + [
+        "//platform/tests/bootstrap:source_audit_files",
+        "//platform/tests/deployment:source_audit_files",
+        "//platform/tests/observer:source_audit_files",
+        "//platform/tests/status_daemon:source_audit_files",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)

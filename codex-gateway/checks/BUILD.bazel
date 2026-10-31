@@ -1,0 +1,53 @@
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/python:tests.bzl", "ruff_test")
+
+package(default_visibility = ["//codex-gateway:__subpackages__"])
+
+ruff_test(
+    name = "ruff_check_test",
+    command = "check",
+    config = "//:pyproject.toml",
+    data = ["//codex-gateway:python_lint_inputs"],
+    paths = [
+        "codex-gateway/src",
+        "codex-gateway/tests",
+    ],
+)
+
+ruff_test(
+    name = "ruff_format_test",
+    command = "format",
+    config = "//:pyproject.toml",
+    data = ["//codex-gateway:python_lint_inputs"],
+    paths = [
+        "codex-gateway/src",
+        "codex-gateway/tests",
+    ],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)

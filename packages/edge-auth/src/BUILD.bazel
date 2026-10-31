@@ -1,0 +1,39 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//tools/bazel:js.bzl", "copied_source_files")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//packages/edge-auth:__subpackages__"])
+
+exports_files(
+    glob(
+        [
+            "*.ts",
+            "*.tsx",
+            "*.css",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//packages/edge-auth:__subpackages__"],
+)
+
+js_library(
+    name = "lib",
+    srcs = glob(["*.ts"]),
+    types = glob(["*.ts"]),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+copied_source_files(
+    name = "typecheck_sources",
+    srcs = glob(["*.ts"]),
+)

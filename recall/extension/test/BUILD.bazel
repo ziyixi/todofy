@@ -1,0 +1,771 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@npm//recall/extension:vitest/package_json.bzl", vitest = "bin")
+load("//proto/bazel:ts_package.bzl", "proto_package")
+load("//recall/extension:bazel.bzl", "options_browser_test")
+load("//tools/bazel:js.bzl", "copied_source_files", "vitest_test", "workspace_link")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//recall:__subpackages__"])
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//recall:__subpackages__"],
+)
+
+copied_source_files(
+    name = "types_srcs",
+    srcs = glob(
+        ["*.ts"],
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+copied_source_files(
+    name = "lint_sources",
+    srcs = glob(
+        [
+            "**/*.ts",
+            "**/*.mjs",
+        ],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+)
+
+proto_package(
+    name = "test__capture_test_proto",
+    deps = [
+        "//proto/recall/ingest/v1:ts",
+        "//recall/extension:node_modules/fake-indexeddb",
+        "//recall/extension:node_modules/vitest",
+        "//recall/extension/src:src__browser",
+        "//recall/extension/src:src__capture",
+        "//recall/extension/src:src__context",
+        "//recall/extension/src:src__db",
+        "//recall/extension/src:src__focus",
+        "//recall/extension/src:src__limits",
+        "//recall/extension/src:src__messages",
+        "//recall/extension/src:src__page",
+        "//recall/extension/src:src__page-text",
+        "//recall/extension/src:src__screenshot",
+        "//recall/extension/src:src__store",
+        "//recall/extension/src:src__visits",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+)
+
+workspace_link(
+    name = "test__capture_test_proto_link",
+    src = ":test__capture_test_proto",
+    project = "recall/extension",
+)
+
+vitest_test(
+    name = "test__capture_test",
+    config = "//recall/extension:test_config",
+    data = [
+        ":fake-chrome.ts",
+        ":helpers.ts",
+        ":test__capture_test_proto_link",
+        "//proto/recall/ingest/v1:ts",
+        "//recall/extension:node_modules/fake-indexeddb",
+        "//recall/extension:node_modules/vitest",
+        "//recall/extension:package_json",
+        "//recall/extension:test_config",
+        "//recall/extension/src:src__browser",
+        "//recall/extension/src:src__capture",
+        "//recall/extension/src:src__context",
+        "//recall/extension/src:src__db",
+        "//recall/extension/src:src__focus",
+        "//recall/extension/src:src__limits",
+        "//recall/extension/src:src__messages",
+        "//recall/extension/src:src__page",
+        "//recall/extension/src:src__page-text",
+        "//recall/extension/src:src__screenshot",
+        "//recall/extension/src:src__store",
+        "//recall/extension/src:src__visits",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+    project = "recall/extension",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":capture.test.ts"],
+)
+
+proto_package(
+    name = "test__contract_test_proto",
+    deps = [
+        "//proto/recall/ingest/v1:ts",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+        "//recall/extension:node_modules/fake-indexeddb",
+        "//recall/extension:node_modules/vitest",
+        "//recall/extension/src:src__browser",
+        "//recall/extension/src:src__capture",
+        "//recall/extension/src:src__context",
+        "//recall/extension/src:src__db",
+        "//recall/extension/src:src__focus",
+        "//recall/extension/src:src__limits",
+        "//recall/extension/src:src__messages",
+        "//recall/extension/src:src__page",
+        "//recall/extension/src:src__page-text",
+        "//recall/extension/src:src__screenshot",
+        "//recall/extension/src:src__store",
+        "//recall/extension/src:src__visits",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+)
+
+workspace_link(
+    name = "test__contract_test_proto_link",
+    src = ":test__contract_test_proto",
+    project = "recall/extension",
+)
+
+vitest_test(
+    name = "test__contract_test",
+    config = "//recall/extension:test_config",
+    data = [
+        ":fake-chrome.ts",
+        ":test__contract_test_proto_link",
+        "//proto/recall/ingest/v1:ts",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+        "//recall/extension:node_modules/fake-indexeddb",
+        "//recall/extension:node_modules/vitest",
+        "//recall/extension:package_json",
+        "//recall/extension:test_config",
+        "//recall/extension/src:src__browser",
+        "//recall/extension/src:src__capture",
+        "//recall/extension/src:src__context",
+        "//recall/extension/src:src__db",
+        "//recall/extension/src:src__focus",
+        "//recall/extension/src:src__limits",
+        "//recall/extension/src:src__messages",
+        "//recall/extension/src:src__page",
+        "//recall/extension/src:src__page-text",
+        "//recall/extension/src:src__screenshot",
+        "//recall/extension/src:src__store",
+        "//recall/extension/src:src__visits",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+    project = "recall/extension",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":contract.test.ts"],
+)
+
+proto_package(
+    name = "test__diagnostic_test_proto",
+    deps = [
+        "//proto/recall/ingest/v1:ts",
+        "//recall/extension:node_modules/fake-indexeddb",
+        "//recall/extension:node_modules/vitest",
+        "//recall/extension/src:src__browser",
+        "//recall/extension/src:src__context",
+        "//recall/extension/src:src__db",
+        "//recall/extension/src:src__limits",
+        "//recall/extension/src:src__messages",
+        "//recall/extension/src:src__page",
+        "//recall/extension/src:src__store",
+        "//recall/extension/src:src__visits",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+)
+
+workspace_link(
+    name = "test__diagnostic_test_proto_link",
+    src = ":test__diagnostic_test_proto",
+    project = "recall/extension",
+)
+
+vitest_test(
+    name = "test__diagnostic_test",
+    config = "//recall/extension:test_config",
+    data = [
+        ":fake-chrome.ts",
+        ":test__diagnostic_test_proto_link",
+        "//proto/recall/ingest/v1:ts",
+        "//recall/extension:node_modules/fake-indexeddb",
+        "//recall/extension:node_modules/vitest",
+        "//recall/extension:package_json",
+        "//recall/extension:test_config",
+        "//recall/extension/src:src__browser",
+        "//recall/extension/src:src__context",
+        "//recall/extension/src:src__db",
+        "//recall/extension/src:src__limits",
+        "//recall/extension/src:src__messages",
+        "//recall/extension/src:src__page",
+        "//recall/extension/src:src__store",
+        "//recall/extension/src:src__visits",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+    project = "recall/extension",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":diagnostic.test.ts"],
+)
+
+proto_package(
+    name = "test__focus_test_proto",
+    deps = [
+        "//proto/recall/ingest/v1:ts",
+        "//recall/extension:node_modules/fake-indexeddb",
+        "//recall/extension:node_modules/vitest",
+        "//recall/extension/src:src__browser",
+        "//recall/extension/src:src__context",
+        "//recall/extension/src:src__db",
+        "//recall/extension/src:src__focus",
+        "//recall/extension/src:src__limits",
+        "//recall/extension/src:src__messages",
+        "//recall/extension/src:src__page",
+        "//recall/extension/src:src__store",
+        "//recall/extension/src:src__visits",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+)
+
+workspace_link(
+    name = "test__focus_test_proto_link",
+    src = ":test__focus_test_proto",
+    project = "recall/extension",
+)
+
+vitest_test(
+    name = "test__focus_test",
+    config = "//recall/extension:test_config",
+    data = [
+        ":fake-chrome.ts",
+        ":helpers.ts",
+        ":test__focus_test_proto_link",
+        "//proto/recall/ingest/v1:ts",
+        "//recall/extension:node_modules/fake-indexeddb",
+        "//recall/extension:node_modules/vitest",
+        "//recall/extension:package_json",
+        "//recall/extension:test_config",
+        "//recall/extension/src:src__browser",
+        "//recall/extension/src:src__context",
+        "//recall/extension/src:src__db",
+        "//recall/extension/src:src__focus",
+        "//recall/extension/src:src__limits",
+        "//recall/extension/src:src__messages",
+        "//recall/extension/src:src__page",
+        "//recall/extension/src:src__store",
+        "//recall/extension/src:src__visits",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+    project = "recall/extension",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":focus.test.ts"],
+)
+
+proto_package(
+    name = "test__install_test_proto",
+    deps = [
+        "//recall/extension:node_modules/esbuild",
+        "//recall/extension:node_modules/vitest",
+        "//recall/extension/scripts:scripts__build",
+        "//recall/extension/scripts:scripts__icons",
+        "//recall/extension/scripts:scripts__install",
+        "//recall/extension/scripts:scripts__manifest",
+        "//recall/extension/scripts:scripts__zip",
+    ],
+)
+
+workspace_link(
+    name = "test__install_test_proto_link",
+    src = ":test__install_test_proto",
+    project = "recall/extension",
+)
+
+vitest_test(
+    name = "test__install_test",
+    config = "//recall/extension:test_config",
+    data = [
+        ":test__install_test_proto_link",
+        "//recall/extension:node_modules/esbuild",
+        "//recall/extension:node_modules/fake-indexeddb",
+        "//recall/extension:node_modules/vitest",
+        "//recall/extension:package_json",
+        "//recall/extension:test_config",
+        "//recall/extension/scripts:scripts__build",
+        "//recall/extension/scripts:scripts__icons",
+        "//recall/extension/scripts:scripts__install",
+        "//recall/extension/scripts:scripts__manifest",
+        "//recall/extension/scripts:scripts__zip",
+    ],
+    project = "recall/extension",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":install.test.mjs"],
+)
+
+proto_package(
+    name = "test__manifest_test_proto",
+    deps = [
+        "//recall/extension:node_modules/vitest",
+        "//recall/extension/scripts:scripts__manifest",
+    ],
+)
+
+workspace_link(
+    name = "test__manifest_test_proto_link",
+    src = ":test__manifest_test_proto",
+    project = "recall/extension",
+)
+
+vitest_test(
+    name = "test__manifest_test",
+    config = "//recall/extension:test_config",
+    data = [
+        ":test__manifest_test_proto_link",
+        "//recall/extension:node_modules/fake-indexeddb",
+        "//recall/extension:node_modules/vitest",
+        "//recall/extension:package_json",
+        "//recall/extension:test_config",
+        "//recall/extension/scripts:scripts__manifest",
+    ],
+    project = "recall/extension",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":manifest.test.mjs"],
+)
+
+proto_package(
+    name = "test__mobile_test_proto",
+    deps = [
+        "//proto/recall/ingest/v1:ts",
+        "//recall/extension:node_modules/fake-indexeddb",
+        "//recall/extension:node_modules/vitest",
+        "//recall/extension/src:src__browser",
+        "//recall/extension/src:src__capture",
+        "//recall/extension/src:src__context",
+        "//recall/extension/src:src__db",
+        "//recall/extension/src:src__focus",
+        "//recall/extension/src:src__limits",
+        "//recall/extension/src:src__messages",
+        "//recall/extension/src:src__page",
+        "//recall/extension/src:src__page-text",
+        "//recall/extension/src:src__screenshot",
+        "//recall/extension/src:src__store",
+        "//recall/extension/src:src__visits",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+)
+
+workspace_link(
+    name = "test__mobile_test_proto_link",
+    src = ":test__mobile_test_proto",
+    project = "recall/extension",
+)
+
+vitest_test(
+    name = "test__mobile_test",
+    config = "//recall/extension:test_config",
+    data = [
+        ":fake-chrome.ts",
+        ":helpers.ts",
+        ":test__mobile_test_proto_link",
+        "//proto/recall/ingest/v1:ts",
+        "//recall/extension:node_modules/fake-indexeddb",
+        "//recall/extension:node_modules/vitest",
+        "//recall/extension:package_json",
+        "//recall/extension:test_config",
+        "//recall/extension/src:src__browser",
+        "//recall/extension/src:src__capture",
+        "//recall/extension/src:src__context",
+        "//recall/extension/src:src__db",
+        "//recall/extension/src:src__focus",
+        "//recall/extension/src:src__limits",
+        "//recall/extension/src:src__messages",
+        "//recall/extension/src:src__page",
+        "//recall/extension/src:src__page-text",
+        "//recall/extension/src:src__screenshot",
+        "//recall/extension/src:src__store",
+        "//recall/extension/src:src__visits",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+    project = "recall/extension",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":mobile.test.ts"],
+)
+
+proto_package(
+    name = "test__screenshot_test_proto",
+    deps = [
+        "//recall/extension:node_modules/vitest",
+        "//recall/extension/src:src__screenshot",
+        "//recall/shared:url",
+    ],
+)
+
+workspace_link(
+    name = "test__screenshot_test_proto_link",
+    src = ":test__screenshot_test_proto",
+    project = "recall/extension",
+)
+
+vitest_test(
+    name = "test__screenshot_test",
+    config = "//recall/extension:test_config",
+    data = [
+        ":test__screenshot_test_proto_link",
+        "//recall/extension:node_modules/fake-indexeddb",
+        "//recall/extension:node_modules/vitest",
+        "//recall/extension:package_json",
+        "//recall/extension:test_config",
+        "//recall/extension/src:src__screenshot",
+        "//recall/shared:url",
+    ],
+    project = "recall/extension",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":screenshot.test.ts"],
+)
+
+proto_package(
+    name = "test__settings_test_proto",
+    deps = [
+        "//proto/recall/ingest/v1:ts",
+        "//recall/extension:node_modules/fake-indexeddb",
+        "//recall/extension:node_modules/vitest",
+        "//recall/extension/src:src__browser",
+        "//recall/extension/src:src__context",
+        "//recall/extension/src:src__db",
+        "//recall/extension/src:src__focus",
+        "//recall/extension/src:src__limits",
+        "//recall/extension/src:src__messages",
+        "//recall/extension/src:src__options-view",
+        "//recall/extension/src:src__page",
+        "//recall/extension/src:src__store",
+        "//recall/extension/src:src__visits",
+        "//recall/shared:denylist",
+        "//recall/shared:diagnostic",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+)
+
+workspace_link(
+    name = "test__settings_test_proto_link",
+    src = ":test__settings_test_proto",
+    project = "recall/extension",
+)
+
+vitest_test(
+    name = "test__settings_test",
+    config = "//recall/extension:test_config",
+    data = [
+        ":fake-chrome.ts",
+        ":test__settings_test_proto_link",
+        "//proto/recall/ingest/v1:ts",
+        "//recall/extension:node_modules/fake-indexeddb",
+        "//recall/extension:node_modules/vitest",
+        "//recall/extension:package_json",
+        "//recall/extension:test_config",
+        "//recall/extension/src:src__browser",
+        "//recall/extension/src:src__context",
+        "//recall/extension/src:src__db",
+        "//recall/extension/src:src__focus",
+        "//recall/extension/src:src__limits",
+        "//recall/extension/src:src__messages",
+        "//recall/extension/src:src__options-view",
+        "//recall/extension/src:src__page",
+        "//recall/extension/src:src__store",
+        "//recall/extension/src:src__visits",
+        "//recall/shared:denylist",
+        "//recall/shared:diagnostic",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+    project = "recall/extension",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":settings.test.ts"],
+)
+
+proto_package(
+    name = "test__sw_test_proto",
+    deps = [
+        "//proto/recall/ingest/v1:ts",
+        "//recall/extension:node_modules/fake-indexeddb",
+        "//recall/extension:node_modules/vitest",
+        "//recall/extension/src:src__browser",
+        "//recall/extension/src:src__capture",
+        "//recall/extension/src:src__context",
+        "//recall/extension/src:src__db",
+        "//recall/extension/src:src__focus",
+        "//recall/extension/src:src__limits",
+        "//recall/extension/src:src__messages",
+        "//recall/extension/src:src__page",
+        "//recall/extension/src:src__page-text",
+        "//recall/extension/src:src__screenshot",
+        "//recall/extension/src:src__store",
+        "//recall/extension/src:src__sw",
+        "//recall/extension/src:src__update",
+        "//recall/extension/src:src__visits",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+)
+
+workspace_link(
+    name = "test__sw_test_proto_link",
+    src = ":test__sw_test_proto",
+    project = "recall/extension",
+)
+
+vitest_test(
+    name = "test__sw_test",
+    config = "//recall/extension:test_config",
+    data = [
+        ":fake-chrome.ts",
+        ":test__sw_test_proto_link",
+        "//proto/recall/ingest/v1:ts",
+        "//recall/extension:node_modules/fake-indexeddb",
+        "//recall/extension:node_modules/vitest",
+        "//recall/extension:package_json",
+        "//recall/extension:test_config",
+        "//recall/extension/src:src__browser",
+        "//recall/extension/src:src__capture",
+        "//recall/extension/src:src__context",
+        "//recall/extension/src:src__db",
+        "//recall/extension/src:src__focus",
+        "//recall/extension/src:src__limits",
+        "//recall/extension/src:src__messages",
+        "//recall/extension/src:src__page",
+        "//recall/extension/src:src__page-text",
+        "//recall/extension/src:src__screenshot",
+        "//recall/extension/src:src__store",
+        "//recall/extension/src:src__sw",
+        "//recall/extension/src:src__update",
+        "//recall/extension/src:src__visits",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+    project = "recall/extension",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":sw.test.ts"],
+)
+
+proto_package(
+    name = "test__update_test_proto",
+    deps = [
+        "//recall/extension:node_modules/fake-indexeddb",
+        "//recall/extension:node_modules/vitest",
+        "//recall/extension/src:src__context",
+        "//recall/extension/src:src__db",
+        "//recall/extension/src:src__page",
+        "//recall/extension/src:src__update",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+)
+
+workspace_link(
+    name = "test__update_test_proto_link",
+    src = ":test__update_test_proto",
+    project = "recall/extension",
+)
+
+vitest_test(
+    name = "test__update_test",
+    config = "//recall/extension:test_config",
+    data = [
+        ":fake-chrome.ts",
+        ":test__update_test_proto_link",
+        "//recall/extension:node_modules/fake-indexeddb",
+        "//recall/extension:node_modules/vitest",
+        "//recall/extension:package_json",
+        "//recall/extension:test_config",
+        "//recall/extension/src:src__context",
+        "//recall/extension/src:src__db",
+        "//recall/extension/src:src__page",
+        "//recall/extension/src:src__update",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+    project = "recall/extension",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":update.test.ts"],
+)
+
+proto_package(
+    name = "test__upload_test_proto",
+    deps = [
+        "//proto/recall/ingest/v1:ts",
+        "//recall/extension:node_modules/fake-indexeddb",
+        "//recall/extension:node_modules/vitest",
+        "//recall/extension/src:src__browser",
+        "//recall/extension/src:src__context",
+        "//recall/extension/src:src__db",
+        "//recall/extension/src:src__limits",
+        "//recall/extension/src:src__messages",
+        "//recall/extension/src:src__page",
+        "//recall/extension/src:src__store",
+        "//recall/extension/src:src__visits",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+)
+
+workspace_link(
+    name = "test__upload_test_proto_link",
+    src = ":test__upload_test_proto",
+    project = "recall/extension",
+)
+
+vitest_test(
+    name = "test__upload_test",
+    config = "//recall/extension:test_config",
+    data = [
+        ":fake-chrome.ts",
+        ":test__upload_test_proto_link",
+        "//proto/recall/ingest/v1:ts",
+        "//recall/extension:node_modules/fake-indexeddb",
+        "//recall/extension:node_modules/vitest",
+        "//recall/extension:package_json",
+        "//recall/extension:test_config",
+        "//recall/extension/src:src__browser",
+        "//recall/extension/src:src__context",
+        "//recall/extension/src:src__db",
+        "//recall/extension/src:src__limits",
+        "//recall/extension/src:src__messages",
+        "//recall/extension/src:src__page",
+        "//recall/extension/src:src__store",
+        "//recall/extension/src:src__visits",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+    project = "recall/extension",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":upload.test.ts"],
+)
+
+proto_package(
+    name = "test__visits_test_proto",
+    deps = [
+        "//proto/recall/ingest/v1:ts",
+        "//recall/extension:node_modules/fake-indexeddb",
+        "//recall/extension:node_modules/vitest",
+        "//recall/extension/src:src__browser",
+        "//recall/extension/src:src__context",
+        "//recall/extension/src:src__db",
+        "//recall/extension/src:src__focus",
+        "//recall/extension/src:src__limits",
+        "//recall/extension/src:src__messages",
+        "//recall/extension/src:src__page",
+        "//recall/extension/src:src__store",
+        "//recall/extension/src:src__visits",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+)
+
+workspace_link(
+    name = "test__visits_test_proto_link",
+    src = ":test__visits_test_proto",
+    project = "recall/extension",
+)
+
+vitest_test(
+    name = "test__visits_test",
+    config = "//recall/extension:test_config",
+    data = [
+        ":fake-chrome.ts",
+        ":helpers.ts",
+        ":test__visits_test_proto_link",
+        "//proto/recall/ingest/v1:ts",
+        "//recall/extension:node_modules/fake-indexeddb",
+        "//recall/extension:node_modules/vitest",
+        "//recall/extension:package_json",
+        "//recall/extension:test_config",
+        "//recall/extension/src:src__browser",
+        "//recall/extension/src:src__context",
+        "//recall/extension/src:src__db",
+        "//recall/extension/src:src__focus",
+        "//recall/extension/src:src__limits",
+        "//recall/extension/src:src__messages",
+        "//recall/extension/src:src__page",
+        "//recall/extension/src:src__store",
+        "//recall/extension/src:src__visits",
+        "//recall/shared:denylist",
+        "//recall/shared:scrub",
+        "//recall/shared:url",
+    ],
+    project = "recall/extension",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":visits.test.ts"],
+)
+
+js_library(
+    name = "smoke_sources",
+    srcs = [
+        ":fake-chrome.ts",
+        ":smoke-upload.ts",
+    ],
+    deps = [
+        "//recall/extension:build_proto_link",
+        "//recall/extension:node_modules/fake-indexeddb",
+        "//recall/extension/src:src__browser",
+        "//recall/extension/src:src__capture",
+        "//recall/extension/src:src__db",
+        "//recall/extension/src:src__focus",
+        "//recall/extension/src:src__store",
+    ],
+)
+
+options_browser_test(name = "options_browser_test")
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+)
+
+test_suite(
+    name = "browser_tests",
+    tags = ["browser"],
+)
+
+test_suite(name = "check")
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)

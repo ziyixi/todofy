@@ -1,0 +1,29 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//website:bazel.bzl", "website_sources")
+
+package(default_visibility = ["//website:__subpackages__"])
+
+exports_files(
+    glob(
+        ["*.css"],
+        allow_empty = True,
+    ),
+    visibility = ["//website:__subpackages__"],
+)
+
+website_sources()
+
+js_library(
+    name = "article_css",
+    srcs = ["article.module.css"],
+)
+
+js_library(
+    name = "site_css",
+    srcs = ["site.module.css"],
+)
+
+js_library(
+    name = "globals_css",
+    srcs = ["globals.css"],
+)

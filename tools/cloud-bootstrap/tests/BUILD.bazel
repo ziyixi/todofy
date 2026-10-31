@@ -1,0 +1,85 @@
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/python:tests.bzl", "unittest_test")
+
+package(default_visibility = ["//visibility:public"])
+
+unittest_test(
+    name = "test_bootstrap",
+    srcs = ["test_bootstrap.py"],
+    data = [
+        "//tools:repository_test_data",
+        "//tools/cloud-bootstrap:python_sources",
+    ],
+    env = {"BAZEL_COPY_WORKSPACE": "1"},
+    imports = [
+        ".",
+        "..",
+    ],
+    modules = ["test_bootstrap"],
+    deps = [
+        "//tools/cloud-bootstrap:adopt_metadata",
+        "//tools/cloud-bootstrap:bootstrap_inventory",
+        "//tools/cloud-bootstrap:cloud_api",
+        "//tools/cloud-bootstrap:finalize",
+        "//tools/cloud-bootstrap:github_config",
+        "//tools/cloud-bootstrap:github_secrets",
+        "//tools/cloud-bootstrap:private_input",
+        "//tools/cloud-bootstrap:state_imports",
+        "//tools/cloud-bootstrap:tofu_bootstrap",
+        "//tools/cloud-config:cloud_profile",
+        "//tools/cloud-release:control",
+    ],
+)
+
+unittest_test(
+    name = "test_fresh_collisions",
+    srcs = ["test_fresh_collisions.py"],
+    data = [
+        "//tools:repository_test_data",
+        "//tools/cloud-bootstrap:python_sources",
+    ],
+    imports = [
+        ".",
+        "..",
+    ],
+    modules = ["test_fresh_collisions"],
+    deps = [
+        "//tools/cloud-bootstrap:fresh_collisions",
+        "//tools/cloud-bootstrap:private_input",
+    ],
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        ":test_bootstrap",
+        ":test_fresh_collisions",
+    ],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)

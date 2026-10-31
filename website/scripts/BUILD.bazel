@@ -1,0 +1,14 @@
+load("//website:bazel.bzl", "website_sources")
+
+package(default_visibility = ["//website:__subpackages__"])
+
+website_sources(
+    application_excludes = [],
+    children = [
+        "//website/scripts/bazel",
+        "//website/scripts/content",
+        "//website/scripts/export",
+        "//website/scripts/images",
+        "//website/scripts/release",
+    ],
+)

@@ -1,0 +1,1039 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@npm//dashboard/web:vitest/package_json.bzl", vitest = "bin")
+load("//tools/bazel:js.bzl", "copied_source_files", "proto_vitest_test", "ts_source_library")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//dashboard:__subpackages__"])
+
+COMMON_TEST_DATA = [
+    "//dashboard/web:package_json",
+    "//dashboard/web/src/test:source_fixtures_ts",
+    "//dashboard/web/src/test:source_harness_tsx",
+    "//dashboard/web/src/test:source_test_setup_ts",
+    "//dashboard/web:test_config",
+    "//dashboard/web:node_modules/@testing-library/dom",
+    "//dashboard/web:node_modules/@vitejs/plugin-react",
+    "//dashboard/web:node_modules/jsdom",
+    "//dashboard/web:node_modules/vite",
+    "//:node_modules/vitest",
+]
+
+COMMON_TEST_DEPS = [
+    "//dashboard/web:node_modules/@tanstack/react-query",
+    "//dashboard/web:node_modules/@testing-library/jest-dom",
+    "//dashboard/web:node_modules/@testing-library/react",
+    "//dashboard/web:node_modules/@testing-library/user-event",
+    "//dashboard/web:node_modules/vitest",
+    ":src__App",
+    ":src__api__attention-cache",
+    ":src__api__client",
+    ":src__api__queries",
+    ":src__components__ActionsSection",
+    ":src__components__AppDetails",
+    ":src__components__AttentionActions",
+    ":src__components__AttentionStrip",
+    ":src__components__Canary",
+    ":src__components__DigestSection",
+    ":src__components__GuardControls",
+    ":src__components__Launcher",
+    ":src__components__Modal",
+    ":src__components__NewsletterConfigDetails",
+    ":src__components__PersonalMcpDetails",
+    ":src__components__QuotaBars",
+    ":src__components__WebsiteSyncPanel",
+    ":src__components__status",
+    ":src__components__ui",
+    ":src__lib__alert-guidance",
+    ":src__lib__flows",
+    ":src__lib__format",
+    ":src__lib__registry",
+    ":src__lib__url",
+    ":src__router",
+    ":src__views__CloudflareView",
+    ":src__views__FlowsView",
+    ":src__views__HomeView",
+    ":src__views__OpsView",
+    "//contracts:ops-v1/fixtures/GuardState/normal.json_data",
+    "//contracts:ops-v1/fixtures/GuardState/shed-mail-hero.json_data",
+    "//contracts:ops-v1/fixtures/GuardState/shed-todofy.json_data",
+    "//contracts:ops-v1/fixtures/OpsStatus/codex-gateway-ok.json_data",
+    "//contracts:ops-v1/fixtures/OpsStatus/mail-hero-degraded.json_data",
+    "//contracts:ops-v1/fixtures/OpsStatus/mail-hero-ok.json_data",
+    "//contracts:ops-v1/fixtures/OpsStatus/todofy-degraded.json_data",
+    "//contracts:ops-v1/fixtures/OpsStatus/todofy-ok.json_data",
+    "//dashboard/worker/src:api_types_web",
+    "//dashboard/worker/src:registry_web",
+    "//proto/ts:rpc-status",
+]
+
+COMMON_TEST_DATA_2 = [
+    "//dashboard/web:package_json",
+    "//dashboard/web/src/test:source_test_setup_ts",
+    "//dashboard/web:test_config",
+    "//dashboard/web:node_modules/@testing-library/dom",
+    "//dashboard/web:node_modules/@testing-library/user-event",
+    "//dashboard/web:node_modules/@vitejs/plugin-react",
+    "//dashboard/web:node_modules/jsdom",
+    "//dashboard/web:node_modules/vite",
+    "//:node_modules/vitest",
+]
+
+COMMON_TEST_DATA_3 = [
+    "//dashboard/web:package_json",
+    "//dashboard/web/src/test:source_fixtures_ts",
+    "//dashboard/web/src/test:source_test_setup_ts",
+    "//dashboard/web:test_config",
+    "//dashboard/web:node_modules/@testing-library/dom",
+    "//dashboard/web:node_modules/@testing-library/user-event",
+    "//dashboard/web:node_modules/@vitejs/plugin-react",
+    "//dashboard/web:node_modules/jsdom",
+    "//dashboard/web:node_modules/vite",
+    "//:node_modules/vitest",
+]
+
+COMMON_TEST_DATA_4 = [
+    "//dashboard/web:package_json",
+    "//dashboard/web/src/test:source_fixtures_ts",
+    "//dashboard/web/src/test:source_harness_tsx",
+    "//dashboard/web/src/test:source_test_setup_ts",
+    "//dashboard/web:test_config",
+    "//dashboard/web:node_modules/@testing-library/dom",
+    "//dashboard/web:node_modules/@testing-library/user-event",
+    "//dashboard/web:node_modules/@vitejs/plugin-react",
+    "//dashboard/web:node_modules/jsdom",
+    "//dashboard/web:node_modules/vite",
+    "//:node_modules/vitest",
+]
+
+COMMON_TEST_DEPS_2 = [
+    "//dashboard/web:node_modules/@tanstack/react-query",
+    "//dashboard/web:node_modules/@testing-library/jest-dom",
+    "//dashboard/web:node_modules/@testing-library/react",
+    "//dashboard/web:node_modules/vitest",
+    ":src__App",
+    ":src__api__attention-cache",
+    ":src__api__client",
+    ":src__api__queries",
+    ":src__components__ActionsSection",
+    ":src__components__AppDetails",
+    ":src__components__AttentionActions",
+    ":src__components__AttentionStrip",
+    ":src__components__Canary",
+    ":src__components__DigestSection",
+    ":src__components__GuardControls",
+    ":src__components__Launcher",
+    ":src__components__Modal",
+    ":src__components__NewsletterConfigDetails",
+    ":src__components__PersonalMcpDetails",
+    ":src__components__QuotaBars",
+    ":src__components__WebsiteSyncPanel",
+    ":src__components__status",
+    ":src__components__ui",
+    ":src__lib__alert-guidance",
+    ":src__lib__flows",
+    ":src__lib__format",
+    ":src__lib__registry",
+    ":src__lib__url",
+    ":src__router",
+    ":src__views__CloudflareView",
+    ":src__views__FlowsView",
+    ":src__views__HomeView",
+    ":src__views__OpsView",
+    "//contracts:ops-v1/fixtures/GuardState/normal.json_data",
+    "//contracts:ops-v1/fixtures/GuardState/shed-mail-hero.json_data",
+    "//contracts:ops-v1/fixtures/GuardState/shed-todofy.json_data",
+    "//contracts:ops-v1/fixtures/OpsStatus/codex-gateway-ok.json_data",
+    "//contracts:ops-v1/fixtures/OpsStatus/mail-hero-degraded.json_data",
+    "//contracts:ops-v1/fixtures/OpsStatus/mail-hero-ok.json_data",
+    "//contracts:ops-v1/fixtures/OpsStatus/todofy-degraded.json_data",
+    "//contracts:ops-v1/fixtures/OpsStatus/todofy-ok.json_data",
+    "//dashboard/worker/src:api_types_web",
+    "//dashboard/worker/src:registry_web",
+    "//proto/ts:rpc-status",
+]
+
+COMMON_TEST_DEPS_3 = [
+    "//dashboard/web:node_modules/@testing-library/jest-dom",
+    "//dashboard/web:node_modules/@testing-library/react",
+    "//dashboard/web:node_modules/vitest",
+]
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//dashboard:__subpackages__"],
+)
+
+copied_source_files(
+    name = "application_sources_srcs",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ) + ["//dashboard/web/src/test:application_sources_srcs"],
+)
+
+copied_source_files(
+    name = "typecheck_project_srcs",
+    srcs = [
+        "App.test.tsx",
+        "App.tsx",
+        "api/attention-cache.test.ts",
+        "api/attention-cache.ts",
+        "api/client.test.ts",
+        "api/client.ts",
+        "api/queries.ts",
+        "components/ActionsSection.test.tsx",
+        "components/ActionsSection.tsx",
+        "components/AppDetails.test.tsx",
+        "components/AppDetails.tsx",
+        "components/AttentionActions.test.tsx",
+        "components/AttentionActions.tsx",
+        "components/AttentionStrip.tsx",
+        "components/Canary.tsx",
+        "components/DigestSection.tsx",
+        "components/GuardControls.tsx",
+        "components/Launcher.tsx",
+        "components/Modal.tsx",
+        "components/NewsletterConfigDetails.test.tsx",
+        "components/NewsletterConfigDetails.tsx",
+        "components/PersonalMcpDetails.test.tsx",
+        "components/PersonalMcpDetails.tsx",
+        "components/QuotaBars.tsx",
+        "components/WebsiteSyncPanel.test.tsx",
+        "components/WebsiteSyncPanel.tsx",
+        "components/status.tsx",
+        "components/ui.tsx",
+        "lib/alert-guidance.ts",
+        "lib/flows.ts",
+        "lib/format.test.ts",
+        "lib/format.ts",
+        "lib/labels.test.ts",
+        "lib/labels.ts",
+        "lib/registry.ts",
+        "lib/url.ts",
+        "main.tsx",
+        "refresh.test.tsx",
+        "router.test.ts",
+        "router.ts",
+        "styles/layout.test.ts",
+        "views/CloudflareView.test.tsx",
+        "views/CloudflareView.tsx",
+        "views/FlowsView.test.tsx",
+        "views/FlowsView.tsx",
+        "views/HomeView.test.tsx",
+        "views/HomeView.tsx",
+        "views/OpsView.test.tsx",
+        "views/OpsView.tsx",
+    ] + ["//dashboard/web/src/test:typecheck_project_srcs"],
+)
+
+copied_source_files(
+    name = "lint_sources",
+    srcs = glob(
+        [
+            "**/*.ts",
+            "**/*.tsx",
+        ],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ) + ["//dashboard/web/src/test:lint_sources"],
+)
+
+ts_source_library(
+    name = "src__lib__format",
+    srcs = [":lib/format.ts"],
+    deps = ["//dashboard/worker/src:api_types_web"],
+)
+
+ts_source_library(
+    name = "src__api__client",
+    srcs = [
+        ":api/client.ts",
+        ":lib/labels.ts",
+    ],
+    deps = [
+        ":src__lib__format",
+        "//dashboard/worker/src:api_types_web",
+        "//proto/common/errors/v1:ts",
+        "//proto/dashboard/ui/v1:ts",
+        "//proto/ops/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "src__api__attention-cache",
+    srcs = [":api/attention-cache.ts"],
+    deps = [
+        "//dashboard/worker/src:api_types_web",
+        "//dashboard/worker/src:attention_rollup_web",
+    ],
+)
+
+ts_source_library(
+    name = "src__api__queries",
+    srcs = [":api/queries.ts"],
+    deps = [
+        ":src__api__attention-cache",
+        ":src__api__client",
+        "//dashboard/web:node_modules/@tanstack/react-query",
+        "//dashboard/worker/src:api_types_web",
+    ],
+)
+
+ts_source_library(
+    name = "src__router",
+    srcs = [":router.ts"],
+    deps = [
+        "//dashboard/web:node_modules/react",
+        "//dashboard/worker/src:api_types_web",
+    ],
+)
+
+ts_source_library(
+    name = "src__lib__url",
+    srcs = [":lib/url.ts"],
+)
+
+ts_source_library(
+    name = "src__lib__registry",
+    srcs = [":lib/registry.ts"],
+    deps = [
+        ":src__api__client",
+        ":src__lib__url",
+        ":src__router",
+        "//dashboard/worker/src:api_types_web",
+    ],
+)
+
+ts_source_library(
+    name = "src__components__status",
+    srcs = [":components/status.tsx"],
+    deps = [
+        ":src__api__client",
+        "//dashboard/web:node_modules/lucide-react",
+        "//dashboard/web:node_modules/react",
+        "//dashboard/worker/src:api_types_web",
+    ],
+)
+
+ts_source_library(
+    name = "src__lib__alert-guidance",
+    srcs = [":lib/alert-guidance.ts"],
+)
+
+ts_source_library(
+    name = "src__components__ui",
+    srcs = [":components/ui.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__components__status",
+        ":src__lib__format",
+        "//dashboard/web:node_modules/lucide-react",
+        "//dashboard/web:node_modules/react",
+    ],
+)
+
+ts_source_library(
+    name = "src__components__AttentionActions",
+    srcs = [":components/AttentionActions.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__components__ui",
+        ":src__lib__alert-guidance",
+        "//dashboard/web:node_modules/react",
+        "//dashboard/worker/src:api_types_web",
+    ],
+)
+
+ts_source_library(
+    name = "src__components__AttentionStrip",
+    srcs = [":components/AttentionStrip.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__components__AttentionActions",
+        ":src__components__status",
+        ":src__components__ui",
+        ":src__lib__format",
+        ":src__lib__registry",
+        "//dashboard/web:node_modules/lucide-react",
+        "//dashboard/web:node_modules/react",
+        "//dashboard/worker/src:api_types_web",
+    ],
+)
+
+ts_source_library(
+    name = "src__components__QuotaBars",
+    srcs = [":components/QuotaBars.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__components__ui",
+        ":src__lib__format",
+        ":src__lib__registry",
+        ":src__lib__url",
+        "//dashboard/web:node_modules/react",
+        "//dashboard/worker/src:api_types_web",
+    ],
+)
+
+ts_source_library(
+    name = "src__views__CloudflareView",
+    srcs = [":views/CloudflareView.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__components__QuotaBars",
+        ":src__components__status",
+        ":src__components__ui",
+        ":src__lib__format",
+        ":src__lib__registry",
+        ":src__router",
+        "//dashboard/web:node_modules/lucide-react",
+        "//dashboard/web:node_modules/react",
+        "//dashboard/worker/src:api_types_web",
+        "//proto/dashboard/ui/v1:ts",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "src__components__Canary",
+    srcs = [":components/Canary.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__components__ui",
+        ":src__lib__format",
+        "//dashboard/web:node_modules/react",
+        "//dashboard/worker/src:api_types_web",
+    ],
+)
+
+ts_source_library(
+    name = "src__lib__flows",
+    srcs = [":lib/flows.ts"],
+    deps = [
+        ":src__api__client",
+        ":src__lib__format",
+        ":src__lib__registry",
+        "//dashboard/worker/src:api_types_web",
+    ],
+)
+
+ts_source_library(
+    name = "src__views__FlowsView",
+    srcs = [":views/FlowsView.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__components__AttentionActions",
+        ":src__components__Canary",
+        ":src__components__status",
+        ":src__components__ui",
+        ":src__lib__flows",
+        ":src__lib__format",
+        ":src__lib__registry",
+        ":src__lib__url",
+        ":src__router",
+        "//dashboard/web:node_modules/lucide-react",
+        "//dashboard/web:node_modules/react",
+        "//dashboard/worker/src:api_types_web",
+    ],
+)
+
+ts_source_library(
+    name = "src__components__WebsiteSyncPanel",
+    srcs = [":components/WebsiteSyncPanel.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__components__ui",
+        ":src__lib__url",
+        "//dashboard/web:node_modules/react",
+        "//dashboard/worker/src:api_types_web",
+    ],
+)
+
+ts_source_library(
+    name = "src__components__Modal",
+    srcs = [":components/Modal.tsx"],
+    deps = [
+        ":src__components__ui",
+        "//dashboard/web:node_modules/lucide-react",
+        "//dashboard/web:node_modules/react",
+        "//dashboard/web:node_modules/react-dom",
+    ],
+)
+
+ts_source_library(
+    name = "src__components__Launcher",
+    srcs = [":components/Launcher.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__components__AttentionActions",
+        ":src__components__Modal",
+        ":src__components__status",
+        ":src__components__ui",
+        ":src__lib__format",
+        ":src__lib__registry",
+        ":src__lib__url",
+        ":src__router",
+        "//dashboard/web:node_modules/lucide-react",
+        "//dashboard/web:node_modules/react",
+        "//dashboard/worker/src:api_types_web",
+    ],
+)
+
+ts_source_library(
+    name = "src__views__HomeView",
+    srcs = [":views/HomeView.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__components__AttentionActions",
+        ":src__components__Launcher",
+        ":src__components__QuotaBars",
+        ":src__components__WebsiteSyncPanel",
+        ":src__components__status",
+        ":src__lib__flows",
+        ":src__lib__format",
+        ":src__lib__registry",
+        ":src__router",
+        "//dashboard/web:node_modules/lucide-react",
+        "//dashboard/web:node_modules/react",
+        "//dashboard/worker/src:api_types_web",
+    ],
+)
+
+ts_source_library(
+    name = "src__components__GuardControls",
+    srcs = [":components/GuardControls.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__components__Modal",
+        ":src__components__ui",
+        ":src__lib__format",
+        ":src__lib__registry",
+        "//dashboard/web:node_modules/react",
+        "//dashboard/worker/src:api_types_web",
+    ],
+)
+
+ts_source_library(
+    name = "src__components__ActionsSection",
+    srcs = [":components/ActionsSection.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__components__GuardControls",
+        ":src__components__Modal",
+        ":src__components__ui",
+        ":src__lib__registry",
+        "//dashboard/web:node_modules/lucide-react",
+        "//dashboard/web:node_modules/react",
+        "//dashboard/worker/src:api_types_web",
+    ],
+)
+
+ts_source_library(
+    name = "src__components__PersonalMcpDetails",
+    srcs = [":components/PersonalMcpDetails.tsx"],
+    deps = [
+        ":src__components__ui",
+        "//dashboard/web:node_modules/react",
+        "//dashboard/worker/src:api_types_web",
+    ],
+)
+
+ts_source_library(
+    name = "src__components__NewsletterConfigDetails",
+    srcs = [":components/NewsletterConfigDetails.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__components__ui",
+        ":src__lib__url",
+        "//dashboard/web:node_modules/react",
+        "//dashboard/worker/src:api_types_web",
+    ],
+)
+
+ts_source_library(
+    name = "src__components__AppDetails",
+    srcs = [":components/AppDetails.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__components__AttentionActions",
+        ":src__components__NewsletterConfigDetails",
+        ":src__components__PersonalMcpDetails",
+        ":src__components__ui",
+        ":src__lib__format",
+        ":src__lib__url",
+        "//dashboard/web:node_modules/lucide-react",
+        "//dashboard/web:node_modules/react",
+        "//dashboard/worker/src:api_types_web",
+    ],
+)
+
+ts_source_library(
+    name = "src__components__DigestSection",
+    srcs = [":components/DigestSection.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__components__ui",
+        ":src__lib__registry",
+        "//dashboard/web:node_modules/react",
+        "//dashboard/worker/src:api_types_web",
+    ],
+)
+
+ts_source_library(
+    name = "src__views__OpsView",
+    srcs = [":views/OpsView.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__components__ActionsSection",
+        ":src__components__AppDetails",
+        ":src__components__DigestSection",
+        ":src__components__ui",
+        ":src__lib__format",
+        ":src__lib__registry",
+        "//dashboard/web:node_modules/react",
+        "//dashboard/worker/src:api_types_web",
+    ],
+)
+
+ts_source_library(
+    name = "src__App",
+    srcs = [":App.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__components__AttentionActions",
+        ":src__components__AttentionStrip",
+        ":src__components__ui",
+        ":src__lib__format",
+        ":src__router",
+        ":src__views__CloudflareView",
+        ":src__views__FlowsView",
+        ":src__views__HomeView",
+        ":src__views__OpsView",
+        "//dashboard/web:node_modules/lucide-react",
+        "//dashboard/web:node_modules/react",
+        "//dashboard/worker/src:api_types_web",
+    ],
+)
+
+js_library(
+    name = "src__main",
+    srcs = [
+        ":main.tsx",
+        ":styles/app.css",
+        ":styles/tokens.css",
+    ],
+    types = [":main.tsx"],
+    deps = [
+        ":src__App",
+        ":src__api__queries",
+        "//dashboard/web:node_modules/@tanstack/react-query",
+        "//dashboard/web:node_modules/react",
+        "//dashboard/web:node_modules/react-dom",
+    ],
+)
+
+js_library(
+    name = "lib",
+    deps = [
+        ":src__App",
+        ":src__api__attention-cache",
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__components__ActionsSection",
+        ":src__components__AppDetails",
+        ":src__components__AttentionActions",
+        ":src__components__AttentionStrip",
+        ":src__components__Canary",
+        ":src__components__DigestSection",
+        ":src__components__GuardControls",
+        ":src__components__Launcher",
+        ":src__components__Modal",
+        ":src__components__NewsletterConfigDetails",
+        ":src__components__PersonalMcpDetails",
+        ":src__components__QuotaBars",
+        ":src__components__WebsiteSyncPanel",
+        ":src__components__status",
+        ":src__components__ui",
+        ":src__lib__alert-guidance",
+        ":src__lib__flows",
+        ":src__lib__format",
+        ":src__lib__registry",
+        ":src__lib__url",
+        ":src__main",
+        ":src__router",
+        ":src__views__CloudflareView",
+        ":src__views__FlowsView",
+        ":src__views__HomeView",
+        ":src__views__OpsView",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__App_test",
+    config = "//dashboard/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "dashboard/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":App.test.tsx"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "src__refresh_test",
+    config = "//dashboard/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "dashboard/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":refresh.test.tsx"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "src__router_test",
+    config = "//dashboard/web:test_config",
+    data = COMMON_TEST_DATA_2,
+    project = "dashboard/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":router.test.ts"],
+    deps = [
+        ":src__router",
+        "//dashboard/web:node_modules/@testing-library/jest-dom",
+        "//dashboard/web:node_modules/@testing-library/react",
+        "//dashboard/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__api__attention-cache_test",
+    config = "//dashboard/web:test_config",
+    data = COMMON_TEST_DATA_3,
+    project = "dashboard/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":api/attention-cache.test.ts"],
+    deps = [
+        ":src__api__attention-cache",
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__components__AttentionActions",
+        ":src__components__status",
+        ":src__components__ui",
+        ":src__lib__alert-guidance",
+        ":src__lib__format",
+        "//contracts:ops-v1/fixtures/GuardState/normal.json_data",
+        "//contracts:ops-v1/fixtures/GuardState/shed-mail-hero.json_data",
+        "//contracts:ops-v1/fixtures/GuardState/shed-todofy.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/codex-gateway-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/mail-hero-degraded.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/mail-hero-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/todofy-degraded.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/todofy-ok.json_data",
+        "//dashboard/web:node_modules/@testing-library/jest-dom",
+        "//dashboard/web:node_modules/@testing-library/react",
+        "//dashboard/web:node_modules/vitest",
+        "//dashboard/worker/src:api_types_web",
+        "//dashboard/worker/src:registry_web",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__api__client_test",
+    config = "//dashboard/web:test_config",
+    data = COMMON_TEST_DATA_4,
+    project = "dashboard/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":api/client.test.ts"],
+    deps = COMMON_TEST_DEPS_2,
+)
+
+proto_vitest_test(
+    name = "src__components__ActionsSection_test",
+    config = "//dashboard/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "dashboard/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":components/ActionsSection.test.tsx"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "src__components__AppDetails_test",
+    config = "//dashboard/web:test_config",
+    data = COMMON_TEST_DATA_2,
+    project = "dashboard/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":components/AppDetails.test.tsx"],
+    deps = [
+        ":src__api__attention-cache",
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__components__AppDetails",
+        ":src__components__AttentionActions",
+        ":src__components__NewsletterConfigDetails",
+        ":src__components__PersonalMcpDetails",
+        ":src__components__status",
+        ":src__components__ui",
+        ":src__lib__alert-guidance",
+        ":src__lib__format",
+        ":src__lib__url",
+        "//contracts:ops-v1/fixtures/OpsStatus/watch-degraded.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/watch-ok.json_data",
+        "//dashboard/web:node_modules/@testing-library/jest-dom",
+        "//dashboard/web:node_modules/@testing-library/react",
+        "//dashboard/web:node_modules/vitest",
+        "//dashboard/worker/src:api_types_web",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__components__AttentionActions_test",
+    config = "//dashboard/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "dashboard/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":components/AttentionActions.test.tsx"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "src__components__NewsletterConfigDetails_test",
+    config = "//dashboard/web:test_config",
+    data = COMMON_TEST_DATA_2,
+    project = "dashboard/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":components/NewsletterConfigDetails.test.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__components__NewsletterConfigDetails",
+        ":src__components__status",
+        ":src__components__ui",
+        ":src__lib__format",
+        ":src__lib__url",
+        "//dashboard/web:node_modules/@testing-library/jest-dom",
+        "//dashboard/web:node_modules/@testing-library/react",
+        "//dashboard/web:node_modules/vitest",
+        "//dashboard/worker/src:api_types_web",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__components__PersonalMcpDetails_test",
+    config = "//dashboard/web:test_config",
+    data = COMMON_TEST_DATA_2,
+    project = "dashboard/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":components/PersonalMcpDetails.test.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__components__PersonalMcpDetails",
+        ":src__components__status",
+        ":src__components__ui",
+        ":src__lib__format",
+        "//dashboard/web:node_modules/@testing-library/jest-dom",
+        "//dashboard/web:node_modules/@testing-library/react",
+        "//dashboard/web:node_modules/vitest",
+        "//dashboard/worker/src:api_types_web",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__components__WebsiteSyncPanel_test",
+    config = "//dashboard/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "dashboard/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":components/WebsiteSyncPanel.test.tsx"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "src__lib__format_test",
+    config = "//dashboard/web:test_config",
+    data = COMMON_TEST_DATA_2,
+    project = "dashboard/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":lib/format.test.ts"],
+    deps = [
+        ":src__lib__format",
+        ":src__lib__url",
+        "//dashboard/web:node_modules/@testing-library/jest-dom",
+        "//dashboard/web:node_modules/@testing-library/react",
+        "//dashboard/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__lib__labels_test",
+    config = "//dashboard/web:test_config",
+    data = COMMON_TEST_DATA_2,
+    project = "dashboard/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":lib/labels.test.ts"],
+    deps = [
+        ":src__api__client",
+        ":src__lib__alert-guidance",
+        ":src__lib__format",
+        "//contracts:ops-v1/fixtures/GuardState/shed-watch.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/mail-hero-degraded.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/mail-hero-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/recall-degraded.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/recall-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/tasks-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/todofy-degraded.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/todofy-ok.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/watch-degraded.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/watch-ok.json_data",
+        "//dashboard/web:node_modules/@testing-library/jest-dom",
+        "//dashboard/web:node_modules/@testing-library/react",
+        "//dashboard/web:node_modules/vitest",
+        "//proto/dashboard/ui/v1:ts",
+        "//proto/ts:wire-json",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__styles__layout_test",
+    config = "//dashboard/web:test_config",
+    data = [
+        "//:node_modules/vitest",
+        "//dashboard/web:application_sources",
+        "//dashboard/web:node_modules/@testing-library/dom",
+        "//dashboard/web:node_modules/@testing-library/user-event",
+        "//dashboard/web:node_modules/@vitejs/plugin-react",
+        "//dashboard/web:node_modules/jsdom",
+        "//dashboard/web:node_modules/vite",
+        "//dashboard/web:package_json",
+        "//dashboard/web:test_config",
+        "//dashboard/web/src/test:source_test_setup_ts",
+    ],
+    project = "dashboard/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":styles/layout.test.ts"],
+    deps = COMMON_TEST_DEPS_3,
+)
+
+proto_vitest_test(
+    name = "src__views__CloudflareView_test",
+    config = "//dashboard/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "dashboard/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":views/CloudflareView.test.tsx"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "src__views__FlowsView_test",
+    config = "//dashboard/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "dashboard/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":views/FlowsView.test.tsx"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "src__views__HomeView_test",
+    config = "//dashboard/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "dashboard/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":views/HomeView.test.tsx"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "src__views__OpsView_test",
+    config = "//dashboard/web:test_config",
+    data = COMMON_TEST_DATA_4,
+    project = "dashboard/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":views/OpsView.test.tsx"],
+    deps = COMMON_TEST_DEPS_2,
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+    deps = [] + ["//dashboard/web/src/test:source_audit_files"],
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        ":src__App_test",
+        ":src__api__attention-cache_test",
+        ":src__api__client_test",
+        ":src__components__ActionsSection_test",
+        ":src__components__AppDetails_test",
+        ":src__components__AttentionActions_test",
+        ":src__components__NewsletterConfigDetails_test",
+        ":src__components__PersonalMcpDetails_test",
+        ":src__components__WebsiteSyncPanel_test",
+        ":src__lib__format_test",
+        ":src__lib__labels_test",
+        ":src__refresh_test",
+        ":src__router_test",
+        ":src__styles__layout_test",
+        ":src__views__CloudflareView_test",
+        ":src__views__FlowsView_test",
+        ":src__views__HomeView_test",
+        ":src__views__OpsView_test",
+        "//dashboard/web/src/test:check",
+    ],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+    tests = [
+        ":src__App_test",
+        ":src__api__attention-cache_test",
+        ":src__api__client_test",
+        ":src__components__ActionsSection_test",
+        ":src__components__AppDetails_test",
+        ":src__components__AttentionActions_test",
+        ":src__components__NewsletterConfigDetails_test",
+        ":src__components__PersonalMcpDetails_test",
+        ":src__components__WebsiteSyncPanel_test",
+        ":src__lib__format_test",
+        ":src__lib__labels_test",
+        ":src__refresh_test",
+        ":src__router_test",
+        ":src__styles__layout_test",
+        ":src__views__CloudflareView_test",
+        ":src__views__FlowsView_test",
+        ":src__views__HomeView_test",
+        ":src__views__OpsView_test",
+        "//dashboard/web/src/test:unit_tests",
+    ],
+)

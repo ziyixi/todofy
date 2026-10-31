@@ -293,6 +293,25 @@ def test_source_audit_hashes_package_inputs_but_ignores_bytecode(
     }
 
 
+def test_source_audit_ignores_exact_bazel_metadata(smoke, source_root):
+    package = source_root / "src/newsletter"
+    (package / "workflow").mkdir()
+    (package / "workflow/schema.py").write_text("# Synthetic package input\n")
+    expected = smoke.source_hashes(source_root)
+    for name in ("BUILD.bazel", "workflow/BUILD.bazel"):
+        (package / name).write_text('filegroup(name = "sources")\n')
+    assert smoke.source_hashes(source_root) == expected
+
+
+@pytest.mark.parametrize(
+    "name", ["unexpected.txt", "values.bazel", "BUILD.bazel.bak"]
+)
+def test_source_audit_rejects_unknown_package_files(smoke, source_root, name):
+    (source_root / "src/newsletter" / name).write_text("Synthetic extra file\n")
+    with pytest.raises(ValueError, match="Unexpected package file"):
+        smoke.source_hashes(source_root)
+
+
 def test_ci_smokes_native_amd64_before_publish_without_rebuild():
     jobs = workflows.load("ci.yml")["jobs"]
     image = jobs["artifacts"]

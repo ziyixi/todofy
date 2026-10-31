@@ -1,6 +1,6 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library")
 load("@rules_python//python:defs.bzl", "py_library", "py_test")
-load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -12,22 +12,7 @@ js_library(
     ],
 )
 
-filegroup(
-    name = "source_audit_files",
-    srcs = glob(
-        ["*"],
-        allow_empty = True,
-        exclude = SOURCE_AUDIT_EXCLUDES,
-    ) + glob(
-        [
-            ".env.example",
-            ".env.*.example",
-            ".dev.vars.example",
-        ],
-        allow_empty = True,
-    ),
-    visibility = ["//visibility:public"],
-)
+source_audit_files()
 
 py_library(
     name = "legacy_restore",
@@ -49,28 +34,25 @@ py_library(
     deps = [":legacy_restore"],
 )
 
-[
-    py_test(
-        name = "restore_" + module + "_test",
-        srcs = [
-            module + ".py",
-            "//tools/bazel/python:unittest_main.py",
-        ],
-        args = [module],
-        data = ["//mail-hero/cloudflare:migrations"],
-        imports = ["."],
-        legacy_create_init = False,
-        main = "//tools/bazel/python:unittest_main.py",
-        deps = [
-            ":legacy_restore",
-            ":native_restore",
-        ] + ([":synthetic_snapshot"] if module == "test_native_backup" else []),
-    )
-    for module in [
-        "test_backup",
-        "test_native_backup",
-    ]
-]
+[py_test(
+    name = "restore_" + module + "_test",
+    srcs = [
+        module + ".py",
+        "//tools/bazel/python:unittest_main.py",
+    ],
+    args = [module],
+    data = ["//mail-hero/cloudflare:migrations"],
+    imports = ["."],
+    legacy_create_init = False,
+    main = "//tools/bazel/python:unittest_main.py",
+    deps = [
+        ":legacy_restore",
+        ":native_restore",
+    ] + ([":synthetic_snapshot"] if module == "test_native_backup" else []),
+) for module in [
+    "test_backup",
+    "test_native_backup",
+]]
 
 test_suite(
     name = "check",

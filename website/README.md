@@ -54,7 +54,7 @@ English and Chinese versions use distinct slugs and `Language` values, with the 
 Only main Actions publishes the site. Code changes, daily relay checks and Home's **立即同步** use the same release
 lock and identity checks. A matching code/content/config identity records a successful check without uploading.
 Changed releases verify the complete route contract before and after publication; failure follows the recorded
-rollback path. Live deployment verification is the uncached `bazel run //website:verify_deployment` operator and
+rollback path. Live deployment verification is the uncached `bazel run //website/tests/e2e:verify_deployment` operator and
 requires an explicit URL and expected build identity.
 
 Notion is read only. Public Notion buttons and status write-back are retired. The production environment supplies

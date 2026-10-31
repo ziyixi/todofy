@@ -1,5 +1,5 @@
 load("@rules_python//python:defs.bzl", "py_library", "py_test")
-load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES", "source_audit_files")
 
 py_library(
     name = "planner",
@@ -21,31 +21,19 @@ py_test(
 
 test_suite(
     name = "check",
-    tests = [":tests", ":release_tests"],
+    tests = [
+        ":release_tests",
+        ":tests",
+    ],
     visibility = ["//visibility:public"],
 )
 
 py_test(
     name = "release_tests",
     srcs = ["test_releases.py"],
+    legacy_create_init = False,
     main = "test_releases.py",
     deps = [":planner"],
-    legacy_create_init = False,
 )
 
-filegroup(
-    name = "source_audit_files",
-    srcs = glob(
-        ["*"],
-        allow_empty = True,
-        exclude = SOURCE_AUDIT_EXCLUDES,
-    ) + glob(
-        [
-            ".env.example",
-            ".env.*.example",
-            ".dev.vars.example",
-        ],
-        allow_empty = True,
-    ),
-    visibility = ["//visibility:public"],
-)
+source_audit_files()

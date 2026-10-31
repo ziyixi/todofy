@@ -16,7 +16,7 @@ describe('no external requests', () => {
     const shipped = [
       join(root, 'index.html'),
       ...files(join(root, 'public')),
-      ...files(join(root, 'src')).filter((path) => !/\.test\.tsx?$|[/\\]test[/\\]/.test(path)),
+      ...files(join(root, 'src')).filter((path) => !/\.test\.tsx?$|[/\\]test[/\\]/.test(relative(root, path))),
     ]
     // XML namespace URIs (xmlns="http://www.w3.org/2000/svg") are identifiers, never fetched.
     const text = (path: string) => readFileSync(path, 'utf8').replace(/xmlns(?::\w+)?="http:\/\/www\.w3\.org\/[^"]*"/g, '')
@@ -25,7 +25,7 @@ describe('no external requests', () => {
   })
 
   it('calls fetch only through the same-origin API client', () => {
-    const sources = files(join(root, 'src')).filter((path) => !/\.test\.tsx?$|[/\\]test[/\\]/.test(path))
+    const sources = files(join(root, 'src')).filter((path) => !/\.test\.tsx?$|[/\\]test[/\\]/.test(relative(root, path)))
     const users = sources.filter((path) => /\bfetch\(|XMLHttpRequest|WebSocket|EventSource|sendBeacon/.test(readFileSync(path, 'utf8')))
     expect(users.map((path) => relative(root, path))).toEqual(['src/api/client.ts'])
   })

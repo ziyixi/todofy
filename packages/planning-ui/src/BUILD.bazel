@@ -1,0 +1,806 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//tools/bazel:js.bzl", "copied_source_files")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//packages/planning-ui:__subpackages__"])
+
+exports_files(
+    glob(
+        [
+            "*.ts",
+            "*.tsx",
+            "*.css",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//packages/planning-ui:__subpackages__"],
+)
+
+js_library(
+    name = "announce",
+    srcs = [":announce.ts"],
+    types = [":announce.ts"],
+    deps = ["//packages/planning-ui:node_modules/react"],
+)
+
+js_library(
+    name = "model",
+    srcs = [":model.ts"],
+    types = [":model.ts"],
+    deps = ["//packages/planning-ui:node_modules/react"],
+)
+
+js_library(
+    name = "domain",
+    srcs = [":domain.ts"],
+    types = [":domain.ts"],
+    deps = [":model"],
+)
+
+js_library(
+    name = "i18n",
+    srcs = [":i18n.ts"],
+    types = [":i18n.ts"],
+    deps = [":model"],
+)
+
+js_library(
+    name = "StatusMarks",
+    srcs = [":StatusMarks.tsx"],
+    types = [":StatusMarks.tsx"],
+    deps = [
+        ":domain",
+        ":i18n",
+        ":model",
+        "//packages/planning-ui:node_modules/lucide-react",
+        "//packages/planning-ui:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "AddStep",
+    srcs = [":AddStep.tsx"],
+    types = [":AddStep.tsx"],
+    deps = [
+        ":StatusMarks",
+        ":announce",
+        ":domain",
+        ":i18n",
+        ":model",
+        "//packages/planning-ui:node_modules/lucide-react",
+        "//packages/planning-ui:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "drag-announcements",
+    srcs = [":drag-announcements.ts"],
+    types = [":drag-announcements.ts"],
+    deps = [
+        ":model",
+        "//packages/planning-ui:node_modules/@dnd-kit/dom",
+    ],
+)
+
+js_library(
+    name = "planning-outcomes",
+    srcs = [":planning-outcomes.ts"],
+    types = [":planning-outcomes.ts"],
+    deps = [
+        ":domain",
+        ":model",
+    ],
+)
+
+js_library(
+    name = "bets",
+    srcs = [":bets.ts"],
+    types = [":bets.ts"],
+    deps = [":model"],
+)
+
+js_library(
+    name = "mail",
+    srcs = [":mail.ts"],
+    types = [":mail.ts"],
+    deps = [":model"],
+)
+
+js_library(
+    name = "weekly-review",
+    srcs = [":weekly-review.ts"],
+    types = [":weekly-review.ts"],
+    deps = [
+        ":domain",
+        ":mail",
+        ":model",
+        ":planning-outcomes",
+    ],
+)
+
+js_library(
+    name = "plan-updates",
+    srcs = [":plan-updates.ts"],
+    types = [":plan-updates.ts"],
+    deps = [
+        ":bets",
+        ":domain",
+        ":model",
+        ":planning-outcomes",
+        ":weekly-review",
+    ],
+)
+
+js_library(
+    name = "CompleteTaskButton",
+    srcs = [":CompleteTaskButton.tsx"],
+    types = [":CompleteTaskButton.tsx"],
+    deps = [
+        ":domain",
+        ":i18n",
+        ":model",
+        "//packages/planning-ui:node_modules/lucide-react",
+        "//packages/planning-ui:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "PlanningCalendar",
+    srcs = [":PlanningCalendar.tsx"],
+    types = [":PlanningCalendar.tsx"],
+    deps = [
+        ":CompleteTaskButton",
+        ":StatusMarks",
+        ":domain",
+        ":drag-announcements",
+        ":i18n",
+        ":model",
+        ":plan-updates",
+        ":planning-outcomes",
+        ":weekly-review",
+        "//packages/planning-ui:node_modules/@dnd-kit/react",
+        "//packages/planning-ui:node_modules/lucide-react",
+        "//packages/planning-ui:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "dependency_rules",
+    srcs = [
+        ":deadlines.ts",
+        ":dependencies.ts",
+    ],
+    types = [
+        ":deadlines.ts",
+        ":dependencies.ts",
+    ],
+    deps = [
+        ":PlanningCalendar",
+        ":domain",
+        ":i18n",
+        ":model",
+        ":weekly-review",
+    ],
+)
+
+alias(
+    name = "deadlines",
+    actual = ":dependency_rules",
+)
+
+alias(
+    name = "dependencies",
+    actual = ":dependency_rules",
+)
+
+js_library(
+    name = "plan-visibility",
+    srcs = [":plan-visibility.ts"],
+    types = [":plan-visibility.ts"],
+    deps = [
+        ":dependency_rules",
+        ":domain",
+        ":model",
+    ],
+)
+
+js_library(
+    name = "review-lanes",
+    srcs = [":review-lanes.ts"],
+    types = [":review-lanes.ts"],
+    deps = [
+        ":dependency_rules",
+        ":model",
+        ":plan-visibility",
+        ":planning-outcomes",
+        ":weekly-review",
+    ],
+)
+
+js_library(
+    name = "lane-reorder",
+    srcs = [":lane-reorder.ts"],
+    types = [":lane-reorder.ts"],
+    deps = [
+        ":model",
+        ":plan-updates",
+        ":planning-outcomes",
+        "//packages/planning-ui:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "row-drag",
+    srcs = [":row-drag.ts"],
+    types = [":row-drag.ts"],
+    deps = ["//packages/planning-ui:node_modules/@dnd-kit/dom"],
+)
+
+js_library(
+    name = "FullTitle",
+    srcs = [":FullTitle.tsx"],
+    types = [":FullTitle.tsx"],
+    deps = ["//packages/planning-ui:node_modules/react"],
+)
+
+js_library(
+    name = "ReviewBoard",
+    srcs = [":ReviewBoard.tsx"],
+    types = [":ReviewBoard.tsx"],
+    deps = [
+        ":CompleteTaskButton",
+        ":FullTitle",
+        ":StatusMarks",
+        ":dependency_rules",
+        ":domain",
+        ":drag-announcements",
+        ":i18n",
+        ":lane-reorder",
+        ":model",
+        ":plan-updates",
+        ":planning-outcomes",
+        ":review-lanes",
+        ":row-drag",
+        ":weekly-review",
+        "//packages/planning-ui:node_modules/@dnd-kit/collision",
+        "//packages/planning-ui:node_modules/@dnd-kit/dom",
+        "//packages/planning-ui:node_modules/@dnd-kit/react",
+        "//packages/planning-ui:node_modules/lucide-react",
+        "//packages/planning-ui:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "QuickTasks",
+    srcs = [":QuickTasks.tsx"],
+    types = [":QuickTasks.tsx"],
+    deps = [
+        ":CompleteTaskButton",
+        ":FullTitle",
+        ":domain",
+        ":drag-announcements",
+        ":i18n",
+        ":model",
+        ":planning-outcomes",
+        "//packages/planning-ui:node_modules/@dnd-kit/react",
+        "//packages/planning-ui:node_modules/lucide-react",
+        "//packages/planning-ui:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "PlanningWeek",
+    srcs = [":PlanningWeek.tsx"],
+    types = [":PlanningWeek.tsx"],
+    deps = [
+        ":AddStep",
+        ":CompleteTaskButton",
+        ":FullTitle",
+        ":PlanningCalendar",
+        ":QuickTasks",
+        ":ReviewBoard",
+        ":StatusMarks",
+        ":domain",
+        ":drag-announcements",
+        ":i18n",
+        ":lane-reorder",
+        ":model",
+        ":plan-updates",
+        ":planning-outcomes",
+        ":row-drag",
+        ":weekly-review",
+        "//packages/planning-ui:node_modules/@dnd-kit/collision",
+        "//packages/planning-ui:node_modules/@dnd-kit/dom",
+        "//packages/planning-ui:node_modules/@dnd-kit/react",
+        "//packages/planning-ui:node_modules/lucide-react",
+        "//packages/planning-ui:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "BetText",
+    srcs = [":BetText.tsx"],
+    types = [":BetText.tsx"],
+    deps = [
+        ":StatusMarks",
+        ":bets",
+        ":i18n",
+        ":model",
+        "//packages/planning-ui:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "BetGoal",
+    srcs = [":BetGoal.tsx"],
+    types = [":BetGoal.tsx"],
+    deps = [
+        ":bets",
+        ":model",
+        "//packages/planning-ui:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "TaskDependencies",
+    srcs = [":TaskDependencies.tsx"],
+    types = [":TaskDependencies.tsx"],
+    deps = [
+        ":StatusMarks",
+        ":dependency_rules",
+        ":domain",
+        ":i18n",
+        ":model",
+        "//packages/planning-ui:node_modules/lucide-react",
+        "//packages/planning-ui:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "execution-fields_css",
+    srcs = [":execution-fields.css"],
+    deps = [],
+)
+
+js_library(
+    name = "ExecutionFields",
+    srcs = [":ExecutionFields.tsx"],
+    types = [":ExecutionFields.tsx"],
+    deps = [
+        ":execution-fields_css",
+        ":i18n",
+        ":model",
+        "//packages/planning-ui:node_modules/lucide-react",
+        "//packages/planning-ui:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "TaskEditor",
+    srcs = [":TaskEditor.tsx"],
+    types = [":TaskEditor.tsx"],
+    deps = [
+        ":ExecutionFields",
+        ":StatusMarks",
+        ":TaskDependencies",
+        ":dependency_rules",
+        ":domain",
+        ":i18n",
+        ":model",
+        ":planning-outcomes",
+        "//packages/planning-ui:node_modules/lucide-react",
+        "//packages/planning-ui:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "WeeklyReview",
+    srcs = [":WeeklyReview.tsx"],
+    types = [":WeeklyReview.tsx"],
+    deps = [
+        ":BetGoal",
+        ":BetText",
+        ":PlanningCalendar",
+        ":TaskEditor",
+        ":announce",
+        ":bets",
+        ":dependency_rules",
+        ":domain",
+        ":i18n",
+        ":model",
+        ":plan-updates",
+        ":plan-visibility",
+        ":planning-outcomes",
+        ":weekly-review",
+        "//packages/planning-ui:node_modules/lucide-react",
+        "//packages/planning-ui:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "plan-view-state",
+    srcs = [":plan-view-state.ts"],
+    types = [":plan-view-state.ts"],
+    deps = [":model"],
+)
+
+js_library(
+    name = "PlanView",
+    srcs = [":PlanView.tsx"],
+    types = [":PlanView.tsx"],
+    deps = [
+        ":CompleteTaskButton",
+        ":PlanningWeek",
+        ":ReviewBoard",
+        ":WeeklyReview",
+        ":domain",
+        ":i18n",
+        ":model",
+        ":plan-view-state",
+        ":plan-visibility",
+        ":planning-outcomes",
+        ":review-lanes",
+        ":weekly-review",
+        "//packages/planning-ui:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "FocusEntries",
+    srcs = [":FocusEntries.tsx"],
+    types = [":FocusEntries.tsx"],
+    deps = [
+        ":StatusMarks",
+        ":domain",
+        ":i18n",
+        ":model",
+        ":plan-updates",
+        "//packages/planning-ui:node_modules/lucide-react",
+        "//packages/planning-ui:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "idle-pause",
+    srcs = [":idle-pause.ts"],
+    types = [":idle-pause.ts"],
+    deps = [],
+)
+
+js_library(
+    name = "useIdlePause",
+    srcs = [":useIdlePause.ts"],
+    types = [":useIdlePause.ts"],
+    deps = [
+        ":idle-pause",
+        ":model",
+        "//packages/planning-ui:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "FocusBlock",
+    srcs = [":FocusBlock.tsx"],
+    types = [":FocusBlock.tsx"],
+    deps = [
+        ":FocusEntries",
+        ":StatusMarks",
+        ":domain",
+        ":i18n",
+        ":model",
+        ":planning-outcomes",
+        ":useIdlePause",
+        "//packages/planning-ui:node_modules/lucide-react",
+        "//packages/planning-ui:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "FocusView",
+    srcs = [":FocusView.tsx"],
+    types = [":FocusView.tsx"],
+    deps = [
+        ":FocusBlock",
+        ":FocusEntries",
+        ":PlanningCalendar",
+        ":StatusMarks",
+        ":dependency_rules",
+        ":domain",
+        ":drag-announcements",
+        ":i18n",
+        ":model",
+        ":plan-updates",
+        ":plan-visibility",
+        ":planning-outcomes",
+        ":row-drag",
+        ":useIdlePause",
+        "//packages/planning-ui:node_modules/@dnd-kit/collision",
+        "//packages/planning-ui:node_modules/@dnd-kit/dom",
+        "//packages/planning-ui:node_modules/@dnd-kit/react",
+        "//packages/planning-ui:node_modules/lucide-react",
+        "//packages/planning-ui:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "TaskBreadcrumb",
+    srcs = [":TaskBreadcrumb.tsx"],
+    types = [":TaskBreadcrumb.tsx"],
+    deps = [
+        ":domain",
+        ":model",
+        ":planning-outcomes",
+        "//packages/planning-ui:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "StepEditor",
+    srcs = [":StepEditor.tsx"],
+    types = [":StepEditor.tsx"],
+    deps = [
+        ":StatusMarks",
+        ":TaskBreadcrumb",
+        ":announce",
+        ":domain",
+        ":i18n",
+        ":model",
+        ":plan-updates",
+        "//packages/planning-ui:node_modules/lucide-react",
+        "//packages/planning-ui:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "WeeklyGoals",
+    srcs = [":WeeklyGoals.tsx"],
+    types = [":WeeklyGoals.tsx"],
+    deps = [
+        ":BetGoal",
+        ":BetText",
+        ":PlanningCalendar",
+        ":announce",
+        ":bets",
+        ":domain",
+        ":i18n",
+        ":model",
+        "//packages/planning-ui:node_modules/lucide-react",
+        "//packages/planning-ui:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "MiniTimer",
+    srcs = [":MiniTimer.tsx"],
+    types = [":MiniTimer.tsx"],
+    deps = [
+        ":domain",
+        ":i18n",
+        ":model",
+        "//packages/planning-ui:node_modules/lucide-react",
+        "//packages/planning-ui:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "mini-timer_css",
+    srcs = [":mini-timer.css"],
+    deps = [],
+)
+
+js_library(
+    name = "picture-in-picture",
+    srcs = [":picture-in-picture.ts"],
+    types = [":picture-in-picture.ts"],
+    deps = [
+        ":i18n",
+        ":mini-timer_css",
+        ":model",
+    ],
+)
+
+js_library(
+    name = "App",
+    srcs = [":App.tsx"],
+    types = [":App.tsx"],
+    deps = [
+        ":FocusView",
+        ":MiniTimer",
+        ":PlanView",
+        ":PlanningCalendar",
+        ":StatusMarks",
+        ":StepEditor",
+        ":TaskEditor",
+        ":WeeklyGoals",
+        ":announce",
+        ":domain",
+        ":i18n",
+        ":idle-pause",
+        ":mail",
+        ":model",
+        ":picture-in-picture",
+        ":plan-updates",
+        ":plan-view-state",
+        ":planning-outcomes",
+        ":useIdlePause",
+        "//packages/planning-ui:node_modules/lucide-react",
+        "//packages/planning-ui:node_modules/react",
+        "//packages/planning-ui:node_modules/react-dom",
+    ],
+)
+
+js_library(
+    name = "MailCategories",
+    srcs = [":MailCategories.tsx"],
+    types = [":MailCategories.tsx"],
+    deps = [
+        ":i18n",
+        ":mail",
+        ":model",
+        "//packages/planning-ui:node_modules/lucide-react",
+        "//packages/planning-ui:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "api",
+    srcs = [":api.ts"],
+    types = [":api.ts"],
+    deps = [
+        ":bets",
+        ":domain",
+        ":model",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+    ],
+)
+
+js_library(
+    name = "dependencies_css",
+    srcs = [":dependencies.css"],
+    deps = [],
+)
+
+js_library(
+    name = "focus_css",
+    srcs = [":focus.css"],
+    deps = [],
+)
+
+js_library(
+    name = "index",
+    srcs = [":index.ts"],
+    types = [":index.ts"],
+    deps = [
+        ":App",
+        ":ExecutionFields",
+        ":TaskDependencies",
+        ":TaskEditor",
+        ":api",
+        ":model",
+        ":plan-view-state",
+    ],
+)
+
+js_library(
+    name = "mail-categories_css",
+    srcs = [":mail-categories.css"],
+    deps = [],
+)
+
+js_library(
+    name = "planner_css",
+    srcs = [":planner.css"],
+    deps = [],
+)
+
+js_library(
+    name = "review-board_css",
+    srcs = [":review-board.css"],
+    deps = [],
+)
+
+js_library(
+    name = "planning-week_css",
+    srcs = [":planning-week.css"],
+    deps = [],
+)
+
+js_library(
+    name = "weekly-review_css",
+    srcs = [":weekly-review.css"],
+    deps = [],
+)
+
+js_library(
+    name = "planning-board_css",
+    srcs = [":planning-board.css"],
+    deps = [
+        ":planning-week_css",
+        ":review-board_css",
+        ":weekly-review_css",
+    ],
+)
+
+js_library(
+    name = "weekly-goals_css",
+    srcs = [":weekly-goals.css"],
+    deps = [],
+)
+
+js_library(
+    name = "styles_css",
+    srcs = [":styles.css"],
+    deps = [
+        ":dependencies_css",
+        ":focus_css",
+        ":mail-categories_css",
+        ":planner_css",
+        ":planning-board_css",
+        ":weekly-goals_css",
+    ],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+copied_source_files(
+    name = "typecheck_sources",
+    srcs = [
+        "AddStep.tsx",
+        "App.tsx",
+        "BetGoal.tsx",
+        "BetText.tsx",
+        "CompleteTaskButton.tsx",
+        "ExecutionFields.tsx",
+        "FocusBlock.tsx",
+        "FocusEntries.tsx",
+        "FocusView.tsx",
+        "FullTitle.tsx",
+        "MailCategories.tsx",
+        "MiniTimer.tsx",
+        "PlanView.tsx",
+        "PlanningCalendar.tsx",
+        "PlanningWeek.tsx",
+        "QuickTasks.tsx",
+        "ReviewBoard.tsx",
+        "StatusMarks.tsx",
+        "StepEditor.tsx",
+        "TaskBreadcrumb.tsx",
+        "TaskDependencies.tsx",
+        "TaskEditor.tsx",
+        "WeeklyGoals.tsx",
+        "WeeklyReview.tsx",
+        "announce.ts",
+        "api.ts",
+        "bets.ts",
+        "deadlines.ts",
+        "dependencies.ts",
+        "domain.ts",
+        "drag-announcements.ts",
+        "i18n.ts",
+        "idle-pause.ts",
+        "index.ts",
+        "lane-reorder.ts",
+        "mail.ts",
+        "model.ts",
+        "picture-in-picture.ts",
+        "plan-updates.ts",
+        "plan-view-state.ts",
+        "plan-visibility.ts",
+        "planning-outcomes.ts",
+        "review-lanes.ts",
+        "row-drag.ts",
+        "useIdlePause.ts",
+        "weekly-review.ts",
+    ],
+)

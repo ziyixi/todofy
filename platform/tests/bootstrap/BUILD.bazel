@@ -1,0 +1,64 @@
+load("@rules_python//python:defs.bzl", "py_library")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/python:tests.bzl", "unittest_test")
+
+package(default_visibility = ["//platform:__subpackages__"])
+
+py_library(
+    name = "package",
+    srcs = ["__init__.py"],
+    imports = ["../.."],
+)
+
+unittest_test(
+    name = "bootstrap_test_boundaries",
+    size = "small",
+    srcs = ["test_boundaries.py"],
+    data = [
+        "//platform:manifests",
+        "//platform:pyproject.toml",
+    ],
+    imports = [
+        "..",
+        "../..",
+        "../../src",
+        "../status_daemon",
+    ],
+    modules = ["tests.bootstrap.test_boundaries"],
+    deps = [
+        ":package",
+        "@python_deps//pyyaml",
+    ],
+)
+
+test_suite(
+    name = "tests",
+    tests = [":bootstrap_test_boundaries"],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)

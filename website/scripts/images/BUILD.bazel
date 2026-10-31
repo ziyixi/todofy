@@ -1,0 +1,30 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//website:bazel.bzl", "website_sources")
+
+package(default_visibility = ["//website:__subpackages__"])
+
+exports_files(
+    glob(
+        ["*.ts"],
+        allow_empty = True,
+    ),
+    visibility = ["//website:__subpackages__"],
+)
+
+js_library(
+    name = "prepare",
+    srcs = [":prepare.ts"],
+    deps = [
+        "//website:node_modules/sharp",
+        "//website/src/lib/content:hash",
+        "//website/src/lib/content:reader",
+        "//website/src/lib/content:schema",
+        "//website/src/lib/content:site-data",
+        "//website/src/lib/images:config",
+    ],
+)
+
+website_sources(
+    application_excludes = [],
+    children = [],
+)

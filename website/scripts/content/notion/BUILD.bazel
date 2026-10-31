@@ -1,0 +1,71 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//website:bazel.bzl", "website_sources")
+
+package(default_visibility = ["//website:__subpackages__"])
+
+exports_files(
+    glob(
+        ["*.ts"],
+        allow_empty = True,
+    ),
+    visibility = ["//website:__subpackages__"],
+)
+
+js_library(
+    name = "types",
+    srcs = [":types.ts"],
+    deps = ["//website/scripts/content:types"],
+)
+
+js_library(
+    name = "media",
+    srcs = [":media.ts"],
+    deps = [
+        ":types",
+        "//website:node_modules/sharp",
+        "//website/scripts/content:types",
+        "//website/src/lib/content:errors",
+    ],
+)
+
+js_library(
+    name = "convert",
+    srcs = [":convert.ts"],
+    deps = [
+        ":media",
+        ":types",
+        "//website:node_modules/zod",
+        "//website/scripts/content:types",
+        "//website/src/lib/content:equation",
+        "//website/src/lib/content:errors",
+        "//website/src/lib/content:hash",
+        "//website/src/lib/content:heading",
+        "//website/src/lib/content:schema",
+        "//website/src/lib/content:url",
+    ],
+)
+
+js_library(
+    name = "pagination",
+    srcs = [":pagination.ts"],
+    deps = [
+        ":types",
+        "//website/src/lib/content:errors",
+    ],
+)
+
+js_library(
+    name = "withdrawal",
+    srcs = [":withdrawal.ts"],
+    deps = [
+        ":pagination",
+        ":types",
+        "//website/src/lib/content:errors",
+        "//website/src/lib/content:hash",
+    ],
+)
+
+website_sources(
+    application_excludes = [],
+    children = [],
+)

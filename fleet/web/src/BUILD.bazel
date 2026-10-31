@@ -1,0 +1,489 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@npm//fleet/web:vitest/package_json.bzl", vitest = "bin")
+load("//tools/bazel:js.bzl", "copied_source_files", "proto_vitest_test", "ts_source_library")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//fleet:__subpackages__"])
+
+COMMON_TEST_DATA = [
+    "//fleet/web:package_json",
+    ":setup.ts",
+    "//fleet/web:test_config",
+    "//fleet/web:node_modules/@testing-library/dom",
+    "//fleet/web:node_modules/@testing-library/user-event",
+    "//fleet/web:node_modules/@vitejs/plugin-react",
+    "//fleet/web:node_modules/jsdom",
+    "//fleet/web:node_modules/vite",
+    "//:node_modules/vitest",
+    "//fleet/deploy:public-navigation",
+]
+
+COMMON_TEST_DATA_2 = [
+    "//fleet/web:package_json",
+    ":setup.ts",
+    "//fleet/web:test_config",
+    "//fleet/web:node_modules/@testing-library/dom",
+    "//fleet/web:node_modules/@testing-library/react",
+    "//fleet/web:node_modules/@testing-library/user-event",
+    "//fleet/web:node_modules/@vitejs/plugin-react",
+    "//fleet/web:node_modules/jsdom",
+    "//fleet/web:node_modules/vite",
+    "//:node_modules/vitest",
+    "//fleet/deploy:public-navigation",
+]
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//fleet:__subpackages__"],
+)
+
+copied_source_files(
+    name = "application_sources_srcs",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+copied_source_files(
+    name = "typecheck_project_srcs",
+    srcs = [
+        "App.test.tsx",
+        "App.tsx",
+        "HostReportView.tsx",
+        "Mark.tsx",
+        "NewsletterConfigView.test.tsx",
+        "NewsletterConfigView.tsx",
+        "Overview.tsx",
+        "ReconcileView.test.tsx",
+        "ReconcileView.tsx",
+        "ResourcesView.test.tsx",
+        "ResourcesView.tsx",
+        "RuntimeView.tsx",
+        "TimeChart.test.tsx",
+        "TimeChart.tsx",
+        "api.ts",
+        "chart.test.ts",
+        "chart.ts",
+        "deployment.ts",
+        "format.test.ts",
+        "format.ts",
+        "main.tsx",
+        "metrics.test.ts",
+        "metrics.ts",
+        "setup.ts",
+        "test/nodes.ts",
+        "vite-env.d.ts",
+    ],
+)
+
+copied_source_files(
+    name = "lint_sources",
+    srcs = glob(
+        [
+            "**/*.ts",
+            "**/*.tsx",
+        ],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+ts_source_library(
+    name = "src__api",
+    srcs = [":api.ts"],
+    deps = [
+        "//proto/fleet/ui/v1:ts",
+        "//proto/ts:http-client",
+    ],
+)
+
+ts_source_library(
+    name = "src__format",
+    srcs = [":format.ts"],
+)
+
+ts_source_library(
+    name = "src__Mark",
+    srcs = [":Mark.tsx"],
+    deps = [
+        ":src__format",
+        "//fleet/web:node_modules/react",
+    ],
+)
+
+ts_source_library(
+    name = "src__deployment",
+    srcs = [":deployment.ts"],
+)
+
+ts_source_library(
+    name = "src__ReconcileView",
+    srcs = [":ReconcileView.tsx"],
+    deps = [
+        ":src__deployment",
+        ":src__format",
+        "//fleet/web:node_modules/react",
+        "//proto/platform/runtime/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__RuntimeView",
+    srcs = [":RuntimeView.tsx"],
+    deps = [
+        ":src__Mark",
+        ":src__ReconcileView",
+        ":src__format",
+        "//fleet/web:node_modules/react",
+        "//proto/platform/runtime/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__NewsletterConfigView",
+    srcs = [":NewsletterConfigView.tsx"],
+    deps = [
+        ":src__format",
+        "//fleet/web:node_modules/react",
+        "//fleet/worker/src:newsletter_config_web",
+        "//proto/fleet/telemetry/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__HostReportView",
+    srcs = [":HostReportView.tsx"],
+    deps = [
+        ":src__Mark",
+        ":src__NewsletterConfigView",
+        ":src__RuntimeView",
+        ":src__format",
+        "//fleet/web:node_modules/react",
+        "//proto/fleet/telemetry/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__metrics",
+    srcs = [":metrics.ts"],
+    deps = ["//proto/fleet/ui/v1:ts"],
+)
+
+ts_source_library(
+    name = "src__Overview",
+    srcs = [":Overview.tsx"],
+    deps = [
+        ":src__HostReportView",
+        ":src__Mark",
+        ":src__format",
+        ":src__metrics",
+        "//fleet/web:node_modules/react",
+        "//proto/fleet/telemetry/v1:ts",
+        "//proto/fleet/ui/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__chart",
+    srcs = [":chart.ts"],
+    deps = [":src__format"],
+)
+
+ts_source_library(
+    name = "src__TimeChart",
+    srcs = [":TimeChart.tsx"],
+    deps = [
+        ":src__chart",
+        "//fleet/web:node_modules/react",
+    ],
+)
+
+ts_source_library(
+    name = "src__ResourcesView",
+    srcs = [":ResourcesView.tsx"],
+    deps = [
+        ":src__TimeChart",
+        ":src__api",
+        ":src__chart",
+        ":src__format",
+        ":src__metrics",
+        "//fleet/web:node_modules/@tanstack/react-query",
+        "//fleet/web:node_modules/react",
+        "//proto/fleet/ui/v1:ts",
+        "//proto/ts:wire-json",
+    ],
+)
+
+js_library(
+    name = "src__App",
+    srcs = [
+        ":App.tsx",
+        ":style.css",
+    ],
+    types = [":App.tsx"],
+    deps = [
+        ":src__Overview",
+        ":src__ResourcesView",
+        ":src__api",
+        "//fleet/web:node_modules/@tanstack/react-query",
+        "//fleet/web:node_modules/react",
+        "//proto/fleet/ui/v1:ts",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "src__main",
+    srcs = [":main.tsx"],
+    deps = [
+        ":src__App",
+        "//fleet/web:node_modules/@tanstack/react-query",
+        "//fleet/web:node_modules/react",
+        "//fleet/web:node_modules/react-dom",
+    ],
+)
+
+js_library(
+    name = "lib",
+    deps = [
+        ":src__App",
+        ":src__HostReportView",
+        ":src__Mark",
+        ":src__NewsletterConfigView",
+        ":src__Overview",
+        ":src__ReconcileView",
+        ":src__ResourcesView",
+        ":src__RuntimeView",
+        ":src__TimeChart",
+        ":src__api",
+        ":src__chart",
+        ":src__deployment",
+        ":src__format",
+        ":src__main",
+        ":src__metrics",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__App_test",
+    config = "//fleet/web:test_config",
+    data = [
+        ":setup.ts",
+        ":style.css",
+        ":test/nodes.ts",
+        "//:node_modules/vitest",
+        "//fleet/deploy:public-navigation",
+        "//fleet/web:node_modules/@testing-library/dom",
+        "//fleet/web:node_modules/@vitejs/plugin-react",
+        "//fleet/web:node_modules/jsdom",
+        "//fleet/web:node_modules/vite",
+        "//fleet/web:package_json",
+        "//fleet/web:test_config",
+    ],
+    project = "fleet/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":App.test.tsx"],
+    deps = [
+        ":src__App",
+        ":src__HostReportView",
+        ":src__Mark",
+        ":src__NewsletterConfigView",
+        ":src__Overview",
+        ":src__ReconcileView",
+        ":src__ResourcesView",
+        ":src__RuntimeView",
+        ":src__TimeChart",
+        ":src__api",
+        ":src__chart",
+        ":src__deployment",
+        ":src__format",
+        ":src__metrics",
+        "//contracts:fleet-report-v1/fixtures/healthy.json_data",
+        "//fleet/web:node_modules/@tanstack/react-query",
+        "//fleet/web:node_modules/@testing-library/jest-dom",
+        "//fleet/web:node_modules/@testing-library/react",
+        "//fleet/web:node_modules/@testing-library/user-event",
+        "//fleet/web:node_modules/vitest",
+        "//proto/fleet/ui/v1:ts",
+        "//proto/ts:wire-json",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__NewsletterConfigView_test",
+    config = "//fleet/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "fleet/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":NewsletterConfigView.test.tsx"],
+    deps = [
+        ":src__NewsletterConfigView",
+        ":src__format",
+        "//fleet/web:node_modules/@testing-library/jest-dom",
+        "//fleet/web:node_modules/@testing-library/react",
+        "//fleet/web:node_modules/vitest",
+        "//proto/fleet/telemetry/v1:ts",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__ReconcileView_test",
+    config = "//fleet/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "fleet/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":ReconcileView.test.tsx"],
+    deps = [
+        ":src__ReconcileView",
+        ":src__deployment",
+        ":src__format",
+        "//fleet/web:node_modules/@testing-library/jest-dom",
+        "//fleet/web:node_modules/@testing-library/react",
+        "//fleet/web:node_modules/vitest",
+        "//proto/platform/runtime/v1:ts",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__ResourcesView_test",
+    config = "//fleet/web:test_config",
+    data = [
+        ":setup.ts",
+        ":test/nodes.ts",
+        "//:node_modules/vitest",
+        "//fleet/deploy:public-navigation",
+        "//fleet/web:node_modules/@testing-library/dom",
+        "//fleet/web:node_modules/@vitejs/plugin-react",
+        "//fleet/web:node_modules/jsdom",
+        "//fleet/web:node_modules/vite",
+        "//fleet/web:package_json",
+        "//fleet/web:test_config",
+    ],
+    project = "fleet/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":ResourcesView.test.tsx"],
+    deps = [
+        ":src__ResourcesView",
+        ":src__TimeChart",
+        ":src__api",
+        ":src__chart",
+        ":src__format",
+        ":src__metrics",
+        "//fleet/web:node_modules/@tanstack/react-query",
+        "//fleet/web:node_modules/@testing-library/jest-dom",
+        "//fleet/web:node_modules/@testing-library/react",
+        "//fleet/web:node_modules/@testing-library/user-event",
+        "//fleet/web:node_modules/vitest",
+        "//proto/fleet/ui/v1:ts",
+        "//proto/ts:wire-json",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__TimeChart_test",
+    config = "//fleet/web:test_config",
+    data = [
+        ":setup.ts",
+        "//:node_modules/vitest",
+        "//fleet/deploy:public-navigation",
+        "//fleet/web:node_modules/@testing-library/dom",
+        "//fleet/web:node_modules/@vitejs/plugin-react",
+        "//fleet/web:node_modules/jsdom",
+        "//fleet/web:node_modules/vite",
+        "//fleet/web:package_json",
+        "//fleet/web:test_config",
+    ],
+    project = "fleet/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":TimeChart.test.tsx"],
+    deps = [
+        ":src__TimeChart",
+        ":src__chart",
+        ":src__format",
+        "//fleet/web:node_modules/@testing-library/jest-dom",
+        "//fleet/web:node_modules/@testing-library/react",
+        "//fleet/web:node_modules/@testing-library/user-event",
+        "//fleet/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__chart_test",
+    config = "//fleet/web:test_config",
+    data = COMMON_TEST_DATA_2,
+    project = "fleet/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":chart.test.ts"],
+    deps = [
+        ":src__chart",
+        ":src__format",
+        "//fleet/web:node_modules/@testing-library/jest-dom",
+        "//fleet/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__format_test",
+    config = "//fleet/web:test_config",
+    data = COMMON_TEST_DATA_2,
+    project = "fleet/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":format.test.ts"],
+    deps = [
+        ":src__format",
+        "//fleet/web:node_modules/@testing-library/jest-dom",
+        "//fleet/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__metrics_test",
+    config = "//fleet/web:test_config",
+    data = [
+        ":setup.ts",
+        ":test/nodes.ts",
+        "//:node_modules/vitest",
+        "//fleet/deploy:public-navigation",
+        "//fleet/web:node_modules/@testing-library/dom",
+        "//fleet/web:node_modules/@testing-library/react",
+        "//fleet/web:node_modules/@testing-library/user-event",
+        "//fleet/web:node_modules/@vitejs/plugin-react",
+        "//fleet/web:node_modules/jsdom",
+        "//fleet/web:node_modules/vite",
+        "//fleet/web:package_json",
+        "//fleet/web:test_config",
+    ],
+    project = "fleet/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":metrics.test.ts"],
+    deps = [
+        ":src__metrics",
+        "//fleet/web:node_modules/@testing-library/jest-dom",
+        "//fleet/web:node_modules/vitest",
+    ],
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+)
+
+test_suite(name = "check")
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)

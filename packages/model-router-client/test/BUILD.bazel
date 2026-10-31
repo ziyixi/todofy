@@ -1,0 +1,70 @@
+load("@npm//packages/model-router-client:vitest/package_json.bzl", vitest = "bin")
+load("//tools/bazel:js.bzl", "copied_source_files", "vitest_test", "workspace_link")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//packages/model-router-client:__subpackages__"])
+
+exports_files(
+    glob(
+        [
+            "*.ts",
+            "*.tsx",
+            "*.css",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//packages/model-router-client:__subpackages__"],
+)
+
+workspace_link(
+    name = "proto_test_link",
+    src = "//packages/model-router-client:proto_package",
+    project = "packages/model-router-client",
+)
+
+vitest_test(
+    name = "client_test",
+    data = [
+        ":proto_test_link",
+        "//packages/model-router-client:package_metadata",
+        "//packages/model-router-client/src:lib",
+    ],
+    project = "packages/model-router-client",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":index.test.ts"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+    tests = [":client_test"],
+)
+
+test_suite(
+    name = "typecheck_tests",
+    tests = ["//packages/model-router-client:types_typecheck_test"],
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        ":typecheck_tests",
+        ":unit_tests",
+    ],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+copied_source_files(
+    name = "typecheck_sources",
+    srcs = [":index.test.ts"],
+)

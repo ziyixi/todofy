@@ -1,0 +1,421 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@npm//mailsort/web:vitest/package_json.bzl", vitest = "bin")
+load("//tools/bazel:js.bzl", "copied_source_files", "proto_vitest_test", "ts_source_library")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//mailsort:__subpackages__"])
+
+COMMON_TEST_DATA = [
+    "//mailsort/web:package_json",
+    "//mailsort/web/src/test:source_fakeServer_ts",
+    "//mailsort/web/src/test:source_setup_ts",
+    "//mailsort/web:test_config",
+    "//mailsort/web:node_modules/jsdom",
+    "//mailsort/web:node_modules/vite",
+]
+
+COMMON_TEST_DEPS = [
+    "//mailsort/web:node_modules/vitest",
+    ":src__api",
+    ":src__app",
+    ":src__components",
+    ":src__dom",
+    ":src__flowchart",
+    ":src__format",
+    ":src__priorities",
+    ":src__views__classifier",
+    ":src__views__common",
+    ":src__views__label-detail",
+    ":src__views__prompt",
+    ":src__views__replay",
+    "//proto/mailsort/ui/v2:ts",
+    "//proto/modelrouter/inference/v1:ts",
+    "//proto/ts:field-mask",
+    "//proto/ts:http-transcoder",
+    "//proto/ts:protobuf",
+    "//proto/ts:protobuf-wkt",
+    "//proto/ts:rpc-status",
+]
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//mailsort:__subpackages__"],
+)
+
+copied_source_files(
+    name = "application_sources_srcs",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ) + ["//mailsort/web/src/test:application_sources_srcs"],
+)
+
+copied_source_files(
+    name = "typecheck_project_srcs",
+    srcs = [
+        "api.ts",
+        "app.test.ts",
+        "app.ts",
+        "check-layout.test.ts",
+        "classification-interval.test.ts",
+        "components.ts",
+        "dom.ts",
+        "flowchart.ts",
+        "format.ts",
+        "labels.test.ts",
+        "main.ts",
+        "overview.test.ts",
+        "priorities.ts",
+        "prompt.test.ts",
+        "provider.test.ts",
+        "replay.test.ts",
+        "unread-classification.test.ts",
+        "views/classifier.ts",
+        "views/common.ts",
+        "views/label-detail.ts",
+        "views/labels.ts",
+        "views/overview.ts",
+        "views/prompt.ts",
+        "views/replay.ts",
+        "views/review.ts",
+        "views/settings.ts",
+        "views/unread-classification.ts",
+    ] + ["//mailsort/web/src/test:typecheck_project_srcs"],
+)
+
+copied_source_files(
+    name = "lint_sources",
+    srcs = glob(
+        [
+            "**/*.ts",
+            "**/*.tsx",
+        ],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ) + ["//mailsort/web/src/test:lint_sources"],
+)
+
+ts_source_library(
+    name = "src__api",
+    srcs = [":api.ts"],
+    deps = [
+        "//proto/common/errors/v1:ts",
+        "//proto/mailsort/ui/v2:ts",
+        "//proto/ts:http-client",
+    ],
+)
+
+ts_source_library(
+    name = "src__dom",
+    srcs = [":dom.ts"],
+)
+
+ts_source_library(
+    name = "src__components",
+    srcs = [":components.ts"],
+    deps = [":src__dom"],
+)
+
+ts_source_library(
+    name = "src__format",
+    srcs = [":format.ts"],
+    deps = [
+        "//proto/mailsort/ui/v2:ts",
+        "//proto/ts:protobuf-wkt",
+    ],
+)
+
+ts_source_library(
+    name = "src__priorities",
+    srcs = [":priorities.ts"],
+)
+
+ts_source_library(
+    name = "src__views__common",
+    srcs = [":views/common.ts"],
+    deps = [
+        ":src__api",
+        ":src__components",
+        ":src__dom",
+        ":src__priorities",
+        "//proto/mailsort/ui/v2:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__views__label-detail",
+    srcs = [":views/label-detail.ts"],
+    deps = [
+        ":src__api",
+        ":src__dom",
+        ":src__format",
+        "//proto/mailsort/ui/v2:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__flowchart",
+    srcs = [":flowchart.ts"],
+    deps = [
+        ":src__dom",
+        ":src__priorities",
+        "//mailsort/web:node_modules/d3-sankey",
+        "//proto/mailsort/ui/v2:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__views__classifier",
+    srcs = [":views/classifier.ts"],
+    deps = [
+        ":src__dom",
+        ":src__format",
+        "//proto/mailsort/ui/v2:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__views__replay",
+    srcs = [":views/replay.ts"],
+    deps = [
+        ":src__api",
+        ":src__components",
+        ":src__dom",
+        ":src__format",
+        "//proto/mailsort/ui/v2:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__views__prompt",
+    srcs = [":views/prompt.ts"],
+    deps = [
+        ":src__api",
+        ":src__components",
+        ":src__dom",
+        ":src__format",
+        "//proto/mailsort/ui/v2:ts",
+        "//proto/ts:protobuf",
+    ],
+)
+
+ts_source_library(
+    name = "src__app",
+    srcs = [
+        ":app.ts",
+        ":views/labels.ts",
+        ":views/overview.ts",
+        ":views/review.ts",
+        ":views/settings.ts",
+        ":views/unread-classification.ts",
+    ],
+    deps = [
+        ":src__api",
+        ":src__components",
+        ":src__dom",
+        ":src__flowchart",
+        ":src__format",
+        ":src__priorities",
+        ":src__views__classifier",
+        ":src__views__common",
+        ":src__views__label-detail",
+        ":src__views__prompt",
+        ":src__views__replay",
+        "//proto/mailsort/ui/v2:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+    ],
+)
+
+js_library(
+    name = "src__main",
+    srcs = [
+        ":main.ts",
+        ":styles.css",
+    ],
+    types = [":main.ts"],
+    deps = [":src__app"],
+)
+
+js_library(
+    name = "lib",
+    deps = [
+        ":src__api",
+        ":src__app",
+        ":src__components",
+        ":src__dom",
+        ":src__flowchart",
+        ":src__format",
+        ":src__main",
+        ":src__priorities",
+        ":src__views__classifier",
+        ":src__views__common",
+        ":src__views__label-detail",
+        ":src__views__prompt",
+        ":src__views__replay",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__app_test",
+    config = "//mailsort/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "mailsort/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":app.test.ts"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "src__check-layout_test",
+    config = "//mailsort/web:test_config",
+    data = [
+        "//mailsort/web:application_sources",
+        "//mailsort/web:node_modules/jsdom",
+        "//mailsort/web:node_modules/vite",
+        "//mailsort/web:package_json",
+        "//mailsort/web:test_config",
+        "//mailsort/web/src/test:source_fakeServer_ts",
+        "//mailsort/web/src/test:source_setup_ts",
+    ],
+    project = "mailsort/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":check-layout.test.ts"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "src__classification-interval_test",
+    config = "//mailsort/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "mailsort/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":classification-interval.test.ts"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "src__labels_test",
+    config = "//mailsort/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "mailsort/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":labels.test.ts"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "src__overview_test",
+    config = "//mailsort/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "mailsort/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":overview.test.ts"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "src__prompt_test",
+    config = "//mailsort/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "mailsort/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":prompt.test.ts"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "src__provider_test",
+    config = "//mailsort/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "mailsort/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":provider.test.ts"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "src__replay_test",
+    config = "//mailsort/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "mailsort/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":replay.test.ts"],
+    deps = [
+        ":src__api",
+        ":src__components",
+        ":src__dom",
+        ":src__format",
+        ":src__views__replay",
+        "//mailsort/web:node_modules/vitest",
+        "//proto/mailsort/ui/v2:ts",
+        "//proto/modelrouter/inference/v1:ts",
+        "//proto/ts:field-mask",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__unread-classification_test",
+    config = "//mailsort/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "mailsort/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":unread-classification.test.ts"],
+    deps = COMMON_TEST_DEPS,
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+    deps = [] + ["//mailsort/web/src/test:source_audit_files"],
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        ":src__app_test",
+        ":src__check-layout_test",
+        ":src__classification-interval_test",
+        ":src__labels_test",
+        ":src__overview_test",
+        ":src__prompt_test",
+        ":src__provider_test",
+        ":src__replay_test",
+        ":src__unread-classification_test",
+        "//mailsort/web/src/test:check",
+    ],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+    tests = [
+        ":src__app_test",
+        ":src__check-layout_test",
+        ":src__classification-interval_test",
+        ":src__labels_test",
+        ":src__overview_test",
+        ":src__prompt_test",
+        ":src__provider_test",
+        ":src__replay_test",
+        ":src__unread-classification_test",
+        "//mailsort/web/src/test:unit_tests",
+    ],
+)

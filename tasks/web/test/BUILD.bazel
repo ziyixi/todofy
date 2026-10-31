@@ -1,0 +1,426 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//tools/bazel:js.bzl", "copied_source_files")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+load("//tools/bazel/browser:defs.bzl", "tasks_browser_test")
+
+package(default_visibility = ["//tasks:__subpackages__"])
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//tasks:__subpackages__"],
+)
+
+js_library(
+    name = "source_setup_ts",
+    srcs = ["setup.ts"],
+)
+
+copied_source_files(
+    name = "types_srcs",
+    srcs = glob(
+        [
+            "**/*.ts",
+            "**/*.tsx",
+        ],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+copied_source_files(
+    name = "lint_sources",
+    srcs = glob(
+        ["**/*.ts"],
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+_BROWSER_RUNTIME_DATA = [
+    "//tasks/web:bundle",
+    "//tasks:migrations",
+    "//tasks/worker/test:browser_server",
+    "//tasks/worker:node_modules/@ziyixi/edge-auth",
+    "//tasks/worker:typecheck_proto_link",
+    "//tasks/worker:node_modules/@ziyixi/task-dates",
+]
+
+tasks_browser_test(
+    name = "browser_catalog_detail_readiness_test",
+    config = "//tasks/web:browser_test_config",
+    data = ["//tasks/web:package_json"] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/catalog-detail-readiness.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_category_drag_test",
+    config = "//tasks/web:browser_test_config",
+    data = [
+        ":browser/drag.ts",
+        ":browser/planning-stub.ts",
+        "//tasks/web:package_json",
+    ] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/category-drag.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_color_detail_test",
+    config = "//tasks/web:browser_test_config",
+    data = ["//tasks/web:package_json"] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/color-detail.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_date_input_help_test",
+    config = "//tasks/web:browser_test_config",
+    data = ["//tasks/web:package_json"] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/date-input-help.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_focus_time_test",
+    config = "//tasks/web:browser_test_config",
+    data = [
+        ":browser/planning-stub.ts",
+        "//tasks/web:package_json",
+    ] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/focus-time.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_goals_linking_test",
+    config = "//tasks/web:browser_test_config",
+    data = ["//tasks/web:package_json"] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/goals-linking.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_goals_page_test",
+    config = "//tasks/web:browser_test_config",
+    data = [
+        ":browser/goals-fixture.ts",
+        "//tasks/web:package_json",
+    ] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/goals-page.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_gtd_test",
+    config = "//tasks/web:browser_test_config",
+    data = [
+        ":browser/planning-stub.ts",
+        "//tasks/web:package_json",
+    ] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/gtd.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_idle_pause_test",
+    config = "//tasks/web:browser_test_config",
+    data = [
+        ":browser/planning-stub.ts",
+        "//tasks/web:package_json",
+    ] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/idle-pause.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_mail_test",
+    config = "//tasks/web:browser_test_config",
+    data = [
+        ":browser/planning-stub.ts",
+        "//tasks/web:package_json",
+    ] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/mail.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_mini_timer_test",
+    config = "//tasks/web:browser_test_config",
+    data = [
+        ":browser/planning-stub.ts",
+        "//tasks/web:package_json",
+    ] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/mini-timer.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_next_step_estimate_test",
+    config = "//tasks/web:browser_test_config",
+    data = [
+        ":browser/planning-stub.ts",
+        "//tasks/web:package_json",
+    ] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/next-step-estimate.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_noop_save_test",
+    config = "//tasks/web:browser_test_config",
+    data = ["//tasks/web:package_json"] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/noop-save.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_outdated_test",
+    config = "//tasks/web:browser_test_config",
+    data = ["//tasks/web:package_json"] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/outdated.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_plan_completion_test",
+    config = "//tasks/web:browser_test_config",
+    data = [
+        ":browser/planning-stub.ts",
+        "//tasks/web:package_json",
+    ] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/plan-completion.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_plan_layout_test",
+    config = "//tasks/web:browser_test_config",
+    data = [
+        ":browser/planning-stub.ts",
+        "//tasks/web:package_json",
+    ] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/plan-layout.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_planning_drag_test",
+    config = "//tasks/web:browser_test_config",
+    data = [
+        ":browser/planning-stub.ts",
+        "//tasks/web:package_json",
+    ] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/planning-drag.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_planning_journeys_test",
+    config = "//tasks/web:browser_test_config",
+    data = [
+        ":browser/planning-stub.ts",
+        "//tasks/web:package_json",
+    ] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/planning-journeys.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_planning_native_test",
+    config = "//tasks/web:browser_test_config",
+    data = [
+        ":browser/planning-stub.ts",
+        "//tasks/web:package_json",
+    ] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/planning-native.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_planning_quick_time_test",
+    config = "//tasks/web:browser_test_config",
+    data = [
+        ":browser/planning-stub.ts",
+        "//tasks/web:package_json",
+    ] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/planning-quick-time.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_planning_readiness_test",
+    config = "//tasks/web:browser_test_config",
+    data = [
+        ":browser/planning-stub.ts",
+        "//tasks/web:package_json",
+    ] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/planning-readiness.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_pwa_launch_test",
+    config = "//tasks/web:browser_test_config",
+    data = [
+        ":browser/planning-stub.ts",
+        "//tasks/web:package_json",
+    ] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/pwa-launch.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_pwa_test",
+    config = "//tasks/web:browser_test_config",
+    data = ["//tasks/web:package_json"] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/pwa.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_refinement_test",
+    config = "//tasks/web:browser_test_config",
+    data = ["//tasks/web:package_json"] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/refinement.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_request_counts_test",
+    config = "//tasks/web:browser_test_config",
+    data = [
+        ":browser/planning-stub.ts",
+        "//tasks/web:package_json",
+    ] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/request-counts.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_sidebar_resize_test",
+    config = "//tasks/web:browser_test_config",
+    data = [
+        ":browser/planning-stub.ts",
+        "//tasks/web:package_json",
+    ] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/sidebar-resize.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_task_context_dates_test",
+    config = "//tasks/web:browser_test_config",
+    data = ["//tasks/web:package_json"] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/task-context-dates.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_task_delete_keyboard_test",
+    config = "//tasks/web:browser_test_config",
+    data = [
+        ":browser/planning-stub.ts",
+        "//tasks/web:package_json",
+    ] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/task-delete-keyboard.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_task_detail_reads_test",
+    config = "//tasks/web:browser_test_config",
+    data = ["//tasks/web:package_json"] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/task-detail-reads.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_task_details_layout_test",
+    config = "//tasks/web:browser_test_config",
+    data = ["//tasks/web:package_json"] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/task-details-layout.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_task_editor_save_test",
+    config = "//tasks/web:browser_test_config",
+    data = ["//tasks/web:package_json"] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/task-editor-save.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_task_menus_test",
+    config = "//tasks/web:browser_test_config",
+    data = ["//tasks/web:package_json"] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/task-menus.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_task_row_drag_test",
+    config = "//tasks/web:browser_test_config",
+    data = [
+        ":browser/drag.ts",
+        "//tasks/web:package_json",
+    ] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/task-row-drag.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_task_tree_test",
+    config = "//tasks/web:browser_test_config",
+    data = [
+        ":browser/drag.ts",
+        "//tasks/web:package_json",
+    ] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/task-tree.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_tasks_test",
+    config = "//tasks/web:browser_test_config",
+    data = [
+        ":browser/drag.ts",
+        "//tasks/web:package_json",
+    ] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/tasks.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_titlebar_test",
+    config = "//tasks/web:browser_test_config",
+    data = [
+        ":browser/planning-stub.ts",
+        "//tasks/web:package_json",
+    ] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/titlebar.spec.ts",
+)
+
+tasks_browser_test(
+    name = "browser_view_refresh_test",
+    config = "//tasks/web:browser_test_config",
+    data = ["//tasks/web:package_json"] + _BROWSER_RUNTIME_DATA,
+    project = "tasks/web",
+    spec = ":browser/view-refresh.spec.ts",
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+)
+
+test_suite(
+    name = "browser_tests",
+    tags = ["browser"],
+)
+
+test_suite(name = "check")

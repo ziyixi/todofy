@@ -1,0 +1,77 @@
+load("@aspect_rules_js//js:defs.bzl", "js_binary", "js_library")
+load("//tools/bazel:js.bzl", "copied_source_files")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//recall:__subpackages__"])
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//recall:__subpackages__"],
+)
+
+copied_source_files(
+    name = "lint_sources",
+    srcs = glob(
+        ["**/*.mjs"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+)
+
+js_library(
+    name = "scripts__icons",
+    srcs = [":icons.mjs"],
+    deps = [],
+)
+
+js_library(
+    name = "scripts__manifest",
+    srcs = [":manifest.mjs"],
+    deps = ["//recall/extension/src:manifest_asset"],
+)
+
+js_library(
+    name = "scripts__zip",
+    srcs = [":zip.mjs"],
+    deps = [],
+)
+
+js_library(
+    name = "scripts__build",
+    srcs = [":build.mjs"],
+    deps = [
+        ":scripts__icons",
+        ":scripts__manifest",
+        ":scripts__zip",
+        "//recall/extension:application_sources",
+        "//recall/extension:node_modules/esbuild",
+        "//recall/extension/src:build_assets",
+        "//recall/shared:notice",
+    ],
+)
+
+js_library(
+    name = "scripts__install",
+    srcs = [":install.mjs"],
+    deps = [
+        ":scripts__manifest",
+        ":scripts__zip",
+    ],
+)
+
+js_binary(
+    name = "builder",
+    data = [
+        ":scripts__build",
+        "//recall/extension:package_json",
+    ],
+    entry_point = ":bazel-build.mjs",
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+)

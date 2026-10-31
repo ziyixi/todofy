@@ -1,0 +1,463 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//tools/bazel:js.bzl", "copied_source_files", "ts_source_library")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//dashboard:__subpackages__"])
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//dashboard:__subpackages__"],
+)
+
+copied_source_files(
+    name = "types_srcs",
+    srcs = [
+        "account-inventory.json",
+        "api.ts",
+        "api-types.ts",
+        "attention-rollup.ts",
+        "attention-state.ts",
+        "canary.ts",
+        "config.ts",
+        "digest.ts",
+        "discovery.ts",
+        "docs.ts",
+        "drift.ts",
+        "drift-desired.json",
+        "env.ts",
+        "evaluate.ts",
+        "guard.ts",
+        "http.ts",
+        "idl.ts",
+        "index.ts",
+        "limits.ts",
+        "mcp.ts",
+        "ops-client.ts",
+        "probe.ts",
+        "registry.ts",
+        "registry-check.ts",
+        "registry-types.ts",
+        "resource-identities.ts",
+        "state.ts",
+        "time.ts",
+        "usage.ts",
+        "view-body.ts",
+        "views.ts",
+        "website-sync.ts",
+    ],
+)
+
+copied_source_files(
+    name = "web_declarations_srcs",
+    srcs = [
+        "api-types.ts",
+        "attention-rollup.ts",
+        "registry.ts",
+        "registry-types.ts",
+        "resource-identities.ts",
+    ],
+)
+
+copied_source_files(
+    name = "application_sources_srcs",
+    srcs = glob(
+        ["**"],
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+copied_source_files(
+    name = "lint_sources",
+    srcs = glob(
+        [
+            "**/*.ts",
+            "**/*.tsx",
+        ],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+copied_source_files(
+    name = "catalog_inputs",
+    srcs = [
+        ":account-inventory.json",
+        ":registry.ts",
+        ":resource-identities.ts",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+ts_source_library(
+    name = "account-inventory_json",
+    srcs = [":account-inventory.json"],
+)
+
+ts_source_library(
+    name = "api-types",
+    srcs = [":api-types.ts"],
+    deps = [
+        "//proto/dashboard/ui/v1:ts",
+        "//proto/ops/v1:ts",
+        "//proto/website/sync/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "idl",
+    srcs = [":idl.ts"],
+    deps = [
+        ":api-types",
+        "//proto/dashboard/ui/v1:ts",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "registry-types",
+    srcs = [":registry-types.ts"],
+    deps = [":api-types"],
+)
+
+ts_source_library(
+    name = "resource-identities",
+    srcs = [":resource-identities.ts"],
+)
+
+ts_source_library(
+    name = "registry",
+    srcs = [":registry.ts"],
+    deps = [
+        ":api-types",
+        ":registry-types",
+        ":resource-identities",
+    ],
+)
+
+ts_source_library(
+    name = "time",
+    srcs = [":time.ts"],
+)
+
+ts_source_library(
+    name = "limits",
+    srcs = [":limits.ts"],
+    deps = [":api-types"],
+)
+
+ts_source_library(
+    name = "usage",
+    srcs = [":usage.ts"],
+    deps = [
+        ":api-types",
+        ":idl",
+        ":limits",
+        ":time",
+    ],
+)
+
+ts_source_library(
+    name = "docs",
+    srcs = [":docs.ts"],
+    deps = [
+        ":api-types",
+        ":usage",
+        "//proto/ops/v1:ts",
+        "//proto/tasks/inbox/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "drift-desired_json",
+    srcs = [":drift-desired.json"],
+)
+
+ts_source_library(
+    name = "drift",
+    srcs = [":drift.ts"],
+    deps = [
+        ":api-types",
+        ":drift-desired_json",
+        ":idl",
+        ":time",
+    ],
+)
+
+ts_source_library(
+    name = "guard",
+    srcs = [":guard.ts"],
+    deps = [
+        ":api-types",
+        ":time",
+        "//contracts:ops-v1/runtime",
+        "//proto/ops/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "discovery",
+    srcs = [":discovery.ts"],
+    deps = [
+        ":api-types",
+        ":registry",
+        ":registry-types",
+        ":time",
+        ":usage",
+    ],
+)
+
+ts_source_library(
+    name = "attention-rollup",
+    srcs = [":attention-rollup.ts"],
+    deps = [":api-types"],
+)
+
+ts_source_library(
+    name = "attention-state",
+    srcs = [":attention-state.ts"],
+    deps = [
+        ":api-types",
+        ":attention-rollup",
+        ":time",
+        "//proto/dashboard/mcp/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "probe",
+    srcs = [":probe.ts"],
+    deps = [
+        ":api-types",
+        ":docs",
+        ":usage",
+    ],
+)
+
+ts_source_library(
+    name = "view-body",
+    srcs = [":view-body.ts"],
+    deps = [":api-types"],
+)
+
+ts_source_library(
+    name = "module_group_18",
+    srcs = [
+        ":canary.ts",
+        ":config.ts",
+        ":digest.ts",
+        ":env.ts",
+        ":evaluate.ts",
+        ":ops-client.ts",
+        ":state.ts",
+        ":views.ts",
+        ":website-sync.ts",
+    ],
+    deps = [
+        ":api-types",
+        ":attention-rollup",
+        ":attention-state",
+        ":discovery",
+        ":docs",
+        ":drift",
+        ":guard",
+        ":idl",
+        ":probe",
+        ":registry",
+        ":registry-types",
+        ":time",
+        ":usage",
+        ":view-body",
+        "//contracts:ops-v1/runtime",
+        "//proto/dashboard/mcp/v1:ts",
+        "//proto/ops/v1:ts",
+        "//proto/tasks/inbox/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+        "//proto/website/sync/v1:ts",
+    ],
+)
+
+alias(
+    name = "canary",
+    actual = ":module_group_18",
+)
+
+alias(
+    name = "config",
+    actual = ":module_group_18",
+)
+
+alias(
+    name = "digest",
+    actual = ":module_group_18",
+)
+
+alias(
+    name = "env",
+    actual = ":module_group_18",
+)
+
+alias(
+    name = "evaluate",
+    actual = ":module_group_18",
+)
+
+alias(
+    name = "ops-client",
+    actual = ":module_group_18",
+)
+
+alias(
+    name = "state",
+    actual = ":module_group_18",
+)
+
+alias(
+    name = "views",
+    actual = ":module_group_18",
+)
+
+alias(
+    name = "website-sync",
+    actual = ":module_group_18",
+)
+
+ts_source_library(
+    name = "api",
+    srcs = [":api.ts"],
+    deps = [
+        ":api-types",
+        ":module_group_18",
+        ":registry",
+        ":view-body",
+        "//proto/common/errors/v1:ts",
+        "//proto/dashboard/ui/v1:ts",
+        "//proto/ops/v1:ts",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "http",
+    srcs = [":http.ts"],
+    deps = [
+        ":api",
+        ":api-types",
+        ":module_group_18",
+        "//packages/edge-auth:lib",
+        "//proto/dashboard/ui/v1:ts",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+ts_source_library(
+    name = "mcp",
+    srcs = [":mcp.ts"],
+    deps = [
+        ":module_group_18",
+        "//proto/dashboard/mcp/v1:ts",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "index",
+    srcs = [":index.ts"],
+    deps = [
+        ":http",
+        ":mcp",
+        ":module_group_18",
+    ],
+)
+
+ts_source_library(
+    name = "registry-check",
+    srcs = [":registry-check.ts"],
+    deps = [
+        ":api-types",
+        ":idl",
+        ":module_group_18",
+        ":registry",
+        ":registry-types",
+    ],
+)
+
+js_library(
+    name = "lib",
+    deps = [
+        ":account-inventory_json",
+        ":api",
+        ":api-types",
+        ":attention-rollup",
+        ":attention-state",
+        ":discovery",
+        ":docs",
+        ":drift",
+        ":drift-desired_json",
+        ":guard",
+        ":http",
+        ":idl",
+        ":index",
+        ":limits",
+        ":mcp",
+        ":module_group_18",
+        ":probe",
+        ":registry",
+        ":registry-check",
+        ":registry-types",
+        ":resource-identities",
+        ":time",
+        ":usage",
+        ":view-body",
+    ],
+)
+
+js_library(
+    name = "api_types_web",
+    srcs = [":api-types.ts"],
+    deps = ["//dashboard/worker:web_declarations"],
+)
+
+js_library(
+    name = "attention_rollup_web",
+    srcs = [":attention-rollup.ts"],
+    deps = [
+        ":api_types_web",
+        "//dashboard/worker:web_declarations",
+    ],
+)
+
+js_library(
+    name = "registry_web",
+    srcs = [
+        ":registry.ts",
+        ":registry-types.ts",
+        ":resource-identities.ts",
+    ],
+    deps = [
+        ":api_types_web",
+        "//dashboard/worker:web_declarations",
+    ],
+)
+
+js_library(
+    name = "entry_metadata",
+    srcs = [":index.ts"],
+)
+
+js_library(
+    name = "env_metadata",
+    srcs = [":env.ts"],
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+)

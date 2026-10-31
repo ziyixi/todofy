@@ -1,0 +1,71 @@
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/python:tests.bzl", "ruff_test")
+
+package(default_visibility = ["//platform:__subpackages__"])
+
+ruff_test(
+    name = "ruff_check_test",
+    command = "check",
+    config = "//:pyproject.toml",
+    data = [
+        "//:cloud_profile_inputs",
+        "//platform:python_lint_inputs",
+        "//tools/platform-build:python_lint_inputs",
+        "//tools/vps-bootstrap:python_sources",
+        "//tools/vps-release:python_sources",
+    ],
+    paths = [
+        "platform/src",
+        "platform/tests",
+        "tools/platform-build",
+        "tools/vps-release",
+        "tools/vps-bootstrap",
+    ],
+)
+
+ruff_test(
+    name = "ruff_format_test",
+    command = "format",
+    config = "//:pyproject.toml",
+    data = [
+        "//:cloud_profile_inputs",
+        "//platform:python_lint_inputs",
+        "//tools/platform-build:python_lint_inputs",
+        "//tools/vps-bootstrap:python_sources",
+        "//tools/vps-release:python_sources",
+    ],
+    paths = [
+        "platform/src",
+        "platform/tests",
+        "tools/platform-build",
+        "tools/vps-release",
+        "tools/vps-bootstrap",
+    ],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)

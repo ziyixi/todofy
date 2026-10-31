@@ -1,0 +1,380 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@npm//todofy/gateway:vitest/package_json.bzl", vitest = "bin")
+load("//tools/bazel:js.bzl", "copied_source_files", "proto_vitest_test", "workerd_vitest_test", "workspace_link")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//todofy:__subpackages__"])
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//todofy:__subpackages__"],
+)
+
+js_library(
+    name = "source_runtime_tsconfig_json",
+    srcs = ["runtime/tsconfig.json"],
+)
+
+copied_source_files(
+    name = "types_srcs",
+    srcs = [
+        "access.test.ts",
+        "cloudflare-workers.ts",
+        "helpers.ts",
+        "hooks.test.ts",
+        "mail.test.ts",
+        "metrics.test.ts",
+        "ops.test.ts",
+        "owner.test.ts",
+        "pre-encoded.test.ts",
+        "raw.d.ts",
+        "routing.test.ts",
+        "runtime/fixtures.ts",
+        "setup.ts",
+        "validate.d.ts",
+    ],
+)
+
+copied_source_files(
+    name = "types_data",
+    srcs = ["setup.ts"],
+)
+
+copied_source_files(
+    name = "runtime_types_srcs",
+    srcs = glob(
+        [
+            "runtime/**/*.ts",
+            "runtime/**/*.mts",
+        ],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+copied_source_files(
+    name = "lint_sources",
+    srcs = glob(
+        [
+            "**/*.ts",
+            "**/*.mts",
+        ],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+copied_source_files(
+    name = "lint_data",
+    srcs = ["runtime/tsconfig.json"],
+)
+
+workspace_link(
+    name = "access_test_edge_auth_link",
+    src = "//packages/edge-auth:pkg",
+    project = "todofy/gateway",
+)
+
+proto_vitest_test(
+    name = "access_test",
+    config = "//todofy/gateway:test_config",
+    data = [
+        ":access_test_edge_auth_link",
+        ":cloudflare-workers.ts",
+        ":helpers.ts",
+        ":setup.ts",
+        "//todofy/gateway:node_modules/vitest",
+        "//todofy/gateway:package_json",
+    ],
+    project = "todofy/gateway",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":access.test.ts"],
+    deps = [
+        "//todofy/gateway/src:index",
+        "//todofy/gateway/src:module_group_0",
+    ],
+)
+
+workspace_link(
+    name = "hooks_test_edge_auth_link",
+    src = "//packages/edge-auth:pkg",
+    project = "todofy/gateway",
+)
+
+proto_vitest_test(
+    name = "hooks_test",
+    config = "//todofy/gateway:test_config",
+    data = [
+        ":cloudflare-workers.ts",
+        ":helpers.ts",
+        ":hooks_test_edge_auth_link",
+        ":setup.ts",
+        "//todofy/gateway:node_modules/vitest",
+        "//todofy/gateway:package_json",
+    ],
+    project = "todofy/gateway",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":hooks.test.ts"],
+    deps = [
+        "//todofy/gateway/src:index",
+        "//todofy/gateway/src:module_group_0",
+    ],
+)
+
+workspace_link(
+    name = "mail_test_edge_auth_link",
+    src = "//packages/edge-auth:pkg",
+    project = "todofy/gateway",
+)
+
+proto_vitest_test(
+    name = "mail_test",
+    config = "//todofy/gateway:test_config",
+    data = [
+        ":cloudflare-workers.ts",
+        ":helpers.ts",
+        ":mail_test_edge_auth_link",
+        ":setup.ts",
+        "//todofy/gateway:node_modules/vitest",
+        "//todofy/gateway:package_json",
+    ],
+    project = "todofy/gateway",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":mail.test.ts"],
+    deps = [
+        "//proto/todofy/mail/v1:ts",
+        "//proto/ts:http-client",
+        "//todofy/gateway/src:index",
+        "//todofy/gateway/src:mail",
+        "//todofy/gateway/src:module_group_0",
+    ],
+)
+
+workspace_link(
+    name = "metrics_test_edge_auth_link",
+    src = "//packages/edge-auth:pkg",
+    project = "todofy/gateway",
+)
+
+proto_vitest_test(
+    name = "metrics_test",
+    config = "//todofy/gateway:test_config",
+    data = [
+        ":cloudflare-workers.ts",
+        ":helpers.ts",
+        ":metrics_test_edge_auth_link",
+        ":setup.ts",
+        "//todofy/gateway:node_modules/vitest",
+        "//todofy/gateway:package_json",
+    ],
+    project = "todofy/gateway",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":metrics.test.ts"],
+    deps = [
+        "//todofy/gateway/src:index",
+        "//todofy/gateway/src:metrics",
+        "//todofy/gateway/src:module_group_0",
+    ],
+)
+
+workspace_link(
+    name = "ops_test_edge_auth_link",
+    src = "//packages/edge-auth:pkg",
+    project = "todofy/gateway",
+)
+
+proto_vitest_test(
+    name = "ops_test",
+    config = "//todofy/gateway:test_config",
+    data = [
+        ":cloudflare-workers.ts",
+        ":helpers.ts",
+        ":ops_test_edge_auth_link",
+        ":setup.ts",
+        "//todofy/gateway:node_modules/vitest",
+        "//todofy/gateway:package_json",
+    ],
+    project = "todofy/gateway",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":ops.test.ts"],
+    deps = [
+        "//contracts:ops-v1/fixtures/CanaryResult/processing-paused.json_data",
+        "//contracts:ops-v1/fixtures/GuardState/shed-todofy.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/todofy-degraded.json_data",
+        "//proto/ops/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+        "//todofy/gateway/src:index",
+        "//todofy/gateway/src:module_group_0",
+        "//todofy/gateway/src:ops",
+    ],
+)
+
+workspace_link(
+    name = "owner_test_edge_auth_link",
+    src = "//packages/edge-auth:pkg",
+    project = "todofy/gateway",
+)
+
+proto_vitest_test(
+    name = "owner_test",
+    config = "//todofy/gateway:test_config",
+    data = [
+        ":cloudflare-workers.ts",
+        ":helpers.ts",
+        ":owner_test_edge_auth_link",
+        ":setup.ts",
+        "//todofy/gateway:node_modules/vitest",
+        "//todofy/gateway:package_json",
+    ],
+    project = "todofy/gateway",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":owner.test.ts"],
+    deps = [
+        "//todofy/gateway/src:index",
+        "//todofy/gateway/src:module_group_0",
+    ],
+)
+
+workspace_link(
+    name = "pre-encoded_test_edge_auth_link",
+    src = "//packages/edge-auth:pkg",
+    project = "todofy/gateway",
+)
+
+proto_vitest_test(
+    name = "pre-encoded_test",
+    config = "//todofy/gateway:test_config",
+    data = [
+        ":cloudflare-workers.ts",
+        ":pre-encoded_test_edge_auth_link",
+        ":runtime/fixtures.ts",
+        ":setup.ts",
+        "//todofy/gateway:node_modules/vitest",
+        "//todofy/gateway:package_json",
+    ],
+    project = "todofy/gateway",
+    runner = vitest.vitest_test,
+    tests = [":pre-encoded.test.ts"],
+    deps = [
+        "//proto/todofy/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+        "//todofy/gateway/src:ui",
+    ],
+)
+
+workspace_link(
+    name = "routing_test_edge_auth_link",
+    src = "//packages/edge-auth:pkg",
+    project = "todofy/gateway",
+)
+
+proto_vitest_test(
+    name = "routing_test",
+    config = "//todofy/gateway:test_config",
+    data = [
+        ":cloudflare-workers.ts",
+        ":helpers.ts",
+        ":routing_test_edge_auth_link",
+        ":setup.ts",
+        "//todofy/gateway:node_modules/vitest",
+        "//todofy/gateway:package_json",
+    ],
+    project = "todofy/gateway",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":routing.test.ts"],
+    deps = [
+        "//todofy/gateway/src:index",
+        "//todofy/gateway/src:module_group_0",
+        "//todofy/worker/todofy/core:gateway_error_contract",
+    ],
+)
+
+js_library(
+    name = "runtime_helpers",
+    srcs = [
+        ":runtime/fixtures.ts",
+        ":runtime/harness.ts",
+        ":runtime/jwt.ts",
+        ":runtime/tsconfig.json",
+    ],
+    types = glob(
+        ["runtime/**/*.ts"],
+        exclude = [
+            "**/*.test.ts",
+            "BUILD.bazel",
+        ],
+    ),
+)
+
+workerd_vitest_test(
+    name = "runtime_cpu_test",
+    data = [
+        ":test_support",
+        "//todofy/gateway:config",
+        "//tools/workerd-cpu:lib",
+    ],
+    project = "todofy/gateway",
+    runner = vitest.vitest_test,
+    tags = [
+        "cpu",
+        "exclusive",
+        "workerd",
+    ],
+    tests = [":runtime/cpu.test.ts"],
+)
+
+js_library(
+    name = "test_support",
+    srcs = glob(
+        ["**"],
+        exclude = [
+            "runtime/**",
+            "smoke/**",
+            "**/*.test.ts",
+            "BUILD.bazel",
+        ],
+    ),
+    types = glob(
+        ["**/*.ts"],
+        exclude = [
+            "runtime/**",
+            "smoke/**",
+            "**/*.test.ts",
+            "BUILD.bazel",
+        ],
+    ),
+)
+
+js_library(
+    name = "runtime_metadata",
+    srcs = [":runtime/harness.ts"],
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+)
+
+test_suite(name = "check")
+
+test_suite(
+    name = "runtime_tests",
+    tags = ["workerd"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)

@@ -1,0 +1,55 @@
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/python:tests.bzl", "unittest_test")
+
+package(default_visibility = ["//visibility:public"])
+
+unittest_test(
+    name = "test_client",
+    size = "small",
+    srcs = ["test_client.py"],
+    data = ["//packages/model-router-client/python:pyproject.toml"],
+    imports = [
+        ".",
+        "..",
+        "../src",
+    ],
+    modules = ["tests.test_client"],
+    deps = ["//packages/model-router-client/python/src/model_router_client:package"],
+)
+
+test_suite(
+    name = "tests",
+    tests = [":test_client"],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+test_suite(
+    name = "check",
+    tests = [":tests"],
+)

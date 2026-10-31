@@ -1,6 +1,8 @@
 """Website browser checks on the declared empty and synthetic fixture exports."""
 
 load("@aspect_rules_js//js:defs.bzl", "js_binary", "js_test")
+load("//tools/bazel:js.bzl", "copied_source_files")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
 
 def _browser_setup_impl(ctx):
     browser = ctx.toolchains["//tools/bazel/browser:toolchain_type"].browser
@@ -50,7 +52,7 @@ await import('@playwright/test/cli');
         json.encode(manifest_path),
         json.encode(ctx.attr.spec),
     ))
-    ctx.actions.write(config, """import original from './playwright.config.ts';
+    ctx.actions.write(config, """import original from '../../playwright.config.ts';
 import { realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 const root = resolve(process.env.TEST_SRCDIR, process.env.TEST_WORKSPACE);
@@ -66,6 +68,7 @@ export default {
   use: { ...original.use, baseURL: origin },
   webServer: {
     ...original.webServer,
+    cwd: original.webServer?.cwd ?? process.cwd(),
     command: [wrangler, 'dev', '--config', config, '--assets', assets, '--ip', '127.0.0.1', '--port', port].map(JSON.stringify).join(' '),
     url: origin,
     timeout: 120000,
@@ -90,13 +93,14 @@ _browser_setup = rule(
 )
 
 def website_browser_test(name, spec, mode, site):
-    _browser_setup(name = name + "_setup", site = site, mode = mode, spec = spec, wrangler = ":wrangler")
+    spec_path = "tests/e2e/" + spec.removeprefix(":")
+    _browser_setup(name = name + "_setup", site = site, mode = mode, spec = spec_path, wrangler = "//website/relay:wrangler")
     js_test(
         name = name,
         entry_point = ":" + name + "_setup",
-        args = ["test", spec, "--config", name + "_setup_config.mjs"],
+        args = ["test", spec_path, "--config", "tests/e2e/" + name + "_setup_config.mjs"],
         chdir = "website",
-        data = [site, ":browser_content_inputs", ":wrangler", ":node_modules/@playwright/test", ":node_modules/@axe-core/playwright", spec, "playwright.config.ts", "wrangler.toml", "tsconfig.json", ":" + name + "_setup"] + ([":prepare_empty"] if mode == "empty" else []) + ([":src__lib__content__publication-state", ":content__site_config", "tests/support/deployment-contract.ts"] if spec.endswith("deployment.spec.ts") else []),
+        data = [site, "//website/content:browser_inputs", "//website/relay:wrangler", "//website:node_modules/@playwright/test", "//website:node_modules/@axe-core/playwright", spec, "//website:playwright_config", "//website:public_config", "//website:typescript_config", ":" + name + "_setup"] + (["//website:prepare_empty"] if mode == "empty" else []) + (["//website/src/lib/content:publication-state", "//website/content:site_config", "//website/tests/support:deployment_contract"] if spec_path.endswith("deployment.spec.ts") else []),
         env = {"CI": "true", "WRANGLER_SEND_METRICS": "false"},
         patch_node_fs = False,
         size = "large",
@@ -129,13 +133,13 @@ process.argv[config + 1] = resolve(root, 'website/' + process.argv[config + 1]);
 process.chdir(operator);
 await import('@playwright/test/cli');
 """ % (json.encode(browser.playwright_version), json.encode(ctx.workspace_name), json.encode(registry)))
-    ctx.actions.write(config, """import original from './playwright.config.ts';
+    ctx.actions.write(config, """import original from '../../playwright.config.ts';
 import { realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 const operator = process.env.WEBSITE_VERIFIER_DIRECTORY;
 export default {
   ...original,
-  testDir: resolve(dirname(realpathSync(new URL('./playwright.config.ts', import.meta.url))), original.testDir),
+  testDir: resolve(dirname(realpathSync(new URL('../../playwright.config.ts', import.meta.url))), original.testDir),
   outputDir: resolve(operator, 'test-results'),
   reporter: Array.isArray(original.reporter) ? original.reporter.map(([name, options]) => name === 'html' ? [name, { ...options, outputFolder: resolve(operator, 'playwright-report') }] : [name, options]) : original.reporter,
 };
@@ -149,8 +153,33 @@ def website_deployment_verifier(name):
     js_binary(
         name = name,
         entry_point = ":" + name + "_setup",
-        args = ["test", "tests/e2e/deployment.spec.ts", "--project", "desktop-chromium", "--config", name + "_setup_config.mjs"],
-        data = [":node_modules/@playwright/test", ":src__lib__content__publication-state", ":content__site_config", "tests/e2e/deployment.spec.ts", "tests/support/deployment-contract.ts", "playwright.config.ts", "tsconfig.json", ":" + name + "_setup"],
+        args = ["test", "tests/e2e/deployment.spec.ts", "--project", "desktop-chromium", "--config", "tests/e2e/" + name + "_setup_config.mjs"],
+        data = ["//website:node_modules/@playwright/test", "//website/src/lib/content:publication-state", "//website/content:site_config", ":deployment.spec.ts", "//website/tests/support:deployment_contract", "//website:playwright_config", "//website:typescript_config", ":" + name + "_setup"],
         patch_node_fs = False,
         visibility = ["//visibility:public"],
     )
+
+def website_sources(children = [], application_excludes = None):
+    """Keep source and audit coverage explicit across Website package boundaries."""
+    source_excludes = SOURCE_SUBPACKAGE_AUDIT_EXCLUDES + ["BUILD.bazel"]
+    copied_source_files(
+        name = "files",
+        srcs = native.glob(["**"], allow_empty = True, exclude = source_excludes) + [child + ":files" for child in children],
+    )
+    copied_source_files(
+        name = "audit_sources",
+        srcs = native.glob(["**"], allow_empty = True, exclude = SOURCE_SUBPACKAGE_AUDIT_EXCLUDES) + [child + ":audit_sources" for child in children],
+    )
+    native.filegroup(
+        name = "source_audit_files",
+        srcs = native.glob(["**"], allow_empty = True, exclude = SOURCE_SUBPACKAGE_AUDIT_EXCLUDES) + [child + ":source_audit_files" for child in children],
+    )
+    copied_source_files(
+        name = "lint_sources",
+        srcs = native.glob(["**/*.ts", "**/*.tsx", "**/*.mts", "**/*.mjs"], allow_empty = True, exclude = SOURCE_SUBPACKAGE_AUDIT_EXCLUDES) + [child + ":lint_sources" for child in children],
+    )
+    if application_excludes != None:
+        copied_source_files(
+            name = "application_files",
+            srcs = native.glob(["**"], allow_empty = True, exclude = source_excludes + application_excludes) + [child + ":application_files" for child in children],
+        )

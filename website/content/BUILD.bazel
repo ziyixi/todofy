@@ -1,0 +1,42 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//tools/bazel:js.bzl", "copied_source_files")
+load("//website:bazel.bzl", "website_sources")
+
+package(default_visibility = ["//website:__subpackages__"])
+
+exports_files(
+    glob(
+        ["*.json"],
+        allow_empty = True,
+    ),
+    visibility = ["//website:__subpackages__"],
+)
+
+js_library(
+    name = "site_config",
+    srcs = [":site.config.ts"],
+)
+
+copied_source_files(
+    name = "browser_inputs",
+    srcs = [
+        ":profile.json",
+        ":publications.json",
+    ],
+)
+
+copied_source_files(
+    name = "data",
+    srcs = [
+        ":files",
+        "//website:public_assets",
+        "//website/tests/fixtures:files",
+    ],
+)
+
+exports_files(
+    ["site.config.ts"],
+    visibility = ["//visibility:public"],
+)
+
+website_sources()

@@ -1,0 +1,222 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//tools/bazel:js.bzl", "copied_source_files", "ts_source_library")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//todofy:__subpackages__"])
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//todofy:__subpackages__"],
+)
+
+copied_source_files(
+    name = "types_srcs",
+    srcs = [
+        "access.ts",
+        "coordinator.ts",
+        "crypto.ts",
+        "csrf.ts",
+        "env.ts",
+        "hooks.ts",
+        "http.ts",
+        "index.ts",
+        "mail.ts",
+        "metrics.ts",
+        "ops.ts",
+        "owner.ts",
+        "ui.ts",
+        "warm.ts",
+    ],
+)
+
+copied_source_files(
+    name = "application_sources_srcs",
+    srcs = glob(
+        ["**"],
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+copied_source_files(
+    name = "lint_sources",
+    srcs = glob(
+        [
+            "**/*.ts",
+            "**/*.tsx",
+        ],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+ts_source_library(
+    name = "module_group_0",
+    srcs = [
+        ":coordinator.ts",
+        ":env.ts",
+        ":http.ts",
+    ],
+    deps = [
+        "//packages/edge-auth:lib",
+        "//proto/ops/v1:ts",
+    ],
+)
+
+alias(
+    name = "coordinator",
+    actual = ":module_group_0",
+)
+
+alias(
+    name = "env",
+    actual = ":module_group_0",
+)
+
+alias(
+    name = "http",
+    actual = ":module_group_0",
+)
+
+ts_source_library(
+    name = "access",
+    srcs = [":access.ts"],
+    deps = [
+        ":module_group_0",
+        "//packages/edge-auth:lib",
+    ],
+)
+
+ts_source_library(
+    name = "crypto",
+    srcs = [":crypto.ts"],
+)
+
+ts_source_library(
+    name = "ui",
+    srcs = [":ui.ts"],
+    deps = [
+        ":module_group_0",
+        "//proto/common/errors/v1:ts",
+        "//proto/todofy/ui/v1:ts",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:page-token",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "csrf",
+    srcs = [":csrf.ts"],
+    deps = [
+        ":module_group_0",
+        ":ui",
+        "//packages/edge-auth:lib",
+    ],
+)
+
+ts_source_library(
+    name = "hooks",
+    srcs = [":hooks.ts"],
+    deps = [
+        ":crypto",
+        ":module_group_0",
+    ],
+)
+
+ts_source_library(
+    name = "metrics",
+    srcs = [":metrics.ts"],
+    deps = [":module_group_0"],
+)
+
+ts_source_library(
+    name = "warm",
+    srcs = [":warm.ts"],
+    deps = [
+        "//proto/todofy/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "owner",
+    srcs = [":owner.ts"],
+    deps = [
+        ":access",
+        ":csrf",
+        ":module_group_0",
+        ":ui",
+        ":warm",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+ts_source_library(
+    name = "ops",
+    srcs = [":ops.ts"],
+    deps = [
+        ":module_group_0",
+        "//proto/ops/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "mail",
+    srcs = [":mail.ts"],
+    deps = [
+        ":module_group_0",
+        ":ui",
+        "//proto/todofy/mail/v1:ts",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:rpc-status",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "index",
+    srcs = [":index.ts"],
+    deps = [
+        ":hooks",
+        ":mail",
+        ":metrics",
+        ":module_group_0",
+        ":ops",
+        ":owner",
+    ],
+)
+
+js_library(
+    name = "lib",
+    deps = [
+        ":access",
+        ":crypto",
+        ":csrf",
+        ":hooks",
+        ":index",
+        ":mail",
+        ":metrics",
+        ":module_group_0",
+        ":ops",
+        ":owner",
+        ":ui",
+        ":warm",
+    ],
+)
+
+js_library(
+    name = "entry_metadata",
+    srcs = [":index.ts"],
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+)

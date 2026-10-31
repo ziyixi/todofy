@@ -1,0 +1,272 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//tools/bazel:js.bzl", "copied_source_files", "ts_source_library")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//links:__subpackages__"])
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//links:__subpackages__"],
+)
+
+copied_source_files(
+    name = "types_srcs",
+    srcs = [
+        "api.ts",
+        "auth.ts",
+        "backup.ts",
+        "backup-alarm.ts",
+        "backup-runner.ts",
+        "env.ts",
+        "http.ts",
+        "index.ts",
+        "keys.ts",
+        "limits.ts",
+        "model.ts",
+        "ops.ts",
+        "ops-status.ts",
+        "pages.ts",
+        "resolve.ts",
+        "store.ts",
+        "targets.ts",
+    ],
+)
+
+copied_source_files(
+    name = "web_limits_types_srcs",
+    srcs = ["limits.ts"],
+)
+
+copied_source_files(
+    name = "application_sources_srcs",
+    srcs = glob(
+        ["**"],
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+copied_source_files(
+    name = "lint_sources",
+    srcs = glob(
+        [
+            "**/*.ts",
+            "**/*.tsx",
+        ],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+ts_source_library(
+    name = "backup",
+    srcs = [":backup.ts"],
+)
+
+ts_source_library(
+    name = "module_group_1",
+    srcs = [
+        ":backup-alarm.ts",
+        ":backup-runner.ts",
+        ":env.ts",
+    ],
+    deps = [
+        ":backup",
+        "//proto/ops/v1:ts",
+    ],
+)
+
+alias(
+    name = "backup-alarm",
+    actual = ":module_group_1",
+)
+
+alias(
+    name = "backup-runner",
+    actual = ":module_group_1",
+)
+
+alias(
+    name = "env",
+    actual = ":module_group_1",
+)
+
+ts_source_library(
+    name = "limits",
+    srcs = [":limits.ts"],
+)
+
+ts_source_library(
+    name = "keys",
+    srcs = [":keys.ts"],
+    deps = [":limits"],
+)
+
+ts_source_library(
+    name = "targets",
+    srcs = [":targets.ts"],
+    deps = [
+        ":keys",
+        ":limits",
+    ],
+)
+
+ts_source_library(
+    name = "model",
+    srcs = [":model.ts"],
+    deps = [
+        ":targets",
+        "//proto/links/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "store",
+    srcs = [":store.ts"],
+    deps = [
+        ":limits",
+        ":model",
+    ],
+)
+
+ts_source_library(
+    name = "api",
+    srcs = [":api.ts"],
+    deps = [
+        ":keys",
+        ":limits",
+        ":model",
+        ":module_group_1",
+        ":store",
+        ":targets",
+        "//proto/common/errors/v1:ts",
+        "//proto/links/ui/v1:ts",
+        "//proto/ts:field-mask",
+        "//proto/ts:filter",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:page-token",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "auth",
+    srcs = [":auth.ts"],
+    deps = [
+        ":module_group_1",
+        "//packages/edge-auth:lib",
+    ],
+)
+
+ts_source_library(
+    name = "resolve",
+    srcs = [":resolve.ts"],
+    deps = [
+        ":keys",
+        ":model",
+        ":targets",
+    ],
+)
+
+ts_source_library(
+    name = "pages",
+    srcs = [":pages.ts"],
+    deps = [
+        ":resolve",
+        ":targets",
+    ],
+)
+
+ts_source_library(
+    name = "http",
+    srcs = [":http.ts"],
+    deps = [
+        ":api",
+        ":auth",
+        ":keys",
+        ":limits",
+        ":module_group_1",
+        ":pages",
+        ":resolve",
+        "//packages/edge-auth:lib",
+        "//proto/links/ui/v1:ts",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+ts_source_library(
+    name = "ops-status",
+    srcs = [":ops-status.ts"],
+    deps = [
+        ":module_group_1",
+        "//proto/ops/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "ops",
+    srcs = [":ops.ts"],
+    deps = [
+        ":module_group_1",
+        ":ops-status",
+        "//proto/ops/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "index",
+    srcs = [":index.ts"],
+    deps = [
+        ":http",
+        ":module_group_1",
+        ":ops",
+    ],
+)
+
+js_library(
+    name = "lib",
+    deps = [
+        ":api",
+        ":auth",
+        ":backup",
+        ":http",
+        ":index",
+        ":keys",
+        ":limits",
+        ":model",
+        ":module_group_1",
+        ":ops",
+        ":ops-status",
+        ":pages",
+        ":resolve",
+        ":store",
+        ":targets",
+    ],
+)
+
+js_library(
+    name = "limits_web",
+    srcs = [":limits.ts"],
+    deps = ["//links/worker:web_limits_types"],
+)
+
+js_library(
+    name = "entry_metadata",
+    srcs = [":index.ts"],
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+)

@@ -1,0 +1,234 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@npm//tasks/worker:vitest/package_json.bzl", vitest = "bin")
+load("//tools/bazel:js.bzl", "copied_source_files", "proto_vitest_test", "vitest_test", "workspace_link")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//tasks:__subpackages__"])
+
+COMMON_TEST_DATA = [
+    "//tasks/worker:package_json",
+    "//tasks/worker:test_config",
+    ":task-dates_link",
+]
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//tasks:__subpackages__"],
+)
+
+js_library(
+    name = "source_runtime_tsconfig_json",
+    srcs = ["runtime/tsconfig.json"],
+)
+
+copied_source_files(
+    name = "types_srcs",
+    srcs = glob(
+        ["*.ts"],
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+copied_source_files(
+    name = "lint_sources",
+    srcs = glob(
+        ["**/*.ts"],
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+copied_source_files(
+    name = "lint_data",
+    srcs = ["runtime/tsconfig.json"],
+)
+
+copied_source_files(
+    name = "runtime_types_srcs",
+    srcs = glob(
+        ["runtime/*.ts"],
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+proto_vitest_test(
+    name = "filters_test",
+    config = "//tasks/worker:test_config",
+    data = COMMON_TEST_DATA,
+    project = "tasks/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":filters.test.ts"],
+    deps = ["//tasks/worker/src:filters"],
+)
+
+proto_vitest_test(
+    name = "goal-model_test",
+    config = "//tasks/worker:test_config",
+    data = COMMON_TEST_DATA,
+    project = "tasks/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":goal-model.test.ts"],
+    deps = [
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//tasks/worker/src:goal-model",
+    ],
+)
+
+proto_vitest_test(
+    name = "mail_test",
+    config = "//tasks/worker:test_config",
+    data = COMMON_TEST_DATA,
+    project = "tasks/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":mail.test.ts"],
+    deps = [
+        "//proto/todofy/mail/v1:ts",
+        "//proto/ts:protobuf",
+        "//tasks/worker/src:mail",
+    ],
+)
+
+proto_vitest_test(
+    name = "planning_test",
+    config = "//tasks/worker:test_config",
+    data = COMMON_TEST_DATA,
+    project = "tasks/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":planning.test.ts"],
+    deps = ["//tasks/worker/src:planning"],
+)
+
+proto_vitest_test(
+    name = "receipts_test",
+    config = "//tasks/worker:test_config",
+    data = COMMON_TEST_DATA,
+    project = "tasks/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":receipts.test.ts"],
+    deps = [
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:wire-json",
+        "//tasks/worker/src:receipts",
+    ],
+)
+
+proto_vitest_test(
+    name = "review_test",
+    config = "//tasks/worker:test_config",
+    data = COMMON_TEST_DATA,
+    project = "tasks/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":review.test.ts"],
+    deps = [
+        "//tasks/worker/src:gtd",
+        "//tasks/worker/src:review",
+    ],
+)
+
+proto_vitest_test(
+    name = "startup_test",
+    config = "//tasks/worker:test_config",
+    data = COMMON_TEST_DATA,
+    project = "tasks/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":startup.test.ts"],
+    deps = ["//tasks/worker/src:startup"],
+)
+
+workspace_link(
+    name = "task-dates_link",
+    src = "//packages/task-dates:pkg",
+    project = "tasks/worker",
+)
+
+js_library(
+    name = "runtime_harness",
+    srcs = glob(
+        ["runtime/*.ts"],
+        exclude = [
+            "runtime/*.test.ts",
+            "runtime/dev-server.ts",
+            "BUILD.bazel",
+        ],
+    ),
+    deps = [
+        "//tasks/worker:application_sources",
+        "//tasks/worker:node_modules/esbuild",
+        "//tasks/worker:node_modules/miniflare",
+        "//tasks/worker:node_modules/vitest",
+        "//tasks/worker/src:index",
+        "//tools/workerd-cpu:lib",
+    ],
+)
+
+workspace_link(
+    name = "runtime_proto_link",
+    src = "//tasks/worker:runtime_proto",
+    project = "tasks/worker",
+)
+
+workspace_link(
+    name = "edge-auth_link",
+    src = "//packages/edge-auth:pkg",
+    project = "tasks/worker",
+)
+
+js_library(
+    name = "browser_server",
+    srcs = [":runtime/dev-server.ts"],
+    deps = [":runtime_harness"],
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+)
+
+test_suite(name = "check")
+
+test_suite(
+    name = "runtime_tests",
+    tags = ["workerd"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)
+
+[vitest_test(
+    name = "runtime_" + test.removeprefix("runtime/").removesuffix(".test.ts") + "_test",
+    size = "large",
+    config = "//tasks/worker:runtime_test_config",
+    data = [
+        ":edge-auth_link",
+        ":runtime_harness",
+        ":runtime_proto_link",
+        ":task-dates_link",
+        "//tasks:migrations",
+        "//tasks/worker:package_json",
+        "//tasks/worker:runtime_test_config",
+    ] + ([
+        "//tasks/worker:wrangler",
+        "//tasks/tools:backup_restore",
+        "//tasks:public_config",
+    ] if test.endswith("/backup-runner.test.ts") else []),
+    env = {"BAZEL_WRANGLER": "$(rootpath //tasks/worker:wrangler)"} if test.endswith("/backup-runner.test.ts") else {},
+    project = "tasks/worker",
+    runner = vitest.vitest_test,
+    tags = ["workerd"] + ([
+        "cpu",
+        "exclusive",
+    ] if test.endswith("/cpu.test.ts") else []),
+    tests = [test],
+) for test in glob(["runtime/*.test.ts"])]

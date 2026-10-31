@@ -1,0 +1,239 @@
+load("@npm//model-router/worker:vitest/package_json.bzl", vitest = "bin")
+load("//tools/bazel:js.bzl", "copied_source_files", "proto_vitest_test")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//model-router:__subpackages__"])
+
+COMMON_TEST_DATA = [
+    "//model-router/worker:package_json",
+    ":runtime-entry.ts",
+    ":runtime-harness.ts",
+    "//model-router/worker:node_modules/esbuild",
+    "//model-router/worker:node_modules/jose",
+    "//model-router/worker:node_modules/miniflare",
+    "//model-router/worker:node_modules/vitest",
+    "//model-router/worker:runtime_edge_auth_link",
+    "//model-router/migrations:all",
+]
+
+COMMON_TEST_DEPS = [
+    "//model-router/worker/src:lib",
+    "//proto/modelrouter/inference/v1:ts",
+    "//proto/ts:http-client",
+]
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//model-router:__subpackages__"],
+)
+
+copied_source_files(
+    name = "typecheck_project_srcs",
+    srcs = [
+        "array-output.test.ts",
+        "backup.test.ts",
+        "cost-backfill.test.ts",
+        "executor.test.ts",
+        "failure-reason.test.ts",
+        "openai.test.ts",
+        "openai-runtime.test.ts",
+        "pricing.test.ts",
+        "providers.test.ts",
+        "runtime.test.ts",
+        "runtime-entry.ts",
+        "runtime-harness.ts",
+    ],
+)
+
+copied_source_files(
+    name = "lint_sources",
+    srcs = glob(
+        [
+            "**/*.ts",
+            "**/*.mts",
+        ],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+proto_vitest_test(
+    name = "array-output_test",
+    config = "//model-router/worker:test_config",
+    data = COMMON_TEST_DATA,
+    project = "model-router/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":array-output.test.ts"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "backup_test",
+    config = "//model-router/worker:test_config",
+    data = [
+        "//model-router/migrations:0001_router.sql_data",
+        "//model-router/worker:node_modules/vitest",
+        "//model-router/worker:package_json",
+    ],
+    project = "model-router/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":backup.test.ts"],
+    deps = [
+        "//model-router/tools:backup-restore",
+        "//model-router/worker/src:backup",
+    ],
+)
+
+proto_vitest_test(
+    name = "cost-backfill_test",
+    config = "//model-router/worker:test_config",
+    data = [
+        ":runtime-entry.ts",
+        ":runtime-harness.ts",
+        "//model-router/migrations:0003_missing_cost_estimates.sql_data",
+        "//model-router/migrations:all",
+        "//model-router/worker:node_modules/esbuild",
+        "//model-router/worker:node_modules/jose",
+        "//model-router/worker:node_modules/miniflare",
+        "//model-router/worker:node_modules/vitest",
+        "//model-router/worker:package_json",
+        "//model-router/worker:runtime_edge_auth_link",
+    ],
+    project = "model-router/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":cost-backfill.test.ts"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "executor_test",
+    config = "//model-router/worker:test_config",
+    data = [
+        "//model-router/worker:node_modules/vitest",
+        "//model-router/worker:package_json",
+    ],
+    project = "model-router/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":executor.test.ts"],
+    deps = ["//model-router/worker/src:executor"],
+)
+
+proto_vitest_test(
+    name = "failure-reason_test",
+    config = "//model-router/worker:test_config",
+    data = COMMON_TEST_DATA,
+    project = "model-router/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":failure-reason.test.ts"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "openai-runtime_test",
+    config = "//model-router/worker:test_config",
+    data = COMMON_TEST_DATA,
+    project = "model-router/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":openai-runtime.test.ts"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "openai_test",
+    config = "//model-router/worker:test_config",
+    data = [
+        "//model-router/worker:node_modules/vitest",
+        "//model-router/worker:package_json",
+    ],
+    project = "model-router/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":openai.test.ts"],
+    deps = [
+        "//model-router/worker/src:module_group_2",
+        "//model-router/worker/src:providers_openai",
+        "//model-router/worker/src:providers_usage",
+        "//model-router/worker/src:schema",
+        "//proto/modelrouter/inference/v1:ts",
+        "//proto/ts:protobuf",
+    ],
+)
+
+proto_vitest_test(
+    name = "pricing_test",
+    config = "//model-router/worker:test_config",
+    data = [
+        "//model-router/worker:node_modules/vitest",
+        "//model-router/worker:package_json",
+    ],
+    project = "model-router/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":pricing.test.ts"],
+    deps = [
+        "//model-router/worker/src:module_group_2",
+        "//model-router/worker/src:providers_pricing",
+        "//model-router/worker/src:providers_usage",
+    ],
+)
+
+proto_vitest_test(
+    name = "providers_test",
+    config = "//model-router/worker:test_config",
+    data = [
+        "//model-router/worker:node_modules/vitest",
+        "//model-router/worker:package_json",
+    ],
+    project = "model-router/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":providers.test.ts"],
+    deps = [
+        "//model-router/worker/src:module_group_2",
+        "//model-router/worker/src:providers_claude",
+        "//model-router/worker/src:providers_common",
+        "//model-router/worker/src:providers_gemini",
+        "//model-router/worker/src:providers_usage",
+        "//model-router/worker/src:providers_workers-ai",
+        "//proto/modelrouter/inference/v1:ts",
+        "//proto/ts:protobuf",
+    ],
+)
+
+proto_vitest_test(
+    name = "runtime_test",
+    config = "//model-router/worker:test_config",
+    data = COMMON_TEST_DATA,
+    project = "model-router/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":runtime.test.ts"],
+    deps = [
+        "//model-router/worker/src:backup",
+        "//model-router/worker/src:lib",
+        "//proto/modelrouter/inference/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+)
+
+test_suite(name = "check")
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)

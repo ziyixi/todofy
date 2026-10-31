@@ -1,0 +1,221 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@npm//fleet/worker:vitest/package_json.bzl", vitest = "bin")
+load("//tools/bazel:js.bzl", "copied_source_files", "proto_vitest_test", "workerd_vitest_test")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//fleet:__subpackages__"])
+
+COMMON_TEST_DEPS = [
+    "//fleet/worker/src:health",
+    "//fleet/worker/src:report",
+    "//contracts:fleet-report-v1/fixtures/healthy.json_data",
+]
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//fleet:__subpackages__"],
+)
+
+js_library(
+    name = "source_runtime_tsconfig_json",
+    srcs = ["runtime/tsconfig.json"],
+)
+
+copied_source_files(
+    name = "types_srcs",
+    srcs = [
+        "cloudflare-workers.ts",
+        "codex-gateway.test.ts",
+        "deploy.test.ts",
+        "metrics.test.ts",
+        "newsletter-config.test.ts",
+        "report.test.ts",
+    ],
+)
+
+copied_source_files(
+    name = "lint_sources",
+    srcs = glob(
+        ["**/*.ts"],
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+copied_source_files(
+    name = "lint_data",
+    srcs = ["runtime/tsconfig.json"],
+)
+
+copied_source_files(
+    name = "runtime_types_srcs",
+    srcs = glob(
+        ["runtime/**/*.ts"],
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+proto_vitest_test(
+    name = "codex-gateway_test",
+    config = "//fleet/worker:test_config",
+    data = [
+        "//fleet/worker:node_modules/vitest",
+        "//fleet/worker:package_json",
+    ],
+    project = "fleet/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":codex-gateway.test.ts"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "deploy_test",
+    config = "//fleet/worker:test_config",
+    data = [
+        "//fleet/worker:node_modules/vitest",
+        "//fleet/worker:package_json",
+    ],
+    project = "fleet/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":deploy.test.ts"],
+    deps = ["//fleet/deploy:vars"],
+)
+
+proto_vitest_test(
+    name = "metrics_test",
+    config = "//fleet/worker:test_config",
+    data = [
+        "//fleet/worker:node_modules/vitest",
+        "//fleet/worker:package_json",
+    ],
+    project = "fleet/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":metrics.test.ts"],
+    deps = [
+        "//contracts:fleet-report-v1/fixtures/healthy.json_data",
+        "//contracts:fleet-report-v1/fixtures/node_metrics.json_data",
+        "//fleet/worker/src:metrics",
+        "//fleet/worker/src:report",
+        "//proto/fleet/telemetry/v1:ts",
+    ],
+)
+
+proto_vitest_test(
+    name = "newsletter-config_test",
+    config = "//fleet/worker:test_config",
+    data = [
+        "//fleet/worker:node_modules/vitest",
+        "//fleet/worker:package_json",
+    ],
+    project = "fleet/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":newsletter-config.test.ts"],
+    deps = [
+        "//contracts:fleet-report-v1/fixtures/healthy.json_data",
+        "//fleet/worker/src:health",
+        "//fleet/worker/src:report",
+        "//proto/fleet/telemetry/v1:ts",
+    ],
+)
+
+proto_vitest_test(
+    name = "report_test",
+    config = "//fleet/worker:test_config",
+    data = [
+        "//fleet/worker:node_modules/vitest",
+        "//fleet/worker:package_json",
+    ],
+    project = "fleet/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":report.test.ts"],
+    deps = COMMON_TEST_DEPS,
+)
+
+js_library(
+    name = "runtime_helpers",
+    srcs = [
+        ":runtime/harness.ts",
+        ":runtime/tsconfig.json",
+    ],
+    types = glob(
+        ["runtime/**/*.ts"],
+        exclude = [
+            "**/*.test.ts",
+            "BUILD.bazel",
+        ],
+    ),
+)
+
+workerd_vitest_test(
+    name = "runtime_metrics_test",
+    data = [
+        ":test_support",
+        "//contracts:fleet-report-v1/fixtures/healthy.json_data",
+        "//contracts:fleet-report-v1/fixtures/node_metrics.json_data",
+    ],
+    project = "fleet/worker",
+    runner = vitest.vitest_test,
+    tests = [":runtime/metrics.test.ts"],
+)
+
+workerd_vitest_test(
+    name = "runtime_receipt_test",
+    data = [
+        ":test_support",
+        "//contracts:fleet-report-v1/fixtures/healthy.json_data",
+    ],
+    project = "fleet/worker",
+    runner = vitest.vitest_test,
+    tests = [":runtime/receipt.test.ts"],
+)
+
+js_library(
+    name = "test_support",
+    srcs = glob(
+        ["**"],
+        exclude = [
+            "runtime/**",
+            "smoke/**",
+            "**/*.test.ts",
+            "BUILD.bazel",
+        ],
+    ),
+    types = glob(
+        ["**/*.ts"],
+        exclude = [
+            "runtime/**",
+            "smoke/**",
+            "**/*.test.ts",
+            "BUILD.bazel",
+        ],
+    ),
+)
+
+js_library(
+    name = "runtime_metadata",
+    srcs = [":runtime/harness.ts"],
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+)
+
+test_suite(name = "check")
+
+test_suite(
+    name = "runtime_tests",
+    tags = ["workerd"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)

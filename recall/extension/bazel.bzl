@@ -21,7 +21,7 @@ await mkdir(folder, { recursive: true });
 await cp(resolve(root, %s), folder, { recursive: true, dereference: true });
 await chmod(folder, 0o755);
 const { webkit, expect } = await import('@playwright/test');
-const { checkOrionOptions } = await import('./test/options-browser.mjs');
+const { checkOrionOptions } = await import('./options-browser.mjs');
 const result = await checkOrionOptions({ webkit, expect, folder });
 await writeFile(resolve(folder, 'orion-browser-check.json'), JSON.stringify(result, null, 2) + '\\n');
 for (const check of result.results) console.log('ok - ' + check.case);
@@ -39,12 +39,12 @@ _webkit_setup = rule(
 )
 
 def options_browser_test(name):
-    _webkit_setup(name = name + "_setup", artifact = ":extension_artifact")
+    _webkit_setup(name = name + "_setup", artifact = "//recall/extension:extension_artifact")
     js_test(
         name = name,
         entry_point = ":" + name + "_setup",
         chdir = "recall/extension",
-        data = [":extension_artifact", ":node_modules/@playwright/test", "test/options-browser.mjs", "test/options-browser-fixture.mjs", ":" + name + "_setup"],
+        data = ["//recall/extension:extension_artifact", "//recall/extension:node_modules/@playwright/test", "options-browser.mjs", "options-browser-fixture.mjs", ":" + name + "_setup"],
         patch_node_fs = False,
         size = "large",
         tags = ["browser", "exclusive"],

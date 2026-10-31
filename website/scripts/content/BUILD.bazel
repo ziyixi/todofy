@@ -1,0 +1,95 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//website:bazel.bzl", "website_sources")
+
+package(default_visibility = ["//website:__subpackages__"])
+
+exports_files(
+    glob(
+        ["*.ts"],
+        allow_empty = True,
+    ),
+    visibility = ["//website:__subpackages__"],
+)
+
+js_library(
+    name = "args",
+    srcs = [":args.ts"],
+    deps = ["//website/src/lib/content:errors"],
+)
+
+js_library(
+    name = "types",
+    srcs = [":types.ts"],
+    deps = [
+        "//website:node_modules/zod",
+        "//website/src/lib/content:schema",
+    ],
+)
+
+js_library(
+    name = "mode",
+    srcs = [":mode.ts"],
+    deps = [
+        ":types",
+        "//website/src/lib/content:errors",
+        "//website/src/lib/content:schema",
+    ],
+)
+
+js_library(
+    name = "redirects",
+    srcs = [":redirects.ts"],
+    deps = [
+        "//website/src/lib/content:errors",
+        "//website/src/lib/content:redirect-path",
+        "//website/src/lib/content:schema",
+    ],
+)
+
+js_library(
+    name = "prepare",
+    srcs = [":prepare.ts"],
+    deps = [
+        ":args",
+        ":mode",
+        ":redirects",
+        ":types",
+        "//website/scripts/content/adapters:empty",
+        "//website/scripts/content/adapters:fixture",
+        "//website/scripts/content/adapters:notion",
+        "//website/scripts/images:prepare",
+        "//website/src/lib/content:date",
+        "//website/src/lib/content:errors",
+        "//website/src/lib/content:hash",
+        "//website/src/lib/content:registry",
+        "//website/src/lib/content:schema",
+        "//website/src/lib/content:site-data",
+        "//website/src/lib/content:stable-json",
+        "//website/src/lib/content:validate",
+    ],
+)
+
+js_library(
+    name = "validate",
+    srcs = [":validate.ts"],
+    deps = [
+        ":args",
+        ":mode",
+        ":types",
+        "//website/src/lib/content:errors",
+        "//website/src/lib/content:hash",
+        "//website/src/lib/content:reader",
+        "//website/src/lib/content:schema",
+        "//website/src/lib/content:site-data",
+        "//website/src/lib/content:stable-json",
+        "//website/src/lib/content:validate",
+    ],
+)
+
+website_sources(
+    application_excludes = [],
+    children = [
+        "//website/scripts/content/adapters",
+        "//website/scripts/content/notion",
+    ],
+)

@@ -1,0 +1,571 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@npm//mail-hero/web:vitest/package_json.bzl", vitest = "bin")
+load("//tools/bazel:js.bzl", "copied_source_files", "proto_vitest_test", "ts_source_library")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//mail-hero:__subpackages__"])
+
+COMMON_TEST_DATA = [
+    "//mail-hero/web:package_json",
+    "//mail-hero/web:test_config",
+    "//mail-hero/web:node_modules/@testing-library/react",
+    "//mail-hero/web:node_modules/@vitejs/plugin-react",
+    "//mail-hero/web:node_modules/jsdom",
+    "//mail-hero/web:node_modules/vite",
+]
+
+COMMON_TEST_DATA_2 = [
+    "//mail-hero/web:package_json",
+    ":test/fakeServer.ts",
+    ":test/fixtures.tsx",
+    "//mail-hero/web:test_config",
+    "//mail-hero/web:node_modules/@vitejs/plugin-react",
+    "//mail-hero/web:node_modules/jsdom",
+    "//mail-hero/web:node_modules/vite",
+]
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//mail-hero:__subpackages__"],
+)
+
+copied_source_files(
+    name = "application_sources_srcs",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+copied_source_files(
+    name = "typecheck_project_srcs",
+    srcs = [
+        "api/client.test.ts",
+        "api/client.ts",
+        "api/queries.ts",
+        "app/App.test.tsx",
+        "app/App.tsx",
+        "components/UI.tsx",
+        "components/alerts.ts",
+        "components/attemptResults.test.ts",
+        "components/attemptResults.ts",
+        "components/messageDisplay.ts",
+        "main.tsx",
+        "pages/DashboardPage.test.tsx",
+        "pages/DashboardPage.tsx",
+        "pages/DeliveriesPage.test.tsx",
+        "pages/DeliveriesPage.tsx",
+        "pages/DeliveryPage.test.tsx",
+        "pages/DeliveryPage.tsx",
+        "pages/EndpointsPage.test.tsx",
+        "pages/EndpointsPage.tsx",
+        "pages/InboxPage.test.tsx",
+        "pages/InboxPage.tsx",
+        "pages/MessagePage.test.tsx",
+        "pages/MessagePage.tsx",
+        "pages/SettingsPage.test.tsx",
+        "pages/SettingsPage.tsx",
+        "pages/SetupPage.tsx",
+        "test/fakeServer.ts",
+        "test/fixtures.tsx",
+    ],
+)
+
+ts_source_library(
+    name = "src__api__client",
+    srcs = [":api/client.ts"],
+    deps = [
+        "//proto/common/errors/v1:ts",
+        "//proto/mailhero/ui/v2:ts",
+        "//proto/ts:filter",
+        "//proto/ts:http-client",
+        "//proto/ts:protobuf-wkt",
+    ],
+)
+
+ts_source_library(
+    name = "src__api__queries",
+    srcs = [":api/queries.ts"],
+    deps = [":src__api__client"],
+)
+
+ts_source_library(
+    name = "src__components__alerts",
+    srcs = [":components/alerts.ts"],
+    deps = ["//proto/mailhero/ui/v2:ts"],
+)
+
+ts_source_library(
+    name = "src__components__UI",
+    srcs = [":components/UI.tsx"],
+    deps = [
+        ":src__api__client",
+        "//mail-hero/web:node_modules/lucide-react",
+        "//mail-hero/web:node_modules/react",
+    ],
+)
+
+ts_source_library(
+    name = "src__components__messageDisplay",
+    srcs = [":components/messageDisplay.ts"],
+    deps = ["//proto/mailhero/ui/v2:ts"],
+)
+
+ts_source_library(
+    name = "src__pages__InboxPage",
+    srcs = [":pages/InboxPage.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__components__UI",
+        ":src__components__messageDisplay",
+        "//mail-hero/web:node_modules/@tanstack/react-query",
+        "//mail-hero/web:node_modules/lucide-react",
+        "//mail-hero/web:node_modules/react",
+        "//mail-hero/web:node_modules/react-router",
+        "//proto/mailhero/ui/v2:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__pages__MessagePage",
+    srcs = [":pages/MessagePage.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__components__UI",
+        ":src__components__messageDisplay",
+        "//mail-hero/web:node_modules/@tanstack/react-query",
+        "//mail-hero/web:node_modules/lucide-react",
+        "//mail-hero/web:node_modules/react",
+        "//mail-hero/web:node_modules/react-router",
+        "//proto/mailhero/ui/v2:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__components__attemptResults",
+    srcs = [":components/attemptResults.ts"],
+    deps = [
+        ":src__api__client",
+        "//proto/mailhero/ui/v2:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__pages__DeliveriesPage",
+    srcs = [":pages/DeliveriesPage.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__components__UI",
+        ":src__components__attemptResults",
+        "//mail-hero/web:node_modules/@tanstack/react-query",
+        "//mail-hero/web:node_modules/lucide-react",
+        "//mail-hero/web:node_modules/react",
+        "//mail-hero/web:node_modules/react-router",
+        "//proto/mailhero/ui/v2:ts",
+        "//proto/ts:filter",
+    ],
+)
+
+ts_source_library(
+    name = "src__pages__DeliveryPage",
+    srcs = [":pages/DeliveryPage.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__components__UI",
+        "//mail-hero/web:node_modules/@tanstack/react-query",
+        "//mail-hero/web:node_modules/lucide-react",
+        "//mail-hero/web:node_modules/react",
+        "//mail-hero/web:node_modules/react-router",
+        "//proto/mailhero/ui/v2:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__pages__EndpointsPage",
+    srcs = [":pages/EndpointsPage.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__components__UI",
+        "//mail-hero/web:node_modules/@tanstack/react-query",
+        "//mail-hero/web:node_modules/lucide-react",
+        "//mail-hero/web:node_modules/react",
+        "//mail-hero/web:node_modules/react-router",
+        "//proto/mailhero/ui/v2:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__pages__SettingsPage",
+    srcs = [":pages/SettingsPage.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__components__UI",
+        ":src__components__alerts",
+        "//mail-hero/web:node_modules/@tanstack/react-query",
+        "//mail-hero/web:node_modules/lucide-react",
+        "//mail-hero/web:node_modules/react",
+        "//mail-hero/web:node_modules/react-router",
+        "//proto/mailhero/ui/v2:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__pages__SetupPage",
+    srcs = [":pages/SetupPage.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__components__UI",
+        "//mail-hero/web:node_modules/@tanstack/react-query",
+        "//mail-hero/web:node_modules/lucide-react",
+        "//mail-hero/web:node_modules/react",
+        "//mail-hero/web:node_modules/react-router",
+        "//proto/mailhero/ui/v2:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__pages__DashboardPage",
+    srcs = [":pages/DashboardPage.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__components__UI",
+        ":src__components__attemptResults",
+        "//mail-hero/web:node_modules/@tanstack/react-query",
+        "//mail-hero/web:node_modules/lucide-react",
+        "//mail-hero/web:node_modules/react",
+        "//mail-hero/web:node_modules/react-router",
+        "//proto/mailhero/ui/v2:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__app__App",
+    srcs = [":app/App.tsx"],
+    deps = [
+        ":src__api__queries",
+        ":src__components__UI",
+        ":src__components__alerts",
+        ":src__pages__DashboardPage",
+        ":src__pages__DeliveriesPage",
+        ":src__pages__DeliveryPage",
+        ":src__pages__EndpointsPage",
+        ":src__pages__InboxPage",
+        ":src__pages__MessagePage",
+        ":src__pages__SettingsPage",
+        ":src__pages__SetupPage",
+        "//mail-hero/web:node_modules/@tanstack/react-query",
+        "//mail-hero/web:node_modules/lucide-react",
+        "//mail-hero/web:node_modules/react",
+        "//mail-hero/web:node_modules/react-router",
+        "//proto/mailhero/ui/v2:ts",
+    ],
+)
+
+js_library(
+    name = "src__main",
+    srcs = [
+        ":main.tsx",
+        ":styles.css",
+    ],
+    types = [":main.tsx"],
+    deps = [
+        ":src__app__App",
+        "//mail-hero/web:node_modules/@tanstack/react-query",
+        "//mail-hero/web:node_modules/react",
+        "//mail-hero/web:node_modules/react-dom",
+        "//mail-hero/web:node_modules/react-router",
+    ],
+)
+
+js_library(
+    name = "lib",
+    deps = [
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__app__App",
+        ":src__components__UI",
+        ":src__components__alerts",
+        ":src__components__attemptResults",
+        ":src__components__messageDisplay",
+        ":src__main",
+        ":src__pages__DashboardPage",
+        ":src__pages__DeliveriesPage",
+        ":src__pages__DeliveryPage",
+        ":src__pages__EndpointsPage",
+        ":src__pages__InboxPage",
+        ":src__pages__MessagePage",
+        ":src__pages__SettingsPage",
+        ":src__pages__SetupPage",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__api__client_test",
+    config = "//mail-hero/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "mail-hero/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":api/client.test.ts"],
+    deps = [
+        ":src__api__client",
+        "//mail-hero/web:node_modules/vitest",
+        "//proto/mailhero/ui/v2:ts",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__app__App_test",
+    config = "//mail-hero/web:test_config",
+    data = COMMON_TEST_DATA_2,
+    project = "mail-hero/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":app/App.test.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__app__App",
+        ":src__components__UI",
+        ":src__components__alerts",
+        ":src__components__attemptResults",
+        ":src__components__messageDisplay",
+        ":src__pages__DashboardPage",
+        ":src__pages__DeliveriesPage",
+        ":src__pages__DeliveryPage",
+        ":src__pages__EndpointsPage",
+        ":src__pages__InboxPage",
+        ":src__pages__MessagePage",
+        ":src__pages__SettingsPage",
+        ":src__pages__SetupPage",
+        "//mail-hero/web:node_modules/@tanstack/react-query",
+        "//mail-hero/web:node_modules/@testing-library/react",
+        "//mail-hero/web:node_modules/react",
+        "//mail-hero/web:node_modules/react-router",
+        "//mail-hero/web:node_modules/vitest",
+        "//proto/mailhero/ui/v2:ts",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__components__attemptResults_test",
+    config = "//mail-hero/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "mail-hero/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":components/attemptResults.test.ts"],
+    deps = [
+        ":src__api__client",
+        ":src__components__attemptResults",
+        "//mail-hero/web:node_modules/vitest",
+        "//proto/mailhero/ui/v2:ts",
+        "//proto/ts:protobuf",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__pages__DashboardPage_test",
+    config = "//mail-hero/web:test_config",
+    data = COMMON_TEST_DATA_2,
+    project = "mail-hero/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":pages/DashboardPage.test.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__components__UI",
+        ":src__components__attemptResults",
+        ":src__pages__DashboardPage",
+        "//mail-hero/web:node_modules/@tanstack/react-query",
+        "//mail-hero/web:node_modules/@testing-library/react",
+        "//mail-hero/web:node_modules/react",
+        "//mail-hero/web:node_modules/react-router",
+        "//mail-hero/web:node_modules/vitest",
+        "//proto/mailhero/ui/v2:ts",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__pages__DeliveriesPage_test",
+    config = "//mail-hero/web:test_config",
+    data = COMMON_TEST_DATA_2,
+    project = "mail-hero/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":pages/DeliveriesPage.test.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__components__UI",
+        ":src__components__attemptResults",
+        ":src__pages__DeliveriesPage",
+        "//mail-hero/web:node_modules/@tanstack/react-query",
+        "//mail-hero/web:node_modules/@testing-library/react",
+        "//mail-hero/web:node_modules/react",
+        "//mail-hero/web:node_modules/react-router",
+        "//mail-hero/web:node_modules/vitest",
+        "//proto/mailhero/ui/v2:ts",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__pages__DeliveryPage_test",
+    config = "//mail-hero/web:test_config",
+    data = COMMON_TEST_DATA_2,
+    project = "mail-hero/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":pages/DeliveryPage.test.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__components__UI",
+        ":src__pages__DeliveryPage",
+        "//mail-hero/web:node_modules/@tanstack/react-query",
+        "//mail-hero/web:node_modules/@testing-library/react",
+        "//mail-hero/web:node_modules/react",
+        "//mail-hero/web:node_modules/react-router",
+        "//mail-hero/web:node_modules/vitest",
+        "//proto/mailhero/ui/v2:ts",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__pages__EndpointsPage_test",
+    config = "//mail-hero/web:test_config",
+    data = COMMON_TEST_DATA_2,
+    project = "mail-hero/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":pages/EndpointsPage.test.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__components__UI",
+        ":src__pages__EndpointsPage",
+        "//mail-hero/web:node_modules/@tanstack/react-query",
+        "//mail-hero/web:node_modules/@testing-library/react",
+        "//mail-hero/web:node_modules/react",
+        "//mail-hero/web:node_modules/react-router",
+        "//mail-hero/web:node_modules/vitest",
+        "//proto/mailhero/ui/v2:ts",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__pages__InboxPage_test",
+    config = "//mail-hero/web:test_config",
+    data = COMMON_TEST_DATA_2,
+    project = "mail-hero/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":pages/InboxPage.test.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__components__UI",
+        ":src__components__messageDisplay",
+        ":src__pages__InboxPage",
+        "//mail-hero/web:node_modules/@tanstack/react-query",
+        "//mail-hero/web:node_modules/@testing-library/react",
+        "//mail-hero/web:node_modules/react",
+        "//mail-hero/web:node_modules/react-router",
+        "//mail-hero/web:node_modules/vitest",
+        "//proto/mailhero/ui/v2:ts",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__pages__MessagePage_test",
+    config = "//mail-hero/web:test_config",
+    data = COMMON_TEST_DATA_2,
+    project = "mail-hero/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":pages/MessagePage.test.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__components__UI",
+        ":src__components__messageDisplay",
+        ":src__pages__MessagePage",
+        "//mail-hero/web:node_modules/@tanstack/react-query",
+        "//mail-hero/web:node_modules/@testing-library/react",
+        "//mail-hero/web:node_modules/react",
+        "//mail-hero/web:node_modules/react-router",
+        "//mail-hero/web:node_modules/vitest",
+        "//proto/mailhero/ui/v2:ts",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__pages__SettingsPage_test",
+    config = "//mail-hero/web:test_config",
+    data = COMMON_TEST_DATA_2,
+    project = "mail-hero/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":pages/SettingsPage.test.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__components__UI",
+        ":src__components__alerts",
+        ":src__pages__SettingsPage",
+        "//mail-hero/web:node_modules/@tanstack/react-query",
+        "//mail-hero/web:node_modules/@testing-library/react",
+        "//mail-hero/web:node_modules/react",
+        "//mail-hero/web:node_modules/react-router",
+        "//mail-hero/web:node_modules/vitest",
+        "//proto/mailhero/ui/v2:ts",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+)
+
+test_suite(name = "check")
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)

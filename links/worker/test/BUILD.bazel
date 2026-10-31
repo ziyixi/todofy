@@ -1,0 +1,323 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@npm//links/worker:vitest/package_json.bzl", vitest = "bin")
+load("//tools/bazel:js.bzl", "copied_source_files", "proto_vitest_test", "workerd_vitest_test")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//links:__subpackages__"])
+
+COMMON_TEST_DEPS = [
+    "//proto/links/ui/v1:ts",
+    "//proto/ts:protobuf",
+    "//proto/ts:protobuf-wkt",
+    "//proto/ts:wire-json",
+]
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//links:__subpackages__"],
+)
+
+js_library(
+    name = "source_runtime_tsconfig_json",
+    srcs = ["runtime/tsconfig.json"],
+)
+
+copied_source_files(
+    name = "types_srcs",
+    srcs = [
+        "jwt.ts",
+        "keys.test.ts",
+        "model.test.ts",
+        "ops-status.test.ts",
+        "pages.test.ts",
+        "resolve.test.ts",
+        "targets.test.ts",
+        "validate.d.ts",
+    ],
+)
+
+copied_source_files(
+    name = "runtime_types_srcs",
+    srcs = glob(
+        [
+            "runtime/**/*.ts",
+            "runtime/**/*.mts",
+        ],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+copied_source_files(
+    name = "lint_sources",
+    srcs = glob(
+        [
+            "**/*.ts",
+            "**/*.mts",
+        ],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+copied_source_files(
+    name = "lint_data",
+    srcs = ["runtime/tsconfig.json"],
+)
+
+proto_vitest_test(
+    name = "keys_test",
+    config = "//links/worker:test_config",
+    data = [
+        "//links/worker:node_modules/vitest",
+        "//links/worker:package_json",
+    ],
+    project = "links/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":keys.test.ts"],
+    deps = [
+        "//links/worker/src:keys",
+        "//links/worker/src:limits",
+    ],
+)
+
+proto_vitest_test(
+    name = "model_test",
+    config = "//links/worker:test_config",
+    data = [
+        "//links/worker:node_modules/vitest",
+        "//links/worker:package_json",
+    ],
+    project = "links/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":model.test.ts"],
+    deps = [
+        "//links/worker/src:model",
+        "//proto/links/ui/v1:ts",
+        "//proto/ts:wire-json",
+    ],
+)
+
+proto_vitest_test(
+    name = "ops-status_test",
+    config = "//links/worker:test_config",
+    data = [
+        "//contracts:ops-v1/fixtures/OpsStatus/links-degraded.json_data",
+        "//contracts:ops-v1/fixtures/OpsStatus/links-ok.json_data",
+        "//contracts:ops-v1/ops-v1.schema.json_data",
+        "//links/worker:node_modules/vitest",
+        "//links/worker:package_json",
+    ],
+    project = "links/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":ops-status.test.ts"],
+    deps = [
+        "//contracts:ops-v1/validate",
+        "//links/worker/src:ops-status",
+    ],
+)
+
+proto_vitest_test(
+    name = "pages_test",
+    config = "//links/worker:test_config",
+    data = [
+        "//links/worker:node_modules/vitest",
+        "//links/worker:package_json",
+    ],
+    project = "links/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":pages.test.ts"],
+    deps = ["//links/worker/src:pages"],
+)
+
+proto_vitest_test(
+    name = "resolve_test",
+    config = "//links/worker:test_config",
+    data = [
+        "//links/worker:node_modules/vitest",
+        "//links/worker:package_json",
+    ],
+    project = "links/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":resolve.test.ts"],
+    deps = [
+        "//links/worker/src:keys",
+        "//links/worker/src:resolve",
+    ],
+)
+
+proto_vitest_test(
+    name = "targets_test",
+    config = "//links/worker:test_config",
+    data = [
+        "//links/worker:node_modules/vitest",
+        "//links/worker:package_json",
+    ],
+    project = "links/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":targets.test.ts"],
+    deps = [
+        "//links/worker/src:limits",
+        "//links/worker/src:targets",
+    ],
+)
+
+js_library(
+    name = "runtime_helpers",
+    srcs = [
+        ":runtime/harness.ts",
+        ":runtime/tsconfig.json",
+    ],
+    types = glob(
+        ["runtime/**/*.ts"],
+        exclude = [
+            "**/*.test.ts",
+            "BUILD.bazel",
+        ],
+    ),
+)
+
+workerd_vitest_test(
+    name = "runtime_access_test",
+    data = [
+        ":jwt.ts",
+        ":test_support",
+        "//links:config",
+    ],
+    project = "links/worker",
+    runner = vitest.vitest_test,
+    tests = [":runtime/access.test.ts"],
+)
+
+workerd_vitest_test(
+    name = "runtime_api_test",
+    data = [
+        ":test_support",
+        "//links:config",
+    ],
+    project = "links/worker",
+    runner = vitest.vitest_test,
+    tests = [":runtime/api.test.ts"],
+    deps = COMMON_TEST_DEPS,
+)
+
+workerd_vitest_test(
+    name = "runtime_backup_test",
+    data = [
+        ":test_support",
+        "//links:config",
+        "//links/tools:backup-restore",
+        "//links/worker:wrangler",
+    ],
+    env = {"BAZEL_WRANGLER": "$(rootpath //links/worker:wrangler)"},
+    project = "links/worker",
+    runner = vitest.vitest_test,
+    tests = [":runtime/backup.test.ts"],
+    deps = ["//proto/ops/v1:ts"],
+)
+
+workerd_vitest_test(
+    name = "runtime_budget_test",
+    data = [
+        ":test_support",
+        "//links:config",
+    ],
+    project = "links/worker",
+    runner = vitest.vitest_test,
+    tests = [":runtime/budget.test.ts"],
+    deps = COMMON_TEST_DEPS,
+)
+
+workerd_vitest_test(
+    name = "runtime_cpu_test",
+    data = [
+        ":jwt.ts",
+        ":test_support",
+        "//links:config",
+        "//tools/workerd-cpu:lib",
+    ],
+    project = "links/worker",
+    runner = vitest.vitest_test,
+    tags = [
+        "cpu",
+        "exclusive",
+        "workerd",
+    ],
+    tests = [":runtime/cpu.test.ts"],
+    deps = ["//proto/ops/v1:ts"],
+)
+
+workerd_vitest_test(
+    name = "runtime_redirect_test",
+    data = [
+        ":test_support",
+        "//links:config",
+    ],
+    project = "links/worker",
+    runner = vitest.vitest_test,
+    tests = [":runtime/redirect.test.ts"],
+)
+
+workerd_vitest_test(
+    name = "runtime_schema_test",
+    data = [
+        ":test_support",
+        "//links:config",
+    ],
+    project = "links/worker",
+    runner = vitest.vitest_test,
+    tests = [":runtime/schema.test.ts"],
+)
+
+js_library(
+    name = "test_support",
+    srcs = glob(
+        ["**"],
+        exclude = [
+            "runtime/**",
+            "smoke/**",
+            "**/*.test.ts",
+            "BUILD.bazel",
+        ],
+    ),
+    types = glob(
+        ["**/*.ts"],
+        exclude = [
+            "runtime/**",
+            "smoke/**",
+            "**/*.test.ts",
+            "BUILD.bazel",
+        ],
+    ),
+)
+
+js_library(
+    name = "runtime_metadata",
+    srcs = [":runtime/harness.ts"],
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+)
+
+test_suite(name = "check")
+
+test_suite(
+    name = "runtime_tests",
+    tags = ["workerd"],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)

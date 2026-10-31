@@ -1,0 +1,1654 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@npm//tasks/web:vitest/package_json.bzl", vitest = "bin")
+load("//tools/bazel:js.bzl", "copied_source_files", "proto_vitest_test", "workspace_link")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//tasks:__subpackages__"])
+
+COMMON_TEST_DATA = [
+    "//tasks/web:package_json",
+    "//tasks/web/test:source_setup_ts",
+    "//tasks/web:test_config",
+    "//tasks/web:node_modules/@testing-library/react",
+    "//tasks/web:node_modules/@vitejs/plugin-react",
+    "//tasks/web:node_modules/jsdom",
+]
+
+COMMON_TEST_DATA_2 = [
+    "//tasks/web:package_json",
+    "//tasks/web/test:source_setup_ts",
+    "//tasks/web:test_config",
+    "//tasks/web:node_modules/@vitejs/plugin-react",
+    "//tasks/web:node_modules/jsdom",
+]
+
+COMMON_TEST_DATA_3 = [
+    "//tasks/web:package_json",
+    "//tasks/web/test:source_setup_ts",
+    "//tasks/web:test_config",
+    "//tasks/web:node_modules/@vitejs/plugin-react",
+    "//tasks/web:node_modules/jsdom",
+    ":planning-ui_link",
+]
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//tasks:__subpackages__"],
+)
+
+copied_source_files(
+    name = "types_srcs",
+    srcs = glob(
+        [
+            "**/*.ts",
+            "**/*.tsx",
+        ],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+copied_source_files(
+    name = "application_sources_srcs",
+    srcs = glob(
+        ["**"],
+        exclude = [
+            "**/*.test.*",
+            "BUILD.bazel",
+        ],
+    ),
+)
+
+copied_source_files(
+    name = "lint_sources",
+    srcs = glob(
+        [
+            "**/*.ts",
+            "**/*.tsx",
+        ],
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+js_library(
+    name = "src__outdated",
+    srcs = [":outdated.ts"],
+    deps = [
+        "//proto/ts:rpc-status",
+        "//tasks/shared:build",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__api",
+    srcs = [":api.ts"],
+    deps = [
+        ":src__outdated",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:http-client",
+    ],
+)
+
+js_library(
+    name = "src__dates",
+    srcs = [":dates.ts"],
+    deps = [],
+)
+
+js_library(
+    name = "src__routes",
+    srcs = [":routes.ts"],
+    deps = [],
+)
+
+js_library(
+    name = "src__useTaskView",
+    srcs = [":useTaskView.ts"],
+    deps = [
+        ":src__api",
+        ":src__routes",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__task-schedule",
+    srcs = [":task-schedule.ts"],
+    deps = [":src__api"],
+)
+
+js_library(
+    name = "src__task-date-actions",
+    srcs = [":task-date-actions.ts"],
+    deps = [":src__api"],
+)
+
+js_library(
+    name = "src__task-planning",
+    srcs = [":task-planning.ts"],
+    deps = [":src__api"],
+)
+
+js_library(
+    name = "src__task-order",
+    srcs = [":task-order.ts"],
+    deps = [":src__api"],
+)
+
+js_library(
+    name = "src__task-drag",
+    srcs = [":task-drag.ts"],
+    deps = [":src__api"],
+)
+
+js_library(
+    name = "src__useTaskActions",
+    srcs = [":useTaskActions.ts"],
+    deps = [
+        ":src__api",
+        ":src__dates",
+        ":src__routes",
+        ":src__task-date-actions",
+        ":src__task-drag",
+        ":src__task-order",
+        ":src__task-planning",
+        ":src__task-schedule",
+        ":src__useTaskView",
+        "//proto/ts:http-client",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__components__CatalogMenu",
+    srcs = [
+        ":components/CatalogMenu.tsx",
+        ":components/task-menus.css",
+    ],
+    deps = [
+        ":src__api",
+        "//tasks/web:node_modules/@base-ui/react",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__components__TaskDrag",
+    srcs = [
+        ":components/TaskDrag.tsx",
+        ":components/task-drag.css",
+    ],
+    deps = [
+        ":src__api",
+        ":src__task-drag",
+        "//packages/planning-ui:lib",
+        "//tasks/web:node_modules/@dnd-kit/abstract",
+        "//tasks/web:node_modules/@dnd-kit/collision",
+        "//tasks/web:node_modules/@dnd-kit/dom",
+        "//tasks/web:node_modules/@dnd-kit/react",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__components__Sidebar",
+    srcs = [
+        ":components/Sidebar.tsx",
+        ":components/sidebar.css",
+    ],
+    deps = [
+        ":src__api",
+        ":src__components__CatalogMenu",
+        ":src__components__TaskDrag",
+        ":src__routes",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__components__SidebarResize",
+    srcs = [
+        ":components/SidebarResize.tsx",
+        ":components/sidebar-resize.css",
+    ],
+    deps = ["//tasks/web:node_modules/react"],
+)
+
+js_library(
+    name = "src__recurrence-controls",
+    srcs = [":recurrence-controls.ts"],
+    deps = [],
+)
+
+js_library(
+    name = "src__components__TaskMetadata",
+    srcs = [
+        ":components/TaskMetadata.tsx",
+        ":components/task-metadata.css",
+    ],
+    deps = [
+        ":src__api",
+        ":src__dates",
+        ":src__recurrence-controls",
+        ":src__task-planning",
+        "//tasks/web:node_modules/lucide-react",
+    ],
+)
+
+js_library(
+    name = "src__components__Dialog",
+    srcs = [":components/Dialog.tsx"],
+    deps = [
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__useDeleteConfirmation",
+    srcs = [":useDeleteConfirmation.ts"],
+    deps = ["//tasks/web:node_modules/react"],
+)
+
+js_library(
+    name = "src__components__ProjectPicker",
+    srcs = [
+        ":components/ProjectPicker.tsx",
+        ":components/property-pickers.css",
+    ],
+    deps = [
+        ":src__api",
+        "//tasks/web:node_modules/@base-ui/react",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__components__DateCalendar",
+    srcs = [":components/DateCalendar.tsx"],
+    deps = [
+        ":src__dates",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__components__RecurrencePicker",
+    srcs = [
+        ":components/RecurrencePicker.tsx",
+        ":components/recurrence-picker.css",
+    ],
+    deps = [":src__recurrence-controls"],
+)
+
+js_library(
+    name = "src__components__SchedulePicker",
+    srcs = [
+        ":components/SchedulePicker.tsx",
+        ":components/property-pickers.css",
+    ],
+    deps = [
+        ":src__api",
+        ":src__components__DateCalendar",
+        ":src__components__RecurrencePicker",
+        ":src__dates",
+        ":src__recurrence-controls",
+        "//tasks/web:node_modules/@base-ui/react",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__components__TaskMenu",
+    srcs = [
+        ":components/TaskMenu.tsx",
+        ":components/task-menus.css",
+    ],
+    deps = [
+        ":src__api",
+        ":src__components__ProjectPicker",
+        ":src__components__SchedulePicker",
+        ":src__dates",
+        ":src__useTaskActions",
+        "//tasks/web:node_modules/@base-ui/react",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__components__TaskRow",
+    srcs = [":components/TaskRow.tsx"],
+    deps = [
+        ":src__api",
+        ":src__components__Dialog",
+        ":src__components__TaskDrag",
+        ":src__components__TaskMenu",
+        ":src__components__TaskMetadata",
+        ":src__useDeleteConfirmation",
+        "//tasks/web:node_modules/@base-ui/react",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__components__TaskTreeRow",
+    srcs = [
+        ":components/TaskTreeRow.tsx",
+        ":components/task-tree.css",
+    ],
+    deps = [
+        ":src__api",
+        ":src__components__TaskDrag",
+        ":src__components__TaskRow",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__components__TaskList",
+    srcs = [":components/TaskList.tsx"],
+    deps = [
+        ":src__api",
+        ":src__components__TaskDrag",
+        ":src__components__TaskMenu",
+        ":src__components__TaskTreeRow",
+        ":src__dates",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__components__CompletedHistory",
+    srcs = [":components/CompletedHistory.tsx"],
+    deps = [
+        ":src__api",
+        "//packages/planning-ui:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__components__TaskWorkspace",
+    srcs = [":components/TaskWorkspace.tsx"],
+    deps = [
+        ":src__api",
+        ":src__components__CompletedHistory",
+        ":src__components__TaskList",
+        ":src__dates",
+        ":src__routes",
+        ":src__useTaskActions",
+        ":src__useTaskView",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__components__CatalogView",
+    srcs = [":components/CatalogView.tsx"],
+    deps = [
+        ":src__api",
+        ":src__components__CatalogMenu",
+        ":src__routes",
+        "//tasks/web:node_modules/lucide-react",
+    ],
+)
+
+js_library(
+    name = "src__components__ErrorBoundary",
+    srcs = [":components/ErrorBoundary.tsx"],
+    deps = ["//tasks/web:node_modules/react"],
+)
+
+js_library(
+    name = "src__useReturnRefresh",
+    srcs = [":useReturnRefresh.ts"],
+    deps = ["//tasks/web:node_modules/react"],
+)
+
+js_library(
+    name = "src__launch",
+    srcs = [":launch.ts"],
+    deps = ["//tasks/web:node_modules/react"],
+)
+
+js_library(
+    name = "src__titlebar",
+    srcs = [":titlebar.tsx"],
+    deps = [
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__components__LabelPicker",
+    srcs = [
+        ":components/LabelPicker.tsx",
+        ":components/label-picker.css",
+    ],
+    deps = [
+        ":src__api",
+        "//tasks/web:node_modules/@base-ui/react",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__components__DescriptionMarkdown",
+    srcs = [":components/DescriptionMarkdown.tsx"],
+    deps = [
+        "//tasks/web:node_modules/react-markdown",
+        "//tasks/web:node_modules/remark-gfm",
+    ],
+)
+
+js_library(
+    name = "src__components__TaskDescription",
+    srcs = [":components/TaskDescription.tsx"],
+    deps = [
+        ":src__components__DescriptionMarkdown",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__components__PriorityPicker",
+    srcs = [
+        ":components/PriorityPicker.tsx",
+        ":components/property-pickers.css",
+    ],
+    deps = [
+        "//tasks/web:node_modules/@base-ui/react",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__components__StartAheadPicker",
+    srcs = [":components/StartAheadPicker.tsx"],
+    deps = [
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__components__TaskFields",
+    srcs = [":components/TaskFields.tsx"],
+    deps = [
+        ":src__api",
+        ":src__components__LabelPicker",
+        ":src__components__PriorityPicker",
+        ":src__components__ProjectPicker",
+        ":src__components__SchedulePicker",
+        ":src__components__StartAheadPicker",
+        ":src__components__TaskDescription",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__components__TaskChildRow",
+    srcs = [":components/TaskChildRow.tsx"],
+    deps = [
+        ":src__api",
+        ":src__components__TaskDrag",
+        ":src__dates",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__components__TaskChildren",
+    srcs = [
+        ":components/TaskChildren.tsx",
+        ":components/task-children.css",
+    ],
+    deps = [
+        ":src__api",
+        ":src__components__TaskChildRow",
+        ":src__components__TaskDrag",
+        ":src__dates",
+        ":src__task-order",
+        ":src__useDeleteConfirmation",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__components__TaskPlanningFields",
+    srcs = [
+        ":components/TaskPlanningFields.tsx",
+        ":components/task-planning.css",
+    ],
+    deps = [
+        ":src__task-planning",
+        "//packages/planning-ui:lib",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__components__TaskDependencyFields",
+    srcs = [":components/TaskDependencyFields.tsx"],
+    deps = [
+        ":src__api",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__useTaskPlanning",
+    srcs = [":useTaskPlanning.ts"],
+    deps = [
+        ":src__api",
+        ":src__task-planning",
+        "//packages/planning-ui:lib",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__goals-client",
+    srcs = [":goals-client.ts"],
+    deps = [":src__api"],
+)
+
+js_library(
+    name = "src__components__GoalPicker",
+    srcs = [
+        ":components/GoalPicker.tsx",
+        ":components/goal-picker.css",
+    ],
+    deps = [
+        ":src__api",
+        ":src__goals-client",
+        "//tasks/web:node_modules/@base-ui/react",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__components__TaskDialog",
+    srcs = [
+        ":components/TaskDialog.tsx",
+        ":components/color-detail.css",
+        ":components/task-dialog.css",
+    ],
+    deps = [
+        ":src__api",
+        ":src__components__Dialog",
+        ":src__components__GoalPicker",
+        ":src__components__TaskChildren",
+        ":src__components__TaskDependencyFields",
+        ":src__components__TaskFields",
+        ":src__components__TaskPlanningFields",
+        ":src__task-planning",
+        ":src__task-schedule",
+        ":src__useDeleteConfirmation",
+        ":src__useTaskPlanning",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__usePlanView",
+    srcs = [":usePlanView.ts"],
+    deps = [
+        "//packages/planning-ui:lib",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__PlanningPage",
+    srcs = [":PlanningPage.tsx"],
+    deps = [
+        ":src__api",
+        ":src__components__GoalPicker",
+        ":src__usePlanView",
+        ":src__useTaskActions",
+        "//packages/planning-ui:lib",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__mail-api",
+    srcs = [":mail-api.ts"],
+    deps = [
+        ":src__api",
+        "//packages/planning-ui:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/todofy/mail/v1:ts",
+        "//proto/ts:http-client",
+    ],
+)
+
+js_library(
+    name = "src__components__MailRow",
+    srcs = [":components/MailRow.tsx"],
+    deps = [
+        "//proto/tasks/ui/v1:ts",
+        "//proto/todofy/mail/v1:ts",
+        "//tasks/web:node_modules/lucide-react",
+    ],
+)
+
+js_library(
+    name = "src__MailPage",
+    srcs = [
+        ":MailPage.tsx",
+        ":mail.css",
+    ],
+    deps = [
+        ":src__api",
+        ":src__components__Dialog",
+        ":src__components__MailRow",
+        ":src__mail-api",
+        ":src__routes",
+        "//packages/planning-ui:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/todofy/mail/v1:ts",
+        "//proto/ts:http-client",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__gtd__model",
+    srcs = [":gtd/model.ts"],
+    deps = [
+        "//packages/planning-ui:lib",
+        "//proto/tasks/ui/v1:ts",
+    ],
+)
+
+js_library(
+    name = "src__gtd__GtdMetrics",
+    srcs = [":gtd/GtdMetrics.tsx"],
+    deps = [
+        ":src__gtd__model",
+        "//proto/tasks/ui/v1:ts",
+    ],
+)
+
+js_library(
+    name = "src__gtd__GtdProgress",
+    srcs = [":gtd/GtdProgress.tsx"],
+    deps = [
+        ":src__gtd__model",
+        "//proto/tasks/ui/v1:ts",
+        "//tasks/web:node_modules/lucide-react",
+    ],
+)
+
+js_library(
+    name = "src__gtd__GtdCompletion",
+    srcs = [":gtd/GtdCompletion.tsx"],
+    deps = [
+        ":src__gtd__GtdMetrics",
+        ":src__gtd__GtdProgress",
+        ":src__gtd__model",
+        "//packages/planning-ui:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__gtd__GtdTime",
+    srcs = [
+        ":gtd/GtdTime.tsx",
+        ":gtd/gtd-time.css",
+    ],
+    deps = [
+        ":src__gtd__model",
+        "//packages/planning-ui:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__GtdPage",
+    srcs = [
+        ":GtdPage.tsx",
+        ":gtd.css",
+    ],
+    deps = [
+        ":src__api",
+        ":src__dates",
+        ":src__gtd__GtdCompletion",
+        ":src__gtd__GtdTime",
+        ":src__gtd__model",
+        "//packages/planning-ui:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__components__GoalEditor",
+    srcs = [":components/GoalEditor.tsx"],
+    deps = [
+        ":src__api",
+        ":src__components__Dialog",
+        "//proto/tasks/ui/v1:ts",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__components__GoalProgress",
+    srcs = [":components/GoalProgress.tsx"],
+    deps = [
+        ":src__api",
+        ":src__components__Dialog",
+        ":src__dates",
+        "//proto/tasks/ui/v1:ts",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__components__GoalDefinition",
+    srcs = [":components/GoalDefinition.tsx"],
+    deps = [
+        ":src__components__GoalProgress",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__components__GoalRelatedTasks",
+    srcs = [":components/GoalRelatedTasks.tsx"],
+    deps = [
+        ":src__api",
+        "//packages/planning-ui:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__GoalsPage",
+    srcs = [
+        ":GoalsPage.tsx",
+        ":goals.css",
+    ],
+    deps = [
+        ":src__api",
+        ":src__components__GoalDefinition",
+        ":src__components__GoalEditor",
+        ":src__components__GoalProgress",
+        ":src__components__GoalRelatedTasks",
+        ":src__goals-client",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//tasks/web:node_modules/@base-ui/react",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__components__ColorPicker",
+    srcs = [
+        ":components/ColorPicker.tsx",
+        ":components/color-detail.css",
+    ],
+    deps = [
+        "//tasks/shared:colors",
+        "//tasks/web:node_modules/@base-ui/react",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__components__CatalogEditor",
+    srcs = [":components/CatalogEditor.tsx"],
+    deps = [
+        ":src__api",
+        ":src__components__ColorPicker",
+        ":src__components__Dialog",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__App",
+    srcs = [
+        ":App.tsx",
+        ":styles.css",
+    ],
+    deps = [
+        ":src__GoalsPage",
+        ":src__GtdPage",
+        ":src__MailPage",
+        ":src__PlanningPage",
+        ":src__api",
+        ":src__components__CatalogEditor",
+        ":src__components__CatalogView",
+        ":src__components__ErrorBoundary",
+        ":src__components__Sidebar",
+        ":src__components__SidebarResize",
+        ":src__components__TaskDialog",
+        ":src__components__TaskDrag",
+        ":src__components__TaskWorkspace",
+        ":src__dates",
+        ":src__launch",
+        ":src__outdated",
+        ":src__routes",
+        ":src__titlebar",
+        ":src__useReturnRefresh",
+        ":src__useTaskActions",
+        ":src__useTaskView",
+        "//proto/tasks/ui/v1:ts",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "src__main",
+    srcs = [":main.tsx"],
+    deps = [
+        ":src__App",
+        "//tasks/web:node_modules/react",
+        "//tasks/web:node_modules/react-dom",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__GoalsPage_test",
+    config = "//tasks/web:test_config",
+    data = [
+        ":goals.css",
+        ":planning-ui_link",
+        "//tasks/web:node_modules/@vitejs/plugin-react",
+        "//tasks/web:node_modules/jsdom",
+        "//tasks/web:package_json",
+        "//tasks/web:test_config",
+        "//tasks/web/test:source_setup_ts",
+    ],
+    project = "tasks/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":GoalsPage.test.tsx"],
+    deps = [
+        ":src__GoalsPage",
+        ":src__api",
+        ":src__components__Dialog",
+        ":src__components__GoalDefinition",
+        ":src__components__GoalEditor",
+        ":src__components__GoalProgress",
+        ":src__components__GoalRelatedTasks",
+        ":src__dates",
+        ":src__goals-client",
+        ":src__outdated",
+        ":src__routes",
+        "//packages/planning-ui:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
+        "//tasks/shared:build",
+        "//tasks/web:node_modules/@base-ui/react",
+        "//tasks/web:node_modules/@testing-library/react",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+        "//tasks/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__GtdPage_test",
+    config = "//tasks/web:test_config",
+    data = [
+        ":gtd.css",
+        ":gtd/gtd-time.css",
+        ":planning-ui_link",
+        "//:node_modules/@dnd-kit/geometry",
+        "//:node_modules/@dnd-kit/state",
+        "//tasks/web:node_modules/@dnd-kit/abstract",
+        "//tasks/web:node_modules/@vitejs/plugin-react",
+        "//tasks/web:node_modules/jsdom",
+        "//tasks/web:node_modules/react-dom",
+        "//tasks/web:package_json",
+        "//tasks/web:test_config",
+        "//tasks/web/test:source_setup_ts",
+    ],
+    project = "tasks/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":GtdPage.test.tsx"],
+    deps = [
+        ":src__GtdPage",
+        ":src__api",
+        ":src__dates",
+        ":src__gtd__GtdCompletion",
+        ":src__gtd__GtdMetrics",
+        ":src__gtd__GtdProgress",
+        ":src__gtd__GtdTime",
+        ":src__gtd__model",
+        ":src__outdated",
+        "//packages/planning-ui:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
+        "//tasks/shared:build",
+        "//tasks/web:node_modules/@testing-library/react",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+        "//tasks/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__api_test",
+    config = "//tasks/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "tasks/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":api.test.ts"],
+    deps = [
+        ":src__api",
+        ":src__outdated",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:rpc-status",
+        "//tasks/shared:build",
+        "//tasks/web:node_modules/react",
+        "//tasks/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__components__DateCalendar_test",
+    config = "//tasks/web:test_config",
+    data = [
+        ":components/property-pickers.css",
+        ":components/recurrence-picker.css",
+        "//tasks/web:node_modules/@vitejs/plugin-react",
+        "//tasks/web:node_modules/jsdom",
+        "//tasks/web:package_json",
+        "//tasks/web:test_config",
+        "//tasks/web/test:source_setup_ts",
+    ],
+    project = "tasks/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":components/DateCalendar.test.tsx"],
+    deps = [
+        ":src__api",
+        ":src__components__DateCalendar",
+        ":src__components__RecurrencePicker",
+        ":src__components__SchedulePicker",
+        ":src__dates",
+        ":src__outdated",
+        ":src__recurrence-controls",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:rpc-status",
+        "//tasks/shared:build",
+        "//tasks/web:node_modules/@base-ui/react",
+        "//tasks/web:node_modules/@testing-library/react",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+        "//tasks/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__components__ErrorBoundary_test",
+    config = "//tasks/web:test_config",
+    data = COMMON_TEST_DATA_2,
+    project = "tasks/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":components/ErrorBoundary.test.tsx"],
+    deps = [
+        ":src__components__ErrorBoundary",
+        "//tasks/web:node_modules/@testing-library/react",
+        "//tasks/web:node_modules/react",
+        "//tasks/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__components__GoalEditor_test",
+    config = "//tasks/web:test_config",
+    data = COMMON_TEST_DATA_2,
+    project = "tasks/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":components/GoalEditor.test.tsx"],
+    deps = [
+        ":src__api",
+        ":src__components__Dialog",
+        ":src__components__GoalEditor",
+        ":src__outdated",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
+        "//tasks/shared:build",
+        "//tasks/web:node_modules/@testing-library/react",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+        "//tasks/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__components__GoalProgress_test",
+    config = "//tasks/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "tasks/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":components/GoalProgress.test.tsx"],
+    deps = [
+        ":src__api",
+        ":src__components__Dialog",
+        ":src__components__GoalProgress",
+        ":src__dates",
+        ":src__outdated",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:rpc-status",
+        "//tasks/shared:build",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+        "//tasks/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__components__GoalRelatedTasks_test",
+    config = "//tasks/web:test_config",
+    data = COMMON_TEST_DATA_3,
+    project = "tasks/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":components/GoalRelatedTasks.test.tsx"],
+    deps = [
+        ":src__api",
+        ":src__components__GoalRelatedTasks",
+        ":src__dates",
+        ":src__outdated",
+        ":src__routes",
+        ":src__task-date-actions",
+        ":src__task-drag",
+        ":src__task-order",
+        ":src__task-planning",
+        ":src__task-schedule",
+        ":src__useTaskActions",
+        ":src__useTaskView",
+        "//packages/planning-ui:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
+        "//tasks/shared:build",
+        "//tasks/web:node_modules/@testing-library/react",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+        "//tasks/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__components__LabelPicker_test",
+    config = "//tasks/web:test_config",
+    data = [
+        ":components/label-picker.css",
+        "//tasks/web:node_modules/@vitejs/plugin-react",
+        "//tasks/web:node_modules/jsdom",
+        "//tasks/web:package_json",
+        "//tasks/web:test_config",
+        "//tasks/web/test:source_setup_ts",
+    ],
+    project = "tasks/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":components/LabelPicker.test.tsx"],
+    deps = [
+        ":src__api",
+        ":src__components__LabelPicker",
+        ":src__outdated",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
+        "//tasks/shared:build",
+        "//tasks/web:node_modules/@base-ui/react",
+        "//tasks/web:node_modules/@testing-library/react",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+        "//tasks/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__components__ProjectPicker_test",
+    config = "//tasks/web:test_config",
+    data = [
+        ":components/property-pickers.css",
+        "//tasks/web:node_modules/@vitejs/plugin-react",
+        "//tasks/web:node_modules/jsdom",
+        "//tasks/web:package_json",
+        "//tasks/web:test_config",
+        "//tasks/web/test:source_setup_ts",
+    ],
+    project = "tasks/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":components/ProjectPicker.test.tsx"],
+    deps = [
+        ":src__api",
+        ":src__components__ProjectPicker",
+        ":src__outdated",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
+        "//tasks/shared:build",
+        "//tasks/web:node_modules/@base-ui/react",
+        "//tasks/web:node_modules/@testing-library/react",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+        "//tasks/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__components__Sidebar_test",
+    config = "//tasks/web:test_config",
+    data = [
+        ":components/sidebar.css",
+        ":components/task-drag.css",
+        ":components/task-menus.css",
+        ":planning-ui_link",
+        "//tasks/web:node_modules/@vitejs/plugin-react",
+        "//tasks/web:node_modules/jsdom",
+        "//tasks/web:package_json",
+        "//tasks/web:test_config",
+        "//tasks/web/test:source_setup_ts",
+    ],
+    project = "tasks/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":components/Sidebar.test.tsx"],
+    deps = [
+        ":src__api",
+        ":src__components__CatalogMenu",
+        ":src__components__Sidebar",
+        ":src__components__TaskDrag",
+        ":src__outdated",
+        ":src__routes",
+        ":src__task-drag",
+        "//packages/planning-ui:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
+        "//tasks/shared:build",
+        "//tasks/web:node_modules/@base-ui/react",
+        "//tasks/web:node_modules/@dnd-kit/abstract",
+        "//tasks/web:node_modules/@dnd-kit/collision",
+        "//tasks/web:node_modules/@dnd-kit/dom",
+        "//tasks/web:node_modules/@dnd-kit/react",
+        "//tasks/web:node_modules/@testing-library/react",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+        "//tasks/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__components__TaskDialog_test",
+    config = "//tasks/web:test_config",
+    data = [
+        ":components/color-detail.css",
+        ":components/goal-picker.css",
+        ":components/label-picker.css",
+        ":components/property-pickers.css",
+        ":components/recurrence-picker.css",
+        ":components/task-children.css",
+        ":components/task-dialog.css",
+        ":components/task-drag.css",
+        ":components/task-planning.css",
+        ":planning-ui_link",
+        "//tasks/web:node_modules/@vitejs/plugin-react",
+        "//tasks/web:node_modules/jsdom",
+        "//tasks/web:package_json",
+        "//tasks/web:test_config",
+        "//tasks/web/test:source_setup_ts",
+    ],
+    project = "tasks/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":components/TaskDialog.test.tsx"],
+    deps = [
+        ":src__api",
+        ":src__components__DateCalendar",
+        ":src__components__DescriptionMarkdown",
+        ":src__components__Dialog",
+        ":src__components__GoalPicker",
+        ":src__components__LabelPicker",
+        ":src__components__PriorityPicker",
+        ":src__components__ProjectPicker",
+        ":src__components__RecurrencePicker",
+        ":src__components__SchedulePicker",
+        ":src__components__StartAheadPicker",
+        ":src__components__TaskChildRow",
+        ":src__components__TaskChildren",
+        ":src__components__TaskDependencyFields",
+        ":src__components__TaskDescription",
+        ":src__components__TaskDialog",
+        ":src__components__TaskDrag",
+        ":src__components__TaskFields",
+        ":src__components__TaskPlanningFields",
+        ":src__dates",
+        ":src__goals-client",
+        ":src__outdated",
+        ":src__recurrence-controls",
+        ":src__task-drag",
+        ":src__task-order",
+        ":src__task-planning",
+        ":src__task-schedule",
+        ":src__useDeleteConfirmation",
+        ":src__useTaskPlanning",
+        "//packages/planning-ui:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
+        "//tasks/shared:build",
+        "//tasks/web:node_modules/@base-ui/react",
+        "//tasks/web:node_modules/@dnd-kit/abstract",
+        "//tasks/web:node_modules/@dnd-kit/collision",
+        "//tasks/web:node_modules/@dnd-kit/dom",
+        "//tasks/web:node_modules/@dnd-kit/react",
+        "//tasks/web:node_modules/@testing-library/react",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+        "//tasks/web:node_modules/react-markdown",
+        "//tasks/web:node_modules/remark-gfm",
+        "//tasks/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__components__TaskList_test",
+    config = "//tasks/web:test_config",
+    data = [
+        ":components/property-pickers.css",
+        ":components/recurrence-picker.css",
+        ":components/task-drag.css",
+        ":components/task-menus.css",
+        ":components/task-metadata.css",
+        ":components/task-tree.css",
+        ":planning-ui_link",
+        "//tasks/web:node_modules/@vitejs/plugin-react",
+        "//tasks/web:node_modules/jsdom",
+        "//tasks/web:package_json",
+        "//tasks/web:test_config",
+        "//tasks/web/test:source_setup_ts",
+    ],
+    project = "tasks/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":components/TaskList.test.tsx"],
+    deps = [
+        ":src__api",
+        ":src__components__DateCalendar",
+        ":src__components__Dialog",
+        ":src__components__ProjectPicker",
+        ":src__components__RecurrencePicker",
+        ":src__components__SchedulePicker",
+        ":src__components__TaskDrag",
+        ":src__components__TaskList",
+        ":src__components__TaskMenu",
+        ":src__components__TaskMetadata",
+        ":src__components__TaskRow",
+        ":src__components__TaskTreeRow",
+        ":src__dates",
+        ":src__outdated",
+        ":src__recurrence-controls",
+        ":src__routes",
+        ":src__task-date-actions",
+        ":src__task-drag",
+        ":src__task-order",
+        ":src__task-planning",
+        ":src__task-schedule",
+        ":src__useDeleteConfirmation",
+        ":src__useTaskActions",
+        ":src__useTaskView",
+        "//packages/planning-ui:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
+        "//tasks/shared:build",
+        "//tasks/web:node_modules/@base-ui/react",
+        "//tasks/web:node_modules/@dnd-kit/abstract",
+        "//tasks/web:node_modules/@dnd-kit/collision",
+        "//tasks/web:node_modules/@dnd-kit/dom",
+        "//tasks/web:node_modules/@dnd-kit/react",
+        "//tasks/web:node_modules/@testing-library/react",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+        "//tasks/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__dates_test",
+    config = "//tasks/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "tasks/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":dates.test.ts"],
+    deps = [
+        ":src__dates",
+        ":src__routes",
+        "//tasks/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__goals-client_test",
+    config = "//tasks/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "tasks/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":goals-client.test.ts"],
+    deps = [
+        ":src__api",
+        ":src__goals-client",
+        ":src__outdated",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
+        "//tasks/shared:build",
+        "//tasks/web:node_modules/react",
+        "//tasks/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__gtd__GtdTime_test",
+    config = "//tasks/web:test_config",
+    data = [
+        ":gtd/gtd-time.css",
+        ":planning-ui_link",
+        "//:node_modules/@dnd-kit/geometry",
+        "//:node_modules/@dnd-kit/state",
+        "//tasks/web:node_modules/@dnd-kit/abstract",
+        "//tasks/web:node_modules/@vitejs/plugin-react",
+        "//tasks/web:node_modules/jsdom",
+        "//tasks/web:node_modules/react-dom",
+        "//tasks/web:package_json",
+        "//tasks/web:test_config",
+        "//tasks/web/test:source_setup_ts",
+    ],
+    project = "tasks/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":gtd/GtdTime.test.tsx"],
+    deps = [
+        ":src__gtd__GtdTime",
+        ":src__gtd__model",
+        "//packages/planning-ui:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//tasks/web:node_modules/@testing-library/react",
+        "//tasks/web:node_modules/lucide-react",
+        "//tasks/web:node_modules/react",
+        "//tasks/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__launch_test",
+    config = "//tasks/web:test_config",
+    data = COMMON_TEST_DATA_2,
+    project = "tasks/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":launch.test.ts"],
+    deps = [
+        ":src__launch",
+        "//tasks/web:node_modules/@testing-library/react",
+        "//tasks/web:node_modules/react",
+        "//tasks/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__outdated_test",
+    config = "//tasks/web:test_config",
+    data = COMMON_TEST_DATA_2,
+    project = "tasks/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":outdated.test.ts"],
+    deps = [
+        ":src__outdated",
+        "//proto/ts:rpc-status",
+        "//tasks/shared:build",
+        "//tasks/web:node_modules/@testing-library/react",
+        "//tasks/web:node_modules/react",
+        "//tasks/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__recurrence-controls_test",
+    config = "//tasks/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "tasks/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":recurrence-controls.test.ts"],
+    deps = [
+        ":src__recurrence-controls",
+        "//tasks/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__task-date-actions_test",
+    config = "//tasks/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "tasks/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":task-date-actions.test.ts"],
+    deps = [
+        ":src__api",
+        ":src__outdated",
+        ":src__task-date-actions",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
+        "//tasks/shared:build",
+        "//tasks/web:node_modules/react",
+        "//tasks/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__usePlanView_test",
+    config = "//tasks/web:test_config",
+    data = COMMON_TEST_DATA_3,
+    project = "tasks/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":usePlanView.test.tsx"],
+    deps = [
+        ":src__usePlanView",
+        "//packages/planning-ui:lib",
+        "//tasks/web:node_modules/@testing-library/react",
+        "//tasks/web:node_modules/react",
+        "//tasks/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__useReturnRefresh_test",
+    config = "//tasks/web:test_config",
+    data = COMMON_TEST_DATA_2,
+    project = "tasks/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":useReturnRefresh.test.tsx"],
+    deps = [
+        ":src__useReturnRefresh",
+        "//tasks/web:node_modules/@testing-library/react",
+        "//tasks/web:node_modules/react",
+        "//tasks/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__useTaskActions_test",
+    config = "//tasks/web:test_config",
+    data = COMMON_TEST_DATA_2,
+    project = "tasks/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":useTaskActions.test.tsx"],
+    deps = [
+        ":src__api",
+        ":src__dates",
+        ":src__outdated",
+        ":src__routes",
+        ":src__task-date-actions",
+        ":src__task-drag",
+        ":src__task-order",
+        ":src__task-planning",
+        ":src__task-schedule",
+        ":src__useTaskActions",
+        ":src__useTaskView",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
+        "//tasks/shared:build",
+        "//tasks/web:node_modules/@testing-library/react",
+        "//tasks/web:node_modules/react",
+        "//tasks/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__useTaskPlanning_test",
+    config = "//tasks/web:test_config",
+    data = COMMON_TEST_DATA_3,
+    project = "tasks/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":useTaskPlanning.test.tsx"],
+    deps = [
+        ":src__api",
+        ":src__outdated",
+        ":src__task-planning",
+        ":src__useTaskPlanning",
+        "//packages/planning-ui:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
+        "//tasks/shared:build",
+        "//tasks/web:node_modules/@testing-library/react",
+        "//tasks/web:node_modules/react",
+        "//tasks/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__useTaskView_test",
+    config = "//tasks/web:test_config",
+    data = COMMON_TEST_DATA_2,
+    project = "tasks/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":useTaskView.test.tsx"],
+    deps = [
+        ":src__api",
+        ":src__outdated",
+        ":src__routes",
+        ":src__useTaskView",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
+        "//tasks/shared:build",
+        "//tasks/web:node_modules/@testing-library/react",
+        "//tasks/web:node_modules/react",
+        "//tasks/web:node_modules/vitest",
+    ],
+)
+
+workspace_link(
+    name = "planning-ui_link",
+    src = "//packages/planning-ui:pkg",
+    project = "tasks/web",
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+)
+
+test_suite(name = "check")
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+)

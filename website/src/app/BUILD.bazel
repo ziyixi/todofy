@@ -1,0 +1,103 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//website:bazel.bzl", "website_sources")
+
+package(default_visibility = ["//website:__subpackages__"])
+
+exports_files(
+    glob(
+        [
+            "*.ts",
+            "*.tsx",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//website:__subpackages__"],
+)
+
+js_library(
+    name = "_build-identity",
+    srcs = [":_build-identity.ts"],
+    deps = ["//website/src/lib/content:index"],
+)
+
+js_library(
+    name = "_site-data",
+    srcs = [":_site-data.ts"],
+    deps = [
+        "//website:node_modules/react",
+        "//website/src/lib/content:index",
+    ],
+)
+
+js_library(
+    name = "layout",
+    srcs = [
+        ":layout.tsx",
+        "//website/src/styles:globals_css",
+    ],
+    deps = [
+        ":_site-data",
+        "//website:node_modules/katex",
+        "//website:node_modules/next",
+        "//website:node_modules/photoswipe",
+        "//website:node_modules/react",
+    ],
+)
+
+js_library(
+    name = "not-found",
+    srcs = [
+        ":not-found.tsx",
+        "//website/src/styles:site_css",
+    ],
+    deps = [
+        "//website:node_modules/next",
+        "//website/src/components:PageShell",
+    ],
+)
+
+js_library(
+    name = "page",
+    srcs = [
+        ":page.tsx",
+        "//website/src/styles:site_css",
+    ],
+    deps = [
+        ":_site-data",
+        "//website:node_modules/next",
+        "//website/src/components:BlogList",
+        "//website/src/components:JsonLd",
+        "//website/src/components:PageShell",
+        "//website/src/components:ProfileIntro",
+        "//website/src/components:PublicationList",
+        "//website/src/lib:metadata",
+    ],
+)
+
+js_library(
+    name = "robots",
+    srcs = [":robots.ts"],
+    deps = [
+        ":_site-data",
+        "//website:node_modules/next",
+    ],
+)
+
+js_library(
+    name = "sitemap",
+    srcs = [":sitemap.ts"],
+    deps = [
+        ":_site-data",
+        "//website:node_modules/next",
+        "//website/src/lib:metadata",
+    ],
+)
+
+website_sources(children = [
+    "//website/src/app/blog",
+    "//website/src/app/build-info.json",
+    "//website/src/app/feed.xml",
+    "//website/src/app/privacy",
+    "//website/src/app/publication-state.json",
+    "//website/src/app/publications",
+])

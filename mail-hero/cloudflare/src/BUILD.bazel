@@ -1,0 +1,485 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//tools/bazel:js.bzl", "copied_source_files", "ts_source_library")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//mail-hero:__subpackages__"])
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//mail-hero:__subpackages__"],
+)
+
+copied_source_files(
+    name = "typecheck_project_srcs",
+    srcs = [
+        "native/alerts.ts",
+        "native/api.ts",
+        "native/api-common.ts",
+        "native/api-deliveries.ts",
+        "native/api-delivery-stats.ts",
+        "native/api-endpoints.ts",
+        "native/api-filter.ts",
+        "native/api-messages.ts",
+        "native/api-settings.ts",
+        "native/api-v2.ts",
+        "native/backup.ts",
+        "native/backup-artifact-capacity.ts",
+        "native/backup-artifacts.ts",
+        "native/backup-checksum.ts",
+        "native/backup-retention.ts",
+        "native/backup-state.ts",
+        "native/capacity.ts",
+        "native/content-policy.ts",
+        "native/coordinator.ts",
+        "native/dependencies.ts",
+        "native/index.ts",
+        "native/ingest.ts",
+        "native/lifecycle.ts",
+        "native/native-backup-artifacts.ts",
+        "native/native-backup-format.ts",
+        "native/native-backup-runner.ts",
+        "native/ops.ts",
+        "native/ops-core.ts",
+        "native/ops-guard.ts",
+        "native/parser.ts",
+        "native/pipeline.ts",
+        "native/security.ts",
+        "native/types.ts",
+        "native/warmup.ts",
+    ],
+)
+
+copied_source_files(
+    name = "application_sources_srcs",
+    srcs = glob(
+        ["**"],
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+ts_source_library(
+    name = "native_types",
+    srcs = [":native/types.ts"],
+)
+
+ts_source_library(
+    name = "native_capacity",
+    srcs = [":native/capacity.ts"],
+    deps = [":native_types"],
+)
+
+ts_source_library(
+    name = "native_alerts",
+    srcs = [":native/alerts.ts"],
+    deps = [
+        ":native_capacity",
+        ":native_types",
+    ],
+)
+
+ts_source_library(
+    name = "native_security",
+    srcs = [":native/security.ts"],
+    deps = [
+        ":native_types",
+        "//packages/edge-auth:lib",
+    ],
+)
+
+ts_source_library(
+    name = "native_api-common",
+    srcs = [":native/api-common.ts"],
+    deps = [
+        ":native_security",
+        ":native_types",
+    ],
+)
+
+ts_source_library(
+    name = "native_backup-retention",
+    srcs = [":native/backup-retention.ts"],
+)
+
+ts_source_library(
+    name = "native_native-backup-format",
+    srcs = [":native/native-backup-format.ts"],
+)
+
+ts_source_library(
+    name = "native_backup-artifact-capacity",
+    srcs = [":native/backup-artifact-capacity.ts"],
+    deps = [":native_types"],
+)
+
+ts_source_library(
+    name = "native_native-backup-artifacts",
+    srcs = [":native/native-backup-artifacts.ts"],
+    deps = [
+        ":native_backup-artifact-capacity",
+        ":native_backup-retention",
+        ":native_native-backup-format",
+        ":native_types",
+    ],
+)
+
+js_library(
+    name = "module_group_9",
+    srcs = [
+        ":native/backup.ts",
+        ":native/backup-artifacts.ts",
+    ],
+    types = [
+        ":native/backup-artifacts.ts",
+        ":native/backup.ts",
+    ],
+    deps = [
+        ":native_backup-artifact-capacity",
+        ":native_backup-retention",
+        ":native_capacity",
+        ":native_native-backup-artifacts",
+        ":native_native-backup-format",
+        ":native_security",
+        ":native_types",
+    ],
+)
+
+alias(
+    name = "native_backup-artifacts",
+    actual = ":module_group_9",
+)
+
+alias(
+    name = "native_backup",
+    actual = ":module_group_9",
+)
+
+ts_source_library(
+    name = "native_lifecycle",
+    srcs = [":native/lifecycle.ts"],
+    deps = [
+        ":module_group_9",
+        ":native_capacity",
+        ":native_security",
+        ":native_types",
+    ],
+)
+
+ts_source_library(
+    name = "native_ops-guard",
+    srcs = [":native/ops-guard.ts"],
+    deps = [
+        "//contracts:ops-v1/runtime",
+        "//proto/ops/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "module_group_12",
+    srcs = [
+        ":native/content-policy.ts",
+        ":native/ingest.ts",
+        ":native/parser.ts",
+        ":native/pipeline.ts",
+    ],
+    deps = [
+        ":module_group_9",
+        ":native_alerts",
+        ":native_capacity",
+        ":native_lifecycle",
+        ":native_ops-guard",
+        ":native_security",
+        ":native_types",
+        "//mail-hero/cloudflare:node_modules/parse5",
+        "//mail-hero/cloudflare:node_modules/postal-mime",
+        "//proto/mailhero/webhook/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+alias(
+    name = "native_content-policy",
+    actual = ":module_group_12",
+)
+
+alias(
+    name = "native_ingest",
+    actual = ":module_group_12",
+)
+
+alias(
+    name = "native_parser",
+    actual = ":module_group_12",
+)
+
+alias(
+    name = "native_pipeline",
+    actual = ":module_group_12",
+)
+
+ts_source_library(
+    name = "module_group_13",
+    srcs = [
+        ":native/api-deliveries.ts",
+        ":native/api-delivery-stats.ts",
+    ],
+    deps = [
+        ":module_group_12",
+        ":native_api-common",
+        ":native_security",
+        ":native_types",
+        "//proto/mailhero/ui/v2:ts",
+    ],
+)
+
+alias(
+    name = "native_api-deliveries",
+    actual = ":module_group_13",
+)
+
+alias(
+    name = "native_api-delivery-stats",
+    actual = ":module_group_13",
+)
+
+ts_source_library(
+    name = "native_api-endpoints",
+    srcs = [":native/api-endpoints.ts"],
+    deps = [
+        ":module_group_12",
+        ":native_api-common",
+        ":native_security",
+        ":native_types",
+    ],
+)
+
+ts_source_library(
+    name = "native_api-filter",
+    srcs = [":native/api-filter.ts"],
+)
+
+ts_source_library(
+    name = "native_api-messages",
+    srcs = [":native/api-messages.ts"],
+    deps = [
+        ":module_group_12",
+        ":native_api-common",
+        ":native_security",
+        ":native_types",
+    ],
+)
+
+ts_source_library(
+    name = "native_api-settings",
+    srcs = [":native/api-settings.ts"],
+    deps = [
+        ":module_group_12",
+        ":native_alerts",
+        ":native_api-common",
+        ":native_lifecycle",
+        ":native_security",
+        ":native_types",
+    ],
+)
+
+ts_source_library(
+    name = "native_dependencies",
+    srcs = [":native/dependencies.ts"],
+    deps = [":native_types"],
+)
+
+ts_source_library(
+    name = "native_api-v2",
+    srcs = [":native/api-v2.ts"],
+    deps = [
+        ":module_group_13",
+        ":module_group_9",
+        ":native_api-common",
+        ":native_api-endpoints",
+        ":native_api-filter",
+        ":native_api-messages",
+        ":native_api-settings",
+        ":native_dependencies",
+        ":native_security",
+        ":native_types",
+        "//proto/common/errors/v1:ts",
+        "//proto/mailhero/ui/v2:ts",
+        "//proto/ts:field-mask",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:page-token",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+ts_source_library(
+    name = "native_ops-core",
+    srcs = [":native/ops-core.ts"],
+    deps = [
+        ":module_group_12",
+        ":module_group_9",
+        ":native_alerts",
+        ":native_capacity",
+        ":native_ops-guard",
+        ":native_security",
+        ":native_types",
+        "//proto/ops/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "native_warmup",
+    srcs = [":native/warmup.ts"],
+    deps = [
+        ":native_api-common",
+        ":native_api-messages",
+        ":native_api-v2",
+        ":native_ops-core",
+        ":native_ops-guard",
+        "//proto/mailhero/ui/v2:ts",
+        "//proto/ops/v1:ts",
+        "//proto/ts:http-path",
+        "//proto/ts:http-rule",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "native_api",
+    srcs = [":native/api.ts"],
+    deps = [
+        ":native_api-messages",
+        ":native_api-v2",
+        ":native_dependencies",
+        ":native_security",
+        ":native_types",
+        ":native_warmup",
+        "//proto/mailhero/ui/v2:ts",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+ts_source_library(
+    name = "native_backup-checksum",
+    srcs = [":native/backup-checksum.ts"],
+    deps = ["//mail-hero/cloudflare:node_modules/@noble/hashes"],
+)
+
+ts_source_library(
+    name = "native_backup-state",
+    srcs = [":native/backup-state.ts"],
+    deps = [
+        ":module_group_9",
+        ":native_native-backup-format",
+        ":native_security",
+        ":native_types",
+    ],
+)
+
+ts_source_library(
+    name = "native_native-backup-runner",
+    srcs = [":native/native-backup-runner.ts"],
+    deps = [
+        ":module_group_9",
+        ":native_backup-checksum",
+        ":native_backup-state",
+        ":native_native-backup-artifacts",
+        ":native_native-backup-format",
+        ":native_types",
+    ],
+)
+
+ts_source_library(
+    name = "native_coordinator",
+    srcs = [":native/coordinator.ts"],
+    deps = [
+        ":module_group_12",
+        ":native_api",
+        ":native_backup-state",
+        ":native_capacity",
+        ":native_native-backup-runner",
+        ":native_ops-guard",
+        ":native_types",
+    ],
+)
+
+ts_source_library(
+    name = "native_ops",
+    srcs = [":native/ops.ts"],
+    deps = [
+        ":native_ops-core",
+        ":native_types",
+        "//proto/ops/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "native_index",
+    srcs = [":native/index.ts"],
+    deps = [
+        ":module_group_12",
+        ":module_group_9",
+        ":native_api",
+        ":native_api-v2",
+        ":native_coordinator",
+        ":native_ops",
+        ":native_security",
+        ":native_types",
+    ],
+)
+
+js_library(
+    name = "lib",
+    deps = [
+        ":module_group_12",
+        ":module_group_13",
+        ":module_group_9",
+        ":native_alerts",
+        ":native_api",
+        ":native_api-common",
+        ":native_api-endpoints",
+        ":native_api-filter",
+        ":native_api-messages",
+        ":native_api-settings",
+        ":native_api-v2",
+        ":native_backup-artifact-capacity",
+        ":native_backup-checksum",
+        ":native_backup-retention",
+        ":native_backup-state",
+        ":native_capacity",
+        ":native_coordinator",
+        ":native_dependencies",
+        ":native_index",
+        ":native_lifecycle",
+        ":native_native-backup-artifacts",
+        ":native_native-backup-format",
+        ":native_native-backup-runner",
+        ":native_ops",
+        ":native_ops-core",
+        ":native_ops-guard",
+        ":native_security",
+        ":native_types",
+        ":native_warmup",
+    ],
+)
+
+js_library(
+    name = "entry_metadata",
+    srcs = [":native/index.ts"],
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+)

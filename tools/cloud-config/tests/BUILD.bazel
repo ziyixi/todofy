@@ -1,0 +1,95 @@
+load("@npm//website:tsx/package_json.bzl", tsx = "bin")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/python:tests.bzl", "unittest_test")
+
+package(default_visibility = ["//visibility:public"])
+
+unittest_test(
+    name = "test_cloud_config",
+    srcs = ["test_cloud_config.py"],
+    data = [
+        "//tools:repository_test_data",
+        "//tools/cloud-config:python_sources",
+    ],
+    env = {"BAZEL_COPY_WORKSPACE": "1"},
+    imports = [
+        ".",
+        "..",
+    ],
+    modules = ["test_cloud_config"],
+    deps = [
+        "//tools/cloud-config:cloud_profile",
+        "//tools/service-catalog:catalog",
+    ],
+)
+
+tsx.tsx_test(
+    name = "worker-secrets_test",
+    args = [
+        "--test",
+        "tools/cloud-config/tests/worker-secrets.test.mjs",
+    ],
+    data = [
+        "worker-secrets.test.mjs",
+        "//dashboard/deploy:source_deploy_vars_mjs",
+        "//fleet/deploy:source_deploy_vars_mjs",
+        "//links/deploy:source_deploy_vars_mjs",
+        "//mail-hero/deploy:source_deploy_vars_mjs",
+        "//tools/cloud-config:worker-deploy",
+        "//tools/cloud-config:worker-secrets",
+        "//watch/deploy:source_deploy_vars_mjs",
+        "//website/relay:config",
+        "//website/relay/deploy:vars",
+    ],
+)
+
+tsx.tsx_test(
+    name = "worker-deploy_test",
+    args = [
+        "--test",
+        "tools/cloud-config/tests/worker-deploy.test.mjs",
+    ],
+    data = [
+        "worker-deploy.test.mjs",
+        "//tools/cloud-config:worker-deploy",
+        "//tools/cloud-config:worker-secrets",
+        "//website/relay:config",
+        "//website/relay/deploy:vars",
+    ],
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        ":test_cloud_config",
+        ":worker-deploy_test",
+        ":worker-secrets_test",
+    ],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)

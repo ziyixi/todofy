@@ -1,0 +1,451 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//tools/bazel:js.bzl", "copied_source_files", "ts_source_library")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//mailsort:__subpackages__"])
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//mailsort:__subpackages__"],
+)
+
+copied_source_files(
+    name = "types_srcs",
+    srcs = [
+        "api.ts",
+        "auth.ts",
+        "backup.ts",
+        "classification-model.ts",
+        "classification-prompt.ts",
+        "classification-result.ts",
+        "classifier-config.ts",
+        "dmarc.ts",
+        "env.ts",
+        "examples.ts",
+        "feedback.ts",
+        "flow.ts",
+        "gmail.ts",
+        "http.ts",
+        "ids.ts",
+        "index.ts",
+        "label-identity.ts",
+        "limits.ts",
+        "mask.ts",
+        "mime.ts",
+        "model.ts",
+        "ops.ts",
+        "ops-status.ts",
+        "paths.ts",
+        "pipeline.ts",
+        "priority.ts",
+        "priority-prompt.ts",
+        "priority-setup.ts",
+        "reasons.ts",
+        "replay.ts",
+        "restore.ts",
+        "session.ts",
+        "settings.ts",
+        "state.ts",
+        "store.ts",
+        "text.d.ts",
+        "unread.ts",
+        "writes.ts",
+    ],
+)
+
+copied_source_files(
+    name = "application_sources_srcs",
+    srcs = glob(
+        ["**"],
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+copied_source_files(
+    name = "lint_sources",
+    srcs = glob(
+        [
+            "**/*.ts",
+            "**/*.tsx",
+        ],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+ts_source_library(
+    name = "limits",
+    srcs = [":limits.ts"],
+)
+
+ts_source_library(
+    name = "ids",
+    srcs = [":ids.ts"],
+)
+
+ts_source_library(
+    name = "paths",
+    srcs = [":paths.ts"],
+    deps = [":limits"],
+)
+
+ts_source_library(
+    name = "gmail",
+    srcs = [":gmail.ts"],
+    deps = [
+        ":limits",
+        ":paths",
+    ],
+)
+
+ts_source_library(
+    name = "mime",
+    srcs = [":mime.ts"],
+    deps = [
+        ":gmail",
+        ":limits",
+    ],
+)
+
+ts_source_library(
+    name = "mask",
+    srcs = [":mask.ts"],
+    deps = [
+        ":limits",
+        ":mime",
+    ],
+)
+
+ts_source_library(
+    name = "module_group_6",
+    srcs = [
+        ":label-identity.ts",
+        ":priority.ts",
+        ":store.ts",
+    ],
+    deps = [
+        ":ids",
+        ":limits",
+        ":mask",
+    ],
+)
+
+alias(
+    name = "label-identity",
+    actual = ":module_group_6",
+)
+
+alias(
+    name = "priority",
+    actual = ":module_group_6",
+)
+
+alias(
+    name = "store",
+    actual = ":module_group_6",
+)
+
+ts_source_library(
+    name = "backup",
+    srcs = [":backup.ts"],
+    deps = [
+        ":limits",
+        ":module_group_6",
+        "//proto/ops/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "classification-result",
+    srcs = [":classification-result.ts"],
+)
+
+ts_source_library(
+    name = "priority-prompt",
+    srcs = [":priority-prompt.ts"],
+    deps = [
+        "//mailsort/prompts:personal-rules",
+        "//mailsort/prompts:priority-classification",
+    ],
+)
+
+ts_source_library(
+    name = "classification-prompt",
+    srcs = [":classification-prompt.ts"],
+    deps = [
+        ":ids",
+        ":module_group_6",
+        ":priority-prompt",
+        "//proto/mailsort/ui/v2:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+    ],
+)
+
+ts_source_library(
+    name = "examples",
+    srcs = [":examples.ts"],
+    deps = [":module_group_6"],
+)
+
+ts_source_library(
+    name = "flow",
+    srcs = [":flow.ts"],
+    deps = [
+        ":limits",
+        ":module_group_6",
+    ],
+)
+
+ts_source_library(
+    name = "feedback",
+    srcs = [":feedback.ts"],
+    deps = [
+        ":examples",
+        ":flow",
+        ":module_group_6",
+    ],
+)
+
+ts_source_library(
+    name = "unread",
+    srcs = [":unread.ts"],
+    deps = [
+        ":gmail",
+        ":module_group_6",
+        "//proto/mailsort/ui/v2:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+    ],
+)
+
+ts_source_library(
+    name = "reasons",
+    srcs = [":reasons.ts"],
+    deps = [
+        "//proto/common/errors/v1:ts",
+        "//proto/mailsort/ui/v2:ts",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+ts_source_library(
+    name = "replay",
+    srcs = [":replay.ts"],
+    deps = [
+        ":limits",
+        ":module_group_6",
+    ],
+)
+
+ts_source_library(
+    name = "module_group_17",
+    srcs = [
+        ":api.ts",
+        ":classification-model.ts",
+        ":classifier-config.ts",
+        ":env.ts",
+        ":model.ts",
+        ":ops-status.ts",
+        ":pipeline.ts",
+        ":priority-setup.ts",
+        ":restore.ts",
+        ":session.ts",
+        ":settings.ts",
+        ":state.ts",
+        ":writes.ts",
+    ],
+    deps = [
+        ":backup",
+        ":classification-prompt",
+        ":classification-result",
+        ":examples",
+        ":feedback",
+        ":flow",
+        ":gmail",
+        ":ids",
+        ":limits",
+        ":mask",
+        ":mime",
+        ":module_group_6",
+        ":paths",
+        ":reasons",
+        ":replay",
+        ":unread",
+        "//packages/model-router-client:lib",
+        "//proto/mailsort/ui/v2:ts",
+        "//proto/ops/v1:ts",
+        "//proto/ts:field-mask",
+        "//proto/ts:http-client",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:page-token",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+        "//proto/ts:wire-json",
+    ],
+)
+
+alias(
+    name = "api",
+    actual = ":module_group_17",
+)
+
+alias(
+    name = "classification-model",
+    actual = ":module_group_17",
+)
+
+alias(
+    name = "classifier-config",
+    actual = ":module_group_17",
+)
+
+alias(
+    name = "env",
+    actual = ":module_group_17",
+)
+
+alias(
+    name = "model",
+    actual = ":module_group_17",
+)
+
+alias(
+    name = "ops-status",
+    actual = ":module_group_17",
+)
+
+alias(
+    name = "pipeline",
+    actual = ":module_group_17",
+)
+
+alias(
+    name = "priority-setup",
+    actual = ":module_group_17",
+)
+
+alias(
+    name = "restore",
+    actual = ":module_group_17",
+)
+
+alias(
+    name = "session",
+    actual = ":module_group_17",
+)
+
+alias(
+    name = "settings",
+    actual = ":module_group_17",
+)
+
+alias(
+    name = "state",
+    actual = ":module_group_17",
+)
+
+alias(
+    name = "writes",
+    actual = ":module_group_17",
+)
+
+ts_source_library(
+    name = "auth",
+    srcs = [":auth.ts"],
+    deps = [
+        ":module_group_17",
+        "//packages/edge-auth:lib",
+    ],
+)
+
+ts_source_library(
+    name = "dmarc",
+    srcs = [":dmarc.ts"],
+)
+
+ts_source_library(
+    name = "http",
+    srcs = [":http.ts"],
+    deps = [
+        ":auth",
+        ":limits",
+        ":module_group_17",
+        ":reasons",
+        "//packages/edge-auth:lib",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+ts_source_library(
+    name = "ops",
+    srcs = [":ops.ts"],
+    deps = [
+        ":module_group_17",
+        "//proto/ops/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "index",
+    srcs = [":index.ts"],
+    deps = [
+        ":http",
+        ":module_group_17",
+        ":ops",
+    ],
+)
+
+ts_source_library(
+    name = "text_d",
+    srcs = [":text.d.ts"],
+)
+
+js_library(
+    name = "lib",
+    deps = [
+        ":auth",
+        ":backup",
+        ":classification-prompt",
+        ":classification-result",
+        ":dmarc",
+        ":examples",
+        ":feedback",
+        ":flow",
+        ":gmail",
+        ":http",
+        ":ids",
+        ":index",
+        ":limits",
+        ":mask",
+        ":mime",
+        ":module_group_17",
+        ":module_group_6",
+        ":ops",
+        ":paths",
+        ":priority-prompt",
+        ":reasons",
+        ":replay",
+        ":text_d",
+        ":unread",
+    ],
+)
+
+js_library(
+    name = "entry_metadata",
+    srcs = [":index.ts"],
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+)
+
+copied_source_files(
+    name = "text_declarations",
+    srcs = ["text.d.ts"],
+)

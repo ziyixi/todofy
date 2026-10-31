@@ -1,5 +1,5 @@
 load("@rules_python//python:defs.bzl", "py_binary")
-load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES", "source_audit_files")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -53,14 +53,14 @@ py_binary(
     name = "gateway_identity",
     srcs = ["gateway_identity.py"],
     legacy_create_init = False,
-    deps = ["//codex-gateway:access"],
+    deps = ["//codex-gateway/src/codex_gateway:access"],
 )
 
 py_binary(
     name = "newsletter_identity",
     srcs = ["newsletter_identity.py"],
     legacy_create_init = False,
-    deps = ["//newsletter:console_access"],
+    deps = ["//newsletter/src/newsletter:console_access"],
 )
 
 py_binary(
@@ -82,19 +82,4 @@ py_binary(
     deps = ["@python_deps//pyyaml"],
 )
 
-filegroup(
-    name = "source_audit_files",
-    srcs = glob(
-        ["*"],
-        allow_empty = True,
-        exclude = SOURCE_AUDIT_EXCLUDES,
-    ) + glob(
-        [
-            ".env.example",
-            ".env.*.example",
-            ".dev.vars.example",
-        ],
-        allow_empty = True,
-    ),
-    visibility = ["//visibility:public"],
-)
+source_audit_files()

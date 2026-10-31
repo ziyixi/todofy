@@ -1,0 +1,48 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//todofy:__subpackages__"])
+
+js_library(
+    name = "api_schema_data",
+    srcs = [
+        "recommendation-v1.schema.json",
+        "summary-v1.schema.json",
+        "//todofy/tests/unit/legacy:node_schemas",
+    ],
+)
+
+filegroup(
+    name = "api_schemas",
+    srcs = glob([
+        "*.json",
+        "*.yaml",
+    ]) + ["//todofy/tests/unit/legacy:schema_sources"],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)

@@ -7,4 +7,6 @@ await buildExtension({
   dist: resolve('dist'),
   commit: identity.commit,
   time: new Date(Number(identity.time) * 1000),
+  // Read the declared project config in clean and previously checked build trees.
+  tsconfig: resolve('tsconfig.json'),
 });

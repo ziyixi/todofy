@@ -1,5 +1,5 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library", "js_test")
-load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files")
 
 package(default_visibility = ["//tasks:__subpackages__"])
 
@@ -22,8 +22,8 @@ js_library(
     srcs = ["prepare-goals-import.ts"],
     deps = [
         ":todoist_export",
-        "//tasks/worker:goal-model",
-        "//tasks/worker:goal-validation",
+        "//tasks/worker/src:goal-model",
+        "//tasks/worker/src:goal-validation",
     ],
 )
 
@@ -34,14 +34,14 @@ js_library(
         "//packages/task-dates:lib",
         "//tasks/shared:build",
         "//tasks/shared:colors",
-        "//tasks/worker:catalog",
-        "//tasks/worker:model",
-        "//tasks/worker:task-validation",
+        "//tasks/worker/src:catalog",
+        "//tasks/worker/src:model",
+        "//tasks/worker/src:task-validation",
     ],
 )
 
 _D1_DATA = [
-    "//tasks/worker:runtime_harness",
+    "//tasks/worker/test:runtime_harness",
     "//tasks/worker:typecheck_proto_link",
     "//tasks/worker:node_modules/@ziyixi/edge-auth",
     "//tasks/worker:node_modules/@ziyixi/task-dates",
@@ -110,22 +110,7 @@ js_test(
 
 test_suite(name = "check")
 
-filegroup(
-    name = "source_audit_files",
-    srcs = glob(
-        [
-            "*",
-            "test/**",
-        ],
-        allow_empty = True,
-        exclude = SOURCE_AUDIT_EXCLUDES,
-    ) + glob(
-        [
-            ".env.example",
-            ".env.*.example",
-            ".dev.vars.example",
-        ],
-        allow_empty = True,
-    ),
-    visibility = ["//visibility:public"],
-)
+source_audit_files(patterns = [
+    "*",
+    "test/**",
+])

@@ -1,0 +1,807 @@
+load("@rules_python//python:defs.bzl", "py_library")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//newsletter:__subpackages__"])
+
+py_library(
+    name = "adapters",
+    srcs = ["adapters.py"],
+    imports = [".."],
+    deps = [
+        ":contracts",
+        ":package",
+        ":types",
+        "@python_deps//httpx",
+        "@python_deps//protobuf",
+    ],
+)
+
+py_library(
+    name = "admin",
+    srcs = ["admin.py"],
+    imports = [".."],
+    deps = [
+        ":adapters",
+        ":contracts",
+        ":delivery",
+        ":deployment_client",
+        ":drain",
+        ":ownership",
+        ":package",
+        ":settings",
+        ":types",
+        "//newsletter/src/newsletter/workflow:story_replay",
+        "@python_deps//ziyixi_protos",
+    ],
+)
+
+py_library(
+    name = "app",
+    srcs = ["app.py"],
+    imports = [".."],
+    deps = [
+        ":adapters",
+        ":contracts",
+        ":delivery",
+        ":deployment_api",
+        ":drain",
+        ":editor",
+        ":lifecycle",
+        ":monitoring_api",
+        ":package",
+        ":rendering",
+        ":settings",
+        ":todofy",
+        ":types",
+        ":worker",
+        "//newsletter/src/newsletter/collection:collector",
+        "//newsletter/src/newsletter/collection:instructions",
+        "//newsletter/src/newsletter/collection:repository",
+        "//newsletter/src/newsletter/workflow:definition",
+        "//newsletter/src/newsletter/workflow:pipeline",
+        "@python_deps//fastapi",
+        "@python_deps//protobuf",
+        "@python_deps//starlette",
+        "@python_deps//ziyixi_protos",
+    ],
+)
+
+py_library(
+    name = "charts",
+    srcs = ["charts.py"],
+    imports = [".."],
+    deps = [
+        ":package",
+        ":types",
+        "@python_deps//pillow",
+    ],
+)
+
+py_library(
+    name = "cli",
+    srcs = ["cli.py"],
+    data = [":package_resources"],
+    imports = [".."],
+    deps = [
+        ":adapters",
+        ":admin",
+        ":contracts",
+        ":drain",
+        ":editor",
+        ":package",
+        ":rendering",
+        ":todofy",
+        ":worker",
+        "@python_deps//uvicorn",
+        "@python_deps//ziyixi_protos",
+    ],
+)
+
+py_library(
+    name = "config_cli",
+    srcs = ["config_cli.py"],
+    imports = [".."],
+    deps = [
+        ":content_config",
+        ":package",
+    ],
+)
+
+py_library(
+    name = "config_sync",
+    srcs = ["config_sync.py"],
+    imports = [".."],
+    deps = [
+        ":content_config",
+        ":files",
+        ":package",
+        "@python_deps//httpx",
+    ],
+)
+
+py_library(
+    name = "console_access",
+    srcs = ["console_access.py"],
+    imports = [".."],
+    visibility = [
+        "//newsletter:__subpackages__",
+        "//tools/bazel/images:__pkg__",
+    ],
+    deps = [
+        ":package",
+        "@python_deps//cryptography",
+        "@python_deps//pyjwt",
+    ],
+)
+
+py_library(
+    name = "console_api",
+    srcs = ["console_api.py"],
+    imports = [".."],
+    deps = [
+        ":console_access",
+        ":console_read",
+        ":diagnostics",
+        ":package",
+        "//proto:python_runtime",
+        "//proto/newsletter/ui/v1:python",
+        "@python_deps//fastapi",
+        "@python_deps//starlette",
+    ],
+)
+
+py_library(
+    name = "console_read",
+    srcs = ["console_read.py"],
+    imports = [".."],
+    deps = [
+        ":config_sync",
+        ":console_views",
+        ":content_config",
+        ":monitoring_api",
+        ":monitoring_status",
+        ":package",
+        ":provenance",
+        ":rendering",
+        ":settings",
+        "//newsletter/src/newsletter/workflow:researcher",
+        "//proto/newsletter/ui/v1:python",
+    ],
+)
+
+py_library(
+    name = "console_views",
+    srcs = ["console_views.py"],
+    imports = [".."],
+    deps = [
+        ":package",
+        "//newsletter/src/newsletter/workflow:researcher",
+        "//proto/newsletter/ui/v1:python",
+    ],
+)
+
+py_library(
+    name = "content_config",
+    srcs = ["content_config.py"],
+    data = [":package_resources"],
+    imports = [".."],
+    deps = [
+        ":contracts",
+        ":email_templates",
+        ":files",
+        ":package",
+        ":types",
+        "//newsletter/src/newsletter/collection:instructions",
+        "//newsletter/src/newsletter/workflow:content",
+        "//newsletter/src/newsletter/workflow:definition",
+        "//newsletter/src/newsletter/workflow:researcher",
+        "//newsletter/src/newsletter/workflow:story_recipe",
+        "@python_deps//pyyaml",
+    ],
+)
+
+py_library(
+    name = "contracts",
+    srcs = ["contracts.py"],
+    imports = [".."],
+    deps = [
+        ":package",
+        "@python_deps//protobuf",
+        "@python_deps//ziyixi_protos",
+    ],
+)
+
+py_library(
+    name = "delivery",
+    srcs = ["delivery.py"],
+    imports = [".."],
+    deps = [
+        ":adapters",
+        ":contracts",
+        ":diagnostics",
+        ":drain",
+        ":package",
+        ":types",
+        "@python_deps//ziyixi_protos",
+    ],
+)
+
+py_library(
+    name = "deployment_api",
+    srcs = ["deployment_api.py"],
+    imports = [".."],
+    deps = [
+        ":drain",
+        ":package",
+        "@python_deps//fastapi",
+    ],
+)
+
+py_library(
+    name = "deployment_client",
+    srcs = ["deployment_client.py"],
+    imports = [".."],
+    deps = [":package"],
+)
+
+py_library(
+    name = "diagnostics",
+    srcs = ["diagnostics.py"],
+    imports = [".."],
+    deps = [":package"],
+)
+
+py_library(
+    name = "drain",
+    srcs = [
+        "drain.py",
+        "store.py",
+    ],
+    imports = [".."],
+    visibility = [
+        "//newsletter:__subpackages__",
+        "//tools/vps-bootstrap:__pkg__",
+    ],
+    deps = [
+        ":contracts",
+        ":package",
+        ":types",
+        "//packages/model-router-client/python/src/model_router_client:package",
+    ],
+)
+
+py_library(
+    name = "editor",
+    srcs = [
+        "editor.py",
+        "schema_compat.py",
+        "//newsletter/src/newsletter/workflow:story_editor.py",
+    ],
+    data = [":package_resources"],
+    imports = [".."],
+    deps = [
+        ":contracts",
+        ":diagnostics",
+        ":drain",
+        ":errors",
+        ":model_io",
+        ":model_schema",
+        ":package",
+        ":settings",
+        ":types",
+        ":usage",
+        "//newsletter/src/newsletter/workflow:components",
+        "//newsletter/src/newsletter/workflow:package",
+        "//newsletter/src/newsletter/workflow:prompt_examples",
+        "//newsletter/src/newsletter/workflow:publication",
+        "//newsletter/src/newsletter/workflow:review",
+        "//newsletter/src/newsletter/workflow:schema",
+        "//newsletter/src/newsletter/workflow:types",
+        "//packages/model-router-client/python/src/model_router_client:package",
+        "@python_deps//protobuf",
+        "@python_deps//ziyixi_protos",
+    ],
+)
+
+py_library(
+    name = "email_templates",
+    srcs = ["email_templates.py"],
+    data = [":templates"],
+    imports = [".."],
+    deps = [
+        ":contracts",
+        ":diagnostics",
+        ":package",
+        "@python_deps//jinja2",
+        "@python_deps//markupsafe",
+    ],
+)
+
+py_library(
+    name = "errors",
+    srcs = ["errors.py"],
+    imports = [".."],
+    deps = [":package"],
+)
+
+py_library(
+    name = "files",
+    srcs = ["files.py"],
+    imports = [".."],
+    deps = [":package"],
+)
+
+py_library(
+    name = "lifecycle",
+    srcs = ["lifecycle.py"],
+    imports = [".."],
+    deps = [
+        ":adapters",
+        ":console_access",
+        ":console_api",
+        ":console_read",
+        ":diagnostics",
+        ":drain",
+        ":editor",
+        ":model_client",
+        ":notion_api",
+        ":notion_journal",
+        ":notion_sync",
+        ":ownership",
+        ":package",
+        ":preflight",
+        ":settings",
+        ":todofy",
+        ":worker",
+        "//newsletter/src/newsletter/collection:collector",
+        "//newsletter/src/newsletter/collection:instructions",
+        "//newsletter/src/newsletter/collection:pipeline",
+        "//newsletter/src/newsletter/collection:repository",
+        "//newsletter/src/newsletter/workflow:pipeline",
+        "//newsletter/src/newsletter/workflow:state",
+        "@python_deps//fastapi",
+        "@python_deps//uvicorn",
+    ],
+)
+
+py_library(
+    name = "model_client",
+    srcs = ["model_client.py"],
+    imports = [".."],
+    deps = [
+        ":package",
+        ":settings",
+        "//packages/model-router-client/python/src/model_router_client:package",
+        "@python_deps//httpx",
+    ],
+)
+
+py_library(
+    name = "model_io",
+    srcs = ["model_io.py"],
+    imports = [".."],
+    deps = [
+        ":errors",
+        ":package",
+        ":types",
+    ],
+)
+
+py_library(
+    name = "model_schema",
+    srcs = ["model_schema.py"],
+    imports = [".."],
+    deps = [
+        ":contracts",
+        ":package",
+        ":types",
+        "@python_deps//protobuf",
+        "@python_deps//ziyixi_protos",
+    ],
+)
+
+py_library(
+    name = "monitoring_api",
+    srcs = ["monitoring_api.py"],
+    imports = [".."],
+    deps = [
+        ":config_sync",
+        ":drain",
+        ":monitoring_status",
+        ":package",
+        ":provenance",
+        "@python_deps//fastapi",
+    ],
+)
+
+py_library(
+    name = "monitoring_status",
+    srcs = ["monitoring_status.py"],
+    imports = [".."],
+    deps = [
+        ":drain",
+        ":package",
+    ],
+)
+
+py_library(
+    name = "notion_api",
+    srcs = ["notion_api.py"],
+    imports = [".."],
+    deps = [
+        ":adapters",
+        ":contracts",
+        ":package",
+        ":types",
+        "@python_deps//httpx",
+    ],
+)
+
+py_library(
+    name = "notion_cli",
+    srcs = ["notion_cli.py"],
+    imports = [".."],
+    deps = [
+        ":adapters",
+        ":notion_api",
+        ":package",
+    ],
+)
+
+py_library(
+    name = "notion_content",
+    srcs = ["notion_content.py"],
+    imports = [".."],
+    deps = [
+        ":charts",
+        ":contracts",
+        ":package",
+        ":types",
+        ":usage",
+        "//newsletter/src/newsletter/workflow:sources",
+        "@python_deps//ziyixi_protos",
+    ],
+)
+
+py_library(
+    name = "notion_intake",
+    srcs = ["notion_intake.py"],
+    imports = [".."],
+    deps = [
+        ":contracts",
+        ":diagnostics",
+        ":notion_content",
+        ":notion_journal",
+        ":package",
+        ":types",
+    ],
+)
+
+py_library(
+    name = "notion_journal",
+    srcs = ["notion_journal.py"],
+    imports = [".."],
+    deps = [
+        ":contracts",
+        ":drain",
+        ":notion_content",
+        ":package",
+        ":types",
+        "//newsletter/src/newsletter/workflow:sources",
+    ],
+)
+
+py_library(
+    name = "notion_sync",
+    srcs = ["notion_sync.py"],
+    imports = [".."],
+    deps = [
+        ":adapters",
+        ":contracts",
+        ":diagnostics",
+        ":notion_api",
+        ":notion_intake",
+        ":notion_journal",
+        ":package",
+        ":types",
+    ],
+)
+
+py_library(
+    name = "ownership",
+    srcs = ["ownership.py"],
+    imports = [".."],
+    visibility = [
+        "//newsletter:__subpackages__",
+        "//tools/vps-bootstrap:__pkg__",
+    ],
+    deps = [":package"],
+)
+
+py_library(
+    name = "package",
+    srcs = ["__init__.py"],
+    imports = [".."],
+)
+
+py_library(
+    name = "personal",
+    srcs = ["personal.py"],
+    imports = [".."],
+    deps = [
+        ":package",
+        ":types",
+    ],
+)
+
+py_library(
+    name = "preflight",
+    srcs = ["preflight.py"],
+    data = [":package_resources"],
+    imports = [".."],
+    deps = [
+        ":adapters",
+        ":charts",
+        ":diagnostics",
+        ":drain",
+        ":editor",
+        ":model_client",
+        ":notion_api",
+        ":package",
+        ":rendering",
+        ":settings",
+        ":todofy",
+        ":types",
+        "//packages/model-router-client/python/src/model_router_client:package",
+        "@python_deps//httpx",
+        "@python_deps//ziyixi_protos",
+    ],
+)
+
+py_library(
+    name = "provenance",
+    srcs = ["provenance.py"],
+    imports = [".."],
+    deps = [":package"],
+)
+
+py_library(
+    name = "rendering",
+    srcs = ["rendering.py"],
+    data = [":templates"],
+    imports = [".."],
+    deps = [
+        ":charts",
+        ":contracts",
+        ":email_templates",
+        ":package",
+        ":types",
+        ":usage",
+        "@python_deps//jinja2",
+        "@python_deps//ziyixi_protos",
+    ],
+)
+
+py_library(
+    name = "schema_smoke",
+    srcs = ["schema_smoke.py"],
+    imports = [".."],
+    deps = [
+        ":contracts",
+        ":editor",
+        ":errors",
+        ":model_client",
+        ":package",
+        ":settings",
+        ":types",
+        ":usage",
+        "//newsletter/src/newsletter/workflow:components",
+    ],
+)
+
+py_library(
+    name = "settings",
+    srcs = ["settings.py"],
+    data = [":package_resources"],
+    imports = [".."],
+    deps = [":package"],
+)
+
+py_library(
+    name = "todofy",
+    srcs = ["todofy.py"],
+    imports = [".."],
+    deps = [
+        ":contracts",
+        ":package",
+        ":personal",
+        ":types",
+        "@python_deps//httpx",
+    ],
+)
+
+py_library(
+    name = "trigger",
+    srcs = ["trigger.py"],
+    imports = [".."],
+    deps = [":package"],
+)
+
+py_library(
+    name = "types",
+    srcs = ["types.py"],
+    imports = [".."],
+    deps = [
+        ":package",
+        ":usage",
+    ],
+)
+
+py_library(
+    name = "usage",
+    srcs = ["usage.py"],
+    imports = [".."],
+    deps = [
+        ":diagnostics",
+        ":package",
+        "//packages/model-router-client/python/src/model_router_client:package",
+    ],
+)
+
+py_library(
+    name = "worker",
+    srcs = ["worker.py"],
+    imports = [".."],
+    deps = [
+        ":adapters",
+        ":contracts",
+        ":diagnostics",
+        ":drain",
+        ":editor",
+        ":email_templates",
+        ":errors",
+        ":package",
+        ":rendering",
+        ":todofy",
+        ":types",
+        ":usage",
+        "//newsletter/src/newsletter/workflow:repository",
+        "//newsletter/src/newsletter/workflow:state",
+        "@python_deps//ziyixi_protos",
+    ],
+)
+
+py_library(
+    name = "library",
+    deps = [
+        ":adapters",
+        ":admin",
+        ":app",
+        ":charts",
+        ":cli",
+        ":config_cli",
+        ":config_sync",
+        ":console_access",
+        ":console_api",
+        ":console_read",
+        ":console_views",
+        ":content_config",
+        ":contracts",
+        ":delivery",
+        ":deployment_api",
+        ":deployment_client",
+        ":diagnostics",
+        ":drain",
+        ":editor",
+        ":email_templates",
+        ":errors",
+        ":files",
+        ":lifecycle",
+        ":model_client",
+        ":model_io",
+        ":model_schema",
+        ":monitoring_api",
+        ":monitoring_status",
+        ":notion_api",
+        ":notion_cli",
+        ":notion_content",
+        ":notion_intake",
+        ":notion_journal",
+        ":notion_sync",
+        ":ownership",
+        ":package",
+        ":personal",
+        ":preflight",
+        ":provenance",
+        ":rendering",
+        ":schema_smoke",
+        ":settings",
+        ":todofy",
+        ":trigger",
+        ":types",
+        ":usage",
+        ":worker",
+        "//newsletter/src/newsletter/collection:library",
+        "//newsletter/src/newsletter/workflow:library",
+    ],
+)
+
+filegroup(
+    name = "discovery_instructions",
+    srcs = glob(
+        ["instructions/**/*.md"],
+        allow_empty = True,
+    ),
+)
+
+filegroup(
+    name = "templates",
+    srcs = glob(
+        ["templates/**"],
+        allow_empty = True,
+    ),
+)
+
+filegroup(
+    name = "workflows",
+    srcs = glob(
+        ["workflows/**"],
+        allow_empty = True,
+    ),
+)
+
+filegroup(
+    name = "package_resources",
+    srcs = glob(
+        [
+            "instructions/**/*.md",
+            "templates/**",
+            "workflows/**",
+            "policy/**",
+            "fixtures/*.json",
+        ],
+        allow_empty = True,
+    ),
+)
+
+filegroup(
+    name = "bootstrap_settings",
+    srcs = ["settings.py"],
+    visibility = [
+        "//newsletter:__subpackages__",
+        "//platform:__pkg__",
+    ],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ) + [
+        "//newsletter/src/newsletter/collection:python_sources",
+        "//newsletter/src/newsletter/workflow:python_sources",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + [
+        "//newsletter/src/newsletter/collection:source_audit_files",
+        "//newsletter/src/newsletter/workflow:source_audit_files",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)

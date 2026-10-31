@@ -1,6 +1,6 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library", "js_test")
 load("@npm//website:tsx/package_json.bzl", tsx = "bin")
-load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files")
 
 package(default_visibility = ["//newsletter-console:__subpackages__"])
 
@@ -42,11 +42,11 @@ tsx.tsx_test(
         ":source_public_navigation_mjs",
         "//:cloud_profile_inputs",
         "//newsletter-console:config",
-        "//newsletter-console/worker:entry_metadata",
-        "//newsletter-console/worker:env_metadata",
         "//newsletter-console/worker:node_modules/wrangler",
         "//newsletter-console/worker:package_metadata",
-        "//newsletter-console/worker:runtime_metadata",
+        "//newsletter-console/worker/src:entry_metadata",
+        "//newsletter-console/worker/src:env_metadata",
+        "//newsletter-console/worker/test:runtime_metadata",
         "//tools/cf-guard:toml",
     ],
 )
@@ -89,22 +89,7 @@ js_library(
     deps = ["//tools/bundle-size:library"],
 )
 
-filegroup(
-    name = "source_audit_files",
-    srcs = glob(
-        [
-            "*",
-            "test/**",
-        ],
-        allow_empty = True,
-        exclude = SOURCE_AUDIT_EXCLUDES,
-    ) + glob(
-        [
-            ".env.example",
-            ".env.*.example",
-            ".dev.vars.example",
-        ],
-        allow_empty = True,
-    ),
-    visibility = ["//visibility:public"],
-)
+source_audit_files(patterns = [
+    "*",
+    "test/**",
+])

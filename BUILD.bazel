@@ -1,6 +1,6 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library")
 load("@npm//:defs.bzl", "npm_link_all_packages")
-load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files")
 
 exports_files([
     ".bazelrc",
@@ -12,19 +12,7 @@ exports_files([
     "pnpm-lock.yaml",
     "pnpm-workspace.yaml",
     "uv.lock",
-    "config/cloud.toml",
-    "config/resources.toml",
 ])
-
-exports_files(glob([
-    ".github/actions/check-*/action.yml",
-    ".github/actions/release-*/action.yml",
-    ".github/actions/publish-*/action.yml",
-    ".github/workflows/worker-release.yml",
-    ".github/workflows/website-release.yml",
-    ".github/actions/setup-bazel/action.yml",
-    ".github/actions/setup-workspace/action.yml",
-]))
 
 npm_link_all_packages(name = "node_modules")
 
@@ -41,53 +29,37 @@ js_library(
 
 filegroup(
     name = "python_repository_test_data",
-    srcs = glob(
-        [
-            ".github/workflows/*.yml",
-            ".github/actions/**",
-            "config/*.toml",
-        ],
-        allow_empty = True,
-    ) + [
+    srcs = [
         ".gitignore",
         ".python-version",
         "pyproject.toml",
         "uv.lock",
+        "//.github/actions:files",
+        "//.github/workflows:files",
+        "//config:files",
         "//contracts:fixtures",
         "//tools:repository_test_sources",
     ],
     visibility = ["//visibility:public"],
 )
 
-js_library(
+alias(
     name = "cloud_profile_inputs",
-    srcs = [
-        "config/cloud.toml",
-        "config/resources.toml",
-    ],
+    actual = "//config:profile_inputs",
     visibility = ["//visibility:public"],
 )
 
-filegroup(
-    name = "source_audit_files",
-    srcs = glob(
-        [
-            "*",
-            ".github/**",
-            "config/**",
-            "docs/**",
-        ],
-        allow_empty = True,
-        exclude = SOURCE_AUDIT_EXCLUDES,
-    ) + glob(
-        [
-            ".env.example",
-            ".env.*.example",
-            ".dev.vars.example",
-        ],
-        allow_empty = True,
-    ),
-    visibility = ["//visibility:public"],
+source_audit_files(
+    patterns = [
+        "*",
+        ".github/**",
+        "docs/**",
+    ],
+    deps = [
+        "//.github/actions:source_audit_files",
+        "//.github/workflows:source_audit_files",
+        "//config:source_audit_files",
+    ],
 )
 
 filegroup(
@@ -236,11 +208,10 @@ filegroup(
         "MODULE.bazel",
         "pyproject.toml",
         "uv.lock",
-    ] + glob([
-        ".github/workflows/ci.yml",
-        ".github/workflows/worker-release.yml",
-        ".github/workflows/newsletter-daily.yml",
-        ".github/actions/*/action.yml",
-    ]),
+        "//.github/actions:action_files",
+        "//.github/workflows:ci.yml",
+        "//.github/workflows:newsletter-daily.yml",
+        "//.github/workflows:worker-release.yml",
+    ],
     visibility = ["//visibility:public"],
 )

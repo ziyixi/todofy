@@ -2,163 +2,45 @@ load("@aspect_rules_js//js:defs.bzl", "js_library")
 load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
 load("@npm//:defs.bzl", "npm_link_all_packages")
 load("@npm//fleet/worker:eslint/package_json.bzl", eslint = "bin")
-load("@npm//fleet/worker:vitest/package_json.bzl", vitest = "bin")
 load("@npm//fleet/worker:wrangler/package_json.bzl", wrangler = "bin")
 load("//proto/bazel:ts_package.bzl", "proto_package")
-load("//tools/bazel:js.bzl", "proto_vitest_test", "workerd_vitest_test", "workspace_package_link")
-load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel:js.bzl", "workspace_package_link")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files")
 load("//tools/bazel/lint:defs.bzl", "eslint_test")
 
 package(default_visibility = ["//fleet:__subpackages__"])
 
+exports_files(
+    [
+        "package.json",
+        "tsconfig.json",
+        "vitest.config.ts",
+        "vitest.runtime.config.ts",
+    ],
+    visibility = ["//fleet:__subpackages__"],
+)
+
+alias(
+    name = "package_json",
+    actual = ":package_metadata",
+)
+
+js_library(
+    name = "test_config",
+    srcs = ["vitest.config.ts"],
+)
+
+js_library(
+    name = "runtime_test_config",
+    srcs = ["vitest.runtime.config.ts"],
+)
+
 npm_link_all_packages(name = "node_modules")
-
-js_library(
-    name = "metrics",
-    srcs = ["src/metrics.ts"],
-    types = ["src/metrics.ts"],
-    deps = ["//proto/fleet/telemetry/v1:ts"],
-)
-
-js_library(
-    name = "runtime",
-    srcs = ["src/runtime.ts"],
-    types = ["src/runtime.ts"],
-    deps = [
-        "//proto/fleet/telemetry/v1:ts",
-        "//proto/platform/runtime/v1:ts",
-    ],
-)
-
-js_library(
-    name = "report",
-    srcs = ["src/report.ts"],
-    types = ["src/report.ts"],
-    deps = [
-        ":metrics",
-        ":runtime",
-        "//proto/fleet/telemetry/v1:ts",
-        "//proto/ts:wire-json",
-    ],
-)
-
-js_library(
-    name = "newsletter-config",
-    srcs = ["src/newsletter-config.ts"],
-    types = ["src/newsletter-config.ts"],
-    deps = ["//proto/fleet/telemetry/v1:ts"],
-)
-
-js_library(
-    name = "health",
-    srcs = ["src/health.ts"],
-    types = ["src/health.ts"],
-    deps = [
-        ":newsletter-config",
-        ":report",
-        ":runtime",
-        "//proto/ops/v1:ts",
-    ],
-)
-
-js_library(
-    name = "module_group_5",
-    srcs = [
-        "src/env.ts",
-        "src/state.ts",
-    ],
-    types = [
-        "src/env.ts",
-        "src/state.ts",
-    ],
-    deps = [
-        ":health",
-        ":metrics",
-        ":report",
-        "//proto/fleet/ui/v1:ts",
-        "//proto/ops/v1:ts",
-        "//proto/ts:wire-json",
-    ],
-)
-
-alias(
-    name = "env",
-    actual = ":module_group_5",
-)
-
-alias(
-    name = "state",
-    actual = ":module_group_5",
-)
-
-js_library(
-    name = "receipt",
-    srcs = ["src/receipt.ts"],
-    types = ["src/receipt.ts"],
-    deps = [
-        ":module_group_5",
-        ":report",
-    ],
-)
-
-js_library(
-    name = "http",
-    srcs = ["src/http.ts"],
-    types = ["src/http.ts"],
-    deps = [
-        ":metrics",
-        ":module_group_5",
-        ":receipt",
-        ":report",
-        "//packages/edge-auth:lib",
-        "//proto/fleet/ui/v1:ts",
-        "//proto/ts:http-transcoder",
-        "//proto/ts:protobuf-wkt",
-        "//proto/ts:rpc-status",
-    ],
-)
-
-js_library(
-    name = "ops",
-    srcs = ["src/ops.ts"],
-    types = ["src/ops.ts"],
-    deps = [
-        ":module_group_5",
-        "//proto/ops/v1:ts",
-    ],
-)
-
-js_library(
-    name = "index",
-    srcs = ["src/index.ts"],
-    types = ["src/index.ts"],
-    deps = [
-        ":http",
-        ":module_group_5",
-        ":ops",
-    ],
-)
-
-js_library(
-    name = "lib",
-    deps = [
-        ":health",
-        ":http",
-        ":index",
-        ":metrics",
-        ":module_group_5",
-        ":newsletter-config",
-        ":ops",
-        ":receipt",
-        ":report",
-        ":runtime",
-    ],
-)
 
 proto_package(
     name = "proto_types_package",
     deps = [
-        ":lib",
+        "//fleet/worker/src:lib",
         "//proto/fleet/telemetry/v1:ts",
         "//proto/fleet/ui/v1:ts",
         "//proto/ops/v1:ts",
@@ -181,117 +63,22 @@ workspace_package_link(
     src = "//packages/edge-auth:pkg",
 )
 
-proto_vitest_test(
-    name = "codex-gateway_test",
-    data = [
-        "package.json",
-        ":node_modules/vitest",
-    ],
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = ["test/codex-gateway.test.ts"],
-    deps = [
-        ":health",
-        ":report",
-        "//contracts:fleet-report-v1/fixtures/healthy.json_data",
-    ],
-)
-
-proto_vitest_test(
-    name = "deploy_test",
-    data = [
-        "package.json",
-        ":node_modules/vitest",
-    ],
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = ["test/deploy.test.ts"],
-    deps = ["//fleet/deploy:vars"],
-)
-
-proto_vitest_test(
-    name = "metrics_test",
-    data = [
-        "package.json",
-        ":node_modules/vitest",
-    ],
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = ["test/metrics.test.ts"],
-    deps = [
-        ":metrics",
-        ":report",
-        "//contracts:fleet-report-v1/fixtures/healthy.json_data",
-        "//contracts:fleet-report-v1/fixtures/node_metrics.json_data",
-        "//proto/fleet/telemetry/v1:ts",
-    ],
-)
-
-proto_vitest_test(
-    name = "newsletter-config_test",
-    data = [
-        "package.json",
-        ":node_modules/vitest",
-    ],
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = ["test/newsletter-config.test.ts"],
-    deps = [
-        ":health",
-        ":report",
-        "//contracts:fleet-report-v1/fixtures/healthy.json_data",
-        "//proto/fleet/telemetry/v1:ts",
-    ],
-)
-
-proto_vitest_test(
-    name = "report_test",
-    data = [
-        "package.json",
-        ":node_modules/vitest",
-    ],
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = ["test/report.test.ts"],
-    deps = [
-        ":health",
-        ":report",
-        "//contracts:fleet-report-v1/fixtures/healthy.json_data",
-    ],
-)
-
 ts_project(
     name = "types",
     srcs = [
-        "src/env.ts",
-        "src/health.ts",
-        "src/http.ts",
-        "src/index.ts",
-        "src/metrics.ts",
-        "src/newsletter-config.ts",
-        "src/ops.ts",
-        "src/receipt.ts",
-        "src/report.ts",
-        "src/runtime.ts",
-        "src/state.ts",
-        "test/cloudflare-workers.ts",
-        "test/codex-gateway.test.ts",
-        "test/deploy.test.ts",
-        "test/metrics.test.ts",
-        "test/newsletter-config.test.ts",
-        "test/report.test.ts",
-        "vitest.config.ts",
-        "vitest.runtime.config.ts",
+        ":vitest.config.ts",
+        ":vitest.runtime.config.ts",
+        "//fleet/worker/src:types_srcs",
+        "//fleet/worker/test:types_srcs",
     ],
     data = [
-        "vitest.config.ts",
-        "vitest.runtime.config.ts",
+        ":vitest.config.ts",
+        ":vitest.runtime.config.ts",
     ],
     no_emit = True,
     resolve_json_module = True,
     deps = [
         ":edge_auth_types_link",
-        ":lib",
         ":node_modules/@cloudflare/workers-types",
         ":node_modules/@types/node",
         ":node_modules/vitest",
@@ -299,6 +86,7 @@ ts_project(
         "//contracts:fleet-report-v1/fixtures/healthy.json_data",
         "//contracts:fleet-report-v1/fixtures/node_metrics.json_data",
         "//fleet/deploy:vars",
+        "//fleet/worker/src:lib",
     ],
 )
 
@@ -309,10 +97,10 @@ alias(
 
 ts_project(
     name = "web_declarations",
-    srcs = ["src/newsletter-config.ts"],
+    srcs = ["//fleet/worker/src:web_declarations_srcs"],
     declaration = True,
     emit_declaration_only = True,
-    extends = "tsconfig.json",
+    extends = ":tsconfig.json",
     resolve_json_module = True,
     tsconfig = {
         "compilerOptions": {"noEmit": False},
@@ -325,66 +113,31 @@ ts_project(
     ],
 )
 
-js_library(
-    name = "newsletter_config_web",
-    srcs = ["src/newsletter-config.ts"],
-    deps = [":web_declarations"],
-)
-
 wrangler.wrangler_binary(name = "wrangler")
 
 js_library(
     name = "application_sources",
-    srcs = glob([
-        "src/**",
+    srcs = ["//fleet/worker/src:application_sources_srcs"] + glob([
         "package.json",
         "tsconfig.json",
     ]),
 )
 
-test_suite(name = "check")
-
-js_library(
-    name = "runtime_helpers",
-    srcs = [
-        "test/runtime/harness.ts",
-        "test/runtime/tsconfig.json",
+test_suite(
+    name = "check",
+    tests = [
+        ":lint",
+        ":runtime_types_typecheck_test",
+        ":types_typecheck_test",
+        ":web_declarations_typecheck_test",
+        "//fleet/worker/test:check",
     ],
-    types = glob(
-        ["test/runtime/**/*.ts"],
-        exclude = ["**/*.test.ts"],
-    ),
-)
-
-workerd_vitest_test(
-    name = "runtime_metrics_test",
-    data = [
-        ":test_support",
-        "//contracts:fleet-report-v1/fixtures/healthy.json_data",
-        "//contracts:fleet-report-v1/fixtures/node_metrics.json_data",
-    ],
-    runner = vitest.vitest_test,
-    tests = ["test/runtime/metrics.test.ts"],
-)
-
-workerd_vitest_test(
-    name = "runtime_receipt_test",
-    data = [
-        ":test_support",
-        "//contracts:fleet-report-v1/fixtures/healthy.json_data",
-    ],
-    runner = vitest.vitest_test,
-    tests = ["test/runtime/receipt.test.ts"],
 )
 
 eslint_test(
     name = "lint",
     data = [
-        "package.json",
-        "test/runtime/tsconfig.json",
-        "tsconfig.json",
         ":edge_auth_types_link",
-        ":lib",
         ":node_modules/@cloudflare/workers-types",
         ":node_modules/@eslint/js",
         ":node_modules/@types/node",
@@ -393,18 +146,20 @@ eslint_test(
         ":node_modules/miniflare",
         ":node_modules/typescript-eslint",
         ":node_modules/vitest",
+        ":package.json",
         ":proto_types_link",
-        ":runtime_helpers",
+        ":tsconfig.json",
         "//:node_modules/@cloudflare/workers-types",
         "//contracts:fleet-report-v1/fixtures/healthy.json_data",
         "//contracts:fleet-report-v1/fixtures/node_metrics.json_data",
         "//fleet/deploy:vars",
+        "//fleet/worker/src:lib",
+        "//fleet/worker/test:lint_data",
+        "//fleet/worker/test:runtime_helpers",
         "//tools/workerd-cpu:types",
     ],
-    runner = eslint.eslint_test,
-    sources = glob([
-        "src/**/*.ts",
-        "test/**/*.ts",
+    runner = eslint.eslint_binary,
+    sources = ["//fleet/worker/src:lint_sources"] + ["//fleet/worker/test:lint_sources"] + glob([
         "*.js",
         "*.ts",
     ]),
@@ -412,18 +167,18 @@ eslint_test(
 
 ts_config(
     name = "worker_config",
-    src = "tsconfig.json",
+    src = ":tsconfig.json",
 )
 
 ts_config(
     name = "runtime_config",
-    src = "test/runtime/tsconfig.json",
+    src = "//fleet/worker/test:source_runtime_tsconfig_json",
     deps = [":worker_config"],
 )
 
 ts_project(
     name = "runtime_types",
-    srcs = [":proto_types_package_wire_types"] + glob(["test/runtime/**/*.ts"]),
+    srcs = [":proto_types_package_wire_types"] + ["//fleet/worker/test:runtime_types_srcs"],
     extends = ":runtime_config",
     no_emit = True,
     resolve_json_module = True,
@@ -434,84 +189,29 @@ ts_project(
     },
     deps = [
         ":edge_auth_types_link",
-        ":lib",
         ":node_modules/@cloudflare/workers-types",
         ":node_modules/@types/node",
         ":node_modules/esbuild",
         ":node_modules/miniflare",
         ":node_modules/vitest",
         ":proto_types_link",
-        ":test_support",
         "//:node_modules/@cloudflare/workers-types",
         "//contracts:fleet-report-v1/fixtures/healthy.json_data",
         "//contracts:fleet-report-v1/fixtures/node_metrics.json_data",
+        "//fleet/worker/src:lib",
+        "//fleet/worker/test:test_support",
     ],
 )
 
 js_library(
-    name = "test_support",
-    srcs = glob(
-        ["test/**"],
-        exclude = [
-            "test/runtime/**",
-            "test/smoke/**",
-            "**/*.test.ts",
-        ],
-    ),
-    types = glob(
-        ["test/**/*.ts"],
-        exclude = [
-            "test/runtime/**",
-            "test/smoke/**",
-            "**/*.test.ts",
-        ],
-    ),
-)
-
-js_library(
     name = "package_metadata",
-    srcs = ["package.json"],
-)
-
-js_library(
-    name = "entry_metadata",
-    srcs = ["src/index.ts"],
-)
-
-js_library(
-    name = "runtime_metadata",
-    srcs = ["test/runtime/harness.ts"],
-)
-
-js_library(
-    name = "env_metadata",
-    srcs = ["src/env.ts"],
-)
-
-filegroup(
-    name = "source_audit_files",
-    srcs = glob(
-        [
-            "*",
-            "src/**",
-            "test/**",
-        ],
-        allow_empty = True,
-        exclude = SOURCE_AUDIT_EXCLUDES,
-    ) + glob(
-        [
-            ".env.example",
-            ".env.*.example",
-            ".dev.vars.example",
-        ],
-        allow_empty = True,
-    ),
-    visibility = ["//visibility:public"],
+    srcs = [":package.json"],
 )
 
 test_suite(
     name = "unit_tests",
     tags = ["unit"],
+    tests = ["//fleet/worker/test:unit_tests"],
 )
 
 test_suite(
@@ -524,5 +224,22 @@ test_suite(
 
 test_suite(
     name = "runtime_tests",
-    tests = [":runtime_" + file.removeprefix("test/runtime/").removesuffix(".test.ts") + "_test" for file in glob(["test/runtime/*.test.ts"])],
+    tests = ["//fleet/worker/test:runtime_tests"],
+)
+
+alias(
+    name = "lib",
+    actual = "//fleet/worker/src:lib",
+)
+
+source_audit_files(
+    patterns = [
+        "*",
+        "src/**",
+        "test/**",
+    ],
+    deps = [
+        "//fleet/worker/src:source_audit_files",
+        "//fleet/worker/test:source_audit_files",
+    ],
 )

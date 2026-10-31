@@ -47,7 +47,7 @@ function filesUnder(folder) {
  * Builds the extension into `<dist>/extension` and `<dist>/recall-extension-<short commit>.zip` (`dist` is emptied
  * first); returns the version, the short commit and both paths.
  */
-export async function buildExtension({ dist = DIST, time = new Date(), commit = currentCommit() } = {}) {
+export async function buildExtension({ dist = DIST, time = new Date(), commit = currentCommit(), tsconfig } = {}) {
   if (Number.isNaN(time.getTime())) throw new Error('the build time is not a time');
   const short = commit.slice(0, 7);
   const version = versionOf(time);
@@ -63,6 +63,7 @@ export async function buildExtension({ dist = DIST, time = new Date(), commit = 
     platform: 'browser',
     legalComments: 'none',
     logLevel: 'warning',
+    tsconfig,
     define: { RECALL_BUILD: JSON.stringify(version), RECALL_ORION: 'false' },
   };
   await build({ ...common, entryPoints: { sw: join(ROOT, 'src/sw.ts'), options: join(ROOT, 'src/options.ts') }, format: 'esm', outdir: out });

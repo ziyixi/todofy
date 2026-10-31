@@ -1,0 +1,199 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@npm//links/web:vitest/package_json.bzl", vitest = "bin")
+load("//tools/bazel:js.bzl", "copied_source_files", "proto_vitest_test", "ts_source_library")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//links:__subpackages__"])
+
+COMMON_TEST_DATA = [
+    "//links/web:package_json",
+    "//links/web/src/test:source_setup_ts",
+    "//links/web:test_config",
+    "//links/web:node_modules/jsdom",
+    "//links/web:node_modules/vite",
+]
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//links:__subpackages__"],
+)
+
+copied_source_files(
+    name = "application_sources_srcs",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ) + ["//links/web/src/test:application_sources_srcs"],
+)
+
+copied_source_files(
+    name = "typecheck_project_srcs",
+    srcs = [
+        "api.test.ts",
+        "api.ts",
+        "launcher.test.ts",
+        "launcher.ts",
+        "main.ts",
+        "view.test.ts",
+        "view.ts",
+    ] + ["//links/web/src/test:typecheck_project_srcs"],
+)
+
+copied_source_files(
+    name = "lint_sources",
+    srcs = glob(
+        [
+            "**/*.ts",
+            "**/*.tsx",
+        ],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ) + ["//links/web/src/test:lint_sources"],
+)
+
+ts_source_library(
+    name = "src__api",
+    srcs = [":api.ts"],
+    deps = [
+        "//proto/common/errors/v1:ts",
+        "//proto/links/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+ts_source_library(
+    name = "src__launcher",
+    srcs = [":launcher.ts"],
+    deps = [
+        "//links/worker/src:limits_web",
+        "//proto/links/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+    ],
+)
+
+ts_source_library(
+    name = "src__view",
+    srcs = [":view.ts"],
+    deps = [
+        ":src__api",
+        ":src__launcher",
+        "//proto/links/ui/v1:ts",
+    ],
+)
+
+js_library(
+    name = "src__main",
+    srcs = [
+        ":main.ts",
+        ":styles.css",
+    ],
+    types = [":main.ts"],
+    deps = [":src__view"],
+)
+
+js_library(
+    name = "lib",
+    deps = [
+        ":src__api",
+        ":src__launcher",
+        ":src__main",
+        ":src__view",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__api_test",
+    config = "//links/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "links/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":api.test.ts"],
+    deps = [
+        ":src__api",
+        "//links/web:node_modules/vitest",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__launcher_test",
+    config = "//links/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "links/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":launcher.test.ts"],
+    deps = [
+        ":src__launcher",
+        "//links/web:node_modules/vitest",
+        "//links/worker/src:limits_web",
+        "//proto/links/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__view_test",
+    config = "//links/web:test_config",
+    data = [
+        "//links/web:node_modules/jsdom",
+        "//links/web:node_modules/vite",
+        "//links/web:package_json",
+        "//links/web:test_config",
+        "//links/web/src/test:source_fakeServer_ts",
+        "//links/web/src/test:source_setup_ts",
+    ],
+    project = "links/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":view.test.ts"],
+    deps = [
+        ":src__api",
+        ":src__launcher",
+        ":src__view",
+        "//links/web:node_modules/vitest",
+        "//proto/links/ui/v1:ts",
+        "//proto/ts:field-mask",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:page-token",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+        "//proto/ts:wire-json",
+    ],
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+    deps = [] + ["//links/web/src/test:source_audit_files"],
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        ":src__api_test",
+        ":src__launcher_test",
+        ":src__view_test",
+        "//links/web/src/test:check",
+    ],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+    tests = [
+        ":src__api_test",
+        ":src__launcher_test",
+        ":src__view_test",
+        "//links/web/src/test:unit_tests",
+    ],
+)

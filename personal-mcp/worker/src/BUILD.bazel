@@ -1,0 +1,295 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//tools/bazel:js.bzl", "copied_source_files", "ts_source_library")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//personal-mcp:__subpackages__"])
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//personal-mcp:__subpackages__"],
+)
+
+copied_source_files(
+    name = "types_srcs",
+    srcs = glob(
+        ["**/*.ts"],
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+copied_source_files(
+    name = "application_sources_srcs",
+    srcs = glob(
+        ["**"],
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+copied_source_files(
+    name = "lint_sources",
+    srcs = glob(
+        [
+            "**/*.ts",
+            "**/*.tsx",
+        ],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+ts_source_library(
+    name = "tasks",
+    srcs = [":tasks.ts"],
+    deps = [
+        "//personal-mcp/worker:node_modules/@modelcontextprotocol/server",
+        "//personal-mcp/worker:node_modules/zod",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "source-tools",
+    srcs = [":source-tools.ts"],
+    deps = [
+        "//personal-mcp/worker:node_modules/@modelcontextprotocol/server",
+        "//proto/ts:http-client",
+    ],
+)
+
+ts_source_library(
+    name = "recall",
+    srcs = [":recall.ts"],
+    deps = [
+        ":source-tools",
+        "//personal-mcp/worker:node_modules/@modelcontextprotocol/server",
+        "//personal-mcp/worker:node_modules/zod",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "content",
+    srcs = [":content.ts"],
+    deps = [
+        ":recall",
+        ":source-tools",
+        ":tasks",
+        "//personal-mcp/worker:node_modules/@modelcontextprotocol/server",
+        "//personal-mcp/worker:node_modules/zod",
+        "//proto/dashboard/mcp/v1:ts",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/todofy/mail/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "events",
+    srcs = [":events.ts"],
+    deps = [
+        ":content",
+        ":tasks",
+        "//proto/todofy/mail/v1:ts",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "work-model",
+    srcs = [":work-model.ts"],
+    deps = [
+        "//personal-mcp/worker:node_modules/@modelcontextprotocol/server",
+        "//personal-mcp/worker:node_modules/zod",
+    ],
+)
+
+ts_source_library(
+    name = "work-read",
+    srcs = [":work-read.ts"],
+    deps = [
+        ":work-model",
+        "//personal-mcp/worker:node_modules/zod",
+    ],
+)
+
+ts_source_library(
+    name = "work-store",
+    srcs = [":work-store.ts"],
+    deps = [
+        ":work-model",
+        ":work-read",
+        "//personal-mcp/worker:node_modules/zod",
+    ],
+)
+
+ts_source_library(
+    name = "work-tools",
+    srcs = [":work-tools.ts"],
+    deps = [
+        ":work-model",
+        ":work-store",
+        "//personal-mcp/worker:node_modules/@modelcontextprotocol/server",
+    ],
+)
+
+ts_source_library(
+    name = "watch",
+    srcs = [":watch.ts"],
+    deps = [
+        ":source-tools",
+        ":work-model",
+        ":work-store",
+        "//personal-mcp/worker:node_modules/@modelcontextprotocol/server",
+        "//personal-mcp/worker:node_modules/zod",
+        "//proto/ts:http-client",
+        "//proto/ts:wire-json",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "server",
+    srcs = [":server.ts"],
+    deps = [
+        ":content",
+        ":events",
+        ":tasks",
+        ":watch",
+        ":work-store",
+        ":work-tools",
+        "//personal-mcp/worker:node_modules/@modelcontextprotocol/server",
+        "//personal-mcp/worker:node_modules/zod",
+    ],
+)
+
+ts_source_library(
+    name = "webhook",
+    srcs = [":webhook.ts"],
+    deps = [
+        "//packages/edge-auth:lib",
+        "//personal-mcp/worker:node_modules/@modelcontextprotocol/server",
+        "//personal-mcp/worker:node_modules/standardwebhooks",
+    ],
+)
+
+ts_source_library(
+    name = "backup",
+    srcs = [":backup.ts"],
+    deps = ["//proto/ops/v1:ts"],
+)
+
+ts_source_library(
+    name = "watch-events",
+    srcs = [":watch-events.ts"],
+    deps = [
+        ":events",
+        ":watch",
+        ":work-store",
+        "//proto/ts:http-client",
+        "//proto/ts:wire-json",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "restore",
+    srcs = [":restore.ts"],
+    deps = [
+        ":backup",
+        ":events",
+    ],
+)
+
+ts_source_library(
+    name = "module_group_15",
+    srcs = [
+        ":auth.ts",
+        ":env.ts",
+        ":ops.ts",
+        ":store.ts",
+    ],
+    deps = [
+        ":backup",
+        ":content",
+        ":events",
+        ":restore",
+        ":server",
+        ":watch",
+        ":watch-events",
+        ":webhook",
+        ":work-store",
+        "//packages/edge-auth:lib",
+        "//personal-mcp/worker:node_modules/@modelcontextprotocol/server",
+        "//proto/ops/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+    ],
+)
+
+alias(
+    name = "auth",
+    actual = ":module_group_15",
+)
+
+alias(
+    name = "env",
+    actual = ":module_group_15",
+)
+
+alias(
+    name = "ops",
+    actual = ":module_group_15",
+)
+
+alias(
+    name = "store",
+    actual = ":module_group_15",
+)
+
+ts_source_library(
+    name = "index",
+    srcs = [":index.ts"],
+    deps = [":module_group_15"],
+)
+
+js_library(
+    name = "lib",
+    deps = [
+        ":backup",
+        ":content",
+        ":events",
+        ":index",
+        ":module_group_15",
+        ":recall",
+        ":restore",
+        ":server",
+        ":source-tools",
+        ":tasks",
+        ":watch",
+        ":watch-events",
+        ":webhook",
+        ":work-model",
+        ":work-read",
+        ":work-store",
+        ":work-tools",
+    ],
+)
+
+js_library(
+    name = "entry_metadata",
+    srcs = [":index.ts"],
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+)

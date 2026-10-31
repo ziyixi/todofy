@@ -2,576 +2,37 @@ load("@aspect_rules_js//js:defs.bzl", "js_library")
 load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
 load("@npm//:defs.bzl", "npm_link_all_packages")
 load("@npm//mail-hero/web:vite/package_json.bzl", vite = "bin")
-load("@npm//mail-hero/web:vitest/package_json.bzl", vitest = "bin")
 load("//proto/bazel:ts_package.bzl", "proto_package")
-load("//tools/bazel:js.bzl", "proto_vitest_test", "vite_bundle", "workspace_link", "workspace_package_link")
-load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel:js.bzl", "vite_bundle", "workspace_package_link")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files")
 
 package(default_visibility = ["//mail-hero:__subpackages__"])
+
+exports_files(
+    [
+        "package.json",
+        "tsconfig.json",
+        "vite.config.ts",
+    ],
+    visibility = ["//mail-hero:__subpackages__"],
+)
+
+js_library(
+    name = "package_json",
+    srcs = ["package.json"],
+)
+
+js_library(
+    name = "test_config",
+    srcs = ["vite.config.ts"],
+)
 
 npm_link_all_packages(name = "node_modules")
 
 js_library(
-    name = "src__api__client",
-    srcs = ["src/api/client.ts"],
-    types = ["src/api/client.ts"],
-    deps = [
-        "//proto/common/errors/v1:ts",
-        "//proto/mailhero/ui/v2:ts",
-        "//proto/ts:filter",
-        "//proto/ts:http-client",
-        "//proto/ts:protobuf-wkt",
-    ],
-)
-
-js_library(
-    name = "src__api__queries",
-    srcs = ["src/api/queries.ts"],
-    types = ["src/api/queries.ts"],
-    deps = [":src__api__client"],
-)
-
-js_library(
-    name = "src__components__alerts",
-    srcs = ["src/components/alerts.ts"],
-    types = ["src/components/alerts.ts"],
-    deps = ["//proto/mailhero/ui/v2:ts"],
-)
-
-js_library(
-    name = "src__components__UI",
-    srcs = ["src/components/UI.tsx"],
-    types = ["src/components/UI.tsx"],
-    deps = [
-        ":node_modules/lucide-react",
-        ":node_modules/react",
-        ":src__api__client",
-    ],
-)
-
-js_library(
-    name = "src__components__messageDisplay",
-    srcs = ["src/components/messageDisplay.ts"],
-    types = ["src/components/messageDisplay.ts"],
-    deps = ["//proto/mailhero/ui/v2:ts"],
-)
-
-js_library(
-    name = "src__pages__InboxPage",
-    srcs = ["src/pages/InboxPage.tsx"],
-    types = ["src/pages/InboxPage.tsx"],
-    deps = [
-        ":node_modules/@tanstack/react-query",
-        ":node_modules/lucide-react",
-        ":node_modules/react",
-        ":node_modules/react-router",
-        ":src__api__client",
-        ":src__api__queries",
-        ":src__components__UI",
-        ":src__components__messageDisplay",
-        "//proto/mailhero/ui/v2:ts",
-    ],
-)
-
-js_library(
-    name = "src__pages__MessagePage",
-    srcs = ["src/pages/MessagePage.tsx"],
-    types = ["src/pages/MessagePage.tsx"],
-    deps = [
-        ":node_modules/@tanstack/react-query",
-        ":node_modules/lucide-react",
-        ":node_modules/react",
-        ":node_modules/react-router",
-        ":src__api__client",
-        ":src__api__queries",
-        ":src__components__UI",
-        ":src__components__messageDisplay",
-        "//proto/mailhero/ui/v2:ts",
-    ],
-)
-
-js_library(
-    name = "src__components__attemptResults",
-    srcs = ["src/components/attemptResults.ts"],
-    types = ["src/components/attemptResults.ts"],
-    deps = [
-        ":src__api__client",
-        "//proto/mailhero/ui/v2:ts",
-    ],
-)
-
-js_library(
-    name = "src__pages__DeliveriesPage",
-    srcs = ["src/pages/DeliveriesPage.tsx"],
-    types = ["src/pages/DeliveriesPage.tsx"],
-    deps = [
-        ":node_modules/@tanstack/react-query",
-        ":node_modules/lucide-react",
-        ":node_modules/react",
-        ":node_modules/react-router",
-        ":src__api__client",
-        ":src__components__UI",
-        ":src__components__attemptResults",
-        "//proto/mailhero/ui/v2:ts",
-        "//proto/ts:filter",
-    ],
-)
-
-js_library(
-    name = "src__pages__DeliveryPage",
-    srcs = ["src/pages/DeliveryPage.tsx"],
-    types = ["src/pages/DeliveryPage.tsx"],
-    deps = [
-        ":node_modules/@tanstack/react-query",
-        ":node_modules/lucide-react",
-        ":node_modules/react",
-        ":node_modules/react-router",
-        ":src__api__client",
-        ":src__api__queries",
-        ":src__components__UI",
-        "//proto/mailhero/ui/v2:ts",
-    ],
-)
-
-js_library(
-    name = "src__pages__EndpointsPage",
-    srcs = ["src/pages/EndpointsPage.tsx"],
-    types = ["src/pages/EndpointsPage.tsx"],
-    deps = [
-        ":node_modules/@tanstack/react-query",
-        ":node_modules/lucide-react",
-        ":node_modules/react",
-        ":node_modules/react-router",
-        ":src__api__client",
-        ":src__api__queries",
-        ":src__components__UI",
-        "//proto/mailhero/ui/v2:ts",
-    ],
-)
-
-js_library(
-    name = "src__pages__SettingsPage",
-    srcs = ["src/pages/SettingsPage.tsx"],
-    types = ["src/pages/SettingsPage.tsx"],
-    deps = [
-        ":node_modules/@tanstack/react-query",
-        ":node_modules/lucide-react",
-        ":node_modules/react",
-        ":node_modules/react-router",
-        ":src__api__client",
-        ":src__api__queries",
-        ":src__components__UI",
-        ":src__components__alerts",
-        "//proto/mailhero/ui/v2:ts",
-    ],
-)
-
-js_library(
-    name = "src__pages__SetupPage",
-    srcs = ["src/pages/SetupPage.tsx"],
-    types = ["src/pages/SetupPage.tsx"],
-    deps = [
-        ":node_modules/@tanstack/react-query",
-        ":node_modules/lucide-react",
-        ":node_modules/react",
-        ":node_modules/react-router",
-        ":src__api__client",
-        ":src__api__queries",
-        ":src__components__UI",
-        "//proto/mailhero/ui/v2:ts",
-    ],
-)
-
-js_library(
-    name = "src__pages__DashboardPage",
-    srcs = ["src/pages/DashboardPage.tsx"],
-    types = ["src/pages/DashboardPage.tsx"],
-    deps = [
-        ":node_modules/@tanstack/react-query",
-        ":node_modules/lucide-react",
-        ":node_modules/react",
-        ":node_modules/react-router",
-        ":src__api__client",
-        ":src__api__queries",
-        ":src__components__UI",
-        ":src__components__attemptResults",
-        "//proto/mailhero/ui/v2:ts",
-    ],
-)
-
-js_library(
-    name = "src__app__App",
-    srcs = ["src/app/App.tsx"],
-    types = ["src/app/App.tsx"],
-    deps = [
-        ":node_modules/@tanstack/react-query",
-        ":node_modules/lucide-react",
-        ":node_modules/react",
-        ":node_modules/react-router",
-        ":src__api__queries",
-        ":src__components__UI",
-        ":src__components__alerts",
-        ":src__pages__DashboardPage",
-        ":src__pages__DeliveriesPage",
-        ":src__pages__DeliveryPage",
-        ":src__pages__EndpointsPage",
-        ":src__pages__InboxPage",
-        ":src__pages__MessagePage",
-        ":src__pages__SettingsPage",
-        ":src__pages__SetupPage",
-        "//proto/mailhero/ui/v2:ts",
-    ],
-)
-
-js_library(
-    name = "src__main",
-    srcs = [
-        "src/main.tsx",
-        "src/styles.css",
-    ],
-    types = ["src/main.tsx"],
-    deps = [
-        ":node_modules/@tanstack/react-query",
-        ":node_modules/react",
-        ":node_modules/react-dom",
-        ":node_modules/react-router",
-        ":src__app__App",
-    ],
-)
-
-js_library(
-    name = "lib",
-    deps = [
-        ":src__api__client",
-        ":src__api__queries",
-        ":src__app__App",
-        ":src__components__UI",
-        ":src__components__alerts",
-        ":src__components__attemptResults",
-        ":src__components__messageDisplay",
-        ":src__main",
-        ":src__pages__DashboardPage",
-        ":src__pages__DeliveriesPage",
-        ":src__pages__DeliveryPage",
-        ":src__pages__EndpointsPage",
-        ":src__pages__InboxPage",
-        ":src__pages__MessagePage",
-        ":src__pages__SettingsPage",
-        ":src__pages__SetupPage",
-    ],
-)
-
-proto_vitest_test(
-    name = "src__api__client_test",
-    data = [
-        "package.json",
-        "vite.config.ts",
-        ":node_modules/@testing-library/react",
-        ":node_modules/@vitejs/plugin-react",
-        ":node_modules/jsdom",
-        ":node_modules/vite",
-    ],
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = ["src/api/client.test.ts"],
-    deps = [
-        ":node_modules/vitest",
-        ":src__api__client",
-        "//proto/mailhero/ui/v2:ts",
-        "//proto/ts:rpc-status",
-    ],
-)
-
-proto_vitest_test(
-    name = "src__app__App_test",
-    data = [
-        "package.json",
-        "src/test/fakeServer.ts",
-        "src/test/fixtures.tsx",
-        "vite.config.ts",
-        ":node_modules/@vitejs/plugin-react",
-        ":node_modules/jsdom",
-        ":node_modules/vite",
-    ],
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = ["src/app/App.test.tsx"],
-    deps = [
-        ":node_modules/@tanstack/react-query",
-        ":node_modules/@testing-library/react",
-        ":node_modules/react",
-        ":node_modules/react-router",
-        ":node_modules/vitest",
-        ":src__api__client",
-        ":src__api__queries",
-        ":src__app__App",
-        ":src__components__UI",
-        ":src__components__alerts",
-        ":src__components__attemptResults",
-        ":src__components__messageDisplay",
-        ":src__pages__DashboardPage",
-        ":src__pages__DeliveriesPage",
-        ":src__pages__DeliveryPage",
-        ":src__pages__EndpointsPage",
-        ":src__pages__InboxPage",
-        ":src__pages__MessagePage",
-        ":src__pages__SettingsPage",
-        ":src__pages__SetupPage",
-        "//proto/mailhero/ui/v2:ts",
-        "//proto/ts:http-transcoder",
-        "//proto/ts:protobuf",
-        "//proto/ts:rpc-status",
-    ],
-)
-
-proto_vitest_test(
-    name = "src__components__attemptResults_test",
-    data = [
-        "package.json",
-        "vite.config.ts",
-        ":node_modules/@testing-library/react",
-        ":node_modules/@vitejs/plugin-react",
-        ":node_modules/jsdom",
-        ":node_modules/vite",
-    ],
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = ["src/components/attemptResults.test.ts"],
-    deps = [
-        ":node_modules/vitest",
-        ":src__api__client",
-        ":src__components__attemptResults",
-        "//proto/mailhero/ui/v2:ts",
-        "//proto/ts:protobuf",
-    ],
-)
-
-proto_vitest_test(
-    name = "src__pages__DashboardPage_test",
-    data = [
-        "package.json",
-        "src/test/fakeServer.ts",
-        "src/test/fixtures.tsx",
-        "vite.config.ts",
-        ":node_modules/@vitejs/plugin-react",
-        ":node_modules/jsdom",
-        ":node_modules/vite",
-    ],
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = ["src/pages/DashboardPage.test.tsx"],
-    deps = [
-        ":node_modules/@tanstack/react-query",
-        ":node_modules/@testing-library/react",
-        ":node_modules/react",
-        ":node_modules/react-router",
-        ":node_modules/vitest",
-        ":src__api__client",
-        ":src__api__queries",
-        ":src__components__UI",
-        ":src__components__attemptResults",
-        ":src__pages__DashboardPage",
-        "//proto/mailhero/ui/v2:ts",
-        "//proto/ts:http-transcoder",
-        "//proto/ts:protobuf",
-        "//proto/ts:rpc-status",
-    ],
-)
-
-proto_vitest_test(
-    name = "src__pages__DeliveriesPage_test",
-    data = [
-        "package.json",
-        "src/test/fakeServer.ts",
-        "src/test/fixtures.tsx",
-        "vite.config.ts",
-        ":node_modules/@vitejs/plugin-react",
-        ":node_modules/jsdom",
-        ":node_modules/vite",
-    ],
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = ["src/pages/DeliveriesPage.test.tsx"],
-    deps = [
-        ":node_modules/@tanstack/react-query",
-        ":node_modules/@testing-library/react",
-        ":node_modules/react",
-        ":node_modules/react-router",
-        ":node_modules/vitest",
-        ":src__api__client",
-        ":src__components__UI",
-        ":src__components__attemptResults",
-        ":src__pages__DeliveriesPage",
-        "//proto/mailhero/ui/v2:ts",
-        "//proto/ts:http-transcoder",
-        "//proto/ts:protobuf",
-        "//proto/ts:rpc-status",
-    ],
-)
-
-proto_vitest_test(
-    name = "src__pages__DeliveryPage_test",
-    data = [
-        "package.json",
-        "src/test/fakeServer.ts",
-        "src/test/fixtures.tsx",
-        "vite.config.ts",
-        ":node_modules/@vitejs/plugin-react",
-        ":node_modules/jsdom",
-        ":node_modules/vite",
-    ],
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = ["src/pages/DeliveryPage.test.tsx"],
-    deps = [
-        ":node_modules/@tanstack/react-query",
-        ":node_modules/@testing-library/react",
-        ":node_modules/react",
-        ":node_modules/react-router",
-        ":node_modules/vitest",
-        ":src__api__client",
-        ":src__api__queries",
-        ":src__components__UI",
-        ":src__pages__DeliveryPage",
-        "//proto/mailhero/ui/v2:ts",
-        "//proto/ts:http-transcoder",
-        "//proto/ts:protobuf",
-        "//proto/ts:rpc-status",
-    ],
-)
-
-proto_vitest_test(
-    name = "src__pages__EndpointsPage_test",
-    data = [
-        "package.json",
-        "src/test/fakeServer.ts",
-        "src/test/fixtures.tsx",
-        "vite.config.ts",
-        ":node_modules/@vitejs/plugin-react",
-        ":node_modules/jsdom",
-        ":node_modules/vite",
-    ],
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = ["src/pages/EndpointsPage.test.tsx"],
-    deps = [
-        ":node_modules/@tanstack/react-query",
-        ":node_modules/@testing-library/react",
-        ":node_modules/react",
-        ":node_modules/react-router",
-        ":node_modules/vitest",
-        ":src__api__client",
-        ":src__api__queries",
-        ":src__components__UI",
-        ":src__pages__EndpointsPage",
-        "//proto/mailhero/ui/v2:ts",
-        "//proto/ts:http-transcoder",
-        "//proto/ts:protobuf",
-        "//proto/ts:rpc-status",
-    ],
-)
-
-proto_vitest_test(
-    name = "src__pages__InboxPage_test",
-    data = [
-        "package.json",
-        "src/test/fakeServer.ts",
-        "src/test/fixtures.tsx",
-        "vite.config.ts",
-        ":node_modules/@vitejs/plugin-react",
-        ":node_modules/jsdom",
-        ":node_modules/vite",
-    ],
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = ["src/pages/InboxPage.test.tsx"],
-    deps = [
-        ":node_modules/@tanstack/react-query",
-        ":node_modules/@testing-library/react",
-        ":node_modules/react",
-        ":node_modules/react-router",
-        ":node_modules/vitest",
-        ":src__api__client",
-        ":src__api__queries",
-        ":src__components__UI",
-        ":src__components__messageDisplay",
-        ":src__pages__InboxPage",
-        "//proto/mailhero/ui/v2:ts",
-        "//proto/ts:http-transcoder",
-        "//proto/ts:protobuf",
-        "//proto/ts:rpc-status",
-    ],
-)
-
-proto_vitest_test(
-    name = "src__pages__MessagePage_test",
-    data = [
-        "package.json",
-        "src/test/fakeServer.ts",
-        "src/test/fixtures.tsx",
-        "vite.config.ts",
-        ":node_modules/@vitejs/plugin-react",
-        ":node_modules/jsdom",
-        ":node_modules/vite",
-    ],
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = ["src/pages/MessagePage.test.tsx"],
-    deps = [
-        ":node_modules/@tanstack/react-query",
-        ":node_modules/@testing-library/react",
-        ":node_modules/react",
-        ":node_modules/react-router",
-        ":node_modules/vitest",
-        ":src__api__client",
-        ":src__api__queries",
-        ":src__components__UI",
-        ":src__components__messageDisplay",
-        ":src__pages__MessagePage",
-        "//proto/mailhero/ui/v2:ts",
-        "//proto/ts:http-transcoder",
-        "//proto/ts:protobuf",
-        "//proto/ts:rpc-status",
-    ],
-)
-
-proto_vitest_test(
-    name = "src__pages__SettingsPage_test",
-    data = [
-        "package.json",
-        "src/test/fakeServer.ts",
-        "src/test/fixtures.tsx",
-        "vite.config.ts",
-        ":node_modules/@vitejs/plugin-react",
-        ":node_modules/jsdom",
-        ":node_modules/vite",
-    ],
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = ["src/pages/SettingsPage.test.tsx"],
-    deps = [
-        ":node_modules/@tanstack/react-query",
-        ":node_modules/@testing-library/react",
-        ":node_modules/react",
-        ":node_modules/react-router",
-        ":node_modules/vitest",
-        ":src__api__client",
-        ":src__api__queries",
-        ":src__components__UI",
-        ":src__components__alerts",
-        ":src__pages__SettingsPage",
-        "//proto/mailhero/ui/v2:ts",
-        "//proto/ts:http-transcoder",
-        "//proto/ts:protobuf",
-        "//proto/ts:rpc-status",
-    ],
-)
-
-js_library(
     name = "application_sources",
-    srcs = glob(
+    srcs = ["//mail-hero/web/src:application_sources_srcs"] + glob(
         [
-            "src/**",
             "public/**",
             "index.html",
             "_headers",
@@ -581,19 +42,10 @@ js_library(
     ),
 )
 
-js_library(
-    name = "build_checks",
-    srcs = [
-        "scripts/js-budget.mjs",
-        "scripts/js-budget.test.mjs",
-    ],
-    deps = ["//tools/bundle-size:library"],
-)
-
 proto_package(
     name = "bundle_proto",
     deps = [
-        ":lib",
+        "//mail-hero/web/src:lib",
         "//proto/common/errors/v1:ts",
         "//proto/mailhero/ui/v2:ts",
         "//proto/ts:filter",
@@ -616,13 +68,11 @@ vite.vite_binary(name = "vite")
 vite_bundle(
     name = "bundle",
     out_dir = "dist",
-    postbuild = "scripts/js-budget.mjs",
+    postbuild = "//mail-hero/web/scripts:js-budget.mjs",
     tool = ":vite",
     deps = [
         ":application_sources",
-        ":build_checks",
         ":bundle_proto_link",
-        ":lib",
         ":node_modules/@tanstack/react-query",
         ":node_modules/@vitejs/plugin-react",
         ":node_modules/lucide-react",
@@ -631,44 +81,19 @@ vite_bundle(
         ":node_modules/react-router",
         ":node_modules/vite",
         ":node_modules/vitest",
+        "//mail-hero/web/scripts:build_checks",
+        "//mail-hero/web/src:lib",
     ],
 )
 
 ts_project(
     name = "typecheck_project",
     srcs = [
-        "src/api/client.test.ts",
-        "src/api/client.ts",
-        "src/api/queries.ts",
-        "src/app/App.test.tsx",
-        "src/app/App.tsx",
-        "src/components/UI.tsx",
-        "src/components/alerts.ts",
-        "src/components/attemptResults.test.ts",
-        "src/components/attemptResults.ts",
-        "src/components/messageDisplay.ts",
-        "src/main.tsx",
-        "src/pages/DashboardPage.test.tsx",
-        "src/pages/DashboardPage.tsx",
-        "src/pages/DeliveriesPage.test.tsx",
-        "src/pages/DeliveriesPage.tsx",
-        "src/pages/DeliveryPage.test.tsx",
-        "src/pages/DeliveryPage.tsx",
-        "src/pages/EndpointsPage.test.tsx",
-        "src/pages/EndpointsPage.tsx",
-        "src/pages/InboxPage.test.tsx",
-        "src/pages/InboxPage.tsx",
-        "src/pages/MessagePage.test.tsx",
-        "src/pages/MessagePage.tsx",
-        "src/pages/SettingsPage.test.tsx",
-        "src/pages/SettingsPage.tsx",
-        "src/pages/SetupPage.tsx",
-        "src/test/fakeServer.ts",
-        "src/test/fixtures.tsx",
-        "vite.config.ts",
         ":bundle_proto_wire_types",
+        ":vite.config.ts",
+        "//mail-hero/web/src:typecheck_project_srcs",
     ],
-    extends = "tsconfig.json",
+    extends = ":tsconfig.json",
     no_emit = True,
     tsconfig = {
         "compilerOptions": {"noEmit": True},
@@ -697,50 +122,42 @@ alias(
     actual = ":typecheck_project_typecheck",
 )
 
-test_suite(name = "check")
-
-filegroup(
-    name = "source_audit_files",
-    srcs = glob(
-        [
-            "*",
-            "scripts/**",
-            "src/**",
-        ],
-        allow_empty = True,
-        exclude = SOURCE_AUDIT_EXCLUDES,
-    ) + glob(
-        [
-            ".env.example",
-            ".env.*.example",
-            ".dev.vars.example",
-        ],
-        allow_empty = True,
-    ),
-    visibility = ["//visibility:public"],
-)
-
-proto_vitest_test(
-    name = "scripts_js_budget_test",
-    data = [
-        "package.json",
-        "vite.config.ts",
-        ":node_modules/@vitejs/plugin-react",
-        ":node_modules/jsdom",
-        ":node_modules/vite",
+test_suite(
+    name = "check",
+    tests = [
+        ":typecheck_project_typecheck_test",
+        "//mail-hero/web/scripts:check",
+        "//mail-hero/web/src:check",
     ],
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = ["scripts/js-budget.test.mjs"],
-    deps = [":build_checks"],
 )
 
 test_suite(
     name = "unit_tests",
     tags = ["unit"],
+    tests = [
+        "//mail-hero/web/scripts:unit_tests",
+        "//mail-hero/web/src:unit_tests",
+    ],
 )
 
 test_suite(
     name = "typecheck_tests",
     tests = [":typecheck_project_typecheck_test"],
+)
+
+alias(
+    name = "lib",
+    actual = "//mail-hero/web/src:lib",
+)
+
+source_audit_files(
+    patterns = [
+        "*",
+        "scripts/**",
+        "src/**",
+    ],
+    deps = [
+        "//mail-hero/web/scripts:source_audit_files",
+        "//mail-hero/web/src:source_audit_files",
+    ],
 )

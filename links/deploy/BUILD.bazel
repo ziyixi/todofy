@@ -1,6 +1,6 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library", "js_test")
 load("@npm//website:tsx/package_json.bzl", tsx = "bin")
-load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files")
 
 package(default_visibility = ["//links:__subpackages__"])
 
@@ -30,10 +30,10 @@ tsx.tsx_test(
         "test/wrangler-config.test.mjs",
         ":source_deploy_vars_mjs",
         "//links:config",
-        "//links/worker:entry_metadata",
         "//links/worker:node_modules/wrangler",
         "//links/worker:package_metadata",
-        "//links/worker:runtime_metadata",
+        "//links/worker/src:entry_metadata",
+        "//links/worker/test:runtime_metadata",
     ],
 )
 
@@ -79,6 +79,7 @@ js_library(
     visibility = [
         "//links:__subpackages__",
         "//tools/cloud-config:__pkg__",
+        "//tools/cloud-config/tests:__pkg__",
     ],
     deps = ["//tools/cloud-config:worker-deploy"],
 )
@@ -89,22 +90,7 @@ js_library(
     deps = ["//tools/bundle-size:library"],
 )
 
-filegroup(
-    name = "source_audit_files",
-    srcs = glob(
-        [
-            "*",
-            "test/**",
-        ],
-        allow_empty = True,
-        exclude = SOURCE_AUDIT_EXCLUDES,
-    ) + glob(
-        [
-            ".env.example",
-            ".env.*.example",
-            ".dev.vars.example",
-        ],
-        allow_empty = True,
-    ),
-    visibility = ["//visibility:public"],
-)
+source_audit_files(patterns = [
+    "*",
+    "test/**",
+])

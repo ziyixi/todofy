@@ -12,7 +12,7 @@ the contract.
 | File | Purpose |
 | --- | --- |
 | [`proto/recall/archive/v1/archive.proto`](../../proto/recall/archive/v1/archive.proto) | The records and their value rules: the one source |
-| `recall-archive-v1.schema.json` | JSON Schema 2020-12 **generated** from the IDL (`bazel run //proto:write_schemas`; `//proto:schema_test` checks freshness): `$defs/Change` (one archived line), `$defs/ArchiveState` (`state.json`), `$defs/ChangePage` (a feed answer). A reader's schema: every object open, and a change of a kind it does not know passes on its envelope |
+| `recall-archive-v1.schema.json` | JSON Schema 2020-12 **generated** from the IDL (`bazel run //proto:write_schemas`; `//proto/tools:schema_test` checks freshness): `$defs/Change` (one archived line), `$defs/ArchiveState` (`state.json`), `$defs/ChangePage` (a feed answer). A reader's schema: every object open, and a change of a kind it does not know passes on its envelope |
 | `fixtures/<Def>/*.json` | Golden examples, synthetic, exact bytes (2-space JSON, as the codec writes them, then a newline) |
 | `fixtures/future/` | A change a newer recall may write within v1 (`Change/star.json`, a planned kind, and its blob): every reader keeps it |
 | `fixtures/invalid/<Def>/*.json` | Examples every reader must refuse (a blob path with `..`, an upper-case digest, another blob encoding, a visit without its body or page, a visit with a blob, a non-http URL, a malformed tombstone target, another version, a page or state without its feed, a negative cursor) |
@@ -210,7 +210,7 @@ profile's breaking checks (`proto/tools/profile_breaking.py`) hold the IDL to th
   lenient reads, the future change passes a lenient read with its kind and body listed as unrecognized and its blob
   matches it, and `fixtures/archive/` holds the first page's changes (its day file's lines, its `state.json`, its blob's
   size and digest).
-- The generated schema is checked by `//proto:schema_test`. Python `jsonschema`
+- The generated schema is checked by `//proto/tools:schema_test`. Python `jsonschema`
   (Draft 2020-12) gives every fixture the codec's verdict, accepts the future change alone and inside a page, and
   accepts a known kind with unknown members.
 - `//recall:check`: recall's Worker renders each change from its row and its tests rebuild `fixtures/Change/`,

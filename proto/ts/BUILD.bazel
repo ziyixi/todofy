@@ -1,9 +1,9 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library")
 load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
 load("@npm//:defs.bzl", "npm_link_all_packages")
-load("//proto/bazel:codegen.bzl", "proto_codegen")
+load("//proto/bazel:codegen.bzl", "ts_proto_library")
 load("//proto/bazel:ts_package.bzl", "proto_package")
-load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -18,207 +18,129 @@ proto_package(
     deps = [":all_ts"],
 )
 
-proto_codegen(
-    name = "google_api_annotations_ts_generate",
+ts_proto_library(
+    name = "google_api_annotations_ts",
     outs = ["google/api/annotations_pb.ts"],
-    format = "ts",
     proto_package = "google.api",
     protos = ["@googleapis//:google_api_annotations_proto"],
     sources = ["google/api/annotations.proto"],
-)
-
-js_library(
-    name = "google_api_annotations_ts",
-    types = [":google_api_annotations_ts_generate"],
     deps = [
         ":google_api_http_ts",
         ":node_modules/@bufbuild/protobuf",
     ],
 )
 
-proto_codegen(
-    name = "google_api_client_ts_generate",
+ts_proto_library(
+    name = "google_api_client_ts",
     outs = ["google/api/client_pb.ts"],
-    format = "ts",
     proto_package = "google.api",
     protos = ["@googleapis//:google_api_client_proto"],
     sources = ["google/api/client.proto"],
-)
-
-js_library(
-    name = "google_api_client_ts",
-    types = [":google_api_client_ts_generate"],
     deps = [
         ":google_api_launch_stage_ts",
         ":node_modules/@bufbuild/protobuf",
     ],
 )
 
-proto_codegen(
-    name = "google_api_field_behavior_ts_generate",
+ts_proto_library(
+    name = "google_api_field_behavior_ts",
     outs = ["google/api/field_behavior_pb.ts"],
-    format = "ts",
     proto_package = "google.api",
     protos = ["@googleapis//:google_api_field_behavior_proto"],
     sources = ["google/api/field_behavior.proto"],
-)
-
-js_library(
-    name = "google_api_field_behavior_ts",
-    types = [":google_api_field_behavior_ts_generate"],
     deps = [":node_modules/@bufbuild/protobuf"],
 )
 
-proto_codegen(
-    name = "google_api_field_info_ts_generate",
+ts_proto_library(
+    name = "google_api_field_info_ts",
     outs = ["google/api/field_info_pb.ts"],
-    format = "ts",
     proto_package = "google.api",
     protos = ["@googleapis//:google_api_field_info_proto"],
     sources = ["google/api/field_info.proto"],
-)
-
-js_library(
-    name = "google_api_field_info_ts",
-    types = [":google_api_field_info_ts_generate"],
     deps = [":node_modules/@bufbuild/protobuf"],
 )
 
-proto_codegen(
-    name = "google_api_http_ts_generate",
+ts_proto_library(
+    name = "google_api_http_ts",
     outs = ["google/api/http_pb.ts"],
-    format = "ts",
     proto_package = "google.api",
     protos = ["@googleapis//:google_api_http_proto"],
     sources = ["google/api/http.proto"],
-)
-
-js_library(
-    name = "google_api_http_ts",
-    types = [":google_api_http_ts_generate"],
     deps = [":node_modules/@bufbuild/protobuf"],
 )
 
-proto_codegen(
-    name = "google_api_launch_stage_ts_generate",
+ts_proto_library(
+    name = "google_api_launch_stage_ts",
     outs = ["google/api/launch_stage_pb.ts"],
-    format = "ts",
     proto_package = "google.api",
     protos = ["@googleapis//:google_api_launch_stage_proto"],
     sources = ["google/api/launch_stage.proto"],
-)
-
-js_library(
-    name = "google_api_launch_stage_ts",
-    types = [":google_api_launch_stage_ts_generate"],
     deps = [":node_modules/@bufbuild/protobuf"],
 )
 
-proto_codegen(
-    name = "google_api_resource_ts_generate",
+ts_proto_library(
+    name = "google_api_resource_ts",
     outs = ["google/api/resource_pb.ts"],
-    format = "ts",
     proto_package = "google.api",
     protos = ["@googleapis//:google_api_resource_proto"],
     sources = ["google/api/resource.proto"],
-)
-
-js_library(
-    name = "google_api_resource_ts",
-    types = [":google_api_resource_ts_generate"],
     deps = [":node_modules/@bufbuild/protobuf"],
 )
 
-proto_codegen(
-    name = "google_rpc_code_ts_generate",
+ts_proto_library(
+    name = "google_rpc_code_ts",
     outs = ["google/rpc/code_pb.ts"],
-    format = "ts",
     proto_package = "google.rpc",
     protos = ["@googleapis//:google_rpc_code_proto"],
     sources = ["google/rpc/code.proto"],
-)
-
-js_library(
-    name = "google_rpc_code_ts",
-    types = [":google_rpc_code_ts_generate"],
     deps = [":node_modules/@bufbuild/protobuf"],
 )
 
-proto_codegen(
-    name = "google_rpc_error_details_ts_generate",
+ts_proto_library(
+    name = "google_rpc_error_details_ts",
     outs = ["google/rpc/error_details_pb.ts"],
-    format = "ts",
     proto_package = "google.rpc",
     protos = ["@googleapis//:google_rpc_error_details_proto"],
     sources = ["google/rpc/error_details.proto"],
-)
-
-js_library(
-    name = "google_rpc_error_details_ts",
-    types = [":google_rpc_error_details_ts_generate"],
     deps = [":node_modules/@bufbuild/protobuf"],
 )
 
-proto_codegen(
-    name = "google_rpc_status_ts_generate",
+ts_proto_library(
+    name = "google_rpc_status_ts",
     outs = ["google/rpc/status_pb.ts"],
-    format = "ts",
     proto_package = "google.rpc",
     protos = ["@googleapis//:google_rpc_status_proto"],
     sources = ["google/rpc/status.proto"],
-)
-
-js_library(
-    name = "google_rpc_status_ts",
-    types = [":google_rpc_status_ts_generate"],
     deps = [":node_modules/@bufbuild/protobuf"],
 )
 
-proto_codegen(
-    name = "common_errors_v1_ts_generate",
+ts_proto_library(
+    name = "common_errors_v1_ts",
     outs = ["common/errors/v1/errors_pb.ts"],
-    format = "ts",
     proto_package = "common.errors.v1",
     protos = ["//proto/common/errors/v1:proto"],
     sources = ["common/errors/v1/errors.proto"],
-)
-
-js_library(
-    name = "common_errors_v1_ts",
-    types = [":common_errors_v1_ts_generate"],
     deps = [":node_modules/@bufbuild/protobuf"],
 )
 
-proto_codegen(
-    name = "common_wire_v1_ts_generate",
+ts_proto_library(
+    name = "common_wire_v1_ts",
     outs = ["common/wire/v1/wire_pb.ts"],
-    format = "ts",
     proto_package = "common.wire.v1",
     protos = ["//proto/common/wire/v1:proto"],
     sources = ["common/wire/v1/wire.proto"],
-)
-
-js_library(
-    name = "common_wire_v1_ts",
-    types = [":common_wire_v1_ts_generate"],
     deps = [":node_modules/@bufbuild/protobuf"],
 )
 
-proto_codegen(
-    name = "dashboard_mcp_v1_ts_generate",
+ts_proto_library(
+    name = "dashboard_mcp_v1_ts",
     outs = [
         "dashboard/mcp/v1/home_service_pb.ts",
         "dashboard/mcp/v1/home_service_wire.ts",
     ],
-    format = "ts",
     proto_package = "dashboard.mcp.v1",
     protos = ["//proto/dashboard/mcp/v1:proto"],
     sources = ["dashboard/mcp/v1/home_service.proto"],
-)
-
-js_library(
-    name = "dashboard_mcp_v1_ts",
-    types = [":dashboard_mcp_v1_ts_generate"],
     deps = [
         ":common_wire_v1_ts",
         ":dashboard_ui_v1_ts",
@@ -228,8 +150,8 @@ js_library(
     ],
 )
 
-proto_codegen(
-    name = "dashboard_ui_v1_ts_generate",
+ts_proto_library(
+    name = "dashboard_ui_v1_ts",
     outs = [
         "dashboard/ui/v1/attention_pb.ts",
         "dashboard/ui/v1/attention_wire.ts",
@@ -254,7 +176,6 @@ proto_codegen(
         "dashboard/ui/v1/usage_pb.ts",
         "dashboard/ui/v1/usage_wire.ts",
     ],
-    format = "ts",
     proto_package = "dashboard.ui.v1",
     protos = ["//proto/dashboard/ui/v1:proto"],
     sources = [
@@ -270,11 +191,6 @@ proto_codegen(
         "dashboard/ui/v1/registry.proto",
         "dashboard/ui/v1/usage.proto",
     ],
-)
-
-js_library(
-    name = "dashboard_ui_v1_ts",
-    types = [":dashboard_ui_v1_ts_generate"],
     deps = [
         ":common_wire_v1_ts",
         ":google_api_annotations_ts",
@@ -289,21 +205,15 @@ js_library(
     ],
 )
 
-proto_codegen(
-    name = "fleet_telemetry_v1_ts_generate",
+ts_proto_library(
+    name = "fleet_telemetry_v1_ts",
     outs = [
         "fleet/telemetry/v1/host_report_pb.ts",
         "fleet/telemetry/v1/host_report_wire.ts",
     ],
-    format = "ts",
     proto_package = "fleet.telemetry.v1",
     protos = ["//proto/fleet/telemetry/v1:proto"],
     sources = ["fleet/telemetry/v1/host_report.proto"],
-)
-
-js_library(
-    name = "fleet_telemetry_v1_ts",
-    types = [":fleet_telemetry_v1_ts_generate"],
     deps = [
         ":common_wire_v1_ts",
         ":google_api_field_behavior_ts",
@@ -313,26 +223,20 @@ js_library(
     ],
 )
 
-proto_codegen(
-    name = "fleet_ui_v1_ts_generate",
+ts_proto_library(
+    name = "fleet_ui_v1_ts",
     outs = [
         "fleet/ui/v1/fleet_ui_service_pb.ts",
         "fleet/ui/v1/fleet_ui_service_wire.ts",
         "fleet/ui/v1/node_pb.ts",
         "fleet/ui/v1/node_wire.ts",
     ],
-    format = "ts",
     proto_package = "fleet.ui.v1",
     protos = ["//proto/fleet/ui/v1:proto"],
     sources = [
         "fleet/ui/v1/fleet_ui_service.proto",
         "fleet/ui/v1/node.proto",
     ],
-)
-
-js_library(
-    name = "fleet_ui_v1_ts",
-    types = [":fleet_ui_v1_ts_generate"],
     deps = [
         ":fleet_telemetry_v1_ts",
         ":google_api_annotations_ts",
@@ -344,14 +248,13 @@ js_library(
     ],
 )
 
-proto_codegen(
-    name = "links_ui_v1_ts_generate",
+ts_proto_library(
+    name = "links_ui_v1_ts",
     outs = [
         "links/ui/v1/errors_pb.ts",
         "links/ui/v1/link_pb.ts",
         "links/ui/v1/links_ui_service_pb.ts",
     ],
-    format = "ts",
     proto_package = "links.ui.v1",
     protos = ["//proto/links/ui/v1:proto"],
     sources = [
@@ -359,11 +262,6 @@ proto_codegen(
         "links/ui/v1/link.proto",
         "links/ui/v1/links_ui_service.proto",
     ],
-)
-
-js_library(
-    name = "links_ui_v1_ts",
-    types = [":links_ui_v1_ts_generate"],
     deps = [
         ":google_api_annotations_ts",
         ":google_api_client_ts",
@@ -374,8 +272,8 @@ js_library(
     ],
 )
 
-proto_codegen(
-    name = "mailhero_ui_v2_ts_generate",
+ts_proto_library(
+    name = "mailhero_ui_v2_ts",
     outs = [
         "mailhero/ui/v2/delivery_pb.ts",
         "mailhero/ui/v2/endpoint_pb.ts",
@@ -384,7 +282,6 @@ proto_codegen(
         "mailhero/ui/v2/message_pb.ts",
         "mailhero/ui/v2/settings_pb.ts",
     ],
-    format = "ts",
     proto_package = "mailhero.ui.v2",
     protos = ["//proto/mailhero/ui/v2:proto"],
     sources = [
@@ -395,11 +292,6 @@ proto_codegen(
         "mailhero/ui/v2/message.proto",
         "mailhero/ui/v2/settings.proto",
     ],
-)
-
-js_library(
-    name = "mailhero_ui_v2_ts",
-    types = [":mailhero_ui_v2_ts_generate"],
     deps = [
         ":google_api_annotations_ts",
         ":google_api_client_ts",
@@ -410,18 +302,12 @@ js_library(
     ],
 )
 
-proto_codegen(
-    name = "mailhero_webhook_v1_ts_generate",
+ts_proto_library(
+    name = "mailhero_webhook_v1_ts",
     outs = ["mailhero/webhook/v1/mail_received_pb.ts"],
-    format = "ts",
     proto_package = "mailhero.webhook.v1",
     protos = ["//proto/mailhero/webhook/v1:proto"],
     sources = ["mailhero/webhook/v1/mail_received.proto"],
-)
-
-js_library(
-    name = "mailhero_webhook_v1_ts",
-    types = [":mailhero_webhook_v1_ts_generate"],
     deps = [
         ":common_wire_v1_ts",
         ":google_api_field_behavior_ts",
@@ -429,8 +315,8 @@ js_library(
     ],
 )
 
-proto_codegen(
-    name = "mailsort_ui_v2_ts_generate",
+ts_proto_library(
+    name = "mailsort_ui_v2_ts",
     outs = [
         "mailsort/ui/v2/backup_pb.ts",
         "mailsort/ui/v2/consolidation_pb.ts",
@@ -443,7 +329,6 @@ proto_codegen(
         "mailsort/ui/v2/review_pb.ts",
         "mailsort/ui/v2/status_pb.ts",
     ],
-    format = "ts",
     proto_package = "mailsort.ui.v2",
     protos = ["//proto/mailsort/ui/v2:proto"],
     sources = [
@@ -458,11 +343,6 @@ proto_codegen(
         "mailsort/ui/v2/review.proto",
         "mailsort/ui/v2/status.proto",
     ],
-)
-
-js_library(
-    name = "mailsort_ui_v2_ts",
-    types = [":mailsort_ui_v2_ts_generate"],
     deps = [
         ":google_api_annotations_ts",
         ":google_api_client_ts",
@@ -474,26 +354,20 @@ js_library(
     ],
 )
 
-proto_codegen(
-    name = "modelrouter_inference_v1_ts_generate",
+ts_proto_library(
+    name = "modelrouter_inference_v1_ts",
     outs = [
         "modelrouter/inference/v1/console_pb.ts",
         "modelrouter/inference/v1/console_wire.ts",
         "modelrouter/inference/v1/inference_pb.ts",
         "modelrouter/inference/v1/inference_wire.ts",
     ],
-    format = "ts",
     proto_package = "modelrouter.inference.v1",
     protos = ["//proto/modelrouter/inference/v1:proto"],
     sources = [
         "modelrouter/inference/v1/console.proto",
         "modelrouter/inference/v1/inference.proto",
     ],
-)
-
-js_library(
-    name = "modelrouter_inference_v1_ts",
-    types = [":modelrouter_inference_v1_ts_generate"],
     deps = [
         ":google_api_annotations_ts",
         ":google_api_client_ts",
@@ -503,8 +377,8 @@ js_library(
     ],
 )
 
-proto_codegen(
-    name = "newsletter_ui_v1_ts_generate",
+ts_proto_library(
+    name = "newsletter_ui_v1_ts",
     outs = [
         "newsletter/ui/v1/backup_status_pb.ts",
         "newsletter/ui/v1/backup_status_wire.ts",
@@ -521,7 +395,6 @@ proto_codegen(
         "newsletter/ui/v1/source_catalog_pb.ts",
         "newsletter/ui/v1/source_catalog_wire.ts",
     ],
-    format = "ts",
     proto_package = "newsletter.ui.v1",
     protos = ["//proto/newsletter/ui/v1:proto"],
     sources = [
@@ -533,11 +406,6 @@ proto_codegen(
         "newsletter/ui/v1/run.proto",
         "newsletter/ui/v1/source_catalog.proto",
     ],
-)
-
-js_library(
-    name = "newsletter_ui_v1_ts",
-    types = [":newsletter_ui_v1_ts_generate"],
     deps = [
         ":google_api_annotations_ts",
         ":google_api_client_ts",
@@ -548,21 +416,15 @@ js_library(
     ],
 )
 
-proto_codegen(
-    name = "ops_v1_ts_generate",
+ts_proto_library(
+    name = "ops_v1_ts",
     outs = [
         "ops/v1/ops_pb.ts",
         "ops/v1/ops_wire.ts",
     ],
-    format = "ts",
     proto_package = "ops.v1",
     protos = ["//proto/ops/v1:proto"],
     sources = ["ops/v1/ops.proto"],
-)
-
-js_library(
-    name = "ops_v1_ts",
-    types = [":ops_v1_ts_generate"],
     deps = [
         ":common_wire_v1_ts",
         ":google_api_field_behavior_ts",
@@ -571,8 +433,8 @@ js_library(
     ],
 )
 
-proto_codegen(
-    name = "platform_runtime_v1_ts_generate",
+ts_proto_library(
+    name = "platform_runtime_v1_ts",
     outs = [
         "platform/runtime/v1/errors_pb.ts",
         "platform/runtime/v1/errors_wire.ts",
@@ -581,7 +443,6 @@ proto_codegen(
         "platform/runtime/v1/runtime_service_wire.ts",
         "platform/runtime/v1/runtime_wire.ts",
     ],
-    format = "ts",
     proto_package = "platform.runtime.v1",
     protos = ["//proto/platform/runtime/v1:proto"],
     sources = [
@@ -589,11 +450,6 @@ proto_codegen(
         "platform/runtime/v1/runtime.proto",
         "platform/runtime/v1/runtime_service.proto",
     ],
-)
-
-js_library(
-    name = "platform_runtime_v1_ts",
-    types = [":platform_runtime_v1_ts_generate"],
     deps = [
         ":common_wire_v1_ts",
         ":google_api_annotations_ts",
@@ -606,14 +462,13 @@ js_library(
     ],
 )
 
-proto_codegen(
-    name = "prototest_v1_ts_generate",
+ts_proto_library(
+    name = "prototest_v1_ts",
     outs = [
         "prototest/v1/intent_pb.ts",
         "prototest/v1/prototest_pb.ts",
         "prototest/v1/rules_pb.ts",
     ],
-    format = "ts",
     proto_package = "prototest.v1",
     protos = ["//proto/prototest/v1:proto"],
     sources = [
@@ -621,11 +476,6 @@ proto_codegen(
         "prototest/v1/prototest.proto",
         "prototest/v1/rules.proto",
     ],
-)
-
-js_library(
-    name = "prototest_v1_ts",
-    types = [":prototest_v1_ts_generate"],
     deps = [
         ":common_wire_v1_ts",
         ":google_api_annotations_ts",
@@ -635,18 +485,12 @@ js_library(
     ],
 )
 
-proto_codegen(
-    name = "recall_archive_v1_ts_generate",
+ts_proto_library(
+    name = "recall_archive_v1_ts",
     outs = ["recall/archive/v1/archive_pb.ts"],
-    format = "ts",
     proto_package = "recall.archive.v1",
     protos = ["//proto/recall/archive/v1:proto"],
     sources = ["recall/archive/v1/archive.proto"],
-)
-
-js_library(
-    name = "recall_archive_v1_ts",
-    types = [":recall_archive_v1_ts_generate"],
     deps = [
         ":common_wire_v1_ts",
         ":google_api_field_behavior_ts",
@@ -654,26 +498,20 @@ js_library(
     ],
 )
 
-proto_codegen(
-    name = "recall_ingest_v1_ts_generate",
+ts_proto_library(
+    name = "recall_ingest_v1_ts",
     outs = [
         "recall/ingest/v1/diagnostic_pb.ts",
         "recall/ingest/v1/diagnostic_wire.ts",
         "recall/ingest/v1/ingest_pb.ts",
         "recall/ingest/v1/ingest_wire.ts",
     ],
-    format = "ts",
     proto_package = "recall.ingest.v1",
     protos = ["//proto/recall/ingest/v1:proto"],
     sources = [
         "recall/ingest/v1/diagnostic.proto",
         "recall/ingest/v1/ingest.proto",
     ],
-)
-
-js_library(
-    name = "recall_ingest_v1_ts",
-    types = [":recall_ingest_v1_ts_generate"],
     deps = [
         ":common_wire_v1_ts",
         ":google_api_field_behavior_ts",
@@ -682,15 +520,14 @@ js_library(
     ],
 )
 
-proto_codegen(
-    name = "recall_ui_v1_ts_generate",
+ts_proto_library(
+    name = "recall_ui_v1_ts",
     outs = [
         "recall/ui/v1/errors_pb.ts",
         "recall/ui/v1/page_pb.ts",
         "recall/ui/v1/recall_ui_service_pb.ts",
         "recall/ui/v1/status_pb.ts",
     ],
-    format = "ts",
     proto_package = "recall.ui.v1",
     protos = ["//proto/recall/ui/v1:proto"],
     sources = [
@@ -699,11 +536,6 @@ proto_codegen(
         "recall/ui/v1/recall_ui_service.proto",
         "recall/ui/v1/status.proto",
     ],
-)
-
-js_library(
-    name = "recall_ui_v1_ts",
-    types = [":recall_ui_v1_ts_generate"],
     deps = [
         ":google_api_annotations_ts",
         ":google_api_client_ts",
@@ -715,21 +547,15 @@ js_library(
     ],
 )
 
-proto_codegen(
-    name = "tasks_inbox_v1_ts_generate",
+ts_proto_library(
+    name = "tasks_inbox_v1_ts",
     outs = [
         "tasks/inbox/v1/task_inbox_pb.ts",
         "tasks/inbox/v1/task_inbox_wire.ts",
     ],
-    format = "ts",
     proto_package = "tasks.inbox.v1",
     protos = ["//proto/tasks/inbox/v1:proto"],
     sources = ["tasks/inbox/v1/task_inbox.proto"],
-)
-
-js_library(
-    name = "tasks_inbox_v1_ts",
-    types = [":tasks_inbox_v1_ts_generate"],
     deps = [
         ":common_wire_v1_ts",
         ":google_api_field_behavior_ts",
@@ -738,8 +564,8 @@ js_library(
     ],
 )
 
-proto_codegen(
-    name = "tasks_ui_v1_ts_generate",
+ts_proto_library(
+    name = "tasks_ui_v1_ts",
     outs = [
         "tasks/ui/v1/focus_pb.ts",
         "tasks/ui/v1/goals_pb.ts",
@@ -749,7 +575,6 @@ proto_codegen(
         "tasks/ui/v1/task_pb.ts",
         "tasks/ui/v1/tasks_ui_service_pb.ts",
     ],
-    format = "ts",
     proto_package = "tasks.ui.v1",
     protos = ["//proto/tasks/ui/v1:proto"],
     sources = [
@@ -761,11 +586,6 @@ proto_codegen(
         "tasks/ui/v1/task.proto",
         "tasks/ui/v1/tasks_ui_service.proto",
     ],
-)
-
-js_library(
-    name = "tasks_ui_v1_ts",
-    types = [":tasks_ui_v1_ts_generate"],
     deps = [
         ":google_api_annotations_ts",
         ":google_api_client_ts",
@@ -775,18 +595,12 @@ js_library(
     ],
 )
 
-proto_codegen(
-    name = "todofy_mail_v1_ts_generate",
+ts_proto_library(
+    name = "todofy_mail_v1_ts",
     outs = ["todofy/mail/v1/mail_service_pb.ts"],
-    format = "ts",
     proto_package = "todofy.mail.v1",
     protos = ["//proto/todofy/mail/v1:proto"],
     sources = ["todofy/mail/v1/mail_service.proto"],
-)
-
-js_library(
-    name = "todofy_mail_v1_ts",
-    types = [":todofy_mail_v1_ts_generate"],
     deps = [
         ":google_api_annotations_ts",
         ":google_api_client_ts",
@@ -796,21 +610,15 @@ js_library(
     ],
 )
 
-proto_codegen(
-    name = "todofy_report_v1_ts_generate",
+ts_proto_library(
+    name = "todofy_report_v1_ts",
     outs = [
         "todofy/report/v1/report_pb.ts",
         "todofy/report/v1/report_wire.ts",
     ],
-    format = "ts",
     proto_package = "todofy.report.v1",
     protos = ["//proto/todofy/report/v1:proto"],
     sources = ["todofy/report/v1/report.proto"],
-)
-
-js_library(
-    name = "todofy_report_v1_ts",
-    types = [":todofy_report_v1_ts_generate"],
     deps = [
         ":common_wire_v1_ts",
         ":google_api_field_behavior_ts",
@@ -819,8 +627,8 @@ js_library(
     ],
 )
 
-proto_codegen(
-    name = "todofy_ui_v1_ts_generate",
+ts_proto_library(
+    name = "todofy_ui_v1_ts",
     outs = [
         "todofy/ui/v1/errors_pb.ts",
         "todofy/ui/v1/errors_wire.ts",
@@ -835,7 +643,6 @@ proto_codegen(
         "todofy/ui/v1/todofy_ui_service_pb.ts",
         "todofy/ui/v1/todofy_ui_service_wire.ts",
     ],
-    format = "ts",
     proto_package = "todofy.ui.v1",
     protos = ["//proto/todofy/ui/v1:proto"],
     sources = [
@@ -846,11 +653,6 @@ proto_codegen(
         "todofy/ui/v1/status.proto",
         "todofy/ui/v1/todofy_ui_service.proto",
     ],
-)
-
-js_library(
-    name = "todofy_ui_v1_ts",
-    types = [":todofy_ui_v1_ts_generate"],
     deps = [
         ":google_api_annotations_ts",
         ":google_api_client_ts",
@@ -864,8 +666,8 @@ js_library(
     ],
 )
 
-proto_codegen(
-    name = "watch_ui_v1_ts_generate",
+ts_proto_library(
+    name = "watch_ui_v1_ts",
     outs = [
         "watch/ui/v1/change_pb.ts",
         "watch/ui/v1/errors_pb.ts",
@@ -873,7 +675,6 @@ proto_codegen(
         "watch/ui/v1/watch_pb.ts",
         "watch/ui/v1/watch_ui_service_pb.ts",
     ],
-    format = "ts",
     proto_package = "watch.ui.v1",
     protos = ["//proto/watch/ui/v1:proto"],
     sources = [
@@ -883,11 +684,6 @@ proto_codegen(
         "watch/ui/v1/watch.proto",
         "watch/ui/v1/watch_ui_service.proto",
     ],
-)
-
-js_library(
-    name = "watch_ui_v1_ts",
-    types = [":watch_ui_v1_ts_generate"],
     deps = [
         ":google_api_annotations_ts",
         ":google_api_client_ts",
@@ -898,21 +694,15 @@ js_library(
     ],
 )
 
-proto_codegen(
-    name = "website_sync_v1_ts_generate",
+ts_proto_library(
+    name = "website_sync_v1_ts",
     outs = [
         "website/sync/v1/sync_pb.ts",
         "website/sync/v1/sync_wire.ts",
     ],
-    format = "ts",
     proto_package = "website.sync.v1",
     protos = ["//proto/website/sync/v1:proto"],
     sources = ["website/sync/v1/sync.proto"],
-)
-
-js_library(
-    name = "website_sync_v1_ts",
-    types = [":website_sync_v1_ts_generate"],
     deps = [
         ":common_wire_v1_ts",
         ":google_api_field_behavior_ts",
@@ -1088,8 +878,6 @@ js_library(
     ],
 )
 
-# A cross-package compiler boundary for Recall's existing type-only diagnostic import.
-# Only this IDL package and its wire codec type closure are compiled, not all proto packages.
 ts_project(
     name = "recall_ingest_v1_types",
     srcs = [
@@ -1115,19 +903,4 @@ ts_project(
     deps = [":node_modules/@bufbuild/protobuf"],
 )
 
-filegroup(
-    name = "source_audit_files",
-    srcs = glob(
-        ["*"],
-        allow_empty = True,
-        exclude = SOURCE_AUDIT_EXCLUDES,
-    ) + glob(
-        [
-            ".env.example",
-            ".env.*.example",
-            ".dev.vars.example",
-        ],
-        allow_empty = True,
-    ),
-    visibility = ["//visibility:public"],
-)
+source_audit_files()

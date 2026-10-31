@@ -1,0 +1,48 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@npm//website:wrangler/package_json.bzl", wrangler = "bin")
+load("//tools/bazel:js.bzl", "copied_source_files", "workspace_package_link")
+load("//website:bazel.bzl", "website_sources")
+
+package(default_visibility = ["//website:__subpackages__"])
+
+exports_files(
+    glob(
+        ["*.toml"],
+        allow_empty = True,
+    ),
+    visibility = ["//website:__subpackages__"],
+)
+
+wrangler.wrangler_binary(
+    name = "wrangler",
+    env = {
+        "CI": "true",
+        "WRANGLER_SEND_METRICS": "false",
+    },
+)
+
+js_library(
+    name = "config",
+    srcs = [":wrangler.toml"],
+    visibility = ["//visibility:public"],
+)
+
+copied_source_files(
+    name = "sources",
+    srcs = [
+        "wrangler.toml",
+        "//website/relay/src:files",
+    ],
+)
+
+website_sources(children = [
+    "//website/relay/deploy",
+    "//website/relay/src",
+])
+
+workspace_package_link(
+    name = "proto_link",
+    src = "//website:relay_proto",
+    project = "website",
+    runtime_dependencies = ["@bufbuild/protobuf"],
+)

@@ -1,0 +1,54 @@
+load("@rules_python//python:defs.bzl", "py_library")
+load("//tools/bazel:js.bzl", "copied_source_files")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//todofy:__subpackages__"])
+
+copied_source_files(
+    name = "node_schemas",
+    srcs = [
+        "recommendation-v1.schema.json",
+        "summary-v1.schema.json",
+    ],
+)
+
+py_library(
+    name = "contract_before_idl",
+    srcs = ["contract_before_idl.py"],
+    imports = ["../../.."],
+)
+
+filegroup(
+    name = "schema_sources",
+    srcs = glob([
+        "*.json",
+        "*.py",
+    ]),
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)

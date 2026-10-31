@@ -9,7 +9,7 @@ setup:
 	$(UV) sync --locked --package personal-newsletter
 
 lock-check:
-	$(BAZEL) test //newsletter:tests_test_tooling
+	$(BAZEL) test //newsletter/tests:test_tooling
 
 test:
 	$(BAZEL) test //newsletter:tests

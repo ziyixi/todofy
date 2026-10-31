@@ -80,7 +80,7 @@ NEVER_NESTED = frozenset({"provisioner", "connection", "data", "module", "resour
 # Committed files under infra/, relative to it. Anything else (a plan named tfplan or plan.out, a .tofu
 # file, a log) fails, whatever its name.
 ALLOWED_FILES = re.compile(
-    r"^(?:[A-Za-z0-9_-]+\.tf|\.terraform\.lock\.hcl|\.gitignore|README\.md|BUILD\.bazel|local\.tfvars\.example"
+    r"^(?:[A-Za-z0-9_-]+\.tf|\.terraform\.lock\.hcl|\.gitignore|README\.md|(?:[^/]+/)*BUILD\.bazel|local\.tfvars\.example"
     r"|scripts/[A-Za-z0-9_]+\.py|tests/[A-Za-z0-9_]+\.py)$"
 )
 OTHER_CONFIG = ("*.tofu", "*.tf.json", "*.tofu.json")

@@ -1,0 +1,70 @@
+load("@rules_python//python:defs.bzl", "py_library")
+load("//tools/bazel:js.bzl", "copied_source_files")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//todofy:__subpackages__"])
+
+py_library(
+    name = "package",
+    srcs = ["__init__.py"],
+    imports = [".."],
+)
+
+py_library(
+    name = "library",
+    deps = [
+        ":package",
+        "//todofy/worker/todofy/core:library",
+        "//todofy/worker/todofy/runtime:library",
+    ],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ) + [
+        "//todofy/worker/todofy/core:python_sources",
+        "//todofy/worker/todofy/runtime:python_sources",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + [
+        "//todofy/worker/todofy/core:source_audit_files",
+        "//todofy/worker/todofy/runtime:source_audit_files",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+copied_source_files(
+    name = "local_node_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ),
+)
+
+filegroup(
+    name = "node_sources",
+    srcs = [
+        ":local_node_sources",
+        "//todofy/worker/todofy/core:node_sources",
+        "//todofy/worker/todofy/runtime:node_sources",
+    ],
+)

@@ -1,0 +1,497 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@npm//recall/web:vitest/package_json.bzl", vitest = "bin")
+load("//tools/bazel:js.bzl", "copied_source_files", "proto_vitest_test", "ts_source_library")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//recall:__subpackages__"])
+
+COMMON_TEST_DATA = [
+    "//recall/web:package_json",
+    "//recall/web/src/test:source_fakeServer_ts",
+    "//recall/web/src/test:source_helpers_ts",
+    "//recall/web/src/test:source_setup_ts",
+    "//recall/web:test_config",
+    "//recall/web:node_modules/jsdom",
+    "//recall/web:node_modules/vite",
+]
+
+COMMON_TEST_DEPS = [
+    "//recall/web:node_modules/vitest",
+    ":src__api",
+    ":src__app",
+    ":src__components",
+    ":src__day",
+    ":src__dom",
+    ":src__format",
+    ":src__health",
+    ":src__marks",
+    ":src__query",
+    ":src__sessions",
+    ":src__views__common",
+    ":src__views__diagnostic",
+    "//proto/recall/ui/v1:ts",
+    "//proto/ts:field-mask",
+    "//proto/ts:filter",
+    "//proto/ts:http-transcoder",
+    "//proto/ts:protobuf",
+    "//proto/ts:protobuf-wkt",
+    "//proto/ts:rpc-status",
+    "//recall/shared:segment",
+]
+
+COMMON_TEST_DATA_2 = [
+    "//recall/web:package_json",
+    "//recall/web/src/test:source_fakeServer_ts",
+    "//recall/web/src/test:source_setup_ts",
+    "//recall/web:test_config",
+    "//recall/web:node_modules/jsdom",
+    "//recall/web:node_modules/vite",
+]
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//recall:__subpackages__"],
+)
+
+copied_source_files(
+    name = "application_sources_srcs",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ) + ["//recall/web/src/test:application_sources_srcs"],
+)
+
+copied_source_files(
+    name = "typecheck_project_srcs",
+    srcs = [
+        "api.ts",
+        "app.test.ts",
+        "app.ts",
+        "check-layout.test.ts",
+        "components.ts",
+        "day.ts",
+        "devices.test.ts",
+        "diagnostic.test.ts",
+        "dom.ts",
+        "format.ts",
+        "health.ts",
+        "main.ts",
+        "marks.ts",
+        "page.test.ts",
+        "query.test.ts",
+        "query.ts",
+        "search.test.ts",
+        "sessions.test.ts",
+        "sessions.ts",
+        "settings.test.ts",
+        "timeline.test.ts",
+        "tokens.test.ts",
+        "views/common.ts",
+        "views/devices.ts",
+        "views/diagnostic.ts",
+        "views/page.ts",
+        "views/search.ts",
+        "views/settings.ts",
+        "views/snapshots.ts",
+        "views/timeline.ts",
+        "views/tokens.ts",
+    ] + ["//recall/web/src/test:typecheck_project_srcs"],
+)
+
+copied_source_files(
+    name = "lint_sources",
+    srcs = glob(
+        [
+            "**/*.ts",
+            "**/*.tsx",
+        ],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ) + ["//recall/web/src/test:lint_sources"],
+)
+
+ts_source_library(
+    name = "src__api",
+    srcs = [":api.ts"],
+    deps = [
+        "//proto/common/errors/v1:ts",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:http-client",
+    ],
+)
+
+ts_source_library(
+    name = "src__dom",
+    srcs = [":dom.ts"],
+)
+
+ts_source_library(
+    name = "src__components",
+    srcs = [":components.ts"],
+    deps = [":src__dom"],
+)
+
+ts_source_library(
+    name = "src__day",
+    srcs = [":day.ts"],
+)
+
+ts_source_library(
+    name = "src__format",
+    srcs = [":format.ts"],
+    deps = [
+        ":src__day",
+        "//proto/ts:protobuf-wkt",
+    ],
+)
+
+ts_source_library(
+    name = "src__health",
+    srcs = [":health.ts"],
+    deps = [
+        ":src__dom",
+        ":src__format",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:protobuf-wkt",
+    ],
+)
+
+ts_source_library(
+    name = "src__marks",
+    srcs = [":marks.ts"],
+    deps = [
+        ":src__dom",
+        "//recall/shared:segment",
+    ],
+)
+
+ts_source_library(
+    name = "src__views__common",
+    srcs = [":views/common.ts"],
+    deps = [
+        ":src__api",
+        ":src__components",
+        ":src__dom",
+    ],
+)
+
+ts_source_library(
+    name = "src__query",
+    srcs = [":query.ts"],
+    deps = [
+        ":src__day",
+        ":src__format",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+    ],
+)
+
+ts_source_library(
+    name = "src__sessions",
+    srcs = [":sessions.ts"],
+    deps = [
+        ":src__day",
+        ":src__format",
+        "//proto/recall/ui/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "src__views__diagnostic",
+    srcs = [":views/diagnostic.ts"],
+    deps = [
+        ":src__components",
+        ":src__dom",
+        ":src__format",
+        "//proto/recall/ingest/v1:ts",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:wire-json",
+        "//recall/shared:diagnostic",
+    ],
+)
+
+ts_source_library(
+    name = "src__app",
+    srcs = [
+        ":app.ts",
+        ":views/devices.ts",
+        ":views/page.ts",
+        ":views/search.ts",
+        ":views/settings.ts",
+        ":views/snapshots.ts",
+        ":views/timeline.ts",
+        ":views/tokens.ts",
+    ],
+    deps = [
+        ":src__api",
+        ":src__components",
+        ":src__day",
+        ":src__dom",
+        ":src__format",
+        ":src__health",
+        ":src__marks",
+        ":src__query",
+        ":src__sessions",
+        ":src__views__common",
+        ":src__views__diagnostic",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:filter",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//recall/shared:diagnostic",
+    ],
+)
+
+js_library(
+    name = "src__main",
+    srcs = [
+        ":main.ts",
+        ":styles.css",
+    ],
+    types = [":main.ts"],
+    deps = [":src__app"],
+)
+
+js_library(
+    name = "lib",
+    deps = [
+        ":src__api",
+        ":src__app",
+        ":src__components",
+        ":src__day",
+        ":src__dom",
+        ":src__format",
+        ":src__health",
+        ":src__main",
+        ":src__marks",
+        ":src__query",
+        ":src__sessions",
+        ":src__views__common",
+        ":src__views__diagnostic",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__app_test",
+    config = "//recall/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "recall/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":app.test.ts"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "src__check-layout_test",
+    config = "//recall/web:test_config",
+    data = [
+        "//recall/web:application_sources",
+        "//recall/web:node_modules/jsdom",
+        "//recall/web:node_modules/vite",
+        "//recall/web:package_json",
+        "//recall/web:test_config",
+        "//recall/web/src/test:source_fakeServer_ts",
+        "//recall/web/src/test:source_helpers_ts",
+        "//recall/web/src/test:source_setup_ts",
+    ],
+    project = "recall/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":check-layout.test.ts"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "src__devices_test",
+    config = "//recall/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "recall/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":devices.test.ts"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "src__diagnostic_test",
+    config = "//recall/web:test_config",
+    data = [
+        "//recall/web:node_modules/jsdom",
+        "//recall/web:node_modules/vite",
+        "//recall/web:package_json",
+        "//recall/web:test_config",
+        "//recall/web/src/test:source_setup_ts",
+    ],
+    project = "recall/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":diagnostic.test.ts"],
+    deps = [
+        ":src__components",
+        ":src__day",
+        ":src__dom",
+        ":src__format",
+        ":src__views__diagnostic",
+        "//proto/recall/ingest/v1:ts",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//recall/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__page_test",
+    config = "//recall/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "recall/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":page.test.ts"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "src__query_test",
+    config = "//recall/web:test_config",
+    data = COMMON_TEST_DATA_2,
+    project = "recall/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":query.test.ts"],
+    deps = [
+        ":src__day",
+        ":src__dom",
+        ":src__format",
+        ":src__marks",
+        ":src__query",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:field-mask",
+        "//proto/ts:filter",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+        "//recall/shared:segment",
+        "//recall/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__search_test",
+    config = "//recall/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "recall/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":search.test.ts"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "src__sessions_test",
+    config = "//recall/web:test_config",
+    data = COMMON_TEST_DATA_2,
+    project = "recall/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":sessions.test.ts"],
+    deps = [
+        ":src__day",
+        ":src__dom",
+        ":src__format",
+        ":src__marks",
+        ":src__sessions",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:field-mask",
+        "//proto/ts:filter",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+        "//recall/shared:segment",
+        "//recall/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__settings_test",
+    config = "//recall/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "recall/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":settings.test.ts"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "src__timeline_test",
+    config = "//recall/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "recall/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":timeline.test.ts"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "src__tokens_test",
+    config = "//recall/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "recall/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":tokens.test.ts"],
+    deps = COMMON_TEST_DEPS,
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+    deps = [] + ["//recall/web/src/test:source_audit_files"],
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        ":src__app_test",
+        ":src__check-layout_test",
+        ":src__devices_test",
+        ":src__diagnostic_test",
+        ":src__page_test",
+        ":src__query_test",
+        ":src__search_test",
+        ":src__sessions_test",
+        ":src__settings_test",
+        ":src__timeline_test",
+        ":src__tokens_test",
+        "//recall/web/src/test:check",
+    ],
+)
+
+test_suite(
+    name = "unit_tests",
+    tags = ["unit"],
+    tests = [
+        ":src__app_test",
+        ":src__check-layout_test",
+        ":src__devices_test",
+        ":src__diagnostic_test",
+        ":src__page_test",
+        ":src__query_test",
+        ":src__search_test",
+        ":src__sessions_test",
+        ":src__settings_test",
+        ":src__timeline_test",
+        ":src__tokens_test",
+        "//recall/web/src/test:unit_tests",
+    ],
+)

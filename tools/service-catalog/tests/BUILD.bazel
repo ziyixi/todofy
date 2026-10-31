@@ -1,0 +1,77 @@
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/python:tests.bzl", "unittest_test")
+
+package(default_visibility = ["//visibility:public"])
+
+unittest_test(
+    name = "test_catalog",
+    srcs = ["test_catalog.py"],
+    data = [
+        "//tools:repository_test_data",
+        "//tools/service-catalog:python_sources",
+    ],
+    imports = [
+        ".",
+        "..",
+    ],
+    modules = ["test_catalog"],
+    deps = ["//tools/service-catalog:catalog"],
+)
+
+unittest_test(
+    name = "test_inventory",
+    srcs = ["test_inventory.py"],
+    data = [
+        "//tools:repository_test_data",
+        "//tools/service-catalog:python_sources",
+    ],
+    imports = [
+        ".",
+        "..",
+    ],
+    modules = ["test_inventory"],
+    deps = [
+        "//tools/service-catalog:catalog",
+        "//tools/service-catalog:inventory",
+    ],
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        ":test_catalog",
+        ":test_inventory",
+    ],
+)
+
+filegroup(
+    name = "fixtures",
+    srcs = glob(["*.json"]),
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)

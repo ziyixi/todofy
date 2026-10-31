@@ -1,0 +1,74 @@
+load("@npm//website:@playwright/test/package_json.bzl", playwright = "bin")
+load("//website:bazel.bzl", "website_browser_test", "website_deployment_verifier", "website_sources")
+
+package(default_visibility = ["//website:__subpackages__"])
+
+exports_files(
+    glob(
+        ["*.ts"],
+        allow_empty = True,
+    ),
+    visibility = ["//website:__subpackages__"],
+)
+
+website_browser_test(
+    name = "empty_site_browser_test",
+    mode = "empty",
+    site = "//website:empty_site",
+    spec = ":site.spec.ts",
+)
+
+website_browser_test(
+    name = "empty_translations_browser_test",
+    mode = "empty",
+    site = "//website:empty_site",
+    spec = ":translations.spec.ts",
+)
+
+website_browser_test(
+    name = "empty_deployment_browser_test",
+    mode = "empty",
+    site = "//website:empty_site",
+    spec = ":deployment.spec.ts",
+)
+
+website_browser_test(
+    name = "fixture_site_browser_test",
+    mode = "fixture",
+    site = "//website:fixture_site",
+    spec = ":site.spec.ts",
+)
+
+website_browser_test(
+    name = "fixture_translations_browser_test",
+    mode = "fixture",
+    site = "//website:fixture_site",
+    spec = ":translations.spec.ts",
+)
+
+website_browser_test(
+    name = "fixture_deployment_browser_test",
+    mode = "fixture",
+    site = "//website:fixture_site",
+    spec = ":deployment.spec.ts",
+)
+
+playwright.playwright_binary(name = "playwright")
+
+website_deployment_verifier(name = "verify_deployment")
+
+test_suite(
+    name = "tests",
+    tags = ["browser"],
+    tests = [
+        ":empty_deployment_browser_test",
+        ":empty_site_browser_test",
+        ":empty_translations_browser_test",
+        ":fixture_deployment_browser_test",
+        ":fixture_site_browser_test",
+        ":fixture_translations_browser_test",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+website_sources()

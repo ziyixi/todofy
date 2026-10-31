@@ -1,0 +1,217 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@rules_python//python:defs.bzl", "py_library")
+load("//tools/bazel:js.bzl", "copied_source_files")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//todofy:__subpackages__"])
+
+js_library(
+    name = "gateway_error_contract",
+    srcs = ["api_errors.py"],
+)
+
+py_library(
+    name = "package",
+    srcs = ["__init__.py"],
+    imports = ["../.."],
+    deps = ["//todofy/worker/todofy:package"],
+)
+
+py_library(
+    name = "api_errors",
+    srcs = ["api_errors.py"],
+    imports = ["../.."],
+    deps = [":package"],
+)
+
+py_library(
+    name = "backoff",
+    srcs = ["backoff.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        ":vocab",
+    ],
+)
+
+py_library(
+    name = "backup",
+    srcs = ["backup.py"],
+    imports = ["../.."],
+    deps = [":package"],
+)
+
+py_library(
+    name = "carryover",
+    srcs = ["carryover.py"],
+    imports = ["../.."],
+    deps = [":package"],
+)
+
+py_library(
+    name = "contract",
+    srcs = ["contract.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        "//proto:python_runtime",
+        "//proto/mailhero/webhook/v1:python",
+    ],
+)
+
+py_library(
+    name = "mailbox",
+    srcs = ["mailbox.py"],
+    imports = ["../.."],
+    deps = [":package"],
+)
+
+py_library(
+    name = "metrics",
+    srcs = ["metrics.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        ":vocab",
+    ],
+)
+
+py_library(
+    name = "model_input",
+    srcs = ["model_input.py"],
+    imports = ["../.."],
+    deps = [
+        ":contract",
+        ":package",
+    ],
+)
+
+py_library(
+    name = "ops",
+    srcs = ["ops.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        "//proto:python_runtime",
+        "//proto/ops/v1:python",
+    ],
+)
+
+py_library(
+    name = "owner_ui",
+    srcs = ["owner_ui.py"],
+    imports = ["../.."],
+    deps = [
+        ":contract",
+        ":package",
+        "//proto:python_runtime",
+        "//proto/todofy/report/v1:python",
+        "//proto/todofy/ui/v1:python",
+        "//todofy/worker/todofy/core/sql:package",
+    ],
+)
+
+py_library(
+    name = "prompts",
+    srcs = ["prompts.py"],
+    imports = ["../.."],
+    deps = [":package"],
+)
+
+py_library(
+    name = "render",
+    srcs = ["render.py"],
+    imports = ["../.."],
+    deps = [
+        ":contract",
+        ":package",
+    ],
+)
+
+py_library(
+    name = "report_schema",
+    srcs = ["report_schema.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        "//proto:python_runtime",
+        "//proto/todofy/report/v1:python",
+    ],
+)
+
+py_library(
+    name = "vocab",
+    srcs = ["vocab.py"],
+    imports = ["../.."],
+    deps = [":package"],
+)
+
+filegroup(
+    name = "core_sources",
+    srcs = glob(["**/*.py"]) + ["//todofy/worker/todofy/core/sql:python_sources"],
+)
+
+py_library(
+    name = "library",
+    deps = [
+        ":api_errors",
+        ":backoff",
+        ":backup",
+        ":carryover",
+        ":contract",
+        ":mailbox",
+        ":metrics",
+        ":model_input",
+        ":ops",
+        ":owner_ui",
+        ":package",
+        ":prompts",
+        ":render",
+        ":report_schema",
+        ":vocab",
+        "//todofy/worker/todofy/core/sql:library",
+    ],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ) + ["//todofy/worker/todofy/core/sql:python_sources"],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ) + ["//todofy/worker/todofy/core/sql:source_audit_files"],
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+copied_source_files(
+    name = "local_node_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ),
+)
+
+filegroup(
+    name = "node_sources",
+    srcs = [
+        ":local_node_sources",
+        "//todofy/worker/todofy/core/sql:node_sources",
+    ],
+)

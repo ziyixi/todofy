@@ -1,0 +1,34 @@
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(glob(
+    ["*/action.yml"],
+    allow_empty = True,
+))
+
+filegroup(
+    name = "files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+filegroup(
+    name = "action_files",
+    srcs = glob(
+        ["*/action.yml"],
+        allow_empty = True,
+    ),
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+)

@@ -1,0 +1,83 @@
+load("@rules_python//python:defs.bzl", "py_library")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//visibility:public"])
+
+py_library(
+    name = "apply_diagnostics",
+    srcs = ["apply_diagnostics.py"],
+    imports = ["."],
+)
+
+py_library(
+    name = "bootstrap_state",
+    srcs = ["bootstrap_state.py"],
+    imports = ["."],
+    deps = [
+        ":infra_state",
+        "//tools/cloud-bootstrap:cloud_api",
+        "//tools/cloud-bootstrap:private_input",
+    ],
+)
+
+py_library(
+    name = "infra_state",
+    srcs = [
+        "infra_state.py",
+        "reviewed_plans.py",
+    ],
+    imports = ["."],
+    deps = [
+        ":apply_diagnostics",
+        ":platform_export",
+        ":reconcile_policy",
+        "//tools/cloud-config:cloud_profile",
+        "//tools/cloud-config:generate",
+    ],
+)
+
+py_library(
+    name = "local_tfvars",
+    srcs = ["local_tfvars.py"],
+    imports = ["."],
+    deps = ["//tools/cloud-config:cloud_profile"],
+)
+
+py_library(
+    name = "platform_export",
+    srcs = ["platform_export.py"],
+    imports = ["."],
+)
+
+py_library(
+    name = "reconcile_policy",
+    srcs = ["reconcile_policy.py"],
+    imports = ["."],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)

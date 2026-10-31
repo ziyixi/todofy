@@ -1,5 +1,5 @@
-load("@rules_python//python:defs.bzl", "py_library", "py_test")
-load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("@rules_python//python:defs.bzl", "py_library")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -8,8 +8,8 @@ py_library(
     srcs = ["binaries.py"],
     imports = ["."],
     deps = [
-        "//tools/vps-bootstrap:config",
-        "//tools/vps-bootstrap:host",
+        ":config",
+        ":host",
     ],
 )
 
@@ -18,10 +18,10 @@ py_library(
     srcs = ["cluster.py"],
     imports = ["."],
     deps = [
-        "//tools/vps-bootstrap:binaries",
-        "//tools/vps-bootstrap:config",
-        "//tools/vps-bootstrap:host",
-        "//tools/vps-bootstrap:runner",
+        ":binaries",
+        ":config",
+        ":host",
+        ":runner",
     ],
 )
 
@@ -36,9 +36,9 @@ py_library(
     srcs = ["firewall.py"],
     imports = ["."],
     deps = [
-        "//tools/vps-bootstrap:config",
-        "//tools/vps-bootstrap:node_address",
-        "//tools/vps-bootstrap:runner",
+        ":config",
+        ":node_address",
+        ":runner",
     ],
 )
 
@@ -47,8 +47,8 @@ py_library(
     srcs = ["host.py"],
     imports = ["."],
     deps = [
-        "//tools/vps-bootstrap:config",
-        "//tools/vps-bootstrap:runner",
+        ":config",
+        ":runner",
     ],
 )
 
@@ -57,14 +57,14 @@ py_library(
     srcs = ["install.py"],
     imports = ["."],
     deps = [
-        "//tools/vps-bootstrap:binaries",
-        "//tools/vps-bootstrap:cluster",
-        "//tools/vps-bootstrap:config",
-        "//tools/vps-bootstrap:firewall",
-        "//tools/vps-bootstrap:host",
-        "//tools/vps-bootstrap:node_address",
-        "//tools/vps-bootstrap:observer_policy",
-        "//tools/vps-bootstrap:reader",
+        ":binaries",
+        ":cluster",
+        ":config",
+        ":firewall",
+        ":host",
+        ":node_address",
+        ":observer_policy",
+        ":reader",
     ],
 )
 
@@ -73,10 +73,10 @@ py_library(
     srcs = ["node_address.py"],
     imports = ["."],
     deps = [
-        "//tools/vps-bootstrap:cluster",
-        "//tools/vps-bootstrap:config",
-        "//tools/vps-bootstrap:host",
-        "//tools/vps-bootstrap:runner",
+        ":cluster",
+        ":config",
+        ":host",
+        ":runner",
     ],
 )
 
@@ -85,9 +85,9 @@ py_library(
     srcs = ["observer_policy.py"],
     imports = ["."],
     deps = [
-        "//tools/vps-bootstrap:config",
-        "//tools/vps-bootstrap:host",
-        "//tools/vps-bootstrap:runner",
+        ":config",
+        ":host",
+        ":runner",
     ],
 )
 
@@ -96,9 +96,9 @@ py_library(
     srcs = ["prepare.py"],
     imports = ["."],
     deps = [
-        "//tools/vps-bootstrap:config",
-        "//tools/vps-bootstrap:firewall",
-        "//tools/vps-bootstrap:node_address",
+        ":config",
+        ":firewall",
+        ":node_address",
         "//tools/vps-release:release_identity",
         "//tools/vps-release:render",
         "@python_deps//pyyaml",
@@ -110,9 +110,9 @@ py_library(
     srcs = ["reader.py"],
     imports = ["."],
     deps = [
-        "//tools/vps-bootstrap:config",
-        "//tools/vps-bootstrap:host",
-        "//tools/vps-bootstrap:runner",
+        ":config",
+        ":host",
+        ":runner",
     ],
 )
 
@@ -121,13 +121,13 @@ py_library(
     srcs = ["recover.py"],
     imports = ["."],
     deps = [
-        "//tools/vps-bootstrap:binaries",
-        "//tools/vps-bootstrap:cluster",
-        "//tools/vps-bootstrap:config",
-        "//tools/vps-bootstrap:host",
-        "//tools/vps-bootstrap:node_address",
-        "//tools/vps-bootstrap:observer_policy",
-        "//tools/vps-bootstrap:runner",
+        ":binaries",
+        ":cluster",
+        ":config",
+        ":host",
+        ":node_address",
+        ":observer_policy",
+        ":runner",
     ],
 )
 
@@ -136,12 +136,12 @@ py_library(
     srcs = ["repair.py"],
     imports = ["."],
     deps = [
-        "//tools/vps-bootstrap:cluster",
-        "//tools/vps-bootstrap:config",
-        "//tools/vps-bootstrap:host",
-        "//tools/vps-bootstrap:reader",
-        "//tools/vps-bootstrap:repair_checks",
-        "//tools/vps-bootstrap:repair_kube",
+        ":cluster",
+        ":config",
+        ":host",
+        ":reader",
+        ":repair_checks",
+        ":repair_kube",
     ],
 )
 
@@ -150,8 +150,8 @@ py_library(
     srcs = ["repair_checks.py"],
     imports = ["."],
     deps = [
-        "//tools/vps-bootstrap:config",
-        "//tools/vps-bootstrap:host",
+        ":config",
+        ":host",
     ],
 )
 
@@ -160,8 +160,8 @@ py_library(
     srcs = ["repair_gate.py"],
     imports = ["."],
     deps = [
-        "//newsletter:drain",
-        "//newsletter:ownership",
+        "//newsletter/src/newsletter:drain",
+        "//newsletter/src/newsletter:ownership",
     ],
 )
 
@@ -170,9 +170,9 @@ py_library(
     srcs = ["repair_kube.py"],
     imports = ["."],
     deps = [
-        "//tools/vps-bootstrap:cluster",
-        "//tools/vps-bootstrap:config",
-        "//tools/vps-bootstrap:repair_checks",
+        ":cluster",
+        ":config",
+        ":repair_checks",
     ],
 )
 
@@ -180,251 +180,7 @@ py_library(
     name = "runner",
     srcs = ["runner.py"],
     imports = ["."],
-    deps = ["//tools/vps-bootstrap:config"],
-)
-
-py_test(
-    name = "test_binaries_test",
-    srcs = [
-        "tests/test_binaries.py",
-        "//tools/bazel/python:unittest_main.py",
-    ],
-    args = ["test_binaries"],
-    data = [
-        ":python_sources",
-        "//tools:repository_test_data",
-    ],
-    imports = [
-        ".",
-        "tests",
-    ],
-    legacy_create_init = False,
-    main = "//tools/bazel/python:unittest_main.py",
-    deps = [
-        "//tools/vps-bootstrap:binaries",
-        "//tools/vps-bootstrap:cluster",
-        "//tools/vps-bootstrap:config",
-        "//tools/vps-bootstrap:host",
-        "//tools/vps-bootstrap:install",
-    ],
-)
-
-py_test(
-    name = "test_bootstrap_test",
-    srcs = [
-        "tests/test_bootstrap.py",
-        "//tools/bazel/python:unittest_main.py",
-    ],
-    args = ["test_bootstrap"],
-    data = [
-        ":python_sources",
-        "//tools:repository_test_data",
-        "//tools/bazel/python:test_cli_bin",
-    ],
-    env = {
-        "BAZEL_COPY_WORKSPACE": "1",
-        "BAZEL_TEST_BIN": "$(rootpath //tools/bazel/python:test_cli_bin)",
-    },
-    imports = [
-        ".",
-        "tests",
-    ],
-    legacy_create_init = False,
-    main = "//tools/bazel/python:unittest_main.py",
-    deps = [
-        "//platform:deployment_resources",
-        "//platform:status_daemon_config",
-        "//proto/platform/runtime/v1:python",
-        "//tools/vps-bootstrap:binaries",
-        "//tools/vps-bootstrap:cluster",
-        "//tools/vps-bootstrap:config",
-        "//tools/vps-bootstrap:firewall",
-        "//tools/vps-bootstrap:host",
-        "//tools/vps-bootstrap:install",
-        "//tools/vps-bootstrap:node_address",
-        "//tools/vps-bootstrap:observer_policy",
-        "//tools/vps-bootstrap:prepare",
-        "@python_deps//pyyaml",
-    ],
-)
-
-py_test(
-    name = "test_node_address_test",
-    srcs = [
-        "tests/test_node_address.py",
-        "//tools/bazel/python:unittest_main.py",
-    ],
-    args = ["test_node_address"],
-    data = [
-        ":python_sources",
-        "//tools:repository_test_data",
-        "//tools/bazel/python:test_cli_bin",
-    ],
-    env = {
-        "BAZEL_COPY_WORKSPACE": "1",
-        "BAZEL_TEST_BIN": "$(rootpath //tools/bazel/python:test_cli_bin)",
-    },
-    imports = [
-        ".",
-        "tests",
-    ],
-    legacy_create_init = False,
-    main = "//tools/bazel/python:unittest_main.py",
-    deps = [
-        "//tools/vps-bootstrap:config",
-        "//tools/vps-bootstrap:firewall",
-        "//tools/vps-bootstrap:host",
-        "//tools/vps-bootstrap:node_address",
-        "//tools/vps-bootstrap:prepare",
-        "//tools/vps-bootstrap:recover",
-    ],
-)
-
-py_test(
-    name = "test_observer_policy_test",
-    srcs = [
-        "tests/test_observer_policy.py",
-        "//tools/bazel/python:unittest_main.py",
-    ],
-    args = ["test_observer_policy"],
-    data = [
-        ":python_sources",
-        "//tools:repository_test_data",
-    ],
-    imports = [
-        ".",
-        "tests",
-    ],
-    legacy_create_init = False,
-    main = "//tools/bazel/python:unittest_main.py",
-    deps = [
-        "//tools/vps-bootstrap:config",
-        "//tools/vps-bootstrap:observer_policy",
-    ],
-)
-
-py_test(
-    name = "test_reader_test",
-    srcs = [
-        "tests/test_reader.py",
-        "//tools/bazel/python:unittest_main.py",
-    ],
-    args = ["test_reader"],
-    data = [
-        ":python_sources",
-        "//tools:repository_test_data",
-    ],
-    imports = [
-        ".",
-        "tests",
-    ],
-    legacy_create_init = False,
-    main = "//tools/bazel/python:unittest_main.py",
-    deps = [
-        "//tools/vps-bootstrap:config",
-        "//tools/vps-bootstrap:reader",
-    ],
-)
-
-py_test(
-    name = "test_recover_test",
-    srcs = [
-        "tests/test_recover.py",
-        "//tools/bazel/python:unittest_main.py",
-    ],
-    args = ["test_recover"],
-    data = [
-        ":python_sources",
-        "//tools:repository_test_data",
-        "//tools/bazel/python:test_cli_bin",
-    ],
-    env = {
-        "BAZEL_COPY_WORKSPACE": "1",
-        "BAZEL_TEST_BIN": "$(rootpath //tools/bazel/python:test_cli_bin)",
-    },
-    imports = [
-        ".",
-        "tests",
-    ],
-    legacy_create_init = False,
-    main = "//tools/bazel/python:unittest_main.py",
-    deps = [
-        "//platform:deployment_store",
-        "//tools/vps-bootstrap:config",
-        "//tools/vps-bootstrap:prepare",
-        "//tools/vps-bootstrap:recover",
-    ],
-)
-
-py_test(
-    name = "test_repair_test",
-    srcs = [
-        "tests/test_repair.py",
-        "//tools/bazel/python:unittest_main.py",
-    ],
-    args = ["test_repair"],
-    data = [
-        ":python_sources",
-        "//tools:repository_test_data",
-    ],
-    imports = [
-        ".",
-        "tests",
-    ],
-    legacy_create_init = False,
-    main = "//tools/bazel/python:unittest_main.py",
-    deps = [
-        "//tools/vps-bootstrap:config",
-        "//tools/vps-bootstrap:repair",
-        "//tools/vps-bootstrap:repair_checks",
-        "//tools/vps-bootstrap:repair_kube",
-    ],
-)
-
-py_test(
-    name = "test_repair_cli_test",
-    srcs = [
-        "tests/test_repair_cli.py",
-        "//tools/bazel/python:unittest_main.py",
-    ],
-    args = ["test_repair_cli"],
-    data = [
-        ":python_sources",
-        "//tools:repository_test_data",
-    ],
-    imports = [
-        ".",
-        "tests",
-    ],
-    legacy_create_init = False,
-    main = "//tools/bazel/python:unittest_main.py",
-    deps = [
-        "//tools/vps-bootstrap:config",
-        "//tools/vps-bootstrap:install",
-        "//tools/vps-bootstrap:reader",
-        "//tools/vps-bootstrap:repair",
-        "//tools/vps-bootstrap:repair_kube",
-    ],
-)
-
-py_test(
-    name = "test_repair_gate_test",
-    srcs = [
-        "tests/test_repair_gate.py",
-        "//tools/bazel/python:unittest_main.py",
-    ],
-    args = ["test_repair_gate"],
-    data = [
-        ":python_sources",
-        "//tools:repository_test_data",
-    ],
-    imports = [
-        ".",
-        "tests",
-    ],
-    legacy_create_init = False,
-    main = "//tools/bazel/python:unittest_main.py",
-    deps = ["//tools/vps-bootstrap:repair_gate"],
+    deps = [":config"],
 )
 
 filegroup(
@@ -435,43 +191,14 @@ filegroup(
             "*.sh",
             "*.mjs",
             "*.json",
-            "tests/*.py",
         ],
         allow_empty = True,
-    ),
+    ) + ["//tools/vps-bootstrap/tests:python_sources"],
 )
 
 test_suite(
     name = "check",
-    tests = [
-        ":test_binaries_test",
-        ":test_bootstrap_test",
-        ":test_node_address_test",
-        ":test_observer_policy_test",
-        ":test_reader_test",
-        ":test_recover_test",
-        ":test_repair_cli_test",
-        ":test_repair_gate_test",
-        ":test_repair_test",
-    ],
+    tests = ["//tools/vps-bootstrap/tests:check"],
 )
 
-filegroup(
-    name = "source_audit_files",
-    srcs = glob(
-        [
-            "*",
-            "tests/**",
-        ],
-        allow_empty = True,
-        exclude = SOURCE_AUDIT_EXCLUDES,
-    ) + glob(
-        [
-            ".env.example",
-            ".env.*.example",
-            ".dev.vars.example",
-        ],
-        allow_empty = True,
-    ),
-    visibility = ["//visibility:public"],
-)
+source_audit_files(deps = ["//tools/vps-bootstrap/tests:source_audit_files"])

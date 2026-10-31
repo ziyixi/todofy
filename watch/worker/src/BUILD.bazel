@@ -1,0 +1,662 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//tools/bazel:js.bzl", "copied_source_files", "ts_source_library")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//watch:__subpackages__"])
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//watch:__subpackages__"],
+)
+
+copied_source_files(
+    name = "types_srcs",
+    srcs = [
+        "api.ts",
+        "auth.ts",
+        "backup.ts",
+        "browser.ts",
+        "config.ts",
+        "content.ts",
+        "deployment.ts",
+        "diff.ts",
+        "env.ts",
+        "etiquette.ts",
+        "evidence.ts",
+        "evidence-extract.ts",
+        "extract/charset.ts",
+        "extract/entities.ts",
+        "extract/feed.ts",
+        "extract/html.ts",
+        "extract/index.ts",
+        "extract/jsonpath.ts",
+        "extract/markdown.ts",
+        "extract/number.ts",
+        "extract/structured.ts",
+        "fetcher.ts",
+        "health.ts",
+        "host-locks.ts",
+        "http.ts",
+        "ids.ts",
+        "index.ts",
+        "judge.ts",
+        "limits.ts",
+        "model.ts",
+        "normalize.ts",
+        "notify.ts",
+        "obtain.ts",
+        "ops.ts",
+        "ops-status.ts",
+        "pipeline.ts",
+        "preview.ts",
+        "reasons.ts",
+        "restore.ts",
+        "robots.ts",
+        "scheduler.ts",
+        "service.ts",
+        "snapshot.ts",
+        "state.ts",
+        "store.ts",
+        "tasks.ts",
+        "triggers.ts",
+        "url-policy.ts",
+    ],
+)
+
+copied_source_files(
+    name = "web_limits_types_srcs",
+    srcs = ["limits.ts"],
+)
+
+copied_source_files(
+    name = "application_sources_srcs",
+    srcs = glob(
+        ["**"],
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+copied_source_files(
+    name = "lint_sources",
+    srcs = glob(
+        [
+            "**/*.ts",
+            "**/*.tsx",
+        ],
+        allow_empty = True,
+        exclude = ["BUILD.bazel"],
+    ),
+)
+
+ts_source_library(
+    name = "limits",
+    srcs = [":limits.ts"],
+)
+
+ts_source_library(
+    name = "extract_jsonpath",
+    srcs = [":extract/jsonpath.ts"],
+    deps = [":limits"],
+)
+
+ts_source_library(
+    name = "deployment",
+    srcs = [":deployment.ts"],
+)
+
+ts_source_library(
+    name = "url-policy",
+    srcs = [":url-policy.ts"],
+    deps = [
+        ":deployment",
+        ":limits",
+    ],
+)
+
+ts_source_library(
+    name = "config",
+    srcs = [":config.ts"],
+    deps = [
+        ":extract_jsonpath",
+        ":limits",
+        ":url-policy",
+        "//proto/ts:protobuf",
+        "//proto/ts:wire-json",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "ids",
+    srcs = [":ids.ts"],
+)
+
+ts_source_library(
+    name = "extract_charset",
+    srcs = [":extract/charset.ts"],
+)
+
+ts_source_library(
+    name = "extract_entities",
+    srcs = [":extract/entities.ts"],
+)
+
+ts_source_library(
+    name = "extract_html",
+    srcs = [":extract/html.ts"],
+    deps = [
+        ":extract_entities",
+        ":limits",
+    ],
+)
+
+ts_source_library(
+    name = "health",
+    srcs = [":health.ts"],
+    deps = [
+        ":config",
+        ":limits",
+    ],
+)
+
+ts_source_library(
+    name = "extract_feed",
+    srcs = [":extract/feed.ts"],
+    deps = [
+        ":extract_entities",
+        ":limits",
+    ],
+)
+
+ts_source_library(
+    name = "extract_markdown",
+    srcs = [":extract/markdown.ts"],
+    deps = [":limits"],
+)
+
+ts_source_library(
+    name = "extract_structured",
+    srcs = [":extract/structured.ts"],
+    deps = [
+        ":extract_jsonpath",
+        ":limits",
+    ],
+)
+
+ts_source_library(
+    name = "extract_index",
+    srcs = [":extract/index.ts"],
+    deps = [
+        ":config",
+        ":extract_charset",
+        ":extract_feed",
+        ":extract_html",
+        ":extract_markdown",
+        ":extract_structured",
+        ":health",
+    ],
+)
+
+ts_source_library(
+    name = "evidence-extract",
+    srcs = [":evidence-extract.ts"],
+    deps = [
+        ":config",
+        ":extract_charset",
+        ":extract_entities",
+        ":extract_html",
+        ":extract_index",
+        ":limits",
+    ],
+)
+
+ts_source_library(
+    name = "normalize",
+    srcs = [":normalize.ts"],
+)
+
+ts_source_library(
+    name = "store",
+    srcs = [":store.ts"],
+    deps = [":limits"],
+)
+
+ts_source_library(
+    name = "evidence",
+    srcs = [":evidence.ts"],
+    deps = [
+        ":config",
+        ":evidence-extract",
+        ":ids",
+        ":limits",
+        ":normalize",
+        ":store",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "extract_number",
+    srcs = [":extract/number.ts"],
+)
+
+ts_source_library(
+    name = "content",
+    srcs = [":content.ts"],
+    deps = [
+        ":config",
+        ":extract_index",
+        ":extract_number",
+        ":normalize",
+    ],
+)
+
+ts_source_library(
+    name = "snapshot",
+    srcs = [":snapshot.ts"],
+    deps = [
+        ":content",
+        ":limits",
+    ],
+)
+
+ts_source_library(
+    name = "backup",
+    srcs = [":backup.ts"],
+    deps = [
+        ":config",
+        ":limits",
+        ":snapshot",
+        ":store",
+        "//proto/ops/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "fetcher",
+    srcs = [":fetcher.ts"],
+    deps = [
+        ":limits",
+        ":url-policy",
+    ],
+)
+
+ts_source_library(
+    name = "browser",
+    srcs = [":browser.ts"],
+    deps = [
+        ":config",
+        ":evidence-extract",
+        ":fetcher",
+        ":limits",
+        ":url-policy",
+        "//watch/worker:node_modules/@cloudflare/puppeteer",
+    ],
+)
+
+ts_source_library(
+    name = "etiquette",
+    srcs = [":etiquette.ts"],
+    deps = [":limits"],
+)
+
+ts_source_library(
+    name = "model",
+    srcs = [":model.ts"],
+    deps = [
+        ":config",
+        ":health",
+        ":store",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "host-locks",
+    srcs = [":host-locks.ts"],
+)
+
+ts_source_library(
+    name = "robots",
+    srcs = [":robots.ts"],
+    deps = [":limits"],
+)
+
+ts_source_library(
+    name = "obtain",
+    srcs = [":obtain.ts"],
+    deps = [
+        ":browser",
+        ":config",
+        ":etiquette",
+        ":evidence-extract",
+        ":fetcher",
+        ":health",
+        ":host-locks",
+        ":limits",
+        ":robots",
+        ":store",
+        ":url-policy",
+    ],
+)
+
+ts_source_library(
+    name = "diff",
+    srcs = [":diff.ts"],
+    deps = [":limits"],
+)
+
+ts_source_library(
+    name = "triggers",
+    srcs = [":triggers.ts"],
+    deps = [
+        ":config",
+        ":content",
+        ":diff",
+        ":extract_structured",
+        ":limits",
+    ],
+)
+
+ts_source_library(
+    name = "preview",
+    srcs = [":preview.ts"],
+    deps = [
+        ":config",
+        ":content",
+        ":etiquette",
+        ":extract_index",
+        ":extract_number",
+        ":limits",
+        ":model",
+        ":normalize",
+        ":obtain",
+        ":snapshot",
+        ":store",
+        ":triggers",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "reasons",
+    srcs = [":reasons.ts"],
+    deps = [
+        "//proto/common/errors/v1:ts",
+        "//proto/ts:rpc-status",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "restore",
+    srcs = [":restore.ts"],
+    deps = [
+        ":backup",
+        ":config",
+        ":snapshot",
+        ":store",
+    ],
+)
+
+ts_source_library(
+    name = "api",
+    srcs = [":api.ts"],
+    deps = [
+        ":backup",
+        ":browser",
+        ":config",
+        ":etiquette",
+        ":evidence",
+        ":ids",
+        ":limits",
+        ":model",
+        ":preview",
+        ":reasons",
+        ":restore",
+        ":store",
+        "//proto/ts:field-mask",
+        "//proto/ts:filter",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:page-token",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+        "//proto/ts:wire-json",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "judge",
+    srcs = [":judge.ts"],
+    deps = [":config"],
+)
+
+ts_source_library(
+    name = "notify",
+    srcs = [":notify.ts"],
+    deps = [":store"],
+)
+
+ts_source_library(
+    name = "pipeline",
+    srcs = [":pipeline.ts"],
+    deps = [
+        ":config",
+        ":content",
+        ":etiquette",
+        ":evidence",
+        ":evidence-extract",
+        ":extract_index",
+        ":health",
+        ":ids",
+        ":judge",
+        ":limits",
+        ":obtain",
+        ":snapshot",
+        ":store",
+        ":triggers",
+    ],
+)
+
+ts_source_library(
+    name = "tasks",
+    srcs = [":tasks.ts"],
+    deps = [
+        ":config",
+        ":etiquette",
+        ":limits",
+        ":notify",
+        ":store",
+        "//proto/tasks/inbox/v1:ts",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
+    name = "module_group_39",
+    srcs = [
+        ":env.ts",
+        ":ops-status.ts",
+        ":scheduler.ts",
+        ":state.ts",
+    ],
+    deps = [
+        ":api",
+        ":backup",
+        ":browser",
+        ":etiquette",
+        ":evidence",
+        ":extract_html",
+        ":fetcher",
+        ":host-locks",
+        ":judge",
+        ":limits",
+        ":notify",
+        ":obtain",
+        ":pipeline",
+        ":preview",
+        ":reasons",
+        ":restore",
+        ":store",
+        ":tasks",
+        "//contracts:ops-v1/runtime",
+        "//proto/ops/v1:ts",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
+        "//proto/ts:wire-json",
+        "//proto/watch/ui/v1:ts",
+    ],
+)
+
+alias(
+    name = "env",
+    actual = ":module_group_39",
+)
+
+alias(
+    name = "ops-status",
+    actual = ":module_group_39",
+)
+
+alias(
+    name = "scheduler",
+    actual = ":module_group_39",
+)
+
+alias(
+    name = "state",
+    actual = ":module_group_39",
+)
+
+ts_source_library(
+    name = "auth",
+    srcs = [":auth.ts"],
+    deps = [
+        ":module_group_39",
+        "//packages/edge-auth:lib",
+    ],
+)
+
+ts_source_library(
+    name = "http",
+    srcs = [":http.ts"],
+    deps = [
+        ":auth",
+        ":limits",
+        ":module_group_39",
+        ":reasons",
+        "//packages/edge-auth:lib",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+ts_source_library(
+    name = "service",
+    srcs = [":service.ts"],
+    deps = [
+        ":http",
+        ":module_group_39",
+        ":reasons",
+        "//packages/edge-auth:lib",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+ts_source_library(
+    name = "ops",
+    srcs = [":ops.ts"],
+    deps = [
+        ":module_group_39",
+        "//proto/ops/v1:ts",
+    ],
+)
+
+ts_source_library(
+    name = "index",
+    srcs = [":index.ts"],
+    deps = [
+        ":http",
+        ":module_group_39",
+        ":ops",
+        ":service",
+    ],
+)
+
+js_library(
+    name = "lib",
+    deps = [
+        ":api",
+        ":auth",
+        ":backup",
+        ":browser",
+        ":config",
+        ":content",
+        ":deployment",
+        ":diff",
+        ":etiquette",
+        ":evidence",
+        ":evidence-extract",
+        ":extract_charset",
+        ":extract_entities",
+        ":extract_feed",
+        ":extract_html",
+        ":extract_index",
+        ":extract_jsonpath",
+        ":extract_markdown",
+        ":extract_number",
+        ":extract_structured",
+        ":fetcher",
+        ":health",
+        ":host-locks",
+        ":http",
+        ":ids",
+        ":index",
+        ":judge",
+        ":limits",
+        ":model",
+        ":module_group_39",
+        ":normalize",
+        ":notify",
+        ":obtain",
+        ":ops",
+        ":pipeline",
+        ":preview",
+        ":reasons",
+        ":restore",
+        ":robots",
+        ":service",
+        ":snapshot",
+        ":store",
+        ":tasks",
+        ":triggers",
+        ":url-policy",
+    ],
+)
+
+js_library(
+    name = "limits_web",
+    srcs = [":limits.ts"],
+    deps = ["//watch/worker:web_limits_types"],
+)
+
+js_library(
+    name = "entry_metadata",
+    srcs = [":index.ts"],
+)
+
+source_audit_files(
+    exclude = SOURCE_AUDIT_EXCLUDES,
+    patterns = ["**"],
+)
