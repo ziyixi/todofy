@@ -123,6 +123,29 @@ class BazelCI(unittest.TestCase):
         self.assertEqual(step["env"]["GIT_CONFIG_VALUE_0"], "none")
         self.assertIn("private", (ROOT / ".bazelignore").read_text().splitlines())
 
+    def test_private_operations_do_not_route_through_public_release_selection(self):
+        inputs = self.workflow["on"]["workflow_dispatch"]["inputs"]
+        self.assertNotIn("private_operation", inputs)
+        automatic = self.jobs["private-release"]
+        self.assertIn("github.event_name == 'push'", automatic["if"])
+        self.assertEqual(automatic["with"]["operation"], "auto")
+
+        operations = workflow_data(ROOT / ".github/workflows/private-ops.yml")
+        self.assertEqual(set(operations["on"]), {"workflow_dispatch"})
+        jobs = operations["jobs"]
+        self.assertEqual(set(jobs), {"context", "operate"})
+        context = jobs["context"]
+        self.assertIn("github.ref == 'refs/heads/main'", context["if"])
+        checkout = next(step for step in context["steps"] if "checkout@" in step.get("uses", ""))
+        self.assertEqual(checkout["with"]["ref"], "${{ github.sha }}")
+        self.assertEqual(context["outputs"]["revision"], "${{ steps.source.outputs.revision }}")
+        operate = jobs["operate"]
+        self.assertEqual(operate["needs"], "context")
+        self.assertEqual(operate["uses"], "./.github/workflows/private-release.yml")
+        self.assertEqual(operate["with"]["revision"], "${{ needs.context.outputs.revision }}")
+        self.assertEqual(operate["with"]["operation"], "${{ inputs.operation }}")
+        self.assertFalse(any(job.get("uses") == "./.github/workflows/ci.yml" for job in jobs.values()))
+
     def test_worker_publication_uses_checked_sha_artifacts_and_main_gate(self):
         for name, job in self.jobs.items():
             if job.get("uses") != "./.github/workflows/worker-release.yml":

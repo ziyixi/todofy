@@ -19,15 +19,6 @@ on:
         description: Original held release's full source SHA
         type: string
         default: ''
-      private_operation:
-        description: Optional private infrastructure or application operation after checks
-        type: choice
-        options: [none, infra-plan, infra-apply, publish, release]
-        default: none
-      private_expect:
-        description: Reviewed private infrastructure plan identity for infra-apply
-        type: string
-        default: ''
 
 permissions:
   contents: read
@@ -109,7 +100,7 @@ jobs:
         id: plan
         env:
           BASE: ${{ steps.baseline.outputs.base }}
-          RELEASE_APP: ${{ github.event_name == 'workflow_dispatch' && inputs.private_operation == 'none' && inputs.app || '' }}
+          RELEASE_APP: ${{ github.event_name == 'workflow_dispatch' && inputs.app || '' }}
           RESUME: ${{ inputs.resume_vps_release && 'true' || 'false' }}
           # Target Determinator's baseline checkout must not initialize private sources.
           GIT_CONFIG_COUNT: '1'
@@ -125,7 +116,7 @@ jobs:
         id: releases
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_APP: ${{ github.event_name == 'workflow_dispatch' && inputs.private_operation == 'none' && inputs.app || '' }}
+          RELEASE_APP: ${{ github.event_name == 'workflow_dispatch' && inputs.app || '' }}
           RESUME: ${{ inputs.resume_vps_release && 'true' || 'false' }}
           RESUME_SHA: ${{ inputs.resume_source_sha }}
         run: |
@@ -285,14 +276,13 @@ jobs:
       && github.ref == 'refs/heads/main'
       && needs.gate.result == 'success'
       && needs.private.result == 'success'
-      && ((github.event_name == 'workflow_dispatch' && inputs.private_operation != 'none')
-          || (github.event_name == 'push' && vars.PRIVATE_RELEASE_ENABLED == 'true')) }}
+      && github.event_name == 'push'
+      && vars.PRIVATE_RELEASE_ENABLED == 'true' }}
     uses: ./.github/workflows/private-release.yml
     with:
       revision: ${{ needs.changes.outputs.private_sha }}
-      operation: ${{ github.event_name == 'workflow_dispatch' && inputs.private_operation || 'auto' }}
-      expect: ${{ inputs.private_expect || '' }}
-      fingerprint: ${{ github.event_name == 'push' && needs.private.outputs.fingerprint || '' }}
+      operation: auto
+      fingerprint: ${{ needs.private.outputs.fingerprint }}
     secrets:
       private_ssh_key: ${{ secrets.TODOFY_PRIVATE_SSH_KEY }}
       CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}

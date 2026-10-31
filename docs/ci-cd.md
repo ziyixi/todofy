@@ -53,7 +53,8 @@ delegates to the pinned private entry point; application names and deployment im
 the fingerprint to skip unchanged application artifacts, including documentation-only changes. Shared build inputs
 remain part of the native Bazel dependency graph.
 
-Initial publication is manual through `private_operation`; normal push publication starts after
+Initial publication and infrastructure operations use the main-only `Private operations` workflow, which reuses
+the same source's green gate without re-running public application builds. Normal push publication starts after
 `PRIVATE_RELEASE_ENABLED` is enabled. Private images stay private and are pushed from the same checked sources.
 Successful publication records its verified identity through GitHub Deployments. Private infrastructure has its
 own reviewed plan/apply path; public resources keep their existing publication and reconciliation owners.

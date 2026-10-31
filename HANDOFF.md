@@ -5,26 +5,26 @@ Documentation entrypoints are in [docs/README](docs/README.md). Historical waiti
 
 ## Current work
 
-`codex/private-quant-data` integrates the private data platform on `private/` branch `codex/quant-data`.
-Application sources, private proto, deployment configuration and detailed handoff stay in that repository.
-Parent changes are limited to shared dependency/toolchain support and generic private build/release integration.
-No production publication or deployed provider/data-quality verification has completed yet.
-The private application now uses its own native Object/Alarm control; no additional Cron is required. Local
-private checks/artifacts and the generic public proto/Home/workflow checks passed. Private deployment instructions
-own the remaining exact-identity bootstrap and source/data verification; do not infer them from branch CI.
-The follow-up CI found a synthetic Newsletter read at 3.021 ms against an arbitrary 3 ms threshold. That test-only
-margin is now 5 ms, still below Free's 10 ms; the large-response 9 ms check remains. Its local runtime check passed.
-Owner confirmed main promotion/publication. A limited real-source probe identified a private catalog identity
-compatibility fix; its tests and full in-memory reference capture passed. Promote the new catalog-fix gitlink only
-after its branch CI, then continue the private infrastructure/bootstrap runbook. Source access is not deployment.
+`codex/private-quant-data` and private branch `codex/quant-data` finish a private application rollout.
+Application sources, private proto, deployment configuration and detailed evidence stay in that repository.
+Parent changes supply shared tools/dependencies, a protected private publisher and optional Home registration.
+
+The initial integration is on main and verified below. The current follow-up separates manual `Private operations`
+from public build/release selection; it reuses the exact source's green gate and the existing private release lock.
+Its local routing and source-gate regressions passed. Owner confirmed promotion and rollout; preserve that authorization.
+
+The private read-only infrastructure plan has 11 creates and no updates/deletes; no private apply, deployed API
+acceptance or bulk collection has run. After this follow-up's branch CI, promote the same source and continue the
+private plan/apply, actual identity recording, image/Worker publication, initial installation and data acceptance.
+The private handoff owns operational details. Source-only API probes and local checks are not deployment evidence.
 
 ## Latest verified release
 
-Private submodule CI `f4463dfd`: `private/` pins the private repository and builds through native `@private`
-with root toolchains and dependency locks. Real GitHub checkout/build/test, exact commit checks, branch/main CI,
-configuration validation/publication and same-source reconciliation passed. Private CI restores public caches
-without saving caches or uploading artifacts. Public targets work with the submodule initialized or absent.
-Application artifacts and deployments were skipped; the private repository contains only a synthetic acceptance target.
+Shared private-application support `2aea26a0`: exact-source branch/main CI, affected public publication and
+same-source reconciliation passed. Private source remains pinned through the gitlink, uses the root toolchains/locks,
+and restores public caches without uploading private caches or build/test artifacts. A cancelled duplicate operational
+run repeated the same source's public publication; a fresh reconciliation also passed. The private application itself
+has not been deployed. The initial submodule acceptance is retained in the October 31 record.
 
 See the [October 31 record](docs/history/handoff-2026-10-31.md#private-submodule-and-public-ci) for verification and the earlier
 package-ownership and configuration-publishing changes.

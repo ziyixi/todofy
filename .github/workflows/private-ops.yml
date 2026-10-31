@@ -1,0 +1,74 @@
+name: Private operations
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Operation on the checked main source
+        type: choice
+        required: true
+        options:
+          - infra-plan
+          - infra-apply
+          - publish
+          - release
+      expect:
+        description: Reviewed infrastructure plan fingerprint for infra-apply
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  context:
+    name: Select the pinned private source
+    if: github.repository == 'ziyixi/todofy' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      revision: ${{ steps.source.outputs.revision }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Read the event commit's private gitlink
+        id: source
+        env:
+          EVENT_SHA: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          import subprocess
+
+          source = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          if source != os.environ["EVENT_SHA"]:
+              raise SystemExit("PRIVATE_SOURCE_MISMATCH")
+          entry = subprocess.check_output(["git", "ls-tree", "HEAD", "private"], text=True).split()
+          if len(entry) != 4 or entry[:2] != ["160000", "commit"] or entry[3] != "private" or not re.fullmatch(r"[0-9a-f]{40}", entry[2]):
+              raise SystemExit("PRIVATE_REVISION_INVALID")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write("revision=" + entry[2] + "\n")
+          PY
+
+  operate:
+    name: Operate on the checked private source
+    needs: context
+    if: github.repository == 'ziyixi/todofy' && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/private-release.yml
+    with:
+      revision: ${{ needs.context.outputs.revision }}
+      operation: ${{ inputs.operation }}
+      expect: ${{ inputs.expect }}
+    secrets:
+      private_ssh_key: ${{ secrets.TODOFY_PRIVATE_SSH_KEY }}
+      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      INFRA_STATE_PASSPHRASE: ${{ secrets.INFRA_STATE_PASSPHRASE }}
+      INFRA_TFVARS: ${{ secrets.INFRA_TFVARS }}
+    permissions:
+      contents: read
+      checks: read
+      packages: write
+      deployments: write
