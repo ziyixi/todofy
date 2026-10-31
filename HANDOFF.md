@@ -14,9 +14,10 @@ operations reuse prior green source evidence and the existing protected private 
 public build selection. Owner confirmed promotion and rollout; preserve that authorization.
 
 The private reviewed infrastructure applied 11 creates with no updates/deletes, followed by a clean plan. The actual
-owner audience is recorded privately. Check and promote that config source, then continue image/Worker publication,
-initial installation, exact resource registration and deployed API/bulk-data acceptance. No private application
-publication, deployed API acceptance or bulk collection has run yet.
+owner audience source passed branch/main CI and was promoted. The private application image is published; its
+registry digest matches the verified installation archive and anonymous pulls are refused. The complete initial
+installation bundle is staged and verified. Continue initial installation, Worker publication, exact resource
+registration and deployed API/bulk-data acceptance. No collector installation or bulk collection has run yet.
 The private handoff owns operational details. Source-only API probes and local checks are not deployment evidence.
 
 ## Latest verified release
