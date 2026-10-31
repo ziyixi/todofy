@@ -5,6 +5,7 @@ current production state; [HANDOFF](../HANDOFF.md) names the current rollout and
 
 ## Archived handoffs
 
+- [October 31](history/handoff-2026-10-31.md): Bazel package ownership, shared build recipes and equivalence checks.
 - [October 30](history/handoff-2026-10-30.md): build migration context and historical acceptance boundaries.
 
 [Handoff of October 28, 2026](history/handoff-2026-10-28.md) keeps the released notes of October 28: the review
