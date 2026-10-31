@@ -56,8 +56,8 @@ const WORST = rendering(MAX_ANSWER_BYTES, 120_000);
  * and the transcoder's first run (measured 3.8-4.5).
  */
 const COLD_BOUND_MS = 0.6 * FREE_CPU_MS;
-/** A read of a real size, its first run and warm (measured 1.0-1.2 ms for the overview, 1.3-1.6 for 256 KiB of CJK). */
-const READ_BOUND_MS = 0.3 * FREE_CPU_MS;
+/** Small reads retain half the Free budget; one first-run sample varies more than a warm median on shared runners. */
+const READ_BOUND_MS = 0.5 * FREE_CPU_MS;
 /**
  * The worst answer the cap admits (measured 4.2-4.5 first, single isolates 3.6-5.5, and 3.3-3.5 warm). The bound
  * keeps it under Free's limit with room for runners; it is not a regression margin, so a few ms more at the cap alone

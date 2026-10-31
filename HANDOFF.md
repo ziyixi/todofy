@@ -12,6 +12,8 @@ No production publication or provider/data-quality verification has completed ye
 The private application now uses its own native Object/Alarm control; no additional Cron is required. Local
 private checks/artifacts and the generic public proto/Home/workflow checks passed. Private deployment instructions
 own the remaining exact-identity bootstrap and source/data verification; do not infer them from branch CI.
+The follow-up CI found a synthetic Newsletter read at 3.021 ms against an arbitrary 3 ms threshold. That test-only
+margin is now 5 ms, still below Free's 10 ms; the large-response 9 ms check remains. Its local runtime check passed.
 
 ## Latest verified release
 
