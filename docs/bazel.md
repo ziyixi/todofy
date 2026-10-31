@@ -86,5 +86,7 @@ Host integration prerequisites, including Docker and the CI runner's kernel-poli
 cache. Provider credentials, deployment locks, infrastructure apply, production verification and repair remain
 Actions/operator operations. A successful build does not prove a live rollout.
 
-Migration and release acceptance are recorded in [October 30 history](history/handoff-2026-10-30.md#full-bazel-migration).
+The initial migration is recorded in [October 30 history](history/handoff-2026-10-30.md#full-bazel-migration);
+[October 31 history](history/handoff-2026-10-31.md#bazel-package-ownership-and-shared-build-recipes) covers package ownership
+and build-equivalence checks.
 [HANDOFF](../HANDOFF.md) tracks current work and separate business/recovery checks.
