@@ -57,14 +57,16 @@ jobs:
           bazel build @private//:private "${options[@]}"
           bazel test @private//:check "${options[@]}"
           bazel cquery @private//:private "${options[@]}" --output=files > "$RUNNER_TEMP/private-outputs.txt"
+          bazel info execution_root > "$RUNNER_TEMP/private-execution-root.txt"
           python3 - <<'PY'
           import hashlib
           import os
           from pathlib import Path
           digest = hashlib.sha256()
+          execution_root = Path(Path(os.environ['RUNNER_TEMP'], 'private-execution-root.txt').read_text().strip())
           for name in sorted(Path(os.environ['RUNNER_TEMP'], 'private-outputs.txt').read_text().splitlines()):
               digest.update(Path(name).name.encode() + b'\0')
-              with open(name, 'rb') as source:
+              with (execution_root / name).open('rb') as source:
                   while block := source.read(1024 * 1024):
                       digest.update(block)
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:

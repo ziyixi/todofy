@@ -1,9 +1,12 @@
 """The native graph selects work; the original production locks and ordering still gate writes."""
 
+import hashlib
 import os
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from workflow_sources import workflow_data
 
@@ -123,6 +126,42 @@ class BazelCI(unittest.TestCase):
         self.assertEqual(step["env"]["GIT_CONFIG_VALUE_0"], "none")
         self.assertIn("private", (ROOT / ".bazelignore").read_text().splitlines())
 
+    def test_private_fingerprint_reads_source_and_generated_files_from_the_execution_root(
+        self,
+    ):
+        workflow = workflow_data(ROOT / ".github/workflows/private-check.yml")
+        script = next(
+            step["run"]
+            for step in workflow["jobs"]["check"]["steps"]
+            if step.get("id") == "check"
+        )
+        python = script.split("python3 - <<'PY'\n", 1)[1].split("\nPY", 1)[0]
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            execution_root = temporary / "execution"
+            names = (
+                "external/private/k3s/manifests/kustomization.yaml",
+                "bazel-out/generated.txt",
+            )
+            for name in names:
+                source = execution_root / name
+                source.parent.mkdir(parents=True, exist_ok=True)
+                source.write_text("synthetic source")
+            (temporary / "private-outputs.txt").write_text("\n".join(names) + "\n")
+            (temporary / "private-execution-root.txt").write_text(
+                str(execution_root) + "\n"
+            )
+            output = temporary / "github-output"
+            with patch.dict(
+                os.environ,
+                {"RUNNER_TEMP": str(temporary), "GITHUB_OUTPUT": str(output)},
+            ):
+                exec(compile(python, "private-fingerprint", "exec"), {})
+            expected = hashlib.sha256(
+                b"generated.txt\0synthetic sourcekustomization.yaml\0synthetic source"
+            ).hexdigest()
+            self.assertEqual(output.read_text(), "fingerprint=" + expected + "\n")
+
     def test_private_operations_do_not_route_through_public_release_selection(self):
         inputs = self.workflow["on"]["workflow_dispatch"]["inputs"]
         self.assertNotIn("private_operation", inputs)
@@ -136,15 +175,25 @@ class BazelCI(unittest.TestCase):
         self.assertEqual(set(jobs), {"context", "operate"})
         context = jobs["context"]
         self.assertIn("github.ref == 'refs/heads/main'", context["if"])
-        checkout = next(step for step in context["steps"] if "checkout@" in step.get("uses", ""))
+        checkout = next(
+            step for step in context["steps"] if "checkout@" in step.get("uses", "")
+        )
         self.assertEqual(checkout["with"]["ref"], "${{ github.sha }}")
-        self.assertEqual(context["outputs"]["revision"], "${{ steps.source.outputs.revision }}")
+        self.assertEqual(
+            context["outputs"]["revision"], "${{ steps.source.outputs.revision }}"
+        )
         operate = jobs["operate"]
         self.assertEqual(operate["needs"], "context")
         self.assertEqual(operate["uses"], "./.github/workflows/private-release.yml")
-        self.assertEqual(operate["with"]["revision"], "${{ needs.context.outputs.revision }}")
+        self.assertEqual(
+            operate["with"]["revision"], "${{ needs.context.outputs.revision }}"
+        )
         self.assertEqual(operate["with"]["operation"], "${{ inputs.operation }}")
-        self.assertFalse(any(job.get("uses") == "./.github/workflows/ci.yml" for job in jobs.values()))
+        self.assertFalse(
+            any(
+                job.get("uses") == "./.github/workflows/ci.yml" for job in jobs.values()
+            )
+        )
 
     def test_worker_publication_uses_checked_sha_artifacts_and_main_gate(self):
         for name, job in self.jobs.items():
@@ -169,7 +218,9 @@ class BazelCI(unittest.TestCase):
         )
         self.assertEqual(release["environment"]["name"], "production")
 
-    def test_cluster_identity_is_available_only_in_the_protected_private_publisher(self):
+    def test_cluster_identity_is_available_only_in_the_protected_private_publisher(
+        self,
+    ):
         for name in ("changes", "checks", "artifacts", "gate", "private"):
             self.assertNotIn("id-token", self.jobs[name].get("permissions", {}))
         caller = self.jobs["private-release"]
@@ -183,9 +234,13 @@ class BazelCI(unittest.TestCase):
         self.assertEqual(environment["K3S_CLUSTER_CA"], "${{ vars.K3S_CLUSTER_CA }}")
         self.assertNotIn("KUBECONFIG", environment)
         operations = workflow_data(ROOT / ".github/workflows/private-ops.yml")
-        choices = operations["on"]["workflow_dispatch"]["inputs"]["operation"]["options"]
+        choices = operations["on"]["workflow_dispatch"]["inputs"]["operation"][
+            "options"
+        ]
         self.assertTrue({"k3s-check", "k3s-plan", "k3s-apply"} <= set(choices))
-        self.assertEqual(operations["jobs"]["operate"]["permissions"]["id-token"], "write")
+        self.assertEqual(
+            operations["jobs"]["operate"]["permissions"]["id-token"], "write"
+        )
 
     def test_service_binding_predecessors_still_release_first(self):
         for app, predecessors in {
