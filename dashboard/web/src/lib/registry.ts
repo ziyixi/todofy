@@ -117,14 +117,15 @@ export function readIn(reg: Reg, entry: RegistryEntry | undefined): { url: strin
 }
 
 /**
- * Where a background service's row leads inside this page: its Worker (it has one), else the first
- * flow it takes part in, else 操作与记录. A service read in another app's console (READ_IN) opens that console
- * in a new tab instead.
+ * A background service opens its registered console, or the console selected by READ_IN, in a new tab.
+ * Other entries lead to their Worker, first flow or 操作与记录.
  */
 export function entryPageHash(reg: Reg, entry: RegistryEntry): { hash: string; what: string; external?: true } {
   const reader = readIn(reg, entry)
   if (reader) return { hash: reader.url, what: `${reader.what}（新标签页）`, external: true }
   if (entry.id === 'notion-publish' || entry.id === 'personal-mcp') return { hash: routeHash({ view: 'ops' }), what: '查看操作与记录' }
+  const consoleUrl = entry.group === 'services' ? httpsUrl(entry.url) : null
+  if (consoleUrl) return { hash: consoleUrl, what: '查看服务控制台（新标签页）', external: true }
   const script = entry.scripts[0]
   if (script !== undefined) return { hash: routeHash({ view: 'cloudflare', script }), what: '查看 Cloudflare 中的 Worker' }
   const flow = flowsOfEntry(reg, entry.id)[0]

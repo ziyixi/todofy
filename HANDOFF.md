@@ -5,9 +5,13 @@ Documentation entrypoints are in [docs/README](docs/README.md). Historical waiti
 
 ## Current work
 
-`codex/private-quant-data` and private branch `codex/quant-data` finish a private application rollout.
+Continuation branch `codex/quant-rollout-resume` in both repositories finishes the private application rollout.
+It starts from the checked main and pinned private source; the earlier `codex/private-quant-data` /
+`codex/quant-data` work remains merged. Initial installation, publication and data acceptance remain pending.
 Application sources, private proto, deployment configuration and detailed evidence stay in that repository.
 Parent changes supply shared tools/dependencies, a protected private publisher and optional Home registration.
+The continuation also opens registered background-service consoles from their Home rows. Private/Home web checks
+passed locally and release artifacts built; the continuation still needs exact-source branch CI and runtime acceptance.
 
 The integration and main-only `Private operations` entry are on main after exact-source green checks. Manual
 operations reuse prior green source evidence and the existing protected private release lock without invoking
