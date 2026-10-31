@@ -28,11 +28,12 @@ import {
 } from '@ziyixi/edge-auth';
 import { DashboardUiService } from '@ziyixi/proto/dashboard/ui/v1/dashboard_ui_service_pb';
 import { HttpTranscoder, type RouteInfo } from '@ziyixi/proto/http-transcoder';
-import { RpcError } from '@ziyixi/proto/rpc-status';
+import { Code, RpcError } from '@ziyixi/proto/rpc-status';
 import { dashboardError, handlers, isReason, REASONS, type ApiContext } from './api.ts';
 import type { CsrfResponse, HealthResponse, LegacyApiError } from './api-types.ts';
 import { buildSha, devNow, publicHost } from './config.ts';
 import type { Env } from './env.ts';
+import { homeCatalog, PRIVATE_CATALOG_ERROR } from './private-catalog.ts';
 
 export const MAX_BODY_BYTES = 1024;
 /** Access signing keys are cached for 10 minutes (the SPEC's stricter default; Todofy uses 1 h). */
@@ -161,7 +162,8 @@ const api = new HttpTranscoder(DashboardUiService, handlers, {
   domain: API_DOMAIN,
   maxBodyBytes: MAX_BODY_BYTES,
   authorize,
-  localize: (reason) => (isReason(reason) ? { locale: 'zh-CN', message: REASONS[reason].zh } : undefined),
+  localize: (reason) => (isReason(reason) ? { locale: 'zh-CN', message: REASONS[reason].zh }
+    : reason === PRIVATE_CATALOG_ERROR ? { locale: 'zh-CN', message: '私人服务清单配置无效，请检查 PRIVATE_CATALOG' } : undefined),
   // A bug (api.ts wraps its HomeState calls as UNAVAILABLE itself): never answered as retryable.
   onUnexpected: () => dashboardError('INTERNAL'),
 });
@@ -223,6 +225,9 @@ async function route(base: Context): Promise<Routed> {
     return { response: csrfResponse(), asset: false };
   }
   if (url.pathname === '/api/v1' || url.pathname.startsWith(API_PREFIX)) {
+    try { homeCatalog(env.PRIVATE_CATALOG); } catch {
+      return fail(new RpcError(Code.FAILED_PRECONDITION, PRIVATE_CATALOG_ERROR, 'private service catalog configuration is invalid; check PRIVATE_CATALOG'));
+    }
     const result = await api.handle(request, ctx, ctx.requestId);
     if (result === null) return fail(dashboardError('NOT_FOUND'));
     return { response: result.response, asset: false, reason: result.error?.reason };

@@ -408,9 +408,10 @@ def generate_file(file: dict[str, Any], types: dict[str, tuple[str, str]], enums
     return "\n".join(lines)
 
 
-def python_files(image: dict[str, Any]) -> dict[str, Any]:
-    """The image restricted to the files of PYTHON_PACKAGES (a reference to another package fails later)."""
-    return {**image, "file": [file for file in image["file"] if file.get("package") in PYTHON_PACKAGES]}
+def python_files(image: dict[str, Any], packages: set[str] | None = None) -> dict[str, Any]:
+    """Index the default Python packages and any explicitly selected package."""
+    selected = set(PYTHON_PACKAGES) | (packages or set())
+    return {**image, "file": [file for file in image["file"] if file.get("package") in selected]}
 
 
 def generate(image: dict[str, Any], packages: set[str] | None = None) -> dict[str, str]:
@@ -424,7 +425,7 @@ def generate(image: dict[str, Any], packages: set[str] | None = None) -> dict[st
     except wire_rules.RuleError as error:
         raise GenerateError(str(error)) from None
     enums = wire_rules.enum_index(image)
-    image = python_files(image)
+    image = python_files(image, packages)
     types = index_types(image)
     out: dict[str, str] = {}
     for file in sorted(image["file"], key=lambda f: f["name"]):

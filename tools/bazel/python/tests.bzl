@@ -2,10 +2,10 @@
 
 load("@rules_python//python:defs.bzl", "py_binary", "py_test")
 
-_PYTEST_MAIN = "//tools/bazel/python:pytest_main.py"
-_UNITTEST_MAIN = "//tools/bazel/python:unittest_main.py"
-_RUFF_MAIN = "//tools/bazel/python:check_ruff.py"
-_RUFF = "@python_deps//ruff:data"
+_PYTEST_MAIN = Label("//tools/bazel/python:pytest_main.py")
+_UNITTEST_MAIN = Label("//tools/bazel/python:unittest_main.py")
+_RUFF_MAIN = Label("//tools/bazel/python:check_ruff.py")
+_RUFF = Label("@python_deps//ruff:data")
 
 def pytest_test(name, srcs, config, plugins = [], args = [], data = [], env = {}, deps = [], **kwargs):
     """Run explicit pytest selectors with the repository's locked runner."""

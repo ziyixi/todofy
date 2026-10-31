@@ -883,7 +883,7 @@ class Workflow(unittest.TestCase):
 
     def test_github_variables_are_only_the_switches(self):
         used = set(re.findall(r"\bvars\.([A-Z0-9_]+)", effective_ci()))
-        self.assertEqual(used, TOGGLES | {"VPS_DEPLOY_ENABLED"})
+        self.assertEqual(used, TOGGLES | {"VPS_DEPLOY_ENABLED", "PRIVATE_RELEASE_ENABLED"})
         # A repository gate cannot inject private runtime values into a Worker.
         self.assertIn("&& vars.VPS_DEPLOY_ENABLED == 'true'", effective_ci())
 

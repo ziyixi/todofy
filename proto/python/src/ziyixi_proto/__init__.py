@@ -4,3 +4,7 @@
 ...) is generated from proto/ by proto/tools/gen_py.py when the package is built (``uv sync``) and is never
 committed.
 """
+
+from pkgutil import extend_path
+
+__path__ = extend_path(__path__, __name__)

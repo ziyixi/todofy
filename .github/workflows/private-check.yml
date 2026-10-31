@@ -9,6 +9,10 @@ on:
     secrets:
       private_ssh_key:
         required: true
+    outputs:
+      fingerprint:
+        description: Digest of the checked unstamped private artifacts and their actual shared dependencies
+        value: ${{ jobs.check.outputs.fingerprint }}
 
 permissions:
   contents: read
@@ -18,6 +22,8 @@ jobs:
     name: Build and test pinned private sources
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    outputs:
+      fingerprint: ${{ steps.check.outputs.fingerprint }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -45,7 +51,22 @@ jobs:
             bazel-9.3.1-${{ runner.os }}-go-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-
             bazel-9.3.1-${{ runner.os }}-go-
       - name: Build and test private targets
+        id: check
         run: |
           options=("--repository_cache=$HOME/.cache/personal-cloud-bazel/repository" "--disk_cache=$HOME/.cache/personal-cloud-bazel/actions")
           bazel build @private//:private "${options[@]}"
           bazel test @private//:check "${options[@]}"
+          bazel cquery @private//:private "${options[@]}" --output=files > "$RUNNER_TEMP/private-outputs.txt"
+          python3 - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+          digest = hashlib.sha256()
+          for name in sorted(Path(os.environ['RUNNER_TEMP'], 'private-outputs.txt').read_text().splitlines()):
+              digest.update(Path(name).name.encode() + b'\0')
+              with open(name, 'rb') as source:
+                  while block := source.read(1024 * 1024):
+                      digest.update(block)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('fingerprint=' + digest.hexdigest() + '\n')
+          PY

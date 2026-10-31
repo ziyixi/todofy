@@ -11,11 +11,23 @@ py_library(
 )
 
 py_library(
+    name = "private_catalog",
+    srcs = ["private_catalog.py"],
+    imports = ["."],
+    deps = [
+        ":catalog",
+        "//tools/cloud-config:cloud_profile",
+        "//tools/cloud-release:cloudflare",
+    ],
+)
+
+py_library(
     name = "inventory",
     srcs = ["inventory.py"],
     imports = ["."],
     deps = [
         ":catalog",
+        ":private_catalog",
         "//tools/cloud-config:cloud_profile",
         "//tools/cloud-release:api",
         "//tools/cloud-release:cloudflare",

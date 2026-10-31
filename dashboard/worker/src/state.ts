@@ -51,7 +51,6 @@ import {
 } from './guard.ts';
 import { mergeScripts, workerRows, withLiveInventory, type CfScriptsDoc } from './discovery.ts';
 import {
-  DESIRED,
   advanceRun,
   attemptsExhausted,
   completedDoc,
@@ -80,6 +79,9 @@ import { callWebsiteRequest, callWebsiteSyncStatus, unconfirmedWebsiteRequest } 
 import type { WebsiteSyncRequestResult } from './api-types.ts';
 import { PROBE_ERRORS, nextProbeDoc, probeDue, probeUrl, type ProbeTarget } from './probe.ts';
 import { REGISTRY, entryProbe } from './registry.ts';
+import { homeCatalog } from './private-catalog.ts';
+import type { RegistryDef } from './registry-types.ts';
+import type { DesiredState } from './drift.ts';
 import { HOUR_MS, MINUTE_MS, iso, isoOrNull, utcDay, utcMonthStart } from './time.ts';
 import { fetchUsage, type UsageErrorCode } from './usage.ts';
 import type { ViewBody } from './view-body.ts';
@@ -150,15 +152,16 @@ export const STATUS_REFRESH_MS = OPS_LIMITS.statusMinIntervalSeconds * 1000;
 const REFRESH_MIN_MS = REFRESH_MIN_INTERVAL_SECONDS * 1000;
 const PROBE_MIN_MS = PROBE_MIN_INTERVAL_SECONDS * 1000;
 const CLOUDFLARE_REFRESH_MIN_MS = CLOUDFLARE_REFRESH_MIN_SECONDS * 1000;
-const DESIRED_HASH = fnv1a(JSON.stringify(DESIRED));
 
 /** The entries the tick probes (entryProbe: at most one GET each per tick). */
-const PROBED: readonly (ProbeTarget & { readonly id: string })[] = REGISTRY.entries.flatMap((entry) => {
-  const probe = entryProbe(entry);
-  if (probe === null) return [];
-  const { url, expect, content_type } = probe;
-  return [content_type === undefined ? { id: entry.id, url, expect } : { id: entry.id, url, expect, content_type }];
-});
+function probeTargets(registry: RegistryDef): readonly (ProbeTarget & { readonly id: string })[] {
+  return registry.entries.flatMap((entry) => {
+    const probe = entryProbe(entry);
+    if (probe === null) return [];
+    const { url, expect, content_type } = probe;
+    return [content_type === undefined ? { id: entry.id, url, expect } : { id: entry.id, url, expect, content_type }];
+  });
+}
 
 /** Whether an app's status() may be polled at `now`: never polled, or the last attempt is at least 10 minutes old (or from a later clock). */
 function statusDue(doc: { readonly checked_at: number | null }, now: number): boolean {
@@ -283,9 +286,18 @@ export class HomeState extends DurableObject<Env> {
   /** While a view is built: documents already read (each key once per build). */
   private readCache: Map<string, unknown> | null = null;
   private readonly attentionState: AttentionState;
+  private readonly registry: RegistryDef;
+  private readonly desired: DesiredState;
+  private readonly desiredHash: string;
+  private readonly probed: readonly (ProbeTarget & { readonly id: string })[];
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+    const catalog = homeCatalog(env.PRIVATE_CATALOG);
+    this.registry = catalog.registry;
+    this.desired = catalog.desired;
+    this.desiredHash = fnv1a(JSON.stringify(this.desired));
+    this.probed = probeTargets(this.registry);
     this.attentionState = new AttentionState(ctx.storage, <T extends Record<string, SqlStorageValue>>(query: string, ...bindings: SqlStorageValue[]) => this.rows<T>(query, ...bindings));
     void ctx.blockConcurrencyWhile(() => {
       for (const statement of SCHEMA) ctx.storage.sql.exec(statement);
@@ -598,11 +610,11 @@ export class HomeState extends DurableObject<Env> {
     const configured = analyticsConfigured(this.env);
     let doc = storedDrift(this.doc<DriftDoc>('drift'));
     let pending = storedRun(this.doc<DriftRunDoc>('drift_run'));
-    const contextChanged = doc.desired_hash !== DESIRED_HASH || (pending !== null && pending.desired_hash !== DESIRED_HASH);
+    const contextChanged = doc.desired_hash !== this.desiredHash || (pending !== null && pending.desired_hash !== this.desiredHash);
     if (contextChanged) {
       recheck ||= doc.checked_at !== null || doc.last_run_day !== null || pending !== null;
       // Keep the last completed result and audit cursor while replacing the obsolete scheduling context.
-      doc = { ...doc, desired_hash: DESIRED_HASH, last_run_day: null, running_day: null };
+      doc = { ...doc, desired_hash: this.desiredHash, last_run_day: null, running_day: null };
       this.putDoc('drift', doc, now);
       this.deleteDoc('drift_run');
       pending = null;
@@ -616,14 +628,14 @@ export class HomeState extends DurableObject<Env> {
       plan = driftPlan(now, null, doc, configured, recheck);
     }
     if (plan.kind !== 'start' && plan.kind !== 'continue') return { outcome: 'idle', calls: 0 };
-    const run = plan.kind === 'start' ? newDriftRun(now, doc, DESIRED_HASH) : plan.run;
-    const result = await advanceRun(run, (this.env.CF_ANALYTICS_TOKEN ?? '').trim(), this.env.ACCOUNT_ID, (url, init) => globalThis.fetch(url, init));
+    const run = plan.kind === 'start' ? newDriftRun(now, doc, this.desiredHash) : plan.run;
+    const result = await advanceRun(run, (this.env.CF_ANALYTICS_TOKEN ?? '').trim(), this.env.ACCOUNT_ID, (url, init) => globalThis.fetch(url, init), this.desired);
     if (result.run.account !== null && (run.account === null || runComplete(result.run))) {
       this.putDoc('cf_scripts', withLiveInventory(this.doc<CfScriptsDoc>('cf_scripts'), result.run.account.scripts, now), now);
     }
     let outcome: string;
     if (runComplete(result.run)) {
-      doc = completedDoc(doc, result.run, now);
+      doc = completedDoc(doc, result.run, now, this.desired);
       this.deleteDoc('drift_run');
       outcome = configurationFindings(doc.counts) === 0 ? 'ok' : 'drift';
     } else if (result.error !== null && attemptsExhausted(result.run)) {
@@ -807,7 +819,7 @@ export class HomeState extends DurableObject<Env> {
    * more often than PROBE_MIN_INTERVAL_SECONDS (a refresh's probe stands in for the tick's).
    */
   private async pollProbes(now: number): Promise<Record<string, string>> {
-    const due = PROBED.filter((probe) => probeDue(this.doc<ProbeDoc>(`probe:${probe.id}`), now));
+    const due = this.probed.filter((probe) => probeDue(this.doc<ProbeDoc>(`probe:${probe.id}`), now));
     const results = await Promise.all(due.map(async (probe) => [probe, await probeUrl(probe)] as const));
     const summary: Record<string, string> = {};
     for (const [probe, result] of results) {
@@ -819,7 +831,7 @@ export class HomeState extends DurableObject<Env> {
 
   /** Probe documents of entries that are no longer probed (registry change, `enabled: false`). */
   private dropOrphanProbes(): void {
-    const keep = new Set(PROBED.map((probe) => `probe:${probe.id}`));
+    const keep = new Set(this.probed.map((probe) => `probe:${probe.id}`));
     const keys = this.ctx.storage.sql.exec<{ key: string }>("SELECT key FROM state WHERE key >= 'probe:' AND key < 'probe;'").toArray();
     for (const { key } of keys) if (!keep.has(key)) this.deleteDoc(key);
   }
@@ -841,7 +853,7 @@ export class HomeState extends DurableObject<Env> {
     if (last != null && now - last < min && now >= last) return false;
     if (scope === 'home') {
       const statuses = OPS_APPS.filter((app) => statusDue(this.statusDoc(app), now));
-      const probes = PROBED.filter((probe) => probeDue(this.doc<ProbeDoc>(`probe:${probe.id}`), now));
+      const probes = this.probed.filter((probe) => probeDue(this.doc<ProbeDoc>(`probe:${probe.id}`), now));
       if (statuses.length === 0 && probes.length === 0) return false;
       await Promise.all([statuses.length > 0 ? this.pollStatuses(now, statuses) : Promise.resolve(), probes.length > 0 ? this.pollProbes(now) : Promise.resolve()]);
     } else {
@@ -869,7 +881,7 @@ export class HomeState extends DurableObject<Env> {
       lastTickAt: meta.last_tick_at,
       analyticsConfigured: analyticsConfigured(this.env),
       statuses: this.statusDocs(),
-      probes: Object.fromEntries(PROBED.flatMap((probe) => {
+      probes: Object.fromEntries(this.probed.flatMap((probe) => {
         const doc = this.doc<ProbeDoc>(`probe:${probe.id}`);
         return doc === null ? [] : [[probe.id, doc] as const];
       })),
@@ -903,14 +915,14 @@ export class HomeState extends DurableObject<Env> {
         const target = this.currentDesired(now, app);
         return this.canGuard(app) && target.level === 'shed' && target.source === 'owner';
       }),
-      statuses: evaluation.statuses, ...(neverRan ? {} : { evaluation }) });
+      statuses: evaluation.statuses, ...(neverRan ? {} : { evaluation }) }, this.registry);
     const active = new Set([...list.map(itemKey), ...raw.attention.items.map(itemKey)]);
     return this.attentionState.project(raw.attention, now, (condition) => this.attentionResolved(condition, now, tickAt, active, evaluation));
   }
 
   /** The digest items the owner has not dismissed: what the report and the Ops view's digest list. */
   private undismissed(items: readonly OpsReportItem[]): OpsReportItem[] {
-    return items.filter((item) => !this.attentionState.isDismissed({ ...item, target: targetOf(item.source, item.code) }));
+    return items.filter((item) => !this.attentionState.isDismissed({ ...item, target: targetOf(item.source, item.code, this.registry) }));
   }
 
   /** A missing/unavailable source is not evidence that its prior business condition recovered. */
@@ -918,7 +930,7 @@ export class HomeState extends DurableObject<Env> {
     const code = condition.code === 'unreachable' ? 'app_unreachable' : condition.code;
     const scriptsFresh = evaluation.scripts !== null && usageFresh({ fetched_at: evaluation.scripts.observed_at, day: evaluation.scripts.day, rows: [] }, now);
     if (condition.target.script !== undefined) {
-      return scriptsFresh && workerRows(evaluation.scripts, now).some((row) => row.script === condition.target.script && row.level === 'ok');
+      return scriptsFresh && workerRows(evaluation.scripts, now, this.registry).some((row) => row.script === condition.target.script && row.level === 'ok');
     }
     if (active.has(`${condition.source}:${code}`)) return false;
     const probe = evaluation.probes[condition.source];
@@ -966,7 +978,7 @@ export class HomeState extends DurableObject<Env> {
           const checked = this.statusDoc(app).checked_at;
           return checked === null ? now : checked + STATUS_REFRESH_MS;
         }),
-        ...PROBED.map((probe) => {
+        ...this.probed.map((probe) => {
           const checked = this.doc<ProbeDoc>(`probe:${probe.id}`)?.checked_at;
           return checked === undefined ? now : checked + PROBE_MIN_MS;
         }),
@@ -1000,9 +1012,9 @@ export class HomeState extends DurableObject<Env> {
       const base = this.shellFor(view, now, refreshed);
       switch (view) {
         case 'home':
-          return homeResponse(base, this.evalInput(now), this.usageView(now), this.summaryDesired(now));
+          return homeResponse(base, this.evalInput(now), this.usageView(now), this.summaryDesired(now), this.registry);
         case 'flows':
-          return flowsResponse(base, this.evalInput(now), this.canaryView(now));
+          return flowsResponse(base, this.evalInput(now), this.canaryView(now), this.registry);
         case 'cloudflare':
           return cloudflareResponse(
             base,
@@ -1011,11 +1023,12 @@ export class HomeState extends DurableObject<Env> {
             this.doc<UsageDoc>('usage') ?? NO_USAGE,
             this.doc<CfScriptsDoc>('cf_scripts'),
             this.guardView(now),
-            driftView(storedDrift(this.doc<DriftDoc>('drift')), analyticsConfigured(this.env), now),
+            driftView(storedDrift(this.doc<DriftDoc>('drift')), analyticsConfigured(this.env), now, this.desired),
+            this.registry,
           );
         case 'ops': {
           const digest = this.doc<DigestDoc>('digest') ?? NO_DIGEST;
-          return opsResponse(base, this.guardView(now), this.canaryView(now), this.digestView(digest, this.digestEnabled()), this.statusDocs());
+          return opsResponse(base, this.guardView(now), this.canaryView(now), this.digestView(digest, this.digestEnabled()), this.statusDocs(), this.registry);
         }
       }
     } finally {

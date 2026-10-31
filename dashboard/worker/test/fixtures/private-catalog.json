@@ -1,0 +1,120 @@
+{
+  "registry": {
+    "entries": [
+      {
+        "id": "demo-one",
+        "name": "演示one",
+        "description": "合成私人服务",
+        "group": "apps",
+        "icon": "database",
+        "accent": "blue",
+        "url": "https://demo-one.ziyixi.science/",
+        "access": true,
+        "status": {
+          "type": "public_http",
+          "enabled": true,
+          "url": "https://demo-one.ziyixi.science/healthz",
+          "expect": [
+            200
+          ],
+          "content_type": "text/plain",
+          "outside_access": true,
+          "error_rate": true
+        },
+        "tile_metric": {
+          "kind": "latency"
+        },
+        "app_only_signals": [],
+        "order": 90
+      },
+      {
+        "id": "demo-two",
+        "name": "演示two",
+        "description": "合成私人服务",
+        "group": "apps",
+        "icon": "database",
+        "accent": "blue",
+        "url": "https://demo-two.ziyixi.science/",
+        "access": true,
+        "status": {
+          "type": "link_only"
+        },
+        "tile_metric": null,
+        "app_only_signals": [],
+        "order": 91
+      }
+    ],
+    "workers": [
+      {
+        "script": "demo-edge-one",
+        "entry": "demo-one",
+        "role": "合成 Worker"
+      },
+      {
+        "script": "demo-edge-two",
+        "entry": "demo-two",
+        "role": "合成 Worker"
+      }
+    ],
+    "resources": [
+      {
+        "id": "demo-store-one",
+        "kind": "r2",
+        "name": "合成资源one",
+        "entry": "demo-one",
+        "match": "demo-store-one"
+      },
+      {
+        "id": "demo-store-two",
+        "kind": "r2",
+        "name": "合成资源two",
+        "entry": "demo-two",
+        "match": "demo-store-two"
+      }
+    ]
+  },
+  "desired": {
+    "version": 1,
+    "zones": [
+      "ziyixi.science"
+    ],
+    "workers": {
+      "demo-edge-one": {
+        "config": "private/demo/one/wrangler.toml",
+        "workers_dev": false,
+        "preview_urls": false,
+        "custom_domains": [
+          "demo-one.ziyixi.science"
+        ],
+        "routes": [],
+        "crons": [],
+        "bindings": [
+          {
+            "name": "STORE",
+            "type": "r2_bucket",
+            "source": "config"
+          }
+        ],
+        "personal": []
+      },
+      "demo-edge-two": {
+        "config": "private/demo/two/wrangler.toml",
+        "workers_dev": false,
+        "preview_urls": false,
+        "custom_domains": [
+          "demo-two.ziyixi.science"
+        ],
+        "routes": [],
+        "crons": [],
+        "bindings": [
+          {
+            "name": "STORE",
+            "type": "r2_bucket",
+            "source": "config"
+          }
+        ],
+        "personal": []
+      }
+    }
+  }
+}

@@ -192,7 +192,7 @@ def workerd_vitest_test(name, runner, tests, project, deps = [], data = [], tags
 
 def _vite_build_config_impl(ctx):
     output = ctx.actions.declare_file(ctx.label.name + ".mjs")
-    config_path = ctx.file.config.short_path[len(ctx.label.package) + 1:]
+    config_path = relative_path(ctx.file.config.short_path.removeprefix("../" + ctx.label.repo_name + "/"), ctx.label.package)
     content = """import original from %s;
 import { realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -212,7 +212,7 @@ export default async env => {
 """ % (json.encode("./" + config_path), json.encode(ctx.attr.out_dir))
     postbuild = ctx.file.postbuild
     if postbuild:
-        postbuild_path = postbuild.short_path[len(ctx.label.package) + 1:]
+        postbuild_path = relative_path(postbuild.short_path.removeprefix("../" + ctx.label.repo_name + "/"), ctx.label.package)
         if postbuild.basename == "js-budget.mjs":
             check = """const checks = await import(%s);
         const problem = checks.jsBudgetProblem(checks.jsSize(resolve(%s, 'assets')));

@@ -175,6 +175,7 @@ filegroup(
         "//tools/bazel/browser:source_audit_files",
         "//tools/bazel/ci:source_audit_files",
         "//tools/bazel/images:source_audit_files",
+        "//tools/bazel/js-deps:source_audit_files",
         "//tools/bazel/lint:source_audit_files",
         "//tools/bazel/python:source_audit_files",
         "//tools/bundle-size:source_audit_files",

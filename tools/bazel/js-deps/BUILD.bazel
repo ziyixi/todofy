@@ -1,0 +1,10 @@
+load("@npm//:defs.bzl", "npm_link_all_packages")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files")
+
+package(default_visibility = ["//visibility:public"])
+
+npm_link_all_packages(name = "node_modules")
+
+exports_files(["package.json"])
+
+source_audit_files()

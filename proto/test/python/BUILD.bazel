@@ -265,6 +265,17 @@ unittest_test(
 )
 
 unittest_test(
+    name = "test_selected_generation",
+    srcs = ["test_selected_generation.py"],
+    imports = ["."],
+    modules = ["test_selected_generation"],
+    deps = [
+        "//proto:python_runtime",
+        "//proto/tools:generators",
+    ],
+)
+
+unittest_test(
     name = "test_wire_enum",
     srcs = ["test_wire_enum.py"],
     imports = ["."],
@@ -315,6 +326,7 @@ test_suite(
         ":test_profile_breaking",
         ":test_retired",
         ":test_schema_imports",
+        ":test_selected_generation",
         ":test_wire_enum",
         ":test_wire_profile_cases",
         ":test_wire_rules",

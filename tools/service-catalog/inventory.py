@@ -8,6 +8,7 @@ import sys
 
 from catalog import REPO, load_catalog, read_toml, require
 from cloud_profile import load_resources
+from private_catalog import configuration_changes, load_private_catalog, supplemental_expected
 
 sys.path.insert(0, str(REPO / "tools/cloud-release"))
 # Durable Object class -> its config/resources.toml key: the one list the release comparison also uses.
@@ -121,16 +122,21 @@ def main():
     elif args.check:
         require(output.read_text() == text, "generated account inventory is stale")
     else:
-        from api import Api, ReleaseError
+        from api import Api
         try:
-            observed = observe(Api("cloudflare", os.environ.get("CLOUDFLARE_API_TOKEN", "")),
-                               load_resources(REPO)["account_id"], FIRST_DEPLOY_PENDING)
+            attachment = load_private_catalog(os.environ.get("PRIVATE_CATALOG"), load_catalog(), wanted, REPO)
+            wanted = supplemental_expected(wanted, attachment)
+            resources = load_resources(REPO)
+            api = Api("cloudflare", os.environ.get("CLOUDFLARE_API_TOKEN", ""))
+            observed = observe(api, resources["account_id"], FIRST_DEPLOY_PENDING)
             changes = compare(wanted, observed, pending())
+            configuration = configuration_changes(api, resources["account_id"], resources["zone_id"], attachment)
             # Public logs contain counts only. Exact identities are already shown in the owner's Dashboard.
             print(json.dumps({"event": "account_inventory", "changes": len(changes),
-                              "by_kind": {kind: sum(c["kind"] == kind for c in changes) for kind in wanted}}))
-            return 1 if changes else 0
-        except ReleaseError as error:
+                              "by_kind": {kind: sum(c["kind"] == kind for c in changes) for kind in wanted},
+                              "private_configuration_changes": configuration}))
+            return 1 if changes or configuration else 0
+        except ValueError as error:
             print(str(error), file=sys.stderr)
             return 1
     return 0

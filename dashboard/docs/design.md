@@ -155,7 +155,7 @@ key is involved. Details and per-app policy are in [edge-auth](../../packages/ed
 
 | Surface | Behavior |
 | --- | --- |
-| `GET /api/v1/registry` | Isolate-cached registry; build ETag, no object call |
+| `GET /api/v1/registry` | Isolate-cached registry; build/catalog ETag, no object call |
 | `homeView`, `flowsView`, `cloudflareView`, `opsView` GETs | One cached HomeState projection with ETag/304 |
 | Home/Cloudflare refresh methods | Separate rate-limited scopes; only due source reads |
 | Guard override and canary run | Serialized, UUID-identified actions with explicit receipts |

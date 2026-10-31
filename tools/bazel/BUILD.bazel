@@ -31,4 +31,7 @@ test_suite(
     tests = ["//tools/bazel/test:check"],
 )
 
-source_audit_files(deps = ["//tools/bazel/test:source_audit_files"])
+source_audit_files(deps = [
+    "//tools/bazel/js-deps:source_audit_files",
+    "//tools/bazel/test:source_audit_files",
+])

@@ -658,7 +658,7 @@ function wireCounts(counts: Readonly<Record<DriftCategory, number>>): Drift['cou
   return changes > 0 ? counts : older;
 }
 
-export function driftView(doc: DriftDoc, configured: boolean, now: number): Drift {
+export function driftView(doc: DriftDoc, configured: boolean, now: number, desired: DesiredState = DESIRED): Drift {
   const total = totalFindings(doc.counts);
   const status: Drift['status'] = !configured
     ? 'not_configured'
@@ -674,7 +674,7 @@ export function driftView(doc: DriftDoc, configured: boolean, now: number): Drif
     status,
     checked_at: isoOrNull(doc.checked_at),
     in_progress: configured && doc.running_day === utcDay(now),
-    desired_workers: doc.desired_workers > 0 ? doc.desired_workers : Object.keys(DESIRED.workers).length,
+    desired_workers: doc.desired_workers > 0 ? doc.desired_workers : Object.keys(desired.workers).length,
     counts: wireCounts(doc.counts),
     findings,
     findings_omitted: total - findings.length,

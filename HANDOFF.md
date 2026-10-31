@@ -5,7 +5,10 @@ Documentation entrypoints are in [docs/README](docs/README.md). Historical waiti
 
 ## Current work
 
-No implementation changes in progress.
+`codex/private-quant-data` integrates the private data platform on `private/` branch `codex/quant-data`.
+Application sources, private proto, deployment configuration and detailed handoff stay in that repository.
+Parent changes are limited to shared dependency/toolchain support and generic private build/release integration.
+No production publication or provider/data-quality verification has completed yet.
 
 ## Latest verified release
 

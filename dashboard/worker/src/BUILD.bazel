@@ -37,6 +37,7 @@ copied_source_files(
         "mcp.ts",
         "ops-client.ts",
         "probe.ts",
+        "private-catalog.ts",
         "registry.ts",
         "registry-check.ts",
         "registry-types.ts",
@@ -243,6 +244,19 @@ ts_source_library(
 )
 
 ts_source_library(
+    name = "private-catalog",
+    srcs = [":private-catalog.ts"],
+    deps = [
+        ":drift",
+        ":registry",
+        ":registry-check",
+        ":registry-types",
+        "//proto/dashboard/ui/v1:ts",
+        "//proto/ts:wire-json",
+    ],
+)
+
+ts_source_library(
     name = "module_group_18",
     srcs = [
         ":canary.ts",
@@ -265,6 +279,7 @@ ts_source_library(
         ":guard",
         ":idl",
         ":probe",
+        ":private-catalog",
         ":registry",
         ":registry-types",
         ":time",
@@ -331,6 +346,7 @@ ts_source_library(
     deps = [
         ":api-types",
         ":module_group_18",
+        ":private-catalog",
         ":registry",
         ":view-body",
         "//proto/common/errors/v1:ts",
@@ -350,6 +366,7 @@ ts_source_library(
         ":api",
         ":api-types",
         ":module_group_18",
+        ":private-catalog",
         "//packages/edge-auth:lib",
         "//proto/dashboard/ui/v1:ts",
         "//proto/ts:http-transcoder",
@@ -383,9 +400,10 @@ ts_source_library(
     deps = [
         ":api-types",
         ":idl",
-        ":module_group_18",
         ":registry",
         ":registry-types",
+        "//proto/ops/v1:ts",
+        "//proto/ts:wire-json",
     ],
 )
 
@@ -409,6 +427,7 @@ js_library(
         ":mcp",
         ":module_group_18",
         ":probe",
+        ":private-catalog",
         ":registry",
         ":registry-check",
         ":registry-types",

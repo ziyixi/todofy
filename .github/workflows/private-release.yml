@@ -1,0 +1,75 @@
+name: Private release
+
+on:
+  workflow_call:
+    inputs:
+      revision:
+        type: string
+        required: true
+      operation:
+        type: string
+        default: release
+      expect:
+        type: string
+        default: ''
+      fingerprint:
+        type: string
+        default: ''
+    secrets:
+      private_ssh_key:
+        required: true
+      CF_API_TOKEN:
+        required: true
+      INFRA_STATE_PASSPHRASE:
+        required: true
+      INFRA_TFVARS:
+        required: true
+
+permissions:
+  contents: read
+  checks: read
+  packages: write
+  deployments: write
+
+concurrency:
+  group: private-production
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release pinned private sources
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: production
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ziyixi/todofy-private
+          path: private
+          ref: ${{ inputs.revision }}
+          ssh-key: ${{ secrets.private_ssh_key }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-bazel
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: package.json
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: 1.12.6
+          tofu_wrapper: false
+          github_token: ${{ github.token }}
+      - name: Run the pinned private release entry point
+        env:
+          PRIVATE_REVISION: ${{ inputs.revision }}
+          PRIVATE_RELEASE_OPERATION: ${{ inputs.operation }}
+          PRIVATE_INFRA_EXPECT: ${{ inputs.expect }}
+          PRIVATE_BUILD_FINGERPRINT: ${{ inputs.fingerprint }}
+          GITHUB_TOKEN: ${{ github.token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          INFRA_STATE_PASSPHRASE: ${{ secrets.INFRA_STATE_PASSPHRASE }}
+          INFRA_TFVARS: ${{ secrets.INFRA_TFVARS }}
+        run: python3 private/ci/release.py

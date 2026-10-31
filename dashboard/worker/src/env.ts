@@ -70,6 +70,8 @@ export interface Env {
    * read-only GETs under the same API (drift.ts); never logged or sent elsewhere.
    */
   readonly CF_ANALYTICS_TOKEN?: string;
+  /** Optional private registration and desired configuration; never exposed anonymously. */
+  readonly PRIVATE_CATALOG?: string;
 
   // local development and the workerd tests only (.dev.vars, test/runtime); never in the production config
   readonly DEV_AUTH_BYPASS?: string;

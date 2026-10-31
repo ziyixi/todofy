@@ -111,6 +111,8 @@ copied_source_files(
         "ops-client.test.ts",
         "ops-golden.test.ts",
         "probe.test.ts",
+        "private-catalog.test.ts",
+        "fixtures/private-catalog.json",
         "raw.d.ts",
         "registry.test.ts",
         "usage.test.ts",
@@ -530,6 +532,23 @@ proto_vitest_test(
 )
 
 proto_vitest_test(
+    name = "private-catalog_test",
+    config = "//dashboard/worker:test_config",
+    data = COMMON_TEST_DATA + [":fixtures/private-catalog.json"],
+    project = "dashboard/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":private-catalog.test.ts"],
+    deps = [
+        "//dashboard/worker/src:account-inventory_json",
+        "//dashboard/worker/src:discovery",
+        "//dashboard/worker/src:drift",
+        "//dashboard/worker/src:private-catalog",
+        "//dashboard/worker/src:registry",
+    ],
+)
+
+proto_vitest_test(
     name = "probe_test",
     config = "//dashboard/worker:test_config",
     data = COMMON_TEST_DATA,
@@ -703,6 +722,15 @@ workerd_vitest_test(
     ],
     tests = [":runtime/api-cpu.test.ts"],
     deps = COMMON_TEST_DEPS,
+)
+
+workerd_vitest_test(
+    name = "runtime_private-catalog_test",
+    data = COMMON_TEST_DATA_3,
+    project = "dashboard/worker",
+    runner = vitest.vitest_test,
+    tests = [":runtime/private-catalog.test.ts"],
+    deps = COMMON_TEST_DEPS + ["//dashboard/worker/src:private-catalog"],
 )
 
 workerd_vitest_test(

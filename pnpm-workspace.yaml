@@ -28,6 +28,7 @@ packages:
   - "todofy/gateway"
   - "todofy"
   - "todofy/web"
+  - "tools/bazel/js-deps"
   - "watch/web"
   - "watch/worker"
   - "website"

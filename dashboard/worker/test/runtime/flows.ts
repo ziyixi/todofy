@@ -14,7 +14,7 @@ import modelRouterOk from '../fixtures/model-router-ok.json';
 import type { GuardState, OpsStatus } from '@ziyixi/proto/ops/v1/ops_wire';
 import type { CanaryRun, OverallLevel, Usage, ViewId } from '../../src/api-types.ts';
 import type { AppDetail, CloudflareView, OpsView } from '../../src/api-types.ts';
-import { DESIRED } from '../../src/drift.ts';
+import { DESIRED, type DesiredState } from '../../src/drift.ts';
 import { fakeCloudflare, type LiveTweaks } from '../drift-fixture.ts';
 import { graphqlBody, type SyntheticUsage } from '../graphql-fixture.ts';
 import { contractErrors, type ContractName } from '../contract.ts';
@@ -155,7 +155,7 @@ async function answerOf<T>(name: ViewId | 'registry', response: Response): Promi
 }
 
 export async function startFlows(
-  options: { bindings?: Record<string, string>; usage?: SyntheticUsage; persist?: string; inspectorPort?: number } = {},
+  options: { bindings?: Record<string, string>; usage?: SyntheticUsage; persist?: string; inspectorPort?: number; desired?: DesiredState } = {},
 ): Promise<FlowHarness> {
   const analytics: Analytics = { answer: options.usage ?? {}, requests: [] };
   const cloudflare: CloudflareApi = { tweaks: {}, requests: [] };
@@ -175,7 +175,7 @@ export async function startFlows(
       }
       const route = routes.get(request.url);
       if (route) return route();
-      const fake = fakeCloudflare(request.url, cloudflare.tweaks, DESIRED);
+      const fake = fakeCloudflare(request.url, cloudflare.tweaks, options.desired ?? DESIRED);
       if (fake !== null) cloudflare.requests.push({ url: request.url, method: request.method, authorization: request.headers.get('authorization') });
       return fake ?? new Response('no outbound fetch expected', { status: 599 });
     },

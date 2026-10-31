@@ -6,8 +6,11 @@
 import { MAX_OUTBOUND_PER_REFRESH, MAX_OUTBOUND_PER_TICK } from './api-types.ts';
 import type { EntryDef, PublicProbe, RegistryDef } from './registry-types.ts';
 import { ACCENTS, FLOW_STAGES_MAX, ICON_KEYS } from './idl.ts';
-import { isOpsCode } from './ops-client.ts';
+import { file_ops_v1_ops } from '@ziyixi/proto/ops/v1/ops_pb';
+import { formatMatches } from '@ziyixi/proto/wire-json';
 import { OWNER_ZONE, PLATFORM_SIGNALS, outboundPerRefresh, outboundPerTick, stageScripts } from './registry.ts';
+
+const isOpsCode = (value: string): boolean => formatMatches(file_ops_v1_ops, 'Code', value);
 
 const ENTRY_ID = /^[a-z][a-z0-9-]{0,31}$/;
 const RESOURCE_ID = /^[a-z][a-z0-9-]{0,47}$/;

@@ -24,6 +24,8 @@ import type { ViewId } from './api-types.ts';
 import { buildSha } from './config.ts';
 import type { Env } from './env.ts';
 import { registryBody } from './registry.ts';
+import { homeCatalog } from './private-catalog.ts';
+import { fnv1a } from './views.ts';
 import { HOME_OBJECT, type AttentionMutationOutcome, type GuardOverrideOutcome, type HomeState, type StartCanaryOutcome, type WebsiteSyncOutcome } from './state.ts';
 import { etagMatches, type ViewBody } from './view-body.ts';
 
@@ -116,8 +118,10 @@ export const handlers: ServiceHandlers<ShapeOf<typeof DashboardUiService>, ApiCo
   getRegistry(_request, ctx) {
     // Static per build: answered by the Worker from the string it serialized once, never by HomeState.
     const build = buildSha(ctx.env);
-    const etag = `"${build}"`;
-    const body = etagMatches(ctx.request.headers.get('if-none-match'), etag) ? null : registryBody(build);
+    const catalog = homeCatalog(ctx.env.PRIVATE_CATALOG);
+    const serialized = registryBody(build, catalog.registry);
+    const etag = ctx.env.PRIVATE_CATALOG ? `"${build}:${fnv1a(serialized)}"` : `"${build}"`;
+    const body = etagMatches(ctx.request.headers.get('if-none-match'), etag) ? null : serialized;
     return Promise.resolve(new PreEncoded(body, { etag }));
   },
   getHomeView: (_request, ctx) => viewAnswer(ctx, 'home', false),

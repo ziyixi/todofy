@@ -701,14 +701,19 @@ export function registryView(build: string, registry: RegistryDef = REGISTRY): R
   };
 }
 
-const serialized = new Map<string, string>();
+const serialized = new WeakMap<RegistryDef, Map<string, string>>();
 
 /** registryView serialized once per build per isolate (the handler only passes the string through). */
-export function registryBody(build: string): string {
-  let body = serialized.get(build);
+export function registryBody(build: string, registry: RegistryDef = REGISTRY): string {
+  let builds = serialized.get(registry);
+  if (builds === undefined) {
+    builds = new Map();
+    serialized.set(registry, builds);
+  }
+  let body = builds.get(build);
   if (body === undefined) {
-    body = JSON.stringify(registryView(build));
-    serialized.set(build, body);
+    body = JSON.stringify(registryView(build, registry));
+    builds.set(build, body);
   }
   return body;
 }

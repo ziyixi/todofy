@@ -120,6 +120,15 @@ class CatalogTests(unittest.TestCase):
                          ("Newsletter", "apps", "https://news.ziyixi.science/", True))
         self.assertEqual(console["status"], {"type": "none"})
 
+    def test_public_production_scan_is_independent_of_private_submodule_initialization(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for relative in ("demo/wrangler.toml", "private/demo/wrangler.toml", "private/nested/app/wrangler.toml"):
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('name = "synthetic"\n')
+            self.assertEqual(catalog.production_configs(root), {"demo/wrangler.toml"})
+
     def test_all_production_configs_and_consumer_maps_are_covered(self):
         loaded = catalog.load_catalog()
         self.assertEqual(set(loaded.worker_configs().values()), catalog.production_configs(catalog.REPO))

@@ -1,6 +1,11 @@
 """Exact inventory fails on new objects and on missing registered resources."""
 
 import sys
+import json
+import copy
+import os
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).absolute().parents[1]))
 from catalog import CatalogError
 import inventory
 from inventory import compare, expected, observe, pending
+from private_catalog import load_private_catalog, supplemental_expected, configuration_changes, attach_home_secrets
 
 SYNTHETIC = {
     "workers": {"result": [{"id": "demo"}]},
@@ -32,6 +38,104 @@ class FakeApi:
 
 
 class InventoryTests(unittest.TestCase):
+    def private_fixture(self):
+        return json.loads((inventory.REPO / "dashboard/worker/test/fixtures/private-catalog.json").read_text())
+
+    def attachment(self, value):
+        return load_private_catalog(json.dumps(value), inventory.load_catalog(), expected(), inventory.REPO)
+
+    def test_separate_registration_preserves_materialized_home_credentials(self):
+        secrets = {"ACCESS_OWNER": "owner@example.org", "ACCESS_OWNER_ALIASES": "alias@example.org",
+                   "CF_ANALYTICS_TOKEN": "synthetic-analytics-value"}
+        frozen = copy.deepcopy(secrets)
+        raw = json.dumps(self.private_fixture())
+        self.assertEqual(attach_home_secrets(secrets, raw), {**secrets, "PRIVATE_CATALOG": raw})
+        self.assertEqual(secrets, frozen)
+        self.assertIs(attach_home_secrets(secrets, ""), secrets)
+        with self.assertRaisesRegex(ValueError, "PRIVATE_CATALOG_INVALID"):
+            attach_home_secrets(secrets, '{"invalid":"synthetic-private-value"}')
+        self.assertEqual(secrets, frozen)
+
+    def test_registration_cli_uses_the_existing_owner_only_secrets_file_and_never_prints_values(self):
+        secrets = {"ACCESS_OWNER": "owner@example.org", "CF_ANALYTICS_TOKEN": "synthetic-analytics-value"}
+        raw = json.dumps(self.private_fixture())
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "home-secrets.json"
+            path.write_text(json.dumps(secrets))
+            path.chmod(0o600)
+            def call(value):
+                return subprocess.run([sys.executable, str(inventory.REPO / "tools/service-catalog/private_catalog.py"),
+                                       "--secrets-file", str(path)], env={**os.environ, "PRIVATE_CATALOG": value},
+                                      text=True, capture_output=True, check=False)
+            rejected = call('{"invalid":"synthetic-private-value"}')
+            self.assertEqual(rejected.returncode, 1)
+            self.assertEqual(json.loads(path.read_text()), secrets)
+            self.assertEqual(rejected.stderr.strip(), "PRIVATE_CATALOG_INVALID")
+            accepted = call(raw)
+            self.assertEqual(accepted.returncode, 0, accepted.stderr)
+            self.assertEqual(json.loads(path.read_text()), {**secrets, "PRIVATE_CATALOG": raw})
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            for value in (*secrets.values(), "demo-edge-one", "synthetic-private-value"):
+                self.assertNotIn(value, accepted.stdout + accepted.stderr + rejected.stdout + rejected.stderr)
+
+    def test_private_attachment_adds_only_registered_identities(self):
+        wanted = expected()
+        self.assertIsNone(load_private_catalog("", None, wanted, inventory.REPO))
+        attachment = self.attachment(self.private_fixture())
+        merged = supplemental_expected(wanted, attachment)
+        self.assertEqual(set(merged["workers"]) - set(wanted["workers"]), {"demo-edge-one", "demo-edge-two"})
+        self.assertEqual(set(merged["r2"]) - set(wanted["r2"]), {"demo-store-one", "demo-store-two"})
+        self.assertEqual(compare(merged, merged), [])
+        actual = {**merged, "workers": [*merged["workers"], "unknown-extra"]}
+        self.assertEqual(compare(merged, actual), [{"kind": "workers", "identity": "unknown-extra", "change": "unregistered"}])
+        self.assertEqual(attachment["registry"]["workers"][0]["entry"], attachment["registry"]["entries"][0]["id"])
+
+    def test_private_attachment_refuses_collisions_and_invalid_values_without_echoing_them(self):
+        edits = [
+            lambda value: value["registry"]["entries"][0].update(id="home"),
+            lambda value: value["registry"]["workers"][0].update(script="home"),
+            lambda value: value["registry"]["resources"][0].update(id="infra-state"),
+            lambda value: value["registry"]["resources"][0].update(match="infra-state"),
+            lambda value: value["registry"]["entries"][0]["status"].update(type="ops_v1"),
+            lambda value: value["registry"]["entries"][0]["status"].update(url="https://other.example/healthz"),
+            lambda value: value["desired"]["workers"]["demo-edge-one"].update(custom_domains=["home.ziyixi.science"]),
+            lambda value: value["desired"].update(zones=["other.example"]),
+            lambda value: value["desired"]["workers"]["demo-edge-one"]["bindings"].append({"name": "STORE", "type": "r2_bucket", "source": "config"}),
+        ]
+        for edit in edits:
+            value = copy.deepcopy(self.private_fixture())
+            edit(value)
+            with self.subTest(edit=edits.index(edit)), self.assertRaisesRegex(ValueError, "^PRIVATE_CATALOG_INVALID$"):
+                self.attachment(value)
+
+    def test_private_configuration_comparison_is_read_only_and_detects_each_difference(self):
+        attachment = self.attachment(self.private_fixture())
+
+        class PrivateApi:
+            def __init__(self):
+                self.requests = []
+                self.flags = {"enabled": False, "previews_enabled": False}
+
+            def call(self, path):
+                self.requests.append(path)
+                if path.endswith("/settings"):
+                    return {"bindings": [{"name": "STORE", "type": "r2_bucket", "bucket_name": "unused-private-target"}]}
+                if path.endswith("/schedules"):
+                    return {"schedules": []}
+                if path.endswith("/subdomain"):
+                    return self.flags
+                if path.endswith("/domains"):
+                    return [{"hostname": "demo-" + name + ".ziyixi.science", "service": "demo-edge-" + name} for name in ("one", "two")]
+                if path.endswith("/routes"):
+                    return []
+                raise AssertionError("unexpected request")
+
+        api = PrivateApi()
+        self.assertEqual(configuration_changes(api, "synthetic-account", "synthetic-zone", attachment), 0)
+        self.assertEqual(len(api.requests), 10)
+        api.flags["enabled"] = True
+        self.assertEqual(configuration_changes(api, "synthetic-account", "synthetic-zone", attachment), 2)
+
     def test_all_kinds_and_bootstrap_owned_state_are_registered(self):
         wanted = expected()
         self.assertIn("infra-state", wanted["r2"])

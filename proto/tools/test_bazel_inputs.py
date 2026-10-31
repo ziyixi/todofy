@@ -1,12 +1,14 @@
 """The Bazel adapter preserves authoritative generator options and rejects unsupported plugin changes."""
 
-from pathlib import Path
+import json
+import sys
 import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 import yaml
-
-from bazel_codegen import typescript_template
+from bazel_codegen import main, typescript_template
 
 CONFIG = Path(__file__).absolute().parents[1] / "buf.gen.yaml"
 
@@ -43,6 +45,88 @@ class ConfigTest(unittest.TestCase):
         config["plugins"].append(config["plugins"][0].copy())
         with self.assertRaisesRegex(ValueError, "single-plugin"):
             self.template(config)
+
+
+class GenerationTest(unittest.TestCase):
+    def test_protobuf_only_output_does_not_attempt_wire_generation(self):
+        image = {
+            "file": [
+                {
+                    "name": "google/api/client.proto",
+                    "package": "google.api",
+                    "syntax": "proto3",
+                    "messageType": [{"name": "PythonSettings", "nestedType": [{"name": "ExperimentalFeatures"}]}],
+                }
+            ]
+        }
+
+        def generate(command, **_kwargs):
+            template = json.loads(command[command.index("--template") + 1])
+            output = Path(template["plugins"][0]["out"]) / "google/api/client_pb.ts"
+            output.parent.mkdir(parents=True)
+            output.write_text("// synthetic protobuf output\n")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / "client_pb.ts"
+            args = [
+                "codegen",
+                "--format",
+                "ts",
+                "--package",
+                "google.api",
+                "--buf",
+                "/pinned/buf",
+                "--plugin",
+                "/pinned/plugin",
+                "--config",
+                str(CONFIG),
+                "--output",
+                f"google/api/client_pb.ts={target}",
+            ]
+            with (
+                patch.object(sys, "argv", args),
+                patch("bazel_codegen.subprocess.check_output", return_value=json.dumps(image).encode()),
+                patch("bazel_codegen.subprocess.run", side_effect=generate),
+            ):
+                main()
+            self.assertEqual(target.read_text(), "// synthetic protobuf output\n")
+
+    def test_explicit_schema_target_uses_the_declared_output_path(self):
+        image = {
+            "file": [
+                {
+                    "name": "selected/v1/item.proto",
+                    "package": "selected.v1",
+                    "syntax": "proto3",
+                    "messageType": [{"name": "Item", "field": []}],
+                }
+            ]
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / "item.schema.json"
+            args = [
+                "codegen",
+                "--format",
+                "schema",
+                "--package",
+                "selected.v1",
+                "--buf",
+                "/pinned/buf",
+                "--schema-identity",
+                "https://schema.local/item",
+                "--schema-title",
+                "Selected",
+                "--output",
+                f"selected.schema.json={target}",
+            ]
+            with (
+                patch.object(sys, "argv", args),
+                patch("bazel_codegen.subprocess.check_output", return_value=json.dumps(image).encode()),
+            ):
+                main()
+            schema = json.loads(target.read_text())
+            self.assertEqual(schema["$id"], "https://schema.local/item")
+            self.assertIn("Item", schema["$defs"])
 
 
 if __name__ == "__main__":

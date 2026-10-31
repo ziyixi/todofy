@@ -64,6 +64,10 @@ bazel build @private//:private
 bazel test @private//:check
 ```
 
+Private proto packages use the public code-generation rules with explicit package selection and the shared wire
+runtime. Private JavaScript builds link the root's `tools/bazel/js-deps` importer; private Python dependencies are
+resolved in the root lock. No application source is copied into the public repository.
+
 Push a private commit before updating the parent's gitlink to it, so every recorded revision can be checked out.
 [CI/CD](ci-cd.md#private-checks) describes its separate check and cache boundary.
 

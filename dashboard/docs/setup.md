@@ -32,6 +32,18 @@ drift observation. It is never a write credential or a page response.
 with that application's authorized release; already-running isolates do not read GitHub settings dynamically.
 Shared owner-identity changes require checking the actual consumers through their release dependencies.
 
+Private services can attach optional `PRIVATE_CATALOG` JSON without publishing their names or configuration in
+this repository. The same attachment is supplied to Home and the production reconciliation job. Its shape is
+`{registry: {entries, workers, resources}, desired: {version, zones, workers}}`, using the existing registry and
+drift-desired fields. Empty/unset keeps the public catalog. A nonempty invalid attachment fails with
+`PRIVATE_CATALOG_INVALID`; it cannot replace public identities or hide unregistered resources.
+
+Supplemental entries use `public_http` or `link_only`, owner-zone HTTPS links, and the existing groups. A public
+probe of an Access-protected service needs its own declared bypass path, a 2xx expectation and a content type.
+It makes one fetch per due interval and reads no body. Supplemental entries add no Ops binding, control or flow.
+Worker configuration and exact storage identities join the same owner views and read-only reconciliation; the
+existing outbound ceilings still apply. Source/build identity remains the private release's responsibility.
+
 ## 3. Local development
 
 ```sh

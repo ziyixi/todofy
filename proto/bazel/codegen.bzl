@@ -16,6 +16,14 @@ def _generate_impl(ctx):
         args.add("--plugin", ctx.executable._plugin)
         args.add("--config", ctx.file._generation_config)
         configs.append(ctx.file._generation_config)
+        if ctx.attr.wire_runtime:
+            args.add("--wire-runtime", ctx.attr.wire_runtime)
+    if ctx.attr.schema_identity:
+        if ctx.attr.format != "schema" or len(ctx.attr.outs) != 1:
+            fail("schema_identity requires format=schema and exactly one output")
+        args.add("--schema-identity", ctx.attr.schema_identity)
+        args.add("--schema-title", ctx.attr.schema_title)
+        args.add("--schema-root", ctx.attr.schema_root)
     for source in ctx.attr.sources:
         args.add("--source", source)
     unknown = [path for path in ctx.attr.output_paths if path not in ctx.attr.outs]
@@ -51,6 +59,10 @@ proto_codegen = rule(
         "sources": attr.string_list(mandatory = True),
         "outs": attr.string_list(mandatory = True),
         "output_paths": attr.string_dict(),
+        "wire_runtime": attr.string(),
+        "schema_identity": attr.string(),
+        "schema_title": attr.string(),
+        "schema_root": attr.string(),
         "_ts_generator": attr.label(default = "//proto/tools:bazel_ts_codegen", executable = True, cfg = "exec"),
         "_python_generator": attr.label(default = "//proto/tools:bazel_python_codegen", executable = True, cfg = "exec"),
         "_schema_generator": attr.label(default = "//proto/tools:bazel_schema_codegen", executable = True, cfg = "exec"),
@@ -107,7 +119,7 @@ proto_source_files = rule(
     attrs = {"protos": attr.label_list(providers = [ProtoInfo], mandatory = True)},
 )
 
-def ts_proto_library(name, outs, proto_package, protos, sources, deps):
+def ts_proto_library(name, outs, proto_package, protos, sources, deps, wire_runtime = ""):
     """Generate one declared TypeScript package and expose its exact dependencies."""
     proto_codegen(
         name = name + "_generate",
@@ -116,6 +128,7 @@ def ts_proto_library(name, outs, proto_package, protos, sources, deps):
         proto_package = proto_package,
         protos = protos,
         sources = sources,
+        wire_runtime = wire_runtime,
     )
     js_library(
         name = name,

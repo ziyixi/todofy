@@ -298,6 +298,7 @@ jobs:
       - name: Compare actual Worker, D1, DO and R2 identities
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          PRIVATE_CATALOG: ${{ secrets.PRIVATE_CATALOG }}
         run: python3 tools/service-catalog/inventory.py
 
   infra-result:

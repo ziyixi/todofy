@@ -48,6 +48,16 @@ use the same public graph without an initialized submodule.
 The private job restores the public Bazel cache but never saves a cache or uploads build/test artifacts. Public
 cache producers run without the private checkout.
 
+Its checked, unstamped artifacts produce a content fingerprint. The optional main-only [Private publication](../.github/workflows/private-release.yml)
+delegates to the pinned private entry point; application names and deployment implementation stay private. It uses
+the fingerprint to skip unchanged application artifacts, including documentation-only changes. Shared build inputs
+remain part of the native Bazel dependency graph.
+
+Initial publication is manual through `private_operation`; normal push publication starts after
+`PRIVATE_RELEASE_ENABLED` is enabled. Private images stay private and are pushed from the same checked sources.
+Successful publication records its verified identity through GitHub Deployments. Private infrastructure has its
+own reviewed plan/apply path; public resources keep their existing publication and reconciliation owners.
+
 ## Checked artifacts
 
 The credential-free artifact matrix builds only selected Worker archives, Linux OCI images and extension ZIPs.

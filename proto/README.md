@@ -136,6 +136,15 @@ package actions reuse the pinned Buf/protobuf-es tools and the existing Python, 
 The real `buf.gen.yaml` is an action input. The Google APIs repository validates `buf.lock` before using its
 commit-specific archive checksum. Actions consume declared files and toolchains, without local `node_modules`.
 
+Independent repositories may load `@@//proto/bazel:codegen.bzl` and supply their own `proto_library` closures to
+`proto_codegen`, `ts_proto_library` and `python_proto_library`. The `proto_package` argument selects a package without
+adding it to this module's default Python or wire-TypeScript inventories. Generated modules remain in the caller's
+repository. TypeScript callers in a separate npm package set `wire_runtime = "@ziyixi/proto/wire-json"`, so their
+generated wire types augment the shared codec. Their package assembly must expose the shared annotation imports
+through that existing package, preserving one runtime. For a schema outside the published registry, a
+`proto_codegen(format = "schema")` target with one output accepts `schema_identity`, `schema_title` and optional
+`schema_root`; an empty root generates the package's `$defs` document. Published schema defaults remain unchanged.
+
 For raw pnpm/uv development, `node proto/tools/ensure.mjs` runs `bazel build //proto:materialized` from the
 repository root and copies that target's generated modules into the existing source export paths. It requires
 Bazel 9.3.1 on PATH; `BAZEL` can name its executable. Bazel decides freshness using the same graph as CI.

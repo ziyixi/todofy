@@ -40,7 +40,10 @@ py_test(
     imports = ["."],
     legacy_create_init = False,
     main = "test_bazel_inputs.py",
-    deps = ["@python_deps//pyyaml"],
+    deps = [
+        ":generators",
+        "@python_deps//pyyaml",
+    ],
 )
 
 exports_files([

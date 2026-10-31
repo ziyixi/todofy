@@ -156,6 +156,7 @@ jobs:
           dashboard-access-owner-aliases: ${{ secrets.DASHBOARD_ACCESS_OWNER_ALIASES }}
           dashboard-cf-analytics-token: ${{ secrets.DASHBOARD_CF_ANALYTICS_TOKEN }}
           dashboard-worker-secrets: ${{ secrets.DASHBOARD_WORKER_SECRETS }}
+          private-catalog: ${{ secrets.PRIVATE_CATALOG }}
       - name: Release links
         id: links
         if: inputs.app == 'links' && steps.preflight.outputs.required == 'true'

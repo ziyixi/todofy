@@ -92,7 +92,8 @@ def production_configs(root: Path) -> set[str]:
     found = set()
     for directory, dirs, names in os.walk(root, followlinks=False):
         dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS and not d.startswith(".")
-                         and not (Path(directory) / d).is_symlink())
+                         and not (Path(directory) / d).is_symlink()
+                         and not (Path(directory) == root and d == "private"))
         if "wrangler.toml" in names:
             found.add((Path(directory) / "wrangler.toml").relative_to(root).as_posix())
     return found

@@ -95,6 +95,7 @@ class FileWriter:
         enums: dict[str, dict[str, Any]],
         names: dict[str, str],
         others: dict[str, tuple[str, str]] | None = None,
+        wire_runtime: str | None = None,
     ) -> None:
         self.file = file
         self.enums = enums
@@ -103,6 +104,7 @@ class FileWriter:
         self.others = others or {}
         self.imports: dict[str, set[str]] = {}  # wire module path -> the names this file imports from it
         self.package = file["package"]
+        self.wire_runtime = wire_runtime
 
     def type_name(self, full: str, where: str) -> str:
         if full in self.names:
@@ -226,6 +228,7 @@ class FileWriter:
 
     def write(self) -> str:
         depth = self.file["name"].count("/")
+        wire_runtime = string_literal(self.wire_runtime or "../" * depth + "wire-json.ts")
         body: list[str] = []
         for enum in self.file.get("enumType", []):
             body += ["", *self.enum(enum, enum["name"], f"{self.package}.{enum['name']}")]
@@ -256,7 +259,7 @@ class FileWriter:
                 f"/** The wire JSON of {self.package} ({self.file['name']}): types only (tools/gen_wire_ts.py). */",
                 "// The module the WireTypes entries below merge into, imported so that a program reaching this file",
                 "// only through a package import (an app's UI, through its Worker's types) loads it too.",
-                f"import type {{}} from '{'../' * depth}wire-json.ts';",
+                f"import type {{}} from {wire_runtime};",
                 *(
                     f"import type {{ {', '.join(sorted(names))} }} from '{relative(module, self.file['name'])}';"
                     for module, names in sorted(self.imports.items())
@@ -264,7 +267,7 @@ class FileWriter:
                 *body,
                 "",
                 "// toWire(<Message>Schema, m) answers these types where this module is imported (ts/wire-json.ts).",
-                f"declare module '{'../' * depth}wire-json.ts' {{",
+                f"declare module {wire_runtime} {{",
                 "  interface WireTypes {",
                 *registry,
                 "  }",
@@ -274,10 +277,16 @@ class FileWriter:
         )
 
 
-def generate(image: dict[str, Any], packages: set[str] | None = None) -> dict[str, str]:
+def generate(
+    image: dict[str, Any],
+    packages: set[str] | None = None,
+    *,
+    wire_runtime: str | None = None,
+) -> dict[str, str]:
     """Relative output path -> source, optionally restricting output while indexing the full import closure."""
     enums = wire_rules.enum_index(image)
-    files = [f for f in sorted(image["file"], key=lambda f: f["name"]) if f.get("package") in WIRE_PACKAGES]
+    selected = set(WIRE_PACKAGES) | (packages or set())
+    files = [f for f in sorted(image["file"], key=lambda f: f["name"]) if f.get("package") in selected]
     names_of = {file["name"]: type_names(file) for file in files}
     out: dict[str, str] = {}
     for file in files:
@@ -290,7 +299,7 @@ def generate(image: dict[str, Any], packages: set[str] | None = None) -> dict[st
             for full, name in names_of[other["name"]].items()
         }
         out[file["name"][: -len(".proto")] + "_wire.ts"] = FileWriter(
-            file, enums, names_of[file["name"]], others
+            file, enums, names_of[file["name"]], others, wire_runtime
         ).write()
     return out
 

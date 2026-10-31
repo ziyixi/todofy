@@ -12,6 +12,7 @@ filegroup(
         "//dashboard/deploy:source_deploy_vars_mjs",
         "//tools:release_probes",
         "//tools/cloud-release:release_inputs",
+        "//tools/service-catalog:private_catalog",
     ],
     tags = [
         "artifact://dashboard:dashboard",

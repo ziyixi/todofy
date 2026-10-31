@@ -30,6 +30,10 @@ def main() -> None:
     parser.add_argument("--buf", type=Path, required=True)
     parser.add_argument("--plugin", type=Path)
     parser.add_argument("--config", type=Path)
+    parser.add_argument("--wire-runtime")
+    parser.add_argument("--schema-identity")
+    parser.add_argument("--schema-title", default="")
+    parser.add_argument("--schema-root", default="")
     parser.add_argument("--descriptor", type=Path, action="append", default=[])
     parser.add_argument("--source", action="append", default=[])
     parser.add_argument("--output", action="append", default=[])
@@ -55,7 +59,10 @@ def main() -> None:
                 path.relative_to(root / "ts").as_posix(): path.read_text(encoding="utf-8")
                 for path in (root / "ts").rglob("*.ts")
             }
-            generated.update(importlib.import_module("gen_wire_ts").generate(image, packages))
+            if any(mapping.split("=", 1)[0].endswith("_wire.ts") for mapping in args.output):
+                generated.update(
+                    importlib.import_module("gen_wire_ts").generate(image, packages, wire_runtime=args.wire_runtime)
+                )
         elif args.format == "python":
             generated = importlib.import_module("gen_py").generate(image, packages)
         else:
@@ -63,7 +70,16 @@ def main() -> None:
             # package is compiled without the rest of the module's import graph.
             order = {source: index for index, source in enumerate(args.source)}
             image["file"].sort(key=lambda file: (order.get(file["name"], len(order)), file["name"]))
-            generated = importlib.import_module("gen_schema").generate(image, packages)
+            generator = importlib.import_module("gen_schema")
+            targets = None
+            if args.schema_identity is not None:
+                if len(args.output) != 1:
+                    raise ValueError("An explicit schema target requires exactly one output")
+                path = args.output[0].split("=", 1)[0]
+                targets = (
+                    generator.Target(args.package, path, args.schema_identity, args.schema_title, root=args.schema_root),
+                )
+            generated = generator.generate(image, packages, targets=targets)
         for mapping in args.output:
             name, destination = mapping.split("=", 1)
             target = Path(destination)
