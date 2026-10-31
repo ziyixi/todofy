@@ -92,6 +92,20 @@ describe('首页', () => {
     expect(link).toHaveAttribute('target', '_blank')
   })
 
+  it('opens a supplemental background service in its registered console', async () => {
+    const scenario = healthy()
+    const engine = scenario.registry.entries.find((entry) => entry.id === 'newsletter')!
+    scenario.registry = { ...scenario.registry, entries: [...scenario.registry.entries, {
+      ...engine, id: 'private-engine', name: '私有数据引擎', url: 'https://private-example.ziyixi.science/',
+      scripts: [], order: 90, status_type: 'public_http',
+    }] }
+    await showHome(scenario)
+    const link = within(launcher()).getByRole('link', { name: /^私有数据引擎：/ })
+    expect(link).toHaveAttribute('href', 'https://private-example.ziyixi.science/')
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', 'noreferrer noopener')
+  })
+
   it('shows a link-only tile as its host: no status button, no fake green', async () => {
     await showHome(withLinkOnly())
     const apps = within(launcher()).getByRole('region', { name: '应用' })
