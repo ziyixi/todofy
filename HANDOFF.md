@@ -5,21 +5,18 @@ Documentation entrypoints are in [docs/README](docs/README.md). Historical waiti
 
 ## Current work
 
-`codex/root-go-module` is moving the existing Go dependency manifest and sums to the repository root.
-The Go SDK, dependency versions, annotation checks and package BUILD entrypoints remain. Root Bazel imports
-the shared module; repository audits and current documentation are updated. Native Go tests, API lint and
-repository audits passed; dependency declarations and checksums match the previous module. Branch/main CI
-and same-source reconciliation remain pending. No application runtime, credentials or business data change.
+No active rollout. Separate business and recovery acceptance remains listed below.
 
 ## Latest verified release
 
-Build ownership and configuration publishing `8f5b83fb`: implementation targets live in their owning packages,
-while directories keep their main interfaces. Full migration checks, independent source/test/artifact comparisons,
-application publications, VPS rollout and Website live verification passed. The final configuration fix also passed
-affected branch/main checks, actual validation/publication using the existing image and same-source reconciliation.
+Root Go module `60460b21`: all Go packages share root go.mod/go.sum, imported by the existing Bazel toolchain.
+Go, dependency versions and checksums remain. Native Go/API-lint/repository checks, affected branch/main CI,
+actual configuration validation/publication and same-source reconciliation passed. Application artifacts and
+deployments were skipped.
 Application runtime sources, dependency locks, credentials, business content and installed owner extensions remain unchanged.
 
-See the [October 31 record](docs/history/handoff-2026-10-31.md#bazel-package-ownership-and-shared-build-recipes).
+See the [October 31 record](docs/history/handoff-2026-10-31.md#root-go-module) for verification and the earlier
+package-ownership and configuration-publishing changes.
 The earlier build migration and Newsletter correction remain in the [October 30 archive](docs/history/handoff-2026-10-30.md).
 Per-application source identities remain independent.
 
