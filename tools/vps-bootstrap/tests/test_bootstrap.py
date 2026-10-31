@@ -202,6 +202,49 @@ class BootstrapTests(unittest.TestCase):
                 with self.assertRaisesRegex(config.BootstrapError, "VERSIONS_INVALID"):
                     config.load_bundle(bundle)
 
+    def test_k3s_runtime_metadata_preserves_older_bundle_compatibility(self):
+        bundle = self.bundle()
+        versions_path = bundle / "versions.json"
+        manifest_path = bundle / "manifest.json"
+        original = config.read_json(versions_path)
+        legacy = {
+            name: value
+            for name, value in original["k3s"].items()
+            if name in {"version", "linux_amd64_sha256"}
+        }
+        for pinned in (original["k3s"], legacy):
+            with self.subTest(runtime_metadata=len(pinned) == 4):
+                versions_path.write_text(json.dumps({**original, "k3s": pinned}))
+                manifest = config.read_json(manifest_path)
+                manifest["files"]["versions.json"] = config.checksum(versions_path)
+                manifest_path.write_text(json.dumps(manifest))
+                self.assertEqual(config.load_bundle(bundle)["source_sha"], SHA)
+
+    def test_partial_or_invalid_k3s_runtime_metadata_is_refused(self):
+        bundle = self.bundle()
+        versions_path = bundle / "versions.json"
+        manifest_path = bundle / "manifest.json"
+        original = config.read_json(versions_path)
+        current = original["k3s"]
+        invalid = (
+            {
+                name: value
+                for name, value in current.items()
+                if name != "linux_amd64_data_sha256"
+            },
+            {**current, "linux_amd64_runtime_sha256": "not-a-checksum"},
+            {**current, "linux_amd64_data_sha256": 42},
+            {**current, "url": "https://example.invalid/runtime"},
+        )
+        for pinned in invalid:
+            with self.subTest(pinned=pinned):
+                versions_path.write_text(json.dumps({**original, "k3s": pinned}))
+                manifest = config.read_json(manifest_path)
+                manifest["files"]["versions.json"] = config.checksum(versions_path)
+                manifest_path.write_text(json.dumps(manifest))
+                with self.assertRaisesRegex(config.BootstrapError, "VERSIONS_INVALID"):
+                    config.load_bundle(bundle)
+
     def test_rendered_daily_trigger_passes_the_real_client_configuration_contract(self):
         runtime = prepare.render(ROOT, SHA, IMAGES)
         daily = next(

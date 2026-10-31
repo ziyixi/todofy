@@ -2,7 +2,9 @@
   "version": 1,
   "k3s": {
     "version": "v1.37.1+k3s1",
-    "linux_amd64_sha256": "92b94582eb7b34a8cf532e6006842b9ed215a6783cf56a3dd6271fd35243b2c0"
+    "linux_amd64_sha256": "92b94582eb7b34a8cf532e6006842b9ed215a6783cf56a3dd6271fd35243b2c0",
+    "linux_amd64_data_sha256": "18fd43a317b2366d41914bc17e9effe1cf7af9d12a97fcf5ec8909cb9cc4fdeb",
+    "linux_amd64_runtime_sha256": "84c9d1eab439adca83c6a77690ea3b39d1aa6cab471802a9528e7592abff5f37"
   },
   "kubectl": {
     "version": "v1.36.1",

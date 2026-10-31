@@ -12,6 +12,8 @@ The private repository owns the implementation and setup evidence. Parent main `
 after exact-source branch and main checks. The reviewed shared infrastructure changes applied and the following
 plan had zero changes. The one-time cluster trust handoff remains pending before private-application deployment
 and data acceptance. The continuation PRs are merged; further source changes need a new review.
+The active follow-up preserves the private acceptance evidence and updates shared version metadata handling;
+its exact-source checks must finish before promotion. Detailed runtime handoff status remains in the private repository.
 
 The earlier `codex/quant-rollout-resume` continuation in both repositories is merged, along with the original
 `codex/private-quant-data` / `codex/quant-data` work. Initial installation, publication and data acceptance remain pending.

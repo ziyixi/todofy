@@ -139,15 +139,26 @@ def load_bundle(directory):
         "VERSIONS_INVALID",
     )
     pinned = versions.get("k3s", {})
-    require(set(pinned) == {"version", "linux_amd64_sha256"}, "VERSIONS_INVALID")
+    base_fields = {"version", "linux_amd64_sha256"}
+    runtime_fields = {"linux_amd64_data_sha256", "linux_amd64_runtime_sha256"}
     require(
-        re.fullmatch(
+        isinstance(pinned, dict)
+        and set(pinned) in (base_fields, base_fields | runtime_fields),
+        "VERSIONS_INVALID",
+    )
+    require(
+        isinstance(pinned["version"], str)
+        and re.fullmatch(
             r"v1\.[0-9]{1,2}\.[0-9]{1,2}\+k3s[0-9]+", pinned.get("version", "")
         ),
         "VERSIONS_INVALID",
     )
     require(
-        re.fullmatch(r"[0-9a-f]{64}", pinned.get("linux_amd64_sha256", "")),
+        all(
+            isinstance(pinned[name], str)
+            and re.fullmatch(r"[0-9a-f]{64}", pinned[name])
+            for name in set(pinned) - {"version"}
+        ),
         "VERSIONS_INVALID",
     )
     connector = versions.get("cloudflared", {})
