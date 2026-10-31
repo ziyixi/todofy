@@ -1,5 +1,4 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library")
-load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
 load("//tools/bazel:js.bzl", "copied_source_files")
 load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
@@ -24,21 +23,6 @@ js_library(
     visibility = ["//visibility:public"],
 )
 
-ts_project(
-    name = "types_dom",
-    srcs = glob(["*.ts"]),
-    extends = "//packages/edge-auth:compiler_config",
-    no_emit = True,
-    root_dir = "..",
-    tsconfig = "//packages/edge-auth:dom_compiler_config",
-    deps = ["//packages/edge-auth:node_modules/@cloudflare/workers-types"],
-)
-
-alias(
-    name = "typecheck_dom",
-    actual = ":types_dom_typecheck",
-)
-
 filegroup(
     name = "source_audit_files",
     srcs = glob(
@@ -51,14 +35,5 @@ filegroup(
 
 copied_source_files(
     name = "typecheck_sources",
-    srcs = [
-        "access.ts",
-        "bytes.ts",
-        "cookies.ts",
-        "csrf.ts",
-        "headers.ts",
-        "index.ts",
-        "keys.ts",
-        "tokens.ts",
-    ],
+    srcs = glob(["*.ts"]),
 )

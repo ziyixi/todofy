@@ -12,7 +12,7 @@ function files(dir: string): string[] {
 }
 
 // The UI's sources and the one file of ../shared it ships (marks.ts imports the segmenter's rule).
-const shipped = () => [...files(join(root, 'src')).filter((path) => !/\.test\.ts$|[/\\]test[/\\]/.test(path)), join(root, '..', 'shared', 'segment.ts')]
+const shipped = () => [...files(join(root, 'src')).filter((path) => !/\.test\.ts$|[/\\]test[/\\]/.test(relative(root, path))), join(root, '..', 'shared', 'segment.ts')]
 
 describe('no external requests', () => {
   it('has no absolute URL in the shipped sources or index.html', () => {

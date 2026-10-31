@@ -167,25 +167,23 @@ def proto_vitest_test(name, runner, tests, deps, data = [], project = None, **kw
         **kwargs
     )
 
-def workerd_vitest_test(name, runner, tests, deps = [], data = [], tags = ["workerd"], project = None, lib = None, runtime_helpers = None, config = None, package_json = None, **kwargs):
+def workerd_vitest_test(name, runner, tests, project, deps = [], data = [], tags = ["workerd"], **kwargs):
     """Run the existing whole-Worker harness with its shared runtime inputs."""
-    moved = project != None
-    project = project or native.package_name()
     parent = "//" + project + ":"
     proto_vitest_test(
         name = name,
         runner = runner,
         tests = tests,
-        deps = [lib or parent + "lib"] + deps,
+        deps = [parent + "lib"] + deps,
         data = [
             parent + "application_sources",
-            runtime_helpers or ("//" + project + "/test:runtime_helpers" if moved else parent + "runtime_helpers"),
+            "//" + project + "/test:runtime_helpers",
             parent + "edge_auth_types_link",
             parent + "node_modules/esbuild",
             parent + "node_modules/miniflare",
-            package_json or parent + ("package_json" if moved else "package.json"),
+            parent + "package_json",
         ] + data,
-        config = config or parent + ("runtime_test_config" if moved else "vitest.runtime.config.ts"),
+        config = parent + "runtime_test_config",
         project = project,
         size = "large",
         tags = tags,

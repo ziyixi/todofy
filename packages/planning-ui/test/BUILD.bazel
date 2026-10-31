@@ -1,6 +1,5 @@
-load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
 load("@npm//packages/planning-ui:vitest/package_json.bzl", vitest = "bin")
-load("//tools/bazel:js.bzl", "proto_vitest_test")
+load("//tools/bazel:js.bzl", "copied_source_files", "proto_vitest_test")
 load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
 package(default_visibility = ["//packages/planning-ui:__subpackages__"])
@@ -701,82 +700,6 @@ proto_vitest_test(
     ],
 )
 
-ts_project(
-    name = "types",
-    srcs = [
-        ":add-step.test.tsx",
-        ":announce.test.tsx",
-        ":api.test.ts",
-        ":api-dependencies.test.ts",
-        ":api-planning.test.ts",
-        ":background-reads.test.tsx",
-        ":bets.test.ts",
-        ":components.test.tsx",
-        ":deadlines.test.ts",
-        ":deadlines-ui.test.tsx",
-        ":dependencies.test.ts",
-        ":dependencies-ui.test.tsx",
-        ":domain.test.ts",
-        ":drag-announcements.test.ts",
-        ":fixture.ts",
-        ":focus.test.tsx",
-        ":focus-entries.test.tsx",
-        ":full-title.test.tsx",
-        ":host.test.tsx",
-        ":idle-pause.test.ts",
-        ":idle-pause-ui.test.tsx",
-        ":mail.test.ts",
-        ":mini-timer.test.tsx",
-        ":native-api.test.ts",
-        ":native-order.test.ts",
-        ":native-planning.test.tsx",
-        ":native-timer.test.tsx",
-        ":optimistic.test.tsx",
-        ":plan-updates.test.ts",
-        ":plan-view-state.test.ts",
-        ":plan-visibility.test.tsx",
-        ":planner.test.tsx",
-        ":planning-outcomes.test.ts",
-        ":polish.test.tsx",
-        ":quick.test.tsx",
-        ":render-cost.test.tsx",
-        ":review-lanes.test.ts",
-        ":row-drag.test.ts",
-        ":setup.ts",
-        ":step-editor.test.tsx",
-        ":transport.ts",
-        ":weekly-goals.test.tsx",
-        ":weekly-review.test.tsx",
-        "//packages/planning-ui/src:typecheck_sources",
-    ],
-    no_emit = True,
-    root_dir = "..",
-    tsconfig = "//packages/planning-ui:compiler_config",
-    deps = [
-        "//:node_modules/@types/react",
-        "//packages/planning-ui:node_modules/@dnd-kit/collision",
-        "//packages/planning-ui:node_modules/@dnd-kit/dom",
-        "//packages/planning-ui:node_modules/@dnd-kit/react",
-        "//packages/planning-ui:node_modules/@testing-library/react",
-        "//packages/planning-ui:node_modules/@types/node",
-        "//packages/planning-ui:node_modules/@types/react",
-        "//packages/planning-ui:node_modules/@types/react-dom",
-        "//packages/planning-ui:node_modules/@vitejs/plugin-react",
-        "//packages/planning-ui:node_modules/jsdom",
-        "//packages/planning-ui:node_modules/lucide-react",
-        "//packages/planning-ui:node_modules/react",
-        "//packages/planning-ui:node_modules/react-dom",
-        "//packages/planning-ui:node_modules/vite",
-        "//packages/planning-ui:node_modules/vitest",
-        "//packages/planning-ui:proto_typecheck_link",
-    ],
-)
-
-alias(
-    name = "typecheck",
-    actual = ":types_typecheck",
-)
-
 test_suite(
     name = "unit_tests",
     tags = ["unit"],
@@ -826,7 +749,7 @@ test_suite(
 
 test_suite(
     name = "typecheck_tests",
-    tests = [":types_typecheck_test"],
+    tests = ["//packages/planning-ui:types_typecheck_test"],
 )
 
 test_suite(
@@ -845,4 +768,53 @@ filegroup(
         exclude = SOURCE_AUDIT_EXCLUDES,
     ),
     visibility = ["//visibility:public"],
+)
+
+copied_source_files(
+    name = "typecheck_sources",
+    srcs = [
+        ":add-step.test.tsx",
+        ":announce.test.tsx",
+        ":api.test.ts",
+        ":api-dependencies.test.ts",
+        ":api-planning.test.ts",
+        ":background-reads.test.tsx",
+        ":bets.test.ts",
+        ":components.test.tsx",
+        ":deadlines.test.ts",
+        ":deadlines-ui.test.tsx",
+        ":dependencies.test.ts",
+        ":dependencies-ui.test.tsx",
+        ":domain.test.ts",
+        ":drag-announcements.test.ts",
+        ":fixture.ts",
+        ":focus.test.tsx",
+        ":focus-entries.test.tsx",
+        ":full-title.test.tsx",
+        ":host.test.tsx",
+        ":idle-pause.test.ts",
+        ":idle-pause-ui.test.tsx",
+        ":mail.test.ts",
+        ":mini-timer.test.tsx",
+        ":native-api.test.ts",
+        ":native-order.test.ts",
+        ":native-planning.test.tsx",
+        ":native-timer.test.tsx",
+        ":optimistic.test.tsx",
+        ":plan-updates.test.ts",
+        ":plan-view-state.test.ts",
+        ":plan-visibility.test.tsx",
+        ":planner.test.tsx",
+        ":planning-outcomes.test.ts",
+        ":polish.test.tsx",
+        ":quick.test.tsx",
+        ":render-cost.test.tsx",
+        ":review-lanes.test.ts",
+        ":row-drag.test.ts",
+        ":setup.ts",
+        ":step-editor.test.tsx",
+        ":transport.ts",
+        ":weekly-goals.test.tsx",
+        ":weekly-review.test.tsx",
+    ],
 )

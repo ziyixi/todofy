@@ -1,6 +1,5 @@
-load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
 load("@npm//packages/model-router-client:vitest/package_json.bzl", vitest = "bin")
-load("//tools/bazel:js.bzl", "vitest_test", "workspace_link")
+load("//tools/bazel:js.bzl", "copied_source_files", "vitest_test", "workspace_link")
 load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
 package(default_visibility = ["//packages/model-router-client:__subpackages__"])
@@ -23,22 +22,6 @@ workspace_link(
     project = "packages/model-router-client",
 )
 
-ts_project(
-    name = "types",
-    srcs = [
-        ":index.test.ts",
-        "//packages/model-router-client/src:typecheck_sources",
-    ],
-    no_emit = True,
-    root_dir = "..",
-    tsconfig = "//packages/model-router-client:compiler_config",
-    deps = [
-        "//packages/model-router-client:node_modules/@cloudflare/workers-types",
-        "//packages/model-router-client:node_modules/vitest",
-        "//packages/model-router-client:proto_typecheck_link",
-    ],
-)
-
 vitest_test(
     name = "client_test",
     data = [
@@ -52,11 +35,6 @@ vitest_test(
     tests = [":index.test.ts"],
 )
 
-alias(
-    name = "typecheck",
-    actual = ":types_typecheck",
-)
-
 test_suite(
     name = "unit_tests",
     tags = ["unit"],
@@ -65,7 +43,7 @@ test_suite(
 
 test_suite(
     name = "typecheck_tests",
-    tests = [":types_typecheck_test"],
+    tests = ["//packages/model-router-client:types_typecheck_test"],
 )
 
 test_suite(
@@ -84,4 +62,9 @@ filegroup(
         exclude = SOURCE_AUDIT_EXCLUDES,
     ),
     visibility = ["//visibility:public"],
+)
+
+copied_source_files(
+    name = "typecheck_sources",
+    srcs = [":index.test.ts"],
 )

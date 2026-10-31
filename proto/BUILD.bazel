@@ -1,5 +1,5 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library")
-load("@aspect_rules_ts//ts:defs.bzl", "ts_config")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
 load("@npm//:defs.bzl", "npm_link_all_packages")
 load("@rules_python//python:packaging.bzl", "py_package", "py_wheel")
 load("//proto/bazel:codegen.bzl", "proto_codegen", "proto_image", "proto_source_files")
@@ -221,9 +221,9 @@ proto_image(
 test_suite(
     name = "tests",
     tests = [
+        ":ts_project_typecheck_test",
         "//proto/scripts:rules_selftest",
         "//proto/test:tests",
-        "//proto/test:types_typecheck_test",
         "//proto/test/python:tests",
         "//proto/tools:api_lint_test",
         "//proto/tools:bazel_inputs_test",
@@ -256,7 +256,7 @@ alias(
 
 alias(
     name = "typecheck",
-    actual = "//proto/test:typecheck",
+    actual = ":ts_project_typecheck",
 )
 
 source_audit_files(deps = [
@@ -297,4 +297,21 @@ test_suite(
 test_suite(
     name = "rules_selftest",
     tests = ["//proto/scripts:rules_selftest"],
+)
+
+ts_project(
+    name = "ts_project",
+    srcs = [
+        ":vitest_config",
+        "//proto/test:typecheck_sources",
+    ],
+    no_emit = True,
+    tsconfig = "//proto:compiler_config",
+    deps = [
+        "//proto:node_modules/@bufbuild/protobuf",
+        "//proto:node_modules/@cloudflare/workers-types",
+        "//proto:node_modules/@types/node",
+        "//proto:node_modules/vitest",
+        "//proto/ts:all_ts",
+    ],
 )

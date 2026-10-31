@@ -61,6 +61,8 @@ def source_hashes(root: pathlib.Path) -> dict[str, str]:
         if "__pycache__" in path.parts or path.suffix == ".pyc":
             continue
         if path.is_file():
+            if path.name == "BUILD.bazel":
+                continue
             if path.suffix not in {
                 ".py",
                 ".pyi",

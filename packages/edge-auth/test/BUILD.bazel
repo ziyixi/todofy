@@ -1,6 +1,5 @@
-load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
 load("@npm//packages/edge-auth:vitest/package_json.bzl", vitest = "bin")
-load("//tools/bazel:js.bzl", "vitest_test")
+load("//tools/bazel:js.bzl", "copied_source_files", "vitest_test")
 load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
 package(default_visibility = ["//packages/edge-auth:__subpackages__"])
@@ -15,18 +14,6 @@ exports_files(
         allow_empty = True,
     ),
     visibility = ["//packages/edge-auth:__subpackages__"],
-)
-
-ts_project(
-    name = "types",
-    srcs = ["//packages/edge-auth/src:typecheck_sources"] + glob(["*.ts"]) + ["//packages/edge-auth:vitest_config"],
-    no_emit = True,
-    root_dir = "..",
-    tsconfig = "//packages/edge-auth:compiler_config",
-    deps = [
-        "//packages/edge-auth:node_modules/@cloudflare/workers-types",
-        "//packages/edge-auth:node_modules/vitest",
-    ],
 )
 
 [vitest_test(
@@ -44,11 +31,6 @@ ts_project(
     tests = [test],
 ) for test in glob(["*.test.ts"])]
 
-alias(
-    name = "typecheck",
-    actual = ":types_typecheck",
-)
-
 test_suite(
     name = "unit_tests",
     tags = ["unit"],
@@ -63,8 +45,8 @@ test_suite(
 test_suite(
     name = "typecheck_tests",
     tests = [
-        ":types_typecheck_test",
-        "//packages/edge-auth/src:types_dom_typecheck_test",
+        "//packages/edge-auth:types_dom_typecheck_test",
+        "//packages/edge-auth:types_typecheck_test",
     ],
 )
 
@@ -84,4 +66,9 @@ filegroup(
         exclude = SOURCE_AUDIT_EXCLUDES,
     ),
     visibility = ["//visibility:public"],
+)
+
+copied_source_files(
+    name = "typecheck_sources",
+    srcs = glob(["*.ts"]),
 )

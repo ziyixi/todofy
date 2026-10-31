@@ -1,6 +1,5 @@
-load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
 load("@npm//packages/task-dates:vitest/package_json.bzl", vitest = "bin")
-load("//tools/bazel:js.bzl", "vitest_test")
+load("//tools/bazel:js.bzl", "copied_source_files", "vitest_test")
 load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
 package(default_visibility = ["//packages/task-dates:__subpackages__"])
@@ -17,22 +16,6 @@ exports_files(
     visibility = ["//packages/task-dates:__subpackages__"],
 )
 
-ts_project(
-    name = "types",
-    srcs = [
-        ":dates.test.ts",
-        "//packages/task-dates/src:typecheck_sources",
-    ],
-    no_emit = True,
-    root_dir = "..",
-    tsconfig = "//packages/task-dates:compiler_config",
-    deps = [
-        "//packages/task-dates:node_modules/chrono-node",
-        "//packages/task-dates:node_modules/rrule",
-        "//packages/task-dates:node_modules/vitest",
-    ],
-)
-
 vitest_test(
     name = "dates_test",
     data = [
@@ -45,11 +28,6 @@ vitest_test(
     tests = [":dates.test.ts"],
 )
 
-alias(
-    name = "typecheck",
-    actual = ":types_typecheck",
-)
-
 test_suite(
     name = "unit_tests",
     tags = ["unit"],
@@ -58,7 +36,7 @@ test_suite(
 
 test_suite(
     name = "typecheck_tests",
-    tests = [":types_typecheck_test"],
+    tests = ["//packages/task-dates:types_typecheck_test"],
 )
 
 test_suite(
@@ -77,4 +55,9 @@ filegroup(
         exclude = SOURCE_AUDIT_EXCLUDES,
     ),
     visibility = ["//visibility:public"],
+)
+
+copied_source_files(
+    name = "typecheck_sources",
+    srcs = [":dates.test.ts"],
 )

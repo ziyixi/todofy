@@ -1,6 +1,5 @@
-load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
 load("@npm//proto:vitest/package_json.bzl", vitest = "bin")
-load("//tools/bazel:js.bzl", "vitest_test")
+load("//tools/bazel:js.bzl", "copied_source_files", "vitest_test")
 load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 
 package(default_visibility = ["//proto:__subpackages__"])
@@ -553,26 +552,6 @@ test_suite(
     ],
 )
 
-ts_project(
-    name = "types",
-    srcs = glob(["*.ts"]) + ["//proto:vitest_config"],
-    no_emit = True,
-    root_dir = "..",
-    tsconfig = "//proto:compiler_config",
-    deps = [
-        "//proto:node_modules/@bufbuild/protobuf",
-        "//proto:node_modules/@cloudflare/workers-types",
-        "//proto:node_modules/@types/node",
-        "//proto:node_modules/vitest",
-        "//proto/ts:all_ts",
-    ],
-)
-
-alias(
-    name = "typecheck",
-    actual = ":types_typecheck",
-)
-
 filegroup(
     name = "source_audit_files",
     srcs = glob(
@@ -581,4 +560,9 @@ filegroup(
         exclude = SOURCE_AUDIT_EXCLUDES,
     ),
     visibility = ["//visibility:public"],
+)
+
+copied_source_files(
+    name = "typecheck_sources",
+    srcs = glob(["*.ts"]),
 )
