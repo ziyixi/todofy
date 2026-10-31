@@ -5,7 +5,11 @@ Documentation entrypoints are in [docs/README](docs/README.md). Historical waiti
 
 ## Current work
 
-No active rollout. Separate business and recovery acceptance remains listed below.
+`codex/root-go-module` is moving the existing Go dependency manifest and sums to the repository root.
+The Go SDK, dependency versions, annotation checks and package BUILD entrypoints remain. Root Bazel imports
+the shared module; repository audits and current documentation are updated. Native Go tests, API lint and
+repository audits passed; dependency declarations and checksums match the previous module. Branch/main CI
+and same-source reconciliation remain pending. No application runtime, credentials or business data change.
 
 ## Latest verified release
 

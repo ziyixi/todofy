@@ -41,7 +41,7 @@ exception described [below](#internal-model-router-changes); other APIs retain n
    the runtime the generator targets. `.github/scripts/test_proto.py` enforces it (and the wiring below).
    Generation is deterministic; CI generates twice and compares. googleapis has two pins, bumped together:
    `buf.lock` (what buf compiles the module and generates the TypeScript against) and the genproto Go code compiled
-   into api-linter (`tools/api-linter/go.mod`, through which it interprets the `google.api` annotations);
+   into api-linter (the root [`go.mod`](../go.mod), through which it interprets the `google.api` annotations);
    `tools/api-linter/googleapis`, run first by `pnpm run api-lint`, fails unless every googleapis file the module
    imports is the same in both.
 4. **Lint and breaking.** `buf lint` uses `STANDARD` (AIP-aligned: `_UNSPECIFIED` zero values, enum prefixes,
@@ -122,7 +122,7 @@ exception described [below](#internal-model-router-changes); other APIs retain n
 | `python/` | Stdlib runtime, wheel backend and ignored generated package directories |
 | `tools/gen_py.py`, `gen_wire_ts.py`, `gen_schema.py` | Canonical generators reused by Bazel actions |
 | `tools/wire_rules.py`, `profile_breaking.py`, `retired.py` | Value-rule interpretation and compatibility checks |
-| `tools/api-linter/` | Go tool/module pins and annotation agreement check |
+| `tools/api-linter/` | Bazel linter entrypoint and annotation agreement check; dependencies use the root Go module |
 | `test/`, `testdata/`, `prototest/` | Synthetic fixtures, runtime tests and cross-language cases; `prototest` never ships in the wheel |
 
 Published schemas are generated from `gen_schema.py`'s `SCHEMAS`. A target publishes a `$defs` document or one

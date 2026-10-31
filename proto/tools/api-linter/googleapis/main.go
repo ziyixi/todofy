@@ -1,7 +1,7 @@
 // Command googleapis checks that api-linter reads the module with the googleapis that buf.lock pins.
 //
 // api-linter interprets the google.api annotations (field_behavior, resource, http, field_info, ...) through the
-// googleapis Go code compiled into it (google.golang.org/genproto, pinned in ../go.mod), while buf compiles the
+// googleapis Go code compiled into it (google.golang.org/genproto, pinned in the root go.mod), while buf compiles the
 // module, and protoc-gen-es generates the TypeScript, against the googleapis commit buf.lock pins. The two are
 // separate pins of the same files, bumped together. This command reads buf's image of the module (with its imports)
 // and fails unless every googleapis file there (google/..., but not google/protobuf/: the well-known types are no
@@ -133,7 +133,7 @@ func main() {
 	}
 	if failed > 0 {
 		fmt.Fprintln(os.Stderr, "googleapis-check: api-linter would read these annotations with another googleapis than buf.lock's. "+
-			"Bump google.golang.org/genproto/googleapis/... in tools/api-linter/go.mod (or buf.lock) until both carry the same files.")
+			"Bump google.golang.org/genproto/googleapis/... in the root go.mod (or proto/buf.lock) until both carry the same files.")
 		os.Exit(1)
 	}
 	if len(results) == 0 {

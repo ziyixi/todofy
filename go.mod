@@ -1,4 +1,4 @@
-module github.com/ziyixi/todofy/proto/tools/api-linter
+module github.com/ziyixi/todofy
 
 go 1.26.0
 
@@ -7,9 +7,9 @@ toolchain go1.27.1
 tool github.com/googleapis/api-linter/v2/cmd/api-linter
 
 // api-linter's own copy of googleapis: it interprets the google.api annotations through this compiled genproto code,
-// while buf compiles the module against the googleapis commit buf.lock pins. Bump the two together: googleapis/
-// (googleapis-check, run by //proto:api_lint_test) fails until every googleapis file the module imports is the
-// same in both.
+// while buf compiles the module against the googleapis commit proto/buf.lock pins. Bump the two together:
+// proto/tools/api-linter/googleapis (googleapis-check, run by //proto:api_lint_test) fails until every imported
+// googleapis file is the same in both.
 require (
 	cloud.google.com/go/longrunning v1.2.0
 	google.golang.org/genproto v0.0.0-20260908043556-f8649ddbbfe6
