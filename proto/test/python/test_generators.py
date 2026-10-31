@@ -152,6 +152,22 @@ class WireTypesTest(unittest.TestCase):
     def test_only_the_listed_packages_get_wire_types(self) -> None:
         self.assertEqual(gen_wire_ts.generate({"file": [union_file("other.v1")]}), {})
 
+    def test_positional_empty_wkt_has_no_arguments_alongside_an_http_service(self) -> None:
+        file = union_file()
+        file["service"][0]["method"][0]["options"] = {"[google.api.http]": {"get": "/v1/m"}}
+        file["service"].append({
+            "name": "ControlService",
+            "method": [{
+                "name": "Status",
+                "inputType": ".google.protobuf.Empty",
+                "outputType": ".ops.v1.M",
+                "options": {"[common.wire.v1.method]": {"positional": True}},
+            }],
+        })
+        source = gen_wire_ts.generate({"file": [file]})["ops/v1/m_wire.ts"]
+        self.assertIn("export interface ControlService {\n  status(): Promise<M>;", source)
+        self.assertNotIn("export interface S", source)
+
     def test_a_type_of_another_file_is_imported(self) -> None:
         # dashboard/ui/v1/v.proto: a message V embedding ops.v1's M and its nested enum, and a sibling file's P.
         def field(name: str, number: int, type_name: str, kind: str = "TYPE_MESSAGE") -> dict:

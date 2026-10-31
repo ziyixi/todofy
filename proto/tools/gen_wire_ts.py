@@ -211,7 +211,7 @@ class FileWriter:
             where = f"{self.package}.{name}.{method['name']}"
             output = self.type_name(method["outputType"], where)
             if wire_rules.positional(method):
-                request = messages[method["inputType"]]
+                request = {} if method["inputType"] == ".google.protobuf.Empty" else messages[method["inputType"]]
                 params = []
                 for field in sorted(request.get("field", []), key=lambda f: f["number"]):
                     view = wire_rules.FieldView(field, None, None, "", None, None, None)

@@ -9,6 +9,9 @@ Documentation entrypoints are in [docs/README](docs/README.md). Historical waiti
 Application sources, private proto, deployment configuration and detailed handoff stay in that repository.
 Parent changes are limited to shared dependency/toolchain support and generic private build/release integration.
 No production publication or provider/data-quality verification has completed yet.
+The private application now uses its own native Object/Alarm control; no additional Cron is required. Local
+private checks/artifacts and the generic public proto/Home/workflow checks passed. Private deployment instructions
+own the remaining exact-identity bootstrap and source/data verification; do not infer them from branch CI.
 
 ## Latest verified release
 
