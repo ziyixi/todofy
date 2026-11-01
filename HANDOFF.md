@@ -15,8 +15,9 @@ passed. The initial private-application publication has not completed; runtime a
 further source changes need a new review.
 The merged follow-up preserves the private acceptance evidence and updates shared version metadata handling.
 Detailed runtime handoff status remains in the private repository.
-The current follow-up adds read-only verification to the existing protected operator and carries a verified
-private-console layout correction; finish its exact-source checks before promotion.
+Read-only runtime verification and the private-console layout correction passed branch/main checks and are merged.
+The live collector runs the checked follow-up source. Initial publication still stops while confirming its running
+version, before Worker upload; resolve that failure and continue runtime/data acceptance.
 
 The earlier `codex/quant-rollout-resume` continuation in both repositories is merged, along with the original
 `codex/private-quant-data` / `codex/quant-data` work. Initial application publication and data acceptance remain pending.
