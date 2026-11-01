@@ -92,4 +92,68 @@ describe('Storage in workerd with native SQLite', () => {
       expect(HASH(new Uint8Array(await read.arrayBuffer()))).toBe(HASH(content));
     }
   });
+
+  it('persists provider tails and replayable page transitions across fresh SQLite DO instances', async () => {
+    current = await harness();
+    await current.connect();
+    const active = current;
+    const key = await current.client('quant', 'read_only');
+    const other = await current.client('other');
+    const file = (index: number) => ({ '.tag': 'file', path_display: '/namespaces/quant/parts/' + String(index), rev: 'abc123', size: 1, content_hash: 'b'.repeat(64) });
+    current.provider.listPages = [
+      { entries: [...Array.from({ length: 151 }, (_, index) => file(index)), { '.tag': 'folder' }], has_more: true, cursor: 'next-provider' },
+      { entries: Array.from({ length: 51 }, (_, index) => file(151 + index)), has_more: false, cursor: 'done-provider' },
+    ];
+    const read = async (cursor = '', pageSize = 100, prefix = 'parts/', token = key.api_key) => {
+      const response = await active.machine('list', token, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prefix, page_size: pageSize, cursor }) });
+      expect(response.status).toBe(200);
+      return await response.json<{ objects: { key: string }[]; next_cursor: string }>();
+    };
+    const first = await read();
+    expect(first.objects).toHaveLength(100);
+    expect(first.next_cursor.length).toBeLessThan(1024);
+    await current.restart();
+    expect((await read(first.next_cursor, 10)).objects).toHaveLength(10);
+    const tail = await read(first.next_cursor);
+    expect(tail.objects).toHaveLength(51);
+    expect(current.provider.calls).toHaveLength(1);
+    const second = await read(tail.next_cursor, 50);
+    expect(second.objects).toHaveLength(50);
+    expect(current.provider.calls).toHaveLength(2);
+    await current.restart();
+    expect(await read(tail.next_cursor, 50)).toEqual(second);
+    expect(current.provider.calls).toHaveLength(2);
+    const last = await read(second.next_cursor);
+    expect(last.objects).toHaveLength(1);
+    expect(last.next_cursor).toBe('');
+    expect(new Set([...first.objects, ...tail.objects, ...second.objects, ...last.objects].map((object) => object.key)).size).toBe(202);
+    for (const [prefix, token] of [['other/', key.api_key], ['parts/', other.api_key]]) {
+      const invalid = await active.machine('list', token ?? '', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prefix, cursor: first.next_cursor }) });
+      expect(invalid.status).toBe(400);
+    }
+    await current.owner('dropbox:disconnect', 'POST', {});
+    const disconnected = await current.machine('list', key.api_key, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prefix: 'parts/', cursor: first.next_cursor }) });
+    expect(disconnected.status).toBe(400);
+  });
+
+  it('continues an empty filtered provider page and bounds 51 files to a request for 50', async () => {
+    current = await harness();
+    await current.connect();
+    const key = await current.client('quant', 'read_only');
+    current.provider.listPages = [
+      { entries: [{ '.tag': 'folder' }], has_more: true, cursor: 'empty-page' },
+      { entries: Array.from({ length: 51 }, (_, index) => ({ '.tag': 'file', path_display: '/namespaces/quant/parts/' + String(index), rev: 'abc123', size: 0, content_hash: 'b'.repeat(64) })), has_more: false, cursor: 'end' },
+    ];
+    let cursor = '';
+    const counts = [];
+    do {
+      const response = await current.machine('list', key.api_key, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prefix: 'parts/', cursor, page_size: 50 }) });
+      expect(response.status).toBe(200);
+      const page = await response.json<{ objects: unknown[]; next_cursor: string }>();
+      counts.push(page.objects.length);
+      cursor = page.next_cursor;
+    } while (cursor !== '' && counts.length < 5);
+    expect(counts).toEqual([0, 50, 1]);
+    expect(cursor).toBe('');
+  });
 });

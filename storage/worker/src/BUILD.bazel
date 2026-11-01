@@ -14,7 +14,7 @@ ts_source_library(name = "env", srcs = [":env.ts"], deps = ["//proto/storage/obj
 ts_source_library(name = "ui", srcs = [":ui.ts"])
 ts_source_library(name = "errors", srcs = [":errors.ts"], deps = [":env", "//proto/ts:rpc-status"])
 ts_source_library(name = "keys", srcs = [":keys.ts"], deps = [":errors", "//packages/edge-auth:lib", "//proto/storage/objects/v1:ts", "//proto/storage/ui/v1:ts", "//proto/ts:rpc-status", "//proto/ts:wire-json"])
-ts_source_library(name = "store", srcs = [":store.ts"], deps = [":env", ":errors", "//proto/ts:rpc-status"])
+ts_source_library(name = "store", srcs = [":store.ts"], deps = [":env", ":errors", "//proto/storage/objects/v1:ts", "//proto/ts:rpc-status"])
 ts_source_library(name = "dropbox", srcs = [":dropbox.ts"], deps = [":env", ":errors", ":keys", ":store", "//packages/edge-auth:lib", "//proto/ts:rpc-status"])
 ts_source_library(name = "objects", srcs = [":objects.ts"], deps = [
     ":dropbox", ":env", ":errors", ":keys", ":store", "//proto/storage/objects/v1:ts", "//proto/storage/ui/v1:ts",

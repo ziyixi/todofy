@@ -16,11 +16,13 @@ export const HASH = (bytes: Uint8Array): string => {
 
 interface File { readonly bytes: Uint8Array; readonly revision: string }
 interface MachineInit { readonly method?: string; readonly headers?: Readonly<Record<string, string>>; readonly body?: string | Uint8Array }
+interface ProviderPage { readonly entries: readonly Record<string, unknown>[]; readonly has_more: boolean; readonly cursor: string }
 
 export class FakeDropbox {
   readonly files = new Map<string, File>();
   readonly calls: { readonly path: string; readonly argument: unknown }[] = [];
   refreshes = 0;
+  listPages: readonly ProviderPage[] | null = null;
   private revision = 0;
 
   metadata(path: string, file: File): Record<string, unknown> {
@@ -78,6 +80,11 @@ export class FakeDropbox {
     }
     const argument = await request.json<{ path?: string; cursor?: string; limit?: number }>();
     this.calls.push({ path: url.pathname, argument });
+    if (this.listPages !== null && (url.pathname === '/2/files/list_folder' || url.pathname === '/2/files/list_folder/continue')) {
+      const index = url.pathname === '/2/files/list_folder' ? 0 : this.listPages.findIndex((page) => page.cursor === argument.cursor) + 1;
+      const page = url.pathname.endsWith('/continue') && index === 0 ? undefined : this.listPages[index];
+      return page === undefined ? Response.json({ error_summary: 'path/not_found/' }, { status: 409 }) : Response.json(page);
+    }
     if (url.pathname === '/2/files/get_metadata') {
       const file = this.files.get(argument.path ?? '');
       return file === undefined ? Response.json({ error_summary: 'path/not_found/' }, { status: 409 }) : Response.json({ '.tag': 'file', ...this.metadata(argument.path ?? '', file) });
@@ -97,6 +104,7 @@ export async function harness(): Promise<{
   machine(path: string, key: string | null, init?: MachineInit): Promise<Response>;
   connect(): Promise<void>;
   client(namespace: string, access?: 'read_only' | 'read_write'): Promise<{ readonly name: string; readonly api_key: string }>;
+  restart(): Promise<void>;
   dispose(): Promise<void>;
 }> {
   const temporary = await mkdtemp(join(tmpdir(), 'storage-runtime-'));
@@ -108,12 +116,13 @@ export async function harness(): Promise<{
   });
   const script = compiled.outputFiles[0]?.text;
   if (script === undefined) throw new Error('no synthetic Worker bundle');
-  const mf = new Miniflare(convertV4MiniflareOptions({
+  const start = (): Miniflare => new Miniflare(convertV4MiniflareOptions({
     modules: true, script, compatibilityDate: '2026-09-08', resourcePersistencePath: temporary, host: '127.0.0.1', port: 0,
     durableObjects: { STORAGE: { className: 'StorageState', useSQLite: true } },
     bindings: { PUBLIC_HOST: 'storage.example.test', ACCESS_ISSUER: 'https://synthetic.cloudflareaccess.com', ACCESS_AUDIENCE: 'a'.repeat(64), ACCESS_OWNER: 'owner@example.test', DEV_AUTH_BYPASS: 'true', BUILD_SHA: 'test' },
     outboundService: (request) => provider.fetch(request as unknown as Request),
   }));
+  let mf = start();
   const owner = async (path: string, method = 'GET', body?: unknown): Promise<Response> => mf.dispatchFetch(ORIGIN + '/api/v1/' + path, {
     method, headers: { origin: ORIGIN, 'x-csrf-token': '1', 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   }) as unknown as Promise<Response>;
@@ -141,6 +150,7 @@ export async function harness(): Promise<{
       if (!response.ok) throw new Error('synthetic key create failed: ' + await response.text());
       return await response.json<{ name: string; api_key: string }>();
     },
+    async restart() { await mf.dispose(); mf = start(); },
     async dispose() { await mf.dispose(); await rm(temporary, { recursive: true, force: true }); },
   };
 }
