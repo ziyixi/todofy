@@ -23,7 +23,12 @@ Data-specific evidence stays in the private repository.
 The current code can reject a legitimate oversized provider page; the fix retains excess metadata in a bounded
 short-lived page cache and preserves the signed namespace/prefix cursor. The ongoing private transfer uses
 stat/get/put and continues on its checked source. Publish this list-only correction after that transfer completes,
-then repeat its live pagination and same-main reconciliation checks.
+then repeat its live pagination and same-main reconciliation checks. The list correction is merged through
+PR #43 and its live 100-object, changed-size and replay checks passed while the private writer was stopped.
+
+`codex/quant-storage-diagnostics` adds bounded safe dependency diagnostics and complete progress projection for
+the first private transfer. Two attempts stopped before a control-head commit; all confirmed immutable objects
+and original data remain retained. Continue recovery on checked main after capturing the actual failure layer.
 
 ## Latest verified release
 
