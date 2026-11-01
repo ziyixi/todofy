@@ -11,26 +11,27 @@ working cache and collect through the application. Remove the transfer from the 
 recovery machinery to the cancelled transfer or import old execution history. The connection-retry-only proposal
 was abandoned without an implementation.
 
-The fresh workbench is published after exact-source branch/main checks and independent review. Owner UI and
-newly collected charts are observed; fresh collection runs in the application. Current follow-up finishes ordinary
-process/status recovery and verification of the current cache. Local integrated checks and review passed;
-exact-source cloud checks, publication and remaining data/API/Colab acceptance are pending. CI builds and
-deploys checked source and observes service
-readiness; it does not wait for business data collection to finish.
+The fresh workbench and normal process continuation are published after exact-source branch/main checks and
+independent review. The same business run retained progress across native rollout. The current follow-up addresses
+the owner's explicit efficiency goal: reduce remote checkpoints, keep immutable uploads outside shared read locks,
+batch bounded reads, reuse fetched identity metadata and parallelize independent cache downloads. Integrated checks,
+review, exact-source publication and production latency comparison remain pending. CI deploys checked source and
+observes readiness; business collection runs independently.
 
 Shared Storage is published, independently connected and registered. Its real object/authentication, gzip,
 32 MiB and pagination/replay checks passed; the [November 1 archive](docs/history/handoff-2026-11-01.md#shared-storage)
 records that separate release. Existing Dropbox files and application connections are preserved.
 
-Next: complete the normal recovery correction, finish fresh collection and verify its Dropbox reads,
+Next: publish and measure the efficiency correction, finish fresh collection and verify its Dropbox reads,
 API/Colab and runtime plans, then require same-main reconciliation. Detailed
 application and data evidence stays in the private handoff; automatic private publication remains disabled.
 
 ## Latest verified release
 
-Private workbench source `e8cdf1c`, checked through parent `5367f1c`, passed exact-source branch/main CI and ordinary
-protected publication. Running source/digest, public health, owner UI and a newly collected chart are verified.
-Fresh bulk collection and final data/API/Colab recovery acceptance remain separate work above. Normal Kubernetes
+Private workbench source `7af8049`, checked through parent `ad367b1`, passed exact-source branch/main CI and ordinary
+protected publication. Running source/digest, health, actual execution continuation, owner UI and working read API
+are verified. Same-main resource/VPS/Worker comparison and resolved drift gate passed. Fresh bulk collection,
+fixed data loading and complete recovery acceptance remain separate work above. Normal Kubernetes
 management uses Actions; runtime identities remain scoped. Detailed application/data evidence stays private.
 
 The [November 1 archive](docs/history/handoff-2026-11-01.md) records the shared integration and compatibility
