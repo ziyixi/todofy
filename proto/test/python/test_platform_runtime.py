@@ -202,6 +202,11 @@ class RpcStatus(unittest.TestCase):
     def test_protocol_errors_have_fixed_safe_identity_and_method_override(self):
         error = RpcError('UNIMPLEMENTED', 'METHOD_NOT_ALLOWED', 'Only GET is supported.', http_status=405)
         self.assertEqual(status_body(error)['error']['code'], 405)
+        reload = status_body(RpcError('FAILED_PRECONDITION', 'RELOAD_REQUIRED',
+                                     'Reload the workbench.', http_status=410))
+        self.assertEqual(reload['error']['code'], 410)
+        self.assertEqual(reload['error']['status'], 'FAILED_PRECONDITION')
+        self.assertEqual(reload['error']['details'][0]['reason'], 'RELOAD_REQUIRED')
         for kwargs in ({'code': 'invented'}, {'reason': 'private path'}, {'message': 'line\nbreak'},
                        {'domain': 'not a domain'}, {'http_status': 301}):
             values = {'code': 'UNAVAILABLE', 'reason': 'STATUS_UNAVAILABLE', 'message': 'Runtime status is unavailable.'}

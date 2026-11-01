@@ -20,7 +20,7 @@ HTTP_STATUS = {"OK": 200, "CANCELLED": 499, "UNKNOWN": 500, "INVALID_ARGUMENT": 
 
 
 class RpcError(Exception):
-    """Safe typed protocol error. HTTP 405 may override UNIMPLEMENTED's default mapping."""
+    """Safe typed protocol error with explicit method/retired-client HTTP overrides."""
     def __init__(self, code: str, reason: str, message: str, *, domain: str = "common.ziyixi.science",
                  http_status: int | None = None):
         if code not in CODE or code == "OK" or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,61}[A-Z0-9]", reason):
@@ -29,7 +29,7 @@ class RpcError(Exception):
             raise ValueError("invalid RPC error domain")
         if not message or len(message) > 256 or any(ord(char) < 32 or ord(char) == 127 for char in message):
             raise ValueError("invalid RPC error message")
-        if http_status is not None and http_status != 405:
+        if http_status is not None and http_status not in {405, 410}:
             raise ValueError("unsupported RPC HTTP override")
         super().__init__(message)
         self.code, self.reason, self.domain = code, reason, domain
