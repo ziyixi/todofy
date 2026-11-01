@@ -161,6 +161,17 @@ class HttpMetadata(unittest.TestCase):
         for path in ('/api/v1/workloads/a%2fb', '/api/v1/workloads/%ff', '/api/v1/workloads/a\\b'):
             self.assertIsNone(match_path(routes['GetWorkload'], path))
 
+    def test_explicit_one_mib_json_bound_accepts_small_and_large_valid_requests(self):
+        maximum = 1024 * 1024
+        self.assertEqual(decode_json_body(b'{"targets":[]}', max_bytes=maximum), {"targets": []})
+        large = b'{"value":"' + b'x' * 70000 + b'"}'
+        self.assertEqual(len(decode_json_body(large, max_bytes=maximum)['value']), 70000)
+        for raw, bound in ((b'{}', maximum + 1), (b'{}', 0),
+                           (b'{"value":"' + b'x' * maximum + b'"}', maximum),
+                           (large, 65536)):
+            with self.subTest(size=len(raw), bound=bound), self.assertRaises(WireJsonError):
+                decode_json_body(raw, max_bytes=bound)
+
 
 class RpcStatus(unittest.TestCase):
     def test_google_code_and_http_tables_match_the_shared_typescript_runtime(self):

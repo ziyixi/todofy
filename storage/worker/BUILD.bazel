@@ -1,0 +1,60 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@npm//storage/worker:eslint/package_json.bzl", eslint = "bin")
+load("@npm//storage/worker:wrangler/package_json.bzl", wrangler = "bin")
+load("//proto/bazel:ts_package.bzl", "proto_package")
+load("//tools/bazel:js.bzl", "workspace_package_link")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files")
+load("//tools/bazel/lint:defs.bzl", "eslint_test")
+
+package(default_visibility = ["//storage:__subpackages__"])
+
+exports_files(["package.json", "tsconfig.json", "vitest.config.ts", "vitest.runtime.config.ts"])
+npm_link_all_packages(name = "node_modules")
+js_library(name = "package_metadata", srcs = ["package.json"])
+alias(name = "package_json", actual = ":package_metadata")
+js_library(name = "test_config", srcs = ["vitest.config.ts"])
+js_library(name = "runtime_test_config", srcs = ["vitest.runtime.config.ts"])
+proto_package(name = "proto_types_package", deps = ["//storage/worker/src:lib"])
+workspace_package_link(name = "proto_types_link", src = ":proto_types_package", runtime_dependencies = ["@bufbuild/protobuf"])
+workspace_package_link(name = "edge_auth_types_link", src = "//packages/edge-auth:pkg")
+
+ts_project(
+    name = "types",
+    srcs = ["vitest.config.ts", "vitest.runtime.config.ts", "//storage/worker/src:types_srcs", "//storage/worker/test:types_srcs"],
+    no_emit = True,
+    resolve_json_module = True,
+    deps = [":edge_auth_types_link", ":proto_types_link", ":node_modules/@cloudflare/workers-types", ":node_modules/@types/node", ":node_modules/vitest", "//storage/worker/src:lib"],
+)
+alias(name = "typecheck", actual = ":types_typecheck")
+test_suite(name = "typecheck_tests", tests = [":types_typecheck_test", ":runtime_types_typecheck_test"])
+ts_config(name = "worker_config", src = "tsconfig.json")
+ts_config(name = "runtime_config", src = "//storage/worker/test:source_runtime_tsconfig_json", deps = [":worker_config"])
+ts_project(
+    name = "runtime_types",
+    srcs = ["//storage/worker/test:runtime_types_srcs"],
+    extends = ":runtime_config",
+    no_emit = True,
+    resolve_json_module = True,
+    tsconfig = {"compilerOptions": {"noEmit": True}, "include": [], "exclude": []},
+    deps = [":edge_auth_types_link", ":proto_types_link", ":node_modules/@cloudflare/workers-types", ":node_modules/@types/node", ":node_modules/esbuild", ":node_modules/miniflare", ":node_modules/vitest", "//storage/worker/src:lib"],
+)
+wrangler.wrangler_binary(name = "wrangler")
+js_library(name = "application_sources", srcs = ["package.json", "tsconfig.json", "//storage/worker/src:application_sources_srcs"])
+alias(name = "lib", actual = "//storage/worker/src:lib")
+eslint_test(
+    name = "lint",
+    runner = eslint.eslint_binary,
+    sources = ["eslint.config.js", "vitest.config.ts", "vitest.runtime.config.ts", "//storage/worker/src:lint_sources", "//storage/worker/test:lint_sources"],
+    data = [
+        "package.json", "tsconfig.json", ":application_sources", ":edge_auth_types_link", ":proto_types_link",
+        ":node_modules/@cloudflare/workers-types", ":node_modules/@eslint/js", ":node_modules/@types/node", ":node_modules/esbuild",
+        ":node_modules/eslint", ":node_modules/miniflare", ":node_modules/typescript", ":node_modules/typescript-eslint", ":node_modules/vitest",
+        "//storage/worker/src:lib", "//storage/worker/test:runtime_helpers", "//storage/worker/test:source_runtime_tsconfig_json",
+    ],
+)
+test_suite(name = "unit_tests", tests = ["//storage/worker/test:unit_test"])
+test_suite(name = "runtime_tests", tests = ["//storage/worker/test:runtime_test"])
+test_suite(name = "check", tests = [":lint", ":types_typecheck_test", ":runtime_types_typecheck_test", "//storage/worker/test:check"])
+source_audit_files(patterns = ["*"], deps = ["//storage/worker/src:source_audit_files", "//storage/worker/test:source_audit_files"])

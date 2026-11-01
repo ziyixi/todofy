@@ -1,0 +1,33 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@npm//storage/worker:vitest/package_json.bzl", vitest = "bin")
+load("//tools/bazel:js.bzl", "copied_source_files", "proto_vitest_test", "workerd_vitest_test", "workspace_link")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//storage:__subpackages__"])
+exports_files(glob(["**"], exclude = SOURCE_AUDIT_EXCLUDES), visibility = ["//storage:__subpackages__"])
+copied_source_files(name = "types_srcs", srcs = glob(["*.ts"]))
+copied_source_files(name = "runtime_types_srcs", srcs = glob(["runtime/*.ts"]))
+copied_source_files(name = "lint_sources", srcs = glob(["*.ts", "runtime/*.ts"]))
+js_library(name = "source_runtime_tsconfig_json", srcs = ["runtime/tsconfig.json"])
+js_library(name = "runtime_helpers", srcs = ["runtime/harness.ts", "runtime/tsconfig.json"], types = ["runtime/harness.ts"])
+js_library(name = "runtime_metadata", srcs = ["runtime/harness.ts"])
+workspace_link(name = "unit_edge_auth_link", src = "//packages/edge-auth:pkg", project = "storage/worker")
+proto_vitest_test(
+    name = "unit_test",
+    config = "//storage/worker:test_config",
+    tests = [":keys.test.ts", ":dropbox.test.ts", ":objects.test.ts", ":http.test.ts", ":wire.test.ts"],
+    deps = ["//storage/worker/src:lib"],
+    data = [":unit_edge_auth_link", "//storage/worker:node_modules/vitest", "//storage/worker:package_json"],
+    project = "storage/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+)
+workerd_vitest_test(
+    name = "runtime_test",
+    tests = [":runtime/http.test.ts"],
+    project = "storage/worker",
+    runner = vitest.vitest_test,
+    tags = ["workerd", "exclusive"],
+)
+test_suite(name = "check", tests = [":unit_test", ":runtime_test"])
+source_audit_files(exclude = SOURCE_AUDIT_EXCLUDES, patterns = ["**"])

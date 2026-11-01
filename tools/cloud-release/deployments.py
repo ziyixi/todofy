@@ -17,6 +17,7 @@ APPS = {
     "fleet",
     "mailsort",
     "recall",
+    "storage",
     "personal-mcp",
     "newsletter-console",
     "website-relay",

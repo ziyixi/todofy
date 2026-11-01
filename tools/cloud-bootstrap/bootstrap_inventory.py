@@ -18,11 +18,13 @@ POLICY_KEYS = {
     "model-router-inference": "model_router_inference",
     "github-owner": "github_owner", "fleet-receipt": "fleet_receipt",
     "recall-machine": "recall_machine",
+    "storage-machine": "storage_machine",
 }
 STANDALONE = {
     "model-router-inference": "cloudflare_zero_trust_access_application.model_router_inference",
     "fleet-receipt": "cloudflare_zero_trust_access_application.fleet_receipt",
     "mail-hero-backup": "cloudflare_zero_trust_access_application.mail_hero_backup",
+    "storage-machine": "cloudflare_zero_trust_access_application.storage_machine",
 }
 PLATFORM_ADDRESSES = {
     "cloudflare_zero_trust_access_service_token.codex_gateway",

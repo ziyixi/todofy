@@ -1,0 +1,26 @@
+load("@protobuf//bazel:proto_library.bzl", "proto_library")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files")
+
+package(default_visibility = ["//visibility:public"])
+
+proto_library(
+    name = "proto",
+    srcs = ["client.proto", "errors.proto", "storage_ui_service.proto"],
+    strip_import_prefix = "/proto",
+    deps = [
+        "//proto/common/wire/v1:proto",
+        "@googleapis//:google_api_annotations_proto",
+        "@googleapis//:google_api_client_proto",
+        "@googleapis//:google_api_field_behavior_proto",
+        "@googleapis//:google_api_field_info_proto",
+        "@googleapis//:google_api_resource_proto",
+        "@protobuf//:empty_proto",
+        "@protobuf//:timestamp_proto",
+    ],
+)
+
+alias(name = "ts", actual = "//proto/ts:storage_ui_v1_ts")
+
+exports_files(["client.proto", "errors.proto", "storage_ui_service.proto"])
+
+source_audit_files()

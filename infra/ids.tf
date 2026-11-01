@@ -14,6 +14,7 @@ locals {
     "fleet_receipt"          = "fb3608f4-bf0e-4db8-8983-5fb1340f20d5"
     "recall_machine"         = "dcd778e7-e901-4638-8ced-bfe119a470c6"
     "model_router_inference" = "097fe721-2615-4cfa-847b-9f0d0448dd79"
+    "storage_machine"        = "8fcbdccb-d03d-4408-9c37-7a5f34d8c2ff"
   }
   mail_hero_backup_app_id = "dafc6e08-7b1b-461f-8735-2cfa668a0ce0"
   fleet_receipt_app_id    = "e468db67-b8aa-4be4-9961-6965a5fced5d"
@@ -32,6 +33,7 @@ locals {
     "personal-mcp"       = "0ae92f11-d672-4c2c-b511-83fb3e73b68e"
     "model-router"       = "fef4b5c4-d15d-47f7-b8c0-69ac89db7bf0"
     "newsletter-console" = "dca06c66-01f2-4d04-a61a-c4ba0b8ac174"
+    "storage"            = "9c7f591a-7ff8-4c70-a7d0-1fb63b8ffd63"
   }
   d1_database_ids = {
     "mail-hero"    = "6c13e4c3-e239-42fb-a7a4-96810fa8d7dc"

@@ -23,6 +23,7 @@ WORKERS = {
     "fleet": ["fleet/wrangler.toml"],
     "mailsort": ["mailsort/wrangler.toml"],
     "recall": ["recall/wrangler.toml"],
+    "storage": ["storage/wrangler.toml"],
     "personal-mcp": ["personal-mcp/wrangler.toml"],
     "newsletter-console": ["newsletter-console/wrangler.toml"],
     "website-relay": ["website/relay/wrangler.toml"],

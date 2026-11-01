@@ -78,7 +78,7 @@ describe('the registry', () => {
 
   it('registers the entries of the design, in their groups and order', () => {
     const byGroup = (group: string) => REGISTRY.entries.filter((e) => e.group === group).sort((a, b) => a.order - b.order).map((e) => e.id);
-    expect(byGroup('apps')).toEqual(['mail-hero', 'todofy', 'links', 'watch', 'fleet', 'mailsort', 'recall', 'newsletter-console', 'tasks', 'model-router']);
+    expect(byGroup('apps')).toEqual(['mail-hero', 'todofy', 'links', 'watch', 'fleet', 'mailsort', 'recall', 'newsletter-console', 'tasks', 'model-router', 'storage']);
     expect(byGroup('sites')).toEqual(['website']);
     expect(byGroup('services')).toEqual(['notion-publish', 'newsletter', 'personal-mcp', 'codex-gateway']);
     expect(byGroup('hidden')).toEqual(['home', 'self-hosted', 'platform-runtime']);
@@ -103,6 +103,7 @@ describe('the registry', () => {
       'model-router': 'ops_v1',
       // The console has no status of its own: its pages read the engine, whose status comes through Fleet.
       'newsletter-console': 'none',
+      storage: 'none',
     });
   });
 
@@ -166,9 +167,11 @@ describe('the registry', () => {
     expect(resourceByMatch('r2', 'vultr-backup')).toMatchObject({ id: 'vps-backup', name: 'VPS 备份', entry: 'self-hosted' });
     expect(REGISTRY.entries.find((e) => e.id === 'self-hosted')).toMatchObject({ group: 'hidden', url: null, status: { type: 'none' } });
     expect(REGISTRY.workers.filter((w) => w.entry === 'self-hosted')).toEqual([]);
-    // All deployed namespaces are recorded in config/resources.toml.
+    // Only Storage may await its first deployment's namespace capture.
     const unmatched = REGISTRY.resources.filter((r) => r.match === null).map((r) => r.id);
-    expect(unmatched).toEqual(RESOURCE_IDENTITIES['model-router-engine'] ? [] : ['model-router-engine']);
+    expect(unmatched).toEqual(RESOURCE_IDENTITIES['storage-state'] ? [] : ['storage-state']);
+    expect(entryOfScript('storage')).toBe('storage');
+    expect(REGISTRY.resources.find((r) => r.id === 'storage-state')).toMatchObject({ kind: 'do', entry: 'storage', script: 'storage' });
     expect(resourceByMatch('do', '7d90ef3fb1d44ac591a3b21c99fdcccc')).toMatchObject({ id: 'tasks-jobs', kind: 'do', entry: 'tasks', script: 'tasks' });
     expect(resourceByMatch('do', '17bc24e2ecee44f5887d3a82ba9578d5')).toMatchObject({ id: 'links-backup', kind: 'do', entry: 'links', script: 'links' });
     expect(REGISTRY.resources.find((r) => r.id === 'recall-state')).toMatchObject({ kind: 'do', entry: 'recall', script: 'recall' });

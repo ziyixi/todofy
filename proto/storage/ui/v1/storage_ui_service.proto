@@ -1,0 +1,150 @@
+// Owner API, served by the shared transcoder after Access and mutation CSRF checks.
+// Client creation uses request_id as its resource UUID. Repeating a create returns
+// metadata without the one-time credential; disconnect and revoke set a final state.
+syntax = "proto3";
+
+package storage.ui.v1;
+
+import "common/wire/v1/wire.proto";
+import "google/api/annotations.proto";
+import "google/api/client.proto";
+import "google/api/field_behavior.proto";
+import "google/api/field_info.proto";
+import "google/api/resource.proto";
+import "google/protobuf/empty.proto";
+import "storage/ui/v1/client.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "StorageUiServiceProto";
+option java_package = "science.ziyixi.storage.ui.v1";
+
+// Connection and namespace credentials for the Storage service.
+// (-- api-linter: core::0121::resource-must-support-get=disabled
+//     aip.dev/not-precedent: the small owner credential registry is listed as a bounded collection; individual lookup is unnecessary. --)
+service StorageUiService {
+  option (google.api.default_host) = "storage.ziyixi.science";
+
+  // Current connection status.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  rpc GetSettings(GetSettingsRequest) returns (Settings) {
+    option (google.api.http) = {get: "/api/v1/{name=settings}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // Active credentials, in name order.
+  rpc ListClients(ListClientsRequest) returns (ListClientsResponse) {
+    option (google.api.http) = {get: "/api/v1/clients"};
+    option (google.api.method_signature) = "";
+  }
+
+  // Create a namespace credential, showing the plaintext once.
+  // (-- api-linter: core::0133::method-signature=disabled
+  //     aip.dev/not-precedent: the create UUID is required to deduplicate one-time credential issuance. --)
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  rpc CreateClient(CreateClientRequest) returns (Client) {
+    option (google.api.http) = {
+      post: "/api/v1/clients"
+      body: "client"
+    };
+    option (google.api.method_signature) = "client,request_id";
+  }
+
+  // Revoke a credential without changing files or other credentials.
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  rpc DeleteClient(DeleteClientRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {delete: "/api/v1/{name=clients/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // Start the separate App-folder app's OAuth PKCE flow.
+  rpc ConnectDropbox(ConnectDropboxRequest) returns (ConnectDropboxResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/{name=dropbox}:connect"
+      body: "*"
+    };
+  }
+
+  // Revoke this app's connection; all Dropbox files remain.
+  rpc DisconnectDropbox(DisconnectDropboxRequest) returns (DisconnectDropboxResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/{name=dropbox}:disconnect"
+      body: "*"
+    };
+  }
+}
+
+// Input of GetSettings.
+message GetSettingsRequest {
+  // Always settings.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "storage.ziyixi.science/Settings"
+  ];
+}
+
+// Input of ListClients.
+message ListClientsRequest {
+  // Zero means 20, capped at 64.
+  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
+  // Previous page's continuation.
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Output of ListClients.
+message ListClientsResponse {
+  // Active client metadata, never plaintext credentials.
+  repeated Client clients = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Empty on the final page.
+  string next_page_token = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of CreateClient.
+// (-- api-linter: core::0133::request-id-field=disabled
+//     aip.dev/not-precedent: the required request_id is the generated credential UUID. --)
+message CreateClientRequest {
+  // Label, namespace and access are input; name and secret are server-generated.
+  Client client = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // UUID of this create action; repeats never reveal the secret again.
+  // (-- api-linter: core::0133::request-required-fields=disabled
+  //     aip.dev/not-precedent: the required create UUID binds retries without retaining a plaintext key. --)
+  string request_id = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.field_info).format = UUID4
+  ];
+}
+
+// Input of DeleteClient.
+message DeleteClientRequest {
+  // clients/{uuid}.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "storage.ziyixi.science/Client"
+  ];
+}
+
+// Input of ConnectDropbox.
+message ConnectDropboxRequest {
+  // Always dropbox.
+  string name = 1 [(google.api.field_behavior) = REQUIRED];
+  // Public App key for the new App-folder app; no app secret is used.
+  string app_key = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Output of ConnectDropbox.
+message ConnectDropboxResponse {
+  // Dropbox authorization URL with state and S256 challenge.
+  string authorize_url = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Input of DisconnectDropbox.
+message DisconnectDropboxRequest {
+  // Always dropbox.
+  string name = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+// A disconnected connection; no object or credential material is returned.
+message DisconnectDropboxResponse {}

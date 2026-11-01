@@ -76,6 +76,7 @@ describe('操作与记录', () => {
       'Newsletter',
       'Tasks',
       'Model Router',
+      '存储',
       '个人网站',
       '网站同步',
       'Newsletter 引擎',
@@ -106,14 +107,16 @@ describe('操作与记录', () => {
     expect(within(rows[8] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('tasks')
     expect(rows[9]).toHaveTextContent('Model Router')
     expect(rows[9]).toHaveTextContent('ops-v1 状态接口')
-    expect(rows[10]).toHaveTextContent('公开地址探测')
-    expect(rows[12]).toHaveTextContent('ops-v1 状态接口')
+    expect(rows[10]).toHaveTextContent('未接入监控')
+    expect(within(rows[10] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('storage')
+    expect(rows[11]).toHaveTextContent('公开地址探测')
+    expect(rows[13]).toHaveTextContent('ops-v1 状态接口')
     // Hidden, with no Worker: it only names the self-hosted servers' backup bucket.
     const servers = within(about).getByRole('rowheader', { name: '自托管服务器' }).closest('tr')
     expect(servers).toHaveTextContent('未接入监控')
     expect(within(servers as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('—')
-    expect(rows[13]).toHaveTextContent('ops-v1 状态接口')
-    expect(within(rows[13] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('personal-mcp')
+    expect(rows[14]).toHaveTextContent('ops-v1 状态接口')
+    expect(within(rows[14] as HTMLElement).getAllByRole('cell').at(-1)).toHaveTextContent('personal-mcp')
   })
 
   it('names a link-only entry of the registry as such', async () => {

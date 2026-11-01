@@ -1,0 +1,22 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//tools/bazel:cloudflare.bzl", "worker_artifact")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files")
+
+package(default_visibility = ["//visibility:private"])
+
+js_library(name = "config", srcs = ["app.toml", "wrangler.toml"], visibility = ["//visibility:public"])
+filegroup(
+    name = "release",
+    srcs = [":storage", "//.github/actions:release-storage/action.yml", "//storage/deploy:source_deploy_vars_mjs", "//tools:release_probes", "//tools/cloud-release:release_inputs"],
+    tags = ["artifact://storage:storage", "release:worker:storage"],
+    visibility = ["//visibility:public"],
+)
+worker_artifact(
+    name = "storage",
+    srcs = [":config", "//storage/worker:application_sources", "//storage/worker:edge_auth_types_link", "//storage/worker:proto_types_link", "//storage/worker/src:lib"],
+    tool = "//storage/worker:wrangler",
+    bundle_visibility = ["//storage:__subpackages__"],
+    visibility = ["//visibility:public"],
+)
+test_suite(name = "check", tests = ["//storage/deploy:check", "//storage/worker:check"], visibility = ["//visibility:public"])
+source_audit_files(deps = ["//storage/deploy:source_audit_files", "//storage/worker:source_audit_files"])

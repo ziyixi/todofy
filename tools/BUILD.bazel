@@ -49,6 +49,7 @@ filegroup(
         "//personal-mcp:config",
         "//platform:static_deployment_inputs",
         "//recall:config",
+        "//storage:config",
         "//tasks:config",
         "//todofy:config",
         "//watch:config",

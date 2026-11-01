@@ -108,6 +108,8 @@
   镜像发布不等于服务器升级或发送成功。
   新包 `ghcr.io/ziyixi/todofy-newsletter` 由 monorepo Actions 创建/发布；不为旧 `newsletter` 包新增 monorepo Write 权限。
   现有 VPS 继续使用原镜像；切换必须符合任务授权并按 digest 验证。
+- Storage：[README](storage/README.md)。共享 Dropbox 对象接口按应用命名空间隔离；供应商授权只由 Storage 持有，消费者只持自己的应用权限。
+  保留已有文件与独立 Recall 归档，不把 VPS 缓存当作远端持久确认。
 
 长期边界与实现导航见 [architecture](docs/architecture.md)；迁移与回退背景见 [history](docs/history.md)。
 执行应用命令时进入它自己的目录，不把根导航、AGENTS 或 HANDOFF 当成重复的配置来源。

@@ -110,6 +110,7 @@ Current UI, storage/job details and quotas are owned by [Home docs](../dashboard
 | Watch | SQLite DO and private evidence R2, no model judgment. Stored rendered/text/screenshot evidence goes to Dots. Notifications contain only permitted metadata, never watched text/URL. |
 | Mailsort | Existing Gmail grant, own labels/Inbox only, one maintained prompt through Router. No mark-read/send/delete. Bounded recent intake, modes/write ledger and independent backups. |
 | Recall | Multi-device extension intake, visit/index state and retained text/screenshots. Files leave Cloudflare only after confirmed Dropbox archive. Machine tokens are route-scoped digests. |
+| Storage | Shared HTTP object access to a separate Dropbox App folder. Application credentials select a fixed namespace; content streams and conditional writes preserve independent consumers. Dropbox authorization belongs only to Storage. Existing Recall archives remain independent. |
 | Model Router | Unified model API, supplier connections, usage/estimates, D1 metadata and retained private R2 bodies. Apps retain their prompts, budgets and workflows. |
 | Personal MCP | Work continuation, private app tools and event subscriptions in one DO. Bounded references/deliveries, no source-content database or server model. Callback acceptance is not Dot completion. |
 | Newsletter | Independent persistent VPS workflow, own SQLite and frozen send ledger; Notion is async backup. Models through Router, external legacy engine proto remains locked. |

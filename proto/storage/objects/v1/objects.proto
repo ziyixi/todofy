@@ -1,0 +1,107 @@
+// The Storage machine transport. Bearer credentials select a server-owned namespace;
+// callers provide only relative keys. Stat/list use these wire JSON messages.
+// Content uses GET/HEAD/PUT /api/storage/v1/content with a binary stream, ETag and
+// conditional headers. size_bytes is bounded by the service's 32 MiB object limit.
+syntax = "proto3";
+
+package storage.objects.v1;
+
+import "common/wire/v1/wire.proto";
+import "google/api/field_behavior.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "ObjectsProto";
+option java_package = "science.ziyixi.storage.objects.v1";
+option (common.wire.v1.formats) = {
+  name: "Key"
+  pattern: "[A-Za-z0-9_.-][A-Za-z0-9_./-]*"
+  max_length: 1024
+  description: "A relative ASCII object key; segment and namespace checks are transport rules."
+};
+option (common.wire.v1.formats) = {
+  name: "Prefix"
+  pattern: "[A-Za-z0-9_./-]*"
+  max_length: 1024
+  description: "A relative ASCII object prefix, including the empty prefix."
+};
+option (common.wire.v1.formats) = {
+  name: "Revision"
+  pattern: "[A-Za-z0-9]{1,128}"
+  max_length: 128
+  description: "An opaque Dropbox object revision."
+};
+option (common.wire.v1.formats) = {
+  name: "ContentHash"
+  pattern: "[0-9a-f]{64}"
+  max_length: 64
+  description: "Dropbox's 4 MiB block content hash."
+};
+
+// Metadata always includes all four fields, including zero-byte objects.
+message ObjectMetadata {
+  // Relative key in the authenticated namespace.
+  string key = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Key"
+  ];
+  // Dropbox revision, without HTTP ETag quotes.
+  string revision = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Revision"
+  ];
+  // Object length; the transport accepts at most 32 MiB.
+  int32 size_bytes = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 0,
+    (common.wire.v1.field).maximum = 33554432
+  ];
+  // Dropbox's content hash, not the plain SHA256 of the file.
+  string content_hash = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "ContentHash"
+  ];
+}
+
+// POST /api/storage/v1/stat. Authentication precedes JSON parsing.
+message StatObjectRequest {
+  // The relative object key.
+  string key = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Key"
+  ];
+}
+
+// POST /api/storage/v1/list. A cursor is bound to its namespace and prefix.
+// (-- api-linter: core::0158::request-page-token-field=disabled
+//     aip.dev/not-precedent: this machine transport publishes cursor as its continuation field. --)
+// (-- api-linter: core::0132::request-unknown-fields=disabled
+//     aip.dev/not-precedent: the machine protocol selects object prefixes and an authenticated provider cursor. --)
+message ListObjectsRequest {
+  // Relative key prefix; empty selects the whole namespace.
+  string prefix = 1 [
+    (google.api.field_behavior) = OPTIONAL,
+    (common.wire.v1.field).format = "Prefix"
+  ];
+  // Opaque continuation returned by the service.
+  string cursor = 2 [(google.api.field_behavior) = OPTIONAL];
+  // Zero means 100; positive values are capped at 100.
+  int32 page_size = 3 [
+    (google.api.field_behavior) = OPTIONAL,
+    (common.wire.v1.field).minimum = 0
+  ];
+}
+
+// A bounded provider page. A page may be empty while next_cursor is nonempty.
+// (-- api-linter: core::0158::response-next-page-token-field=disabled
+//     aip.dev/not-precedent: this machine transport publishes next_cursor. --)
+// (-- api-linter: core::0132::response-unknown-fields=disabled
+//     aip.dev/not-precedent: this machine transport's continuation is next_cursor. --)
+message ListObjectsResponse {
+  // Matching objects, without folders or provider paths.
+  repeated ObjectMetadata objects = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).max_items = 100
+  ];
+  // Empty when the listing is complete.
+  string next_cursor = 2 [(google.api.field_behavior) = REQUIRED];
+}

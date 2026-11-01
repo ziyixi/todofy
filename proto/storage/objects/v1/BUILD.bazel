@@ -1,0 +1,20 @@
+load("@protobuf//bazel:proto_library.bzl", "proto_library")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files")
+
+package(default_visibility = ["//visibility:public"])
+
+proto_library(
+    name = "proto",
+    srcs = ["objects.proto"],
+    strip_import_prefix = "/proto",
+    deps = [
+        "//proto/common/wire/v1:proto",
+        "@googleapis//:google_api_field_behavior_proto",
+    ],
+)
+
+alias(name = "ts", actual = "//proto/ts:storage_objects_v1_ts")
+
+exports_files(["objects.proto"])
+
+source_audit_files()

@@ -40,7 +40,7 @@ jobs:
     timeout-minutes: ${{ inputs.app == 'website-relay' && 10 || 15 }}
     environment:
       name: production
-      url: ${{ steps.todofy.outputs.url || steps.mail_hero.outputs.url || steps.dashboard.outputs.url || steps.links.outputs.url || steps.tasks.outputs.url || steps.watch.outputs.url || steps.mailsort.outputs.url || steps.recall.outputs.url || steps.fleet.outputs.url || steps.personal_mcp.outputs.url || steps.model_router.outputs.url || steps.newsletter_console.outputs.url }}
+      url: ${{ steps.todofy.outputs.url || steps.mail_hero.outputs.url || steps.dashboard.outputs.url || steps.links.outputs.url || steps.tasks.outputs.url || steps.watch.outputs.url || steps.mailsort.outputs.url || steps.recall.outputs.url || steps.storage.outputs.url || steps.fleet.outputs.url || steps.personal_mcp.outputs.url || steps.model_router.outputs.url || steps.newsletter_console.outputs.url }}
     concurrency:
       group: ${{ inputs.app }}-production
       cancel-in-progress: false
@@ -205,6 +205,16 @@ jobs:
           dashboard-access-owner: ${{ secrets.DASHBOARD_ACCESS_OWNER }}
           dashboard-access-owner-aliases: ${{ secrets.DASHBOARD_ACCESS_OWNER_ALIASES }}
           recall-worker-secrets: ${{ secrets.RECALL_WORKER_SECRETS }}
+      - name: Release storage
+        id: storage
+        if: inputs.app == 'storage' && steps.preflight.outputs.required == 'true'
+        uses: ./.github/actions/release-storage
+        with:
+          required: ${{ steps.preflight.outputs.required }}
+          cf-api-token: ${{ secrets.CF_API_TOKEN }}
+          dashboard-access-owner: ${{ secrets.DASHBOARD_ACCESS_OWNER }}
+          dashboard-access-owner-aliases: ${{ secrets.DASHBOARD_ACCESS_OWNER_ALIASES }}
+          dashboard-worker-secrets: ${{ secrets.DASHBOARD_WORKER_SECRETS }}
       - name: Release fleet
         id: fleet
         if: inputs.app == 'fleet' && steps.preflight.outputs.required == 'true'

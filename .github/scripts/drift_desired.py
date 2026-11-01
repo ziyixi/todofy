@@ -68,6 +68,7 @@ WRAPPERS = {
     "fleet": {"language": "js", "file": "fleet/deploy/deploy-vars.mjs", "vars": "fleet", "secrets": "fleet"},
     "mailsort": {"language": "js", "file": "mailsort/deploy/deploy-vars.mjs", "vars": "mailsort", "secrets": "mailsort"},
     "recall": {"language": "js", "file": "recall/deploy/deploy-vars.mjs", "vars": "recall", "secrets": "recall"},
+    "storage": {"language": "js", "file": "storage/deploy/deploy-vars.mjs", "vars": "storage", "secrets": "storage"},
     "personal-mcp": {"language": "js", "file": "personal-mcp/deploy/deploy-vars.mjs", "vars": "personal-mcp", "secrets": "personal-mcp"},
     "newsletter-console": {"language": "js", "file": "newsletter-console/deploy/deploy-vars.mjs", "vars": "newsletter-console", "secrets": "newsletter-console"},
     "website-relay": {"language": "js", "file": "website/relay/deploy/deploy-vars.mjs", "vars": "ziyixi-notion-publish", "secrets": "ziyixi-notion-publish"},

@@ -9,7 +9,7 @@ on:
       app:
         description: Application to publish after its checks
         type: choice
-        options: [both, all, todofy, mail-hero, dashboard, website, links, watch, newsletter, fleet, platform, codex-gateway, mailsort, recall, tasks, personal-mcp, model-router, newsletter-console]
+        options: [both, all, todofy, mail-hero, dashboard, website, links, watch, newsletter, fleet, platform, codex-gateway, mailsort, recall, storage, tasks, personal-mcp, model-router, newsletter-console]
         default: both
       resume_vps_release:
         description: Resume the investigated held VPS release without rebuilding its images
@@ -63,6 +63,7 @@ jobs:
       platform_deploy: ${{ steps.releases.outputs.platform_deploy }}
       platform_publish: ${{ steps.releases.outputs.platform_publish }}
       recall_deploy: ${{ steps.releases.outputs.recall_deploy }}
+      storage_deploy: ${{ steps.releases.outputs.storage_deploy }}
       recall_extension_publish: ${{ steps.releases.outputs.recall_extension_publish }}
       tasks_deploy: ${{ steps.releases.outputs.tasks_deploy }}
       todofy_deploy: ${{ steps.releases.outputs.todofy_deploy }}
@@ -843,6 +844,27 @@ jobs:
     uses: ./.github/workflows/worker-release.yml
     with:
       app: newsletter-console
+      source_sha: ${{ github.sha }}
+      artifact_run_id: ${{ needs.changes.outputs.artifact_run_id || github.run_id }}
+    secrets: inherit
+
+  storage-deploy:
+    name: Storage deploy
+    needs: [changes, gate]
+    if: >-
+      ${{ !cancelled()
+      && needs.changes.result == 'success'
+      && needs.gate.result == 'success'
+      && github.ref == 'refs/heads/main'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && needs.changes.outputs.storage_deploy == 'true' }}
+    permissions:
+      contents: read
+      actions: read
+      deployments: write
+    uses: ./.github/workflows/worker-release.yml
+    with:
+      app: storage
       source_sha: ${{ github.sha }}
       artifact_run_id: ${{ needs.changes.outputs.artifact_run_id || github.run_id }}
     secrets: inherit

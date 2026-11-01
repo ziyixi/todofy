@@ -297,6 +297,7 @@ function entries(patch: Record<string, Partial<EntryState>> = {}): EntryState[] 
     entry('newsletter', { level: 'unmonitored', checked_at: null, ...patch.newsletter }),
     // The Newsletter console has no status of its own (status none).
     entry('newsletter-console', { level: 'unmonitored', checked_at: null, ...patch['newsletter-console'] }),
+    entry('storage', { level: 'unmonitored', checked_at: null, ...patch.storage }),
   ]
 }
 
