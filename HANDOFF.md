@@ -9,7 +9,12 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 The owner authorized implementation and publication. Existing Dropbox files and application connections remain
 in place. The shared service has independent publication and contracts; private application implementation stays
 in `private/`. The private handoff records the data migration, interface work and acceptance requirements.
-Implementation, source checks, protected publication and same-source reconciliation are pending.
+Shared Storage is published through PR #40 and its real resource identity is registered. Its independent Dropbox
+App-folder connection and 15 live object/authentication checks passed. The private workbench is merged through
+private PR #15 and pinned by `codex/quant-workbench-release` / parent PR #41. Complete private local and Linux checks
+and release artifacts passed, including legacy archive promotion and cross-day event-window regressions.
+The resource-registration update, protected private publication, live transfer/restoration and same-main
+resource reconciliation are pending. Data-specific evidence remains in the private repository.
 
 ## Latest verified release
 

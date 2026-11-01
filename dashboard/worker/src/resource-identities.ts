@@ -13,6 +13,7 @@ export const RESOURCE_IDENTITIES: Readonly<Record<string, string | null>> = {
   "model-router-engine": "ca44d90abc6e4191996a0eefc39df3ce",
   "personal-mcp-subscriptions": "aa1c7803e2a846c191102824560a9fac",
   "recall-state": "7186ddeb99e748d19325e1e217470199",
+  "storage-state": "7dad97089f3447f2bf3d79c10b064ca3",
   "tasks-db": "79a1f345-1183-46c3-bc6a-651be106f90c",
   "tasks-jobs": "7d90ef3fb1d44ac591a3b21c99fdcccc",
   "todofy-core-do": "a013ef9fa45048d4b4f7bfcc641b57ea",
