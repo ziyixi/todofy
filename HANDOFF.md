@@ -14,9 +14,10 @@ App-folder connection and 15 live object/authentication checks passed. The priva
 private PR #15 and pinned by `codex/quant-workbench-release` / parent PR #41. Complete private local and Linux checks
 and release artifacts passed, including legacy archive promotion and cross-day event-window regressions.
 Resource registration is merged through PR #41. `codex/quant-storage-operations` completes live client
-interoperability and large-checkpoint transport before the first private data migration. Protected private
-publication, live transfer/restoration and same-main reconciliation remain pending. Data-specific evidence stays
-in the private repository.
+interoperability, large-checkpoint transport and fixed research context propagation before the first private
+data migration. Full native checks, release artifacts and independent reviews passed. Final exact-source cloud
+checks, protected private publication, live transfer/restoration and same-main reconciliation remain pending.
+Data-specific evidence stays in the private repository.
 
 ## Latest verified release
 
