@@ -61,6 +61,7 @@ locals {
     "newsletter-console" = { name = "Newsletter", domain = "news.ziyixi.science", more = ["platform-runtime.ziyixi.science/api/newsletter/v1/*"], session = "24h" }
     "personal-mcp"       = { name = "Personal MCP", domain = "mcp.ziyixi.science", more = [], session = "24h" }
     "recall"             = { name = "recall", domain = "recall.ziyixi.science", more = [], session = "24h" }
+    "storage"            = { name = "Storage", domain = "storage.ziyixi.science", more = [], session = "24h" }
     "tasks"              = { name = "tasks", domain = "tasks.ziyixi.science", more = [], session = "168h" }
     "todofy"             = { name = "Todofy", domain = "todofy.ziyixi.science", more = [], session = "24h" }
     "watch"              = { name = "watch", domain = "watch.ziyixi.science", more = [], session = "24h" }
@@ -179,6 +180,43 @@ resource "cloudflare_zero_trust_access_application" "recall_machine" {
   options_preflight_bypass    = false
   session_duration            = "24h"
   policies                    = [{ id = cloudflare_zero_trust_access_policy.recall_machine.id, precedence = 1 }]
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# Storage's three bearer-authenticated operations are the complete machine surface.
+# Owner settings and the Dropbox callback remain under the owner application.
+resource "cloudflare_zero_trust_access_policy" "storage_machine" {
+  account_id = var.account_id
+  name       = "Storage machine routes only"
+  decision   = "bypass"
+  include    = [{ everyone = {} }]
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "cloudflare_zero_trust_access_application" "storage_machine" {
+  account_id = var.account_id
+  name       = "Storage machine routes"
+  type       = "self_hosted"
+  domain     = "storage.${local.platform_zone}/api/storage/v1/stat"
+  destinations = [
+    { type = "public", uri = "storage.${local.platform_zone}/api/storage/v1/stat" },
+    { type = "public", uri = "storage.${local.platform_zone}/api/storage/v1/list" },
+    { type = "public", uri = "storage.${local.platform_zone}/api/storage/v1/content" },
+  ]
+  allow_authenticate_via_warp = false
+  app_launcher_visible        = false
+  auto_redirect_to_identity   = false
+  enable_binding_cookie       = false
+  http_only_cookie_attribute  = true
+  options_preflight_bypass    = false
+  session_duration            = "24h"
+  policies                    = [{ id = cloudflare_zero_trust_access_policy.storage_machine.id, precedence = 1 }]
 
   lifecycle {
     prevent_destroy = true

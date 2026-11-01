@@ -106,9 +106,12 @@ describe('GetRegistry', () => {
     const first = await h.view<Registry>('registry');
     expect(first).toMatchObject({ status: 200, etag: '"test"' });
     expect(first.bytes).toBeLessThanOrEqual(VIEW_BODY_BUDGET.registry);
-    expect(first.body?.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'links', 'watch', 'website', 'notion-publish', 'newsletter', 'home', 'fleet', 'platform-runtime', 'mailsort', 'recall', 'tasks', 'personal-mcp', 'codex-gateway', 'model-router', 'newsletter-console', 'self-hosted']);
+    expect(first.body?.entries.map((e) => e.id)).toEqual(['mail-hero', 'todofy', 'links', 'watch', 'website', 'notion-publish', 'newsletter', 'home', 'fleet', 'platform-runtime', 'mailsort', 'recall', 'tasks', 'personal-mcp', 'codex-gateway', 'model-router', 'newsletter-console', 'storage', 'self-hosted']);
     expect(first.body?.entries.find((entry) => entry.id === 'personal-mcp')).toMatchObject({
       group: 'services', access: true, status_type: 'ops_v1', scripts: ['personal-mcp'],
+    });
+    expect(first.body?.entries.find((entry) => entry.id === 'storage')).toMatchObject({
+      group: 'apps', access: true, status_type: 'none', scripts: ['storage'],
     });
     const text = JSON.stringify(first.body);
     for (const url of Object.values(PROBES)) expect(text).not.toContain(new URL(url).pathname);
@@ -142,6 +145,7 @@ describe('GetHomeView and RefreshHomeView', () => {
       'model-router': ['unknown', 'never_checked'],
       // The Newsletter console has no status of its own (status none): 未接入, never checked or made up.
       'newsletter-console': ['unmonitored', null],
+      storage: ['unmonitored', null],
     });
     expect(home.cloudflare).toMatchObject({ usage_status: 'unavailable', quota: [], workers: 0, errors_today: 0 });
     expect(h.outboundLog).toEqual([]);
@@ -281,6 +285,7 @@ describe('GetCloudflareView and RefreshCloudflareView', () => {
     expect(await h.lastRowsRead()).toBeLessThanOrEqual(VIEW_ROWS_READ.cloudflare);
     expect(cf.usage.rows).toHaveLength(14);
     expect(cf.workers).toHaveLength(REGISTRY.workers.length);
+    expect(cf.workers.find((worker) => worker.script === 'storage')).toMatchObject({ entry: 'storage', requests: 0, errors: 0 });
     expect(cf.workers.filter((w) => w.entry === null)).toHaveLength(0);
     expect(cf.historical_workers?.length ?? 0).toBe(Math.max(0, count - 5));
     expect(cf.workers_truncated).toBe(false);

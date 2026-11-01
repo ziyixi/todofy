@@ -27,6 +27,7 @@ Cloudflare hosts the everyday applications. VPS k3s runs Newsletter, the [Codex 
 The [Model Router](model-router/README.md) provides shared model access, request records and usage reporting.
 
 Applications own their data and releases, sharing contracts and a small set of common packages.
+[Storage](storage/README.md) provides application-scoped HTTP object access to a separate Dropbox App folder.
 [Bazel](docs/bazel.md) pins toolchains and follows declared dependencies to build and test.
 GitHub Actions releases affected services; Home and Fleet check the observed runtime state.
 

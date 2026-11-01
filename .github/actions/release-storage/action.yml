@@ -1,0 +1,126 @@
+name: release-storage
+description: "Publish the checked Storage Worker and verify its Access boundary."
+inputs:
+  cf-api-token:
+    description: "Cloudflare deployment token"
+    required: false
+    default: ''
+  dashboard-access-owner:
+    description: "Shared owner identity"
+    required: false
+    default: ''
+  dashboard-access-owner-aliases:
+    description: "Shared owner aliases"
+    required: false
+    default: ''
+  dashboard-worker-secrets:
+    description: "Existing Home identity map"
+    required: false
+    default: ''
+  required:
+    description: "Whether the checked release is required"
+    required: false
+    default: ''
+outputs:
+  url:
+    description: "Owner console URL"
+    value: ${{ steps.config.outputs.url }}
+runs:
+  using: composite
+  steps:
+    - name: Install the selected Node workspaces
+      if: inputs.required == 'true'
+      uses: ./.github/actions/setup-workspace
+      with:
+        root: .release-source
+        filters: 'storage-worker...'
+    - name: Read the committed host and Access issuer
+      if: inputs.required == 'true'
+      id: config
+      working-directory: .release-source/storage
+      shell: bash -e {0}
+      run: |
+        python3 - >> "$GITHUB_OUTPUT" <<'PY'
+        import tomllib
+        with open("wrangler.toml", "rb") as file:
+            variables = tomllib.load(file)["vars"]
+        print("url=https://" + variables["PUBLIC_HOST"])
+        print("host=" + variables["PUBLIC_HOST"])
+        print("access_issuer=" + variables["ACCESS_ISSUER"])
+        PY
+    - name: Write the owner identity secrets file
+      if: inputs.required == 'true'
+      working-directory: .release-source/storage/worker
+      env:
+        STORAGE_ACCESS_OWNER: ${{ inputs.dashboard-access-owner }}
+        STORAGE_ACCESS_OWNER_ALIASES: ${{ inputs.dashboard-access-owner-aliases }}
+        DASHBOARD_WORKER_SECRETS: ${{ inputs.dashboard-worker-secrets }}
+      shell: bash -e {0}
+      run: node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/storage-secrets.json"
+    - name: Validate the compiled Worker before changing production
+      if: inputs.required == 'true'
+      working-directory: .release-source/storage/worker
+      shell: bash -e {0}
+      run: |
+        node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy "$PWD/../.compiled/worker/index.js" --no-bundle --dry-run --config ../wrangler.toml \
+          --secrets-file "$RUNNER_TEMP/storage-secrets.json" --outdir "$RUNNER_TEMP/storage-bundle"
+        node ../deploy/bundle-size.mjs "$RUNNER_TEMP/storage-bundle"
+    - name: Check hostname ownership
+      if: inputs.required == 'true'
+      working-directory: .release-source
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
+        CF_GUARD_ALLOW_REMOVE: ''
+        CF_GUARD_ALLOW_CONFLICT: ''
+      shell: bash -e {0}
+      run: node tools/cf-guard/cf-guard.mjs --config storage/wrangler.toml
+    - name: Deploy the Worker storage
+      if: inputs.required == 'true'
+      working-directory: .release-source/storage/worker
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
+      shell: bash -e {0}
+      run: |
+        test -n "$CLOUDFLARE_API_TOKEN"
+        node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy "$PWD/../.compiled/worker/index.js" --no-bundle --config ../wrangler.toml \
+          --secrets-file "$RUNNER_TEMP/storage-secrets.json"
+    - name: Verify the running source through the provider API
+      if: inputs.required == 'true'
+      working-directory: .release-source/storage/worker
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
+      shell: bash -e {0}
+      run: bash "$GITHUB_WORKSPACE/.release-source/tools/deploy-probes/production.sh" storage ../wrangler.toml
+    - name: Verify owner routes still require Access
+      if: inputs.required == 'true'
+      working-directory: .release-source/storage
+      env:
+        ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}
+        PUBLIC_HOST: ${{ steps.config.outputs.host }}
+      shell: bash -e {0}
+      run: |
+        bash "$GITHUB_WORKSPACE/.release-source/tools/deploy-probes/access.sh" / /api/v1/settings \
+          /api/dropbox/callback /api/storage/v1/other
+    - name: Verify only the three machine routes bypass Access
+      if: inputs.required == 'true'
+      working-directory: .release-source/storage
+      env:
+        PUBLIC_HOST: ${{ steps.config.outputs.host }}
+      shell: bash -e {0}
+      run: |
+        for path in /api/storage/v1/stat /api/storage/v1/list /api/storage/v1/content; do
+          answer=$(curl -sS -o /dev/null --max-time 15 --proto '=https' -X POST \
+            -w '%{http_code}|%{content_type}|%{redirect_url}' "https://$PUBLIC_HOST$path")
+          IFS='|' read -r code media location <<<"$answer"
+          media=${media%%;*}
+          if [ "$code" != 401 ] || [ "$media" != application/json ] || [ -n "$location" ]; then
+            echo "STORAGE_MACHINE_BOUNDARY_FAILED" >&2
+            exit 1
+          fi
+          echo "Storage machine route: 401 without owner login."
+        done
+    - name: Remove the secrets file
+      if: always() && inputs.required == 'true'
+      working-directory: .release-source/storage
+      shell: bash -e {0}
+      run: rm -f "$RUNNER_TEMP/storage-secrets.json"

@@ -1,0 +1,38 @@
+version = 1
+id = "storage"
+target = "cloudflare"
+
+[[workers]]
+config = "storage/wrangler.toml"
+identity_from = "home"
+personal_secrets = ["ACCESS_OWNER", "ACCESS_OWNER_ALIASES"]
+manual_secrets = []
+optional_secrets = ["ACCESS_OWNER_ALIASES"]
+hosts = ["storage"]
+entry = "storage"
+role = "共享文件存储"
+position = 35
+
+[[entries]]
+id = "storage"
+name = "存储"
+description = "应用文件与 Dropbox 连接"
+group = "apps"
+icon = "database"
+accent = "slate"
+access = true
+url_path = "/"
+app_only_signals = []
+order = 35
+worker = "storage"
+position = 35
+[entries.status]
+type = "none"
+
+[[access]]
+key = "storage"
+kind = "owner"
+worker = "storage"
+name = "Storage"
+paths = [""]
+session = "24h"

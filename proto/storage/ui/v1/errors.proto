@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package storage.ui.v1;
+
+option java_multiple_files = true;
+option java_outer_classname = "ErrorsProto";
+option java_package = "science.ziyixi.storage.ui.v1";
+
+// Domain reasons shared by Storage's owner and machine HTTP surfaces.
+enum ErrorReason {
+  // Never emitted.
+  ERROR_REASON_UNSPECIFIED = 0;
+  // The Dropbox connection must be installed again.
+  ERROR_REASON_CONNECTION_INVALID = 1;
+  // The current object revision differs from the precondition.
+  ERROR_REASON_REVISION_CONFLICT = 2;
+  // Every upload must provide create-only or revision-match semantics.
+  ERROR_REASON_WRITE_PRECONDITION_REQUIRED = 3;
+  // A read-only credential attempted to write content.
+  ERROR_REASON_READ_ONLY = 4;
+  // The active client limit was reached.
+  ERROR_REASON_CLIENT_LIMIT = 5;
+  // An object exceeds the fixed maximum length.
+  ERROR_REASON_UPLOAD_TOO_LARGE = 6;
+  // The stream's actual length differs from its declared length.
+  ERROR_REASON_UPLOAD_LENGTH_MISMATCH = 7;
+  // A Range cannot select bytes in this object.
+  ERROR_REASON_RANGE_NOT_SATISFIABLE = 8;
+  // A continuation is invalid or belongs to other list parameters.
+  ERROR_REASON_CURSOR_INVALID = 9;
+  // Dropbox returned an invalid metadata response.
+  ERROR_REASON_PROVIDER_RESPONSE_INVALID = 10;
+}

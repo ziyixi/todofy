@@ -25,6 +25,7 @@
 
 日常应用托管在 Cloudflare。VPS 的 k3s 运行 Newsletter、[Codex Gateway](codex-gateway/README.md) 和[部署服务](platform/README.md)。
 [Model Router](model-router/README.md) 为应用提供统一的模型调用、请求记录和用量统计。
+[Storage](storage/README.md) 通过独立的 Dropbox 应用目录保存应用文件，提供按应用隔离的 HTTP 读写接口。
 
 应用各自管理数据和发布，共享接口与必要的基础代码。[Bazel](docs/bazel.md) 固定工具链并按依赖构建、检查；
 GitHub Actions 发布受影响的服务，Home 和 Fleet 核对实际运行状态。

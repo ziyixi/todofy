@@ -225,6 +225,7 @@ unittest_test(
         ":support",
         "//proto:python_runtime",
         "//proto/platform/runtime/v1:python",
+        "//proto/prototest/v1:python",
     ],
 )
 

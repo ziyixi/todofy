@@ -548,6 +548,44 @@ ts_proto_library(
 )
 
 ts_proto_library(
+    name = "storage_objects_v1_ts",
+    outs = ["storage/objects/v1/objects_pb.ts"],
+    proto_package = "storage.objects.v1",
+    protos = ["//proto/storage/objects/v1:proto"],
+    sources = ["storage/objects/v1/objects.proto"],
+    deps = [
+        ":common_wire_v1_ts",
+        ":google_api_field_behavior_ts",
+        ":node_modules/@bufbuild/protobuf",
+    ],
+)
+
+ts_proto_library(
+    name = "storage_ui_v1_ts",
+    outs = [
+        "storage/ui/v1/client_pb.ts",
+        "storage/ui/v1/errors_pb.ts",
+        "storage/ui/v1/storage_ui_service_pb.ts",
+    ],
+    proto_package = "storage.ui.v1",
+    protos = ["//proto/storage/ui/v1:proto"],
+    sources = [
+        "storage/ui/v1/client.proto",
+        "storage/ui/v1/errors.proto",
+        "storage/ui/v1/storage_ui_service.proto",
+    ],
+    deps = [
+        ":common_wire_v1_ts",
+        ":google_api_annotations_ts",
+        ":google_api_client_ts",
+        ":google_api_field_behavior_ts",
+        ":google_api_field_info_ts",
+        ":google_api_resource_ts",
+        ":node_modules/@bufbuild/protobuf",
+    ],
+)
+
+ts_proto_library(
     name = "tasks_inbox_v1_ts",
     outs = [
         "tasks/inbox/v1/task_inbox_pb.ts",
@@ -868,6 +906,8 @@ js_library(
         ":recall_ingest_v1_ts",
         ":recall_ui_v1_ts",
         ":runtime",
+        ":storage_objects_v1_ts",
+        ":storage_ui_v1_ts",
         ":tasks_inbox_v1_ts",
         ":tasks_ui_v1_ts",
         ":todofy_mail_v1_ts",

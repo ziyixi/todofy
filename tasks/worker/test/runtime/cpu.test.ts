@@ -10,7 +10,7 @@ import {
   measureInIsolates,
 } from '../../../../tools/workerd-cpu/workerd-cpu.mts';
 import { localDate } from '@ziyixi/task-dates';
-import { betWeeks, LANES, mondayOf } from '../../src/planning.ts';
+import { betWeeks, LANES, planningWeekId } from '../../src/planning.ts';
 import { fakeMail, mailEtag } from './fake-mail.ts';
 import { seedWorstWeek, WEEK_ENTRIES, WEEK_STEPS } from './focus-week.ts';
 import { startHarness } from './harness.ts';
@@ -400,7 +400,8 @@ async function seedPlanning(db: D1Database) {
     )
     .bind(JSON.stringify(edges))
     .run();
-  const week = mondayOf(localDate(Date.now(), 'America/Los_Angeles'));
+  // Seed the same Sunday-to-Saturday planning window that the Worker reads.
+  const week = planningWeekId(localDate(Date.now(), 'America/Los_Angeles'));
   await db
     .prepare(
       `INSERT INTO weekly_bets(week_start,area,text,created_at,updated_at)

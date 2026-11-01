@@ -7,6 +7,7 @@ import unittest
 from proto_test_support import PROTO, REPO
 from ziyixi_proto.http_routes import decode_json_body, decode_request, match_path
 from ziyixi_proto.platform.runtime.v1 import runtime_pb as pb, runtime_service_pb as service
+from ziyixi_proto.prototest.v1 import prototest_pb as prototest
 from ziyixi_proto.rpc_status import CODE, HTTP_STATUS, RpcError, status_body
 from ziyixi_proto.wire_json import WireJsonError, from_wire, to_wire
 
@@ -161,6 +162,29 @@ class HttpMetadata(unittest.TestCase):
         for path in ('/api/v1/workloads/a%2fb', '/api/v1/workloads/%ff', '/api/v1/workloads/a\\b'):
             self.assertIsNone(match_path(routes['GetWorkload'], path))
 
+    def test_explicit_one_mib_json_bound_accepts_small_and_large_valid_requests(self):
+        maximum = 1024 * 1024
+        self.assertEqual(decode_json_body(b'{"targets":[]}', max_bytes=maximum), {"targets": []})
+        large = b'{"value":"' + b'x' * 70000 + b'"}'
+        self.assertEqual(len(decode_json_body(large, max_bytes=maximum)['value']), 70000)
+        for raw, bound in ((b'{}', maximum + 1), (b'{}', 0),
+                           (b'{"value":"' + b'x' * maximum + b'"}', maximum),
+                           (large, 65536)):
+            with self.subTest(size=len(raw), bound=bound), self.assertRaises(WireJsonError):
+                decode_json_body(raw, max_bytes=bound)
+
+    def test_scalar_boolean_queries_require_exact_true_or_false(self):
+        binding = next(item for item in prototest.HTTP_BINDINGS if item.rpc == 'GetBook')
+        path = '/v1/shelves/s1/books/b1'
+        for text, expected in (('true', True), ('false', False)):
+            with self.subTest(text=text):
+                value = decode_request(binding, path, [('include_labels', text)])
+                self.assertIs(value.include_labels, expected)
+        for query in ([('include_labels', '1')], [('include_labels', 'True')],
+                      [('include_labels', '')], [('include_labels', 'false'), ('include_labels', 'true')]):
+            with self.subTest(query=query), self.assertRaises(WireJsonError):
+                decode_request(binding, path, query)
+
 
 class RpcStatus(unittest.TestCase):
     def test_google_code_and_http_tables_match_the_shared_typescript_runtime(self):
@@ -178,6 +202,11 @@ class RpcStatus(unittest.TestCase):
     def test_protocol_errors_have_fixed_safe_identity_and_method_override(self):
         error = RpcError('UNIMPLEMENTED', 'METHOD_NOT_ALLOWED', 'Only GET is supported.', http_status=405)
         self.assertEqual(status_body(error)['error']['code'], 405)
+        reload = status_body(RpcError('FAILED_PRECONDITION', 'RELOAD_REQUIRED',
+                                     'Reload the workbench.', http_status=410))
+        self.assertEqual(reload['error']['code'], 410)
+        self.assertEqual(reload['error']['status'], 'FAILED_PRECONDITION')
+        self.assertEqual(reload['error']['details'][0]['reason'], 'RELOAD_REQUIRED')
         for kwargs in ({'code': 'invented'}, {'reason': 'private path'}, {'message': 'line\nbreak'},
                        {'domain': 'not a domain'}, {'http_status': 301}):
             values = {'code': 'UNAVAILABLE', 'reason': 'STATUS_UNAVAILABLE', 'message': 'Runtime status is unavailable.'}

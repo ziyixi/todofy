@@ -1,0 +1,33 @@
+{
+  "name": "storage-worker",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Namespace-scoped Dropbox object RPC and owner connection settings.",
+  "scripts": {
+    "postinstall": "node ../../proto/tools/ensure.mjs",
+    "typecheck": "bazel test //storage/worker:typecheck_tests",
+    "lint": "bazel test //storage/worker:lint",
+    "test": "bazel test //storage/worker:unit_tests",
+    "test:runtime": "bazel test //storage/worker:runtime_tests --nocache_test_results",
+    "predev": "node ../../proto/tools/ensure.mjs",
+    "dev": "wrangler dev --config ../wrangler.toml --ip 127.0.0.1 --port 8798 --local-upstream 127.0.0.1:8798",
+    "check": "bazel test //storage:check"
+  },
+  "dependencies": {
+    "@ziyixi/edge-auth": "workspace:*",
+    "@ziyixi/proto": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "catalog:",
+    "@eslint/js": "catalog:",
+    "@types/node": "catalog:",
+    "esbuild": "catalog:",
+    "eslint": "catalog:",
+    "miniflare": "catalog:",
+    "typescript": "catalog:",
+    "typescript-eslint": "catalog:",
+    "vitest": "catalog:",
+    "wrangler": "catalog:"
+  }
+}

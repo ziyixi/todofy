@@ -1,0 +1,37 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//tools/bazel:js.bzl", "copied_source_files", "ts_source_library")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLUDES = "SOURCE_SUBPACKAGE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//storage:__subpackages__"])
+
+exports_files(glob(["**"], exclude = SOURCE_AUDIT_EXCLUDES), visibility = ["//storage:__subpackages__"])
+
+copied_source_files(name = "types_srcs", srcs = glob(["*.ts"]))
+copied_source_files(name = "application_sources_srcs", srcs = glob(["*.ts"]))
+copied_source_files(name = "lint_sources", srcs = glob(["*.ts"]))
+
+ts_source_library(name = "env", srcs = [":env.ts"], deps = ["//proto/storage/objects/v1:ts", "//proto/ts:wire-json"])
+ts_source_library(name = "ui", srcs = [":ui.ts"])
+ts_source_library(name = "errors", srcs = [":errors.ts"], deps = [":env", "//proto/ts:rpc-status"])
+ts_source_library(name = "keys", srcs = [":keys.ts"], deps = [":errors", "//packages/edge-auth:lib", "//proto/storage/objects/v1:ts", "//proto/storage/ui/v1:ts", "//proto/ts:rpc-status", "//proto/ts:wire-json"])
+ts_source_library(name = "store", srcs = [":store.ts"], deps = [":env", ":errors", "//proto/ts:rpc-status"])
+ts_source_library(name = "dropbox", srcs = [":dropbox.ts"], deps = [":env", ":errors", ":keys", ":store", "//packages/edge-auth:lib", "//proto/ts:rpc-status"])
+ts_source_library(name = "objects", srcs = [":objects.ts"], deps = [
+    ":dropbox", ":env", ":errors", ":keys", ":store", "//proto/storage/objects/v1:ts", "//proto/storage/ui/v1:ts",
+    "//proto/ts:protobuf", "//proto/ts:rpc-status", "//proto/ts:wire-json",
+])
+ts_source_library(name = "owner", srcs = [":owner.ts"], deps = [
+    ":dropbox", ":errors", ":keys", ":store", "//proto/storage/ui/v1:ts", "//proto/ts:http-transcoder",
+    "//proto/ts:page-token", "//proto/ts:protobuf", "//proto/ts:protobuf-wkt", "//proto/ts:rpc-status", "//proto/ts:wire-json",
+])
+ts_source_library(name = "state", srcs = [":state.ts"], deps = [
+    ":dropbox", ":env", ":errors", ":keys", ":objects", ":owner", ":store", "//proto/storage/ui/v1:ts",
+    "//proto/ts:http-transcoder", "//proto/ts:rpc-status", "//proto/ts:wire-json",
+])
+ts_source_library(name = "http", srcs = [":http.ts"], deps = [":env", ":errors", ":ui", "//packages/edge-auth:lib", "//proto/ts:rpc-status"])
+ts_source_library(name = "index", srcs = [":index.ts"], deps = [":env", ":http", ":state"])
+
+js_library(name = "lib", deps = [":index"])
+js_library(name = "entry_metadata", srcs = [":index.ts"])
+js_library(name = "env_metadata", srcs = [":env.ts"])
+source_audit_files(exclude = SOURCE_AUDIT_EXCLUDES, patterns = ["**"])

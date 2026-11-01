@@ -9,7 +9,7 @@ from pathlib import Path
 from workflow_sources import jobs, release_jobs, workflow_data
 
 ROOT = Path(__file__).absolute().parents[2]
-APPS = ("todofy", "mail-hero", "dashboard", "links", "watch", "fleet", "mailsort", "recall", "tasks", "personal-mcp", "model-router", "newsletter-console", "website-relay")
+APPS = ("todofy", "mail-hero", "dashboard", "links", "watch", "fleet", "mailsort", "recall", "storage", "tasks", "personal-mcp", "model-router", "newsletter-console", "website-relay")
 REQUIRED = "steps.preflight.outputs.required == 'true'"
 
 

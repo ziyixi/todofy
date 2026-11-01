@@ -1,0 +1,33 @@
+name = "storage"
+account_id = "f57937bd1d93bf59e737b6d8445fb7a3"
+main = "worker/src/index.ts"
+compatibility_date = "2026-09-08"
+workers_dev = false
+preview_urls = false
+routes = [{ pattern = "storage.ziyixi.science", custom_domain = true }]
+
+[observability]
+enabled = true
+
+[observability.logs]
+enabled = true
+invocation_logs = false
+
+[observability.traces]
+enabled = false
+
+[[durable_objects.bindings]]
+name = "STORAGE"
+class_name = "StorageState"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["StorageState"]
+
+[triggers]
+crons = []
+
+[vars]
+PUBLIC_HOST = "storage.ziyixi.science"
+ACCESS_ISSUER = "https://ziyixi.cloudflareaccess.com"
+ACCESS_AUDIENCE = "1ca727574ca3794f6a3fe7d16127223f5045d8ee669f26beb688da91d1fd107e"

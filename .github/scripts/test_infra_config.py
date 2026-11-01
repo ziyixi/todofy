@@ -243,7 +243,7 @@ class MatchesTheApps(unittest.TestCase):
             + re.findall(r'"([^"]+)"', re.search(r"more\s*=\s*\[(.*?)\]", value).group(1))
             for key, value in owner.items()
         }
-        self.assertEqual(set(owner), {"mail-hero", "todofy", "home", "links", "watch", "fleet", "mailsort", "recall", "tasks", "personal-mcp", "model-router", "newsletter-console"})
+        self.assertEqual(set(owner), {"mail-hero", "todofy", "home", "links", "watch", "fleet", "mailsort", "recall", "storage", "tasks", "personal-mcp", "model-router", "newsletter-console"})
         for worker, uris in destinations.items():
             hosts = {route["pattern"] for route in config(worker).get("routes", []) if route.get("custom_domain")}
             with self.subTest(app=worker):
@@ -320,6 +320,21 @@ class MatchesTheApps(unittest.TestCase):
         for route in ("batches", "changes", "blobs/"):
             self.assertIn(f"${{V1}}{route}", machine)
         self.assertIn('domain = "recall.ziyixi.science", more = []', hcl_map(code, "owner_apps")["recall"])
+
+    def test_storage_bypasses_only_its_three_bearer_authenticated_operations(self):
+        code = (INFRA / "access.tf").read_text()
+        application = re.search(r'resource "cloudflare_zero_trust_access_application" "storage_machine" \{(.*?)^\}',
+                                code, re.S | re.M).group(1)
+        policy = re.search(r'resource "cloudflare_zero_trust_access_policy" "storage_machine" \{(.*?)^\}',
+                           code, re.S | re.M).group(1)
+        prefix = "storage.${local.platform_zone}/api/storage/v1/"
+        self.assertEqual(re.findall(r'uri = "([^"]+)"', application),
+                         [prefix + name for name in ("stat", "list", "content")])
+        self.assertNotIn("*", application)
+        self.assertIn('decision   = "bypass"', policy)
+        self.assertIn("include    = [{ everyone = {} }]", policy)
+        self.assertEqual(code.count("cloudflare_zero_trust_access_policy.storage_machine.id"), 1)
+        self.assertIn('domain = "storage.ziyixi.science", more = []', hcl_map(code, "owner_apps")["storage"])
 
     def test_fleet_receipt_bypasses_only_the_exact_signed_machine_path(self):
         code = (INFRA / "access.tf").read_text()

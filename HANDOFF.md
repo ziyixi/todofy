@@ -3,6 +3,14 @@
 Updated 2026-11-01 UTC. Read [AGENTS](AGENTS.md), then the target application's README/rules.
 Documentation entrypoints are in [docs/README](docs/README.md).
 
+## Current work
+
+`codex/quant-workbench-storage` adds shared Dropbox object storage and expands the private research workbench.
+The owner authorized implementation and publication. Existing Dropbox files and application connections remain
+in place. The shared service has independent publication and contracts; private application implementation stays
+in `private/`. The private handoff records the data migration, interface work and acceptance requirements.
+Implementation, source checks, protected publication and same-source reconciliation are pending.
+
 ## Latest verified release
 
 Private application and shared native CI support are published. Runtime source private `7c984e5`, checked through

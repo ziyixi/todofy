@@ -54,8 +54,8 @@ def match_path(binding: HttpBinding, path: str) -> dict[str, str] | None:
 
 
 def decode_json_body(raw: bytes, *, max_bytes: int = 16384) -> dict:
-    """Decode a bounded JSON object after transport authentication, rejecting duplicate keys at every depth."""
-    if not isinstance(raw, bytes) or not 0 < max_bytes <= 65536 or not 0 < len(raw) <= max_bytes:
+    """Decode a duplicate-free object within the caller's bound (at most 1 MiB; default 16 KiB)."""
+    if not isinstance(raw, bytes) or not 0 < max_bytes <= 1024 * 1024 or not 0 < len(raw) <= max_bytes:
         raise WireJsonError("invalid body size")
 
     def unique(pairs: list[tuple[str, object]]) -> dict:
@@ -123,6 +123,10 @@ def decode_request(binding: HttpBinding, path: str, query: Iterable[tuple[str, s
             values[key] = int(value)
         elif field.kind == "string":
             values[key] = value
+        elif field.kind == "bool":
+            if value not in {"true", "false"}:
+                raise WireJsonError("invalid boolean query field")
+            values[key] = value == "true"
         else:
             raise WireJsonError("unsupported query field")
     return from_wire(binding.request, values, strict=True).message

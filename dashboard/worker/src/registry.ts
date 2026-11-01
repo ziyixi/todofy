@@ -294,6 +294,20 @@ const ENTRIES: readonly EntryDef[] = [
     app_only_signals: [],
     order: 11,
   },
+  {
+    id: 'storage',
+    name: '存储',
+    description: '应用文件与 Dropbox 连接',
+    group: 'apps',
+    icon: 'database',
+    accent: 'slate',
+    url: 'https://storage.ziyixi.science/',
+    access: true,
+    status: { type: 'none' },
+    tile_metric: null,
+    app_only_signals: [],
+    order: 35,
+  },
   // END service-catalog entries
   {
     // Not a monorepo app: the self-hosted VPS and home server keep their backups in the account's R2
@@ -331,6 +345,7 @@ const WORKERS: readonly WorkerDef[] = [
   { script: 'personal-mcp', entry: 'personal-mcp', role: '私有工具与事件订阅' },
   { script: 'model-router', entry: 'model-router', role: '统一模型推理与私有控制台' },
   { script: 'newsletter-console', entry: 'newsletter-console', role: '每日简报的只读控制台' },
+  { script: 'storage', entry: 'storage', role: '共享文件存储' },
   // END service-catalog workers
 ];
 
@@ -343,6 +358,7 @@ const RESOURCES: readonly ResourceDef[] = [
   { id: 'fleet-state', kind: 'do', name: 'FleetState', entry: 'fleet', script: 'fleet', match: RESOURCE_IDENTITIES['fleet-state'] ?? null, todo: '首次 Fleet 发布后，记录 DO namespace 到 config/resources.toml' },
   { id: 'mailsort-state', kind: 'do', name: 'MailsortState', entry: 'mailsort', script: 'mailsort', match: RESOURCE_IDENTITIES['mailsort-state'] ?? null, todo: '首次 mailsort 发布后，记录 DO namespace 到 config/resources.toml' },
   { id: 'recall-state', kind: 'do', name: 'RecallState', entry: 'recall', script: 'recall', match: RESOURCE_IDENTITIES['recall-state'] ?? null, todo: '首次 recall 发布后，记录 DO namespace 到 config/resources.toml' },
+  { id: 'storage-state', kind: 'do', name: 'StorageState', entry: 'storage', script: 'storage', match: RESOURCE_IDENTITIES['storage-state'] ?? null, todo: '首次 Storage 发布后记录 DO namespace' },
   { id: 'personal-mcp-subscriptions', kind: 'do', name: 'SubscriptionStore', entry: 'personal-mcp', script: 'personal-mcp', match: RESOURCE_IDENTITIES['personal-mcp-subscriptions'] ?? null },
   { id: 'mail-hero-db', kind: 'd1', name: 'mail-hero 主库', entry: 'mail-hero', match: RESOURCE_IDENTITIES['mail-hero-db'] ?? null },
   { id: 'todofy-db', kind: 'd1', name: 'todofy 主库', entry: 'todofy', match: RESOURCE_IDENTITIES['todofy-db'] ?? null },

@@ -1,0 +1,10 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library", "js_test")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files")
+
+package(default_visibility = ["//storage:__subpackages__"])
+
+js_library(name = "source_deploy_vars_mjs", srcs = ["deploy-vars.mjs"], deps = ["//tools/cloud-config:worker-deploy"])
+js_library(name = "source_bundle_size_mjs", srcs = ["bundle-size.mjs"], deps = ["//tools/bundle-size:library"])
+js_test(name = "bundle_budget_test", args = ["$(rootpath //storage:worker_bundle)"], data = [":source_bundle_size_mjs", "//storage:worker_bundle"], entry_point = "bundle-size.mjs", preserve_symlinks_main = False)
+test_suite(name = "check", tests = [":bundle_budget_test"])
+source_audit_files(patterns = ["*", "test/**"])

@@ -895,6 +895,55 @@
       ],
       "personal": []
     },
+    "storage": {
+      "config": "storage/wrangler.toml",
+      "workers_dev": false,
+      "preview_urls": false,
+      "custom_domains": [
+        "storage.ziyixi.science"
+      ],
+      "routes": [],
+      "crons": [],
+      "bindings": [
+        {
+          "name": "ACCESS_AUDIENCE",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "ACCESS_ISSUER",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "ACCESS_OWNER",
+          "type": "secret_text",
+          "source": "deploy"
+        },
+        {
+          "name": "ACCESS_OWNER_ALIASES",
+          "type": "secret_text",
+          "source": "deploy",
+          "optional": true
+        },
+        {
+          "name": "BUILD_SHA",
+          "type": "plain_text",
+          "source": "deploy"
+        },
+        {
+          "name": "PUBLIC_HOST",
+          "type": "plain_text",
+          "source": "config"
+        },
+        {
+          "name": "STORAGE",
+          "type": "durable_object_namespace",
+          "source": "config"
+        }
+      ],
+      "personal": []
+    },
     "tasks": {
       "config": "tasks/wrangler.toml",
       "workers_dev": false,

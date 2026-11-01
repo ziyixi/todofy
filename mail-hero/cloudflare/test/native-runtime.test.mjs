@@ -238,14 +238,15 @@ test('native workerd: durable archive, protected API, stable retry identity and 
     assert.equal(posted.message.text, '测试邮件');
     assert.equal(posted.message.from[0].address, 'sender@example.org');
     // workerd's Intl and real D1 evaluate the local-time CASE with numbered parameters.
+    // Keep this historical DST window separate from the live-clock attempts created above.
     await db.prepare(`INSERT INTO delivery_attempts(id,event_id,attempt_no,started_at,finished_at,outcome)
-      VALUES(?,?,90,'2026-11-01T08:30:00.000Z','2026-11-01T08:30:00.000Z','retryable'),(?,?,91,'2026-11-01T09:30:00.000Z','2026-11-01T09:30:00.000Z','delivered')`)
+      VALUES(?,?,90,'2024-11-03T08:30:00.000Z','2024-11-03T08:30:00.000Z','retryable'),(?,?,91,'2024-11-03T09:30:00.000Z','2024-11-03T09:30:00.000Z','delivered')`)
       .bind(crypto.randomUUID(), automatic.event_id, crypto.randomUUID(), automatic.event_id).run();
-    const local = await api(stats('2026-11-01T06:00:00.000Z', '2026-11-01T12:00:00.000Z', { time_zone: 'America/Los_Angeles' }));
+    const local = await api(stats('2024-11-03T06:00:00.000Z', '2024-11-03T12:00:00.000Z', { time_zone: 'America/Los_Angeles' }));
     assert.equal(local.time_zone, 'America/Los_Angeles');
     assert.deepEqual(local.buckets.map(item => [item.start_time.slice(11, 13), item.counts.retried_count ?? 0, item.counts.succeeded_count ?? 0]),
       [['06', 0, 0], ['07', 0, 0], ['08', 1, 0], ['09', 0, 1], ['10', 0, 0], ['11', 0, 0]], 'the repeated 01:00 stays two buckets');
-    const zone = await mf.dispatchFetch(`http://localhost/api/v2${stats('2026-11-01T06:00:00.000Z', '2026-11-01T12:00:00.000Z', { time_zone: 'Not/AZone' })}`);
+    const zone = await mf.dispatchFetch(`http://localhost/api/v2${stats('2024-11-03T06:00:00.000Z', '2024-11-03T12:00:00.000Z', { time_zone: 'Not/AZone' })}`);
     assert.deepEqual([zone.status, reasonOf(await zone.json())], [400, 'INVALID_TIME_ZONE']);
 
     // Mixed versions: an event an older build froze (its R2 payload/<eventID>.json) is retried with exactly those bytes.

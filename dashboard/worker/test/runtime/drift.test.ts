@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { CreateInboxTaskRequest } from '@ziyixi/proto/tasks/inbox/v1/task_inbox_wire';
 import { DRIFT_CALLS_PER_TICK, DRIFT_UTC_HOUR, type CloudflareView, type OpsView } from '../../src/api-types.ts';
-import { countFindings, type DriftDoc, type DriftRunDoc } from '../../src/drift.ts';
+import { DESIRED, countFindings, type DriftDoc, type DriftRunDoc } from '../../src/drift.ts';
 import type { DigestDoc } from '../../src/docs.ts';
 import { outboundPerTick } from '../../src/registry.ts';
 import { CF_API, SENTINEL_VALUE } from '../drift-fixture.ts';
@@ -63,19 +63,25 @@ describe('the daily drift check', () => {
     expect(tick.length).toBeLessThanOrEqual(outboundPerTick());
     expect((await view<CloudflareView>(h, 'cloudflare')).drift).toMatchObject({ status: 'never_checked', checked_at: null });
 
-    // The remaining thirteen Workers fill three ticks and part of a fourth under the unchanged twelve-call drift bound.
+    // The remaining fourteen Workers fill three ticks and part of a fourth under the unchanged twelve-call drift bound.
     await h.tick(start + 30 * MIN);
     expect(driftRequests(h)).toBe(DRIFT_CALLS_PER_TICK);
     expect((await view<CloudflareView>(h, 'cloudflare')).drift).toMatchObject({ status: 'never_checked', checked_at: null });
     await h.tick(start + 60 * MIN);
-    expect(driftRequests(h)).toBe(DRIFT_CALLS_PER_TICK);
+    const middle = h.cloudflare.requests.splice(0);
+    expect(middle).toHaveLength(DRIFT_CALLS_PER_TICK);
+    expect(middle.some((request) => request.url.endsWith('/scripts/storage/settings'))).toBe(true);
     await h.tick(start + 90 * MIN);
     expect(driftRequests(h)).toBe(DRIFT_CALLS_PER_TICK);
     expect((await view<CloudflareView>(h, 'cloudflare')).drift).toMatchObject({ status: 'never_checked', checked_at: null });
     await h.tick(start + 120 * MIN);
-    expect(driftRequests(h)).toBe(3);
+    const last = h.cloudflare.requests.splice(0);
+    expect(last.map((request) => new URL(request.url).pathname.split('/').slice(-2).join('/')).sort()).toEqual([
+      'ziyixi-notion-publish/schedules', 'ziyixi-notion-publish/settings', 'ziyixi-notion-publish/subdomain',
+      'ziyixi-website/schedules', 'ziyixi-website/settings', 'ziyixi-website/subdomain',
+    ]);
     const cloudflare = await view<CloudflareView>(h, 'cloudflare');
-    expect(cloudflare.drift).toMatchObject({ status: 'ok', in_progress: false, desired_workers: 15, findings: [], findings_omitted: 0, last_error: null });
+    expect(cloudflare.drift).toMatchObject({ status: 'ok', in_progress: false, desired_workers: Object.keys(DESIRED.workers).length, findings: [], findings_omitted: 0, last_error: null });
     expect(cloudflare.drift).not.toHaveProperty('audit_unchecked');
     expect(cloudflare.drift.checked_at).toBe(new Date(start + 120 * MIN).toISOString());
     const ops = await view<OpsView>(h, 'ops');
@@ -294,8 +300,8 @@ describe('the daily drift check', () => {
       for (const minute of [2, 3, 4, 5]) {
         if (minute > 2) await h.redeploy({ DEV_NOW: new Date(NOW + minute * MIN).toISOString() });
         const refreshed = await h.refresh<CloudflareView>('cloudflare');
-        // Four Workers a step; the fifteenth is the last step's only one.
-        expect(h.cloudflare.requests.splice(0)).toHaveLength(minute < 5 ? DRIFT_CALLS_PER_TICK : 3);
+        // Four Workers a step; the last step reads the remaining two Workers.
+        expect(h.cloudflare.requests.splice(0)).toHaveLength(minute < 5 ? DRIFT_CALLS_PER_TICK : 6);
         expect(refreshed.body?.drift.in_progress).toBe(minute < 5);
       }
       const result = (await view<CloudflareView>(h, 'cloudflare')).drift;

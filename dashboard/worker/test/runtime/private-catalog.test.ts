@@ -38,7 +38,8 @@ describe('private catalog in the owner runtime', () => {
     expect(cloudflare.body?.workers.find((worker) => worker.script === 'unknown-extra')?.entry).toBeNull();
     expect(cloudflare.body?.resources.find((resource) => resource.id === 'demo-store-one')).toMatchObject({ entry: 'demo-one', resource: 'demo-store-one' });
     expect(cloudflare.body?.resources.find((resource) => resource.id === 'unknown-extra')).toMatchObject({ entry: null, resource: null });
-    expect(cloudflare.body?.drift.desired_workers).toBe(17);
+    expect(cloudflare.body?.drift.desired_workers).toBe(Object.keys(catalog.desired.workers).length);
+    expect(cloudflare.body?.workers.find((worker) => worker.script === 'storage')?.entry).toBe('storage');
     expect(cloudflare.body?.drift.findings.filter((finding) => finding.category === 'scripts')).toEqual([
       { category: 'scripts', script: 'unknown-extra', name: 'unknown-extra', kind: 'extra' },
     ]);
