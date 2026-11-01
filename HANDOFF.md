@@ -5,19 +5,23 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-`codex/quant-storage-diagnostics` completes the owner-authorized private workbench and first Dropbox data transfer.
-The workbench, incremental checkpoint transport and complete fixed research context are merged and have passed
-exact-source local/Linux checks and independent review. Private publication and live acceptance remain pending.
-Two transfer attempts stopped before a control-head commit; confirmed immutable objects and original data are
-retained. The current correction projects bounded HTTP/transport diagnostics and complete progress into Actions
-without business content. Continue recovery on checked main with the actual failure classification.
+`codex/quant-fresh-start` completes the owner-authorized private workbench. The owner explicitly cancelled the
+development-library migration: the data is inexpensive to collect again. Start the new workbench with an empty
+working cache and collect through the application. Remove the transfer from the release prerequisite; do not add
+recovery machinery to the cancelled transfer or import old execution history. The connection-retry-only proposal
+was abandoned without an implementation.
+
+The workbench and shared Storage integration are merged and have passed exact-source local/Linux checks and
+independent review. Fresh-start local checks and review passed; cloud checks, protected publication and live
+acceptance remain pending.
+CI builds and deploys the checked source and waits for service readiness; data collection runs in the application.
 
 Shared Storage is published, independently connected and registered. Its real object/authentication, gzip,
 32 MiB and pagination/replay checks passed; the [November 1 archive](docs/history/handoff-2026-11-01.md#shared-storage)
 records that separate release. Existing Dropbox files and application connections are preserved.
 
-Next: publish the checked diagnostic source, finish the private transfer, independently rebuild an empty cache,
-verify API/Colab and source collection, configure runtime plans, then require same-main reconciliation. Detailed
+Next: verify empty-cache startup, publish the checked workbench, collect fresh data and verify its Dropbox reads,
+API/Colab and runtime plans, then require same-main reconciliation. Detailed
 application and data evidence stays in the private handoff; automatic private publication remains disabled.
 
 ## Latest verified release
