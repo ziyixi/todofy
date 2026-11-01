@@ -1,6 +1,6 @@
 # Handoff
 
-Updated 2026-10-31 UTC. Read [AGENTS](AGENTS.md), then the target application's README/rules.
+Updated 2026-11-01 UTC. Read [AGENTS](AGENTS.md), then the target application's README/rules.
 Documentation entrypoints are in [docs/README](docs/README.md). Historical waiting lists are not instructions.
 
 ## Current work
@@ -8,13 +8,15 @@ Documentation entrypoints are in [docs/README](docs/README.md). Historical waiti
 `codex/quant-live-acceptance` continues the checked Quant/Home work and runtime acceptance.
 The owner explicitly wants normal K3s resources, including namespaces, RBAC and storage, managed through Actions.
 Use native Kubernetes tools with a dedicated short-lived Actions identity; application runtime identities stay scoped.
-The private repository owns the implementation and setup evidence. Parent main `e627cf05` pins private `142822e`
-after exact-source branch and main checks. The reviewed shared infrastructure changes applied and the following
+The private repository owns the implementation and setup evidence. Native CI management and its runtime-identity
+fix are merged after exact-source branch and main checks. The reviewed shared infrastructure changes applied and the following
 plan had zero changes. The owner completed the one-time cluster trust handoff and real CI authorization verification
 passed. The initial private-application publication has not completed; runtime and data acceptance remain pending. The continuation PRs are merged;
 further source changes need a new review.
 The merged follow-up preserves the private acceptance evidence and updates shared version metadata handling.
 Detailed runtime handoff status remains in the private repository.
+The current follow-up adds read-only verification to the existing protected operator and carries a verified
+private-console layout correction; finish its exact-source checks before promotion.
 
 The earlier `codex/quant-rollout-resume` continuation in both repositories is merged, along with the original
 `codex/private-quant-data` / `codex/quant-data` work. Initial application publication and data acceptance remain pending.
