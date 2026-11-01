@@ -16,9 +16,10 @@ further source changes need a new review.
 The merged follow-up preserves the private acceptance evidence and updates shared version metadata handling.
 Detailed runtime handoff status remains in the private repository.
 Read-only runtime verification and the private-console layout correction passed branch/main checks and are merged.
-The live collector and Worker run the checked follow-up source. A complete protected publication subsequently
-passed running identity, digest and public combined health checks. Complete owner-console/data acceptance and
-actual resource registration before final reconciliation.
+The live collector and Worker run the checked follow-up source. Complete protected publication, owner-console
+access, initial collection and raw-artifact archiving are verified. Actual runtime resources are registered;
+Home publication and same-source reconciliation passed. The private follow-up corrects a reproduced database-write
+throughput problem before measured larger collection and final research-version/data acceptance.
 
 The earlier `codex/quant-rollout-resume` continuation in both repositories is merged, along with the original
 `codex/private-quant-data` / `codex/quant-data` work. Initial application publication and data acceptance remain pending.
