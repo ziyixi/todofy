@@ -5,12 +5,13 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-`codex/quant-storage-diagnostics` completes the owner-authorized private workbench and first Dropbox data transfer.
+`codex/quant-connect-recovery` completes the owner-authorized private workbench and first Dropbox data transfer.
 The workbench, incremental checkpoint transport and complete fixed research context are merged and have passed
 exact-source local/Linux checks and independent review. Private publication and live acceptance remain pending.
-Two transfer attempts stopped before a control-head commit; confirmed immutable objects and original data are
-retained. The current correction projects bounded HTTP/transport diagnostics and complete progress into Actions
-without business content. Continue recovery on checked main with the actual failure classification.
+Transfer attempts stopped before a control-head commit; confirmed immutable objects and original data are
+retained. The diagnostic correction is merged and its live event projection identified a connection-establishment
+timeout. The current minimal change uses the existing client's bounded connection-only recovery, preserving
+uncertain-write fencing and response handling. Continue on checked main after native safety regressions.
 
 Shared Storage is published, independently connected and registered. Its real object/authentication, gzip,
 32 MiB and pagination/replay checks passed; the [November 1 archive](docs/history/handoff-2026-11-01.md#shared-storage)
