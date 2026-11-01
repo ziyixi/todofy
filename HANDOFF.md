@@ -11,13 +11,14 @@ Use native Kubernetes tools with a dedicated short-lived Actions identity; appli
 The private repository owns the implementation and setup evidence. Native CI management and its runtime-identity
 fix are merged after exact-source branch and main checks. The reviewed shared infrastructure changes applied and the following
 plan had zero changes. The owner completed the one-time cluster trust handoff and real CI authorization verification
-passed. The initial private-application publication has not completed; runtime and data acceptance remain pending. The continuation PRs are merged;
+passed. Private application health is observed; full publication and data acceptance remain pending. The continuation PRs are merged;
 further source changes need a new review.
 The merged follow-up preserves the private acceptance evidence and updates shared version metadata handling.
 Detailed runtime handoff status remains in the private repository.
 Read-only runtime verification and the private-console layout correction passed branch/main checks and are merged.
-The live collector runs the checked follow-up source. Initial publication still stops while confirming its running
-version, before Worker upload; resolve that failure and continue runtime/data acceptance.
+The live collector and Worker run the checked follow-up source. A complete protected publication subsequently
+passed running identity, digest and public combined health checks. Complete owner-console/data acceptance and
+actual resource registration before final reconciliation.
 
 The earlier `codex/quant-rollout-resume` continuation in both repositories is merged, along with the original
 `codex/private-quant-data` / `codex/quant-data` work. Initial application publication and data acceptance remain pending.
@@ -32,7 +33,7 @@ public build selection. Owner confirmed promotion and rollout; preserve that aut
 
 The private reviewed infrastructure applied 11 creates with no updates/deletes, followed by a clean plan. The actual
 owner audience source passed branch/main CI and was promoted. The private application image is published and
-anonymous pulls are refused. Initial workload resources were created through Actions. Continue Worker publication,
+anonymous pulls are refused. Initial workload resources were created through Actions. Continue owner-console verification,
 exact resource registration and deployed API/bulk-data acceptance. Bulk collection has not run yet.
 The private handoff owns operational details. Source-only API probes and local checks are not deployment evidence.
 
@@ -41,8 +42,8 @@ The private handoff owns operational details. Source-only API probes and local c
 Shared private-application support `2aea26a0`: exact-source branch/main CI, affected public publication and
 same-source reconciliation passed. Private source remains pinned through the gitlink, uses the root toolchains/locks,
 and restores public caches without uploading private caches or build/test artifacts. A cancelled duplicate operational
-run repeated the same source's public publication; a fresh reconciliation also passed. The private application itself
-has not been deployed. The initial submodule acceptance is retained in the October 31 record.
+run repeated the same source's public publication; a fresh reconciliation also passed. That release did not publish
+the private application. Current acceptance is tracked above; the initial submodule evidence is in the October 31 record.
 
 See the [October 31 record](docs/history/handoff-2026-10-31.md#private-submodule-and-public-ci) for verification and the earlier
 package-ownership and configuration-publishing changes.
