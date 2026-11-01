@@ -5,25 +5,20 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-`codex/quant-workbench-storage` adds shared Dropbox object storage and expands the private research workbench.
-The owner authorized implementation and publication. Existing Dropbox files and application connections remain
-in place. The shared service has independent publication and contracts; private application implementation stays
-in `private/`. The private handoff records the data migration, interface work and acceptance requirements.
-Shared Storage is published through PR #40 and its real resource identity is registered. Its independent Dropbox
-App-folder connection and 15 live object/authentication checks passed. The private workbench is merged through
-private PR #15 and pinned by `codex/quant-workbench-release` / parent PR #41. Complete private local and Linux checks
-and release artifacts passed, including legacy archive promotion and cross-day event-window regressions.
-Resource registration is merged through PR #41. `codex/quant-storage-operations` completes live client
-interoperability, large-checkpoint transport and fixed research context propagation before the first private
-data migration. Full native checks, release artifacts and independent reviews passed. Final exact-source cloud
-checks, protected private publication, live transfer/restoration and same-main reconciliation remain pending.
-Data-specific evidence stays in the private repository.
+`codex/quant-storage-diagnostics` completes the owner-authorized private workbench and first Dropbox data transfer.
+The workbench, incremental checkpoint transport and complete fixed research context are merged and have passed
+exact-source local/Linux checks and independent review. Private publication and live acceptance remain pending.
+Two transfer attempts stopped before a control-head commit; confirmed immutable objects and original data are
+retained. The current correction projects bounded HTTP/transport diagnostics and complete progress into Actions
+without business content. Continue recovery on checked main with the actual failure classification.
 
-`codex/storage-list-pages` adapts the shared list protocol to the provider's approximate page-size limit.
-The current code can reject a legitimate oversized provider page; the fix retains excess metadata in a bounded
-short-lived page cache and preserves the signed namespace/prefix cursor. The ongoing private transfer uses
-stat/get/put and continues on its checked source. Publish this list-only correction after that transfer completes,
-then repeat its live pagination and same-main reconciliation checks.
+Shared Storage is published, independently connected and registered. Its real object/authentication, gzip,
+32 MiB and pagination/replay checks passed; the [November 1 archive](docs/history/handoff-2026-11-01.md#shared-storage)
+records that separate release. Existing Dropbox files and application connections are preserved.
+
+Next: publish the checked diagnostic source, finish the private transfer, independently rebuild an empty cache,
+verify API/Colab and source collection, configure runtime plans, then require same-main reconciliation. Detailed
+application and data evidence stays in the private handoff; automatic private publication remains disabled.
 
 ## Latest verified release
 
