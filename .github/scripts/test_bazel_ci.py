@@ -171,6 +171,10 @@ class BazelCI(unittest.TestCase):
 
         operations = workflow_data(ROOT / ".github/workflows/private-ops.yml")
         self.assertEqual(set(operations["on"]), {"workflow_dispatch"})
+        self.assertIn(
+            "data-check",
+            operations["on"]["workflow_dispatch"]["inputs"]["operation"]["options"],
+        )
         jobs = operations["jobs"]
         self.assertEqual(set(jobs), {"context", "operate"})
         context = jobs["context"]

@@ -20,6 +20,9 @@ The live collector and Worker run the checked follow-up source. Complete protect
 access, initial collection and raw-artifact archiving are verified. Actual runtime resources are registered;
 Home publication and same-source reconciliation passed. The private follow-up corrects reproduced database-write
 throughput and archive-recovery problems before measured larger collection and final research-version/data acceptance.
+The owner prioritized actual bulk collection over further browser-download exercises. Real bulk source data exposed
+an optional-field interoperability issue; the focused continuation handles that case and adds a protected read-only
+frozen-data report. Complete the checked-source rollout, resume collection and finish resource/data acceptance.
 
 The earlier `codex/quant-rollout-resume` continuation in both repositories is merged, along with the original
 `codex/private-quant-data` / `codex/quant-data` work. Initial application publication and data acceptance remain pending.
