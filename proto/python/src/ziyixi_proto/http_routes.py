@@ -123,6 +123,10 @@ def decode_request(binding: HttpBinding, path: str, query: Iterable[tuple[str, s
             values[key] = int(value)
         elif field.kind == "string":
             values[key] = value
+        elif field.kind == "bool":
+            if value not in {"true", "false"}:
+                raise WireJsonError("invalid boolean query field")
+            values[key] = value == "true"
         else:
             raise WireJsonError("unsupported query field")
     return from_wire(binding.request, values, strict=True).message

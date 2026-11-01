@@ -7,6 +7,7 @@ import unittest
 from proto_test_support import PROTO, REPO
 from ziyixi_proto.http_routes import decode_json_body, decode_request, match_path
 from ziyixi_proto.platform.runtime.v1 import runtime_pb as pb, runtime_service_pb as service
+from ziyixi_proto.prototest.v1 import prototest_pb as prototest
 from ziyixi_proto.rpc_status import CODE, HTTP_STATUS, RpcError, status_body
 from ziyixi_proto.wire_json import WireJsonError, from_wire, to_wire
 
@@ -171,6 +172,18 @@ class HttpMetadata(unittest.TestCase):
                            (large, 65536)):
             with self.subTest(size=len(raw), bound=bound), self.assertRaises(WireJsonError):
                 decode_json_body(raw, max_bytes=bound)
+
+    def test_scalar_boolean_queries_require_exact_true_or_false(self):
+        binding = next(item for item in prototest.HTTP_BINDINGS if item.rpc == 'GetBook')
+        path = '/v1/shelves/s1/books/b1'
+        for text, expected in (('true', True), ('false', False)):
+            with self.subTest(text=text):
+                value = decode_request(binding, path, [('include_labels', text)])
+                self.assertIs(value.include_labels, expected)
+        for query in ([('include_labels', '1')], [('include_labels', 'True')],
+                      [('include_labels', '')], [('include_labels', 'false'), ('include_labels', 'true')]):
+            with self.subTest(query=query), self.assertRaises(WireJsonError):
+                decode_request(binding, path, query)
 
 
 class RpcStatus(unittest.TestCase):
