@@ -11,13 +11,14 @@ copied_source_files(name = "lint_sources", srcs = glob(["*.ts", "runtime/*.ts"])
 js_library(name = "source_runtime_tsconfig_json", srcs = ["runtime/tsconfig.json"])
 js_library(name = "runtime_helpers", srcs = ["runtime/harness.ts", "runtime/tsconfig.json"], types = ["runtime/harness.ts"])
 js_library(name = "runtime_metadata", srcs = ["runtime/harness.ts"])
+js_library(name = "sqlite_helper", srcs = ["sqlite.ts"], deps = ["//storage/worker/src:store"])
 workspace_link(name = "unit_edge_auth_link", src = "//packages/edge-auth:pkg", project = "storage/worker")
 proto_vitest_test(
     name = "unit_test",
     config = "//storage/worker:test_config",
-    tests = [":keys.test.ts", ":dropbox.test.ts", ":objects.test.ts", ":http.test.ts", ":wire.test.ts"],
+    tests = [":keys.test.ts", ":dropbox.test.ts", ":objects.test.ts", ":http.test.ts", ":wire.test.ts", ":list.test.ts", ":list-cache.test.ts"],
     deps = ["//storage/worker/src:lib"],
-    data = [":unit_edge_auth_link", "//storage/worker:node_modules/vitest", "//storage/worker:package_json"],
+    data = [":sqlite_helper", ":unit_edge_auth_link", "//storage/worker:node_modules/vitest", "//storage/worker:package_json"],
     project = "storage/worker",
     runner = vitest.vitest_test,
     tags = ["unit"],

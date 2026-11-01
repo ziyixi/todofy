@@ -19,6 +19,12 @@ data migration. Full native checks, release artifacts and independent reviews pa
 checks, protected private publication, live transfer/restoration and same-main reconciliation remain pending.
 Data-specific evidence stays in the private repository.
 
+`codex/storage-list-pages` adapts the shared list protocol to the provider's approximate page-size limit.
+The current code can reject a legitimate oversized provider page; the fix retains excess metadata in a bounded
+short-lived page cache and preserves the signed namespace/prefix cursor. The ongoing private transfer uses
+stat/get/put and continues on its checked source. Publish this list-only correction after that transfer completes,
+then repeat its live pagination and same-main reconciliation checks.
+
 ## Latest verified release
 
 Private application and shared native CI support are published. Runtime source private `7c984e5`, checked through

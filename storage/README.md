@@ -3,7 +3,7 @@
 Storage gives applications a namespace-scoped HTTP interface to a separate Dropbox App-folder connection.
 The owner console connects Dropbox and creates independently revocable read-only or read/write keys.
 Each key selects a fixed namespace on the server. File data lives in Dropbox; the native SQLite Durable Object
-holds the connection, key hashes and pagination-signing state. Storage uses no D1, R2 or scheduled job.
+holds the connection, key hashes and short-lived pagination metadata. Storage uses no D1, R2 or scheduled job.
 
 The separate Dropbox app uses `files.metadata.read`, `files.content.read` and `files.content.write` with offline PKCE.
 The callback is `/api/dropbox/callback`. Existing Recall connections, files and archive contracts are independent.
@@ -27,6 +27,15 @@ Keys are relative, at most 1,024 ASCII characters. Segments cannot be empty, `.`
 backslashes, URI escapes and Dropbox `id:`, `ns:` and `rev:` selectors are rejected. Dropbox retains its
 case-insensitive path behavior. A listing may return an empty page with a continuation; keep reading until
 `next_cursor` is empty. Continuations are authenticated and bound to the namespace and prefix.
+
+`page_size` defaults to 100 and is capped at 100; each response contains at most the requested number of objects.
+Dropbox's page-size limit is approximate, so Storage retains one sanitized provider page per cache entry and
+returns any extra objects before fetching the next provider page. Replaying a cursor returns its cached page;
+the caller may change page size. Cursors and their cached pages expire after 24 hours. Existing provider cursors
+remain accepted. The cache is limited to 1,024 pages, 512 KiB per page and 64 MiB of metadata JSON in total.
+Expired pages are removed lazily. Capacity exhaustion returns `RESOURCE_EXHAUSTED`, without evicting valid pages.
+Connecting or disconnecting Dropbox invalidates cached pages from the previous connection.
+Provider JSON remains bounded at 512 KiB. [Dropbox documents the approximate limit and continuation rules](https://github.com/dropbox/dropbox-api-spec/blob/main/files.stone#L1687-L1771).
 
 Each object is at most 32 MiB. Uploads require Content-Length and enforce the actual stream length.
 `If-None-Match: *` creates an absent object. `If-Match: "revision"` replaces that exact revision; the unquoted

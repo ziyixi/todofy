@@ -24,7 +24,7 @@ export class StorageState extends DurableObject<Env> {
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    this.store = new Store(ctx.storage.sql);
+    this.store = new Store(ctx.storage);
     this.dropbox = new Dropbox(this.store, env);
     void ctx.blockConcurrencyWhile(() => {
       const existing = this.store.get('cursor_key') as string | null;
@@ -48,7 +48,7 @@ export class StorageState extends DurableObject<Env> {
     if (path !== '/api/storage/v1/stat' && path !== '/api/storage/v1/list') throw failure(Code.NOT_FOUND, 'NOT_FOUND');
     if (request.method !== 'POST') throw failure(Code.UNIMPLEMENTED, 'METHOD_NOT_ALLOWED', 405);
     if (!/^application\/json(?:\s*;|\s*$)/i.test(request.headers.get('content-type') ?? '')) badRequest();
-    return path === '/api/storage/v1/stat' ? stat(request, client, this.dropbox) : list(request, client, this.dropbox, this.cursorSecret);
+    return path === '/api/storage/v1/stat' ? stat(request, client, this.dropbox) : list(request, client, this.dropbox, this.cursorSecret, this.store);
   }
 
   override async fetch(request: Request): Promise<Response> {

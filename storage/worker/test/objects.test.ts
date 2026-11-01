@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Dropbox } from '../src/dropbox.ts';
-import { readContent, stat, writeContent } from '../src/objects.ts';
+import { list, readContent, stat, writeContent } from '../src/objects.ts';
 import type { ClientRow, Connection } from '../src/store.ts';
+import { sqliteStore } from './sqlite.ts';
 
 const client: ClientRow = { id: 'synthetic', label: 'Synthetic', namespace: 'quant', access: 2, token_sha256: 'a'.repeat(64), create_time: 0, revoked: 0 };
 const object = { name: 'file.bin', path_display: '/namespaces/quant/file.bin', rev: 'abc123', size: 3, content_hash: 'b'.repeat(64) };
@@ -19,6 +20,17 @@ function fakeFetch(handler: (url: string, init: RequestInit) => Response | Promi
 }
 
 describe('metadata and binary reads', () => {
+  it('returns a bounded service page when the provider exceeds its approximate limit', async () => {
+    fakeFetch(() => Response.json({ entries: Array.from({ length: 101 }, (_, index) => ({ '.tag': 'file', ...object, path_display: '/namespaces/quant/part-' + String(index) })), has_more: false, cursor: 'synthetic-provider-cursor' }));
+    const cache = sqliteStore();
+    try {
+      const response = await list(new Request('https://storage.example.test/api/storage/v1/list', { method: 'POST', body: JSON.stringify({ page_size: 100 }) }), client, provider, 'a'.repeat(64), cache.store);
+      const page = await response.json<{ objects: unknown[]; next_cursor: string }>();
+      expect(page.objects).toHaveLength(100);
+      expect(page.next_cursor).not.toBe('');
+    } finally { cache.database.close(); }
+  });
+
   it('returns the complete wire metadata including a zero byte size', async () => {
     fakeFetch(() => Response.json({ '.tag': 'file', ...object, size: 0 }));
     const response = await stat(new Request('https://storage.example.test/api/storage/v1/stat', { method: 'POST', body: JSON.stringify({ key: 'file.bin' }) }), client, provider);
