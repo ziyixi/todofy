@@ -5,34 +5,29 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-`codex/quant-log-timeline` corrects the read-only observer: a rejected log timestamp must not discard independently
-valid request diagnostics. It also normalizes explicit RFC3339 offsets/whitespace and retains bounded character
-classes for an unrecognized prefix, without raw text. Actual previous-container evidence still needs capture
-before collector replacement; a Ready transition alone does not establish the entire unavailable interval.
+`codex/quant-finish-worker` completes the remaining Worker stage without rebuilding/publishing the image or
+patching the already-ready collector. The thin public entry retains pinned private 893837b, current-main CI gate,
+private registry/native source/digest/readiness checks, hostname/config guards and the existing production lock.
+Only the Worker artifact/deploy and a new verified private receipt may write. Normal release operations are
+unchanged. Targeted tests, actual scripts checks and diff review passed; admission and finish-worker remain.
 
-`codex/quant-immutable-write-recovery` addresses a new real client WriteTimeout on an immutable batch. The
-installed consumer handled an explicit incomplete-batch reply but not this send/receive uncertainty. The pending
-change resolves both create-only single and batch outcomes through matching metadata and one bounded missing-object
-write. It preserves mutable head/CAS, rejects invalid acknowledgements and retains original diagnostics even when
-resolution succeeds. Collector checks and independent review passed, and main `99f8895b` plus its complete
-reconciliation succeeded. Consumer publication waits for the observer correction and old-log capture above.
+The preceding normal release installed source 893837b but timed out after about 902 seconds waiting for Ready.
+Read-only verification then proved that collector healthy at source893 and Ready at21:15:21, after the old budget.
+The original registry digest is sha256:efe22000d785125a836772faaa202dedde44b8909c826bd4d651e55ed5fd0109; the finish
+operation must freshly verify native imageID. Do not rerun the entire image/collector release. Exit137/network
+physical causes remain recorded as unknown and, per the owner's latest direction, do not block practical recovery.
 
-The existing read-only runtime probe now retains validated CRI failure/startup times, request bytes and bounded
-per-kind recovery records. Publish the checked diagnostic source to main and run verify before replacing the
-collector, so its previous-container evidence is not overwritten. The precise network cause and correlation of the
-19:09–19:10 public 503s remain open until that evidence is collected. Never restart or replay an Action merely
-because an observation times out.
+The owner's90,000 shared-account Workers line is active. At21:30UTC Home's cache read88,587. To stop before the
+line, queued price job6036c4bc-d1cd-4a68-a64a-e9db6dd69010 was cancelled at0/1022, then the original event job
+63e5d584-d9e5-4ce6-ae43-6129034add86 stopped at its boundary:663/1022 and675,611 matched observations. Its UI
+explicitly offers continuation of359 remaining identities. The Codex goal is active; at00:00UTC quota reset,
+refresh account usage and continue that same event execution, preserving its captured scope/asof/checkpoint.
+No later queued collection remains. Re-run the saved daily price plan when needed after reset/initialization;
+its enabled schedule stays intact. Daily events remain disabled until source/cost acceptance, with end date blank.
 
-Full-pool event initialization continues from its original scope and checkpoint. Existing reorganization parsing
-is installed; its older failed source check needs a normal revisit. Foreign-market earnings identity/date
-semantics remain unverified and coverage warnings stay explicit. Daily-event scheduling is still disabled until
-initial source/cost acceptance; its saved end date is blank and subsequent collection overlaps seven days.
-
-The owner set this first backfill's shared-account Workers request line to 90,000. Monitor the cached account
-usage, preserve other services' headroom and continue the same execution after any necessary UTC-reset wait.
-This is an operator line, not an automatic platform guard. Preserve existing Dropbox/Recall/R2 files, keep
-automatic private publication disabled, use fresh collection without old-library migration and no paid upgrade.
-Do not repeat completed price/SDK/recovery audits or run rejected production upload fixtures.
+Prioritize delivery and bounded retry/checkpoint continuation. Do not reopen speculative runtime investigation,
+repeat completed price/SDK/recovery audits, run rejected production upload fixtures, migrate the old development
+library, upgrade paid products, or disturb existing Dropbox/Recall/R2 files. Automatic private publication stays off.
 
 ## Latest verified release
 
