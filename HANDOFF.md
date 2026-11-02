@@ -5,22 +5,25 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-`codex/quant-worker-readiness` addresses a publication health-gate defect and an empty confirmation error.
-The latest application corrections are running and healthy, but their workflow stopped on the first post-upload
-503. Observe the checked public source and dependencies under the existing bounded readiness policy, without
-replaying upload or rollout. Retain fixed component diagnostics; the historical underlying trigger remains unknown.
-Confirmation dialogs also treated an initial null mutation error as a connection failure before submission.
-Related regressions, affected checks and the real web bundle passed. Normal checked publication and one focused
-confirmation observation remain pending. Detailed incident evidence stays in the private handoff.
+`codex/k3s-session-readiness` retains native command failure evidence and replaces local-listener readiness with
+verified end-to-end identity/authority before writes. Only explicitly classified transient read-only preflight
+failures may wait within the existing startup budget; resource mutations do not replay. The prior generic K3s
+failure lost its exact operation and cause, which remain unknown. Existing application source remains healthy.
 
-Full-pool event initialization continues independently of CI through its saved plan and confirmed checkpoint.
-Remaining work is complete source/coverage acceptance, shared-budget monitoring and enabling daily events.
-Preserve other services' request headroom while initializing; do not restart confirmed work to recover quota.
-Do not repeat the completed price/SDK/recovery audit or resubmit the completed sample job merely for acceptance.
+The same work makes cancelled event initialization resumable from its existing checkpoint for quota control,
+without changing other job types or adding a pause framework. Earlier public health observation and empty-error
+confirmation corrections are included but await activation. Related native checks and the actual web bundle
+passed; exact-source admission, read-only verification and protected publication remain pending.
+
+Full-pool event initialization continues independently of CI. Daily price scheduling has naturally queued its
+09:00 UTC execution; it waits behind initialization. Remaining work is complete source/coverage acceptance,
+account-budget control and enabling daily events. Preserve other services' request headroom; do not restart
+confirmed work to recover quota or repeat completed price/SDK/recovery audits merely for acceptance.
 The proposed older event expansion is not running.
 
 The owner cancelled development-library migration; use fresh collection. Preserve existing Dropbox/Recall/R2
-files, keep automatic private publication disabled and use no paid upgrade.
+files, keep automatic private publication disabled and use no paid upgrade. Detailed incident evidence remains
+in the private handoff.
 
 ## Latest verified release
 
