@@ -5,6 +5,13 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
+`codex/quant-chart-full-range` corrects complete-history chart fitting and manual ticker resolution. The actual
+research API already returns the full history; the chart's spacing floor clipped it. Custom input also treated
+one fuzzy search page as an exact lookup. Reuse existing chart options and server identity resolution, preserving
+scope and captured data. Targeted web checks, real chart-engine reproduction and independent review passed.
+Combine these corrections with the pending calendar/source-link publication. Full-pool event initialization is
+now running through the existing saved plan while code admission proceeds; it uses the plan's incremental profile.
+
 `codex/bazel-template-cache` addresses the failed main admission before the pending Quant publication. A cold
 public-dependency restore considered only Go producer keys; the build then failed while downloading
 a template tool that an unstamped build does not execute. Keep native bounded HTTP handling and checksum
@@ -12,7 +19,8 @@ verification, reuse the existing native template rule for unstamped configuratio
 stamped release path. Actual before/after bytes match for unstamped and stamped configurations. Injecting an
 unavailable template-tool repository allows the ordinary build to finish while the stamped positive control
 fails as intended. The real Quant web bundle builds. Matching cache producers across revisions retains the
-same OS/dependency hashes and restore-only privacy boundary. Normal CI admission remains pending.
+same OS/dependency hashes and restore-only privacy boundary. The exact branch gate passed and its normal PR merge
+is complete; main admission is running.
 The remote HTTP 500's internal origin was not retained and is not established by a later successful download.
 
 `codex/quant-runtime-diagnostics` continues the authorized private workbench and efficiency goal. The owner
