@@ -5,52 +5,32 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-`codex/quant-chart-full-range` corrects complete-history chart fitting and manual ticker resolution. The actual
-research API already returns the full history; the chart's spacing floor clipped it. Custom input also treated
-one fuzzy search page as an exact lookup. Reuse existing chart options and server identity resolution, preserving
-scope and captured data. Targeted web checks, real chart-engine reproduction and independent review passed.
-Combine these corrections with the pending calendar/source-link publication. Full-pool event initialization is
-now running through the existing saved plan while code admission proceeds; it uses the plan's incremental profile.
+`codex/quant-chart-range-resize` continues the authorized Chinese workbench and efficiency goal with three
+reproduced corrections: preserve chart range during resizing, separate an event task's default cutoff from
+its earnings-calendar horizon, and send the required JSON header on bodyless owner mutations. Existing access
+checks, stored execution parameters and data remain intact. Related regressions and all 27 native Quant checks
+plus the web bundle passed; exact-source publication and one resize observation remain pending.
 
-`codex/bazel-template-cache` addresses the failed main admission before the pending Quant publication. A cold
-public-dependency restore considered only Go producer keys; the build then failed while downloading
-a template tool that an unstamped build does not execute. Keep native bounded HTTP handling and checksum
-verification, reuse the existing native template rule for unstamped configurations, and preserve the existing
-stamped release path. Actual before/after bytes match for unstamped and stamped configurations. Injecting an
-unavailable template-tool repository allows the ordinary build to finish while the stamped positive control
-fails as intended. The real Quant web bundle builds. Matching cache producers across revisions retains the
-same OS/dependency hashes and restore-only privacy boundary. The exact branch gate passed and its normal PR merge
-is complete; main admission is running.
-The remote HTTP 500's internal origin was not retained and is not established by a later successful download.
+Full-pool event initialization is running independently of CI through the existing saved plan. It continued
+across the last publication with confirmed progress intact. Remaining work is complete source/coverage acceptance,
+shared-budget monitoring and enabling daily events. Do not repeat the completed price/SDK/recovery audit or
+resubmit the completed sample job just to exercise controls. The proposed older event expansion is not running.
 
-`codex/quant-runtime-diagnostics` continues the authorized private workbench and efficiency goal. The owner
-cancelled development-library migration; use fresh collection. Preserve existing Dropbox/Recall/R2 files and
-keep automatic private publication disabled. Business collection runs independently of CI.
-
-The fresh workbench and bounded cold-recovery correction are published. The first new price snapshot is R2 ready and fixed/working SDK samples passed. Remaining work is the whole-version
-event/source/chart acceptance, bounded initialization and saved plan operation. Whole-version quality and
-complete captured-head cache recovery have now passed. A later connection
-failure recovered automatically with confirmed progress intact; its physical cause remains unresolved. Current
-work retains connection-stage evidence, completes publication control after a failed Kubernetes wait, and corrects
-metadata/report-contract gaps. A reproduced provider share-class calendar mismatch and long source-link wrapping
-are the current fixes. Event checkpoint work is reduced within the existing asset boundary. Detailed data and
-incident evidence stays in the private handoff.
-
-Shared Storage is published, independently connected and registered. Actual object/authentication, gzip,
-32 MiB and pagination/replay checks passed; see the [November 1 archive](docs/history/handoff-2026-11-01.md#shared-storage).
-Existing application connections and files were preserved. No paid upgrade is authorized.
+The owner cancelled development-library migration; use fresh collection. Preserve existing Dropbox/Recall/R2
+files, keep automatic private publication disabled and use no paid upgrade. Detailed data and unresolved
+historical incident evidence remain in the private handoff.
 
 ## Latest verified release
 
-Private source `b171cdd`, checked through parent `419222b`, passed exact-source branch/main CI, independent review
-and ordinary protected publication. Running source/digest, native rollout, public health, real checkpoint
-continuation and working SDK reads were verified. Same-main resource/VPS/Worker comparisons and resolved drift
-gate passed. Fresh full-pool collection, fixed loading and event acceptance remain current work above.
+Private source `b6597e8`, checked through parent `18607f1`, passed branch/main admission and ordinary protected
+publication. Native source/digest observation and public health passed; same-main resource/VPS/Worker comparison
+and resolved infrastructure drift passed. Initial full-history charts and source-link wrapping were observed on
+production desktop and narrow views. The remaining resize defect is current work above.
 
-The [November 2 archive](docs/history/handoff-2026-11-02.md) records the bounded cache-recovery release. Earlier
-private integration and shared Storage evidence remain in [November 1](docs/history/handoff-2026-11-01.md), with
-build and configuration background in [October 31](docs/history/handoff-2026-10-31.md) and
-[October 30](docs/history/handoff-2026-10-30.md). Per-application release identities remain independent.
+The [November 2 archive](docs/history/handoff-2026-11-02.md) records the published cache/build and console corrections.
+Shared Storage is independently connected and registered; its protocol and persistence checks remain in
+[November 1](docs/history/handoff-2026-11-01.md#shared-storage). Earlier integration and build configuration are in
+[October 31](docs/history/handoff-2026-10-31.md) and [October 30](docs/history/handoff-2026-10-30.md).
 Documentation-only closeout still follows normal main CI and same-main reconciliation before delivery.
 
 ## Separate acceptance and follow-ups
