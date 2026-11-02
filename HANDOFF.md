@@ -5,42 +5,38 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-`codex/quant-storage-immutable-write` removes the metadata lookup before creating a new immutable working object.
-The existing conditional-write contract prevents replacement; an explicit conflict still requires matching
-metadata before reuse. Mutable checkpoint comparison and unknown upload outcomes retain their existing rules.
-Related failure/request-count regressions and independent review passed. Exact-source admission and protected
-publication remain pending.
+`codex/quant-control-diagnostics` retains the most recent control failure's fixed phase, code and UTC time in
+the existing cursor and carries that evidence through health/publication diagnostics after recovery. The latest
+publication recovered automatically from a temporary archive error while the collector was reachable, but its
+old projection lost the original failure details. The precise trigger remains unknown. A native alarm regression
+reproduced the same visible states from a plan dependency failure and recovered without manual intervention;
+that demonstrates the mechanism, not the historical trigger. Existing recovery behavior stays in place.
+Local retention/privacy regressions, native alarm recovery, type checks and independent review passed;
+exact-source admission and publication remain pending.
 
-The preceding session/checkpoint correction passed branch/main admission, real read-only connection verification
-and same-main resource/VPS/Worker comparison with resolved drift. It verifies end-to-end identity/authority before
-writes, retains safe failure diagnostics and makes cancelled event runs resumable from their original checkpoint.
-Only classified transient preflight failures wait within the startup budget; resource mutations do not replay.
-That correction, public health observation and empty-error confirmation feedback await combined activation.
-The prior generic K3s failure lost its exact operation and cause, which remain unknown. Existing application
-source remains healthy. Do not repeat completed checks or replay failed publication merely to obtain success.
+Full-pool event initialization continues independently of CI from its original checkpoint. Daily price scheduling
+has naturally queued its execution behind it. Remaining work is complete source/coverage acceptance, account-budget
+control and enabling daily events. Preserve other services' request headroom; do not restart confirmed work or
+repeat completed price/SDK/recovery audits merely for acceptance. The proposed older event expansion is not running.
 
-Full-pool event initialization continues independently of CI. Daily price scheduling has naturally queued its
-09:00 UTC execution; it waits behind initialization. Remaining work is complete source/coverage acceptance,
-account-budget control and enabling daily events. Preserve other services' request headroom; do not restart
-confirmed work to recover quota or repeat completed price/SDK/recovery audits merely for acceptance.
-The proposed older event expansion is not running.
-
-The owner cancelled development-library migration; use fresh collection. Preserve existing Dropbox/Recall/R2
-files, keep automatic private publication disabled and use no paid upgrade. Detailed incident evidence remains
-in the private handoff.
+The owner cancelled development-library migration; use fresh collection. Preserve existing Dropbox/Recall/R2 files,
+keep automatic private publication disabled and use no paid upgrade. Detailed incident evidence remains private.
 
 ## Latest verified release
 
-Private source `b6597e8`, checked through parent `18607f1`, passed branch/main admission and ordinary protected
-publication. Native source/digest observation and public health passed; same-main resource/VPS/Worker comparison
-and resolved infrastructure drift passed. Initial full-history charts and source-link wrapping were observed on
-production desktop and narrow views. The later installed source also preserves resizing; publication observation
-and confirmation feedback remain current work above.
+Private producer `92a6f78`, checked through parent `9c3534f`, passed branch/main admission and first-attempt protected
+publication. Native source/image observation, public health and same-main resource/VPS/Worker comparison with
+resolved drift passed. The original full-pool event run resumed automatically with its confirmed progress intact.
 
-The [November 2 archive](docs/history/handoff-2026-11-02.md) records the published cache/build and console corrections.
-Shared Storage is independently connected and registered; its protocol and persistence checks remain in
-[November 1](docs/history/handoff-2026-11-01.md#shared-storage). Earlier integration and build configuration are in
-[October 31](docs/history/handoff-2026-10-31.md) and [October 30](docs/history/handoff-2026-10-30.md).
+The release includes complete-history chart resize preservation, UTC event defaults, deletion request headers,
+clean confirmation feedback, cancelled-event checkpoint continuation, verified CI connection readiness and reduced
+immutable-upload request overhead. The production deletion dialog was opened and cancelled; no plan was deleted.
+Synthetic request-count and authority/failure checks are distinct from production source/health observations.
+
+The [November 2 archive](docs/history/handoff-2026-11-02.md) records this publication and the earlier cache/build
+and console corrections. Shared Storage is independently connected and registered; its protocol and persistence
+checks remain in [November 1](docs/history/handoff-2026-11-01.md#shared-storage). Earlier integration and build
+configuration are in [October 31](docs/history/handoff-2026-10-31.md) and [October 30](docs/history/handoff-2026-10-30.md).
 Documentation-only closeout still follows normal main CI and same-main reconciliation before delivery.
 
 ## Separate acceptance and follow-ups
