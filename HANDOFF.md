@@ -9,11 +9,11 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 cancelled development-library migration; use fresh collection. Preserve existing Dropbox/Recall/R2 files and
 keep automatic private publication disabled. Business collection runs independently of CI.
 
-The fresh workbench and bounded cold-recovery correction are published. Remaining work is the first new-data
-snapshot, fixed-version/R2/SDK acceptance, real event collection and saved plan operation. A later connection
+The fresh workbench and bounded cold-recovery correction are published. The first new price snapshot is R2 ready and fixed/working SDK samples passed. Remaining work is the whole-version
+quality audit, event/source/chart acceptance, bounded initialization and saved plan operation. A later connection
 failure recovered automatically with confirmed progress intact; its physical cause remains unresolved. Current
-work retains connection-stage evidence and reduces event checkpoint/network work within the existing asset
-boundary. Detailed data and incident evidence stays in the private handoff.
+work retains connection-stage evidence, completes publication control after a failed Kubernetes wait, and corrects
+metadata/report-contract gaps. Event checkpoint work is reduced within the existing asset boundary. Detailed data and incident evidence stays in the private handoff.
 
 Shared Storage is published, independently connected and registered. Actual object/authentication, gzip,
 32 MiB and pagination/replay checks passed; see the [November 1 archive](docs/history/handoff-2026-11-01.md#shared-storage).
