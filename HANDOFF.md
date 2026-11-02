@@ -15,10 +15,13 @@ The fresh workbench and normal process continuation are published after exact-so
 independent review. The same business run retained progress across native rollout. The current follow-up addresses
 the owner's explicit efficiency goal. Remote checkpoints and locked I/O are reduced, bounded reads are batched,
 fetched identities are reused and independent cache downloads run concurrently. These changes passed exact-source
-publication and real active-collection latency comparison. The collector subsequently became unavailable; the
-current follow-up adds bounded, read-only runtime evidence before choosing a fix. Recovery alone must not close
-the incident: identify its cause, recurrence conditions and verified prevention. New-data/source/fixed-load
-acceptance remains pending. CI deploys checked source and observes readiness; business collection runs independently.
+publication and real active-collection latency comparison. The collector subsequently became unavailable. Checked
+read-only diagnostics identified a startup crash loop; a real-data reproduction traced it to the recovery
+transaction retaining old cache data while rebuilding the whole library. The current correction discards the
+rebuildable local database on cold recovery and commits existing partitions separately. It must preserve confirmed
+authority and verify recovery at the intended scale. The first trigger that entered recovery remains unproven;
+retain that uncertainty and record safe failure evidence. New-data/source/fixed-load acceptance remains pending.
+CI deploys checked source and observes readiness; business collection runs independently.
 
 Shared Storage is published, independently connected and registered. Its real object/authentication, gzip,
 32 MiB and pagination/replay checks passed; the [November 1 archive](docs/history/handoff-2026-11-01.md#shared-storage)
