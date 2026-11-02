@@ -5,39 +5,35 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-`codex/quant-control-diagnostics` retains the most recent control failure's fixed phase, code and UTC time in
-the existing cursor and carries that evidence through health/publication diagnostics after recovery. The latest
-publication recovered automatically from a temporary archive error while the collector was reachable, but its
-old projection lost the original failure details. The precise trigger remains unknown. A native alarm regression
-reproduced the same visible states from a plan dependency failure and recovered without manual intervention;
-that demonstrates the mechanism, not the historical trigger. Existing recovery behavior stays in place.
-Local retention/privacy regressions, native alarm recovery, type checks and independent review passed;
-exact-source admission and publication remain pending.
+`codex/quant-event-throughput` removes immutable uploads of successful intermediate news/calendar responses whose
+results were superseded by finer date windows. Final response leaves and all normalized records/checks remain;
+a failed subdivision retains its parent response for diagnosis. Provider request counts, source ranges, pacing,
+formats and the final checkpoint boundary remain unchanged. Related event/asset regressions passed; exact-source
+admission and publication remain pending.
 
-Full-pool event initialization continues independently of CI from its original checkpoint. Daily price scheduling
-has naturally queued its execution behind it. Remaining work is complete source/coverage acceptance, account-budget
-control and enabling daily events. Preserve other services' request headroom; do not restart confirmed work or
-repeat completed price/SDK/recovery audits merely for acceptance. The proposed older event expansion is not running.
-
-The owner cancelled development-library migration; use fresh collection. Preserve existing Dropbox/Recall/R2 files,
-keep automatic private publication disabled and use no paid upgrade. Detailed incident evidence remains private.
+The owner raised this first backfill's operational shared-account request line to 90,000 and prioritized finishing
+collection. This replaces the earlier 60,000 line. It is operator-controlled, not an implemented automatic guard.
+Full-pool initialization continues from its original checkpoint; daily price scheduling has queued its execution
+behind it. Remaining work is complete source/coverage acceptance, quota monitoring and enabling daily events.
+Preserve other services' headroom and existing Dropbox/Recall/R2 files. Use fresh collection without old-library
+migration, keep automatic private publication disabled and use no paid upgrade. Do not repeat completed audits.
 
 ## Latest verified release
 
-Private producer `92a6f78`, checked through parent `9c3534f`, passed branch/main admission and first-attempt protected
-publication. Native source/image observation, public health and same-main resource/VPS/Worker comparison with
-resolved drift passed. The original full-pool event run resumed automatically with its confirmed progress intact.
+Private producer `ff25449`, checked through parent `ed50698`, passed branch/main admission and first-attempt
+protected publication. Native source/image observation, public health and same-main resource/VPS/Worker comparison
+with resolved drift passed. Public health exposes a bounded last-control-failure projection; legacy cursors safely
+return null. The most recent new failure survives recovery. Existing recovery behavior and owner APIs remain.
 
-The release includes complete-history chart resize preservation, UTC event defaults, deletion request headers,
-clean confirmation feedback, cancelled-event checkpoint continuation, verified CI connection readiness and reduced
-immutable-upload request overhead. The production deletion dialog was opened and cancelled; no plan was deleted.
-Synthetic request-count and authority/failure checks are distinct from production source/health observations.
+The original full-pool event run resumed with its confirmed progress intact. The release retains complete-history
+chart resizing, UTC event defaults, deletion headers/confirmation feedback, cancelled-event continuation, verified
+CI connection readiness and reduced immutable-upload request overhead. The production delete dialog was opened
+cleanly and cancelled; no plan was deleted. Historical failure triggers without original evidence remain unknown.
 
-The [November 2 archive](docs/history/handoff-2026-11-02.md) records this publication and the earlier cache/build
-and console corrections. Shared Storage is independently connected and registered; its protocol and persistence
-checks remain in [November 1](docs/history/handoff-2026-11-01.md#shared-storage). Earlier integration and build
-configuration are in [October 31](docs/history/handoff-2026-10-31.md) and [October 30](docs/history/handoff-2026-10-30.md).
-Documentation-only closeout still follows normal main CI and same-main reconciliation before delivery.
+The [November 2 archive](docs/history/handoff-2026-11-02.md) records this publication and earlier corrections.
+Shared Storage's protocol/persistence checks remain in [November 1](docs/history/handoff-2026-11-01.md#shared-storage).
+Earlier integration and build configuration are in [October 31](docs/history/handoff-2026-10-31.md) and
+[October 30](docs/history/handoff-2026-10-30.md). Documentation closeout follows normal main CI and reconciliation.
 
 ## Separate acceptance and follow-ups
 
