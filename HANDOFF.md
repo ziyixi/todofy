@@ -5,6 +5,21 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
+`codex/quant-event-source-shapes` corrects a confirmed corporate-action parser omission: a reorganization's
+participating security may appear in its stock-movement list. Validate that relation without transferring the
+top-level security's ratios to a nested participant. Synthetic source/association regressions passed; admission
+and publication are pending. Cross-market earnings aliases remain unaccepted until identity/date semantics can
+be represented correctly. The already admitted batch release remains independently pinned to parent `72b00df`.
+
+The consumer follow-up also resolves explicit incomplete immutable batches with existing per-object metadata
+checks and create-only writes. A fully confirmed group can continue the same asset without repeating source
+collection; failed confirmation still fences and mutable head CAS is unchanged. Five affected Bazel test targets,
+including native transport and cold recovery, passed. The application's actual Bazel Ruff checks also pass after
+correcting test imports that a root-config check classified differently. Admission and publication are pending.
+The same publication gives the growing library a 600-second startup window and 900-second Deployment deadline.
+The earlier measured restore and expected full-pool reference count expose a risk of outgrowing the old window;
+the estimate is not a new full-pool restore result. Existing deployment regressions passed.
+
 `codex/quant-event-throughput` adds bounded create-only batches on Storage's existing machine content path and
 uses them for Quant's raw/normalized asset stages. The existing Dropbox connection and Durable Object stream a
 batch through native upload sessions and synchronous completion. No new service, permission, stored format or
@@ -14,8 +29,10 @@ Successful finer news/calendar windows also replace unused intermediate response
 Storage native/auth/stream/conflict checks, collector atomicity/recovery tests, dual-language golden/schema/lint/
 compatibility checks and independent reviews passed. The exact Linux image layer and wheel contain the new shared
 protocol module. A same-input synthetic asset drops 25 Storage requests to 4 with identical data/coverage; this is
-not a production throughput prediction. Exact-source admission and ordered publication remain pending: deploy
-Storage first, then the checked Quant consumer, and observe original-job continuation and actual throughput.
+not a production throughput prediction. Storage and the checked consumer are now deployed. A real batch returned
+`BATCH_INCOMPLETE`; automatic recovery retained confirmed progress but repeated the unconfirmed security. The
+provider stage remains unknown. A small follow-up records fixed batch phases and bounded error tags through the
+existing logs, without paths, objects or response bodies. It changes no API result or upload/replay behavior.
 
 The owner raised this first backfill's operational shared-account request line to 90,000 and prioritized finishing
 collection. This replaces the earlier 60,000 line. It is operator-controlled, not an implemented automatic guard.
@@ -26,12 +43,14 @@ migration, keep automatic private publication disabled and use no paid upgrade. 
 
 ## Latest verified release
 
-Private producer `ff25449`, checked through parent `ed50698`, passed branch/main admission and first-attempt
-protected publication. Native source/image observation, public health and same-main resource/VPS/Worker comparison
-with resolved drift passed. Public health exposes a bounded last-control-failure projection; legacy cursors safely
-return null. The most recent new failure survives recovery. Existing recovery behavior and owner APIs remain.
+Private producer `e566485`, checked through parent `72b00df`, passed its exact branch/main CI gate and normal
+first-attempt protected publication after Storage's production release. Public health observed the expected source
+and healthy dependencies. A same-main check-only reconciliation passed, including resolved infrastructure drift.
+The main workflow separately failed while recording a successful Tasks deployment; its GitHub receipt has no
+status and remains unresolved. A successful deployment is not recorded as a wholly successful main workflow.
 
-The original full-pool event run resumed with its confirmed progress intact. The release retains complete-history
+The original full-pool event run resumed with its confirmed progress intact; the later real batch failure above
+still blocks business acceptance. The release retains complete-history
 chart resizing, UTC event defaults, deletion headers/confirmation feedback, cancelled-event continuation, verified
 CI connection readiness and reduced immutable-upload request overhead. The production delete dialog was opened
 cleanly and cancelled; no plan was deleted. Historical failure triggers without original evidence remain unknown.

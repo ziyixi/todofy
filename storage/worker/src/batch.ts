@@ -10,6 +10,37 @@ import { objectKey, providerPath } from './keys.ts';
 import { objectMetadata } from './objects.ts';
 import type { ClientRow } from './store.ts';
 
+type BatchPhase = 'start' | 'append' | 'finish' | 'verify';
+const DIAGNOSTIC_REASONS = new Set([
+  'BATCH_INCOMPLETE', 'REVISION_CONFLICT', 'UPLOAD_LENGTH_MISMATCH', 'NOT_FOUND', 'BAD_REQUEST',
+  'PROVIDER_RESPONSE_INVALID', 'UNAVAILABLE', 'CONNECTION_INVALID', 'NOT_CONFIGURED', 'INTERNAL',
+]);
+const ENTRY_FAILURE_TAGS = new Set([
+  'lookup_failed', 'not_closed', 'content_hash_mismatch', 'too_many_write_operations', 'path', 'not_found',
+  'incorrect_offset', 'closed', 'too_large', 'insufficient_space', 'payload_too_large', 'other',
+  'file', 'folder', 'file_ancestor', 'conflict', 'no_write_permission',
+]);
+
+function logFailure(error: unknown, phase: BatchPhase, finishing: boolean, entry: Record<string, unknown> | null): void {
+  const rpc = error instanceof RpcError ? error : null;
+  const tag = entry?.['.tag'];
+  const failure = entry?.failure;
+  const failureRecord = typeof failure === 'object' && failure !== null && !Array.isArray(failure) ? failure as Record<string, unknown> : null;
+  const failureTag = failureRecord?.['.tag'];
+  const detail = failureTag === 'lookup_failed' ? failureRecord?.lookup_failed : failureTag === 'path' ? failureRecord?.path : undefined;
+  const detailTag = typeof detail === 'object' && detail !== null && !Array.isArray(detail) ? (detail as Record<string, unknown>)['.tag'] : undefined;
+  try {
+    console.error(JSON.stringify({
+      event: 'storage_batch_failed', phase, finish_started: finishing, finish_response_received: phase === 'verify',
+      entry_tag: entry === null ? 'none' : tag === 'success' || tag === 'failure' ? tag : 'other',
+      entry_failure_tag: tag !== 'failure' ? 'none' : typeof failureTag === 'string' && ENTRY_FAILURE_TAGS.has(failureTag) ? failureTag : 'other',
+      entry_detail_tag: tag !== 'failure' || detail === undefined ? 'none' : typeof detailTag === 'string' && ENTRY_FAILURE_TAGS.has(detailTag) ? detailTag : 'other',
+      cause_reason: rpc === null ? 'UNEXPECTED_ERROR' : DIAGNOSTIC_REASONS.has(rpc.reason) ? rpc.reason : 'UNKNOWN_RPC_ERROR',
+      cause_http_status: rpc !== null && Number.isInteger(rpc.httpStatus) && rpc.httpStatus >= 100 && rpc.httpStatus <= 599 ? rpc.httpStatus : 0,
+    }));
+  } catch { /* Diagnostics must not replace the original request result. */ }
+}
+
 function incomplete(): RpcError { return failure(Code.UNAVAILABLE, 'BATCH_INCOMPLETE'); }
 
 function records(value: unknown, length: number): Record<string, unknown>[] {
@@ -53,6 +84,8 @@ export async function batchCreate(request: Request, client: ClientRow, dropbox: 
   let pumping: Promise<void> | undefined;
   let outgoing: ReadableStream<Uint8Array> | undefined;
   let finishing = false;
+  let phase: BatchPhase = 'start';
+  let diagnosticEntry: Record<string, unknown> | null = null;
   try {
     const started = await dropbox.json('files/upload_session/start_batch', { num_sessions: manifest.objects.length });
     const sessionValues = started.session_ids;
@@ -60,6 +93,7 @@ export async function batchCreate(request: Request, client: ClientRow, dropbox: 
       || sessionValues.some((id) => typeof id !== 'string' || id.length === 0 || id.length > 1024)
       || new Set(sessionValues).size !== sessionValues.length) throw incomplete();
     const sessions = sessionValues as string[];
+    phase = 'append';
     const stream = new FixedLengthStream(length);
     outgoing = stream.readable;
     let received = 0;
@@ -78,8 +112,10 @@ export async function batchCreate(request: Request, client: ClientRow, dropbox: 
       content_hash: manifest.contentHash,
     }, stream.readable);
     await pumping;
-    if (records(appended.entries, sessions.length).some((entry) => entry['.tag'] !== 'success')) throw incomplete();
+    const appendFailure = records(appended.entries, sessions.length).find((entry) => entry['.tag'] !== 'success');
+    if (appendFailure !== undefined) { diagnosticEntry = appendFailure; throw incomplete(); }
 
+    phase = 'finish';
     finishing = true;
     const finished = await dropbox.json('files/upload_session/finish_batch_v2', {
       entries: manifest.objects.map((item, index) => ({
@@ -87,8 +123,10 @@ export async function batchCreate(request: Request, client: ClientRow, dropbox: 
         commit: { path: providerPath(client.namespace, item.key), mode: { '.tag': 'add' }, autorename: false, strict_conflict: true, mute: true },
       })),
     });
+    phase = 'verify';
     const objects: ObjectMetadata[] = [];
     for (const [index, entry] of records(finished.entries, sessions.length).entries()) {
+      diagnosticEntry = entry;
       const expected = manifest.objects[index];
       if (expected === undefined) throw incomplete();
       let metadata: ObjectMetadata;
@@ -108,11 +146,14 @@ export async function batchCreate(request: Request, client: ClientRow, dropbox: 
   } catch (error) {
     controller.abort();
     await outgoing?.cancel().catch(() => undefined);
+    let streamFailure: RpcError | undefined;
     if (pumping !== undefined) {
       try { await pumping; } catch (streamError) {
-        if (streamError instanceof RpcError && streamError.reason === 'UPLOAD_LENGTH_MISMATCH') throw streamError;
+        if (streamError instanceof RpcError && streamError.reason === 'UPLOAD_LENGTH_MISMATCH') streamFailure = streamError;
       }
     }
+    logFailure(streamFailure ?? error, phase, finishing, diagnosticEntry);
+    if (streamFailure !== undefined) throw streamFailure;
     if (error instanceof RpcError && error.reason === 'REVISION_CONFLICT') throw error;
     // A finish response may describe partial commits; it never authorizes replay of the batch.
     if (!finishing && error instanceof RpcError && error.httpStatus === 429) throw error;
