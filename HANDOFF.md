@@ -14,7 +14,8 @@ be represented correctly. The already admitted batch release remains independent
 The consumer follow-up also resolves explicit incomplete immutable batches with existing per-object metadata
 checks and create-only writes. A fully confirmed group can continue the same asset without repeating source
 collection; failed confirmation still fences and mutable head CAS is unchanged. Five affected Bazel test targets,
-including native transport and cold recovery, passed. Admission and publication are pending.
+including native transport and cold recovery, passed. The application's actual Bazel Ruff checks also pass after
+correcting test imports that a root-config check classified differently. Admission and publication are pending.
 
 `codex/quant-event-throughput` adds bounded create-only batches on Storage's existing machine content path and
 uses them for Quant's raw/normalized asset stages. The existing Dropbox connection and Durable Object stream a
