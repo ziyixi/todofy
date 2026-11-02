@@ -5,15 +5,19 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-`codex/k3s-session-readiness` retains native command failure evidence and replaces local-listener readiness with
-verified end-to-end identity/authority before writes. Only explicitly classified transient read-only preflight
-failures may wait within the existing startup budget; resource mutations do not replay. The prior generic K3s
-failure lost its exact operation and cause, which remain unknown. Existing application source remains healthy.
+`codex/quant-storage-immutable-write` removes the metadata lookup before creating a new immutable working object.
+The existing conditional-write contract prevents replacement; an explicit conflict still requires matching
+metadata before reuse. Mutable checkpoint comparison and unknown upload outcomes retain their existing rules.
+Related failure/request-count regressions and independent review passed. Exact-source admission and protected
+publication remain pending.
 
-The same work makes cancelled event initialization resumable from its existing checkpoint for quota control,
-without changing other job types or adding a pause framework. Earlier public health observation and empty-error
-confirmation corrections are included but await activation. Related native checks and the actual web bundle
-passed; exact-source admission, read-only verification and protected publication remain pending.
+The preceding session/checkpoint correction passed branch/main admission, real read-only connection verification
+and same-main resource/VPS/Worker comparison with resolved drift. It verifies end-to-end identity/authority before
+writes, retains safe failure diagnostics and makes cancelled event runs resumable from their original checkpoint.
+Only classified transient preflight failures wait within the startup budget; resource mutations do not replay.
+That correction, public health observation and empty-error confirmation feedback await combined activation.
+The prior generic K3s failure lost its exact operation and cause, which remain unknown. Existing application
+source remains healthy. Do not repeat completed checks or replay failed publication merely to obtain success.
 
 Full-pool event initialization continues independently of CI. Daily price scheduling has naturally queued its
 09:00 UTC execution; it waits behind initialization. Remaining work is complete source/coverage acceptance,
