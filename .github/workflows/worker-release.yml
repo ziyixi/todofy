@@ -22,6 +22,12 @@ on:
       expected_main_sha:
         type: string
         default: ''
+      record_only:
+        type: boolean
+        default: false
+      deployment_id:
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -35,7 +41,7 @@ env:
 jobs:
   release:
     name: ${{ inputs.app }} production release
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && !inputs.record_only
     runs-on: ubuntu-24.04
     timeout-minutes: ${{ inputs.app == 'website-relay' && 10 || 15 }}
     environment:
@@ -277,3 +283,65 @@ jobs:
           RELEASE_APP: ${{ inputs.app }}
           RELEASE_SOURCE: ${{ steps.source.outputs.source_sha }}
         run: python3 tools/cloud-release/control.py record --app "$RELEASE_APP" --source-sha "$RELEASE_SOURCE" --source-root .release-source
+
+  record:
+    name: ${{ inputs.app }} receipt only
+    if: github.ref == 'refs/heads/main' && inputs.record_only
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: production
+    permissions:
+      contents: read
+      actions: read
+      deployments: write
+    concurrency:
+      group: ${{ inputs.app }}-production
+      cancel-in-progress: false
+    env:
+      DASHBOARD_CANARY_ENABLED: ${{ vars.DASHBOARD_CANARY_ENABLED }}
+      MAIL_HERO_FORCE_SEND_PAUSED: ${{ vars.MAIL_HERO_FORCE_SEND_PAUSED }}
+      MAIL_HERO_MAINTENANCE_MODE: ${{ vars.MAIL_HERO_MAINTENANCE_MODE }}
+      MAIL_HERO_NATIVE_BACKUP_ENABLED: ${{ vars.MAIL_HERO_NATIVE_BACKUP_ENABLED }}
+      TODOFY_MAINTENANCE_MODE: ${{ vars.TODOFY_MAINTENANCE_MODE }}
+      TODOFY_PROCESSING_PAUSED: ${{ vars.TODOFY_PROCESSING_PAUSED }}
+      MAILSORT_MODE: ${{ inputs.app == 'mailsort' && vars.MAILSORT_MODE || '' }}
+      MODEL_ROUTER_MAINTENANCE_MODE: ${{ vars.MODEL_ROUTER_MAINTENANCE_MODE }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Select the checked receipt source
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_APP: ${{ inputs.app }}
+          RELEASE_SOURCE: ${{ inputs.source_sha }}
+          RELEASE_EXPECTED_MAIN: ${{ inputs.expected_main_sha }}
+          RELEASE_DEPLOYMENT_ID: ${{ inputs.deployment_id }}
+          RELEASE_REPAIR: ${{ inputs.repair }}
+          RELEASE_CHECK_ONLY: ${{ inputs.check_only }}
+        run: |
+          args=()
+          if [ "$RELEASE_REPAIR" = true ]; then args+=(--repair); fi
+          if [ "$RELEASE_CHECK_ONLY" = true ]; then args+=(--check-only); fi
+          python3 tools/cloud-release/control.py prepare --record-only \
+            --app "$RELEASE_APP" --source-sha "$RELEASE_SOURCE" \
+            --deployment-id "$RELEASE_DEPLOYMENT_ID" --expected-main-sha "$RELEASE_EXPECTED_MAIN" "${args[@]}"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.source.outputs.source_sha }}
+          path: .release-source
+          persist-credentials: false
+      - name: Verify the running version and complete only its receipt
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          RELEASE_APP: ${{ inputs.app }}
+          RELEASE_SOURCE: ${{ steps.source.outputs.source_sha }}
+          RELEASE_DEPLOYMENT_ID: ${{ inputs.deployment_id }}
+          RELEASE_EXPECTED_MAIN: ${{ inputs.expected_main_sha }}
+        run: |
+          python3 tools/cloud-release/control.py record --record-only \
+            --app "$RELEASE_APP" --source-sha "$RELEASE_SOURCE" --source-root .release-source \
+            --deployment-id "$RELEASE_DEPLOYMENT_ID" --expected-main-sha "$RELEASE_EXPECTED_MAIN"

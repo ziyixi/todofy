@@ -1,6 +1,7 @@
 """Bounded provider requests; private response bodies never become diagnostics."""
 
 import json
+import re
 import urllib.error
 import urllib.request
 
@@ -9,6 +10,11 @@ MAX_BYTES = 1_000_000
 
 class ReleaseError(ValueError):
     """A fixed diagnostic safe for public Actions logs."""
+
+
+def http_status(error):
+    match = re.fullmatch(r"PROVIDER_HTTP_([1-5][0-9]{2})", str(error))
+    return int(match[1]) if match else None
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -29,7 +35,15 @@ class Api:
         self.opener = opener or urllib.request.build_opener(NoRedirect())
 
     def call(self, path, *, method="GET", body=None, include_metadata=False):
-        if not path.startswith("/") or ".." in path or "\n" in path:
+        comparison = self.provider == "github" and re.fullmatch(
+            r"/repos/[A-Za-z0-9_][A-Za-z0-9_.-]*/[A-Za-z0-9_][A-Za-z0-9_.-]*/compare/[0-9a-f]{40}\.\.\.[0-9a-f]{40}",
+            path,
+        )
+        if (
+            not path.startswith("/")
+            or (".." in path and not comparison)
+            or "\n" in path
+        ):
             raise ReleaseError("PROVIDER_PATH_INVALID")
         data = None if body is None else json.dumps(body).encode()
         request = urllib.request.Request(
@@ -55,6 +69,19 @@ class Api:
                 raise ReleaseError("PROVIDER_RESPONSE_TOO_LARGE")
             result = json.loads(raw)
         except urllib.error.HTTPError as error:
+            print(
+                json.dumps(
+                    {
+                        "event": "release_provider_failure",
+                        "provider": self.provider,
+                        "method": method
+                        if method in {"GET", "POST", "PUT", "PATCH", "DELETE"}
+                        else "other",
+                        "http_status": error.code,
+                    }
+                ),
+                flush=True,
+            )
             raise ReleaseError("PROVIDER_HTTP_" + str(error.code)) from None
         except (urllib.error.URLError, OSError, ValueError) as error:
             if isinstance(error, ReleaseError):

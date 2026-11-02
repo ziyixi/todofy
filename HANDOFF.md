@@ -5,6 +5,13 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
+`codex/deployment-receipt-recovery` addresses the separate GitHub receipt failure after an application was already
+uploaded and verified. Fixed provider/phase diagnostics and exact readback handle a committed 5xx response without
+repeating a POST. An explicit main-only receipt operation revalidates the original gate and live evidence under
+the existing production lock, without building, migrating or publishing the application. Unconfirmed writes and
+changed live versions remain unresolved. Related unit/workflow checks and an independent review passed; admission
+and any applicable receipt completion are pending. The original failed workflow's terminal status is unchanged.
+
 `codex/quant-event-source-shapes` corrects a confirmed corporate-action parser omission: a reorganization's
 participating security may appear in its stock-movement list. Validate that relation without transferring the
 top-level security's ratios to a nested participant. Synthetic source/association regressions passed; admission

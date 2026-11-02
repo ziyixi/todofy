@@ -7,15 +7,14 @@ import unittest
 from pathlib import Path
 
 import yaml
-
 from workflow_sources import ROOT, expand_actions, workflow_data
 
 
 class CompositeActions(unittest.TestCase):
     def assert_release_boundaries(self, release):
-        self.assertEqual(set(release["jobs"]), {"release"})
+        self.assertEqual(set(release["jobs"]), {"release", "record"})
         job = release["jobs"]["release"]
-        self.assertEqual(job["if"], "github.ref == 'refs/heads/main'")
+        self.assertEqual(job["if"], "github.ref == 'refs/heads/main' && !inputs.record_only")
         self.assertEqual(
             job["concurrency"],
             {
@@ -110,7 +109,7 @@ class CompositeActions(unittest.TestCase):
                 action = workflow_data(path)
                 self.assertEqual(action["runs"]["using"], "composite")
                 expressions = " ".join(
-                    re.findall(r"\$\{\{(.*?)\}\}", path.read_text(), re.S)
+                    re.findall(r"\$\{\{(.*?)\}\}", path.read_text(), re.DOTALL)
                 )
                 self.assertNotRegex(
                     expressions, r"\b(secrets|needs|matrix|strategy|vars)[.\[]"
@@ -166,7 +165,7 @@ class CompositeActions(unittest.TestCase):
         self.assertNotIn("MAILSORT_MODE", call.get("env", {}))
         action = workflow_data(ROOT / ".github/actions/release-mailsort/action.yml")
         # vars is a workflow context; a composite inherits the job's resolved environment.
-        expressions = " ".join(re.findall(r"\$\{\{(.*?)\}\}", str(action), re.S))
+        expressions = " ".join(re.findall(r"\$\{\{(.*?)\}\}", str(action), re.DOTALL))
         self.assertNotRegex(expressions, r"\bvars[.\[]")
         deployments = [
             step for step in action["runs"]["steps"]

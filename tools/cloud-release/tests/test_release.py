@@ -3,6 +3,8 @@ import json
 import os
 import sys
 import unittest
+import urllib.error
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -34,6 +36,45 @@ class FakeApi:
 
 
 class ApiMetadataTests(unittest.TestCase):
+    def test_http_failure_projects_provider_method_and_status_without_private_values(
+        self,
+    ):
+        private = "synthetic-private-token /private/path 192.0.2.19"
+
+        class Opener:
+            def open(self, request, timeout):
+                error = urllib.error.HTTPError(
+                    "https://private.invalid/" + private,
+                    500,
+                    private,
+                    {"private": private},
+                    io.BytesIO(private.encode()),
+                )
+                error.close()
+                raise error
+
+        api, output = Api("github", private, Opener()), io.StringIO()
+        with (
+            redirect_stdout(output),
+            self.assertRaisesRegex(ReleaseError, "^PROVIDER_HTTP_500$"),
+        ):
+            api.call(
+                "/repos/example/cloud/deployments",
+                method="POST",
+                body={"private": private},
+            )
+        self.assertEqual(
+            json.loads(output.getvalue()),
+            {
+                "event": "release_provider_failure",
+                "provider": "github",
+                "method": "POST",
+                "http_status": 500,
+            },
+        )
+        self.assertNotIn(private, output.getvalue())
+        self.assertNotIn("https://", output.getvalue())
+
     def api(self, response):
         class Opener:
             def open(self, request, timeout):
@@ -55,6 +96,103 @@ class ApiMetadataTests(unittest.TestCase):
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_record_only_requires_a_main_ancestor_and_its_green_gate(self):
+        saved = {
+            "id": 1,
+            "sha": SHA,
+            "task": "deploy:tasks",
+            "environment": "production",
+            "payload": {"format": "personal-cloud-release-v1"},
+        }
+        for conclusion in ("success", "failure", "cancelled", "skipped"):
+            api = FakeApi(
+                [
+                    {"object": {"sha": "b" * 40}},
+                    saved,
+                    {"status": "ahead", "merge_base_commit": {"sha": SHA}},
+                    {
+                        "workflow_runs": [
+                            {
+                                "id": 7,
+                                "head_sha": SHA,
+                                "head_branch": "main",
+                                "event": "push",
+                                "status": "completed",
+                                "conclusion": "failure",
+                            }
+                        ]
+                    },
+                    {
+                        "total_count": 1,
+                        "jobs": [
+                            {
+                                "id": 8,
+                                "name": "CI gate",
+                                "head_sha": SHA,
+                                "status": "completed",
+                                "conclusion": conclusion,
+                            }
+                        ],
+                    },
+                ]
+            )
+            with (
+                self.subTest(conclusion=conclusion),
+                patch.dict(
+                    os.environ,
+                    {"GITHUB_REPOSITORY": "example/cloud", "GITHUB_SHA": "b" * 40},
+                ),
+            ):
+                if conclusion == "success":
+                    self.assertEqual(
+                        prepare(
+                            "tasks",
+                            "",
+                            False,
+                            api,
+                            "b" * 40,
+                            record_only=True,
+                            deployment_id="1",
+                        ),
+                        SHA,
+                    )
+                else:
+                    with self.assertRaisesRegex(
+                        ReleaseError, "RECEIPT_CI_GATE_NOT_VERIFIED"
+                    ):
+                        prepare(
+                            "tasks",
+                            "",
+                            False,
+                            api,
+                            "b" * 40,
+                            record_only=True,
+                            deployment_id="1",
+                        )
+            self.assertTrue(
+                all(
+                    not options or options.get("method", "GET") == "GET"
+                    for _, options in api.requests
+                )
+            )
+        api = FakeApi(
+            [
+                {"object": {"sha": "b" * 40}},
+                saved,
+                {"status": "diverged", "merge_base_commit": {"sha": "c" * 40}},
+            ]
+        )
+        with (
+            patch.dict(
+                os.environ,
+                {"GITHUB_REPOSITORY": "example/cloud", "GITHUB_SHA": "b" * 40},
+            ),
+            self.assertRaisesRegex(ReleaseError, "RECEIPT_SOURCE_NOT_MAIN"),
+        ):
+            prepare(
+                "tasks", "", False, api, "b" * 40, record_only=True, deployment_id="1"
+            )
+
     def test_only_latest_single_version_at_full_traffic_is_accepted(self):
         self.assertEqual(
             deployment_version(

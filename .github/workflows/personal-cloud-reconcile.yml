@@ -11,10 +11,19 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: Check drift, repair supported drift, or explicitly resume one held VPS repair
+        description: Check drift, repair supported drift, resume one held VPS repair, or complete one Worker receipt
         type: choice
-        options: [check, repair, resume]
+        options: [check, repair, resume, record]
         default: check
+      record_app:
+        description: Worker whose existing receipt needs verification, only for record
+        type: choice
+        options: [todofy, mail-hero, dashboard, links, watch, fleet, mailsort, recall, storage, tasks, personal-mcp, model-router, newsletter-console, website-relay]
+        default: tasks
+      record_deployment_id:
+        description: Existing GitHub deployment ID, required only for record
+        type: string
+        default: ''
       resume_release:
         description: Existing releases/UUID, required only for resume
         type: string
@@ -68,7 +77,7 @@ jobs:
           elif [ "$AUTO_REPAIR" = true ]; then
             operation=repair
           fi
-          case "$operation" in check|repair|resume) ;; *) exit 1 ;; esac
+          case "$operation" in check|repair|resume|record) ;; *) exit 1 ;; esac
           echo 'enabled=true' >> "$GITHUB_OUTPUT"
           echo "source_sha=$main_sha" >> "$GITHUB_OUTPUT"
           echo "operation=$operation" >> "$GITHUB_OUTPUT"
@@ -76,7 +85,7 @@ jobs:
   infra:
     name: Infrastructure comparison and routine repair
     needs: context
-    if: needs.context.outputs.enabled == 'true' && needs.context.outputs.operation != 'resume'
+    if: needs.context.outputs.enabled == 'true' && needs.context.outputs.operation != 'resume' && needs.context.outputs.operation != 'record'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: production
@@ -217,7 +226,7 @@ jobs:
   workers:
     name: Compare or repair ${{ matrix.app }}
     needs: context
-    if: needs.context.outputs.enabled == 'true' && needs.context.outputs.operation != 'resume'
+    if: needs.context.outputs.enabled == 'true' && needs.context.outputs.operation != 'resume' && needs.context.outputs.operation != 'record'
     strategy:
       fail-fast: false
       max-parallel: 3
@@ -235,10 +244,26 @@ jobs:
       expected_main_sha: ${{ needs.context.outputs.source_sha }}
     secrets: inherit
 
+  record-worker:
+    name: Verify and complete one Worker receipt
+    needs: context
+    if: needs.context.outputs.enabled == 'true' && needs.context.outputs.operation == 'record' && github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+      actions: read
+      deployments: write
+    uses: ./.github/workflows/worker-release.yml
+    with:
+      app: ${{ inputs.record_app }}
+      record_only: true
+      deployment_id: ${{ inputs.record_deployment_id }}
+      expected_main_sha: ${{ needs.context.outputs.source_sha }}
+    secrets: inherit
+
   vps:
     name: Compare, repair or explicitly resume the VPS runtime
     needs: context
-    if: needs.context.outputs.enabled == 'true' && vars.VPS_DEPLOY_ENABLED == 'true'
+    if: needs.context.outputs.enabled == 'true' && vars.VPS_DEPLOY_ENABLED == 'true' && needs.context.outputs.operation != 'record'
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     environment: production
@@ -286,7 +311,7 @@ jobs:
   inventory:
     name: Verify complete account resource registration
     needs: context
-    if: needs.context.outputs.enabled == 'true'
+    if: needs.context.outputs.enabled == 'true' && needs.context.outputs.operation != 'record'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     environment: production
@@ -306,7 +331,7 @@ jobs:
     needs: [context, infra, infra-apply]
     if: >-
       ${{ always() && needs.context.outputs.enabled == 'true'
-      && needs.context.outputs.operation != 'resume' }}
+      && needs.context.outputs.operation != 'resume' && needs.context.outputs.operation != 'record' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
