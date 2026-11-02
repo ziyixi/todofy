@@ -10,10 +10,11 @@ cancelled development-library migration; use fresh collection. Preserve existing
 keep automatic private publication disabled. Business collection runs independently of CI.
 
 The fresh workbench and bounded cold-recovery correction are published. The first new price snapshot is R2 ready and fixed/working SDK samples passed. Remaining work is the whole-version
-quality audit, event/source/chart acceptance, bounded initialization and saved plan operation. A later connection
+event/source/chart acceptance, bounded initialization and saved plan operation. Whole-version quality and
+complete captured-head cache recovery have now passed. A later connection
 failure recovered automatically with confirmed progress intact; its physical cause remains unresolved. Current
 work retains connection-stage evidence, completes publication control after a failed Kubernetes wait, and corrects
-metadata/report-contract gaps. Event checkpoint work is reduced within the existing asset boundary. Detailed data and incident evidence stays in the private handoff.
+metadata/report-contract gaps. A reproduced provider share-class calendar mismatch is the current source fix. Event checkpoint work is reduced within the existing asset boundary. Detailed data and incident evidence stays in the private handoff.
 
 Shared Storage is published, independently connected and registered. Actual object/authentication, gzip,
 32 MiB and pagination/replay checks passed; see the [November 1 archive](docs/history/handoff-2026-11-01.md#shared-storage).
@@ -21,7 +22,7 @@ Existing application connections and files were preserved. No paid upgrade is au
 
 ## Latest verified release
 
-Private source `ddfc230`, checked through parent `aa4c78a`, passed exact-source branch/main CI, independent review
+Private source `b171cdd`, checked through parent `419222b`, passed exact-source branch/main CI, independent review
 and ordinary protected publication. Running source/digest, native rollout, public health, real checkpoint
 continuation and working SDK reads were verified. Same-main resource/VPS/Worker comparisons and resolved drift
 gate passed. Fresh full-pool collection, fixed loading and event acceptance remain current work above.
