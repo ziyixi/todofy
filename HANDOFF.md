@@ -5,44 +5,31 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-`codex/quant-runtime-diagnostics` continues the owner-authorized private workbench. The owner explicitly cancelled the
-development-library migration: the data is inexpensive to collect again. Start the new workbench with an empty
-working cache and collect through the application. Remove the transfer from the release prerequisite; do not add
-recovery machinery to the cancelled transfer or import old execution history. The connection-retry-only proposal
-was abandoned without an implementation.
+`codex/quant-runtime-diagnostics` continues the authorized private workbench and efficiency goal. The owner
+cancelled development-library migration; use fresh collection. Preserve existing Dropbox/Recall/R2 files and
+keep automatic private publication disabled. Business collection runs independently of CI.
 
-The fresh workbench and normal process continuation are published after exact-source branch/main checks and
-independent review. The same business run retained progress across native rollout. The current follow-up addresses
-the owner's explicit efficiency goal. Remote checkpoints and locked I/O are reduced, bounded reads are batched,
-fetched identities are reused and independent cache downloads run concurrently. These changes passed exact-source
-publication and real active-collection latency comparison. The collector subsequently became unavailable. Checked
-read-only diagnostics identified a startup crash loop; a real-data reproduction traced it to the recovery
-transaction retaining old cache data while rebuilding the whole library. The current correction discards the
-rebuildable local database on cold recovery and commits existing partitions separately. It must preserve confirmed
-authority and verify recovery at the intended scale. The first trigger that entered recovery remains unproven;
-retain that uncertainty and record safe failure evidence. New-data/source/fixed-load acceptance remains pending.
-CI deploys checked source and observes readiness; business collection runs independently.
+The fresh workbench and bounded cold-recovery correction are published. Remaining work is the first new-data
+snapshot, fixed-version/R2/SDK acceptance, real event collection and saved plan operation. A later connection
+failure recovered automatically with confirmed progress intact; its physical cause remains unresolved. Current
+work retains connection-stage evidence and reduces event checkpoint/network work within the existing asset
+boundary. Detailed data and incident evidence stays in the private handoff.
 
-Shared Storage is published, independently connected and registered. Its real object/authentication, gzip,
-32 MiB and pagination/replay checks passed; the [November 1 archive](docs/history/handoff-2026-11-01.md#shared-storage)
-records that separate release. Existing Dropbox files and application connections are preserved.
-
-Next: finish fresh collection and verify its Dropbox reads,
-API/Colab and runtime plans, then require same-main reconciliation. Detailed
-application and data evidence stays in the private handoff; automatic private publication remains disabled.
+Shared Storage is published, independently connected and registered. Actual object/authentication, gzip,
+32 MiB and pagination/replay checks passed; see the [November 1 archive](docs/history/handoff-2026-11-01.md#shared-storage).
+Existing application connections and files were preserved. No paid upgrade is authorized.
 
 ## Latest verified release
 
-Private workbench source `d7160f7`, checked through parent `b7c3b2`, passed exact-source branch/main CI and ordinary
-protected publication. Running source/digest, health, actual source-failure continuation, owner UI and responsive
-working read API are verified. Same-main resource/VPS/Worker comparison and resolved drift gate passed. Fresh bulk collection,
-fixed data loading and complete recovery acceptance remain separate work above. Normal Kubernetes
-management uses Actions; runtime identities remain scoped. Detailed application/data evidence stays private.
+Private source `ddfc230`, checked through parent `aa4c78a`, passed exact-source branch/main CI, independent review
+and ordinary protected publication. Running source/digest, native rollout, public health, real checkpoint
+continuation and working SDK reads were verified. Same-main resource/VPS/Worker comparisons and resolved drift
+gate passed. Fresh full-pool collection, fixed loading and event acceptance remain current work above.
 
-The [November 1 archive](docs/history/handoff-2026-11-01.md) records the shared integration and compatibility
-regressions. Earlier private-submodule support, public publication and configuration-publishing evidence remain in
-[October 31](docs/history/handoff-2026-10-31.md); build migration and Newsletter correction are in
-[October 30](docs/history/handoff-2026-10-30.md). Per-application source identities remain independent.
+The [November 2 archive](docs/history/handoff-2026-11-02.md) records the bounded cache-recovery release. Earlier
+private integration and shared Storage evidence remain in [November 1](docs/history/handoff-2026-11-01.md), with
+build and configuration background in [October 31](docs/history/handoff-2026-10-31.md) and
+[October 30](docs/history/handoff-2026-10-30.md). Per-application release identities remain independent.
 Documentation-only closeout still follows normal main CI and same-main reconciliation before delivery.
 
 ## Separate acceptance and follow-ups
