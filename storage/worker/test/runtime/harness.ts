@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+const ROOT = process.env.TEST_SRCDIR ? process.cwd() : resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 export const ORIGIN = 'http://127.0.0.1';
 export const HASH = (bytes: Uint8Array): string => {
   const hash = createHash('sha256');
@@ -17,12 +17,19 @@ export const HASH = (bytes: Uint8Array): string => {
 interface File { readonly bytes: Uint8Array; readonly revision: string }
 interface MachineInit { readonly method?: string; readonly headers?: Readonly<Record<string, string>>; readonly body?: string | Uint8Array }
 interface ProviderPage { readonly entries: readonly Record<string, unknown>[]; readonly has_more: boolean; readonly cursor: string }
+interface Session { readonly bytes: Uint8Array; readonly closed: boolean }
+interface AppendEntry { readonly cursor: { readonly session_id: string; readonly offset: number }; readonly length: number; readonly close: boolean }
+interface FinishEntry { readonly cursor: { readonly session_id: string; readonly offset: number }; readonly commit: { readonly path: string; readonly mode: { readonly '.tag': string }; readonly autorename: boolean; readonly strict_conflict: boolean; readonly mute: boolean } }
 
 export class FakeDropbox {
   readonly files = new Map<string, File>();
+  readonly folders = new Set<string>();
   readonly calls: { readonly path: string; readonly argument: unknown }[] = [];
   refreshes = 0;
   listPages: readonly ProviderPage[] | null = null;
+  batchFault: 'start_rate' | 'append_rate' | 'append_partial' | 'finish_rate' | 'finish_partial' | 'finish_unknown' | 'finish_metadata' | null = null;
+  private readonly sessions = new Map<string, Session>();
+  private sessionSequence = 0;
   private revision = 0;
 
   metadata(path: string, file: File): Record<string, unknown> {
@@ -42,6 +49,48 @@ export class FakeDropbox {
     }
     if (request.headers.get('authorization') !== 'Bearer synthetic-private-access') return new Response(null, { status: 401 });
     if (url.pathname === '/2/auth/token/revoke') return new Response('null');
+    if (url.pathname === '/2/files/upload_session/start_batch') {
+      const argument = await request.json<{ num_sessions: number }>();
+      this.calls.push({ path: url.pathname, argument });
+      if (this.batchFault === 'start_rate') return Response.json({}, { status: 429, headers: { 'retry-after': '3' } });
+      const session_ids = Array.from({ length: argument.num_sessions }, () => 'synthetic-session-' + String(++this.sessionSequence));
+      for (const id of session_ids) this.sessions.set(id, { bytes: new Uint8Array(), closed: false });
+      return Response.json({ session_ids });
+    }
+    if (url.pathname === '/2/files/upload_session/append_batch') {
+      const argument = JSON.parse(request.headers.get('dropbox-api-arg') ?? '{}') as { entries: AppendEntry[]; content_hash: string };
+      this.calls.push({ path: url.pathname, argument });
+      if (this.batchFault === 'append_rate') return Response.json({}, { status: 429, headers: { 'retry-after': '3' } });
+      const bytes = new Uint8Array(await request.arrayBuffer());
+      if (HASH(bytes) !== argument.content_hash || argument.entries.reduce((total, entry) => total + entry.length, 0) !== bytes.byteLength) return Response.json({}, { status: 400 });
+      let offset = 0;
+      const entries = argument.entries.map((entry, index) => {
+        const content = bytes.slice(offset, offset + entry.length);
+        offset += entry.length;
+        if (entry.cursor.offset !== 0 || !entry.close || !this.sessions.has(entry.cursor.session_id)) throw new Error('invalid synthetic session append');
+        if (this.batchFault === 'append_partial' && index === 1) return { '.tag': 'failure', failure: { '.tag': 'incorrect_offset', correct_offset: 1 } };
+        this.sessions.set(entry.cursor.session_id, { bytes: content, closed: true });
+        return { '.tag': 'success' };
+      });
+      return Response.json({ entries });
+    }
+    if (url.pathname === '/2/files/upload_session/finish_batch_v2') {
+      const argument = await request.json<{ entries: FinishEntry[] }>();
+      this.calls.push({ path: url.pathname, argument });
+      if (this.batchFault === 'finish_rate') return Response.json({}, { status: 429, headers: { 'retry-after': '3' } });
+      const entries = argument.entries.map((entry, index) => {
+        if (entry.commit.mode['.tag'] !== 'add' || entry.commit.autorename || !entry.commit.strict_conflict || !entry.commit.mute) throw new Error('batch lost create-only commit');
+        if (this.batchFault === 'finish_partial' && index === 1) return { '.tag': 'failure', failure: { '.tag': 'path', path: { '.tag': 'insufficient_space' } } };
+        if (this.files.has(entry.commit.path) || this.folders.has(entry.commit.path)) return { '.tag': 'failure', failure: { '.tag': 'path', path: { '.tag': 'conflict', conflict: { '.tag': this.files.has(entry.commit.path) ? 'file' : 'folder' } } } };
+        const session = this.sessions.get(entry.cursor.session_id);
+        if (!session?.closed || session.bytes.byteLength !== entry.cursor.offset) throw new Error('invalid synthetic finish cursor');
+        const file = { bytes: session.bytes, revision: 'rev' + String(++this.revision) };
+        this.files.set(entry.commit.path, file);
+        return { ...this.metadata(entry.commit.path, file), '.tag': 'success', ...(this.batchFault === 'finish_metadata' && index === 1 ? { content_hash: 'f'.repeat(64) } : {}) };
+      });
+      if (this.batchFault === 'finish_unknown') throw new Error('synthetic unknown commit outcome');
+      return Response.json({ entries });
+    }
     if (url.pathname === '/2/files/upload') {
       const argument = JSON.parse(request.headers.get('dropbox-api-arg') ?? '{}') as { path: string; mode: { '.tag': string; update?: string }; strict_conflict: boolean; autorename: boolean; content_hash?: string };
       this.calls.push({ path: url.pathname, argument });
@@ -86,6 +135,7 @@ export class FakeDropbox {
       return page === undefined ? Response.json({ error_summary: 'path/not_found/' }, { status: 409 }) : Response.json(page);
     }
     if (url.pathname === '/2/files/get_metadata') {
+      if (this.folders.has(argument.path ?? '')) return Response.json({ '.tag': 'folder', path_display: argument.path, name: 'synthetic-folder' });
       const file = this.files.get(argument.path ?? '');
       return file === undefined ? Response.json({ error_summary: 'path/not_found/' }, { status: 409 }) : Response.json({ '.tag': 'file', ...this.metadata(argument.path ?? '', file) });
     }
@@ -98,8 +148,9 @@ export class FakeDropbox {
   }
 }
 
-export async function harness(): Promise<{
+export async function harness(inspect = false): Promise<{
   readonly provider: FakeDropbox;
+  readonly runtime: Miniflare;
   owner(path: string, method?: string, body?: unknown): Promise<Response>;
   machine(path: string, key: string | null, init?: MachineInit): Promise<Response>;
   connect(): Promise<void>;
@@ -110,13 +161,14 @@ export async function harness(): Promise<{
   const temporary = await mkdtemp(join(tmpdir(), 'storage-runtime-'));
   const provider = new FakeDropbox();
   const compiled = await build({
-    ...(process.env.TEST_SRCDIR ? { nodePaths: [`${process.cwd()}/node_modules`] } : {}),
+    ...(process.env.TEST_SRCDIR ? { nodePaths: [`${process.cwd()}/node_modules`], preserveSymlinks: true } : {}),
     entryPoints: [join(ROOT, 'src/index.ts')], bundle: true, format: 'esm', platform: 'neutral', target: 'es2024',
     mainFields: ['module', 'main'], conditions: ['workerd', 'worker', 'import'], external: ['cloudflare:workers'], write: false, logLevel: 'silent',
   });
   const script = compiled.outputFiles[0]?.text;
   if (script === undefined) throw new Error('no synthetic Worker bundle');
   const start = (): Miniflare => new Miniflare(convertV4MiniflareOptions({
+    ...(inspect ? { name: 'storage', inspectorPort: 0 } : {}),
     modules: true, script, compatibilityDate: '2026-09-08', resourcePersistencePath: temporary, host: '127.0.0.1', port: 0,
     durableObjects: { STORAGE: { className: 'StorageState', useSQLite: true } },
     bindings: { PUBLIC_HOST: 'storage.example.test', ACCESS_ISSUER: 'https://synthetic.cloudflareaccess.com', ACCESS_AUDIENCE: 'a'.repeat(64), ACCESS_OWNER: 'owner@example.test', DEV_AUTH_BYPASS: 'true', BUILD_SHA: 'test' },
@@ -128,6 +180,7 @@ export async function harness(): Promise<{
   }) as unknown as Promise<Response>;
   return {
     provider, owner,
+    get runtime() { return mf; },
     async machine(path, key, init = {}) {
       const headers = new Headers(init.headers);
       if (key !== null) headers.set('authorization', 'Bearer ' + key);

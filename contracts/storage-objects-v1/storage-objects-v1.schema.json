@@ -1,0 +1,164 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.local/storage-objects-v1/storage-objects-v1.schema.json",
+  "title": "Namespace-scoped storage object transport",
+  "description": "Authenticated object metadata and bounded create-only binary batches. Cross-object length, header and confirmation semantics are transport rules in README.md.",
+  "$defs": {
+    "Key": {
+      "description": "A relative ASCII object key; segment and namespace checks are transport rules.",
+      "type": "string",
+      "maxLength": 1024,
+      "pattern": "^(?:[A-Za-z0-9_.-][A-Za-z0-9_./-]*)$(?!\\n)"
+    },
+    "Prefix": {
+      "description": "A relative ASCII object prefix, including the empty prefix.",
+      "type": "string",
+      "maxLength": 1024,
+      "pattern": "^(?:[A-Za-z0-9_./-]*)$(?!\\n)"
+    },
+    "Revision": {
+      "description": "An opaque Dropbox object revision.",
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^(?:[A-Za-z0-9]{1,128})$(?!\\n)"
+    },
+    "ContentHash": {
+      "description": "Dropbox's 4 MiB block content hash.",
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^(?:[0-9a-f]{64})$(?!\\n)"
+    },
+    "ObjectMetadata": {
+      "type": "object",
+      "required": [
+        "key",
+        "revision",
+        "size_bytes",
+        "content_hash"
+      ],
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/Key"
+        },
+        "revision": {
+          "$ref": "#/$defs/Revision"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 33554432
+        },
+        "content_hash": {
+          "$ref": "#/$defs/ContentHash"
+        }
+      },
+      "additionalProperties": false
+    },
+    "StatObjectRequest": {
+      "type": "object",
+      "required": [
+        "key"
+      ],
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/Key"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ListObjectsRequest": {
+      "type": "object",
+      "properties": {
+        "prefix": {
+          "$ref": "#/$defs/Prefix"
+        },
+        "cursor": {
+          "type": "string"
+        },
+        "page_size": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "ListObjectsResponse": {
+      "type": "object",
+      "required": [
+        "objects",
+        "next_cursor"
+      ],
+      "properties": {
+        "objects": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/ObjectMetadata"
+          }
+        },
+        "next_cursor": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "BatchCreateObject": {
+      "type": "object",
+      "required": [
+        "key",
+        "size_bytes",
+        "content_hash"
+      ],
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/Key"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 33554432
+        },
+        "content_hash": {
+          "$ref": "#/$defs/ContentHash"
+        }
+      },
+      "additionalProperties": false
+    },
+    "BatchCreateManifest": {
+      "type": "object",
+      "required": [
+        "objects",
+        "content_hash"
+      ],
+      "properties": {
+        "objects": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/BatchCreateObject"
+          }
+        },
+        "content_hash": {
+          "$ref": "#/$defs/ContentHash"
+        }
+      },
+      "additionalProperties": false
+    },
+    "BatchCreateResponse": {
+      "type": "object",
+      "required": [
+        "objects"
+      ],
+      "properties": {
+        "objects": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/ObjectMetadata"
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

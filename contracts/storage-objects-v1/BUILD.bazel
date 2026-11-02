@@ -1,0 +1,23 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//tools/bazel/audit:sources.bzl", "source_audit_files")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["storage-objects-v1.schema.json"] + glob(["fixtures/**"]))
+
+filegroup(
+    name = "fixtures",
+    srcs = glob(["fixtures/**"]),
+)
+
+js_library(
+    name = "js_fixtures",
+    srcs = glob(["fixtures/**"]),
+)
+
+test_suite(
+    name = "check",
+    tests = ["//proto/test/python:test_storage_objects"],
+)
+
+source_audit_files(patterns = ["*", "fixtures/**"])

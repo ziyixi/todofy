@@ -30,4 +30,6 @@ enum ErrorReason {
   ERROR_REASON_CURSOR_INVALID = 9;
   // Dropbox returned an invalid metadata response.
   ERROR_REASON_PROVIDER_RESPONSE_INVALID = 10;
+  // A batch did not confirm every object; the caller must retain its previous head.
+  ERROR_REASON_BATCH_INCOMPLETE = 11;
 }

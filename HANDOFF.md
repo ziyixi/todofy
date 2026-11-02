@@ -5,11 +5,17 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-`codex/quant-event-throughput` removes immutable uploads of successful intermediate news/calendar responses whose
-results were superseded by finer date windows. Final response leaves and all normalized records/checks remain;
-a failed subdivision retains its parent response for diagnosis. Provider request counts, source ranges, pacing,
-formats and the final checkpoint boundary remain unchanged. Related event/asset regressions passed; exact-source
-admission and publication remain pending.
+`codex/quant-event-throughput` adds bounded create-only batches on Storage's existing machine content path and
+uses them for Quant's raw/normalized asset stages. The existing Dropbox connection and Durable Object stream a
+batch through native upload sessions and synchronous completion. No new service, permission, stored format or
+migration. Every item must match before one final control checkpoint can advance; mutable head CAS remains.
+Successful finer news/calendar windows also replace unused intermediate response uploads; failures retain evidence.
+
+Storage native/auth/stream/conflict checks, collector atomicity/recovery tests, dual-language golden/schema/lint/
+compatibility checks and independent reviews passed. The exact Linux image layer and wheel contain the new shared
+protocol module. A same-input synthetic asset drops 25 Storage requests to 4 with identical data/coverage; this is
+not a production throughput prediction. Exact-source admission and ordered publication remain pending: deploy
+Storage first, then the checked Quant consumer, and observe original-job continuation and actual throughput.
 
 The owner raised this first backfill's operational shared-account request line to 90,000 and prioritized finishing
 collection. This replaces the earlier 60,000 line. It is operator-controlled, not an implemented automatic guard.

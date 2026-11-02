@@ -105,3 +105,54 @@ message ListObjectsResponse {
   // Empty when the listing is complete.
   string next_cursor = 2 [(google.api.field_behavior) = REQUIRED];
 }
+
+// One create-only item in a binary batch; empty objects use the existing PUT route.
+message BatchCreateObject {
+  // Relative key in the authenticated namespace.
+  string key = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Key"
+  ];
+  // Exact length of this item's consecutive body segment, at most 32 MiB.
+  int32 size_bytes = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).minimum = 1,
+    (common.wire.v1.field).maximum = 33554432
+  ];
+  // Dropbox content hash of this object's segment.
+  string content_hash = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "ContentHash"
+  ];
+}
+
+// POST /api/storage/v1/content uses this wire JSON in X-Storage-Batch.
+// Authentication precedes manifest/body parsing. The ASCII header is at most 8192
+// bytes; the body concatenates object bytes in this exact order. Transport rules
+// require 1..32 distinct case-insensitive keys and a total length at most 32 MiB.
+message BatchCreateManifest {
+  // Ordered items; an empty list is rejected by the binary transport.
+  repeated BatchCreateObject objects = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).max_items = 32
+  ];
+  // Dropbox content hash of the entire concatenated binary body, across item boundaries.
+  string content_hash = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "ContentHash"
+  ];
+}
+
+// Complete create-only confirmation, in manifest order. No partial success is sent.
+// A pre-existing item is confirmed only after its length and hash match. Missing,
+// failed or unknown items fail the whole HTTP response; no caller checkpoint may
+// advance on such a result. The mutable head continues using the existing PUT CAS.
+// (-- api-linter: core::0233::response-resource-field=disabled
+//     aip.dev/not-precedent: this binary machine transport confirms ordered object metadata. --)
+message BatchCreateResponse {
+  // One validated metadata record for every manifest item.
+  repeated ObjectMetadata objects = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).max_items = 32
+  ];
+}

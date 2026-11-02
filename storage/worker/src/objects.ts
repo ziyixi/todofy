@@ -9,7 +9,7 @@ import { badRequest, failure, readJson } from './errors.ts';
 import { decodeCursor, encodeCursor, LIST_CURSOR_TTL_MS, matchedRevision, objectKey, providerPath, providerRoot, writeMode } from './keys.ts';
 import type { ClientRow, ListPage, ListPageData, Store } from './store.ts';
 
-function metadata(value: Record<string, unknown>, clientNamespace: string, expectedKey?: string): ObjectMetadata {
+export function objectMetadata(value: Record<string, unknown>, clientNamespace: string, expectedKey?: string): ObjectMetadata {
   const path = value.path_display;
   const root = providerRoot(clientNamespace) + '/';
   if ((value['.tag'] !== undefined && value['.tag'] !== 'file') || typeof path !== 'string' || !path.toLowerCase().startsWith(root)
@@ -29,7 +29,7 @@ function json<D extends DescMessage>(schema: D, value: MessageShape<D>): Respons
 
 export async function stat(request: Request, client: ClientRow, dropbox: Dropbox): Promise<Response> {
   const input = fromWire(StatObjectRequestSchema, await readJson(request) as never, { strict: true }).message;
-  const result = metadata(await dropbox.json('files/get_metadata', { path: providerPath(client.namespace, input.key), include_deleted: false }), client.namespace, input.key);
+  const result = objectMetadata(await dropbox.json('files/get_metadata', { path: providerPath(client.namespace, input.key), include_deleted: false }), client.namespace, input.key);
   return json(ObjectMetadataSchema, result);
 }
 
@@ -42,7 +42,7 @@ function providerPage(answer: Record<string, unknown>, clientNamespace: string, 
     if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) throw failure(Code.UNAVAILABLE, 'PROVIDER_RESPONSE_INVALID');
     const item = entry as Record<string, unknown>;
     if (item['.tag'] === 'folder') continue;
-    const object = metadata(item, clientNamespace);
+    const object = objectMetadata(item, clientNamespace);
     if (object.key.startsWith(prefix)) objects.push(object);
   }
   return { namespace: clientNamespace, prefix, expires, generation, provider: answer.has_more ? answer.cursor : '', objects };
@@ -123,7 +123,7 @@ export async function readContent(request: Request, client: ClientRow, dropbox: 
     });
   }
   try {
-    const object = metadata(result.metadata, client.namespace, key);
+    const object = objectMetadata(result.metadata, client.namespace, key);
     if (expected !== null && expected !== object.revision) throw failure(Code.ABORTED, 'REVISION_CONFLICT');
     const headers = new Headers({
       'content-type': 'application/octet-stream', 'cache-control': 'no-store', 'accept-ranges': 'bytes',
@@ -180,7 +180,7 @@ export async function writeContent(request: Request, client: ClientRow, dropbox:
       ...(expectedHash === null ? {} : { content_hash: expectedHash }),
     }, stream.readable);
     await pumping;
-    const object = metadata(result, client.namespace, key);
+    const object = objectMetadata(result, client.namespace, key);
     if (object.sizeBytes !== length || (expectedHash !== null && object.contentHash !== expectedHash)) throw failure(Code.DATA_LOSS, 'PROVIDER_RESPONSE_INVALID');
     const response = json(ObjectMetadataSchema, object);
     response.headers.set('etag', '"' + object.revision + '"');

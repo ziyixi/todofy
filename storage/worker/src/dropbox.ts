@@ -163,9 +163,19 @@ export class Dropbox {
     this.access = null;
   }
 
-  async json(method: 'files/get_metadata' | 'files/list_folder' | 'files/list_folder/continue', args: unknown): Promise<Record<string, unknown>> {
+  async json(method: 'files/get_metadata' | 'files/list_folder' | 'files/list_folder/continue' | 'files/upload_session/start_batch' | 'files/upload_session/finish_batch_v2', args: unknown): Promise<Record<string, unknown>> {
     const response = await this.fetch(this.origins.api + '/2/' + method, {
       method: 'POST', headers: { authorization: 'Bearer ' + await this.token(), 'content-type': 'application/json' }, body: JSON.stringify(args),
+    });
+    if (!response.ok) return providerFailure(response);
+    return record(await readJson(response, 512 * 1024));
+  }
+
+  async appendBatch(args: unknown, body: ReadableStream): Promise<Record<string, unknown>> {
+    const response = await this.fetch(this.origins.content + '/2/files/upload_session/append_batch', {
+      method: 'POST', headers: {
+        authorization: 'Bearer ' + await this.token(), 'content-type': 'application/octet-stream', 'dropbox-api-arg': apiArg(args),
+      }, body,
     });
     if (!response.ok) return providerFailure(response);
     return record(await readJson(response, 512 * 1024));
