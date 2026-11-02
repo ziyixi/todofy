@@ -5,11 +5,17 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
+`codex/quant-log-timeline` corrects the read-only observer: a rejected log timestamp must not discard independently
+valid request diagnostics. It also normalizes explicit RFC3339 offsets/whitespace and retains bounded character
+classes for an unrecognized prefix, without raw text. Actual previous-container evidence still needs capture
+before collector replacement; a Ready transition alone does not establish the entire unavailable interval.
+
 `codex/quant-immutable-write-recovery` addresses a new real client WriteTimeout on an immutable batch. The
 installed consumer handled an explicit incomplete-batch reply but not this send/receive uncertainty. The pending
 change resolves both create-only single and batch outcomes through matching metadata and one bounded missing-object
 write. It preserves mutable head/CAS, rejects invalid acknowledgements and retains original diagnostics even when
-resolution succeeds. Collector checks and independent review passed; admission and publication are pending.
+resolution succeeds. Collector checks and independent review passed, and main `99f8895b` plus its complete
+reconciliation succeeded. Consumer publication waits for the observer correction and old-log capture above.
 
 The existing read-only runtime probe now retains validated CRI failure/startup times, request bytes and bounded
 per-kind recovery records. Publish the checked diagnostic source to main and run verify before replacing the
