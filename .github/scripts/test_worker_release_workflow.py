@@ -14,16 +14,37 @@ REQUIRED = "steps.preflight.outputs.required == 'true'"
 
 
 def steps(block):
-    parts = re.split(r"^      - ", block.split("    steps:\n", 1)[1], flags=re.M)
+    parts = re.split(r"^      - ", block.split("    steps:\n", 1)[1], flags=re.MULTILINE)
     return ["      - " + part for part in parts[1:]]
 
 
 def field(step, name):
-    match = re.search(r"^        " + re.escape(name) + r": (.+)$", step, flags=re.M)
+    match = re.search(r"^        " + re.escape(name) + r": (.+)$", step, flags=re.MULTILINE)
     return match.group(1) if match else None
 
 
 class WorkerReleaseWorkflow(unittest.TestCase):
+    def test_record_only_is_a_separate_protected_job_with_no_application_actions(self):
+        release = self.release_data["jobs"]["release"]
+        record = self.release_data["jobs"]["record"]
+        self.assertEqual(release["if"], "github.ref == 'refs/heads/main' && !inputs.record_only")
+        self.assertEqual(record["if"], "github.ref == 'refs/heads/main' && inputs.record_only")
+        self.assertEqual(record["environment"], "production")
+        self.assertEqual(record["permissions"], {"contents": "read", "actions": "read", "deployments": "write"})
+        self.assertEqual(record["permissions"], self.release_data["permissions"])
+        self.assertEqual(record["concurrency"], release["concurrency"])
+        actions = [step["uses"].split("@")[0] for step in record["steps"] if "uses" in step]
+        self.assertEqual(actions, ["actions/checkout", "actions/checkout"])
+        programs = [step["run"] for step in record["steps"] if "run" in step]
+        self.assertEqual(len(programs), 2)
+        self.assertIn("control.py prepare --record-only", programs[0])
+        self.assertIn("control.py record --record-only", programs[1])
+        for program in programs:
+            self.assertIn('--deployment-id "$RELEASE_DEPLOYMENT_ID"', program)
+            self.assertIn('--expected-main-sha "$RELEASE_EXPECTED_MAIN"', program)
+            for forbidden in ("wrangler", "bazel ", "artifact.py", "migrations", "deploy-vars", "curl "):
+                self.assertNotIn(forbidden, program)
+
     @classmethod
     def setUpClass(cls):
         cls.caller_text = (ROOT / ".github/workflows/ci.yml").read_text()

@@ -90,6 +90,18 @@ configuration hashes, DO namespace IDs, and public D1/R2 identities. They contai
 mail, database contents, or private configuration. `record` prints a small receipt containing
 `deployment_id`, `app`, `source_sha`, and `verified=true`.
 
+Receipt create/status failures log only their fixed phase, provider, method and HTTP status. A 5xx response
+may follow a committed write. The recorder reads GitHub back and continues only when the exact app, source,
+payload and provider version are confirmed. It never blindly repeats either POST; an unconfirmed result stays
+failed. The evidence includes the existing configuration hashes and resource identities, not a new artifact hash.
+
+To complete a pending receipt without uploading the application again, use the existing main-only reconciliation
+workflow with operation `record`, `record_app` and `record_deployment_id`. Its receipt-only job retains the
+production environment and app release lock. It requires the original source to be a current-main ancestor with
+a successful main `CI gate`, then rechecks the live version, settings, routes and resources before adopting that
+exact receipt. A changed version, mismatched proof or latest negative status is refused. An already successful
+matching receipt is read-only. Artifact staging, migrations and deployment do not run; check-only never records.
+
 `last_good` inspects the newest 100 app records and accepts the first record of this format whose
 latest status is `success`, or `inactive` with an earlier `success` among its ten newest statuses. Latest failure/error, unverified inactive and legacy records are skipped. This per-app evidence is separate
 from CI's cumulative diff base: a documentation commit or a green CI run does not replace the last

@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import unittest
+import urllib.error
 from contextlib import redirect_stdout
 from copy import deepcopy
 from pathlib import Path
@@ -12,8 +13,8 @@ from unittest.mock import patch
 from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).absolute().parents[1]))
-from api import Api, ReleaseError
 import control
+from api import Api, ReleaseError
 from control import ROOT, preflight, record, release_inputs
 
 SHA = "a" * 40
@@ -30,6 +31,8 @@ class ProviderFixture:
         )
         self.values, self.requests, self.deployments, self.statuses = {}, [], [], {}
         self.operational = {}
+        self.github_values = {}
+        self.fault = None
         account, zone = self.resources["account_id"], self.resources["zone_id"]
         domains, routes = [], []
         for config in self.configs:
@@ -85,6 +88,7 @@ class ProviderFixture:
                         "MailCoordinator": "mail-coordinator",
                         "TodofyCore": "todofy-core-do",
                         "MailsortState": "mailsort-state",
+                        "TaskJobs": "tasks-jobs",
                     }[source["class_name"]]
                     binding["namespace_id"] = self.resources["durable_objects"][alias]
                 bindings.append(binding)
@@ -141,16 +145,43 @@ class ProviderFixture:
             value = list(reversed(self.deployments))
         elif method == "GET" and path.endswith("/statuses"):
             value = self.statuses.get(int(path.split("/")[-2]), [])
+        elif method == "GET" and "/deployments/" in path:
+            value = next(
+                item
+                for item in self.deployments
+                if item["id"] == int(path.rsplit("/", 1)[1])
+            )
+        elif method == "GET" and path in self.github_values:
+            value = self.github_values[path]
         elif method == "POST" and path.endswith("/deployments"):
+            if self.fault == ("create", False):
+                self.raise_500(request.full_url)
             body = json.loads(request.data)
             value = {**body, "id": len(self.deployments) + 1, "sha": body["ref"]}
             self.deployments.append(value)
+            if self.fault == ("create", True):
+                self.raise_500(request.full_url)
         elif method == "POST" and path.endswith("/statuses"):
+            if self.fault == ("status", False):
+                self.raise_500(request.full_url)
             value = json.loads(request.data)
             self.statuses[int(path.split("/")[-2])] = [value]
+            if self.fault == ("status", True):
+                self.raise_500(request.full_url)
         else:
             raise AssertionError("Unexpected provider operation")
         return io.BytesIO(json.dumps(value).encode())
+
+    def raise_500(self, url):
+        error = urllib.error.HTTPError(
+            url,
+            500,
+            "synthetic-private-token /private/key 192.0.2.19",
+            {},
+            io.BytesIO(b"{}"),
+        )
+        error.close()
+        raise error
 
     def bindings(self, script=None):
         config = self.configs[0]
@@ -179,6 +210,187 @@ class ProviderFixture:
 
 
 class DriftAcceptance(unittest.TestCase):
+    def test_real_provider_api_settles_only_confirmed_receipt_writes(self):
+        for stage in ("create", "status"):
+            for committed in (False, True):
+                fixture = ProviderFixture("tasks")
+                fixture.fault = (stage, committed)
+                output = io.StringIO()
+                with (
+                    self.subTest(stage=stage, committed=committed),
+                    patch.dict(os.environ, {"GITHUB_RUN_ID": "1"}),
+                    redirect_stdout(output),
+                ):
+                    if committed:
+                        self.assertTrue(
+                            record(ROOT, "tasks", SHA, fixture.cloud, fixture.github)[
+                                "verified"
+                            ]
+                        )
+                    else:
+                        with self.assertRaisesRegex(
+                            ReleaseError, "DEPLOYMENT_" + stage.upper() + "_UNCONFIRMED"
+                        ):
+                            record(ROOT, "tasks", SHA, fixture.cloud, fixture.github)
+                self.assertTrue(
+                    all(
+                        method == "GET"
+                        for host, method, _ in fixture.requests
+                        if host == "api.cloudflare.com"
+                    )
+                )
+                creates = [
+                    path
+                    for host, method, path in fixture.requests
+                    if host == "api.github.com"
+                    and method == "POST"
+                    and path.endswith("/deployments")
+                ]
+                self.assertEqual(len(creates), 1)
+                statuses = [
+                    path
+                    for host, method, path in fixture.requests
+                    if host == "api.github.com"
+                    and method == "POST"
+                    and path.endswith("/statuses")
+                ]
+                self.assertEqual(
+                    len(statuses), 0 if stage == "create" and not committed else 1
+                )
+                rows = [json.loads(line) for line in output.getvalue().splitlines()]
+                self.assertTrue(
+                    any(
+                        row.get("phase") == stage and row.get("http_status") == 500
+                        for row in rows
+                    )
+                )
+                for forbidden in (
+                    "synthetic-private-token",
+                    "/private/key",
+                    "192.0.2.19",
+                    "https://",
+                    "/accounts/",
+                ):
+                    self.assertNotIn(forbidden, output.getvalue())
+
+    def test_record_only_cli_adopts_exact_receipt_without_application_commands(self):
+        fixture = self.fixture("tasks")
+        fixture.statuses[1] = []
+        repository, main_sha = fixture.profile["repository"], "b" * 40
+        prefix = "/repos/" + repository
+        fixture.github_values = {
+            prefix + "/git/ref/heads/main": {"object": {"sha": main_sha}},
+            prefix + "/compare/" + SHA + "..." + main_sha: {
+                "status": "ahead",
+                "merge_base_commit": {"sha": SHA},
+            },
+            prefix + "/actions/workflows/ci.yml/runs": {
+                "workflow_runs": [
+                    {
+                        "id": 7,
+                        "head_sha": SHA,
+                        "head_branch": "main",
+                        "event": "push",
+                        "status": "completed",
+                        "conclusion": "failure",
+                    }
+                ]
+            },
+            prefix + "/actions/runs/7/jobs": {
+                "total_count": 1,
+                "jobs": [
+                    {
+                        "id": 8,
+                        "name": "CI gate",
+                        "status": "completed",
+                        "conclusion": "success",
+                    }
+                ],
+            },
+        }
+        with (
+            patch.dict(
+                os.environ, {"GITHUB_REF": "refs/heads/main", "GITHUB_SHA": main_sha}
+            ),
+            patch.object(
+                control,
+                "Api",
+                side_effect=lambda provider, token: (
+                    fixture.github if provider == "github" else fixture.cloud
+                ),
+            ),
+            patch.object(
+                sys,
+                "argv",
+                [
+                    "control.py",
+                    "record",
+                    "--record-only",
+                    "--app",
+                    "tasks",
+                    "--source-sha",
+                    SHA,
+                    "--source-root",
+                    str(ROOT),
+                    "--expected-main-sha",
+                    main_sha,
+                    "--deployment-id",
+                    "1",
+                ],
+            ),
+            patch(
+                "subprocess.run",
+                side_effect=AssertionError(
+                    "record-only must not run application commands"
+                ),
+            ) as commands,
+            redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(control.main(), 0)
+            first_requests = list(fixture.requests)
+            fixture.requests.clear()
+            self.assertEqual(control.main(), 0)
+        commands.assert_not_called()
+        self.assertEqual(len(fixture.deployments), 1)
+        self.assertEqual(
+            [path for host, method, path in first_requests if method == "POST"],
+            [prefix + "/deployments/1/statuses"],
+        )
+        self.assertTrue(all(method == "GET" for _, method, _ in fixture.requests))
+
+    def test_resume_rejects_wrong_receipt_identity_or_proof_without_any_write(self):
+        for changed in ("sha", "config_hash", "version_id", "failure", "app"):
+            fixture = self.fixture("tasks")
+            fixture.statuses[1] = []
+            saved = fixture.deployments[0]
+            if changed == "sha":
+                saved["sha"] = "b" * 40
+            elif changed == "failure":
+                fixture.statuses[1] = [{"state": "failure"}]
+            elif changed == "app":
+                saved["task"] = "deploy:watch"
+            else:
+                saved["payload"]["workers"][0][changed] = "synthetic-private-proof"
+            fixture.requests.clear()
+            with self.subTest(changed=changed), self.assertRaises(ReleaseError):
+                record(ROOT, "tasks", SHA, fixture.cloud, fixture.github, resume_id=1)
+            self.assert_readonly(fixture)
+
+    def test_new_live_version_cannot_adopt_an_older_pending_receipt(self):
+        fixture = self.fixture("tasks")
+        fixture.statuses[1] = []
+        base = "/accounts/" + fixture.resources["account_id"] + "/workers/scripts/tasks"
+        newer = "b1234567-1234-4234-8234-123456789abc"
+        fixture.values[base + "/versions/" + newer] = deepcopy(
+            fixture.values[base + "/versions/" + VERSION]
+        )
+        fixture.values[base + "/deployments"]["deployments"][0]["versions"][0][
+            "version_id"
+        ] = newer
+        with self.assertRaisesRegex(ReleaseError, "DEPLOYMENT_EVIDENCE_MISMATCH"):
+            record(ROOT, "tasks", SHA, fixture.cloud, fixture.github, resume_id=1)
+        self.assert_readonly(fixture)
+
     def fixture(self, app="watch"):
         fixture = ProviderFixture(app)
         environment = {

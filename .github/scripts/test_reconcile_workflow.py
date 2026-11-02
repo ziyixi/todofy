@@ -35,6 +35,22 @@ def job(text, name):
 
 
 class ReconcileWorkflow(unittest.TestCase):
+    def test_explicit_record_operation_reuses_only_the_protected_receipt_job(self):
+        block = job(self.text, "record-worker")
+        self.assertIn("github.event_name == 'workflow_dispatch'", block)
+        self.assertIn("needs.context.outputs.operation == 'record'", block)
+        self.assertIn("uses: ./.github/workflows/worker-release.yml", block)
+        self.assertIn("record_only: true", block)
+        self.assertIn("actions: read", block)
+        self.assertIn("contents: read", block)
+        self.assertIn("deployments: write", block)
+        self.assertIn("app: ${{ inputs.record_app }}", block)
+        self.assertIn("deployment_id: ${{ inputs.record_deployment_id }}", block)
+        self.assertIn("expected_main_sha: ${{ needs.context.outputs.source_sha }}", block)
+        self.assertIn("secrets: inherit", block)
+        for name in ("infra", "workers", "vps", "inventory", "infra-result"):
+            self.assertIn("needs.context.outputs.operation != 'record'", job(self.text, name))
+
     @classmethod
     def setUpClass(cls):
         cls.text = WORKFLOW.read_text()
@@ -45,7 +61,7 @@ class ReconcileWorkflow(unittest.TestCase):
         self.assertIn("workflows: [CI and deploy]", triggers)
         self.assertIn("branches: [main]", triggers)
         self.assertIn("types: [completed]", triggers)
-        self.assertIn("options: [check, repair, resume]", triggers)
+        self.assertIn("options: [check, repair, resume, record]", triggers)
         self.assertIn("default: check", triggers)
         for forbidden in (
             "pull_request",
@@ -197,6 +213,7 @@ class ReconcileWorkflow(unittest.TestCase):
     def test_worker_repair_reuses_last_good_recipe_and_app_locks(self):
         block = job(self.text, "workers")
         self.assertIn("uses: ./.github/workflows/worker-release.yml", block)
+        self.assertIn("permissions:\n      contents: read\n      actions: read\n      deployments: write", block)
         self.assertIn("repair: true", block)
         self.assertIn(
             "check_only: ${{ needs.context.outputs.operation == 'check' }}", block
@@ -214,14 +231,14 @@ class ReconcileWorkflow(unittest.TestCase):
         remain FIRST_DEPLOY_PENDING through the first release; it does not disable that app's reconciliation."""
         block = job(self.text, "workers")
         matrix = block.split("      matrix:\n", 1)[1].split("\n    permissions:\n", 1)[0]
-        apps = re.search(r"^        app: \[([^\]]+)\]$", matrix, re.M).group(1).split(", ")
+        apps = re.search(r"^        app: \[([^\]]+)\]$", matrix, re.MULTILINE).group(1).split(", ")
         workers = constant("tools/cloud-release/control.py", "WORKERS")
         self.assertEqual(sorted(apps), sorted(workers))
         pending = constant("tools/service-catalog/inventory.py", "FIRST_DEPLOY_PENDING")
         scripts = {app: {tomllib.loads((REPO / path).read_text())["name"] for path in paths}
                    for app, paths in workers.items()}
         self.assertLessEqual(pending, set().union(*scripts.values()))
-        excluded = re.findall(r"^          - app: (\S+)$", matrix, re.M)
+        excluded = re.findall(r"^          - app: (\S+)$", matrix, re.MULTILINE)
         self.assertEqual(excluded, [])
         self.assertNotIn("        exclude:", matrix)
 

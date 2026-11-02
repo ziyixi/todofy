@@ -4,12 +4,12 @@ import argparse
 import json
 import os
 import sys
+import tomllib
 from pathlib import Path
 
-import tomllib
 from api import Api, ReleaseError
 from cloudflare import digest, observe, routes_differences, verify, verify_resources
-from deployments import identity, last_good, record_success
+from deployments import identity, last_good, receipt, record_success
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKERS = {
@@ -129,13 +129,100 @@ def operational_values(app, desired):
     return result
 
 
-def prepare(app, source_sha, repair, github, expected_main_sha=""):
+def _checked_receipt_source(github, repository, sha, main_sha):
+    if sha != main_sha:
+        comparison = github.call(
+            "/repos/" + repository + "/compare/" + sha + "..." + main_sha
+        )
+        if (
+            not isinstance(comparison, dict)
+            or comparison.get("status") != "ahead"
+            or comparison.get("merge_base_commit", {}).get("sha") != sha
+        ):
+            raise ReleaseError("RECEIPT_SOURCE_NOT_MAIN")
+    listing = github.call(
+        "/repos/"
+        + repository
+        + "/actions/workflows/ci.yml/runs?head_sha="
+        + sha
+        + "&event=push&branch=main&status=completed&per_page=50"
+    )
+    if not isinstance(listing, dict) or not isinstance(
+        listing.get("workflow_runs"), list
+    ):
+        raise ReleaseError("RECEIPT_CI_GATE_NOT_VERIFIED")
+    runs = [
+        value
+        for value in listing["workflow_runs"]
+        if isinstance(value, dict)
+        and type(value.get("id")) is int
+        and value["id"] > 0
+        and value.get("head_sha") == sha
+        and value.get("head_branch") == "main"
+        and value.get("event") == "push"
+        and value.get("status") == "completed"
+    ]
+    if not runs:
+        raise ReleaseError("RECEIPT_CI_GATE_NOT_VERIFIED")
+    run = max(runs, key=lambda value: value["id"])
+    listing = github.call(
+        "/repos/"
+        + repository
+        + "/actions/runs/"
+        + str(run["id"])
+        + "/jobs?filter=all&per_page=100"
+    )
+    if not isinstance(listing, dict) or not isinstance(listing.get("jobs"), list):
+        raise ReleaseError("RECEIPT_CI_GATE_NOT_VERIFIED")
+    jobs = listing["jobs"]
+    if type(listing.get("total_count", len(jobs))) is not int or listing.get(
+        "total_count", len(jobs)
+    ) > len(jobs):
+        raise ReleaseError("RECEIPT_CI_GATE_NOT_VERIFIED")
+    gates = [
+        value
+        for value in jobs
+        if isinstance(value, dict)
+        and type(value.get("id")) is int
+        and value.get("name") == "CI gate"
+        and value.get("status") == "completed"
+        and value.get("head_sha", sha) == sha
+    ]
+    if (
+        not gates
+        or max(gates, key=lambda value: value["id"]).get("conclusion") != "success"
+    ):
+        raise ReleaseError("RECEIPT_CI_GATE_NOT_VERIFIED")
+
+
+def prepare(
+    app,
+    source_sha,
+    repair,
+    github,
+    expected_main_sha="",
+    *,
+    record_only=False,
+    deployment_id="",
+):
     repository = os.environ["GITHUB_REPOSITORY"]
     if expected_main_sha:
         identity(repository, app, expected_main_sha)
         current = github.call("/repos/" + repository + "/git/ref/heads/main")
         if current.get("object", {}).get("sha") != expected_main_sha:
             raise ReleaseError("RECONCILE_MAIN_CHANGED")
+    if record_only:
+        if (
+            repair
+            or not expected_main_sha
+            or os.environ.get("GITHUB_SHA") != expected_main_sha
+        ):
+            raise ReleaseError("RECORD_ONLY_MODE_INVALID")
+        saved = receipt(github, repository, app, deployment_id)
+        if source_sha and source_sha != saved["sha"]:
+            raise ReleaseError("DEPLOYMENT_EVIDENCE_MISMATCH")
+        _checked_receipt_source(github, repository, saved["sha"], expected_main_sha)
+        return saved["sha"]
     if repair:
         record = last_good(github, repository, app)
         if source_sha and source_sha != record["sha"]:
@@ -220,7 +307,7 @@ def preflight(source, app, sha, repair, cloud, github, check_only=False):
     return not check_only and (not repair or bool(changes))
 
 
-def record(source, app, sha, cloud, github):
+def record(source, app, sha, cloud, github, *, resume_id=None):
     profile, resources, configs, desired = release_inputs(source, app)
     evidence = []
     persistent = verify_resources(cloud, resources, configs)
@@ -255,6 +342,7 @@ def record(source, app, sha, cloud, github):
         sha,
         {"workers": evidence, "persistent_resources": persistent},
         run_url,
+        **({"resume_id": resume_id} if resume_id is not None else {}),
     )
     return {
         "deployment_id": identifier,
@@ -273,14 +361,28 @@ def main():
     parser.add_argument("--repair", action="store_true")
     parser.add_argument("--check-only", action="store_true")
     parser.add_argument("--expected-main-sha", default="")
+    parser.add_argument("--record-only", action="store_true")
+    parser.add_argument("--deployment-id", default="")
     args = parser.parse_args()
     try:
         if os.environ.get("GITHUB_REF") != "refs/heads/main":
             raise ReleaseError("MAIN_REQUIRED")
+        if args.record_only and (
+            args.repair or args.check_only or args.operation == "preflight"
+        ):
+            raise ReleaseError("RECORD_ONLY_MODE_INVALID")
+        if args.deployment_id and not args.record_only:
+            raise ReleaseError("RECORD_ONLY_MODE_INVALID")
         github = Api("github", os.environ.get("GH_TOKEN", ""))
         if args.operation == "prepare":
             sha = prepare(
-                args.app, args.source_sha, args.repair, github, args.expected_main_sha
+                args.app,
+                args.source_sha,
+                args.repair,
+                github,
+                args.expected_main_sha,
+                record_only=args.record_only,
+                deployment_id=args.deployment_id,
             )
             output = {"source_sha": sha}
         else:
@@ -298,6 +400,16 @@ def main():
                 )
                 output = {"required": str(required).lower()}
             else:
+                if args.record_only:
+                    prepare(
+                        args.app,
+                        args.source_sha,
+                        False,
+                        github,
+                        args.expected_main_sha,
+                        record_only=True,
+                        deployment_id=args.deployment_id,
+                    )
                 print(
                     json.dumps(
                         record(
@@ -306,6 +418,11 @@ def main():
                             args.source_sha,
                             cloud,
                             github,
+                            **(
+                                {"resume_id": int(args.deployment_id)}
+                                if args.record_only
+                                else {}
+                            ),
                         )
                     )
                 )
