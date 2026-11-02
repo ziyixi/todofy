@@ -246,6 +246,7 @@ class BazelCI(unittest.TestCase):
             "data-check",
             operations["on"]["workflow_dispatch"]["inputs"]["operation"]["options"],
         )
+        self.assertIn("finish-worker", operations["on"]["workflow_dispatch"]["inputs"]["operation"]["options"])
         jobs = operations["jobs"]
         self.assertEqual(set(jobs), {"context", "operate"})
         context = jobs["context"]
@@ -269,6 +270,11 @@ class BazelCI(unittest.TestCase):
                 job.get("uses") == "./.github/workflows/ci.yml" for job in jobs.values()
             )
         )
+        publisher = workflow_data(ROOT / ".github/workflows/private-release.yml")
+        entry = publisher["jobs"]["release"]["steps"][-1]
+        self.assertEqual(entry["run"], 'if [ "$PRIVATE_RELEASE_OPERATION" = finish-worker ]; then\n  python3 .github/scripts/private_finish_worker.py\nelse\n  python3 private/ci/release.py\nfi\n')
+        self.assertEqual(publisher["concurrency"], {"group": "private-production", "cancel-in-progress": "false"})
+        self.assertEqual(publisher["jobs"]["release"]["environment"], "production")
 
     def test_worker_publication_uses_checked_sha_artifacts_and_main_gate(self):
         for name, job in self.jobs.items():

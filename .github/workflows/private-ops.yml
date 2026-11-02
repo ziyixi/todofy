@@ -12,6 +12,7 @@ on:
           - infra-apply
           - publish
           - release
+          - finish-worker
           - verify
           - data-check
           - k3s-check
