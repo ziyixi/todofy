@@ -5,27 +5,30 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-`codex/quant-chart-range-resize` continues the authorized Chinese workbench and efficiency goal with three
-reproduced corrections: preserve chart range during resizing, separate an event task's default cutoff from
-its earnings-calendar horizon, and send the required JSON header on bodyless owner mutations. Existing access
-checks, stored execution parameters and data remain intact. Related regressions and all 27 native Quant checks
-plus the web bundle passed; exact-source publication and one resize observation remain pending.
+`codex/quant-worker-readiness` addresses a publication health-gate defect and an empty confirmation error.
+The latest application corrections are running and healthy, but their workflow stopped on the first post-upload
+503. Observe the checked public source and dependencies under the existing bounded readiness policy, without
+replaying upload or rollout. Retain fixed component diagnostics; the historical underlying trigger remains unknown.
+Confirmation dialogs also treated an initial null mutation error as a connection failure before submission.
+Related regressions, affected checks and the real web bundle passed. Normal checked publication and one focused
+confirmation observation remain pending. Detailed incident evidence stays in the private handoff.
 
-Full-pool event initialization is running independently of CI through the existing saved plan. It continued
-across the last publication with confirmed progress intact. Remaining work is complete source/coverage acceptance,
-shared-budget monitoring and enabling daily events. Do not repeat the completed price/SDK/recovery audit or
-resubmit the completed sample job just to exercise controls. The proposed older event expansion is not running.
+Full-pool event initialization continues independently of CI through its saved plan and confirmed checkpoint.
+Remaining work is complete source/coverage acceptance, shared-budget monitoring and enabling daily events.
+Preserve other services' request headroom while initializing; do not restart confirmed work to recover quota.
+Do not repeat the completed price/SDK/recovery audit or resubmit the completed sample job merely for acceptance.
+The proposed older event expansion is not running.
 
 The owner cancelled development-library migration; use fresh collection. Preserve existing Dropbox/Recall/R2
-files, keep automatic private publication disabled and use no paid upgrade. Detailed data and unresolved
-historical incident evidence remain in the private handoff.
+files, keep automatic private publication disabled and use no paid upgrade.
 
 ## Latest verified release
 
 Private source `b6597e8`, checked through parent `18607f1`, passed branch/main admission and ordinary protected
 publication. Native source/digest observation and public health passed; same-main resource/VPS/Worker comparison
 and resolved infrastructure drift passed. Initial full-history charts and source-link wrapping were observed on
-production desktop and narrow views. The remaining resize defect is current work above.
+production desktop and narrow views. The later installed source also preserves resizing; publication observation
+and confirmation feedback remain current work above.
 
 The [November 2 archive](docs/history/handoff-2026-11-02.md) records the published cache/build and console corrections.
 Shared Storage is independently connected and registered; its protocol and persistence checks remain in
