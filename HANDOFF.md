@@ -14,7 +14,9 @@ event/source/chart acceptance, bounded initialization and saved plan operation. 
 complete captured-head cache recovery have now passed. A later connection
 failure recovered automatically with confirmed progress intact; its physical cause remains unresolved. Current
 work retains connection-stage evidence, completes publication control after a failed Kubernetes wait, and corrects
-metadata/report-contract gaps. A reproduced provider share-class calendar mismatch is the current source fix. Event checkpoint work is reduced within the existing asset boundary. Detailed data and incident evidence stays in the private handoff.
+metadata/report-contract gaps. A reproduced provider share-class calendar mismatch and long source-link wrapping
+are the current fixes. Event checkpoint work is reduced within the existing asset boundary. Detailed data and
+incident evidence stays in the private handoff.
 
 Shared Storage is published, independently connected and registered. Actual object/authentication, gzip,
 32 MiB and pagination/replay checks passed; see the [November 1 archive](docs/history/handoff-2026-11-01.md#shared-storage).
