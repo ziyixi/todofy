@@ -2,6 +2,7 @@
 
 import hashlib
 import os
+import re
 import subprocess
 import tempfile
 import unittest
@@ -125,6 +126,76 @@ class BazelCI(unittest.TestCase):
         self.assertEqual(step["env"]["GIT_CONFIG_KEY_0"], "submodule.private.update")
         self.assertEqual(step["env"]["GIT_CONFIG_VALUE_0"], "none")
         self.assertIn("private", (ROOT / ".bazelignore").read_text().splitlines())
+
+    def test_private_cache_can_restore_actual_public_producers_across_revisions(self):
+        private = workflow_data(ROOT / ".github/workflows/private-check.yml")
+        consumer = next(
+            step["with"]
+            for step in private["jobs"]["check"]["steps"]
+            if step.get("uses", "").startswith("actions/cache/restore@")
+        )
+        checks = next(
+            step["with"]
+            for step in self.jobs["checks"]["steps"]
+            if step.get("uses", "").startswith("actions/cache@")
+        )
+        planning = next(
+            step["with"]
+            for step in self.jobs["changes"]["steps"]
+            if step.get("uses", "").startswith("actions/cache@")
+        )
+        dependencies = {
+            name: name.encode()
+            for name in (
+                "MODULE.bazel",
+                "MODULE.bazel.lock",
+                "pnpm-lock.yaml",
+                "uv.lock",
+            )
+        }
+
+        def render(template, *, sha, group="", files=dependencies, runner="Linux"):
+            values = {"runner.os": runner, "github.sha": sha, "matrix.group": group}
+
+            def expression(match):
+                value = match[1].strip()
+                if value.startswith("hashFiles("):
+                    names = sorted(re.findall(r"'([^']+)'", value))
+                    return hashlib.sha256(
+                        b"".join(files[name] for name in names)
+                    ).hexdigest()
+                return values[value]
+
+            return re.sub(r"\$\{\{(.*?)\}\}", expression, template)
+
+        def restores(published, *, files=dependencies, runner="Linux"):
+            requested = [consumer["key"], *consumer["restore-keys"].splitlines()]
+            return any(
+                published.startswith(
+                    render(key, sha="next-main", files=files, runner=runner)
+                )
+                for key in requested
+            )
+
+        for group, producer in (
+            ("node", checks),
+            ("python", checks),
+            ("go", checks),
+            ("workerd", checks),
+            ("", planning),
+        ):
+            with self.subTest(producer=group or "planning"):
+                published = render(producer["key"], sha="previous-main", group=group)
+                self.assertNotEqual(published, render(consumer["key"], sha="next-main"))
+                self.assertTrue(restores(published))
+                self.assertEqual(producer["path"], consumer["path"])
+                self.assertFalse(
+                    restores(
+                        published,
+                        files={**dependencies, "uv.lock": b"changed dependency graph"},
+                    )
+                )
+                self.assertFalse(restores(published, runner="macOS"))
 
     def test_private_fingerprint_reads_source_and_generated_files_from_the_execution_root(
         self,

@@ -5,6 +5,16 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
+`codex/bazel-template-cache` addresses the failed main admission before the pending Quant publication. A cold
+public-dependency restore considered only Go producer keys; the build then failed while downloading
+a template tool that an unstamped build does not execute. Keep native bounded HTTP handling and checksum
+verification, reuse the existing native template rule for unstamped configurations, and preserve the existing
+stamped release path. Actual before/after bytes match for unstamped and stamped configurations. Injecting an
+unavailable template-tool repository allows the ordinary build to finish while the stamped positive control
+fails as intended. The real Quant web bundle builds. Matching cache producers across revisions retains the
+same OS/dependency hashes and restore-only privacy boundary. Normal CI admission remains pending.
+The remote HTTP 500's internal origin was not retained and is not established by a later successful download.
+
 `codex/quant-runtime-diagnostics` continues the authorized private workbench and efficiency goal. The owner
 cancelled development-library migration; use fresh collection. Preserve existing Dropbox/Recall/R2 files and
 keep automatic private publication disabled. Business collection runs independently of CI.

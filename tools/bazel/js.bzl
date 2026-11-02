@@ -5,6 +5,7 @@ load("@aspect_rules_js//js:providers.bzl", "JsInfo", "js_info")
 load("@aspect_rules_js//npm:providers.bzl", "NpmPackageInfo")
 load("@bazel_lib//lib:copy_directory.bzl", "copy_directory_bin_action")
 load("@bazel_lib//lib:expand_template.bzl", "expand_template")
+load("@bazel_skylib//rules:expand_template.bzl", native_expand_template = "expand_template")
 load("//proto/bazel:ts_package.bzl", "proto_package")
 load("//tools/bazel:paths.bzl", "module_path", "project_path", "relative_path", "source_label")
 
@@ -250,13 +251,36 @@ def vite_build_config(name, config, out_dir = "dist", postbuild = None, stamp = 
         out_dir = out_dir,
         postbuild = postbuild,
     )
-    expand_template(
+    template = ":" + name + "_template"
+    substitutions = {"__BAZEL_STAMPED__": "false", "__BAZEL_BUILD_SHA__": ""}
+    if stamp != 0:
+        expand_template(
+            name = name + "_stamped",
+            template = template,
+            out = name + "_stamped.mjs",
+            substitutions = substitutions,
+            stamp_substitutions = {"__BAZEL_STAMPED__": "true", "__BAZEL_BUILD_SHA__": "{{BUILD_EMBED_LABEL}}"},
+            stamp = stamp,
+        )
+        if stamp == 1:
+            template = ":" + name + "_stamped"
+            substitutions = {}
+        else:
+            stamping = Label("@bazel_lib//lib:stamp_detect")
+            template = select({
+                stamping: ":" + name + "_stamped",
+                "//conditions:default": template,
+            })
+            substitutions = select({
+                stamping: {},
+                "//conditions:default": substitutions,
+            })
+    # The upstream stamped rule resolves its binary toolchain even when unstamped.
+    native_expand_template(
         name = name,
-        template = ":" + name + "_template",
+        template = template,
         out = name + ".mjs",
-        substitutions = {"__BAZEL_STAMPED__": "false", "__BAZEL_BUILD_SHA__": ""},
-        stamp_substitutions = {"__BAZEL_STAMPED__": "true", "__BAZEL_BUILD_SHA__": "{{BUILD_EMBED_LABEL}}"},
-        stamp = stamp,
+        substitutions = substitutions,
     )
 
 def vite_bundle(name, tool, deps, data = [], out_dir = "dist", postbuild = None, stamp = -1):
