@@ -5,29 +5,28 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-`codex/deployment-receipt-recovery` addresses the separate GitHub receipt failure after an application was already
-uploaded and verified. Fixed provider/phase diagnostics and exact readback handle a committed 5xx response without
-repeating a POST. An explicit main-only receipt operation revalidates the original gate and live evidence under
-the existing production lock, without building, migrating or publishing the application. Unconfirmed writes and
-changed live versions remain unresolved. Related unit/workflow checks and an independent review passed; admission
-and any applicable receipt completion are pending. The original failed workflow's terminal status is unchanged.
+`codex/quant-immutable-write-recovery` addresses a new real client WriteTimeout on an immutable batch. The
+installed consumer handled an explicit incomplete-batch reply but not this send/receive uncertainty. The pending
+change resolves both create-only single and batch outcomes through matching metadata and one bounded missing-object
+write. It preserves mutable head/CAS, rejects invalid acknowledgements and retains original diagnostics even when
+resolution succeeds. Collector checks and independent review passed; admission and publication are pending.
 
-Full-pool event initialization continues from its original captured scope and confirmed progress. The installed
-collector resolves an explicit incomplete immutable batch through matching per-object metadata and create-only
-writes; an unconfirmed resolution still fences without advancing its final checkpoint. Storage now retains fixed
-failure phases/tags in existing logs. The original provider failure's precise stage remains unknown; use the next
-natural failure's evidence rather than treating a successful batch or restart as its cause being resolved.
+The existing read-only runtime probe now retains validated CRI failure/startup times, request bytes and bounded
+per-kind recovery records. Publish the checked diagnostic source to main and run verify before replacing the
+collector, so its previous-container evidence is not overwritten. The precise network cause and correlation of the
+19:09–19:10 public 503s remain open until that evidence is collected. Never restart or replay an Action merely
+because an observation times out.
 
-The installed reorganization parser recognizes validated nested participants without transferring another
-security's ratios. Its earlier source check requires a normal revisit. Cross-market earnings aliases remain
-unaccepted until issuer and date semantics can be represented correctly; unsupported source coverage stays explicit.
+Full-pool event initialization continues from its original scope and checkpoint. Existing reorganization parsing
+is installed; its older failed source check needs a normal revisit. Foreign-market earnings identity/date
+semantics remain unverified and coverage warnings stay explicit. Daily-event scheduling is still disabled until
+initial source/cost acceptance; its saved end date is blank and subsequent collection overlaps seven days.
 
-The owner raised this first backfill's operational shared-account request line to 90,000 and prioritized finishing
-collection. This replaces the earlier 60,000 line. It is operator-controlled, not an implemented automatic guard.
-Full-pool initialization continues from its original checkpoint; daily price scheduling has queued its execution
-behind it. Remaining work is complete source/coverage acceptance, quota monitoring and enabling daily events.
-Preserve other services' headroom and existing Dropbox/Recall/R2 files. Use fresh collection without old-library
-migration, keep automatic private publication disabled and use no paid upgrade. Do not repeat completed audits.
+The owner set this first backfill's shared-account Workers request line to 90,000. Monitor the cached account
+usage, preserve other services' headroom and continue the same execution after any necessary UTC-reset wait.
+This is an operator line, not an automatic platform guard. Preserve existing Dropbox/Recall/R2 files, keep
+automatic private publication disabled, use fresh collection without old-library migration and no paid upgrade.
+Do not repeat completed price/SDK/recovery audits or run rejected production upload fixtures.
 
 ## Latest verified release
 
