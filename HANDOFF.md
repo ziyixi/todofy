@@ -1,11 +1,11 @@
 # Handoff
 
-Updated 2026-11-01 UTC. Read [AGENTS](AGENTS.md), then the target application's README/rules.
+Updated 2026-11-02 UTC. Read [AGENTS](AGENTS.md), then the target application's README/rules.
 Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-`codex/quant-fresh-start` completes the owner-authorized private workbench. The owner explicitly cancelled the
+`codex/quant-runtime-diagnostics` continues the owner-authorized private workbench. The owner explicitly cancelled the
 development-library migration: the data is inexpensive to collect again. Start the new workbench with an empty
 working cache and collect through the application. Remove the transfer from the release prerequisite; do not add
 recovery machinery to the cancelled transfer or import old execution history. The connection-retry-only proposal
@@ -13,24 +13,26 @@ was abandoned without an implementation.
 
 The fresh workbench and normal process continuation are published after exact-source branch/main checks and
 independent review. The same business run retained progress across native rollout. The current follow-up addresses
-the owner's explicit efficiency goal: reduce remote checkpoints, keep immutable uploads outside shared read locks,
-batch bounded reads, reuse fetched identity metadata and parallelize independent cache downloads. Integrated checks,
-review, exact-source publication and production latency comparison remain pending. CI deploys checked source and
-observes readiness; business collection runs independently.
+the owner's explicit efficiency goal. Remote checkpoints and locked I/O are reduced, bounded reads are batched,
+fetched identities are reused and independent cache downloads run concurrently. These changes passed exact-source
+publication and real active-collection latency comparison. The collector subsequently became unavailable; the
+current follow-up adds bounded, read-only runtime evidence before choosing a fix. Recovery alone must not close
+the incident: identify its cause, recurrence conditions and verified prevention. New-data/source/fixed-load
+acceptance remains pending. CI deploys checked source and observes readiness; business collection runs independently.
 
 Shared Storage is published, independently connected and registered. Its real object/authentication, gzip,
 32 MiB and pagination/replay checks passed; the [November 1 archive](docs/history/handoff-2026-11-01.md#shared-storage)
 records that separate release. Existing Dropbox files and application connections are preserved.
 
-Next: publish and measure the efficiency correction, finish fresh collection and verify its Dropbox reads,
+Next: finish fresh collection and verify its Dropbox reads,
 API/Colab and runtime plans, then require same-main reconciliation. Detailed
 application and data evidence stays in the private handoff; automatic private publication remains disabled.
 
 ## Latest verified release
 
-Private workbench source `7af8049`, checked through parent `ad367b1`, passed exact-source branch/main CI and ordinary
-protected publication. Running source/digest, health, actual execution continuation, owner UI and working read API
-are verified. Same-main resource/VPS/Worker comparison and resolved drift gate passed. Fresh bulk collection,
+Private workbench source `d7160f7`, checked through parent `b7c3b2`, passed exact-source branch/main CI and ordinary
+protected publication. Running source/digest, health, actual source-failure continuation, owner UI and responsive
+working read API are verified. Same-main resource/VPS/Worker comparison and resolved drift gate passed. Fresh bulk collection,
 fixed data loading and complete recovery acceptance remain separate work above. Normal Kubernetes
 management uses Actions; runtime identities remain scoped. Detailed application/data evidence stays private.
 
