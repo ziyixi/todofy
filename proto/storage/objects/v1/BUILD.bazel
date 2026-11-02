@@ -14,6 +14,7 @@ proto_library(
 )
 
 alias(name = "ts", actual = "//proto/ts:storage_objects_v1_ts")
+alias(name = "python", actual = "//proto/python/src/ziyixi_proto:storage_objects_v1_py")
 
 exports_files(["objects.proto"])
 

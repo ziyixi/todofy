@@ -63,6 +63,7 @@ PYTHON_PACKAGES = {
     "fleet.telemetry.v1": True,
     "common.errors.v1": True,
     "newsletter.ui.v1": True,
+    "storage.objects.v1": True,
     "prototest.v1": False,
 }
 REQUIRED_OPTION = "[google.api.field_behavior]"

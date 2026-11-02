@@ -174,6 +174,16 @@ proto_codegen(
     sources = ["todofy/report/v1/report.proto"],
 )
 
+proto_codegen(
+    name = "storage_objects_v1_schema",
+    outs = ["schema/storage-objects-v1.schema.json"],
+    format = "schema",
+    output_paths = {"schema/storage-objects-v1.schema.json": "../contracts/storage-objects-v1/storage-objects-v1.schema.json"},
+    proto_package = "storage.objects.v1",
+    protos = ["//proto/storage/objects/v1:proto"],
+    sources = ["storage/objects/v1/objects.proto"],
+)
+
 filegroup(
     name = "schemas",
     srcs = [
@@ -182,6 +192,7 @@ filegroup(
         ":ops_v1_schema",
         ":platform_runtime_v1_schema",
         ":recall_archive_v1_schema",
+        ":storage_objects_v1_schema",
         ":todofy_report_v1_schema",
     ],
 )

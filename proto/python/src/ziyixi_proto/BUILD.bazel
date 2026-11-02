@@ -27,6 +27,9 @@ python_namespace(
         "platform",
         "platform/runtime",
         "platform/runtime/v1",
+        "storage",
+        "storage/objects",
+        "storage/objects/v1",
         "todofy",
         "todofy/mail",
         "todofy/mail/v1",
@@ -226,10 +229,20 @@ py_library(
         ":newsletter_ui_v1_py",
         ":ops_v1_py",
         ":platform_runtime_v1_py",
+        ":storage_objects_v1_py",
         ":todofy_mail_v1_py",
         ":todofy_report_v1_py",
         ":todofy_ui_v1_py",
     ],
+)
+
+python_proto_library(
+    name = "storage_objects_v1_py",
+    outs = ["storage/objects/v1/objects_pb.py"],
+    proto_package = "storage.objects.v1",
+    protos = ["//proto/storage/objects/v1:proto"],
+    sources = ["storage/objects/v1/objects.proto"],
+    deps = [":runtime"],
 )
 
 source_audit_files()

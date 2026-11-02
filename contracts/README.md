@@ -12,6 +12,7 @@ IDL and codecs live in [proto](../proto/README.md); shared authentication lives 
 | [fleet-report-v1](fleet-report-v1/README.md) | Host observer → Fleet | Fleet |
 | [recall-archive-v1](recall-archive-v1/README.md) | Recall → archive stores and change-feed readers | Recall |
 | [newsletter-ui-v1](newsletter-ui-v1/README.md) | Newsletter → console Worker → owner UI | Newsletter |
+| [storage-objects-v1](storage-objects-v1/README.md) | Storage ↔ namespace-scoped application clients | Storage |
 
 ## Sources and changes
 

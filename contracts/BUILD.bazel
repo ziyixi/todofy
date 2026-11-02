@@ -83,6 +83,6 @@ source_audit_files(patterns = [
 
 test_suite(
     name = "check",
-    tests = [":ops_v1_types_typecheck_test"],
+    tests = [":ops_v1_types_typecheck_test", "//contracts/storage-objects-v1:check"],
     visibility = ["//visibility:public"],
 )

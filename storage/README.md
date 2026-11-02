@@ -21,6 +21,7 @@ that key. Authentication precedes reading JSON or binary bodies. The three machi
 | `GET /api/storage/v1/content?key=...` | Optional Range and If-Match | Binary content, ETag and X-Storage-Content-Hash |
 | `HEAD /api/storage/v1/content?key=...` | Same read conditions | Metadata headers without content |
 | `PUT /api/storage/v1/content?key=...` | Binary body and a write precondition | The complete object metadata |
+| `POST /api/storage/v1/content` | Binary concatenation and `X-Storage-Batch` manifest | Complete object metadata in manifest order |
 
 Control JSON uses the repository wire profile in `storage.objects.v1`; failures use `google.rpc.Status`.
 Keys are relative, at most 1,024 ASCII characters. Segments cannot be empty, `.` or `..`; absolute paths,
@@ -45,6 +46,22 @@ Explicit provider rate limits and recognized namespace write contention return 4
 an absent delay becomes one second. The gateway does not repeat uploads. The caller can bound retries of those
 explicit rejections while preserving its body and condition. See [Dropbox's rate and namespace-lock semantics](https://docs.dropboxapi.com/dropbox-api/docs/performance).
 A lost successful upload response can be resolved by statting and verifying the intended size and hash.
+
+`POST content` accepts only create-only objects in the caller's namespace. It has no query parameters and
+requires `Content-Type: application/octet-stream`, exact `Content-Length`, and an ASCII `X-Storage-Batch` header
+of at most 8,192 bytes. That header contains the `BatchCreateManifest` wire JSON: `objects` lists each relative
+`key`, positive `size_bytes` and Dropbox `content_hash`; the top-level `content_hash` covers the concatenated body
+across object boundaries. There are 1 to 32 objects, at most 32 MiB each and at most 32 MiB in total. Duplicate keys,
+including case variants, are refused. Zero-byte objects continue using the existing conditional PUT route.
+
+The existing Durable Object streams the body through Dropbox's native `start_batch`, `append_batch` and synchronous
+`finish_batch_v2`. The ordinary Worker only forwards the request. Every commit uses `add`, `autorename: false`
+and `strict_conflict: true`. An existing object is reused only after stat confirms its key, length and hash;
+different bytes return 409 `REVISION_CONFLICT`. A complete response contains every metadata record in order.
+Partial, invalid or unknown provider results return 503 `BATCH_INCOMPLETE`, including a rate-limit response after
+finish may have begun. Such errors can leave new immutable objects and must not advance a caller's checkpoint.
+Only an explicit rejection before finish can return 429 with Retry-After. Storage never replays the upload.
+The mutable control head continues using the original revision-matched PUT; no object format or permission changes.
 
 GET and HEAD also accept If-Match and reject a different revision before returning content. Valid ranges retain
 the provider's 206, Content-Range and 416 semantics. An upstream 200 remains 200.

@@ -76,6 +76,14 @@ class Target:
 
 SCHEMAS = (
     Target(
+        "storage.objects.v1",
+        "../contracts/storage-objects-v1/storage-objects-v1.schema.json",
+        "https://contracts.local/storage-objects-v1/storage-objects-v1.schema.json",
+        "Namespace-scoped storage object transport",
+        "Authenticated object metadata and bounded create-only binary batches. "
+        "Cross-object length, header and confirmation semantics are transport rules in README.md.",
+    ),
+    Target(
         "platform.runtime.v1",
         "../contracts/platform-runtime-v1/platform-runtime-v1.schema.json",
         "https://contracts.local/platform-runtime-v1/platform-runtime-v1.schema.json",

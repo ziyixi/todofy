@@ -3,6 +3,7 @@ import { HttpTranscoder } from '@ziyixi/proto/http-transcoder';
 import { Code } from '@ziyixi/proto/rpc-status';
 import { StorageUiService } from '@ziyixi/proto/storage/ui/v1/storage_ui_service_pb';
 import { WireJsonError } from '@ziyixi/proto/wire-json';
+import { batchCreate } from './batch.ts';
 import { Dropbox } from './dropbox.ts';
 import { DOMAIN, type Env } from './env.ts';
 import { badRequest, errorResponse, failure } from './errors.ts';
@@ -43,6 +44,7 @@ export class StorageState extends DurableObject<Env> {
     if (path === '/api/storage/v1/content') {
       if (request.method === 'GET' || request.method === 'HEAD') return readContent(request, client, this.dropbox);
       if (request.method === 'PUT') return writeContent(request, client, this.dropbox);
+      if (request.method === 'POST') return batchCreate(request, client, this.dropbox);
       throw failure(Code.UNIMPLEMENTED, 'METHOD_NOT_ALLOWED', 405);
     }
     if (path !== '/api/storage/v1/stat' && path !== '/api/storage/v1/list') throw failure(Code.NOT_FOUND, 'NOT_FOUND');

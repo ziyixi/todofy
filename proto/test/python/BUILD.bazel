@@ -314,6 +314,19 @@ unittest_test(
     ],
 )
 
+unittest_test(
+    name = "test_storage_objects",
+    srcs = ["test_storage_objects.py"],
+    data = ["//contracts/storage-objects-v1:fixtures"],
+    imports = ["."],
+    modules = ["test_storage_objects"],
+    deps = [
+        ":support",
+        "//proto:python_runtime",
+        "//proto/storage/objects/v1:python",
+    ],
+)
+
 test_suite(
     name = "tests",
     tests = [
@@ -328,6 +341,7 @@ test_suite(
         ":test_retired",
         ":test_schema_imports",
         ":test_selected_generation",
+        ":test_storage_objects",
         ":test_wire_enum",
         ":test_wire_profile_cases",
         ":test_wire_rules",
