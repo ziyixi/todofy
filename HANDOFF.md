@@ -16,6 +16,9 @@ checks and create-only writes. A fully confirmed group can continue the same ass
 collection; failed confirmation still fences and mutable head CAS is unchanged. Five affected Bazel test targets,
 including native transport and cold recovery, passed. The application's actual Bazel Ruff checks also pass after
 correcting test imports that a root-config check classified differently. Admission and publication are pending.
+The same publication gives the growing library a 600-second startup window and 900-second Deployment deadline.
+The earlier measured restore and expected full-pool reference count expose a risk of outgrowing the old window;
+the estimate is not a new full-pool restore result. Existing deployment regressions passed.
 
 `codex/quant-event-throughput` adds bounded create-only batches on Storage's existing machine content path and
 uses them for Quant's raw/normalized asset stages. The existing Dropbox connection and Durable Object stream a
