@@ -9,8 +9,8 @@ Private application work, releases, operating limits and owner items are tracked
 `private/HANDOFF.md`; this file names that side only generically (AGENTS).
 
 `claude/review-fixes-public` (local, not pushed; on `9a8f7704`) merges four reviewed public branches with
-`--no-ff`, main as first parent, then one commit that moves the private gitlink to the private side's merged review
-fixes and updates this file:
+`--no-ff`, main as first parent, then two commits: one moves the private gitlink to the private side's merged review
+fixes and records this plan; the next applies the integration review's corrections and re-pins the gitlink.
 
 - `claude/storage-fixes`: Storage refuses malformed keys before waking its Durable Object, checks batch item hashes
   before commit and answers `BATCH_NOT_COMMITTED` for failures before finish, drops a connection Dropbox already
@@ -26,12 +26,13 @@ fixes and updates this file:
 - `claude/private-entry-point`: every private operation runs through the pinned private entry point with the
   operation on its command line, so an older entry point refuses an operation it does not know; the public copy of
   the finish step is removed.
+- Review corrections: the private release job may run 45 minutes instead of 30, enough for a slow private rollout
+  and the checks after it; the landing and rollback plan below.
 
 Only the three image release facades conflicted (`codex-gateway`, `newsletter`, `platform`): each now declares its
 `build-<service>` action and the shared `publish-image`, which is what `ci.yml` runs. The Storage release action and
-the private release workflow merged cleanly and were checked by hand. The entry-point change and the gitlink must
-land in the same push: the private revision on main today refuses one of the routed operations; the new one knows
-them all and no longer reads the removed fingerprint input.
+the private release workflow merged cleanly and were checked by hand. The gitlink and the entry-point change land in
+the same push; the private push, release gate, release, its checks and its rollback follow `private/HANDOFF.md`.
 
 Local checks on macOS with CI's flags and caches: the changed files reach 72 test targets in the check, node,
 python and workerd groups (Target Determinator was emulated from Bazel's query graph; the same emulation reproduced
@@ -46,18 +47,41 @@ workflow, and all three VPS images with their VPS releases, because every releas
 does not publish the Recall extension and runs no private release: the automatic private path is gone, so the
 private side stays at its running revision until its manual release.
 
-Land only after the private HANDOFF lifts its release gate. Push the branch and wait for a complete green branch
-run, whose Changes job should select exactly the set above. If main moved, rebuild this merge on the new main and
-rerun the checks. Merge with main as first parent while the newest main run is green, then wait for the main
-workflow and its Personal cloud reconcile: every deploy job green, Storage's release logging the Durable Object's
-401 for an unknown key, and reconcile's fourteen Worker comparisons, VPS identity, registration and resolved
-drift. Only then run the private release and verification that `private/HANDOFF.md` names. Afterwards Storage's
-owner console should show its connection with no provider error, and Home should show every Worker, Storage and
-the private probes healthy at their next refresh.
+Landing order: this branch first, then the private release.
 
-Rollback: revert the merge on main with `git revert -m 1`, which redeploys the same set from the previous source.
-Storage's old code recreates the dropped cache table on start and ignores the new provider-error key, so reverting
-Storage is safe. The gitlink reverts with the entry point; the private side's own rollback is in its HANDOFF.
+1. Window: after the private HANDOFF lifts its release gate, start soon after 00:00 UTC and finish the branch run,
+   the main run, its reconcile and the private release before 09:00 UTC (the private HANDOFF says why). Both runs
+   start with cold Bazel caches, because the cache keys and paths changed. The 13:41 UTC reconcile and the 15:00 UTC
+   Newsletter daily job come later.
+2. Push the pinned private commit first: the Private Bazel check checks out the gitlink from the private repository
+   ([CI/CD](docs/ci-cd.md#private-checks)). If private main moved, the private merge is rebuilt and re-pinned here.
+3. Push this branch and wait for a complete green branch run whose Changes job selects exactly the set above. If
+   main moved, rebuild the four merges on the new main and rerun the checks.
+4. Fast-forward main to that green SHA (`git push origin <sha>:main`) while the newest main run is green. No new
+   merge commit: release artifacts are reused only for the SHA the branch run built.
+5. Wait for the main workflow and its Personal cloud reconcile: every deploy job green, Storage's release logging the
+   Durable Object's 401 for an unknown key, and reconcile's fourteen Worker comparisons, VPS identity, registration
+   and resolved drift. Then the private release.
+6. Afterwards Storage's owner console shows its connection and no `INSUFFICIENT_SPACE`, `CONNECTION_INVALID` or
+   `BAD_REQUEST` timed after the deploy. The console keeps the newest provider error until a reconnect, and
+   `UNAVAILABLE` alone is a transient rate limit. Home shows every Worker, Storage and the private probes healthy at
+   their next refresh.
+
+Rollback:
+
+- Restore `9a8f7704`'s tree, gitlink included, in one commit; or revert newest first, `git revert` for the two
+  non-merge commits, then `git revert -m 1` for each of the four merges. One `git revert -m 1` of the last merge
+  would leave the other three in place.
+- After a green landing run, pushing the revert redeploys the same set from the old source. After a failed or
+  partial one, the cumulative base stays at the last green main, which the revert's tree equals, so nothing is
+  redeployed: dispatch `CI and deploy` on the reverted main with `app` set to each application that actually
+  deployed (`dashboard` for Home; `all` only if the VPS images also published, accepting the VPS restart), then
+  confirm the new receipts name the revert SHA.
+- `PERSONAL_CLOUD_AUTO_REPAIR` is on, so the 13:41 UTC reconcile and the one after each green main run redeploy
+  each Worker's last good receipt. Before an emergency `wrangler rollback`, the owner sets it to `false`, or the
+  revert and dispatch finish first; it is restored once receipts name the reverted source.
+- Storage's old code recreates the dropped cache table on start and ignores the new provider-error key, so reverting
+  Storage is safe.
 
 ## Latest verified release
 

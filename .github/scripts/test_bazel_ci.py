@@ -363,6 +363,8 @@ class BazelCI(unittest.TestCase):
         )
         self.assertEqual(publisher["concurrency"], {"group": "private-production", "cancel-in-progress": "false"})
         self.assertEqual(publisher["jobs"]["release"]["environment"], "production")
+        # The private rollout may wait out its whole startup window before observation and checks begin.
+        self.assertEqual(publisher["jobs"]["release"]["timeout-minutes"], "45")
 
     def test_worker_publication_uses_checked_sha_artifacts_and_main_gate(self):
         for name, job in self.jobs.items():
