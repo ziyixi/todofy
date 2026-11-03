@@ -32,11 +32,14 @@ drift observation. It is never a write credential or a page response.
 with that application's authorized release; already-running isolates do not read GitHub settings dynamically.
 Shared owner-identity changes require checking the actual consumers through their release dependencies.
 
-Private services can attach optional `PRIVATE_CATALOG` JSON without publishing their names or configuration in
-this repository. The same attachment is supplied to Home and the production reconciliation job. Its shape is
-`{registry: {entries, workers, resources}, desired: {version, zones, workers}}`, using the existing registry and
-drift-desired fields. Empty/unset keeps the public catalog. A nonempty invalid attachment fails with
-`PRIVATE_CATALOG_INVALID`; it cannot replace public identities or hide unregistered resources. Home's
+Private services register in Home through the optional `PRIVATE_CATALOG` Worker secret, without publishing their
+names or configuration in this repository. The Home release and the production reconciliation job each generate it on
+the runner from the selected source's exact private gitlink and delete the file afterwards; no workflow reads a
+GitHub secret for it, and the Home release's generated value replaces any older value in the Worker secrets map. Its
+shape is `{registry: {entries, workers, resources}, desired: {version, zones, workers}}`, using the existing registry
+and drift-desired fields. A Worker without it keeps the public catalog. Generation failures fail with
+`PRIVATE_CATALOG_GENERATION_FAILED` or `PRIVATE_CATALOG_SOURCE_INVALID`; an empty or invalid generated file fails
+with `PRIVATE_CATALOG_INVALID`. A registration cannot replace public identities or hide unregistered resources. Home's
 `parsePrivateCatalog` is the one validator: the Home release runs it, bundled into the checked archive
 (`deploy/private-catalog.mjs`), before the deploy, so an attachment the Worker would refuse fails that release instead
 of Home's API. The reconciliation job only reads the registered identities from it.
