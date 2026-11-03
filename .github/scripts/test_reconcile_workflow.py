@@ -52,6 +52,26 @@ class ReconcileWorkflow(unittest.TestCase):
         self.assertNotIn("secrets.PRIVATE_CATALOG", block)
         self.assertNotIn("upload-artifact", block)
 
+    def test_scheduled_inventory_compares_live_private_sources_without_naming_them(self):
+        block = job(self.text, "inventory")
+        self.assertIn("    permissions:\n      contents: read\n      deployments: read\n    steps:\n", block)
+        step = block.split("      - name: Compare the live private sources with the pinned gitlink\n", 1)[1]
+        step = step.split("\n      - ", 1)[0]
+        self.assertEqual(
+            step,
+            "        if: ${{ !cancelled() && github.event_name == 'schedule' && "
+            "steps.private_catalog.outcome == 'success' }}\n"
+            "        env:\n"
+            "          GH_TOKEN: ${{ github.token }}\n"
+            '        run: python3 .github/scripts/private_revision.py --source-root . '
+            '--catalog-file "$RUNNER_TEMP/private-catalog.json"',
+        )
+        self.assertIn("      - name: Generate registration from the selected private source\n"
+                      "        id: private_catalog\n", block)
+        # The probe address comes from the generated catalogue at run time; removal still follows every outcome.
+        self.assertLess(block.index("private_revision.py"), block.index('rm -f "$RUNNER_TEMP/private-catalog.json"'))
+        self.assertNotIn("https://", block)
+
     def test_explicit_record_operation_reuses_only_the_protected_receipt_job(self):
         block = job(self.text, "record-worker")
         self.assertIn("github.event_name == 'workflow_dispatch'", block)
