@@ -284,9 +284,10 @@ class BazelCI(unittest.TestCase):
         for job in ("changes", "checks", "artifacts", "private-check"):
             consumer = restore(job, repository)
             with self.subTest(consumer=job, cache="repository"):
-                # The lock-matching entry wins; a dependency change still starts warm.
-                self.assertEqual(first_match(consumer, published), 1)
-                self.assertEqual(first_match(consumer, published, files=changed), 2)
+                # Unchanged lockfiles hit main's entry exactly, so a new revision uploads no copy;
+                # a dependency change still starts warm from the newest entry.
+                self.assertEqual(render(consumer["key"], sha="next"), published)
+                self.assertEqual(first_match(consumer, published, files=changed), 1)
                 self.assertIsNone(first_match(consumer, published, runner="macOS"))
         self.assertNotIn(actions, [step["with"]["path"] for step in steps["artifacts"]])
         producer = restore("checks", actions)

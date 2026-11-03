@@ -87,13 +87,13 @@ jobs:
           echo "115e1c63d39e2cd0d0b011c9fadc80f059f021176a4ae0de2232cdd83b1f8011  $RUNNER_TEMP/bazel-tools/target-determinator" | sha256sum --check --status
           chmod +x "$RUNNER_TEMP/bazel-tools/target-determinator"
       # Planning analyzes the whole graph, so it alone saves the downloaded repositories every job restores.
+      # Their key is the lockfiles alone: main uploads them again only when a lockfile changes.
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: repository-cache
         with:
           path: ~/.cache/personal-cloud-bazel/repository
-          key: bazel-9.3.1-${{ runner.os }}-repository-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-${{ github.sha }}
+          key: bazel-9.3.1-${{ runner.os }}-repository-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}
           restore-keys: |
-            bazel-9.3.1-${{ runner.os }}-repository-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-
             bazel-9.3.1-${{ runner.os }}-repository-
       - name: Select the cumulative comparison base
         id: baseline
@@ -163,9 +163,8 @@ jobs:
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/personal-cloud-bazel/repository
-          key: bazel-9.3.1-${{ runner.os }}-repository-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-${{ github.sha }}
+          key: bazel-9.3.1-${{ runner.os }}-repository-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}
           restore-keys: |
-            bazel-9.3.1-${{ runner.os }}-repository-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-
             bazel-9.3.1-${{ runner.os }}-repository-
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: action-cache
@@ -208,9 +207,8 @@ jobs:
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/personal-cloud-bazel/repository
-          key: bazel-9.3.1-${{ runner.os }}-repository-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-${{ github.sha }}
+          key: bazel-9.3.1-${{ runner.os }}-repository-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}
           restore-keys: |
-            bazel-9.3.1-${{ runner.os }}-repository-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-
             bazel-9.3.1-${{ runner.os }}-repository-
       - name: Build the declared Worker archive
         if: matrix.kind == 'worker'

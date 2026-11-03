@@ -25,15 +25,20 @@ and their unexpired artifacts. It skips neither the current cumulative check pla
 
 `run.py` executes one affected group with Bazel. Node, Python and generic checks (including Go) run up to four at once;
 workerd, CPU, browser and container groups run one at a time. The serial workerd leaves are dealt round-robin over three
-shards that run on separate runners and share one cache. CPU test results are not reused. Browser environment
-preparation is an explicit CI step; owner browser profiles are never used.
+shards that run on separate runners and share one cache key: only the first shard to finish saves it, and the other
+two shards' new outputs are dropped. CPU test results are not reused. Browser environment preparation is an explicit CI
+step; owner browser profiles are never used.
 
 Caches are written only by `main` pushes. Planning analyzes the whole graph, so it alone saves the downloaded
-repositories that every job restores. Each check family saves its action cache after `run.py` stops Bazel and trims it
-to 1.5 GiB, least recently used first. Branch, artifact and private jobs only restore. Restore keys prefer the same
-lockfiles and fall back to the newest entry for the platform, so a dependency change starts warm instead of
-downloading every repository again. Downloaded repositories are not trimmed: if their entry grows large, change the
-key prefix once.
+repositories that every job restores. That entry (about 2.4 GB) is keyed by the lockfiles alone, so `main` uploads it
+again only when a lockfile changes; a new download that leaves every lockfile unchanged comes from the network until
+then. Each check family saves its action cache after `run.py` stops Bazel and trims it to 1.5 GiB, least recently used
+first. Those keys carry the revision so the entries stay current: every family that runs on a `main` push uploads a new
+entry, the 10 GB quota fills within a few pushes, and GitHub evicts the least recently used entries. Superseded entries
+of busy families go first, but a family that has not run for several pushes can also lose its entry and then starts cold
+once. Branch, artifact and private jobs only restore. Restore keys prefer the same lockfiles and fall back to the newest
+entry for the platform, so a dependency change starts warm instead of downloading every repository again. Downloaded
+repositories are not trimmed: if their entry grows large, change the key prefix once.
 
 ```sh
 python3 -m unittest discover -s tools/bazel/ci
