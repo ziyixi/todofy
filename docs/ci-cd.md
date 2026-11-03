@@ -76,7 +76,8 @@ variables and private inputs keep their existing injection paths. Unnamed provid
 
 Each image publisher loads and verifies the exact tested archive before pushing it, then records a registry digest.
 A Docker image ID is not a pullable registry digest. VPS releases receive the pullable digest. Recall publishes its
-already-built ZIP bytes after checking the Chrome/Orion manifests and source identity.
+already-built ZIP bytes after checking the Chrome/Orion manifests and source identity, unless only the stamped version
+differs from the latest release.
 
 Website's separate release workflow reads and validates the current public content snapshot. Its Bazel root requires
 that snapshot explicitly; an unconfigured build cannot silently produce an empty production site. No-change checks

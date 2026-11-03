@@ -79,7 +79,8 @@ class RecallExtensionRelease(unittest.TestCase):
     permission in ci.yml, and nothing waits for it. Its step runs here against a stubbed gh and a synthetic build."""
 
     JOB = "recall-extension-release"
-    STEP = "Publish the extension's version unless its tag exists"
+    STEP = "Publish the extension's version unless its tag or content exists"
+    PREVIOUS = "2026.1010.900"
     VERSION = "2026.1011.1234"
     TAG = f"recall-extension-v{VERSION}"
 
@@ -129,7 +130,10 @@ class RecallExtensionRelease(unittest.TestCase):
         self.assertIn("name: recall-extensions-${{ github.sha }}\n", producer)
         script = workflow_run_step(self.JOB, self.STEP)[0]
         self.assertLess(
-            script.index("git/matching-refs/tags/"), script.index("gh release create")
+            script.index("git/matching-refs/tags/"), script.index("gh release download")
+        )
+        self.assertLess(
+            script.index("gh release download"), script.index("gh release create")
         )
         self.assertNotIn("zip -", script)
 
@@ -140,8 +144,13 @@ class RecallExtensionRelease(unittest.TestCase):
         fail_api=False,
         reused="",
         orion_version=None,
+        previous=None,
+        fail_list=False,
     ):
-        """Runs the step on a synthetic build. Returns (exit code, output, gh calls, the published zip's names, notes)."""
+        """Runs the step on a synthetic build. Returns (exit code, output, gh calls, the published zip's names, notes).
+
+        `previous` maps file names to the contents the latest earlier release had; None means there is none.
+        """
         if (
             shutil.which("jq") is None or shutil.which("zip") is None
         ) and os.environ.get("GITHUB_ACTIONS") != "true":
@@ -173,13 +182,32 @@ class RecallExtensionRelease(unittest.TestCase):
                 "version": orion_version or self.VERSION,
             }
             (orion / "manifest.json").write_text(json.dumps(orion_manifest))
-            for folder, stem in ((build, "recall-extension"), (orion, "recall-orion")):
-                with zipfile.ZipFile(
-                    Path(root) / f"{stem}-{SHA[:7]}.zip", "w"
-                ) as packed:
+
+            def pack(folder, path, changes=None):
+                with zipfile.ZipFile(path, "w") as packed:
                     for file in sorted(folder.rglob("*")):
                         if file.is_file():
-                            packed.write(file, file.relative_to(folder).as_posix())
+                            name = file.relative_to(folder).as_posix()
+                            data = file.read_bytes()
+                            if name == "manifest.json" and changes is not None:
+                                data = json.dumps(
+                                    {
+                                        **json.loads(data),
+                                        "version": self.PREVIOUS,
+                                        "version_name": "b" * 7,
+                                    }
+                                ).encode()
+                            packed.writestr(name, (changes or {}).get(name, data))
+
+            for folder, stem in ((build, "recall-extension"), (orion, "recall-orion")):
+                pack(folder, Path(root) / f"{stem}-{SHA[:7]}.zip")
+                if previous is not None:
+                    Path(root, "previous").mkdir(exist_ok=True)
+                    pack(
+                        folder,
+                        Path(root, "previous", f"{stem}-v{self.PREVIOUS}.zip"),
+                        previous,
+                    )
             bin_dir = Path(root, "bin")
             bin_dir.mkdir()
             Path(root, "refs.txt").write_text(refs)
@@ -190,6 +218,15 @@ class RecallExtensionRelease(unittest.TestCase):
                 'case "$1 $2" in\n'
                 f'  "api repos/{REPOSITORY}/git/matching-refs/tags/{self.TAG}") '
                 + ("exit 1 ;;\n" if fail_api else f'cat "{root}/refs.txt" ;;\n')
+                + f'  "api repos/{REPOSITORY}/releases?per_page=100") '
+                + (
+                    "exit 1 ;;\n"
+                    if fail_list
+                    else f'echo "recall-extension-v{self.PREVIOUS}" ;;\n'
+                    if previous is not None
+                    else ";;\n"
+                )
+                + f'  "release download") mkdir -p "$5"; cp "{root}"/previous/*.zip "$5"/ ;;\n'
                 + f'  "release create") cp "$4" "{root}/published.zip"; cp "$5" "{root}/orion.zip"; cp "${{11}}" "{root}/notes.md" ;;\n'
                 '  *) echo "unexpected gh call" >&2; exit 3 ;;\n'
                 "esac\n"
@@ -198,7 +235,12 @@ class RecallExtensionRelease(unittest.TestCase):
             runner_temp = Path(root, "runner")
             runner_temp.mkdir()
             env = {
-                **os.environ,
+                # The step's python3 is the runner's own, not this test's interpreter.
+                **{
+                    name: value
+                    for name, value in os.environ.items()
+                    if not name.startswith("PYTHON")
+                },
                 "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
                 "GH_TOKEN": "synthetic-token",
                 "GH_REPO": REPOSITORY,
@@ -252,8 +294,14 @@ class RecallExtensionRelease(unittest.TestCase):
                     calls[0],
                     f"api repos/{REPOSITORY}/git/matching-refs/tags/{self.TAG} --jq .[].ref",
                 )
-                self.assertRegex(
+                self.assertEqual(
                     calls[1],
+                    f"api repos/{REPOSITORY}/releases?per_page=100 --jq "
+                    '[.[] | select(.tag_name | startswith("recall-extension-v"))] '
+                    "| max_by(.published_at) | .tag_name // empty",
+                )
+                self.assertRegex(
+                    calls[2],
                     rf"^release create {re.escape(self.TAG)} \S+/recall-extension-v{re.escape(self.VERSION)}\.zip "
                     rf"\S+/recall-orion-v{re.escape(self.VERSION)}\.zip --target {SHA} --title recall extension {re.escape(self.VERSION)} --notes-file \S+$",
                 )
@@ -277,6 +325,39 @@ class RecallExtensionRelease(unittest.TestCase):
         reused = f"https://github.com/{REPOSITORY}/actions/runs/800"
         _, _, _, _, notes = self.publish(reused=reused)
         self.assertIn(f"Checked and built in: {reused}", notes)
+
+    def test_only_a_new_version_since_the_latest_release_publishes_nothing(self):
+        code, output, calls, names, _ = self.publish(previous={})
+        self.assertEqual(code, 0, output)
+        self.assertIn(
+            f"Only the version differs from recall-extension-v{self.PREVIOUS}", output
+        )
+        self.assertRegex(
+            calls[2],
+            rf"^release download recall-extension-v{re.escape(self.PREVIOUS)} --dir \S+ "
+            rf"--pattern recall-extension-v{re.escape(self.PREVIOUS)}\.zip "
+            rf"--pattern recall-orion-v{re.escape(self.PREVIOUS)}\.zip$",
+        )
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(names, [])
+
+    def test_changed_content_since_the_latest_release_is_published(self):
+        manifest = {"manifest_version": 3, "name": "recall", "permissions": ["tabs"]}
+        for previous in (
+            {"sw.js": b"older\n"},
+            {"manifest.json": json.dumps(manifest).encode()},
+        ):
+            with self.subTest(changed=next(iter(previous))):
+                code, output, calls, names, _ = self.publish(previous=previous)
+                self.assertEqual(code, 0, output)
+                self.assertTrue(calls[-1].startswith(f"release create {self.TAG} "))
+                self.assertIn("sw.js", names)
+
+    def test_an_unknown_latest_release_publishes_nothing(self):
+        code, output, calls, names, _ = self.publish(fail_list=True)
+        self.assertNotEqual(code, 0, output)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(names, [])
 
     def test_a_mismatched_orion_build_publishes_nothing(self):
         code, output, calls, _, _ = self.publish(orion_version="2026.1010.900")
