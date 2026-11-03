@@ -222,7 +222,7 @@ class CompositeActions(unittest.TestCase):
                     self.assertEqual(values["bundle-size"] == "true", (tools / "bundle-size.mjs").is_file())
                     self.assertEqual(values["d1"] == "true", bool(config.get("d1_databases")))
                     self.assertEqual(values["assets"] == "true", "assets" in config)
-                    self.assertEqual(values["cf-api-token"].startswith("${{ inputs."), True)
+                    self.assertTrue(values["cf-api-token"].startswith("${{ inputs."))
                     self.assertEqual(values["host"], "${{ steps.config.outputs.host }}")
                     self.assertEqual(values["access-issuer"], "${{ steps.config.outputs.access_issuer }}")
         # Todofy's two Workers and the website relay keep their own recipes.
@@ -232,6 +232,28 @@ class CompositeActions(unittest.TestCase):
         # Home is the one without a production-version step, Personal MCP the one with its own Access check.
         self.assertEqual({app for app, values in found.items() if values["production"] != "true"}, {"dashboard"})
         self.assertEqual({app for app, values in found.items() if not values["access-paths"]}, {"personal-mcp"})
+
+    def test_home_checks_the_private_registration_it_deploys_before_the_deploy(self):
+        """A registration Home's parser refuses fails the release, not Home's API: the step runs the bundle the archive
+        carries on the secrets file every wrangler command reads, after that file is written and before the first."""
+        recipe = yaml.load("steps:\n" + release_jobs()["dashboard-deploy"].split("    steps:\n", 1)[1],
+                           Loader=yaml.BaseLoader)["steps"]
+        runs = [step.get("run", "") for step in recipe]
+        written = runs.index('node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/home-secrets.json"')
+        check = runs.index('node ../.compiled/tools/private-catalog.mjs "$RUNNER_TEMP/home-secrets.json"')
+        wrangler = [index for index, run in enumerate(runs) if "wrangler " in run]
+        self.assertLess(written, check)
+        self.assertLess(check, wrangler[0])
+        for index in wrangler:
+            self.assertIn('--secrets-file "$RUNNER_TEMP/home-secrets.json"', runs[index])
+        for index in (written, check):
+            self.assertEqual(recipe[index]["working-directory"], ".release-source/dashboard/worker")
+        self.assertEqual(recipe[check]["env"], {"PRIVATE_CATALOG": "${{ secrets.PRIVATE_CATALOG }}"})
+        self.assertEqual(recipe[check]["if"], "steps.preflight.outputs.required == 'true'")
+        # The archive stages its tools beside the compiled Worker (.compiled/tools/, tools/bazel/cloudflare.bzl).
+        build = (ROOT / "dashboard/BUILD.bazel").read_text()
+        self.assertIn('tools = [":private_catalog_cli"]', build)
+        self.assertIn('outs = ["tools/private-catalog.mjs"]', build)
 
     def test_each_worker_release_declares_every_action_it_runs(self):
         """A change to a shared action selects every release that runs it: each release-<app> action and the local

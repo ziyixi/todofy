@@ -9,7 +9,11 @@ from pathlib import Path
 from workflow_sources import jobs, release_jobs, workflow_data
 
 ROOT = Path(__file__).absolute().parents[2]
-APPS = ("todofy", "mail-hero", "dashboard", "links", "watch", "fleet", "mailsort", "recall", "storage", "tasks", "personal-mcp", "model-router", "newsletter-console", "website-relay")
+sys.path.insert(0, str(ROOT / "tools" / "service-catalog"))
+from catalog import load_catalog  # noqa: E402
+
+# The Worker release units: the catalog's, without the assets-only website and its own release workflow.
+APPS = tuple(sorted({worker["release"] for worker in load_catalog(ROOT).workers} - {"website"}))
 REQUIRED = "steps.preflight.outputs.required == 'true'"
 
 

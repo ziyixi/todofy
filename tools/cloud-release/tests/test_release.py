@@ -206,12 +206,20 @@ class ReleaseTests(unittest.TestCase):
             return {"id": identifier, "name": name, "head_sha": SHA, "status": "completed", "conclusion": conclusion}
 
         first = [job(identifier) for identifier in range(100, 200)]
+        gated = [*first[:99], job(300, "CI gate")]
+        # A listing longer than MAX_JOB_PAGES full pages.
+        longest = [{"total_count": 501, "jobs": gated},
+                   *({"total_count": 501, "jobs": [job(1000 + 100 * page + index) for index in range(100)]}
+                     for page in range(1, 5))]
         # The gate is the 101st job: one page alone reports it missing and fails closed.
         for pages, verified in (
             ([{"total_count": 101, "jobs": first}, {"total_count": 101, "jobs": [job(300, "CI gate")]}], True),
             ([{"total_count": 101, "jobs": first}, {"total_count": 101, "jobs": [job(300, "CI gate", "failure")]}], False),
             ([{"total_count": 101, "jobs": first}, {"total_count": 101, "jobs": []}], False),
             ([{"total_count": 101, "jobs": [*first, job(300, "CI gate")]}], True),
+            # A listing short of its total fails closed even when the gate it did return succeeded.
+            ([{"total_count": 101, "jobs": gated}, {"total_count": 101, "jobs": []}], False),
+            (longest, False),
         ):
             api = FakeApi([{"object": {"sha": "b" * 40}}, saved, {"status": "ahead", "merge_base_commit": {"sha": SHA}},
                            {"workflow_runs": [run]}, *pages])
