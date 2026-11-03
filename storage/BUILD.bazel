@@ -7,7 +7,7 @@ package(default_visibility = ["//visibility:private"])
 js_library(name = "config", srcs = ["app.toml", "wrangler.toml"], visibility = ["//visibility:public"])
 filegroup(
     name = "release",
-    srcs = [":storage", "//.github/actions:release-storage/action.yml", "//storage/deploy:source_deploy_vars_mjs", "//tools:release_probes", "//tools/cloud-release:release_inputs"],
+    srcs = [":storage", "//.github/actions:release-storage/action.yml", "//.github/actions:worker-deploy/action.yml", "//.github/actions:worker-prepare/action.yml", "//storage/deploy:source_deploy_vars_mjs", "//tools:release_probes", "//tools/cloud-release:release_inputs"],
     tags = ["artifact://storage:storage", "release:worker:storage"],
     visibility = ["//visibility:public"],
 )

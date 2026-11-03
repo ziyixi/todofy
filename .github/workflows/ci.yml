@@ -325,10 +325,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Run publish-newsletter steps
+      - name: Publish the tested newsletter image
         id: publish
-        uses: ./.github/actions/publish-newsletter
+        uses: ./.github/actions/publish-image
         with:
+          service: newsletter
           artifact-run-id: ${{ needs.changes.outputs.artifact_run_id || github.run_id }}
 
   platform-image:
@@ -358,10 +359,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Run publish-platform steps
+      - name: Publish the tested platform image
         id: publish
-        uses: ./.github/actions/publish-platform
+        uses: ./.github/actions/publish-image
         with:
+          service: platform
           artifact-run-id: ${{ needs.changes.outputs.artifact_run_id || github.run_id }}
 
   codex-gateway-image:
@@ -391,10 +393,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Run publish-codex-gateway steps
+      - name: Publish the tested codex-gateway image
         id: publish
-        uses: ./.github/actions/publish-codex-gateway
+        uses: ./.github/actions/publish-image
         with:
+          service: codex-gateway
           artifact-run-id: ${{ needs.changes.outputs.artifact_run_id || github.run_id }}
 
   vps-bootstrap-bundle:

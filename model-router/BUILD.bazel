@@ -9,6 +9,8 @@ filegroup(
     srcs = [
         ":model-router",
         "//.github/actions:release-model-router/action.yml",
+        "//.github/actions:worker-deploy/action.yml",
+        "//.github/actions:worker-prepare/action.yml",
         "//model-router/tools:connection_check",
         "//model-router/tools:source_deploy_vars_mjs",
         "//tools:release_probes",

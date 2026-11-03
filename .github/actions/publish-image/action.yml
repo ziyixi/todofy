@@ -1,6 +1,9 @@
-name: publish-platform
-description: "publish-platform; called by the repository workflow."
+name: publish-image
+description: "Publish exactly the image of one VPS service that the CI gate tested; called by the repository workflow."
 inputs:
+  service:
+    description: "newsletter, platform or codex-gateway (tools/container-release/image.py --service)"
+    required: true
   artifact-run-id:
     description: "artifact run id"
     required: false
@@ -14,8 +17,8 @@ runs:
   steps:
     - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
       with:
-        name: platform-image-${{ github.sha }}
-        path: ${{ runner.temp }}/platform-image
+        name: ${{ inputs.service }}-image-${{ github.sha }}
+        path: ${{ runner.temp }}/${{ inputs.service }}-image
         github-token: ${{ github.token }}
         run-id: ${{ inputs.artifact-run-id }}
     - name: Log in for image publication
@@ -26,9 +29,11 @@ runs:
       run: printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
     - name: Verify and publish the tested image
       id: publish
+      env:
+        IMAGE_SERVICE: ${{ inputs.service }}
       working-directory: .
       shell: bash -e {0}
-      run: python3 tools/container-release/image.py publish --service platform --sha "$GITHUB_SHA" --directory "$RUNNER_TEMP/platform-image" --github-output
+      run: python3 tools/container-release/image.py publish --service "$IMAGE_SERVICE" --sha "$GITHUB_SHA" --directory "$RUNNER_TEMP/$IMAGE_SERVICE-image" --github-output
     - name: Log out
       if: always()
       working-directory: .

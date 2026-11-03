@@ -11,6 +11,8 @@ filegroup(
     srcs = [
         ":worker_artifact",
         "//.github/actions:release-recall/action.yml",
+        "//.github/actions:worker-deploy/action.yml",
+        "//.github/actions:worker-prepare/action.yml",
         "//recall/deploy:source_deploy_vars_mjs",
         "//tools:release_probes",
         "//tools/cloud-release:release_inputs",

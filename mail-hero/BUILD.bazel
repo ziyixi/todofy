@@ -9,6 +9,8 @@ filegroup(
     srcs = [
         ":mail-hero",
         "//.github/actions:release-mail-hero/action.yml",
+        "//.github/actions:worker-deploy/action.yml",
+        "//.github/actions:worker-prepare/action.yml",
         "//mail-hero/deploy:source_deploy_vars_mjs",
         "//tools:release_probes",
         "//tools/cloud-release:release_inputs",
