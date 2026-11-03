@@ -2,6 +2,7 @@ import io
 import json
 import os
 import sys
+import tempfile
 import unittest
 import urllib.error
 from contextlib import redirect_stdout
@@ -17,7 +18,10 @@ from cloudflare import (
     verify_resources,
 )
 from control import WORKERS, prepare
-from deployments import last_good, record_success
+from deployments import APPS, last_good, record_success, release_units
+
+sys.path.insert(0, str(Path(__file__).absolute().parents[2] / "service-catalog"))
+from catalog import REPO, load_catalog  # noqa: E402
 
 SHA = "a" * 40
 UUID = "6b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e"
@@ -336,6 +340,26 @@ class ReleaseTests(unittest.TestCase):
             for app in ("model_router", "model-router-extra", "unknown"):
                 with self.subTest(app=app), self.assertRaisesRegex(ReleaseError, "DEPLOYMENT_IDENTITY_INVALID"):
                     prepare(app, SHA, False, FakeApi([]))
+
+    def test_release_units_are_the_validated_catalog_workers(self):
+        units = {}
+        for worker in load_catalog(REPO).workers:
+            units.setdefault(worker["release"], set()).add(worker["config"])
+        self.assertEqual({unit: set(paths) for unit, paths in WORKERS.items()},
+                         {unit: paths for unit, paths in units.items() if unit != "website"})
+        self.assertEqual(APPS, set(units) | {"platform", "codex-gateway"})
+        # The application's root config comes first, so Todofy's receipt keeps its evidence order.
+        self.assertEqual(WORKERS["todofy"], ["todofy/wrangler.toml", "todofy/gateway/wrangler.toml"])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for app, text in (("demo", 'id = "demo"\n[[workers]]\nconfig = "demo/edge/wrangler.toml"\n'
+                                       '[[workers]]\nconfig = "demo/wrangler.toml"\n'
+                                       '[[workers]]\nconfig = "demo/relay/wrangler.toml"\nrelease = "demo-relay"\n'),
+                              ("image", 'id = "image"\ntarget = "vps"\n')):
+                (root / app).mkdir()
+                (root / app / "app.toml").write_text(text)
+            self.assertEqual(release_units(root), {"demo": ["demo/wrangler.toml", "demo/edge/wrangler.toml"],
+                                                   "demo-relay": ["demo/relay/wrangler.toml"]})
 
     def test_router_verification_records_the_same_release_identity(self):
         api = FakeApi([{"id": 1, "sha": SHA}, {}])

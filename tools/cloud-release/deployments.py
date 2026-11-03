@@ -2,29 +2,31 @@
 
 import json
 import re
+import tomllib
+from pathlib import Path
 
 from api import ReleaseError, http_status
 
+ROOT = Path(__file__).resolve().parents[2]
 SHA = re.compile(r"[0-9a-f]{40}")
-APPS = {
-    "codex-gateway",
-    "model-router",
-    "todofy",
-    "mail-hero",
-    "dashboard",
-    "links",
-    "tasks",
-    "watch",
-    "fleet",
-    "mailsort",
-    "recall",
-    "storage",
-    "personal-mcp",
-    "newsletter-console",
-    "website-relay",
-    "platform",
-    "website",
-}
+
+
+def release_units(root=ROOT):
+    """Release unit -> its Wrangler configs, read from the app manifests that tools/service-catalog validates.
+
+    An application's Workers release together under its ID, its root config first; a Worker that declares
+    `release = "<unit>"` releases on its own.
+    """
+    units = {}
+    for manifest in sorted(root.glob("*/app.toml")):
+        app = tomllib.loads(manifest.read_text())
+        for worker in app.get("workers", []):
+            units.setdefault(worker.get("release", app["id"]), []).append(worker["config"])
+    return {unit: sorted(paths, key=lambda path: (path.count("/"), path)) for unit, paths in units.items()}
+
+
+# Every Cloudflare release unit, and the VPS receipts vps_record.py writes (platform's covers the Newsletter image).
+APPS = set(release_units()) | {"platform", "codex-gateway"}
 
 
 def identity(repository, app, sha=None):

@@ -9,25 +9,11 @@ from pathlib import Path
 
 from api import Api, ReleaseError
 from cloudflare import digest, observe, routes_differences, verify, verify_resources
-from deployments import identity, last_good, receipt, record_success
+from deployments import identity, last_good, receipt, record_success, release_units
 
 ROOT = Path(__file__).resolve().parents[2]
-WORKERS = {
-    "model-router": ["model-router/wrangler.toml"],
-    "todofy": ["todofy/wrangler.toml", "todofy/gateway/wrangler.toml"],
-    "mail-hero": ["mail-hero/wrangler.toml"],
-    "dashboard": ["dashboard/wrangler.toml"],
-    "links": ["links/wrangler.toml"],
-    "tasks": ["tasks/wrangler.toml"],
-    "watch": ["watch/wrangler.toml"],
-    "fleet": ["fleet/wrangler.toml"],
-    "mailsort": ["mailsort/wrangler.toml"],
-    "recall": ["recall/wrangler.toml"],
-    "storage": ["storage/wrangler.toml"],
-    "personal-mcp": ["personal-mcp/wrangler.toml"],
-    "newsletter-console": ["newsletter-console/wrangler.toml"],
-    "website-relay": ["website/relay/wrangler.toml"],
-}
+# The assets-only website has no Worker script: website-release.yml publishes it with its own recipe and receipt.
+WORKERS = {unit: paths for unit, paths in release_units(ROOT).items() if unit != "website"}
 # A receipt reads at most this many 100-job pages of one CI run.
 MAX_JOB_PAGES = 5
 MANUAL = {
