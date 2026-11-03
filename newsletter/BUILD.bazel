@@ -13,7 +13,7 @@ filegroup(
     name = "release",
     srcs = [
         ":newsletter",
-        "//.github/actions:check-newsletter-image/action.yml",
+        "//.github/actions:build-newsletter/action.yml",
         "//.github/actions:publish-image/action.yml",
         "//tools/container-release:release_inputs",
     ],

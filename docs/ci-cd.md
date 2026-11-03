@@ -21,7 +21,8 @@ Building a configuration target never applies infrastructure or changes a runnin
 
 The Changes job discovers public `:check` facades and tagged release inputs. Fixed Target Determinator compares their
 Bazel dependency graphs with the selected Git base. CI runs the affected **leaf tests**, grouped by Node, Python,
-Go, browser, workerd, CPU, container and generic checks. It does not run an entire app because one test file changed.
+browser, workerd (three shards), CPU, container and generic checks. It does not run an entire app because one test file
+changed.
 
 Release targets include their production code, assets, static configuration and the publication scripts they use.
 A test-only change does not publish the app. A deployment-script change selects its actual users. Independent units,
@@ -32,10 +33,10 @@ workflow ancestor, so a failed publication remains in the next cumulative releas
 the requested publications. `all` checks the full graph. `both` means Todofy and Mail Hero; `all` means all declared
 releases. Newsletter and Platform keep their paired image publication and VPS rollout.
 
-Tests use Bazel's cache. CPU checks always execute when selected. Container probes, provider verification and live
-publication checks execute each time; cached unit tests do not substitute for them. Browser archives, Python/Node
-interpreters, generators, dependency resolutions and OCI bases are pinned. Ubuntu/Docker integration setup remains
-an explicit CI environment requirement.
+Tests use Bazel's cache, which only `main` pushes save. CPU checks always execute when selected. Container probes,
+provider verification and live publication checks execute each time; cached unit tests do not substitute for them.
+Browser archives, Python/Node interpreters, generators, dependency resolutions and OCI bases are pinned.
+Ubuntu/Docker integration setup remains an explicit CI environment requirement.
 
 ## Private checks
 
@@ -46,18 +47,17 @@ private commit before updating the parent gitlink. Fork builds without private a
 use the same public graph without an initialized submodule.
 
 The private job restores the public Bazel cache but never saves a cache or uploads build/test artifacts. Public
-cache producers run without the private checkout.
+cache producers run without the private checkout. Its Bazel output stays in a file on the runner because it names
+private targets and prints failing test logs; the public log shows only `PRIVATE_BUILD_FAILED` or
+`PRIVATE_TEST_FAILED`. Reproduce a failure locally with `bazel test @private//:check`.
 
-Its checked, unstamped artifacts produce a content fingerprint. The optional main-only [Private publication](../.github/workflows/private-release.yml)
-delegates to the pinned private entry point; application names and deployment implementation stay private. It uses
-the fingerprint to skip unchanged application artifacts, including documentation-only changes. Shared build inputs
-remain part of the native Bazel dependency graph.
-
-Initial publication and infrastructure operations use the main-only `Private operations` workflow, which reuses
-the same source's green gate without re-running public application builds. Normal push publication starts after
-`PRIVATE_RELEASE_ENABLED` is enabled. Private images stay private and are pushed from the same checked sources.
-Successful publication records its verified identity through GitHub Deployments. Private infrastructure has its
-own reviewed plan/apply path; public resources keep their existing publication and reconciliation owners.
+Private publication is manual. The main-only `Private operations` workflow runs
+[Private release](../.github/workflows/private-release.yml), which delegates to the pinned private entry point and
+reuses the same source's green gate without re-running public application builds; application names and deployment
+implementation stay private. A main push never publishes private sources. Private images stay private and are pushed
+from the same checked sources. Successful publication records its verified identity through GitHub Deployments.
+Private infrastructure has its own reviewed plan/apply path; public resources keep their existing publication and
+reconciliation owners.
 
 ## Checked artifacts
 
@@ -76,7 +76,8 @@ variables and private inputs keep their existing injection paths. Unnamed provid
 
 Each image publisher loads and verifies the exact tested archive before pushing it, then records a registry digest.
 A Docker image ID is not a pullable registry digest. VPS releases receive the pullable digest. Recall publishes its
-already-built ZIP bytes after checking the Chrome/Orion manifests and source identity.
+already-built ZIP bytes after checking the Chrome/Orion manifests and source identity, unless only the stamped version
+differs from the latest release.
 
 Website's separate release workflow reads and validates the current public content snapshot. Its Bazel root requires
 that snapshot explicitly; an unconfigured build cannot silently produce an empty production site. No-change checks

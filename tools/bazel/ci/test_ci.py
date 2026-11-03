@@ -3,6 +3,7 @@
 import contextlib
 import io
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -26,7 +27,10 @@ class GroupsTest(unittest.TestCase):
                 for name, kind, tags in [
                     ("cpu", "js_test", ["cpu", "workerd"]),
                     ("browser", "js_test", ["browser"]),
-                    ("worker", "js_test", ["workerd"]),
+                    ("worker1", "js_test", ["workerd"]),
+                    ("worker2", "js_test", ["workerd"]),
+                    ("worker3", "js_test", ["workerd"]),
+                    ("worker4", "js_test", ["workerd"]),
                     ("container", "py_test", ["container"]),
                     ("node", "js_test", []),
                     ("python", "py_test", []),
@@ -42,7 +46,10 @@ class GroupsTest(unittest.TestCase):
             for name in (
                 "cpu",
                 "browser",
-                "worker",
+                "worker1",
+                "worker2",
+                "worker3",
+                "worker4",
                 "container",
                 "node",
                 "python",
@@ -54,9 +61,30 @@ class GroupsTest(unittest.TestCase):
         groups = plan.target_groups(xml, labels)
         self.assertEqual(set(groups), set(plan.GROUPS))
         self.assertEqual(groups["cpu"], ["//a:cpu"])
-        self.assertEqual(groups["workerd"], ["//a:worker"])
+        self.assertEqual(groups["check"], ["//a:check", "//a:go"])
+        self.assertEqual(groups["workerd-1"], ["//a:worker1", "//a:worker4"])
+        self.assertEqual(groups["workerd-2"], ["//a:worker2"])
+        self.assertEqual(groups["workerd-3"], ["//a:worker3"])
         self.assertNotIn(
             "//a:manual", [label for group in groups.values() for label in group]
+        )
+
+    def test_workerd_shards_share_one_cache_and_omit_empty_shards(self):
+        xml = '<query><rule name="//a:worker" class="js_test"><list name="tags"><string value="workerd"/></list></rule></query>'
+        groups = plan.target_groups(xml, {"//a:worker"})
+        self.assertEqual(groups, {"workerd-1": ["//a:worker"]})
+        self.assertEqual(
+            plan.ci_matrix(
+                {"node": [], **{shard: [] for shard in plan.WORKERD_SHARDS}}
+            ),
+            {
+                "include": [
+                    {"group": "node", "cache": "node"},
+                    {"group": "workerd-1", "cache": "workerd"},
+                    {"group": "workerd-2", "cache": "workerd"},
+                    {"group": "workerd-3", "cache": "workerd"},
+                ]
+            },
         )
 
     def test_targets_not_selected_by_determinator_are_omitted(self):
@@ -70,12 +98,28 @@ class GroupsTest(unittest.TestCase):
             )
             self.assertEqual(command[:2], ["bazel", "test"])
             self.assertEqual("--nocache_test_results" in command, group == "cpu")
-            self.assertIn(
-                "--local_test_jobs="
-                + ("1" if group in ("workerd", "cpu", "browser", "container") else "4"),
-                command,
-            )
+            parallel = group in ("node", "python", "check")
+            self.assertIn("--local_test_jobs=" + ("4" if parallel else "1"), command)
             self.assertIn("--target_pattern_file=/tmp/targets.txt", command)
+
+
+class GarbageCollectionTest(unittest.TestCase):
+    def test_least_recently_used_files_go_first_until_the_cache_fits(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = Path(temporary)
+            for age, name in enumerate(("cas/new", "ac/middle", "cas/old")):
+                path = cache / name
+                path.parent.mkdir(exist_ok=True)
+                path.write_bytes(b"x" * 10)
+                os.utime(path, (1000 - age, 1000 - age))
+            runner.collect_garbage(cache, limit=20)
+            self.assertEqual(
+                sorted(path.name for path in cache.rglob("*") if path.is_file()),
+                ["middle", "new"],
+            )
+            runner.collect_garbage(cache, limit=20)
+            self.assertTrue((cache / "ac/middle").exists())
+            runner.collect_garbage(cache / "missing", limit=0)
 
 
 class SelectionTest(unittest.TestCase):

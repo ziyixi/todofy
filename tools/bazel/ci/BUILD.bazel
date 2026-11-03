@@ -1,4 +1,4 @@
-load("@rules_python//python:defs.bzl", "py_library", "py_test")
+load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
 load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES", "source_audit_files")
 
 py_library(
@@ -33,6 +33,16 @@ py_test(
     srcs = ["test_releases.py"],
     legacy_create_init = False,
     main = "test_releases.py",
+    deps = [":planner"],
+)
+
+# Manual: it needs the fixed Bazel and Target Determinator binaries and runs nested Bazel servers.
+py_binary(
+    name = "graph_test",
+    srcs = ["graph_test.py"],
+    legacy_create_init = False,
+    main = "graph_test.py",
+    tags = ["manual"],
     deps = [":planner"],
 )
 

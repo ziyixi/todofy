@@ -39,7 +39,7 @@ addresses, forbids data sources and provisioners, and rejects undeclared file/co
 
 ## Toolchain and checks
 
-Bazel fixes OpenTofu at 1.12.6 and uses Cloudflare provider 5.25.0 with the hashes in
+Bazel fixes OpenTofu at 1.12.6 (Actions reads the same pin from `.opentofu-version`) and uses Cloudflare provider 5.25.0 with the hashes in
 [`.terraform.lock.hcl`](.terraform.lock.hcl). Change these pins deliberately and verify the resulting plan.
 `identity.tf` ignores only the imported GitHub OAuth client secret because Cloudflare cannot return that value;
 the rest of the managed configuration remains compared.

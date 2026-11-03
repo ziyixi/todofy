@@ -9,5 +9,9 @@
   },
   "scripts": {
     "postinstall": "node proto/tools/ensure.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "catalog:",
+    "tsx": "catalog:"
   }
 }

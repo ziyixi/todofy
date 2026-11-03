@@ -19,7 +19,6 @@ py_library(
 pytest_test(
     name = "host_backup_restore_test",
     srcs = ["test_backup_restore.py"],
-    args = ["$(rootpath test_backup_restore.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "//todofy:config",
@@ -54,7 +53,6 @@ pytest_test(
 pytest_test(
     name = "host_smoke_webhook_test",
     srcs = ["test_smoke_webhook.py"],
-    args = ["$(rootpath test_smoke_webhook.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "//todofy:config",

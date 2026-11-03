@@ -19,7 +19,6 @@ py_library(
 pytest_test(
     name = "host_legacy_to_d1_test",
     srcs = ["test_legacy_to_d1.py"],
-    args = ["$(rootpath test_legacy_to_d1.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "conftest.py",
@@ -54,7 +53,6 @@ pytest_test(
 pytest_test(
     name = "host_legacy_snapshot_test",
     srcs = ["test_snapshot.py"],
-    args = ["$(rootpath test_snapshot.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "conftest.py",

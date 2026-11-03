@@ -13,6 +13,7 @@ exports_files([
     "package.json",
     "pnpm-lock.yaml",
     "pnpm-workspace.yaml",
+    "pyproject.toml",
     "uv.lock",
 ])
 
@@ -21,6 +22,8 @@ npm_link_all_packages(name = "node_modules")
 js_library(
     name = "toolchain_version_inputs",
     srcs = [
+        ".node-version",
+        ".opentofu-version",
         ".python-version",
         "MODULE.bazel",
         "package.json",
@@ -97,10 +100,6 @@ filegroup(
     ],
     visibility = ["//visibility:public"],
 )
-
-exports_files(["pyproject.toml"])
-
-exports_files([".python-version"])
 
 filegroup(
     name = "newsletter_ci_test_inputs",

@@ -7,7 +7,6 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 from workflow_sources import workflow_data
 
@@ -113,10 +112,56 @@ class BazelCI(unittest.TestCase):
             for step in steps
             if "cache" in step.get("uses", "")
         ]
-        self.assertEqual(cache_actions, ["actions/cache/restore"])
+        self.assertEqual(cache_actions, ["actions/cache/restore"] * 2)
         self.assertFalse(
             any("upload-artifact@" in step.get("uses", "") for step in steps)
         )
+
+    def test_private_bazel_output_stays_off_the_public_log(self):
+        workflow = workflow_data(ROOT / ".github/workflows/private-check.yml")
+        script = next(
+            step["run"]
+            for step in workflow["jobs"]["check"]["steps"]
+            if step.get("name") == "Build and test private targets"
+        )
+        for failing, code in (
+            ("build", "PRIVATE_BUILD_FAILED"),
+            ("test", "PRIVATE_TEST_FAILED"),
+            ("", ""),
+        ):
+            with (
+                self.subTest(failing=failing),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                temporary = Path(directory)
+                bazel = temporary / "bazel"
+                bazel.write_text(
+                    "#!/bin/sh\n"
+                    'echo "//synthetic-private:target $1"\n'
+                    'echo "synthetic private test log" >&2\n'
+                    f'[ "$1" != "{failing}" ]\n'
+                )
+                bazel.chmod(0o755)
+                result = subprocess.run(
+                    ["bash", "-e", "-c", script],
+                    env={
+                        **os.environ,
+                        "PATH": f"{temporary}{os.pathsep}{os.environ['PATH']}",
+                        "RUNNER_TEMP": str(temporary),
+                        "HOME": str(temporary),
+                    },
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 1 if code else 0)
+                self.assertEqual(
+                    result.stdout + result.stderr, f"::error::{code}\n" if code else ""
+                )
+                self.assertIn(
+                    "synthetic private test log",
+                    (temporary / "private-bazel.log").read_text(),
+                )
 
     def test_public_planning_skips_private_submodule_initialization(self):
         step = next(
@@ -127,23 +172,62 @@ class BazelCI(unittest.TestCase):
         self.assertEqual(step["env"]["GIT_CONFIG_VALUE_0"], "none")
         self.assertIn("private", (ROOT / ".bazelignore").read_text().splitlines())
 
-    def test_private_cache_can_restore_actual_public_producers_across_revisions(self):
+    def cache_steps(self):
         private = workflow_data(ROOT / ".github/workflows/private-check.yml")
-        consumer = next(
-            step["with"]
-            for step in private["jobs"]["check"]["steps"]
-            if step.get("uses", "").startswith("actions/cache/restore@")
+        jobs = {**self.jobs, "private-check": private["jobs"]["check"]}
+        return {
+            name: [
+                step
+                for step in job.get("steps", [])
+                if "actions/cache" in step.get("uses", "")
+            ]
+            for name, job in jobs.items()
+        }
+
+    def test_only_main_pushes_save_bazel_caches(self):
+        steps = self.cache_steps()
+        saves = {}
+        for job, cached in steps.items():
+            restores = {
+                step.get("id"): step for step in cached if "/restore@" in step["uses"]
+            }
+            for step in cached:
+                with self.subTest(job=job, step=step["with"]["path"]):
+                    action = step["uses"].split("@")[0]
+                    self.assertIn(
+                        action, {"actions/cache/restore", "actions/cache/save"}
+                    )
+                    if action == "actions/cache/save":
+                        source = re.fullmatch(
+                            r"\$\{\{ steps\.([a-z-]+)\.outputs\.cache-primary-key \}\}",
+                            step["with"]["key"],
+                        )[1]
+                        self.assertEqual(
+                            step["with"]["path"], restores[source]["with"]["path"]
+                        )
+                        self.assertEqual(
+                            step["if"],
+                            "github.event_name == 'push' && github.ref == 'refs/heads/main' && "
+                            f"steps.{source}.outputs.cache-hit != 'true'",
+                        )
+                        saves.setdefault(job, []).append(step["with"]["path"])
+        self.assertEqual(
+            saves,
+            {
+                "changes": ["~/.cache/personal-cloud-bazel/repository"],
+                "checks": ["~/.cache/personal-cloud-bazel/actions"],
+            },
         )
-        checks = next(
-            step["with"]
-            for step in self.jobs["checks"]["steps"]
-            if step.get("uses", "").startswith("actions/cache@")
+        script = (ROOT / "tools/bazel/ci/run.py").read_text()
+        self.assertLess(
+            script.index('"shutdown"]'),
+            script.index('collect_garbage(cache / "actions")'),
         )
-        planning = next(
-            step["with"]
-            for step in self.jobs["changes"]["steps"]
-            if step.get("uses", "").startswith("actions/cache@")
-        )
+
+    def test_restores_reach_main_producers_across_revisions_and_dependency_changes(
+        self,
+    ):
+        steps = self.cache_steps()
         dependencies = {
             name: name.encode()
             for name in (
@@ -153,9 +237,10 @@ class BazelCI(unittest.TestCase):
                 "uv.lock",
             )
         }
+        changed = {**dependencies, "uv.lock": b"changed dependency graph"}
 
-        def render(template, *, sha, group="", files=dependencies, runner="Linux"):
-            values = {"runner.os": runner, "github.sha": sha, "matrix.group": group}
+        def render(template, *, sha, family="", files=dependencies, runner="Linux"):
+            values = {"runner.os": runner, "github.sha": sha, "matrix.cache": family}
 
             def expression(match):
                 value = match[1].strip()
@@ -168,77 +253,72 @@ class BazelCI(unittest.TestCase):
 
             return re.sub(r"\$\{\{(.*?)\}\}", expression, template)
 
-        def restores(published, *, files=dependencies, runner="Linux"):
-            requested = [consumer["key"], *consumer["restore-keys"].splitlines()]
-            return any(
-                published.startswith(
-                    render(key, sha="next-main", files=files, runner=runner)
-                )
-                for key in requested
-            )
-
-        for group, producer in (
-            ("node", checks),
-            ("python", checks),
-            ("go", checks),
-            ("workerd", checks),
-            ("", planning),
+        def first_match(
+            consumer, published, *, family="", files=dependencies, runner="Linux"
         ):
-            with self.subTest(producer=group or "planning"):
-                published = render(producer["key"], sha="previous-main", group=group)
-                self.assertNotEqual(published, render(consumer["key"], sha="next-main"))
-                self.assertTrue(restores(published))
-                self.assertEqual(producer["path"], consumer["path"])
-                self.assertFalse(
-                    restores(
-                        published,
-                        files={**dependencies, "uv.lock": b"changed dependency graph"},
+            requested = [consumer["key"], *consumer["restore-keys"].splitlines()]
+            return next(
+                (
+                    index
+                    for index, key in enumerate(requested)
+                    if published.startswith(
+                        render(
+                            key, sha="next", family=family, files=files, runner=runner
+                        )
                     )
-                )
-                self.assertFalse(restores(published, runner="macOS"))
+                ),
+                None,
+            )
 
-    def test_private_fingerprint_reads_source_and_generated_files_from_the_execution_root(
-        self,
-    ):
-        workflow = workflow_data(ROOT / ".github/workflows/private-check.yml")
-        script = next(
-            step["run"]
-            for step in workflow["jobs"]["check"]["steps"]
-            if step.get("id") == "check"
-        )
-        python = script.split("python3 - <<'PY'\n", 1)[1].split("\nPY", 1)[0]
-        with tempfile.TemporaryDirectory() as directory:
-            temporary = Path(directory)
-            execution_root = temporary / "execution"
-            names = (
-                "external/private/k3s/manifests/kustomization.yaml",
-                "bazel-out/generated.txt",
+        def restore(job, path):
+            return next(
+                step["with"]
+                for step in steps[job]
+                if "/restore@" in step["uses"] and step["with"]["path"] == path
             )
-            for name in names:
-                source = execution_root / name
-                source.parent.mkdir(parents=True, exist_ok=True)
-                source.write_text("synthetic source")
-            (temporary / "private-outputs.txt").write_text("\n".join(names) + "\n")
-            (temporary / "private-execution-root.txt").write_text(
-                str(execution_root) + "\n"
-            )
-            output = temporary / "github-output"
-            with patch.dict(
-                os.environ,
-                {"RUNNER_TEMP": str(temporary), "GITHUB_OUTPUT": str(output)},
-            ):
-                exec(compile(python, "private-fingerprint", "exec"), {})
-            expected = hashlib.sha256(
-                b"generated.txt\0synthetic sourcekustomization.yaml\0synthetic source"
-            ).hexdigest()
-            self.assertEqual(output.read_text(), "fingerprint=" + expected + "\n")
+
+        repository = "~/.cache/personal-cloud-bazel/repository"
+        actions = "~/.cache/personal-cloud-bazel/actions"
+        published = render(restore("changes", repository)["key"], sha="previous")
+        for job in ("changes", "checks", "artifacts", "private-check"):
+            consumer = restore(job, repository)
+            with self.subTest(consumer=job, cache="repository"):
+                # Unchanged lockfiles hit main's entry exactly, so a new revision uploads no copy;
+                # a dependency change still starts warm from the newest entry.
+                self.assertEqual(render(consumer["key"], sha="next"), published)
+                self.assertEqual(first_match(consumer, published, files=changed), 1)
+                self.assertIsNone(first_match(consumer, published, runner="macOS"))
+        self.assertNotIn(actions, [step["with"]["path"] for step in steps["artifacts"]])
+        producer = restore("checks", actions)
+        for family in ("node", "python", "workerd", "check"):
+            published = render(producer["key"], sha="previous", family=family)
+            with self.subTest(consumer="checks", family=family):
+                self.assertEqual(first_match(producer, published, family=family), 1)
+                self.assertEqual(
+                    first_match(producer, published, family=family, files=changed), 2
+                )
+                self.assertIsNone(
+                    first_match(producer, published, family="cpu", files=changed)
+                )
+        private = restore("private-check", actions)
+        for family in ("node", "python", "workerd"):
+            with self.subTest(consumer="private-check", family=family):
+                published = render(producer["key"], sha="previous", family=family)
+                self.assertIsNotNone(first_match(private, published))
+                self.assertIsNone(first_match(private, published, runner="macOS"))
 
     def test_private_operations_do_not_route_through_public_release_selection(self):
         inputs = self.workflow["on"]["workflow_dispatch"]["inputs"]
         self.assertNotIn("private_operation", inputs)
-        automatic = self.jobs["private-release"]
-        self.assertIn("github.event_name == 'push'", automatic["if"])
-        self.assertEqual(automatic["with"]["operation"], "auto")
+        # Private releases are manual operations only; a main push never publishes them.
+        self.assertFalse(
+            any(
+                job.get("uses") == "./.github/workflows/private-release.yml"
+                for job in self.jobs.values()
+            )
+        )
+        check = workflow_data(ROOT / ".github/workflows/private-check.yml")
+        self.assertNotIn("outputs", check["on"]["workflow_call"])
 
         operations = workflow_data(ROOT / ".github/workflows/private-ops.yml")
         self.assertEqual(set(operations["on"]), {"workflow_dispatch"})
@@ -302,10 +382,8 @@ class BazelCI(unittest.TestCase):
     def test_cluster_identity_is_available_only_in_the_protected_private_publisher(
         self,
     ):
-        for name in ("changes", "checks", "artifacts", "gate", "private"):
-            self.assertNotIn("id-token", self.jobs[name].get("permissions", {}))
-        caller = self.jobs["private-release"]
-        self.assertEqual(caller["permissions"]["id-token"], "write")
+        for name, job in self.jobs.items():
+            self.assertNotIn("id-token", job.get("permissions", {}), name)
         publisher = workflow_data(ROOT / ".github/workflows/private-release.yml")
         self.assertEqual(publisher["permissions"]["id-token"], "write")
         job = publisher["jobs"]["release"]

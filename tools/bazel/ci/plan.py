@@ -14,7 +14,9 @@ from pathlib import Path
 ROOTS_QUERY = 'visible(//:package.json, filter(":check$", //...))'
 RELEASES_QUERY = 'visible(//:package.json, attr("tags", "release:", //...))'
 RELEASE_KINDS = {"worker", "image", "extension", "website"}
-GROUPS = ("node", "python", "go", "browser", "workerd", "cpu", "container", "check")
+# The serial workerd leaves dominate a full run, so three runners split them and share one cache.
+WORKERD_SHARDS = ("workerd-1", "workerd-2", "workerd-3")
+GROUPS = ("node", "python", "browser", *WORKERD_SHARDS, "cpu", "container", "check")
 TD_VERSION = "target-determinator v0.34.0"
 
 
@@ -61,11 +63,25 @@ def target_groups(xml: str, selected: set[str]) -> dict[str, list[str]]:
             None,
         )
         if group is None:
-            group = {"py_test": "python", "go_test": "go", "js_test": "node"}.get(
+            group = {"py_test": "python", "js_test": "node"}.get(
                 rule.attrib["class"], "check"
             )
         groups.setdefault(group, []).append(label)
+    workerd = sorted(groups.pop("workerd", []))
+    for index, shard in enumerate(WORKERD_SHARDS):
+        if targets := workerd[index :: len(WORKERD_SHARDS)]:
+            groups[shard] = targets
     return {group: sorted(targets) for group, targets in sorted(groups.items())}
+
+
+def cache_family(group: str) -> str:
+    return "workerd" if group in WORKERD_SHARDS else group
+
+
+def ci_matrix(groups: dict[str, list[str]]) -> dict[str, list[dict[str, str]]]:
+    return {
+        "include": [{"group": group, "cache": cache_family(group)} for group in groups]
+    }
 
 
 def leaf_query(roots: list[str], resume_vps_release: bool = False) -> str:
@@ -335,7 +351,7 @@ def main() -> None:
         ],
     }
     args.output.write_text(json.dumps(plan, indent=2) + "\n", encoding="utf-8")
-    matrix = {"include": [{"group": group} for group in groups]}
+    matrix = ci_matrix(groups)
     if output := os.environ.get("GITHUB_OUTPUT"):
         with open(output, "a", encoding="utf-8") as handle:
             handle.write("matrix=" + json.dumps(matrix, separators=(",", ":")) + "\n")

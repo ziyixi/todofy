@@ -15,6 +15,7 @@ ruff_test(
         "//tools/vps-release:python_sources",
     ],
     paths = [
+        "platform/apparmor",
         "platform/src",
         "platform/tests",
         "tools/platform-build",
@@ -35,6 +36,7 @@ ruff_test(
         "//tools/vps-release:python_sources",
     ],
     paths = [
+        "platform/apparmor",
         "platform/src",
         "platform/tests",
         "tools/platform-build",

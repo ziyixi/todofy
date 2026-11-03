@@ -772,11 +772,10 @@ def test_workflow_permissions_and_event_isolation_are_least_privilege():
         not {"NEWSLETTER_SEND_TOKEN", "RESEND_API_KEY"} & environment.keys()
         for environment in configured_environments
     )
-    image_steps = service["jobs"]["artifacts"]["steps"]
-    assert any(
-        "publish_content_config.py validate" in step.get("run", "")
-        for step in image_steps
-    )
+    # Bazel's container test validates the content configuration with the image.
+    probe = (ROOT.parent / "tools/bazel/python/container_test.py").read_text()
+    assert '"newsletter/scripts/publish_content_config.py"' in probe
+    assert '"validate"' in probe
     publish_job = service["jobs"]["newsletter-deploy"]
     assert publish_job["name"] == "Newsletter image publish"
     assert "gate" in publish_job["needs"]
