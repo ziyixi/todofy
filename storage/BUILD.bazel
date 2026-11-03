@@ -19,4 +19,7 @@ worker_artifact(
     visibility = ["//visibility:public"],
 )
 test_suite(name = "check", tests = ["//storage/deploy:check", "//storage/worker:check"], visibility = ["//visibility:public"])
-source_audit_files(deps = ["//storage/deploy:source_audit_files", "//storage/worker:source_audit_files"])
+source_audit_files(deps = [
+    "//storage/deploy:source_audit_files",
+    "//storage/worker:source_audit_files",
+])

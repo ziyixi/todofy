@@ -57,4 +57,8 @@ worker_artifact(
     web = "//newsletter-console/web:bundle",
 )
 
-source_audit_files()
+source_audit_files(deps = [
+    "//newsletter-console/deploy:source_audit_files",
+    "//newsletter-console/web:source_audit_files",
+    "//newsletter-console/worker:source_audit_files",
+])

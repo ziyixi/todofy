@@ -64,7 +64,15 @@ worker_artifact(
     web_prefix = "uiassets/dist",
 )
 
-source_audit_files(patterns = [
-    "*",
-    "docs/**",
-])
+source_audit_files(
+    patterns = [
+        "*",
+        "docs/**",
+    ],
+    deps = [
+        "//mail-hero/cloudflare:source_audit_files",
+        "//mail-hero/deploy:source_audit_files",
+        "//mail-hero/deploy/backup:source_audit_files",
+        "//mail-hero/web:source_audit_files",
+    ],
+)

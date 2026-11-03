@@ -77,4 +77,9 @@ js_run_binary(
     visibility = ["//dashboard:__subpackages__"],
 )
 
-source_audit_files()
+source_audit_files(deps = [
+    "//dashboard/deploy:source_audit_files",
+    "//dashboard/docs:source_audit_files",
+    "//dashboard/web:source_audit_files",
+    "//dashboard/worker:source_audit_files",
+])

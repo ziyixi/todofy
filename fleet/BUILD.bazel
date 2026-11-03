@@ -57,7 +57,14 @@ worker_artifact(
     web = "//fleet/web:bundle",
 )
 
-source_audit_files(patterns = [
-    "*",
-    "observer/**",
-])
+source_audit_files(
+    patterns = [
+        "*",
+        "observer/**",
+    ],
+    deps = [
+        "//fleet/deploy:source_audit_files",
+        "//fleet/web:source_audit_files",
+        "//fleet/worker:source_audit_files",
+    ],
+)

@@ -59,8 +59,16 @@ worker_artifact(
     web = "//links/web:bundle",
 )
 
-source_audit_files(patterns = [
-    "*",
-    "docs/**",
-    "migrations/**",
-])
+source_audit_files(
+    patterns = [
+        "*",
+        "docs/**",
+        "migrations/**",
+    ],
+    deps = [
+        "//links/deploy:source_audit_files",
+        "//links/tools:source_audit_files",
+        "//links/web:source_audit_files",
+        "//links/worker:source_audit_files",
+    ],
+)
