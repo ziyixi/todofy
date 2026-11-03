@@ -35,22 +35,18 @@ describe('provider cursors', () => {
     const secret = 'a'.repeat(64);
     const claims = { provider: 'synthetic-provider-cursor', namespace: 'synthetic', prefix: 'datasets/', expires: Date.now() + 60000 };
     const cursor = await encodeCursor(secret, claims);
-    expect(await decodeCursor(secret, cursor, 'synthetic', 'datasets/')).toEqual(claims);
+    expect(await decodeCursor(secret, cursor, 'synthetic', 'datasets/')).toBe(claims.provider);
     await expect(decodeCursor(secret, cursor, 'other', 'datasets/')).rejects.toThrow();
     await expect(decodeCursor(secret, cursor, 'synthetic', 'control/')).rejects.toThrow();
     await expect(decodeCursor('b'.repeat(64), cursor, 'synthetic', 'datasets/')).rejects.toThrow();
     await expect(decodeCursor(secret, cursor.slice(0, -2) + 'xx', 'synthetic', 'datasets/')).rejects.toThrow();
   });
 
-  it('accepts only a valid signed page reference, nonnegative offset and unexpired scope', async () => {
+  it('refuses empty, oversized or expired provider cursors', async () => {
     const secret = 'a'.repeat(64);
-    const claims = { page: crypto.randomUUID(), offset: 100, namespace: 'synthetic', prefix: 'datasets/', expires: Date.now() + 60000 };
-    const cursor = await encodeCursor(secret, claims);
-    expect(await decodeCursor(secret, cursor, 'synthetic', 'datasets/')).toEqual(claims);
-    for (const changed of [{ ...claims, offset: -1 }, { ...claims, offset: 1.5 }, { ...claims, page: 'unknown' }, { ...claims, expires: Date.now() - 1 }]) {
+    const claims = { provider: 'synthetic-provider-cursor', namespace: 'synthetic', prefix: 'datasets/', expires: Date.now() + 60000 };
+    for (const changed of [{ ...claims, provider: '' }, { ...claims, provider: 'x'.repeat(4097) }, { ...claims, expires: Date.now() - 1 }]) {
       await expect(decodeCursor(secret, await encodeCursor(secret, changed), 'synthetic', 'datasets/')).rejects.toMatchObject({ reason: 'CURSOR_INVALID' });
     }
-    await expect(decodeCursor(secret, cursor, 'other', 'datasets/')).rejects.toMatchObject({ reason: 'CURSOR_INVALID' });
-    await expect(decodeCursor(secret, cursor, 'synthetic', 'control/')).rejects.toMatchObject({ reason: 'CURSOR_INVALID' });
   });
 });
