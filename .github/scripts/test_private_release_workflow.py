@@ -173,7 +173,10 @@ class PrivateReleaseWorkflow(unittest.TestCase):
         self.assertFalse(self.condition("private-deploy"))
 
     def operate(self, directory, operation, status, output):
-        """Run the publisher's real step with a stand-in entry point that prints `output` and exits `status`."""
+        """Run the publisher's real step with a stand-in entry point that prints `output` and exits `status`.
+
+        Returns the step's result, whether the entry point's stdout and stderr were the runner file, and whether
+        that file is left behind."""
         publisher = workflow_data(ROOT / ".github/workflows/private-release.yml")
         script = publisher["jobs"]["release"]["steps"][-1]["run"]
         temporary = Path(directory)
@@ -185,11 +188,14 @@ class PrivateReleaseWorkflow(unittest.TestCase):
             '[ "$3" = "$PRIVATE_RELEASE_OPERATION" ] || exit 99\n'
             'cat "$RUNNER_TEMP/entry-output"\n'
             'echo "synthetic-private-runtime" >&2\n'
+            '"$SYNTHETIC_PYTHON" -c "$SYNTHETIC_CAPTURED"\n'
             'exit "$SYNTHETIC_STATUS"\n'
         )
         python.chmod(0o755)
         log = temporary / "private-operation.log"
         log.unlink(missing_ok=True)
+        captured = temporary / "captured"
+        captured.unlink(missing_ok=True)
         result = subprocess.run(
             ["bash", "-e", "-c", script],
             env={
@@ -198,10 +204,16 @@ class PrivateReleaseWorkflow(unittest.TestCase):
                 "RUNNER_TEMP": str(temporary),
                 "PRIVATE_RELEASE_OPERATION": operation,
                 "SYNTHETIC_STATUS": str(status),
+                "SYNTHETIC_PYTHON": sys.executable,
+                "SYNTHETIC_CAPTURED": (
+                    "import os; log = os.stat(os.environ['RUNNER_TEMP'] + '/private-operation.log'); "
+                    "same = all(os.path.samestat(os.fstat(fd), log) for fd in (1, 2)); "
+                    "open(os.environ['RUNNER_TEMP'] + '/captured', 'w').write(str(same))"
+                ),
             },
             capture_output=True, text=True, check=False,
         )
-        return result, log.read_text()
+        return result, captured.read_text() == "True", log.exists()
 
     def test_every_operation_captures_private_output_and_preserves_the_exit_status(self):
         private_output = '{"event":"synthetic","source":"synthetic-private-source"}\n'
@@ -211,13 +223,14 @@ class PrivateReleaseWorkflow(unittest.TestCase):
             for operation in operations:
                 for status in (0, 7):
                     with self.subTest(operation=operation, status=status):
-                        result, log = self.operate(directory, operation, status, private_output)
+                        result, captured, left = self.operate(directory, operation, status, private_output)
                         self.assertEqual(result.returncode, status)
                         outcome = ("PRIVATE_PUBLICATION" if operation in {"release", "publish", "finish-worker"}
                                    else "PRIVATE_OPERATION")
                         expected = f"::error::{outcome}_FAILED\n" if status else f"::notice::{outcome}_COMPLETE\n"
                         self.assertEqual(result.stdout + result.stderr, expected)
-                        self.assertEqual(log, private_output + "synthetic-private-runtime\n")
+                        # The entry point wrote only to the runner file, which the step then removed.
+                        self.assertEqual((captured, left), (True, False))
 
     def test_only_fixed_shape_plan_results_reach_the_public_log(self):
         fingerprint = "create=1,update=12@0123456789abcdef"
@@ -243,7 +256,7 @@ class PrivateReleaseWorkflow(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             for operation, status, output, expected in cases:
                 with self.subTest(operation=operation, status=status, output=output):
-                    result, _ = self.operate(directory, operation, status, output)
+                    result, _, _ = self.operate(directory, operation, status, output)
                     self.assertEqual(result.returncode, status)
                     self.assertEqual(result.stdout + result.stderr, expected)
 

@@ -17,7 +17,7 @@ runs:
   using: composite
   steps:
     # actions/checkout prints "HEAD is now at <sha> <subject>"; private subjects must not reach the public log.
-    # Git output goes to a runner-local file and the public log shows only a fixed code.
+    # Git output goes to a file the step removes and the public log shows only a fixed code.
     - name: Fetch the pinned private commit quietly
       working-directory: .
       env:
@@ -43,11 +43,12 @@ runs:
           refuse PRIVATE_CHECKOUT_INPUT_INVALID
         fi
         [ -n "$PRIVATE_CHECKOUT_KEY" ] || refuse PRIVATE_CHECKOUT_INPUT_INVALID
-        # The key exists only in this step's temporary directory and is removed however the step ends.
+        # The key and Git's output exist only in this step's temporary directory, removed however the step ends.
         credentials=$(mktemp -d "$RUNNER_TEMP/private-checkout.XXXXXX")
         trap 'rm -rf "$credentials"' EXIT
-        log=$(mktemp "$RUNNER_TEMP/private-checkout-log.XXXXXX")
+        log="$credentials/git.log"
         (umask 077 && printf '%s\n' "$(printf '%s' "$PRIVATE_CHECKOUT_KEY" | tr -d '\r')" > "$credentials/key")
+        unset PRIVATE_CHECKOUT_KEY
         # GitHub's published SSH host keys (api.github.com/meta); fingerprints SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU,
         # SHA256:p2QAMXNIC1TJYWeIOttrVc98/R1BUFWu3/LiyKgUfQM and SHA256:uNiVztksCsDhcc0u9e8BujQXVUpKZIDTMczCvj3tD2s.
         cat > "$credentials/known_hosts" <<'KNOWN_HOSTS'
@@ -60,11 +61,25 @@ runs:
         GIT_SSH_COMMAND+=" -o BatchMode=yes -o StrictHostKeyChecking=yes -o GlobalKnownHostsFile=/dev/null"
         GIT_SSH_COMMAND+=" -o UserKnownHostsFile=$(printf %q "$credentials/known_hosts") -o LogLevel=ERROR"
         export GIT_SSH_COMMAND GIT_TERMINAL_PROMPT=0 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
+        # A fixed code for the causes an operator can act on; Git's own output never reaches the public log.
+        cause() {
+          if grep -qF 'Permission denied (publickey' "$log"; then echo PRIVATE_CHECKOUT_AUTH_FAILED
+          elif grep -qF 'Host key verification failed' "$log"; then echo PRIVATE_CHECKOUT_HOST_KEY_FAILED
+          elif grep -qF 'not our ref' "$log"; then echo PRIVATE_CHECKOUT_REVISION_MISSING
+          fi
+        }
+        git -c init.defaultBranch=private init -q "$destination" > "$log" 2>&1 || refuse PRIVATE_CHECKOUT_FAILED
+        # Like actions/checkout, retry only the network fetch: three attempts, 10-20 seconds apart, unless the
+        # cause is one a retry cannot change.
+        for attempt in 1 2 3; do
+          git -C "$destination" fetch -q --no-tags --no-recurse-submodules --no-write-fetch-head ${depth[@]+"${depth[@]}"} \
+            git@github.com:ziyixi/todofy-private.git "$PRIVATE_CHECKOUT_REVISION" > "$log" 2>&1 && break
+          code=$(cause)
+          if [ -n "$code" ] || [ "$attempt" = 3 ]; then refuse "${code:-PRIVATE_CHECKOUT_FAILED}"; fi
+          sleep $((10 + RANDOM % 11))
+        done
         if ! {
-          git -c init.defaultBranch=private init -q "$destination" &&
-            git -C "$destination" fetch -q --no-tags --no-recurse-submodules --no-write-fetch-head ${depth[@]+"${depth[@]}"} \
-              git@github.com:ziyixi/todofy-private.git "$PRIVATE_CHECKOUT_REVISION" &&
-            git -C "$destination" -c advice.detachedHead=false checkout -q --detach "$PRIVATE_CHECKOUT_REVISION" &&
+          git -C "$destination" -c advice.detachedHead=false checkout -q --detach "$PRIVATE_CHECKOUT_REVISION" &&
             test "$(git -C "$destination" rev-parse HEAD)" = "$PRIVATE_CHECKOUT_REVISION"
         } > "$log" 2>&1; then
           refuse PRIVATE_CHECKOUT_FAILED

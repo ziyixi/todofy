@@ -21,7 +21,8 @@ GITHUB_FINGERPRINTS = {
     "p2QAMXNIC1TJYWeIOttrVc98/R1BUFWu3/LiyKgUfQM",
     "uNiVztksCsDhcc0u9e8BujQXVUpKZIDTMczCvj3tD2s",
 }
-# Records each call, then serves the synthetic repository the way GitHub's SSH endpoint would.
+# Records each call, fails the first calls with the scripted messages, then serves the synthetic repository the way
+# GitHub's SSH endpoint would.
 FAKE_SSH = """\
 import json, os, stat, sys
 args = sys.argv[1:]
@@ -32,11 +33,14 @@ with open(key) as handle:
 with open(known) as handle:
     known_text = handle.read()
 record = {"args": args, "key": key_text, "key_path": key, "key_mode": stat.S_IMODE(os.stat(key).st_mode),
-          "known_hosts": known_text}
+          "known_hosts": known_text, "key_inherited": "PRIVATE_CHECKOUT_KEY" in os.environ}
 with open(os.environ["FAKE_SSH_RECORD"], "a") as handle:
     handle.write(json.dumps(record) + "\\n")
-if os.environ.get("FAKE_SSH_FAIL"):
-    print("fatal: synthetic-private-subject", file=sys.stderr)
+with open(os.environ["FAKE_SSH_RECORD"]) as handle:
+    call = len(handle.readlines())
+failures = json.loads(os.environ["FAKE_SSH_FAILURES"])
+if call <= len(failures):
+    print(failures[call - 1], file=sys.stderr)
     sys.exit(255)
 if args[-2:] != ["git@github.com", "git-upload-pack '" + os.environ["FAKE_SSH_EXPECTED"] + ".git'"]:
     sys.exit(254)
@@ -67,18 +71,22 @@ def git(cwd, *args):
 
 
 def run_checkout(workspace, temporary, repository, *, revision, path, history,
-                 key="synthetic-read-only-key\n", fail=False):
-    """Run the action's own step against a local repository behind a recording stand-in for ssh."""
+                 key="synthetic-read-only-key\n", failures=()):
+    """Run the action's own step against a local repository behind recording stand-ins for ssh and sleep."""
     tools = Path(temporary) / "fake-ssh"
     tools.mkdir(exist_ok=True)
     (tools / "ssh.py").write_text(FAKE_SSH)
     ssh = tools / "ssh"
     ssh.write_text('#!/bin/sh\nexec "$FAKE_SSH_PYTHON" "$FAKE_SSH_PROGRAM" "$@"\n')
     ssh.chmod(0o755)
+    sleep = tools / "sleep"
+    sleep.write_text('#!/bin/sh\necho "$@" >> "$FAKE_SLEEP_RECORD"\n')
+    sleep.chmod(0o755)
     runner_temp = Path(temporary) / "runner-temp"
     runner_temp.mkdir(exist_ok=True)
     record = Path(temporary) / "ssh-record.jsonl"
     record.unlink(missing_ok=True)
+    sleeps(temporary).unlink(missing_ok=True)
     result = subprocess.run(
         ["bash", "-e", "-c", checkout_script()],
         cwd=workspace,
@@ -95,12 +103,22 @@ def run_checkout(workspace, temporary, repository, *, revision, path, history,
             "FAKE_SSH_RECORD": str(record),
             "FAKE_SSH_REPOSITORY": str(repository),
             "FAKE_SSH_EXPECTED": REPOSITORY,
-            "FAKE_SSH_FAIL": "1" if fail else "",
+            "FAKE_SSH_FAILURES": json.dumps(list(failures)),
+            "FAKE_SLEEP_RECORD": str(sleeps(temporary)),
         },
         capture_output=True, text=True, check=False,
     )
     calls = [json.loads(line) for line in record.read_text().splitlines()] if record.exists() else []
     return result, calls, runner_temp
+
+
+def sleeps(temporary):
+    return Path(temporary) / "sleep-record.txt"
+
+
+def slept(temporary):
+    path = sleeps(temporary)
+    return [int(line) for line in path.read_text().split()] if path.exists() else []
 
 
 def synthetic_repository(directory):
@@ -126,7 +144,8 @@ class PrivateCheckout(unittest.TestCase):
             if path == ACTION:
                 continue
             text = path.read_text()
-            # actions/checkout prints the fetched commit's subject; no workflow may fetch the private repository with it.
+            # actions/checkout prints the fetched commit's subject; no workflow may fetch the private repository with it,
+            # by name or through the public repository's submodule.
             self.assertNotIn(REPOSITORY, text, path)
             document = workflow_data(path)
             jobs = document.get("jobs", {}).values() if "jobs" in document else [document["runs"]]
@@ -134,6 +153,9 @@ class PrivateCheckout(unittest.TestCase):
                 for step in job.get("steps", []):
                     if step.get("uses") == "./.github/actions/private-checkout":
                         callers.append((path.name, step["with"]))
+                    if step.get("uses", "").startswith("actions/checkout@"):
+                        self.assertEqual(step.get("with", {}).get("submodules", "false"), "false", path)
+                    self.assertNotRegex(step.get("run", ""), r"submodule\s+update|(?<!no-)recurse-submodules", path)
         self.assertEqual(sorted(name for name, _ in callers),
                          ["action.yml", "private-check.yml", "private-check.yml", "private-release.yml"])
         for name, values in callers:
@@ -178,10 +200,12 @@ class PrivateCheckout(unittest.TestCase):
                     call = calls[0]
                     self.assertEqual(call["key"], "-----SYNTHETIC KEY-----\nbody\n")
                     self.assertEqual(call["key_mode"], 0o600)
+                    self.assertFalse(call["key_inherited"])
                     self.assertTrue(call["key_path"].startswith(str(runner_temp)))
                     self.assertFalse(Path(call["key_path"]).exists())
                     self.assertEqual([path.name for path in runner_temp.iterdir()
-                                      if path.name.startswith("private-checkout.")], [])
+                                      if path.name.startswith("private-checkout")], [])
+                    self.assertEqual(slept(directory), [])
                     arguments = " ".join(call["args"])
                     for option in ("-F /dev/null", "-o IdentitiesOnly=yes", "-o IdentityAgent=none",
                                    "-o BatchMode=yes", "-o StrictHostKeyChecking=yes",
@@ -194,21 +218,46 @@ class PrivateCheckout(unittest.TestCase):
                     )
 
     def test_failures_print_only_a_fixed_code_and_remove_the_key(self):
+        transient = "fatal: synthetic-private-subject"
         with tempfile.TemporaryDirectory() as directory:
             source, commits = synthetic_repository(directory)
             workspace = Path(directory) / "workspace"
             workspace.mkdir()
-            for revision, fail in ((commits[2], True), ("f" * 40, False)):
-                with self.subTest(fail=fail):
-                    path = "failed-" + revision[:4]
+            cases = (
+                # A cause a retry may change is retried twice, 10-20 seconds apart, like actions/checkout.
+                (commits[2], [transient] * 3, "PRIVATE_CHECKOUT_FAILED", 3),
+                (commits[2], ["git@github.com: Permission denied (publickey)."], "PRIVATE_CHECKOUT_AUTH_FAILED", 1),
+                (commits[2], ["No ED25519 host key is known for github.com and you have requested strict checking.\n"
+                              "Host key verification failed."], "PRIVATE_CHECKOUT_HOST_KEY_FAILED", 1),
+                ("f" * 40, [], "PRIVATE_CHECKOUT_REVISION_MISSING", 1),
+            )
+            for revision, failures, code, attempts in cases:
+                with self.subTest(code=code):
+                    path = "failed-" + code.lower()
                     result, calls, runner_temp = run_checkout(
-                        workspace, directory, source, revision=revision, path=path, history="commit", fail=fail)
+                        workspace, directory, source, revision=revision, path=path, history="commit",
+                        failures=failures)
                     self.assertEqual(result.returncode, 1)
-                    self.assertEqual(result.stdout + result.stderr, "::error::PRIVATE_CHECKOUT_FAILED\n")
-                    self.assertEqual(len(calls), 1)
-                    self.assertFalse(Path(calls[0]["key_path"]).exists())
+                    self.assertEqual(result.stdout + result.stderr, f"::error::{code}\n")
+                    self.assertEqual(len(calls), attempts)
+                    delays = slept(directory)
+                    self.assertEqual(len(delays), attempts - 1)
+                    self.assertTrue(all(10 <= delay <= 20 for delay in delays), delays)
+                    self.assertFalse(any(Path(call["key_path"]).exists() for call in calls))
                     self.assertEqual([path.name for path in runner_temp.iterdir()
-                                      if path.name.startswith("private-checkout.")], [])
+                                      if path.name.startswith("private-checkout")], [])
+
+    def test_a_transient_fetch_failure_is_retried(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source, commits = synthetic_repository(directory)
+            workspace = Path(directory) / "workspace"
+            workspace.mkdir()
+            result, calls, _ = run_checkout(
+                workspace, directory, source, revision=commits[2], path="private", history="commit",
+                failures=["kex_exchange_identification: Connection closed by remote host"])
+            self.assertEqual((result.returncode, result.stdout + result.stderr), (0, ""))
+            self.assertEqual((len(calls), len(slept(directory))), (2, 1))
+            self.assertEqual(git(workspace / "private", "rev-parse", "HEAD"), commits[2])
 
     def test_invalid_inputs_are_refused_before_any_fetch(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -239,6 +288,8 @@ class PrivateCheckout(unittest.TestCase):
             [
                 '[ -n "$PRIVATE_CHECKOUT_KEY" ] || refuse PRIVATE_CHECKOUT_INPUT_INVALID',
                 '(umask 077 && printf \'%s\\n\' "$(printf \'%s\' "$PRIVATE_CHECKOUT_KEY" | tr -d \'\\r\')" > "$credentials/key")',
+                # Git, ssh and upload-pack do not inherit the key.
+                "unset PRIVATE_CHECKOUT_KEY",
             ],
         )
 

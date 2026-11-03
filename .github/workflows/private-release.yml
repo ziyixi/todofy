@@ -105,6 +105,8 @@ jobs:
               esac
               ;;
           esac
+          # Nothing later reads the captured output.
+          rm -f "$log"
           if [ "$status" = 0 ]; then
             echo "::notice::${outcome}_COMPLETE"
           else
