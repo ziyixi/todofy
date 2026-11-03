@@ -13,7 +13,8 @@ revoked the authorization, disconnecting removes the local connection, and conne
 ## HTTP protocol
 
 Machine requests use `Authorization: Bearer <application key>`. Owner cookies and Access assertions do not replace
-that key. Authentication precedes reading JSON or binary bodies. The three machine paths are:
+that key. Authentication precedes reading JSON or binary bodies, and the ordinary Worker refuses a malformed key
+with 401 before waking the Durable Object. The three machine paths are:
 
 | Method and path | Request | Response |
 | --- | --- | --- |

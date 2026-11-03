@@ -5,7 +5,7 @@ import { StorageUiService } from '@ziyixi/proto/storage/ui/v1/storage_ui_service
 import { WireJsonError } from '@ziyixi/proto/wire-json';
 import { batchCreate } from './batch.ts';
 import { Dropbox } from './dropbox.ts';
-import { DOMAIN, type Env } from './env.ts';
+import { DOMAIN, MACHINE_AUTHORIZATION, type Env } from './env.ts';
 import { badRequest, errorResponse, failure } from './errors.ts';
 import { digest, hex } from './keys.ts';
 import { list, readContent, stat, writeContent } from './objects.ts';
@@ -37,7 +37,7 @@ export class StorageState extends DurableObject<Env> {
 
   private async machine(request: Request): Promise<Response> {
     const authorization = request.headers.get('authorization') ?? '';
-    if (!/^Bearer sto_[A-Za-z0-9_-]{43}$/.test(authorization)) throw failure(Code.UNAUTHENTICATED, 'UNAUTHORIZED');
+    if (!MACHINE_AUTHORIZATION.test(authorization)) throw failure(Code.UNAUTHENTICATED, 'UNAUTHORIZED');
     const client = this.store.authenticate(await digest(authorization.slice('Bearer '.length)));
     if (client === null) throw failure(Code.UNAUTHENTICATED, 'UNAUTHORIZED');
     const path = new URL(request.url).pathname;
