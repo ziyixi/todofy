@@ -8,6 +8,12 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 No unpublished software changes remain from the automatic-publication work. Private application work, operating
 limits and owner follow-ups are recorded only in `private/HANDOFF.md`.
 
+Every Storage, shared release-tool, CI/build and private-entry-point change from the November 2 review landed with
+`c5c1b7e0`; the automatic publication replaced that review's removal of the never-enabled private path. A
+documentation-only follow-up describes Home's generated private registration in its setup guide, extends the generic
+naming rule to the private repository's own commit subjects and branch names, and names the private check's error
+codes generically. It changes no source, so it publishes no service and no private application.
+
 ## Latest verified release
 
 Main `9da2d116` passed its complete automatic publication: selected public service publications, the selected
@@ -28,6 +34,10 @@ Earlier integration and build configuration are in [October 31](docs/history/han
 
 ## Separate acceptance and follow-ups
 
+- Not yet observed after the November 2 review's Storage release (`c5c1b7e0`): Storage's owner console showing its
+  connection and no `INSUFFICIENT_SPACE`, `CONNECTION_INVALID` or `BAD_REQUEST` timed after that release (the console
+  keeps the newest provider error until a reconnect; `UNAVAILABLE` alone is a transient rate limit), and Home showing
+  every Worker, Storage and the private probes healthy. Only Storage's synthetic unknown-key 401 is recorded.
 - Natural Newsletter/send/researcher runs, daily/weekly backup observations, Recall cold archive reads and a complete
   clean-account/clean-VPS historical restore remain distinct from the build migration. Follow each app's verification
   page and [rebuild verification](docs/rebuild-verification.md); do not infer them from uploads or replay real work.
