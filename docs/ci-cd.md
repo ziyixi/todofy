@@ -33,10 +33,10 @@ workflow ancestor, so a failed publication remains in the next cumulative releas
 the requested publications. `all` checks the full graph. `both` means Todofy and Mail Hero; `all` means all declared
 releases. Newsletter and Platform keep their paired image publication and VPS rollout.
 
-Tests use Bazel's cache. CPU checks always execute when selected. Container probes, provider verification and live
-publication checks execute each time; cached unit tests do not substitute for them. Browser archives, Python/Node
-interpreters, generators, dependency resolutions and OCI bases are pinned. Ubuntu/Docker integration setup remains
-an explicit CI environment requirement.
+Tests use Bazel's cache, which only `main` pushes save. CPU checks always execute when selected. Container probes,
+provider verification and live publication checks execute each time; cached unit tests do not substitute for them.
+Browser archives, Python/Node interpreters, generators, dependency resolutions and OCI bases are pinned.
+Ubuntu/Docker integration setup remains an explicit CI environment requirement.
 
 ## Private checks
 

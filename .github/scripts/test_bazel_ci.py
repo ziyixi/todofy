@@ -113,7 +113,7 @@ class BazelCI(unittest.TestCase):
             for step in steps
             if "cache" in step.get("uses", "")
         ]
-        self.assertEqual(cache_actions, ["actions/cache/restore"])
+        self.assertEqual(cache_actions, ["actions/cache/restore"] * 2)
         self.assertFalse(
             any("upload-artifact@" in step.get("uses", "") for step in steps)
         )
@@ -127,23 +127,62 @@ class BazelCI(unittest.TestCase):
         self.assertEqual(step["env"]["GIT_CONFIG_VALUE_0"], "none")
         self.assertIn("private", (ROOT / ".bazelignore").read_text().splitlines())
 
-    def test_private_cache_can_restore_actual_public_producers_across_revisions(self):
+    def cache_steps(self):
         private = workflow_data(ROOT / ".github/workflows/private-check.yml")
-        consumer = next(
-            step["with"]
-            for step in private["jobs"]["check"]["steps"]
-            if step.get("uses", "").startswith("actions/cache/restore@")
+        jobs = {**self.jobs, "private-check": private["jobs"]["check"]}
+        return {
+            name: [
+                step
+                for step in job.get("steps", [])
+                if "actions/cache" in step.get("uses", "")
+            ]
+            for name, job in jobs.items()
+        }
+
+    def test_only_main_pushes_save_bazel_caches(self):
+        steps = self.cache_steps()
+        saves = {}
+        for job, cached in steps.items():
+            restores = {
+                step.get("id"): step for step in cached if "/restore@" in step["uses"]
+            }
+            for step in cached:
+                with self.subTest(job=job, step=step["with"]["path"]):
+                    action = step["uses"].split("@")[0]
+                    self.assertIn(
+                        action, {"actions/cache/restore", "actions/cache/save"}
+                    )
+                    if action == "actions/cache/save":
+                        source = re.fullmatch(
+                            r"\$\{\{ steps\.([a-z-]+)\.outputs\.cache-primary-key \}\}",
+                            step["with"]["key"],
+                        )[1]
+                        self.assertEqual(
+                            step["with"]["path"], restores[source]["with"]["path"]
+                        )
+                        self.assertEqual(
+                            step["if"],
+                            "github.event_name == 'push' && github.ref == 'refs/heads/main' && "
+                            f"steps.{source}.outputs.cache-hit != 'true'",
+                        )
+                        saves.setdefault(job, []).append(step["with"]["path"])
+        self.assertEqual(
+            saves,
+            {
+                "changes": ["~/.cache/personal-cloud-bazel/repository"],
+                "checks": ["~/.cache/personal-cloud-bazel/actions"],
+            },
         )
-        checks = next(
-            step["with"]
-            for step in self.jobs["checks"]["steps"]
-            if step.get("uses", "").startswith("actions/cache@")
+        script = (ROOT / "tools/bazel/ci/run.py").read_text()
+        self.assertLess(
+            script.index('"shutdown"]'),
+            script.index('collect_garbage(cache / "actions")'),
         )
-        planning = next(
-            step["with"]
-            for step in self.jobs["changes"]["steps"]
-            if step.get("uses", "").startswith("actions/cache@")
-        )
+
+    def test_restores_reach_main_producers_across_revisions_and_dependency_changes(
+        self,
+    ):
+        steps = self.cache_steps()
         dependencies = {
             name: name.encode()
             for name in (
@@ -153,9 +192,10 @@ class BazelCI(unittest.TestCase):
                 "uv.lock",
             )
         }
+        changed = {**dependencies, "uv.lock": b"changed dependency graph"}
 
-        def render(template, *, sha, group="", files=dependencies, runner="Linux"):
-            values = {"runner.os": runner, "github.sha": sha, "matrix.cache": group}
+        def render(template, *, sha, family="", files=dependencies, runner="Linux"):
+            values = {"runner.os": runner, "github.sha": sha, "matrix.cache": family}
 
             def expression(match):
                 value = match[1].strip()
@@ -168,33 +208,58 @@ class BazelCI(unittest.TestCase):
 
             return re.sub(r"\$\{\{(.*?)\}\}", expression, template)
 
-        def restores(published, *, files=dependencies, runner="Linux"):
+        def first_match(
+            consumer, published, *, family="", files=dependencies, runner="Linux"
+        ):
             requested = [consumer["key"], *consumer["restore-keys"].splitlines()]
-            return any(
-                published.startswith(
-                    render(key, sha="next-main", files=files, runner=runner)
-                )
-                for key in requested
+            return next(
+                (
+                    index
+                    for index, key in enumerate(requested)
+                    if published.startswith(
+                        render(
+                            key, sha="next", family=family, files=files, runner=runner
+                        )
+                    )
+                ),
+                None,
             )
 
-        for group, producer in (
-            ("node", checks),
-            ("python", checks),
-            ("workerd", checks),
-            ("", planning),
-        ):
-            with self.subTest(producer=group or "planning"):
-                published = render(producer["key"], sha="previous-main", group=group)
-                self.assertNotEqual(published, render(consumer["key"], sha="next-main"))
-                self.assertTrue(restores(published))
-                self.assertEqual(producer["path"], consumer["path"])
-                self.assertFalse(
-                    restores(
-                        published,
-                        files={**dependencies, "uv.lock": b"changed dependency graph"},
-                    )
+        def restore(job, path):
+            return next(
+                step["with"]
+                for step in steps[job]
+                if "/restore@" in step["uses"] and step["with"]["path"] == path
+            )
+
+        repository = "~/.cache/personal-cloud-bazel/repository"
+        actions = "~/.cache/personal-cloud-bazel/actions"
+        published = render(restore("changes", repository)["key"], sha="previous")
+        for job in ("changes", "checks", "artifacts", "private-check"):
+            consumer = restore(job, repository)
+            with self.subTest(consumer=job, cache="repository"):
+                # The lock-matching entry wins; a dependency change still starts warm.
+                self.assertEqual(first_match(consumer, published), 1)
+                self.assertEqual(first_match(consumer, published, files=changed), 2)
+                self.assertIsNone(first_match(consumer, published, runner="macOS"))
+        self.assertNotIn(actions, [step["with"]["path"] for step in steps["artifacts"]])
+        producer = restore("checks", actions)
+        for family in ("node", "python", "workerd", "check"):
+            published = render(producer["key"], sha="previous", family=family)
+            with self.subTest(consumer="checks", family=family):
+                self.assertEqual(first_match(producer, published, family=family), 1)
+                self.assertEqual(
+                    first_match(producer, published, family=family, files=changed), 2
                 )
-                self.assertFalse(restores(published, runner="macOS"))
+                self.assertIsNone(
+                    first_match(producer, published, family="cpu", files=changed)
+                )
+        private = restore("private-check", actions)
+        for family in ("node", "python", "workerd"):
+            with self.subTest(consumer="private-check", family=family):
+                published = render(producer["key"], sha="previous", family=family)
+                self.assertIsNotNone(first_match(private, published))
+                self.assertIsNone(first_match(private, published, runner="macOS"))
 
     def test_private_fingerprint_reads_source_and_generated_files_from_the_execution_root(
         self,

@@ -3,6 +3,7 @@
 import contextlib
 import io
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -98,6 +99,25 @@ class GroupsTest(unittest.TestCase):
             parallel = group in ("node", "python", "check")
             self.assertIn("--local_test_jobs=" + ("4" if parallel else "1"), command)
             self.assertIn("--target_pattern_file=/tmp/targets.txt", command)
+
+
+class GarbageCollectionTest(unittest.TestCase):
+    def test_least_recently_used_files_go_first_until_the_cache_fits(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = Path(temporary)
+            for age, name in enumerate(("cas/new", "ac/middle", "cas/old")):
+                path = cache / name
+                path.parent.mkdir(exist_ok=True)
+                path.write_bytes(b"x" * 10)
+                os.utime(path, (1000 - age, 1000 - age))
+            runner.collect_garbage(cache, limit=20)
+            self.assertEqual(
+                sorted(path.name for path in cache.rglob("*") if path.is_file()),
+                ["middle", "new"],
+            )
+            runner.collect_garbage(cache, limit=20)
+            self.assertTrue((cache / "ac/middle").exists())
+            runner.collect_garbage(cache / "missing", limit=0)
 
 
 class SelectionTest(unittest.TestCase):
