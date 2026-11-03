@@ -5,16 +5,16 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-Owner-requested price policy change is in progress on `codex/quant-weekly-adjusted` in both repositories: daily
-updates collect only raw prices with seven days of overlap; existing weekly updates collect 90 days of raw overlap
-and refresh complete adjusted history from 2016. No new plan type or setting is needed. Update collection/context,
-the daily already-current guard, regression tests and plan copy together, then use normal protected publication.
-Queued old-policy catch-up `94c9f8b9-6785-4bdb-a485-dcff582de8e1` was cancelled at zero progress at 02:08 UTC.
-Initial events continue independently, observed at 835/1,022 at 02:09 UTC. After the policy is live, use the saved
-daily price plan once for raw-only catch-up; do not resume the old-policy execution.
-Local acceptance passed the actual collector facade (13 targets) and web facade (2 targets), including exact
-raw/all request windows, preserved adjusted rows during daily collection and the raw-only already-current guard.
-Branch/main CI and one normal publication remain before this policy is live.
+The owner withdrew weekly adjusted-history refresh and chose the original policy: daily raw prices with seven
+days of overlap plus complete adjusted history; weekly raw prices with 90 days of overlap. Restore that policy,
+its existing regression checks and original plan copy on `codex/quant-daily-adjusted` in both repositories.
+The weekly-policy publication was cancelled. Independent public health still reports source `893837b`, healthy
+and collector reachable, so the desired daily policy is already live. Do not publish another image merely to
+restore source text. Local collector and web facades passed all 15 targets after restoration; branch/main CI and
+repository merges remain before closing this reversal.
+Price catch-up `94c9f8b9-6785-4bdb-a485-dcff582de8e1` was cancelled at zero progress at 02:08 UTC. Queue the saved
+daily price plan once under the retained daily policy; do not resume the cancelled execution. Initial events
+continue independently, last observed at 854/1,022.
 
 Software delivery is complete: source `893837b` runs with private image
 `sha256:efe22000d785125a836772faaa202dedde44b8909c826bd4d651e55ed5fd0109`; the Worker stage finished through main
@@ -29,8 +29,8 @@ boundary: 663/1,022 with 675,611 matched observations. The UI offers continuatio
 On November 3 at 00:03 UTC, the account statistic day reset was confirmed (21 requests), and this same event
 execution resumed from 663. A fresh UI observation confirmed 664/1,022 and 676,459 matched observations, with its
 original ID/start/range preserved. It is running: do not create a replacement or repeat Resume while active.
-Both old zero-progress price executions remain cancelled. The pending policy change above supersedes their
-raw+vendor-adjusted daily behavior.
+Both old zero-progress price executions remain cancelled. Their raw+vendor-adjusted daily behavior is the
+owner's latest retained policy; a fresh saved-plan catch-up can use it after the reversal above.
 
 After initialization, accept actual source coverage/limitations, catch up through the saved daily price plan if
 needed, and enable saved daily events at 03:00 America/Los_Angeles. Its end date is already blank; subsequent source
