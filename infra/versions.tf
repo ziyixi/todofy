@@ -1,5 +1,5 @@
 terraform {
-  # CI installs exactly 1.12.6 (.github/workflows/ci.yml "Infra checks").
+  # Actions installs exactly the version in the repository's .opentofu-version.
   required_version = ">= 1.12.0, < 1.13.0"
 
   required_providers {

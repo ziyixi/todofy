@@ -22,6 +22,8 @@ npm_link_all_packages(name = "node_modules")
 js_library(
     name = "toolchain_version_inputs",
     srcs = [
+        ".node-version",
+        ".opentofu-version",
         ".python-version",
         "MODULE.bazel",
         "package.json",

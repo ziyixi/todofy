@@ -127,9 +127,7 @@ class DependencyWorkspaces(unittest.TestCase):
             for step in steps
             if step.get("uses", "").startswith("actions/setup-node@")
         )
-        self.assertEqual(
-            setup_node["with"], {"node-version-file": "${{ inputs.root }}/package.json"}
-        )
+        self.assertEqual(setup_node["with"], {"node-version-file": ".node-version"})
         setup_pnpm = next(
             step
             for step in steps
@@ -154,6 +152,30 @@ class DependencyWorkspaces(unittest.TestCase):
         self.assertIn("--ignore-scripts", install["run"])
         self.assertNotIn("ensure.mjs", str(steps))
         self.assertNotIn("uv python install", str(steps))
+
+    def test_actions_install_the_toolchain_versions_pinned_in_one_file_each(self):
+        # tools/bazel/test/toolchain-versions.mjs compares both files with MODULE.bazel.
+        pins = {
+            "actions/setup-node@": {"node-version-file": ".node-version"},
+            "opentofu/setup-opentofu@": {"tofu_version_file": ".opentofu-version"},
+        }
+        seen = set()
+        for path in sorted(
+            [*(ROOT / ".github/workflows").glob("*.yml"), *(ROOT / ".github/actions").glob("*/action.yml")]
+        ):
+            source = workflow_data(path)
+            jobs = source.get("jobs", {"action": source.get("runs", {})})
+            for job in jobs.values():
+                for step in job.get("steps", []):
+                    for action, expected in pins.items():
+                        if step.get("uses", "").startswith(action):
+                            seen.add(action)
+                            with self.subTest(path=path.name, action=action):
+                                self.assertLessEqual(expected.items(), step["with"].items())
+                                self.assertNotIn("node-version", step["with"])
+                                self.assertNotIn("tofu_version", step["with"])
+                                self.assertTrue((ROOT / next(iter(expected.values()))).is_file())
+        self.assertEqual(seen, set(pins))
 
     def test_all_check_installers_use_the_workspace_and_root_uv_lock(self):
         for path in (ROOT / ".github/actions").glob("*/action.yml"):
