@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { URL as NodeURL } from 'node:url';
 import { afterEach, expect, it } from 'vitest';
 import { HASH, harness } from './harness.ts';
 
@@ -104,11 +106,14 @@ it('reuses identical conflicts without overwriting and rejects a different exist
   expect(active.provider.folders.has('/namespaces/synthetic/raw/folder')).toBe(true);
 });
 
-it.each(['append_partial', 'finish_partial', 'finish_unknown', 'finish_metadata', 'finish_rate'] as const)('does not acknowledge or replay a %s batch', async (fault) => {
+it.each([
+  ['append_partial', 'BATCH_NOT_COMMITTED'], ['finish_partial', 'BATCH_INCOMPLETE'], ['finish_unknown', 'BATCH_INCOMPLETE'],
+  ['finish_metadata', 'BATCH_INCOMPLETE'], ['finish_rate', 'BATCH_INCOMPLETE'],
+] as const)('does not acknowledge or replay a %s batch', async (fault, reason) => {
   const { active, token } = await setup();
   active.provider.batchFault = fault;
   const response = await active.machine('content', token, input());
-  await failure(response, 503, 'BATCH_INCOMPLETE');
+  await failure(response, 503, reason);
   expect(response.headers.get('retry-after')).toBeNull();
   expect(active.provider.calls.filter((call) => call.path.endsWith('/start_batch'))).toHaveLength(1);
   expect(active.provider.calls.filter((call) => call.path.endsWith('/append_batch'))).toHaveLength(1);
@@ -130,7 +135,7 @@ it('checks the concatenated hash before committing and keeps old single-object C
   const { active, token } = await setup();
   const valid = input();
   const manifest = JSON.parse(valid.headers['x-storage-batch']) as Record<string, unknown>;
-  await failure(await active.machine('content', token, { ...valid, headers: { ...valid.headers, 'x-storage-batch': JSON.stringify({ ...manifest, content_hash: 'f'.repeat(64) }) } }), 503, 'BATCH_INCOMPLETE');
+  await failure(await active.machine('content', token, { ...valid, headers: { ...valid.headers, 'x-storage-batch': JSON.stringify({ ...manifest, content_hash: 'f'.repeat(64) }) } }), 503, 'BATCH_NOT_COMMITTED');
   expect(active.provider.files.size).toBe(0);
   const body = new TextEncoder().encode('mutable head');
   const first = await active.machine('content?key=control/head', token, { method: 'PUT', body, headers: { 'content-length': String(body.byteLength), 'if-none-match': '*' } });
@@ -148,4 +153,45 @@ it('streams the bounded 32-object 32-MiB batch without putting binary bytes in J
   expect((await response.json<{ objects: Metadata[] }>()).objects).toHaveLength(32);
   expect(active.provider.calls).toHaveLength(3);
   expect(active.provider.files.size).toBe(32);
+  // The worst case: every item conflicts and needs its own stat, still within the 50 subrequests of one invocation.
+  const repeated = await active.machine('content', token, input(files));
+  expect(repeated.status).toBe(200);
+  expect(active.provider.calls).toHaveLength(3 + 35);
+});
+
+it('checks every item hash across 4 MiB blocks and refuses different bytes before finish', async () => {
+  const { active, token } = await setup();
+  const block = 4 * 1024 * 1024;
+  const files = [
+    { key: 'raw/multi-block.bin', data: new Uint8Array(block + 5).map((_, index) => index % 251) },
+    { key: 'raw/after-boundary.bin', data: new Uint8Array(block - 3).fill(7) },
+    { key: 'raw/small.bin', data: new TextEncoder().encode('synthetic tail') },
+  ];
+  const response = await active.machine('content', token, input(files));
+  expect(response.status).toBe(200);
+  for (const item of files) {
+    const stored = active.provider.files.get('/namespaces/synthetic/' + item.key)?.bytes ?? new Uint8Array();
+    expect([stored.byteLength, HASH(stored)]).toEqual([item.data.byteLength, HASH(item.data)]);
+  }
+  const swapped = input([{ ...items[0], key: 'raw/swapped-first.bin' }, { ...items[1], key: 'raw/swapped-second.bin' }]);
+  const manifest = JSON.parse(swapped.headers['x-storage-batch']) as { objects: { content_hash: string }[] };
+  const [first, second] = manifest.objects;
+  if (first === undefined || second === undefined) throw new Error('synthetic manifest');
+  [first.content_hash, second.content_hash] = [second.content_hash, first.content_hash];
+  const calls = active.provider.calls.length;
+  await failure(await active.machine('content', token, { ...swapped, headers: { ...swapped.headers, 'x-storage-batch': JSON.stringify(manifest) } }), 400, 'UPLOAD_HASH_MISMATCH');
+  expect(active.provider.calls.slice(calls).map((call) => call.path)).not.toContain('/2/files/upload_session/finish_batch_v2');
+  expect(active.provider.files.has('/namespaces/synthetic/raw/swapped-first.bin')).toBe(false);
+});
+
+it('accepts the contract golden batch unchanged and answers the golden confirmation bytes', async () => {
+  const { active, token } = await setup();
+  const fixture = (name: string) => new NodeURL('../../../../contracts/storage-objects-v1/fixtures/' + name, import.meta.url);
+  const body = new Uint8Array(readFileSync(fixture('body.bin')));
+  const response = await active.machine('content', token, {
+    method: 'POST', body,
+    headers: { 'content-type': 'application/octet-stream', 'content-length': String(body.byteLength), 'x-storage-batch': readFileSync(fixture('manifest.json'), 'utf8') },
+  });
+  expect(response.status).toBe(200);
+  expect(await response.text()).toBe(readFileSync(fixture('response.json'), 'utf8'));
 });

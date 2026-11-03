@@ -52,12 +52,16 @@ across object boundaries. There are 1 to 32 objects, at most 32 MiB each and at 
 including case variants, are refused. Zero-byte objects continue using the existing conditional PUT route.
 
 The existing Durable Object streams the body through Dropbox's native `start_batch`, `append_batch` and synchronous
-`finish_batch_v2`. The ordinary Worker only forwards the request. Every commit uses `add`, `autorename: false`
-and `strict_conflict: true`. An existing object is reused only after stat confirms its key, length and hash;
-different bytes return 409 `REVISION_CONFLICT`. A complete response contains every metadata record in order.
-Partial, invalid or unknown provider results return 503 `BATCH_INCOMPLETE`, including a rate-limit response after
-finish may have begun. Such errors can leave new immutable objects and must not advance a caller's checkpoint.
-Only an explicit rejection before finish can return 429 with Retry-After. Storage never replays the upload.
+`finish_batch_v2`. The ordinary Worker only forwards the request. While streaming, the object hashes each item and
+refuses one whose bytes differ from its manifest hash with 400 `UPLOAD_HASH_MISMATCH` before finish, so wrong bytes
+never commit under a create-only key. Every commit uses `add`, `autorename: false` and `strict_conflict: true`.
+An existing object is reused only after stat confirms its key, length and hash; different bytes return 409
+`REVISION_CONFLICT`. With 32 items, even a batch of existing objects uses at most 36 of the 50 provider subrequests
+one invocation may make. A complete response contains every metadata record in order.
+A failure before finish commits nothing: an explicit rate limit returns 429 with Retry-After, and another provider
+or transport failure returns 503 `BATCH_NOT_COMMITTED`; the caller may send the same batch again. Once finish may
+have begun, partial, invalid or unknown provider results return 503 `BATCH_INCOMPLETE`, including a rate limit.
+Such errors can leave new immutable objects and must not advance a caller's checkpoint. Storage never replays uploads.
 The mutable control head continues using the original revision-matched PUT; no object format or permission changes.
 
 GET and HEAD also accept If-Match and reject a different revision before returning content. Valid ranges retain

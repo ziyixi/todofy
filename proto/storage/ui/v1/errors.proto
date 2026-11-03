@@ -32,4 +32,8 @@ enum ErrorReason {
   ERROR_REASON_PROVIDER_RESPONSE_INVALID = 10;
   // A batch did not confirm every object; the caller must retain its previous head.
   ERROR_REASON_BATCH_INCOMPLETE = 11;
+  // A batch failed before finish committed any object; the caller may send the same batch again.
+  ERROR_REASON_BATCH_NOT_COMMITTED = 12;
+  // A batch item's actual bytes differ from its declared content hash.
+  ERROR_REASON_UPLOAD_HASH_MISMATCH = 13;
 }

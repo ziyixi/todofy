@@ -1,18 +1,18 @@
 import { create } from '@ziyixi/proto/protobuf';
 import { Code, RpcError } from '@ziyixi/proto/rpc-status';
-import { BatchCreateManifestSchema, BatchCreateResponseSchema, type ObjectMetadata } from '@ziyixi/proto/storage/objects/v1/objects_pb';
+import { BatchCreateManifestSchema, BatchCreateResponseSchema, type BatchCreateObject, type ObjectMetadata } from '@ziyixi/proto/storage/objects/v1/objects_pb';
 import { Client_Access } from '@ziyixi/proto/storage/ui/v1/client_pb';
 import { fromWire, toWire } from '@ziyixi/proto/wire-json';
 import type { Dropbox } from './dropbox.ts';
 import { MAX_OBJECT_BYTES } from './env.ts';
 import { badRequest, failure } from './errors.ts';
-import { objectKey, providerPath } from './keys.ts';
+import { hex, objectKey, providerPath } from './keys.ts';
 import { objectMetadata } from './objects.ts';
 import type { ClientRow } from './store.ts';
 
 type BatchPhase = 'start' | 'append' | 'finish' | 'verify';
 const DIAGNOSTIC_REASONS = new Set([
-  'BATCH_INCOMPLETE', 'REVISION_CONFLICT', 'UPLOAD_LENGTH_MISMATCH', 'NOT_FOUND', 'BAD_REQUEST',
+  'BATCH_INCOMPLETE', 'REVISION_CONFLICT', 'UPLOAD_LENGTH_MISMATCH', 'UPLOAD_HASH_MISMATCH', 'NOT_FOUND', 'BAD_REQUEST',
   'PROVIDER_RESPONSE_INVALID', 'UNAVAILABLE', 'CONNECTION_INVALID', 'NOT_CONFIGURED', 'INTERNAL',
 ]);
 const ENTRY_FAILURE_TAGS = new Set([
@@ -42,6 +42,51 @@ function logFailure(error: unknown, phase: BatchPhase, finishing: boolean, entry
 }
 
 function incomplete(): RpcError { return failure(Code.UNAVAILABLE, 'BATCH_INCOMPLETE'); }
+
+const HASH_BLOCK_BYTES = 4 * 1024 * 1024;
+
+/** Dropbox content hashes of consecutive manifest items, through native SHA-256 streams without buffering bytes. */
+class ItemHashes {
+  private readonly items: readonly BatchCreateObject[];
+  private item = 0;
+  private itemBytes = 0;
+  private blockBytes = 0;
+  private block: { readonly writer: WritableStreamDefaultWriter<ArrayBufferView>; readonly digest: Promise<ArrayBuffer> } | null = null;
+  private blocks: ArrayBuffer[] = [];
+
+  constructor(items: readonly BatchCreateObject[]) { this.items = items; }
+
+  /** Rejects as soon as a completed item differs from its manifest hash, before its last bytes are forwarded. */
+  async write(chunk: Uint8Array): Promise<void> {
+    for (let at = 0; at < chunk.byteLength;) {
+      const expected = this.items[this.item];
+      if (expected === undefined) throw failure(Code.INVALID_ARGUMENT, 'UPLOAD_LENGTH_MISMATCH');
+      if (this.block === null) {
+        const stream = new crypto.DigestStream('SHA-256');
+        this.block = { writer: stream.getWriter(), digest: stream.digest };
+      }
+      const take = Math.min(chunk.byteLength - at, expected.sizeBytes - this.itemBytes, HASH_BLOCK_BYTES - this.blockBytes);
+      await this.block.writer.write(chunk.subarray(at, at + take));
+      at += take;
+      this.itemBytes += take;
+      this.blockBytes += take;
+      if (this.blockBytes === HASH_BLOCK_BYTES || this.itemBytes === expected.sizeBytes) {
+        await this.block.writer.close();
+        this.blocks.push(await this.block.digest);
+        this.block = null;
+        this.blockBytes = 0;
+      }
+      if (this.itemBytes === expected.sizeBytes) {
+        const joined = new Uint8Array(this.blocks.length * 32);
+        for (const [index, digest] of this.blocks.entries()) joined.set(new Uint8Array(digest), index * 32);
+        if (hex(await crypto.subtle.digest('SHA-256', joined)) !== expected.contentHash) throw failure(Code.INVALID_ARGUMENT, 'UPLOAD_HASH_MISMATCH');
+        this.blocks = [];
+        this.item++;
+        this.itemBytes = 0;
+      }
+    }
+  }
+}
 
 function records(value: unknown, length: number): Record<string, unknown>[] {
   if (!Array.isArray(value) || value.length !== length || value.some((item) => typeof item !== 'object' || item === null || Array.isArray(item))) throw incomplete();
@@ -97,10 +142,13 @@ export async function batchCreate(request: Request, client: ClientRow, dropbox: 
     const stream = new FixedLengthStream(length);
     outgoing = stream.readable;
     let received = 0;
+    // Each item is checked against its own manifest hash before finish can commit wrong bytes under a create-only key.
+    const hashes = new ItemHashes(manifest.objects);
     const limiter = new TransformStream<Uint8Array, Uint8Array>({
-      transform(chunk, target) {
+      async transform(chunk, target) {
         received += chunk.byteLength;
         if (received > length) throw failure(Code.INVALID_ARGUMENT, 'UPLOAD_LENGTH_MISMATCH');
+        await hashes.write(chunk);
         target.enqueue(chunk);
       },
       flush() { if (received !== length) throw failure(Code.INVALID_ARGUMENT, 'UPLOAD_LENGTH_MISMATCH'); },
@@ -132,6 +180,7 @@ export async function batchCreate(request: Request, client: ClientRow, dropbox: 
       let metadata: ObjectMetadata;
       if (entry['.tag'] === 'success') metadata = objectMetadata({ ...entry, '.tag': 'file' }, client.namespace, expected.key);
       else if (conflict(entry)) {
+        // With refresh, start, append and finish, 32 conflicts use 36 of an invocation's 50 subrequests.
         const existing = await dropbox.json('files/get_metadata', { path: providerPath(client.namespace, expected.key), include_deleted: false });
         if (existing['.tag'] === 'folder') throw failure(Code.ABORTED, 'REVISION_CONFLICT');
         metadata = objectMetadata(existing, client.namespace, expected.key);
@@ -149,14 +198,16 @@ export async function batchCreate(request: Request, client: ClientRow, dropbox: 
     let streamFailure: RpcError | undefined;
     if (pumping !== undefined) {
       try { await pumping; } catch (streamError) {
-        if (streamError instanceof RpcError && streamError.reason === 'UPLOAD_LENGTH_MISMATCH') streamFailure = streamError;
+        if (streamError instanceof RpcError && (streamError.reason === 'UPLOAD_LENGTH_MISMATCH' || streamError.reason === 'UPLOAD_HASH_MISMATCH')) streamFailure = streamError;
       }
     }
     logFailure(streamFailure ?? error, phase, finishing, diagnosticEntry);
     if (streamFailure !== undefined) throw streamFailure;
     if (error instanceof RpcError && error.reason === 'REVISION_CONFLICT') throw error;
     // A finish response may describe partial commits; it never authorizes replay of the batch.
-    if (!finishing && error instanceof RpcError && error.httpStatus === 429) throw error;
-    throw incomplete();
+    if (finishing) throw incomplete();
+    // Nothing is committed before finish: a rate limit keeps its Retry-After, and any other failure permits replay.
+    if (error instanceof RpcError && error.httpStatus === 429) throw error;
+    throw failure(Code.UNAVAILABLE, 'BATCH_NOT_COMMITTED');
   }
 }

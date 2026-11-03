@@ -25,7 +25,10 @@ HTTP 200 returns `BatchCreateResponse` with one fully checked metadata record pe
 existing object is reusable only after its key, size and hash match. No partial result is acknowledged as success.
 Partial or unknown completion returns failure, and consumers keep their prior control head. A whole-response 429
 is reserved for an explicit rejection before any file commit; partially committed batches must not become a
-retryable whole-request 429. The service does not replay uploads. Existing caller recovery/fencing handles unknown
+retryable whole-request 429. Another provider failure before finish is 503 `BATCH_NOT_COMMITTED`: nothing committed
+and the same batch may be sent again. A consumer that does not know this reason may keep treating the 503 as an
+unknown outcome. Each item's bytes are checked against its own hash before commit; a difference is 400
+`UPLOAD_HASH_MISMATCH`. The service does not replay uploads. Existing caller recovery/fencing handles unknown
 outcomes. Mutable heads keep their original single-object revision CAS.
 
 Header/body size sums, nonempty batches, duplicate keys, path segments, actual stream lengths and confirmation

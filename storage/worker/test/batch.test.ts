@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { Code, RpcError } from '@ziyixi/proto/rpc-status';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
 import { batchCreate } from '../src/batch.ts';
 import { Dropbox } from '../src/dropbox.ts';
 import type { ClientRow, Connection } from '../src/store.ts';
@@ -9,6 +9,23 @@ const client: ClientRow = { id: 'synthetic', label: 'Synthetic', namespace: 'syn
 const connection: Connection = { appKey: 'synthetic', refreshToken: 'synthetic-private-refresh', generation: 'synthetic' };
 const hash = createHash('sha256').update(createHash('sha256').update('abc').digest()).digest('hex');
 
+/** Node lacks the Workers DigestStream; the workerd suite runs the native one. */
+class NodeDigestStream extends WritableStream<ArrayBufferView> {
+  readonly digest: Promise<ArrayBuffer>;
+  constructor(algorithm: string) {
+    const hash = createHash('sha256');
+    const digest = Promise.withResolvers<ArrayBuffer>();
+    super({
+      write(chunk: ArrayBufferView) { hash.update(new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength)); },
+      close() { digest.resolve(new Uint8Array(hash.digest()).buffer); },
+    });
+    expect(algorithm).toBe('SHA-256');
+    this.digest = digest.promise;
+  }
+}
+
+beforeAll(() => { Object.defineProperty(crypto, 'DigestStream', { value: NodeDigestStream, configurable: true }); });
+afterAll(() => { Reflect.deleteProperty(crypto, 'DigestStream'); });
 afterEach(() => vi.unstubAllGlobals());
 
 function diagnosticRequest(): Request {
@@ -26,15 +43,15 @@ const baseDiagnostic = {
 };
 
 it.each([
-  { name: 'start', expected: { cause_reason: 'BAD_REQUEST', cause_http_status: 400 } },
-  { name: 'append', expected: { phase: 'append', entry_tag: 'failure', entry_failure_tag: 'content_hash_mismatch' } },
-  { name: 'untrusted entry', expected: { phase: 'append', entry_tag: 'failure', entry_failure_tag: 'other' } },
-  { name: 'finish', expected: { phase: 'finish', finish_started: true, cause_reason: 'UNAVAILABLE' } },
-  { name: 'finish rate', expected: { phase: 'finish', finish_started: true, cause_reason: 'UNAVAILABLE', cause_http_status: 429 } },
-  { name: 'finish entry', expected: { phase: 'verify', finish_started: true, finish_response_received: true, entry_tag: 'failure', entry_failure_tag: 'path', entry_detail_tag: 'not_found' } },
-  { name: 'verify', expected: { phase: 'verify', finish_started: true, finish_response_received: true, entry_tag: 'success' } },
-  { name: 'metadata', expected: { phase: 'verify', finish_started: true, finish_response_received: true, entry_tag: 'success', cause_reason: 'PROVIDER_RESPONSE_INVALID' } },
-])('logs one safe batch diagnostic for $name without changing the API error', async ({ name, expected }) => {
+  { name: 'start', reason: 'BATCH_NOT_COMMITTED', expected: { cause_reason: 'BAD_REQUEST', cause_http_status: 400 } },
+  { name: 'append', reason: 'BATCH_NOT_COMMITTED', expected: { phase: 'append', entry_tag: 'failure', entry_failure_tag: 'content_hash_mismatch' } },
+  { name: 'untrusted entry', reason: 'BATCH_NOT_COMMITTED', expected: { phase: 'append', entry_tag: 'failure', entry_failure_tag: 'other' } },
+  { name: 'finish', reason: 'BATCH_INCOMPLETE', expected: { phase: 'finish', finish_started: true, cause_reason: 'UNAVAILABLE' } },
+  { name: 'finish rate', reason: 'BATCH_INCOMPLETE', expected: { phase: 'finish', finish_started: true, cause_reason: 'UNAVAILABLE', cause_http_status: 429 } },
+  { name: 'finish entry', reason: 'BATCH_INCOMPLETE', expected: { phase: 'verify', finish_started: true, finish_response_received: true, entry_tag: 'failure', entry_failure_tag: 'path', entry_detail_tag: 'not_found' } },
+  { name: 'verify', reason: 'BATCH_INCOMPLETE', expected: { phase: 'verify', finish_started: true, finish_response_received: true, entry_tag: 'success' } },
+  { name: 'metadata', reason: 'BATCH_INCOMPLETE', expected: { phase: 'verify', finish_started: true, finish_response_received: true, entry_tag: 'success', cause_reason: 'PROVIDER_RESPONSE_INVALID' } },
+])('logs one safe batch diagnostic for $name and answers $reason', async ({ name, reason, expected }) => {
   const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
   vi.stubGlobal('FixedLengthStream', class extends TransformStream<Uint8Array, Uint8Array> { constructor(length: number) { super(); expect(length).toBe(3); } });
   vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
@@ -54,7 +71,7 @@ it.each([
       rev: 'synthetic', size: 3, content_hash: '0'.repeat(64), ...(name === 'metadata' ? { path_display: 'synthetic-private-invalid-path' } : {}) }] });
   });
   const provider = new Dropbox({ get: () => null, set: () => undefined, delete: () => undefined, connection: () => connection }, {});
-  await expect(batchCreate(diagnosticRequest(), client, provider)).rejects.toMatchObject({ reason: 'BATCH_INCOMPLETE', httpStatus: 503 });
+  await expect(batchCreate(diagnosticRequest(), client, provider)).rejects.toMatchObject({ reason, httpStatus: 503 });
   expect(log).toHaveBeenCalledExactlyOnceWith(JSON.stringify({ ...baseDiagnostic, ...expected }));
   expect(JSON.stringify(log.mock.calls)).not.toContain('synthetic-private');
 });
@@ -77,7 +94,7 @@ it.each([
     await new Response(body).arrayBuffer();
     return { entries: [{ '.tag': 'failure', failure: { '.tag': tag, [tag]: value } }] };
   });
-  await expect(batchCreate(diagnosticRequest(), client, provider)).rejects.toMatchObject({ reason: 'BATCH_INCOMPLETE', httpStatus: 503 });
+  await expect(batchCreate(diagnosticRequest(), client, provider)).rejects.toMatchObject({ reason: 'BATCH_NOT_COMMITTED', httpStatus: 503 });
   expect(log).toHaveBeenCalledExactlyOnceWith(JSON.stringify({ ...baseDiagnostic,
     phase: 'append', entry_tag: 'failure', entry_failure_tag: tag, entry_detail_tag: detail }));
   expect(JSON.stringify(log.mock.calls)).not.toContain('synthetic-private');
@@ -90,7 +107,7 @@ it.each([
   const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
   const provider = new Dropbox({ get: () => null, set: () => undefined, delete: () => undefined, connection: () => connection }, {});
   vi.spyOn(provider, 'json').mockRejectedValue(error);
-  await expect(batchCreate(diagnosticRequest(), client, provider)).rejects.toMatchObject({ reason: 'BATCH_INCOMPLETE', httpStatus: 503 });
+  await expect(batchCreate(diagnosticRequest(), client, provider)).rejects.toMatchObject({ reason: 'BATCH_NOT_COMMITTED', httpStatus: 503 });
   expect(log).toHaveBeenCalledExactlyOnceWith(JSON.stringify({ ...baseDiagnostic, cause_reason: reason, cause_http_status: 0 }));
 });
 
@@ -123,4 +140,31 @@ it.each(['ab', 'abcd'])('rejects actual stream length %s before any finish call'
   });
   await expect(batchCreate(request, client, provider)).rejects.toMatchObject({ reason: 'UPLOAD_LENGTH_MISMATCH', httpStatus: 400 });
   expect(calls.map((url) => new URL(url).pathname)).toEqual(['/2/files/upload_session/start_batch', '/2/files/upload_session/append_batch']);
+});
+
+it('refuses an item whose bytes differ from its manifest hash before any finish call', async () => {
+  const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  vi.stubGlobal('FixedLengthStream', class extends TransformStream<Uint8Array, Uint8Array> { constructor(length: number) { super(); expect(length).toBe(7); } });
+  const calls: string[] = [];
+  vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+    if (url.endsWith('/oauth2/token')) return Response.json({ access_token: 'synthetic-access', expires_in: 3600 });
+    calls.push(new URL(url).pathname);
+    if (url.endsWith('/start_batch')) return Response.json({ session_ids: ['synthetic-first', 'synthetic-second'] });
+    if (url.endsWith('/append_batch')) {
+      await new Response(init.body).arrayBuffer();
+      return Response.json({ entries: [{ '.tag': 'success' }, { '.tag': 'success' }] });
+    }
+    throw new Error('finish must not commit an item with different bytes');
+  });
+  const digest = (value: string) => createHash('sha256').update(createHash('sha256').update(value).digest()).digest('hex');
+  const provider = new Dropbox({ get: () => null, set: () => undefined, delete: () => undefined, connection: () => connection }, {});
+  const request = new Request('https://storage.example.test/api/storage/v1/content', {
+    method: 'POST', body: 'abcdefg', headers: {
+      'content-type': 'application/octet-stream', 'content-length': '7',
+      'x-storage-batch': JSON.stringify({ objects: [{ key: 'raw/a.bin', size_bytes: 3, content_hash: digest('abc') }, { key: 'raw/b.bin', size_bytes: 4, content_hash: digest('defh') }], content_hash: digest('abcdefg') }),
+    },
+  });
+  await expect(batchCreate(request, client, provider)).rejects.toMatchObject({ reason: 'UPLOAD_HASH_MISMATCH', httpStatus: 400 });
+  expect(calls).toEqual(['/2/files/upload_session/start_batch', '/2/files/upload_session/append_batch']);
+  expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('"cause_reason":"UPLOAD_HASH_MISMATCH"'));
 });

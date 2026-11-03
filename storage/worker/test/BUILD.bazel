@@ -28,6 +28,7 @@ workerd_vitest_test(
     tests = [":runtime/http.test.ts", ":runtime/batch.test.ts"],
     project = "storage/worker",
     runner = vitest.vitest_test,
+    data = ["//contracts/storage-objects-v1:js_fixtures"],
     tags = ["workerd", "exclusive"],
 )
 test_suite(name = "check", tests = [":unit_test", ":runtime_test"])
