@@ -44,7 +44,6 @@ py_library(
 pytest_test(
     name = "test_backoff",
     srcs = ["test_backoff.py"],
-    args = ["$(rootpath test_backoff.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "conftest.py",
@@ -70,7 +69,6 @@ pytest_test(
 pytest_test(
     name = "test_backup",
     srcs = ["test_backup.py"],
-    args = ["$(rootpath test_backup.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "conftest.py",
@@ -100,7 +98,6 @@ pytest_test(
 pytest_test(
     name = "test_backup_job",
     srcs = ["test_backup_job.py"],
-    args = ["$(rootpath test_backup_job.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "conftest.py",
@@ -133,7 +130,6 @@ pytest_test(
 pytest_test(
     name = "test_carryover",
     srcs = ["test_carryover.py"],
-    args = ["$(rootpath test_carryover.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "conftest.py",
@@ -162,7 +158,6 @@ pytest_test(
 pytest_test(
     name = "test_contract",
     srcs = ["test_contract.py"],
-    args = ["$(rootpath test_contract.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "conftest.py",
@@ -193,7 +188,6 @@ pytest_test(
 pytest_test(
     name = "test_core_isolation",
     srcs = ["test_core_isolation.py"],
-    args = ["$(rootpath test_core_isolation.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "conftest.py",
@@ -220,7 +214,6 @@ pytest_test(
 pytest_test(
     name = "test_gemini_wire",
     srcs = ["test_gemini_wire.py"],
-    args = ["$(rootpath test_gemini_wire.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "conftest.py",
@@ -248,7 +241,6 @@ pytest_test(
 pytest_test(
     name = "test_machine_api",
     srcs = ["test_machine_api.py"],
-    args = ["$(rootpath test_machine_api.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "conftest.py",
@@ -278,7 +270,6 @@ pytest_test(
 pytest_test(
     name = "test_mail",
     srcs = ["test_mail.py"],
-    args = ["$(rootpath test_mail.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "conftest.py",
@@ -307,7 +298,6 @@ pytest_test(
 pytest_test(
     name = "test_mail_hero_compat",
     srcs = ["test_mail_hero_compat.py"],
-    args = ["$(rootpath test_mail_hero_compat.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "conftest.py",
@@ -337,7 +327,6 @@ pytest_test(
 pytest_test(
     name = "test_mail_received_parser_legacy",
     srcs = ["test_mail_received_parser_legacy.py"],
-    args = ["$(rootpath test_mail_received_parser_legacy.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "conftest.py",
@@ -365,7 +354,6 @@ pytest_test(
 pytest_test(
     name = "test_mail_received_schema_legacy",
     srcs = ["test_mail_received_schema_legacy.py"],
-    args = ["$(rootpath test_mail_received_schema_legacy.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "conftest.py",
@@ -395,7 +383,6 @@ pytest_test(
 pytest_test(
     name = "test_mailbox",
     srcs = ["test_mailbox.py"],
-    args = ["$(rootpath test_mailbox.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "conftest.py",
@@ -422,7 +409,6 @@ pytest_test(
 pytest_test(
     name = "test_metrics",
     srcs = ["test_metrics.py"],
-    args = ["$(rootpath test_metrics.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "conftest.py",
@@ -454,7 +440,6 @@ pytest_test(
 pytest_test(
     name = "test_metrics_record",
     srcs = ["test_metrics_record.py"],
-    args = ["$(rootpath test_metrics_record.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "conftest.py",
@@ -481,7 +466,6 @@ pytest_test(
 pytest_test(
     name = "test_model_settings",
     srcs = ["test_model_settings.py"],
-    args = ["$(rootpath test_model_settings.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "conftest.py",
@@ -514,7 +498,6 @@ pytest_test(
 pytest_test(
     name = "test_native_coordinator",
     srcs = ["test_native_coordinator.py"],
-    args = ["$(rootpath test_native_coordinator.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "conftest.py",
@@ -543,7 +526,6 @@ pytest_test(
 pytest_test(
     name = "test_ops_contract",
     srcs = ["test_ops_contract.py"],
-    args = ["$(rootpath test_ops_contract.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "conftest.py",
@@ -573,7 +555,6 @@ pytest_test(
 pytest_test(
     name = "test_ops_core",
     srcs = ["test_ops_core.py"],
-    args = ["$(rootpath test_ops_core.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "conftest.py",
@@ -604,7 +585,6 @@ pytest_test(
 pytest_test(
     name = "test_ops_golden",
     srcs = ["test_ops_golden.py"],
-    args = ["$(rootpath test_ops_golden.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "conftest.py",
@@ -635,7 +615,6 @@ pytest_test(
 pytest_test(
     name = "test_owner_ui",
     srcs = ["test_owner_ui.py"],
-    args = ["$(rootpath test_owner_ui.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "conftest.py",
@@ -666,7 +645,6 @@ pytest_test(
 pytest_test(
     name = "test_owner_ui_handle",
     srcs = ["test_owner_ui_handle.py"],
-    args = ["$(rootpath test_owner_ui_handle.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "conftest.py",
@@ -694,7 +672,6 @@ pytest_test(
 pytest_test(
     name = "test_prompts",
     srcs = ["test_prompts.py"],
-    args = ["$(rootpath test_prompts.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "conftest.py",
@@ -726,7 +703,6 @@ pytest_test(
 pytest_test(
     name = "test_pytest_setup",
     srcs = ["test_pytest_setup.py"],
-    args = ["$(rootpath test_pytest_setup.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "conftest.py",
@@ -764,7 +740,6 @@ pytest_test(
 pytest_test(
     name = "test_render",
     srcs = ["test_render.py"],
-    args = ["$(rootpath test_render.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "conftest.py",
@@ -791,7 +766,6 @@ pytest_test(
 pytest_test(
     name = "test_report_schema",
     srcs = ["test_report_schema.py"],
-    args = ["$(rootpath test_report_schema.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "conftest.py",
@@ -818,7 +792,6 @@ pytest_test(
 pytest_test(
     name = "test_report_schema_legacy",
     srcs = ["test_report_schema_legacy.py"],
-    args = ["$(rootpath test_report_schema_legacy.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "conftest.py",
@@ -845,7 +818,6 @@ pytest_test(
 pytest_test(
     name = "test_report_schemas",
     srcs = ["test_report_schemas.py"],
-    args = ["$(rootpath test_report_schemas.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "conftest.py",
@@ -874,7 +846,6 @@ pytest_test(
 pytest_test(
     name = "test_report_wire",
     srcs = ["test_report_wire.py"],
-    args = ["$(rootpath test_report_wire.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "conftest.py",
@@ -903,7 +874,6 @@ pytest_test(
 pytest_test(
     name = "test_schema_sql",
     srcs = ["test_schema_sql.py"],
-    args = ["$(rootpath test_schema_sql.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "conftest.py",
@@ -936,7 +906,6 @@ pytest_test(
 pytest_test(
     name = "test_vocab",
     srcs = ["test_vocab.py"],
-    args = ["$(rootpath test_vocab.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "conftest.py",
