@@ -1,4 +1,4 @@
-load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@aspect_rules_js//js:defs.bzl", "js_library", "js_run_binary")
 load("//tools/bazel:cloudflare.bzl", "worker_artifact")
 load("//tools/bazel/audit:sources.bzl", "source_audit_files")
 
@@ -9,10 +9,11 @@ filegroup(
     srcs = [
         ":dashboard",
         "//.github/actions:release-dashboard/action.yml",
+        "//.github/actions:worker-deploy/action.yml",
+        "//.github/actions:worker-prepare/action.yml",
         "//dashboard/deploy:source_deploy_vars_mjs",
         "//tools:release_probes",
         "//tools/cloud-release:release_inputs",
-        "//tools/service-catalog:private_catalog",
     ],
     tags = [
         "artifact://dashboard:dashboard",
@@ -52,8 +53,33 @@ worker_artifact(
     ],
     bundle_visibility = ["//dashboard:__subpackages__"],
     tool = "//dashboard/worker:wrangler",
+    tools = [":private_catalog_cli"],
     visibility = ["//visibility:public"],
     web = "//dashboard/web:bundle",
 )
 
-source_audit_files()
+# The release step's check of PRIVATE_CATALOG runs Home's own parser (deploy/private-catalog.mjs) with plain Node.
+js_run_binary(
+    name = "private_catalog_cli",
+    srcs = [
+        "//dashboard/deploy:source_private_catalog_mjs",
+        "//dashboard/worker:proto_types_link",
+        "//dashboard/worker/src:lib",
+        "//tools/cloud-config:worker-secrets",
+    ],
+    outs = ["tools/private-catalog.mjs"],
+    args = [
+        "deploy/private-catalog.mjs",
+        "tools/private-catalog.mjs",
+    ],
+    chdir = package_name(),
+    tool = "//dashboard/worker:bundle_node",
+    visibility = ["//dashboard:__subpackages__"],
+)
+
+source_audit_files(deps = [
+    "//dashboard/deploy:source_audit_files",
+    "//dashboard/docs:source_audit_files",
+    "//dashboard/web:source_audit_files",
+    "//dashboard/worker:source_audit_files",
+])

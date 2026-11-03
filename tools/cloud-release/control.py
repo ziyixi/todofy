@@ -9,25 +9,13 @@ from pathlib import Path
 
 from api import Api, ReleaseError
 from cloudflare import digest, observe, routes_differences, verify, verify_resources
-from deployments import identity, last_good, receipt, record_success
+from deployments import identity, last_good, receipt, record_success, release_units
 
 ROOT = Path(__file__).resolve().parents[2]
-WORKERS = {
-    "model-router": ["model-router/wrangler.toml"],
-    "todofy": ["todofy/wrangler.toml", "todofy/gateway/wrangler.toml"],
-    "mail-hero": ["mail-hero/wrangler.toml"],
-    "dashboard": ["dashboard/wrangler.toml"],
-    "links": ["links/wrangler.toml"],
-    "tasks": ["tasks/wrangler.toml"],
-    "watch": ["watch/wrangler.toml"],
-    "fleet": ["fleet/wrangler.toml"],
-    "mailsort": ["mailsort/wrangler.toml"],
-    "recall": ["recall/wrangler.toml"],
-    "storage": ["storage/wrangler.toml"],
-    "personal-mcp": ["personal-mcp/wrangler.toml"],
-    "newsletter-console": ["newsletter-console/wrangler.toml"],
-    "website-relay": ["website/relay/wrangler.toml"],
-}
+# The assets-only website has no Worker script: website-release.yml publishes it with its own recipe and receipt.
+WORKERS = {unit: paths for unit, paths in release_units(ROOT).items() if unit != "website"}
+# A receipt reads at most this many 100-job pages of one CI run.
+MAX_JOB_PAGES = 5
 MANUAL = {
     "SECRET_MISSING",
     "BINDING_TYPE_CHANGED",
@@ -129,6 +117,35 @@ def operational_values(app, desired):
     return result
 
 
+def _latest_jobs(github, repository, run_id):
+    """Every job of the run's latest execution, page by page; an incomplete listing fails closed.
+
+    A main run has about 55 jobs: filter=all would list a rerun's attempts twice and exceed one page,
+    filter=latest lists each job's most recent attempt, and paging covers a run that outgrows one page.
+    """
+    jobs = []
+    for page in range(1, MAX_JOB_PAGES + 1):
+        listing = github.call(
+            "/repos/"
+            + repository
+            + "/actions/runs/"
+            + str(run_id)
+            + "/jobs?filter=latest&per_page=100&page="
+            + str(page)
+        )
+        if not isinstance(listing, dict) or not isinstance(listing.get("jobs"), list):
+            raise ReleaseError("RECEIPT_CI_GATE_NOT_VERIFIED")
+        jobs += listing["jobs"]
+        total = listing.get("total_count", len(jobs))
+        if type(total) is not int:
+            raise ReleaseError("RECEIPT_CI_GATE_NOT_VERIFIED")
+        if not listing["jobs"] or len(jobs) >= total:
+            break
+    if total > len(jobs):
+        raise ReleaseError("RECEIPT_CI_GATE_NOT_VERIFIED")
+    return jobs
+
+
 def _checked_receipt_source(github, repository, sha, main_sha):
     if sha != main_sha:
         comparison = github.call(
@@ -165,20 +182,7 @@ def _checked_receipt_source(github, repository, sha, main_sha):
     if not runs:
         raise ReleaseError("RECEIPT_CI_GATE_NOT_VERIFIED")
     run = max(runs, key=lambda value: value["id"])
-    listing = github.call(
-        "/repos/"
-        + repository
-        + "/actions/runs/"
-        + str(run["id"])
-        + "/jobs?filter=all&per_page=100"
-    )
-    if not isinstance(listing, dict) or not isinstance(listing.get("jobs"), list):
-        raise ReleaseError("RECEIPT_CI_GATE_NOT_VERIFIED")
-    jobs = listing["jobs"]
-    if type(listing.get("total_count", len(jobs))) is not int or listing.get(
-        "total_count", len(jobs)
-    ) > len(jobs):
-        raise ReleaseError("RECEIPT_CI_GATE_NOT_VERIFIED")
+    jobs = _latest_jobs(github, repository, run["id"])
     gates = [
         value
         for value in jobs

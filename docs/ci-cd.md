@@ -95,6 +95,12 @@ actual configuration, preserves owner pauses, runs hostname guards, applies the 
 verifies provider identities. Drift repair uses the last verified source and the same recipe; it can rebuild that
 fixed source with Bazel without relying on an old Actions artifact still being retained.
 
+Each app's `release-<app>` action writes and removes its own secrets file and runs only the probes that app alone has.
+The steps the apps share (workspace install and config read in `worker-prepare`; dry run and bundle budget, hostname
+guard, migrations and deploy, version and Access probes in `worker-deploy`) take the app's differences as literal
+inputs. Todofy's two Workers and the website relay keep their own recipes, and the three VPS images share
+`publish-image`.
+
 Explicit VPS resume continues the daemon's held immutable release. It never builds or publishes replacement images.
 The existing bootstrap, draining, admission and persistence rules continue to apply.
 

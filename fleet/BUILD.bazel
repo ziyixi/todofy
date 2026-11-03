@@ -9,6 +9,8 @@ filegroup(
     srcs = [
         ":fleet",
         "//.github/actions:release-fleet/action.yml",
+        "//.github/actions:worker-deploy/action.yml",
+        "//.github/actions:worker-prepare/action.yml",
         "//fleet/deploy:source_deploy_vars_mjs",
         "//tools:release_probes",
         "//tools/cloud-release:release_inputs",
@@ -55,7 +57,14 @@ worker_artifact(
     web = "//fleet/web:bundle",
 )
 
-source_audit_files(patterns = [
-    "*",
-    "observer/**",
-])
+source_audit_files(
+    patterns = [
+        "*",
+        "observer/**",
+    ],
+    deps = [
+        "//fleet/deploy:source_audit_files",
+        "//fleet/web:source_audit_files",
+        "//fleet/worker:source_audit_files",
+    ],
+)

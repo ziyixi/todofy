@@ -1,8 +1,9 @@
 """Read local composite steps for the repository's existing workflow safety tests.
 
 This is a test reader, not a workflow generator or a GitHub expression interpreter.
-Only explicit local action calls, scalar inputs and exact app selectors are expanded. Native job gates,
-permissions and concurrency remain in the real workflow and are tested separately.
+Only explicit local action calls, scalar inputs, steps a composite selects by literal inputs and exact app
+selectors are expanded. Native job gates, permissions and concurrency remain in the real workflow and are
+tested separately.
 """
 
 import re
@@ -27,6 +28,29 @@ def jobs(text):
 
 def steps(body):
     return ["      - " + part for part in re.split(r"^      - ", body, flags=re.M)[1:]]
+
+
+def select_by_literal_inputs(children, values, action):
+    """Keep or drop the steps a composite selects by literal inputs (`if: inputs.<name> == 'value'`, joined
+    with &&), as Actions does for this call. A condition on any other value stays for the caller's guard."""
+    term = r"inputs\.([a-z0-9-]+) ([!=]=) '([^']*)'"
+    selected = []
+    for child in children:
+        condition = re.search(r"^        if: (.+)\n", child, re.M)
+        terms = condition and re.fullmatch(term + r"(?: && " + term + r")*", condition.group(1))
+        if not terms:
+            selected.append(child)
+            continue
+        comparisons = re.findall(term, condition.group(1))
+        for name, _, _ in comparisons:
+            if name not in values:
+                raise ValueError(f"Unresolved action input: {action} / {name}")
+        if any("${{" in values[name] for name, _, _ in comparisons):
+            selected.append(child)
+        elif all((values[name].strip("'\"") == expected) == (operator == "==")
+                 for name, operator, expected in comparisons):
+            selected.append(child.replace(condition.group(0), "", 1))
+    return selected
 
 
 def expand_actions(block, root=ROOT):
@@ -60,6 +84,7 @@ def expand_actions(block, root=ROOT):
             r"\$\{\{ fromJSON\(inputs\.([a-z0-9-]+)\) \}\}", substitute, inner
         )
         inner = re.sub(r"\$\{\{ inputs\.([a-z0-9-]+) \}\}", substitute, inner)
+        inner = "".join(select_by_literal_inputs(steps(inner), values, call.group(1)))
         # The release action's guard is a bare expression; other inputs are full expressions.
         if "inputs.required" in inner:
             required = values["required"]

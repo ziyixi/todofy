@@ -71,15 +71,18 @@ filegroup(
     srcs = _ASSETS,
 )
 
-source_audit_files(patterns = [
-    "*",
-    "fleet-report-v1/**",
-    "mail-received-v1/**",
-    "newsletter-ui-v1/**",
-    "ops-v1/**",
-    "platform-runtime-v1/**",
-    "recall-archive-v1/**",
-])
+source_audit_files(
+    patterns = [
+        "*",
+        "fleet-report-v1/**",
+        "mail-received-v1/**",
+        "newsletter-ui-v1/**",
+        "ops-v1/**",
+        "platform-runtime-v1/**",
+        "recall-archive-v1/**",
+    ],
+    deps = ["//contracts/storage-objects-v1:source_audit_files"],
+)
 
 test_suite(
     name = "check",

@@ -11,6 +11,8 @@ filegroup(
     srcs = [
         ":worker_artifact",
         "//.github/actions:release-recall/action.yml",
+        "//.github/actions:worker-deploy/action.yml",
+        "//.github/actions:worker-prepare/action.yml",
         "//recall/deploy:source_deploy_vars_mjs",
         "//tools:release_probes",
         "//tools/cloud-release:release_inputs",
@@ -93,10 +95,19 @@ js_library(
     visibility = ["//recall:__subpackages__"],
 )
 
-source_audit_files(patterns = [
-    "*",
-    "docs/**",
-])
+source_audit_files(
+    patterns = [
+        "*",
+        "docs/**",
+    ],
+    deps = [
+        "//recall/deploy:source_audit_files",
+        "//recall/extension:source_audit_files",
+        "//recall/shared:source_audit_files",
+        "//recall/web:source_audit_files",
+        "//recall/worker:source_audit_files",
+    ],
+)
 
 filegroup(
     name = "extension_release",

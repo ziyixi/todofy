@@ -1,0 +1,42 @@
+name: worker-prepare
+description: Install a checked Worker's release workspace and read its committed host and Access issuer.
+inputs:
+  app:
+    description: Application directory in the selected source; a literal from the calling release action
+    required: true
+  filters:
+    description: Space-separated pnpm workspace selectors
+    required: true
+outputs:
+  url:
+    description: Public URL
+    value: ${{ steps.config.outputs.url }}
+  host:
+    description: Public host
+    value: ${{ steps.config.outputs.host }}
+  access_issuer:
+    description: Access team domain
+    value: ${{ steps.config.outputs.access_issuer }}
+runs:
+  using: composite
+  steps:
+    - name: Install the selected Node workspaces
+      uses: ./.github/actions/setup-workspace
+      with:
+        root: .release-source
+        filters: ${{ inputs.filters }}
+    # Every static production value (account, host, Access, resources) is committed in the app's wrangler.toml; the
+    # environment URL and the host probes read it there.
+    - name: Read the host and the Access issuer from the committed config
+      id: config
+      working-directory: .release-source/${{ inputs.app }}
+      shell: bash -e {0}
+      run: |
+        python3 - >> "$GITHUB_OUTPUT" <<'EOF'
+        import tomllib
+        with open("wrangler.toml", "rb") as file:
+            variables = tomllib.load(file)["vars"]
+        print("url=https://" + variables["PUBLIC_HOST"])
+        print("host=" + variables["PUBLIC_HOST"])
+        print("access_issuer=" + variables["ACCESS_ISSUER"])
+        EOF

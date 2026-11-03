@@ -9,6 +9,8 @@ filegroup(
     srcs = [
         ":newsletter-console",
         "//.github/actions:release-newsletter-console/action.yml",
+        "//.github/actions:worker-deploy/action.yml",
+        "//.github/actions:worker-prepare/action.yml",
         "//newsletter-console/deploy:source_deploy_vars_mjs",
         "//tools:release_probes",
         "//tools/cloud-release:release_inputs",
@@ -55,4 +57,8 @@ worker_artifact(
     web = "//newsletter-console/web:bundle",
 )
 
-source_audit_files()
+source_audit_files(deps = [
+    "//newsletter-console/deploy:source_audit_files",
+    "//newsletter-console/web:source_audit_files",
+    "//newsletter-console/worker:source_audit_files",
+])

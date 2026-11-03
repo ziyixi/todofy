@@ -14,7 +14,7 @@ filegroup(
     srcs = [
         ":platform",
         "//.github/actions:check-platform/action.yml",
-        "//.github/actions:publish-platform/action.yml",
+        "//.github/actions:publish-image/action.yml",
         "//tools/container-release:release_inputs",
     ],
     tags = [

@@ -20,26 +20,13 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Install the selected Node workspaces
-      if: inputs.required == 'true'
-      uses: ./.github/actions/setup-workspace
-      with:
-        root: .release-source
-        filters: 'model-router-worker... model-router-web...'
-    - name: Read public deployment identity
-      if: inputs.required == 'true'
+    - name: Prepare the release workspace
       id: config
-      working-directory: .release-source/model-router
-      shell: bash -e {0}
-      run: |
-        python3 - >> "$GITHUB_OUTPUT" <<'EOF'
-        import tomllib
-        with open("wrangler.toml", "rb") as file:
-            variables = tomllib.load(file)["vars"]
-        print("url=https://" + variables["PUBLIC_HOST"])
-        print("host=" + variables["PUBLIC_HOST"])
-        print("access_issuer=" + variables["ACCESS_ISSUER"])
-        EOF
+      if: inputs.required == 'true'
+      uses: ./.github/actions/worker-prepare
+      with:
+        app: model-router
+        filters: 'model-router-worker... model-router-web...'
     - name: Write the declared owner secrets file
       if: inputs.required == 'true'
       working-directory: .release-source/model-router/worker
@@ -47,50 +34,22 @@ runs:
         MODEL_ROUTER_WORKER_SECRETS: ${{ inputs.model-router-worker-secrets }}
       shell: bash -e {0}
       run: node ../tools/deploy-vars.mjs secrets "$RUNNER_TEMP/model-router-secrets.json"
-    - name: Validate the bundle before changing D1
+    - name: Deploy and verify the Worker
       if: inputs.required == 'true'
-      working-directory: .release-source/model-router/worker
-      shell: bash -e {0}
-      run: |
-        node ../tools/deploy-vars.mjs exec -- npx --no-install wrangler deploy "$PWD/../.compiled/worker/index.js" --no-bundle --dry-run --config ../wrangler.toml \
-          --secrets-file "$RUNNER_TEMP/model-router-secrets.json" --outdir "$RUNNER_TEMP/model-router-bundle"
-        node ../tools/bundle-size.mjs "$RUNNER_TEMP/model-router-bundle"
-    - name: Check the hostnames against production
-      if: inputs.required == 'true'
-      working-directory: .release-source
-      env:
-        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
-        CF_GUARD_ALLOW_REMOVE: ''
-        CF_GUARD_ALLOW_CONFLICT: ''
-      shell: bash -e {0}
-      run: node tools/cf-guard/cf-guard.mjs --config model-router/wrangler.toml
-    - name: Apply D1 migrations, then deploy Model Router
-      if: inputs.required == 'true'
-      working-directory: .release-source/model-router/worker
-      env:
-        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
-      shell: bash -e {0}
-      run: |
-        test -n "$CLOUDFLARE_API_TOKEN"
-        npx --no-install wrangler d1 migrations apply DB --remote --config ../wrangler.toml
-        bash "$GITHUB_WORKSPACE/tools/cloud-release/assets-session-retry.sh" \
-          node ../tools/deploy-vars.mjs exec -- npx --no-install wrangler deploy "$PWD/../.compiled/worker/index.js" --no-bundle --config ../wrangler.toml \
-          --secrets-file "$RUNNER_TEMP/model-router-secrets.json"
-    - name: Check that production runs this commit
-      if: inputs.required == 'true'
-      working-directory: .release-source/model-router/worker
-      env:
-        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
-      shell: bash -e {0}
-      run: bash "$GITHUB_WORKSPACE/.release-source/tools/deploy-probes/production.sh" model-router ../wrangler.toml DB
-    - name: Check that Access protects the owner console
-      if: inputs.required == 'true'
-      env:
-        ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}
-        PUBLIC_HOST: ${{ steps.config.outputs.host }}
-      working-directory: .release-source/model-router
-      shell: bash -e {0}
-      run: bash "$GITHUB_WORKSPACE/.release-source/tools/deploy-probes/access.sh" / /api/model/v1/requests /api/model/v1/usage
+      uses: ./.github/actions/worker-deploy
+      with:
+        app: model-router
+        worker: model-router
+        worker-directory: worker
+        tools-directory: tools
+        bundle-size: 'true'
+        d1: 'true'
+        assets: 'true'
+        production: 'true'
+        access-paths: / /api/model/v1/requests /api/model/v1/usage
+        cf-api-token: ${{ inputs.cf-api-token }}
+        host: ${{ steps.config.outputs.host }}
+        access-issuer: ${{ steps.config.outputs.access_issuer }}
     - name: Remove the secrets file
       if: always() && inputs.required == 'true'
       working-directory: .release-source/model-router

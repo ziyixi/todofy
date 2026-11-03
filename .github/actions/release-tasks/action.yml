@@ -20,26 +20,13 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Install the selected Node workspaces
-      if: inputs.required == 'true'
-      uses: ./.github/actions/setup-workspace
-      with:
-        root: .release-source
-        filters: 'tasks-worker... @ziyixi/tasks-web...'
-    - name: Read the host and the Access issuer from the committed config
-      if: inputs.required == 'true'
+    - name: Prepare the release workspace
       id: config
-      working-directory: .release-source/tasks
-      shell: bash -e {0}
-      run: |
-        python3 - >> "$GITHUB_OUTPUT" <<'EOF'
-        import tomllib
-        with open("wrangler.toml", "rb") as file:
-            variables = tomllib.load(file)["vars"]
-        print("url=https://" + variables["PUBLIC_HOST"])
-        print("host=" + variables["PUBLIC_HOST"])
-        print("access_issuer=" + variables["ACCESS_ISSUER"])
-        EOF
+      if: inputs.required == 'true'
+      uses: ./.github/actions/worker-prepare
+      with:
+        app: tasks
+        filters: 'tasks-worker... @ziyixi/tasks-web...'
     - name: Write the Worker secrets file
       if: inputs.required == 'true'
       working-directory: .release-source/tasks/worker
@@ -47,52 +34,22 @@ runs:
         TASKS_WORKER_SECRETS: ${{ inputs.tasks-worker-secrets }}
       shell: bash -e {0}
       run: node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/tasks-secrets.json"
-    - name: Validate the bundle before changing D1
+    - name: Deploy and verify the Worker
       if: inputs.required == 'true'
-      working-directory: .release-source/tasks/worker
-      shell: bash -e {0}
-      run: |
-        node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy "$PWD/../.compiled/worker/index.js" --no-bundle --dry-run --config ../wrangler.toml \
-          --secrets-file "$RUNNER_TEMP/tasks-secrets.json" --outdir "$RUNNER_TEMP/tasks-bundle"
-        node ../deploy/bundle-size.mjs "$RUNNER_TEMP/tasks-bundle"
-    - name: Check the hostnames against production
-      if: inputs.required == 'true'
-      working-directory: .release-source
-      env:
-        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
-        CF_GUARD_ALLOW_REMOVE: ''
-        CF_GUARD_ALLOW_CONFLICT: ''
-      shell: bash -e {0}
-      run: node tools/cf-guard/cf-guard.mjs --config tasks/wrangler.toml
-    - name: Apply D1 migrations, then deploy the Worker tasks
-      if: inputs.required == 'true'
-      working-directory: .release-source/tasks/worker
-      env:
-        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
-      shell: bash -e {0}
-      run: |
-        test -n "$CLOUDFLARE_API_TOKEN"
-        npx --no-install wrangler d1 migrations apply DB --remote --config ../wrangler.toml
-        bash "$GITHUB_WORKSPACE/tools/cloud-release/assets-session-retry.sh" \
-          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy "$PWD/../.compiled/worker/index.js" --no-bundle --config ../wrangler.toml \
-          --secrets-file "$RUNNER_TEMP/tasks-secrets.json"
-    - name: Check that production runs this commit
-      if: inputs.required == 'true'
-      working-directory: .release-source/tasks/worker
-      env:
-        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
-      shell: bash -e {0}
-      run: |
-        bash "$GITHUB_WORKSPACE/.release-source/tools/deploy-probes/production.sh" tasks ../wrangler.toml DB
-    - name: Check that Access answers unauthenticated requests
-      if: inputs.required == 'true'
-      env:
-        ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}
-        PUBLIC_HOST: ${{ steps.config.outputs.host }}
-      working-directory: .release-source/tasks
-      shell: bash -e {0}
-      run: |
-        bash "$GITHUB_WORKSPACE/.release-source/tools/deploy-probes/access.sh" / /api/tasks/v1/catalog
+      uses: ./.github/actions/worker-deploy
+      with:
+        app: tasks
+        worker: tasks
+        worker-directory: worker
+        tools-directory: deploy
+        bundle-size: 'true'
+        d1: 'true'
+        assets: 'true'
+        production: 'true'
+        access-paths: / /api/tasks/v1/catalog
+        cf-api-token: ${{ inputs.cf-api-token }}
+        host: ${{ steps.config.outputs.host }}
+        access-issuer: ${{ steps.config.outputs.access_issuer }}
     - name: Remove the secrets file
       if: always() && inputs.required == 'true'
       working-directory: .release-source/tasks
