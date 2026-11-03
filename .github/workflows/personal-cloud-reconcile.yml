@@ -320,11 +320,19 @@ jobs:
         with:
           ref: ${{ needs.context.outputs.source_sha }}
           persist-credentials: false
+      - name: Generate registration from the selected private source
+        uses: ./.github/actions/private-catalog
+        with:
+          source-root: .
+          private-ssh-key: ${{ secrets.TODOFY_PRIVATE_SSH_KEY }}
+          output-file: ${{ runner.temp }}/private-catalog.json
       - name: Compare actual Worker, D1, DO and R2 identities
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          PRIVATE_CATALOG: ${{ secrets.PRIVATE_CATALOG }}
-        run: python3 tools/service-catalog/inventory.py
+        run: python3 tools/service-catalog/inventory.py --private-catalog-file "$RUNNER_TEMP/private-catalog.json"
+      - name: Remove the generated private registration
+        if: always()
+        run: rm -f "$RUNNER_TEMP/private-catalog.json"
 
   infra-result:
     name: Require resolved infrastructure drift

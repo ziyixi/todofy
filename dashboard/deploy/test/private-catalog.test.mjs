@@ -13,12 +13,18 @@ const FIXTURE = readFileSync(new URL('../../worker/test/fixtures/private-catalog
 // Synthetic values only.
 const SECRETS = { ACCESS_OWNER: 'owner@example.org', CF_ANALYTICS_TOKEN: 'synthetic-analytics-value' }
 
-function attach(raw, secrets = SECRETS) {
+function attach(raw, secrets = SECRETS, catalogFile) {
   const directory = mkdtempSync(join(tmpdir(), 'private-catalog-'))
   try {
     const path = join(directory, 'home-secrets.json')
     writeFileSync(path, JSON.stringify(secrets), { mode: 0o600 })
-    const result = spawnSync(NODE_EXECUTABLE, [CLI, path], {
+    const args = [CLI, path]
+    if (catalogFile !== undefined) {
+      const catalogPath = join(directory, 'catalogue.json')
+      if (catalogFile !== null) writeFileSync(catalogPath, catalogFile, { mode: 0o600 })
+      args.push(catalogPath)
+    }
+    const result = spawnSync(NODE_EXECUTABLE, args, {
       env: raw === undefined ? {} : { PRIVATE_CATALOG: raw }, encoding: 'utf8',
     })
     return { ...result, file: JSON.parse(readFileSync(path, 'utf8')), mode: statSync(path).mode & 0o777 }
@@ -40,6 +46,28 @@ test('a valid registration is added to the owner-only secrets file without print
   assert.equal(result.mode, 0o600)
   for (const value of [...Object.values(SECRETS), 'demo-edge-one', 'demo-one.ziyixi.science']) {
     assert.ok(!(result.stdout + result.stderr).includes(value))
+  }
+})
+
+test('the selected source file replaces older environment and map registrations', () => {
+  const secrets = { ...SECRETS, PRIVATE_CATALOG: '{"invalid":"synthetic-private-value"}' }
+  const result = attach('synthetic-invalid-environment', secrets, FIXTURE)
+  assert.equal(result.status, 0, result.stderr)
+  assert.deepEqual(result.file, { ...SECRETS, PRIVATE_CATALOG: FIXTURE })
+  assert.equal(result.mode, 0o600)
+  for (const value of ['synthetic', 'demo-edge-one', 'demo-one.ziyixi.science']) {
+    assert.ok(!(result.stdout + result.stderr).includes(value))
+  }
+})
+
+test('a missing, empty or invalid source file fails without using an older registration', () => {
+  const secrets = { ...SECRETS, PRIVATE_CATALOG: FIXTURE }
+  for (const file of [null, '', ' ', '{"invalid":"synthetic-private-value"}']) {
+    const result = attach(FIXTURE, secrets, file)
+    assert.equal(result.status, 1)
+    assert.equal(result.stderr.trim(), 'PRIVATE_CATALOG_INVALID')
+    assert.equal(result.stdout, '')
+    assert.deepEqual(result.file, secrets)
   }
 })
 

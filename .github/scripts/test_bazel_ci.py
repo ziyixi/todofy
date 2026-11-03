@@ -36,7 +36,8 @@ class BazelCI(unittest.TestCase):
     def test_gate_requires_selected_checks_and_artifacts(self):
         gate = self.jobs["gate"]
         self.assertEqual(
-            set(gate["needs"]), {"changes", "checks", "artifacts", "private"}
+            set(gate["needs"]),
+            {"changes", "checks", "artifacts", "private", "private-home-artifact"},
         )
         script = gate["steps"][0]["run"]
         for checks, artifacts, private, expected in (
@@ -61,6 +62,8 @@ class BazelCI(unittest.TestCase):
                         "HAS_ARTIFACTS": "true",
                         "PRIVATE": private,
                         "HAS_PRIVATE": "true",
+                        "PRIVATE_HOME_ARTIFACT": "success",
+                        "HAS_PRIVATE_HOME_ARTIFACT": "true",
                     },
                     check=False,
                 )
@@ -77,11 +80,32 @@ class BazelCI(unittest.TestCase):
                     "HAS_ARTIFACTS": "false",
                     "PRIVATE": "skipped",
                     "HAS_PRIVATE": "false",
+                    "PRIVATE_HOME_ARTIFACT": "skipped",
+                    "HAS_PRIVATE_HOME_ARTIFACT": "false",
                 },
                 check=False,
             ).returncode,
             0,
         )
+        for status in ("failure", "cancelled", "skipped"):
+            with self.subTest(private_home_artifact=status):
+                result = subprocess.run(
+                    ["bash", "-e", "-c", script],
+                    env={
+                        **os.environ,
+                        "CHANGES": "success",
+                        "CHECKS": "success",
+                        "ARTIFACTS": "success",
+                        "HAS_CHECKS": "true",
+                        "HAS_ARTIFACTS": "true",
+                        "PRIVATE": "success",
+                        "HAS_PRIVATE": "true",
+                        "PRIVATE_HOME_ARTIFACT": status,
+                        "HAS_PRIVATE_HOME_ARTIFACT": "true",
+                    },
+                    check=False,
+                )
+                self.assertNotEqual(result.returncode, 0)
 
     def test_private_sources_are_pinned_and_never_saved_in_a_cache(self):
         caller = self.jobs["private"]
@@ -89,6 +113,7 @@ class BazelCI(unittest.TestCase):
         self.assertEqual(
             caller["with"]["revision"], "${{ needs.changes.outputs.private_sha }}"
         )
+        self.assertEqual(caller["with"]["base"], "${{ needs.changes.outputs.base }}")
         self.assertEqual(
             caller["secrets"],
             {"private_ssh_key": "${{ secrets.TODOFY_PRIVATE_SSH_KEY }}"},
@@ -107,6 +132,9 @@ class BazelCI(unittest.TestCase):
         self.assertEqual(checkout["repository"], "ziyixi/todofy-private")
         self.assertEqual(checkout["ref"], "${{ inputs.revision }}")
         self.assertEqual(checkout["persist-credentials"], "false")
+        self.assertEqual(checkout["fetch-depth"], "2147483647")
+        self.assertEqual(checkout["fetch-tags"], "false")
+        self.assertEqual(steps[0]["with"]["fetch-depth"], "0")
         cache_actions = [
             step["uses"].split("@")[0]
             for step in steps
@@ -307,18 +335,35 @@ class BazelCI(unittest.TestCase):
                 self.assertIsNotNone(first_match(private, published))
                 self.assertIsNone(first_match(private, published, runner="macOS"))
 
-    def test_private_operations_do_not_route_through_public_release_selection(self):
+    def test_private_selection_uses_the_pinned_entry_point_and_only_returns_a_boolean(self):
+        check = workflow_data(ROOT / ".github/workflows/private-check.yml")
+        self.assertEqual(set(check["on"]["workflow_call"]["outputs"]), {"release_required"})
+        job = check["jobs"]["check"]
+        self.assertEqual(
+            check["on"]["workflow_call"]["outputs"]["release_required"]["value"],
+            "${{ jobs.check.outputs.release_required }}",
+        )
+        self.assertEqual(job["outputs"]["release_required"], "${{ steps.plan.outputs.release_required }}")
+        plan = job["steps"][-1]
+        self.assertEqual(plan["id"], "plan")
+        self.assertEqual(plan["env"]["BASE_SHA"], "${{ inputs.base }}")
+        self.assertIn('python3 private/ci/plan.py --base "$BASE_SHA" --github-output "$GITHUB_OUTPUT"', plan["run"])
+        self.assertIn('> "$RUNNER_TEMP/private-plan.log" 2>&1', plan["run"])
+        self.assertIn("PRIVATE_PLAN_FAILED", plan["run"])
+        install = next(step["run"] for step in job["steps"]
+                       if step.get("name") == "Install fixed Target Determinator")
+        public_install = next(step["run"] for step in self.jobs["changes"]["steps"]
+                              if step.get("name") == "Install fixed Target Determinator")
+        self.assertEqual(install, public_install)
+
+    def test_private_operations_remain_a_separate_recovery_entry_point(self):
         inputs = self.workflow["on"]["workflow_dispatch"]["inputs"]
         self.assertNotIn("private_operation", inputs)
-        # Private releases are manual operations only; a main push never publishes them.
-        self.assertFalse(
-            any(
-                job.get("uses") == "./.github/workflows/private-release.yml"
-                for job in self.jobs.values()
-            )
+        self.assertEqual(
+            [name for name, job in self.jobs.items()
+             if job.get("uses") == "./.github/workflows/private-release.yml"],
+            ["private-deploy"],
         )
-        check = workflow_data(ROOT / ".github/workflows/private-check.yml")
-        self.assertNotIn("outputs", check["on"]["workflow_call"])
 
         operations = workflow_data(ROOT / ".github/workflows/private-ops.yml")
         self.assertEqual(set(operations["on"]), {"workflow_dispatch"})
@@ -354,10 +399,9 @@ class BazelCI(unittest.TestCase):
         entry = publisher["jobs"]["release"]["steps"][-1]
         # Every operation, including finish-worker, runs through the pinned private entry point only. It is passed
         # as an argument: an entry point pinned before an operation existed refuses it rather than defaulting.
-        self.assertEqual(
-            entry["run"],
-            'python3 private/ci/release.py --operation "$PRIVATE_RELEASE_OPERATION"',
-        )
+        self.assertEqual(entry["run"].count(
+            'python3 private/ci/release.py --operation "$PRIVATE_RELEASE_OPERATION"'
+        ), 2)
         self.assertEqual(
             entry["env"]["PRIVATE_RELEASE_OPERATION"], "${{ inputs.operation }}"
         )
@@ -377,7 +421,9 @@ class BazelCI(unittest.TestCase):
                 self.assertEqual(job["with"]["source_sha"], "${{ github.sha }}")
                 self.assertEqual(
                     job["with"]["artifact_run_id"],
-                    "${{ needs.changes.outputs.artifact_run_id || github.run_id }}",
+                    "${{ needs.changes.outputs.dashboard_deploy != 'true' && github.run_id || needs.changes.outputs.artifact_run_id || github.run_id }}"
+                    if name == "dashboard-deploy"
+                    else "${{ needs.changes.outputs.artifact_run_id || github.run_id }}",
                 )
                 self.assertEqual(job["permissions"]["actions"], "read")
         release = workflow_data(ROOT / ".github/workflows/worker-release.yml")["jobs"][
@@ -393,7 +439,12 @@ class BazelCI(unittest.TestCase):
         self,
     ):
         for name, job in self.jobs.items():
-            self.assertNotIn("id-token", job.get("permissions", {}), name)
+            if name == "private-deploy":
+                self.assertEqual(job["permissions"]["id-token"], "write")
+                self.assertEqual(job["uses"], "./.github/workflows/private-release.yml")
+                self.assertNotIn("steps", job)
+            else:
+                self.assertNotIn("id-token", job.get("permissions", {}), name)
         publisher = workflow_data(ROOT / ".github/workflows/private-release.yml")
         self.assertEqual(publisher["permissions"]["id-token"], "write")
         job = publisher["jobs"]["release"]
@@ -450,7 +501,7 @@ class BazelCI(unittest.TestCase):
         self.assertIn("args+=(--gateway-only)", source)
 
     def test_artifact_producers_have_no_production_permissions(self):
-        for name in ("changes", "checks", "artifacts", "gate"):
+        for name in ("changes", "checks", "artifacts", "private-home-artifact", "gate"):
             with self.subTest(job=name):
                 job = self.jobs[name]
                 self.assertNotIn("environment", job)

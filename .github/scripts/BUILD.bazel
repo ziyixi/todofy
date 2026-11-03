@@ -5,6 +5,7 @@ package(default_visibility = ["//visibility:public"])
 
 exports_files([
     "infra_guard.py",
+    "private_catalog.py",
     "test_infra_guard.py",
 ])
 

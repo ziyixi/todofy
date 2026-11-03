@@ -28,6 +28,29 @@ def field(step, name):
 
 
 class WorkerReleaseWorkflow(unittest.TestCase):
+    def test_home_catalogue_uses_the_selected_source_including_repairs_and_is_removed(self):
+        recipe = self.release_data["jobs"]["release"]["steps"]
+        generate = next(step for step in recipe if step.get("uses") == "./.github/actions/private-catalog")
+        preflight = next(step for step in recipe if step.get("id") == "preflight")
+        release = next(step for step in recipe if step.get("uses") == "./.github/actions/release-dashboard")
+        cleanup = next(step for step in recipe if step.get("name") == "Remove the generated private registration")
+        self.assertEqual(generate["if"], "inputs.app == 'dashboard' && " + REQUIRED)
+        self.assertEqual(generate["with"], {
+            "source-root": ".release-source",
+            "private-ssh-key": "${{ secrets.TODOFY_PRIVATE_SSH_KEY }}",
+            "output-file": "${{ runner.temp }}/private-catalog.json",
+        })
+        self.assertLess(recipe.index(preflight), recipe.index(generate))
+        self.assertLess(recipe.index(generate), recipe.index(release))
+        self.assertEqual(release["with"]["private-catalog-file"], "${{ runner.temp }}/private-catalog.json")
+        self.assertEqual(cleanup["if"], "always() && inputs.app == 'dashboard'")
+        self.assertEqual(cleanup["run"], 'rm -f "$RUNNER_TEMP/private-catalog.json"')
+        self.assertNotIn("secrets.PRIVATE_CATALOG", self.release_text)
+        for app in APPS:
+            block = self.releases[app + "-deploy"]
+            for name in ("Read the selected private revision", "Remove the generated private registration"):
+                self.assertEqual(name in block, app == "dashboard")
+
     def test_record_only_is_a_separate_protected_job_with_no_application_actions(self):
         release = self.release_data["jobs"]["release"]
         record = self.release_data["jobs"]["record"]
