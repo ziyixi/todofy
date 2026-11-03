@@ -5,7 +5,7 @@ import { batchCreate } from '../src/batch.ts';
 import { Dropbox } from '../src/dropbox.ts';
 import type { ClientRow, Connection } from '../src/store.ts';
 
-const client: ClientRow = { id: 'synthetic', label: 'Synthetic', namespace: 'quant', access: 2, token_sha256: 'a'.repeat(64), create_time: 0, revoked: 0 };
+const client: ClientRow = { id: 'synthetic', label: 'Synthetic', namespace: 'synthetic', access: 2, token_sha256: 'a'.repeat(64), create_time: 0, revoked: 0 };
 const connection: Connection = { appKey: 'synthetic', refreshToken: 'synthetic-private-refresh', generation: 'synthetic' };
 const hash = createHash('sha256').update(createHash('sha256').update('abc').digest()).digest('hex');
 
@@ -50,7 +50,7 @@ it.each([
     }
     if (name === 'finish' || name === 'finish rate') return new Response('synthetic-private-provider-body', { status: name === 'finish' ? 503 : 429 });
     if (name === 'finish entry') return Response.json({ entries: [{ '.tag': 'failure', failure: { '.tag': 'path', path: { '.tag': 'not_found' } } }] });
-    return Response.json({ entries: [{ '.tag': 'success', path_display: '/namespaces/quant/raw/synthetic-private-key.bin',
+    return Response.json({ entries: [{ '.tag': 'success', path_display: '/namespaces/synthetic/raw/synthetic-private-key.bin',
       rev: 'synthetic', size: 3, content_hash: '0'.repeat(64), ...(name === 'metadata' ? { path_display: 'synthetic-private-invalid-path' } : {}) }] });
   });
   const provider = new Dropbox({ get: () => null, set: () => undefined, delete: () => undefined, connection: () => connection }, {});

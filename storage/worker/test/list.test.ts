@@ -6,7 +6,7 @@ import type { ClientRow } from '../src/store.ts';
 import { sqliteStore } from './sqlite.ts';
 
 const secret = 'a'.repeat(64);
-const client: ClientRow = { id: 'synthetic', label: 'Synthetic', namespace: 'quant', access: 1, token_sha256: 'a'.repeat(64), create_time: 0, revoked: 0 };
+const client: ClientRow = { id: 'synthetic', label: 'Synthetic', namespace: 'synthetic', access: 1, token_sha256: 'a'.repeat(64), create_time: 0, revoked: 0 };
 interface ProviderPage { readonly entries: readonly Record<string, unknown>[]; readonly has_more: boolean; readonly cursor: string }
 interface Listing { readonly objects: { readonly key: string; readonly revision: string }[]; readonly next_cursor: string }
 let cache: ReturnType<typeof sqliteStore>;
@@ -15,12 +15,12 @@ let pages: ProviderPage[];
 let calls: { method: string; cursor?: string }[];
 
 function file(index: number, prefix = 'parts/'): Record<string, unknown> {
-  return { '.tag': 'file', path_display: '/namespaces/quant/' + prefix + String(index), rev: 'abc123', size: 1, content_hash: 'b'.repeat(64) };
+  return { '.tag': 'file', path_display: '/namespaces/synthetic/' + prefix + String(index), rev: 'abc123', size: 1, content_hash: 'b'.repeat(64) };
 }
 function page(start: number, count: number, more = false, cursor = 'provider-' + String(start)): ProviderPage {
   return { entries: Array.from({ length: count }, (_, at) => file(start + at)), has_more: more, cursor };
 }
-async function read(cursor = '', pageSize = 100, prefix = 'parts/', namespace = 'quant'): Promise<Listing> {
+async function read(cursor = '', pageSize = 100, prefix = 'parts/', namespace = 'synthetic'): Promise<Listing> {
   const response = await list(new Request('https://storage.example.test/api/storage/v1/list', {
     method: 'POST', body: JSON.stringify({ prefix, cursor, page_size: pageSize }),
   }), { ...client, namespace }, dropbox, secret, cache.store);
@@ -113,7 +113,7 @@ describe('bounded service pages over approximate provider pages', () => {
 
   it('accepts existing v1 provider cursors and emits bounded v2 continuations', async () => {
     pages = [page(0, 0, true, 'legacy'), page(0, 101)];
-    const cursor = await encodeCursor(secret, { provider: 'legacy', namespace: 'quant', prefix: 'parts/', expires: Date.now() + LIST_CURSOR_TTL_MS });
+    const cursor = await encodeCursor(secret, { provider: 'legacy', namespace: 'synthetic', prefix: 'parts/', expires: Date.now() + LIST_CURSOR_TTL_MS });
     const first = await read(cursor);
     expect(first.objects).toHaveLength(100);
     expect(calls[0]).toMatchObject({ method: 'continue', cursor: 'legacy' });
@@ -132,10 +132,10 @@ describe('bounded service pages over approximate provider pages', () => {
     const first = await read();
     await expect(read(first.next_cursor, 100, 'other/')).rejects.toMatchObject({ reason: 'CURSOR_INVALID' });
     await expect(read(first.next_cursor, 100, 'parts/', 'other')).rejects.toMatchObject({ reason: 'CURSOR_INVALID' });
-    const missing = await encodeCursor(secret, { page: crypto.randomUUID(), offset: 0, namespace: 'quant', prefix: 'parts/', expires: Date.now() + 60000 });
+    const missing = await encodeCursor(secret, { page: crypto.randomUUID(), offset: 0, namespace: 'synthetic', prefix: 'parts/', expires: Date.now() + 60000 });
     await expect(read(missing)).rejects.toMatchObject({ reason: 'CURSOR_INVALID' });
     const stored = cache.database.prepare('SELECT id FROM list_pages').get() as { id: string };
-    const invalidOffset = await encodeCursor(secret, { page: stored.id, offset: 102, namespace: 'quant', prefix: 'parts/', expires: (cache.store.listPage(stored.id, Date.now()))?.expires ?? 0 });
+    const invalidOffset = await encodeCursor(secret, { page: stored.id, offset: 102, namespace: 'synthetic', prefix: 'parts/', expires: (cache.store.listPage(stored.id, Date.now()))?.expires ?? 0 });
     await expect(read(invalidOffset)).rejects.toMatchObject({ reason: 'CURSOR_INVALID' });
     expect(calls).toHaveLength(1);
   });

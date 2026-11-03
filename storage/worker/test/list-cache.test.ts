@@ -6,7 +6,7 @@ import { sqliteStore } from './sqlite.ts';
 
 let cache: ReturnType<typeof sqliteStore>;
 const now = 1000;
-const page: ListPageData = { namespace: 'quant', prefix: '', expires: now + 60000, generation: 'synthetic', provider: 'synthetic', objects: [] };
+const page: ListPageData = { namespace: 'synthetic', prefix: '', expires: now + 60000, generation: 'synthetic', provider: 'synthetic', objects: [] };
 beforeEach(() => { cache = sqliteStore(); });
 afterEach(() => { cache.database.close(); });
 

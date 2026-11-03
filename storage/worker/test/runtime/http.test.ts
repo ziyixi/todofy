@@ -10,7 +10,7 @@ describe('Storage in workerd with native SQLite', () => {
     const unauthorized = await current.machine('stat', null, { method: 'POST', body: '{', headers: { 'content-type': 'application/json' } });
     expect(unauthorized.status).toBe(401);
     expect(current.provider.calls).toHaveLength(0);
-    const key = await current.client('quant');
+    const key = await current.client('synthetic');
     await current.owner(key.name, 'DELETE');
     const revoked = await current.machine('stat', key.api_key, { method: 'POST', body: '{}', headers: { 'content-type': 'application/json' } });
     expect(revoked.status).toBe(401);
@@ -21,7 +21,7 @@ describe('Storage in workerd with native SQLite', () => {
   it('reveals a created credential only once and refuses request ID reuse for another namespace', async () => {
     current = await harness();
     const requestId = crypto.randomUUID();
-    const input = { label: 'Synthetic', namespace: 'quant', access: 'read_only' };
+    const input = { label: 'Synthetic', namespace: 'synthetic', access: 'read_only' };
     const created = await current.owner('clients?request_id=' + requestId, 'POST', input);
     const first = await created.json<{ api_key: string; name: string }>();
     expect(first.api_key).toMatch(/^sto_[A-Za-z0-9_-]{43}$/);
@@ -36,8 +36,8 @@ describe('Storage in workerd with native SQLite', () => {
     current = await harness();
     await current.connect();
     const active = current;
-    const write = await current.client('quant');
-    const read = await current.client('quant', 'read_only');
+    const write = await current.client('synthetic');
+    const read = await current.client('synthetic', 'read_only');
     const other = await current.client('other');
     const bytes = new TextEncoder().encode('synthetic-object');
     const put = (token: string, headers: Record<string, string>) => active.machine('content?key=datasets/part.bin', token, {
@@ -75,7 +75,7 @@ describe('Storage in workerd with native SQLite', () => {
   it('streams a multi-block 8 MiB object and zero-byte object through native FixedLengthStream', async () => {
     current = await harness();
     await current.connect();
-    const key = await current.client('quant');
+    const key = await current.client('synthetic');
     const bytes = new Uint8Array(8 * 1024 * 1024);
     bytes.fill(97, 0, 4 * 1024 * 1024);
     bytes.fill(98, 4 * 1024 * 1024);
@@ -97,9 +97,9 @@ describe('Storage in workerd with native SQLite', () => {
     current = await harness();
     await current.connect();
     const active = current;
-    const key = await current.client('quant', 'read_only');
+    const key = await current.client('synthetic', 'read_only');
     const other = await current.client('other');
-    const file = (index: number) => ({ '.tag': 'file', path_display: '/namespaces/quant/parts/' + String(index), rev: 'abc123', size: 1, content_hash: 'b'.repeat(64) });
+    const file = (index: number) => ({ '.tag': 'file', path_display: '/namespaces/synthetic/parts/' + String(index), rev: 'abc123', size: 1, content_hash: 'b'.repeat(64) });
     current.provider.listPages = [
       { entries: [...Array.from({ length: 151 }, (_, index) => file(index)), { '.tag': 'folder' }], has_more: true, cursor: 'next-provider' },
       { entries: Array.from({ length: 51 }, (_, index) => file(151 + index)), has_more: false, cursor: 'done-provider' },
@@ -139,10 +139,10 @@ describe('Storage in workerd with native SQLite', () => {
   it('continues an empty filtered provider page and bounds 51 files to a request for 50', async () => {
     current = await harness();
     await current.connect();
-    const key = await current.client('quant', 'read_only');
+    const key = await current.client('synthetic', 'read_only');
     current.provider.listPages = [
       { entries: [{ '.tag': 'folder' }], has_more: true, cursor: 'empty-page' },
-      { entries: Array.from({ length: 51 }, (_, index) => ({ '.tag': 'file', path_display: '/namespaces/quant/parts/' + String(index), rev: 'abc123', size: 0, content_hash: 'b'.repeat(64) })), has_more: false, cursor: 'end' },
+      { entries: Array.from({ length: 51 }, (_, index) => ({ '.tag': 'file', path_display: '/namespaces/synthetic/parts/' + String(index), rev: 'abc123', size: 0, content_hash: 'b'.repeat(64) })), has_more: false, cursor: 'end' },
     ];
     let cursor = '';
     const counts = [];

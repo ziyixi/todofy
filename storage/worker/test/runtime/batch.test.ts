@@ -20,7 +20,7 @@ function input(files: readonly Item[] = items) {
 async function setup() {
   current = await harness();
   await current.connect();
-  const key = await current.client('quant');
+  const key = await current.client('synthetic');
   return { active: current, token: key.api_key };
 }
 
@@ -45,7 +45,7 @@ it('creates one ordered batch with native streams and three Dropbox requests', a
   ]);
   for (const [index, item] of items.entries()) {
     expect(metadata.objects[index]).toMatchObject({ key: item.key, size_bytes: item.data.byteLength, content_hash: HASH(item.data) });
-    const file = active.provider.files.get('/namespaces/quant/' + item.key);
+    const file = active.provider.files.get('/namespaces/synthetic/' + item.key);
     expect(file?.bytes).toEqual(item.data);
   }
   expect(active.provider.refreshes).toBe(1);
@@ -53,7 +53,7 @@ it('creates one ordered batch with native streams and three Dropbox requests', a
 
 it('rejects unauthenticated and readonly batches before parsing headers or forwarding bytes', async () => {
   const { active } = await setup();
-  const reader = await active.client('quant', 'read_only');
+  const reader = await active.client('synthetic', 'read_only');
   const invalid = { ...input(), headers: { ...input().headers, 'x-storage-batch': '{invalid' } };
   await failure(await active.machine('content', null, invalid), 401, 'UNAUTHORIZED');
   await failure(await active.machine('content', reader.api_key, invalid), 403, 'READ_ONLY');
@@ -98,10 +98,10 @@ it('reuses identical conflicts without overwriting and rejects a different exist
   const different = [items[0], { ...items[1], data: new TextEncoder().encode('different bytes') }];
   await failure(await active.machine('content', token, input(different)), 409, 'REVISION_CONFLICT');
   expect([...active.provider.files.values()].map((file) => file.revision)).toEqual(revisions);
-  expect(active.provider.files.get('/namespaces/quant/' + items[1].key)?.bytes).toEqual(items[1].data);
-  active.provider.folders.add('/namespaces/quant/raw/folder');
+  expect(active.provider.files.get('/namespaces/synthetic/' + items[1].key)?.bytes).toEqual(items[1].data);
+  active.provider.folders.add('/namespaces/synthetic/raw/folder');
   await failure(await active.machine('content', token, input([{ ...items[0], key: 'raw/folder' }])), 409, 'REVISION_CONFLICT');
-  expect(active.provider.folders.has('/namespaces/quant/raw/folder')).toBe(true);
+  expect(active.provider.folders.has('/namespaces/synthetic/raw/folder')).toBe(true);
 });
 
 it.each(['append_partial', 'finish_partial', 'finish_unknown', 'finish_metadata', 'finish_rate'] as const)('does not acknowledge or replay a %s batch', async (fault) => {

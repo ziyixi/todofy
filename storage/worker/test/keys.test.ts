@@ -3,11 +3,11 @@ import { decodeCursor, encodeCursor, namespace, objectKey, providerPath, writeMo
 
 describe('namespace authority', () => {
   it('keeps namespace selection on the server and rejects alternate Dropbox path syntaxes', () => {
-    expect(providerPath('quant', 'datasets/test/part-01.parquet')).toBe('/namespaces/quant/datasets/test/part-01.parquet');
+    expect(providerPath('synthetic', 'datasets/test/part-01.parquet')).toBe('/namespaces/synthetic/datasets/test/part-01.parquet');
     for (const key of ['/other/file', '../file', 'a/../file', 'a//file', 'a/./file', 'a\\file', 'id:other', 'ns:other', 'rev:other', 'a/%2e%2e/file', '']) {
       expect(() => objectKey(key), key).toThrow();
     }
-    for (const value of ['../quant', 'Quant', '/quant', 'quant/other', '']) expect(() => namespace(value)).toThrow();
+    for (const value of ['../synthetic', 'Synthetic', '/synthetic', 'synthetic/other', '']) expect(() => namespace(value)).toThrow();
   });
 
   it('permits directory and filename prefixes without admitting traversal', () => {
@@ -33,24 +33,24 @@ describe('conditional writes', () => {
 describe('provider cursors', () => {
   it('authenticates the namespace and prefix instead of trusting a caller-supplied provider cursor', async () => {
     const secret = 'a'.repeat(64);
-    const claims = { provider: 'synthetic-provider-cursor', namespace: 'quant', prefix: 'datasets/', expires: Date.now() + 60000 };
+    const claims = { provider: 'synthetic-provider-cursor', namespace: 'synthetic', prefix: 'datasets/', expires: Date.now() + 60000 };
     const cursor = await encodeCursor(secret, claims);
-    expect(await decodeCursor(secret, cursor, 'quant', 'datasets/')).toEqual(claims);
+    expect(await decodeCursor(secret, cursor, 'synthetic', 'datasets/')).toEqual(claims);
     await expect(decodeCursor(secret, cursor, 'other', 'datasets/')).rejects.toThrow();
-    await expect(decodeCursor(secret, cursor, 'quant', 'control/')).rejects.toThrow();
-    await expect(decodeCursor('b'.repeat(64), cursor, 'quant', 'datasets/')).rejects.toThrow();
-    await expect(decodeCursor(secret, cursor.slice(0, -2) + 'xx', 'quant', 'datasets/')).rejects.toThrow();
+    await expect(decodeCursor(secret, cursor, 'synthetic', 'control/')).rejects.toThrow();
+    await expect(decodeCursor('b'.repeat(64), cursor, 'synthetic', 'datasets/')).rejects.toThrow();
+    await expect(decodeCursor(secret, cursor.slice(0, -2) + 'xx', 'synthetic', 'datasets/')).rejects.toThrow();
   });
 
   it('accepts only a valid signed page reference, nonnegative offset and unexpired scope', async () => {
     const secret = 'a'.repeat(64);
-    const claims = { page: crypto.randomUUID(), offset: 100, namespace: 'quant', prefix: 'datasets/', expires: Date.now() + 60000 };
+    const claims = { page: crypto.randomUUID(), offset: 100, namespace: 'synthetic', prefix: 'datasets/', expires: Date.now() + 60000 };
     const cursor = await encodeCursor(secret, claims);
-    expect(await decodeCursor(secret, cursor, 'quant', 'datasets/')).toEqual(claims);
+    expect(await decodeCursor(secret, cursor, 'synthetic', 'datasets/')).toEqual(claims);
     for (const changed of [{ ...claims, offset: -1 }, { ...claims, offset: 1.5 }, { ...claims, page: 'unknown' }, { ...claims, expires: Date.now() - 1 }]) {
-      await expect(decodeCursor(secret, await encodeCursor(secret, changed), 'quant', 'datasets/')).rejects.toMatchObject({ reason: 'CURSOR_INVALID' });
+      await expect(decodeCursor(secret, await encodeCursor(secret, changed), 'synthetic', 'datasets/')).rejects.toMatchObject({ reason: 'CURSOR_INVALID' });
     }
     await expect(decodeCursor(secret, cursor, 'other', 'datasets/')).rejects.toMatchObject({ reason: 'CURSOR_INVALID' });
-    await expect(decodeCursor(secret, cursor, 'quant', 'control/')).rejects.toMatchObject({ reason: 'CURSOR_INVALID' });
+    await expect(decodeCursor(secret, cursor, 'synthetic', 'control/')).rejects.toMatchObject({ reason: 'CURSOR_INVALID' });
   });
 });

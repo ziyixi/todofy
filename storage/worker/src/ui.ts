@@ -6,8 +6,8 @@ export const PAGE = `<!doctype html>
 <section><h2>Dropbox</h2><p id="connection">正在读取连接状态…</p><p class="muted">文件保存在 Todofy Shared Storage 的独立应用文件夹中。</p>
 <form id="connect"><label>Dropbox App key<input id="app-key" required pattern="[a-z0-9]{8,32}" autocomplete="off"></label><button>连接 Dropbox</button></form>
 <button id="disconnect" hidden>断开连接</button><small class="muted">断开连接会保留 Dropbox 中的文件。</small></section>
-<section><h2>应用密钥</h2><form id="create"><label>名称<input id="label" required maxlength="80" placeholder="例如：Quant collector"></label>
-<label>命名空间<input id="namespace" required pattern="[a-z][a-z0-9_-]{0,63}" placeholder="例如：quant"><small class="muted">使用小写字母、数字、连字符或下划线，以字母开头。</small></label>
+<section><h2>应用密钥</h2><form id="create"><label>名称<input id="label" required maxlength="80" placeholder="例如：数据导出"></label>
+<label>命名空间<input id="namespace" required pattern="[a-z][a-z0-9_-]{0,63}" placeholder="例如：exports"><small class="muted">使用小写字母、数字、连字符或下划线，以字母开头。</small></label>
 <label>权限<select id="access"><option value="read_only">只读</option><option value="read_write">读取和条件写入</option></select></label><button>创建密钥</button></form>
 <div id="issued" hidden><p>请复制此密钥。关闭或刷新页面后无法再次查看。</p><textarea id="secret" readonly aria-label="新创建的应用密钥"></textarea></div>
 <table><thead><tr><th>名称</th><th>命名空间</th><th>权限</th><th>操作</th></tr></thead><tbody id="clients"></tbody></table></section></body></html>`;
