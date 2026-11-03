@@ -19,7 +19,7 @@ terraform {
   # - credentials: AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY, derived from the Cloudflare API token at runtime
   #   (README.md "Remote state").
   # No lock file: R2's conditional writes (If-None-Match: *) are not proven for this bucket yet, so
-  # .github/workflows/infra.yml serialises runs with the GitHub concurrency group infra-production instead.
+  # the reconcile and "Infra apply" serialise their runs with the GitHub concurrency group infra-production instead.
   # bootstrap_state.py probes conditional writes; enable use_lockfile only in a later change, after it passes.
   backend "s3" {
     bucket                      = "infra-state"

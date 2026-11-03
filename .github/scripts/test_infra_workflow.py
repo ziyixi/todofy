@@ -1,13 +1,12 @@
-"""Checks of the two workflows of infra/: python3 -m unittest discover -s .github/scripts
+"""Checks of .github/workflows/infra-apply.yml, the apply of infra/ (infra/README.md "Apply"): python3 -m unittest
+discover -s .github/scripts
 
-- .github/workflows/infra.yml, the drift plan (infra/README.md "Drift plan"): plan only (no apply, no import, no state
-  command), main only in the production environment, one concurrency group, the redacted summary as the only output,
-  nothing uploaded, every action pinned by SHA.
-- .github/workflows/infra-apply.yml, the apply (infra/README.md "Apply"): a manual dispatch only, main only in the
-  production environment and the same concurrency group, one step that runs `infra_state.py apply` (its backup, gates
-  and saved-plan apply are tested in infra/tests), the dispatch inputs through the environment only.
-Both hold a production token in a public repository, so their shape is pinned here. The workflows are read as text (no
-YAML library on the runner's python3). Standard library only, Python 3.9+.
+A manual dispatch only, main only in the production environment and the infra-production concurrency group, one step
+that runs `infra_state.py apply` (its backup, gates and saved-plan apply are tested in infra/tests), the dispatch inputs
+through the environment only. The drift report is the infra job of personal-cloud-reconcile.yml
+(test_reconcile_workflow.py); no other workflow runs the state driver. The apply holds a production token in a public
+repository, so its shape is pinned here. The workflows are read as text (no YAML library on the runner's python3).
+Standard library only, Python 3.9+.
 """
 
 import re
@@ -19,8 +18,9 @@ REPO = Path(__file__).absolute().parents[2]
 sys.path.insert(0, str(REPO / "infra" / "scripts"))
 import infra_state  # noqa: E402  (standard library only)
 
-WORKFLOW = REPO / ".github" / "workflows" / "infra.yml"
-APPLY = REPO / ".github" / "workflows" / "infra-apply.yml"
+WORKFLOWS = REPO / ".github" / "workflows"
+APPLY = WORKFLOWS / "infra-apply.yml"
+RECONCILE = WORKFLOWS / "personal-cloud-reconcile.yml"
 
 
 def code(text: str) -> str:
@@ -31,55 +31,6 @@ def code(text: str) -> str:
             continue
         lines.append(re.sub(r"\s+#.*$", "", line))
     return "\n".join(lines)
-
-
-class InfraWorkflow(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.text = WORKFLOW.read_text()
-        cls.code = code(cls.text)
-
-    def test_triggers_are_main_pushes_to_infra_and_dispatch(self):
-        on = self.code.split("\non:\n", 1)[1].split("\npermissions:", 1)[0]
-        self.assertRegex(on, r"push:\n\s+branches: \[main\]\n\s+paths:\n\s+- infra/\*\*\n")
-        self.assertNotIn("schedule:", on)
-        self.assertIn("schedule:", (REPO / ".github/workflows/personal-cloud-reconcile.yml").read_text())
-        self.assertIn("workflow_dispatch:", on)
-        for trigger in ("pull_request", "pull_request_target", "workflow_run", "issue_comment", "repository_dispatch"):
-            with self.subTest(trigger=trigger):
-                self.assertNotIn(trigger, self.code)
-
-    def test_production_on_main_only_in_one_concurrency_group(self):
-        self.assertRegex(self.code, r"\nconcurrency:\n  group: infra-production\n  cancel-in-progress: false\n")
-        self.assertIn("    if: github.ref == 'refs/heads/main'\n", self.code)
-        self.assertEqual(re.findall(r"environment: (\S+)", self.code), ["production"])
-        self.assertRegex(self.code, r"\npermissions:\n  contents: read\n")
-        self.assertNotRegex(self.code, r"(?m)^[ \t]+permissions:")  # no job widens them
-
-    def test_plan_only_and_only_the_redacted_summary(self):
-        runs = re.findall(r"run: (.+)", self.code)
-        self.assertEqual(runs, ["python3 infra/scripts/infra_state.py plan --environment production"])
-        for word in ("apply", "import", "tofu state", "tofu show", "destroy", "taint", "force-unlock", "upload-artifact",
-                     "cache@", "GITHUB_OUTPUT", "set -x"):
-            with self.subTest(word=word):
-                self.assertNotIn(word, self.code)
-        self.assertIn("tofu_wrapper: false", self.code)
-
-    def test_secrets_are_the_token_the_passphrase_and_the_values(self):
-        self.assertEqual(
-            sorted(set(re.findall(r"secrets\.([A-Z0-9_]+)", self.code))),
-            ["CF_API_TOKEN", "INFRA_STATE_PASSPHRASE", "INFRA_TFVARS"],
-        )
-        self.assertNotRegex(self.code, r"vars\.")
-        self.assertNotRegex(self.code, r"run: .*\$\{\{")
-
-    def test_actions_are_pinned_by_sha(self):
-        uses = re.findall(r"uses: (\S+)", self.code)
-        self.assertEqual(len(uses), 2)
-        for action in uses:
-            with self.subTest(action=action):
-                self.assertRegex(action, r"^[\w.-]+/[\w.-]+@[0-9a-f]{40}$")
-        self.assertIn("persist-credentials: false", self.code)
 
 
 class InfraApplyWorkflow(unittest.TestCase):
@@ -127,9 +78,11 @@ class InfraApplyWorkflow(unittest.TestCase):
         self.assertEqual(set(re.findall(r"vars\.([A-Z0-9_]+)", self.code)), {"VPS_BOOTSTRAP_CERT"})
         self.assertNotRegex(self.code, r"run: .*\$\{\{")
 
-    def test_actions_are_pinned_by_sha_and_match_the_drift_workflow(self):
+    def test_actions_are_pinned_by_sha_and_match_the_reconciles_infra_job(self):
         uses = re.findall(r"uses: (\S+)", self.code)
-        shared = re.findall(r"uses: (\S+)", code(WORKFLOW.read_text()))
+        infra_job = code(RECONCILE.read_text()).split("\n  infra:\n", 1)[1].split("\n  workers:\n", 1)[0]
+        shared = re.findall(r"uses: (\S+)", infra_job)
+        self.assertEqual(len(shared), 2)
         self.assertEqual(uses[:len(shared)], shared)
         self.assertEqual(uses[len(shared):], ["actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"] * 2)
         self.assertIn("path: ${{ runner.temp }}/platform-bootstrap.cms", self.code)
@@ -148,10 +101,12 @@ class InfraApplyWorkflow(unittest.TestCase):
         self.assertEqual(infra_state.APPLY_REF, "refs/heads/main")
         self.assertNotRegex(self.code, r"GITHUB_(REF|EVENT_NAME|WORKFLOW):")  # the runner's own values, never overridden
 
-    def test_the_drift_workflow_never_applies(self):
-        drift = code(WORKFLOW.read_text())
-        self.assertNotIn("infra_state.py apply", drift)
-        self.assertNotIn("workflow_dispatch:\n    inputs", drift)
+    def test_only_this_workflow_and_the_reconcile_run_the_state_driver(self):
+        """One drift report (the reconcile's `reconcile`) and one approved write (this workflow's `apply`)."""
+        callers = {path.name: re.findall(r"infra/scripts/infra_state\.py (\S+)", code(path.read_text()))
+                   for path in sorted(WORKFLOWS.glob("*.yml"))}
+        self.assertEqual({name: found for name, found in callers.items() if found},
+                         {"infra-apply.yml": ["apply"], "personal-cloud-reconcile.yml": ["reconcile"]})
 
 
 if __name__ == "__main__":

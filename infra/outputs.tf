@@ -1,6 +1,6 @@
 # Identifiers the apps' wrangler.toml files repeat, read from the managed objects. Not secret: every value is also
 # committed in a wrangler.toml. infra_state.py compares them with those files on every plan (README.md "Outputs"),
-# so an AUD that changed in Cloudflare, or a wrangler.toml that names another database, fails "Infra drift" and
+# so an AUD that changed in Cloudflare, or a wrangler.toml that names another database, fails the reconcile and
 # "Infra apply". Keys are Worker names (access_aud also has the one application no Worker checks itself).
 
 output "access_aud" {

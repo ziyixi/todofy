@@ -20,7 +20,7 @@ What they keep true (infra/README.md):
 - The D1 databases and R2 buckets are exactly those the production configs bind, and each D1 import id is
   the database_id committed there (ids.tf). The production configs are test_wrangler_configs.py's, minus the Workers
   named in NOT_ADOPTED (none since IaC P4 adopted the links app).
-- infra_state.py's lists agree with the rest: WRANGLER_CONFIGS (the outputs check in "Infra drift"/"Infra apply") is
+- infra_state.py's lists agree with the rest: WRANGLER_CONFIGS (the outputs check in the reconcile/"Infra apply") is
   test_wrangler_configs.py's PRODUCTION, its ALLOWED_TYPES (the apply's allowlist) and FROZEN are the guard's, each
   FROZEN object's id is the id ids.tf records, and its OUTPUTS are the outputs outputs.tf declares.
 - The count of managed objects is one number: README.md "Managed here (N objects)", bootstrap_state.py's
@@ -415,7 +415,7 @@ class MatchesTheApps(unittest.TestCase):
 
     def test_every_worker_that_checks_access_has_an_application_of_its_name(self):
         """The access_aud output is keyed by Worker name; a Worker whose ACCESS_AUDIENCE no application key matches
-        would fail the outputs check in "Infra drift"."""
+        would fail the outputs check in the reconcile."""
         code = (INFRA / "access.tf").read_text()
         keys = set(hcl_map(code, "owner_apps"))
         for worker in PRODUCTION:

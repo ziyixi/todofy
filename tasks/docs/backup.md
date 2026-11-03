@@ -118,8 +118,8 @@ afterwards.
      `npx wrangler versions view <that version> --config ../wrangler.toml` lists `DB` with the new id. Go on
      to step 6 only then.
    - Push the commit to `main`. Its preflight now finds the binding it expects and releases the same code.
-   - `infra/` still holds the old database as `cloudflare_d1_database.app["tasks"]`, so "Infra drift" and the
-     reconcile report the id difference, and the new database as unregistered, until the infra state is moved
+   - `infra/` still holds the old database as `cloudflare_d1_database.app["tasks"]`, so the reconcile
+     reports the id difference, and the new database as unregistered, until the infra state is moved
      to it ([import notes](../../infra/README.md#outputs)). Keep the old database until then.
 6. Open Plan: the restored tasks carry their planning facts and dependencies. Mail links of tasks created after
    the backup point at tasks the restored database lacks; converting such a Mail item creates a new Inbox task.

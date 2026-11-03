@@ -68,16 +68,18 @@ The [bootstrap](../tools/cloud-bootstrap/README.md) handles the state bucket bef
 supports creation, adoption, extension and continuation after interruption. It exports provider-issued identities
 and regenerates committed configuration. Do not restore the old hand-written import-block workflow.
 
-## Drift plan (CI)
+## Drift report (CI)
 
-[Infra drift](../.github/workflows/infra.yml) plans on relevant main pushes and manual dispatch.
-[Personal cloud reconcile](../.github/workflows/personal-cloud-reconcile.yml) also checks the running environment
-daily and after publication. These production checks are separate from account-free source tests.
+[Personal cloud reconcile](../.github/workflows/personal-cloud-reconcile.yml) is the only drift report. Its
+Infrastructure job plans current `main` after each successful main CI (so a pushed `infra/` change is compared
+once its CI passes), daily and on a manual `check`. Its summary shows the address table; for a plan it does not
+repair, it ends with the Infra apply `expect` for exactly that plan, or says that Infra apply would refuse it.
+These production checks are separate from account-free source tests.
 
 | Result | Meaning | Next step |
 | --- | --- | --- |
 | No planned actions, matching outputs | Managed resources match the declared configuration | None |
-| Planned in-place changes | Actual configuration differs | Use the repair/review path below |
+| Planned in-place changes | Actual configuration differs | Routine repair, or Infra apply with the printed `expect` |
 | Delete, replace or forget | A resource identity or declaration is being removed | Review the intended retirement or recovery |
 | Output mismatch | An app names a different AUD, database or bucket | Correct the inventory/configuration before applying |
 | Dependency or permission error | No trustworthy comparison completed | Resolve the reported prerequisite and repeat the same check |
@@ -92,9 +94,9 @@ There are two write paths for these resources, both on main and under the same i
 1. Routine reconcile repairs only the dedicated runtime/API CNAMEs and authenticated loopback Tunnel ingress, preserving
    the Tunnel target and exact route/audience policy in [reconcile_policy.py](scripts/reconcile_policy.py).
 2. [Infra apply](../.github/workflows/infra-apply.yml) applies every other change. Its `expect` input is the action
-   counts and plan fingerprint that the reconcile's Infrastructure summary (or the matching drift run) prints for the
-   reviewed address table; it plans again and applies only an identical plan. Its destructive-confirmation input is
-   only for an explicitly reviewed retirement.
+   counts and plan fingerprint that the reconcile's Infrastructure summary prints for the reviewed address table; it
+   plans again and applies only an identical plan. Its destructive-confirmation input is only for an explicitly
+   reviewed retirement.
 
 Private operations' `infra-apply` is a third, separate path: it writes only the private application's own
 infrastructure, under that application's release lock and its own reviewed plan fingerprint.
@@ -120,7 +122,8 @@ Sensitive outputs are private bootstrap inputs and never part of the public summ
 
 1. Declare its service, resource identities and owned resources through the catalog and HCL; keep its release disabled
    until required resources exist. Use the bootstrap's explicit extension addresses for an existing environment.
-2. Review and apply only the new resources. Record the resulting identities through the existing exporter and generator.
+2. After the change reaches `main`, review the new resources in the reconcile's Infrastructure summary and dispatch
+   Infra apply with the `expect` it prints. Record the resulting identities through the existing exporter and generator.
 3. Deploy the same green source after its service-binding providers. After its first deployment, record any new DO
    namespace and remove the first-deploy exclusion.
 4. Require the matching reconcile, resource-registration and provider-readback checks. An Access redirect alone does

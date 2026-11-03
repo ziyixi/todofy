@@ -154,8 +154,8 @@ afterwards.
      From `links/worker`, `npx wrangler deployments status --config ../wrangler.toml` names the version, and
      `npx wrangler versions view <that version> --config ../wrangler.toml` lists `DB` with the new id.
    - Push the commit to `main`. Its preflight now finds the binding it expects and releases the same code.
-   - `infra/` still holds the old database as `cloudflare_d1_database.app["links"]`, so "Infra drift" and the
-     reconcile report the id difference, and the new database as unregistered, until the infra state is moved to
+   - `infra/` still holds the old database as `cloudflare_d1_database.app["links"]`, so the reconcile
+     reports the id difference, and the new database as unregistered, until the infra state is moved to
      it ([import notes](../../infra/README.md#scope)). Keep the old database until then.
 6. Open the launcher (`https://s.ziyixi.science/_/`): it lists the restored links, 显示已删除 the deleted ones, and a
    link's history its kept revisions. A public link redirects anonymously.

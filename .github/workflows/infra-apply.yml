@@ -1,17 +1,17 @@
 # The apply of infra/ (IaC P4, infra/README.md "Apply"). One of the two CI paths that write these Cloudflare objects
 # and the remote state; the other is the routine repair of personal-cloud-reconcile.yml.
 # (Private operations' infra-apply writes only the private application's own infrastructure.)
-# A separate workflow, not a job in infra.yml, because:
-# - its trigger differs: a manual dispatch only, while "Infra drift" runs on pushes to main. In one workflow every
-#   push would also have to skip an apply job, and one wrong `if:` would turn a drift run into an apply;
-# - infra.yml stays plan-only, and test_infra_workflow.py pins that ("apply" never appears in it);
-# - a dispatch needs inputs (the expected actions, the destructive confirmation) that the drift plan must not have.
-# Manual only, for now: an apply should be watched, and the drift run of the merged commit has already shown its
-# address table. The "expect" input is what the reviewer expected from that table (counts and the plan fingerprint,
-# which binds the dispatch to that exact list of addresses and actions), never a copy of a line that differs from it.
-# Switching to `push` is a later, separate decision (README.md). infra_state.py refuses `apply` anywhere but in this
-# workflow (its name), dispatched on main.
-# It shares the concurrency group infra-production with "Infra drift", so a plan never reads a half-written state.
+# A separate workflow, not a job in personal-cloud-reconcile.yml, because:
+# - its trigger differs: a manual dispatch only, while the reconcile runs after main CI, daily and on dispatch. In one
+#   workflow one wrong `if:` would turn a drift check into an apply;
+# - a dispatch needs inputs (the expected actions, the destructive confirmation) that the drift check must not have.
+# Manual only, for now: an apply should be watched, and the reconcile after the merged commit's CI has already shown
+# its address table and printed the expect line for it. The "expect" input is what the reviewer expected from that
+# table (counts and the plan fingerprint, which binds the dispatch to that exact list of addresses and actions), never
+# a copy of a line that differs from it. Switching to `push` is a later, separate decision (README.md).
+# infra_state.py refuses `apply` anywhere but in this workflow (its name), dispatched on main.
+# It shares the concurrency group infra-production with the reconcile's infra job, so a plan never reads a
+# half-written state.
 # The public log shows only the backup's key, the redacted summaries (addresses and action counts) and fixed messages.
 name: Infra apply
 
@@ -19,7 +19,7 @@ on:
   workflow_dispatch:
     inputs:
       expect:
-        description: The counts and fingerprint you expected and checked against the "Infra drift" address table (for example import=5,outputs=3@<12 hex>; none for no change). Never a copy of a line that differs from what you expected
+        description: The counts and fingerprint you expected and checked against the address table in the reconcile's Infrastructure summary (for example import=5,outputs=3@<12 hex>; none for no change). Never a copy of a line that differs from what you expected
         required: true
         type: string
       confirm_destructive:
@@ -31,8 +31,8 @@ on:
 permissions:
   contents: read
 
-# The S3 backend keeps no lock file (versions.tf): this group, shared with infra.yml, is the lock. Never cancel an
-# apply half way.
+# The S3 backend keeps no lock file (versions.tf): this group, shared with the reconcile's infra job, is the lock.
+# Never cancel an apply half way.
 concurrency:
   group: infra-production
   cancel-in-progress: false

@@ -3,10 +3,11 @@
 
     python3 infra/scripts/infra_state.py plan --environment production [--var-file F] [--work-dir D]
     python3 infra/scripts/infra_state.py apply --environment production   # only inside "Infra apply" on main
+    python3 infra/scripts/infra_state.py reconcile --environment production   # only inside "Personal cloud reconcile"
     python3 infra/scripts/infra_state.py list-backups --environment production [--var-file F]
 
-Used by .github/workflows/infra.yml (daily drift plan), .github/workflows/infra-apply.yml (the apply, P4) and by
-bootstrap_state.py (one-time import). It:
+Used by .github/workflows/personal-cloud-reconcile.yml (`reconcile`: the drift check and its routine repair),
+.github/workflows/infra-apply.yml (the apply, P4), locally (`plan`) and by bootstrap_state.py (one-time import). It:
 - refuses to run without the state passphrase (TF_VAR_state_passphrase or INFRA_STATE_PASSPHRASE): state and
   plan encryption are enforced in versions.tf and there is no unencrypted fallback;
 - derives the R2 S3 credentials from CLOUDFLARE_API_TOKEN at runtime (access key id = the token's id from
@@ -858,11 +859,11 @@ def parse_expect(text: str) -> tuple[dict[str, int], Optional[str]]:
     """`import=5,outputs=3@<fingerprint>` -> ({"import": 5, "outputs": 3}, "<fingerprint>"); `none` -> ({}, None).
 
     Counts are separated by commas or spaces, zeros dropped. Any action needs the plan fingerprint that the reviewed
-    "Infra drift" run printed after `@`: it binds the dispatch to that exact list of addresses and actions."""
+    reconcile run printed after `@`: it binds the dispatch to that exact list of addresses and actions."""
     text = text.strip()
     if not text:
         raise Refused(f"state the expected actions with --expect or {EXPECT_ENV} (for example "
-                      "import=5,outputs=3@<fingerprint>, or none), as reviewed in an \"Infra drift\" run")
+                      "import=5,outputs=3@<fingerprint>, or none), as reviewed in a reconcile run")
     if text == "none":
         return {}, None
     counts_text, _, fingerprint = text.partition("@")
@@ -878,7 +879,7 @@ def parse_expect(text: str) -> tuple[dict[str, int], Optional[str]]:
         raise Refused("the expected actions are all zero; dispatch with none instead")
     if not _FINGERPRINT.fullmatch(fingerprint):
         raise Refused(f"the expected actions need the plan fingerprint after @ ({FINGERPRINT_DIGITS} hex digits), as "
-                      "the reviewed \"Infra drift\" run printed it")
+                      "the reviewed reconcile run printed it")
     return expected, fingerprint
 
 
@@ -988,7 +989,7 @@ def apply_gate(summary: dict, plan_json: Any, expected: dict[str, int], fingerpr
     actual = plan_fingerprint(summary)
     if found and actual != fingerprint:
         raise Refused(f"the plan's fingerprint {actual} is not the reviewed {fingerprint}: main or "
-                      "Cloudflare changed since that \"Infra drift\" run; review a new run before dispatching again")
+                      "Cloudflare changed since that reconcile run; review a new run before dispatching again")
 
 
 def utc_now() -> datetime.datetime:

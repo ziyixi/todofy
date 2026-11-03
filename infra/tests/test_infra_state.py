@@ -1003,7 +1003,7 @@ class ApplyCommand(unittest.TestCase):
             "local": {},
             "branch": dict(APPLY_CONTEXT, GITHUB_REF="refs/heads/iac-p4"),
             "push": dict(APPLY_CONTEXT, GITHUB_EVENT_NAME="push"),
-            "drift workflow": dict(APPLY_CONTEXT, GITHUB_WORKFLOW="Infra drift"),
+            "another workflow": dict(APPLY_CONTEXT, GITHUB_WORKFLOW="CI and deploy"),
             # The reconcile prints the expect line; it never applies one (its old reviewed apply is gone).
             "reconcile": dict(APPLY_CONTEXT, GITHUB_WORKFLOW="Personal cloud reconcile",
                               INFRA_REVIEWED_APPLY="reviewed-plan"),
