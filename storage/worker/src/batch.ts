@@ -14,6 +14,7 @@ type BatchPhase = 'start' | 'append' | 'finish' | 'verify';
 const DIAGNOSTIC_REASONS = new Set([
   'BATCH_INCOMPLETE', 'REVISION_CONFLICT', 'UPLOAD_LENGTH_MISMATCH', 'UPLOAD_HASH_MISMATCH', 'NOT_FOUND', 'BAD_REQUEST',
   'PROVIDER_RESPONSE_INVALID', 'UNAVAILABLE', 'CONNECTION_INVALID', 'NOT_CONFIGURED', 'INTERNAL', 'INSUFFICIENT_SPACE',
+  'BATCH_NOT_COMMITTED',
 ]);
 const ENTRY_FAILURE_TAGS = new Set([
   'lookup_failed', 'not_closed', 'content_hash_mismatch', 'too_many_write_operations', 'path', 'not_found',
@@ -21,7 +22,7 @@ const ENTRY_FAILURE_TAGS = new Set([
   'file', 'folder', 'file_ancestor', 'conflict', 'no_write_permission',
 ]);
 
-function logFailure(error: unknown, phase: BatchPhase, finishing: boolean, entry: Record<string, unknown> | null): void {
+function logFailure(error: unknown, answer: RpcError, phase: BatchPhase, finishing: boolean, entry: Record<string, unknown> | null): void {
   const rpc = error instanceof RpcError ? error : null;
   const tag = entry?.['.tag'];
   const failure = entry?.failure;
@@ -37,11 +38,24 @@ function logFailure(error: unknown, phase: BatchPhase, finishing: boolean, entry
       entry_detail_tag: tag !== 'failure' || detail === undefined ? 'none' : typeof detailTag === 'string' && ENTRY_FAILURE_TAGS.has(detailTag) ? detailTag : 'other',
       cause_reason: rpc === null ? 'UNEXPECTED_ERROR' : DIAGNOSTIC_REASONS.has(rpc.reason) ? rpc.reason : 'UNKNOWN_RPC_ERROR',
       cause_http_status: rpc !== null && Number.isInteger(rpc.httpStatus) && rpc.httpStatus >= 100 && rpc.httpStatus <= 599 ? rpc.httpStatus : 0,
+      answer_reason: DIAGNOSTIC_REASONS.has(answer.reason) ? answer.reason : 'UNKNOWN_RPC_ERROR',
     }));
   } catch { /* Diagnostics must not replace the original request result. */ }
 }
 
 function incomplete(): RpcError { return failure(Code.UNAVAILABLE, 'BATCH_INCOMPLETE'); }
+
+/** The answer to a failed batch; only a failure before finish is known to have committed nothing. */
+function failedBatch(error: unknown, finishing: boolean): RpcError {
+  // Definite answers; either may still follow partial commits of other items, so neither acknowledges the batch.
+  if (error instanceof RpcError && (error.reason === 'REVISION_CONFLICT' || error.reason === 'INSUFFICIENT_SPACE')) return error;
+  // A finish response may describe partial commits; it never authorizes replay of the batch.
+  if (finishing) return incomplete();
+  // Before finish, a definite refusal such as a rate limit, an invalid connection or a wrong manifest hash keeps its
+  // answer; only another failure lets the caller send the same batch again.
+  if (error instanceof RpcError && error.httpStatus >= 400 && error.httpStatus < 500) return error;
+  return failure(Code.UNAVAILABLE, 'BATCH_NOT_COMMITTED');
+}
 
 const HASH_BLOCK_BYTES = 4 * 1024 * 1024;
 
@@ -204,14 +218,8 @@ export async function batchCreate(request: Request, client: ClientRow, dropbox: 
         if (streamError instanceof RpcError && (streamError.reason === 'UPLOAD_LENGTH_MISMATCH' || streamError.reason === 'UPLOAD_HASH_MISMATCH')) streamFailure = streamError;
       }
     }
-    logFailure(streamFailure ?? error, phase, finishing, diagnosticEntry);
-    if (streamFailure !== undefined) throw streamFailure;
-    // Definite answers; either may still follow partial commits of other items, so neither acknowledges the batch.
-    if (error instanceof RpcError && (error.reason === 'REVISION_CONFLICT' || error.reason === 'INSUFFICIENT_SPACE')) throw error;
-    // A finish response may describe partial commits; it never authorizes replay of the batch.
-    if (finishing) throw incomplete();
-    // Nothing is committed before finish: a rate limit keeps its Retry-After, and any other failure permits replay.
-    if (error instanceof RpcError && error.httpStatus === 429) throw error;
-    throw failure(Code.UNAVAILABLE, 'BATCH_NOT_COMMITTED');
+    const answer = streamFailure ?? failedBatch(error, finishing);
+    logFailure(streamFailure ?? error, answer, phase, finishing, diagnosticEntry);
+    throw answer;
   }
 }

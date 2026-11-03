@@ -62,10 +62,12 @@ never commit under a create-only key. Every commit uses `add`, `autorename: fals
 An existing object is reused only after stat confirms its key, length and hash; different bytes return 409
 `REVISION_CONFLICT`. With 32 items, even a batch of existing objects uses at most 36 of the 50 provider subrequests
 one invocation may make. A complete response contains every metadata record in order.
-A failure before finish commits nothing: an explicit rate limit returns 429 with Retry-After, and another provider
-or transport failure returns 503 `BATCH_NOT_COMMITTED`; the caller may send the same batch again. Once finish may
-have begun, partial, invalid or unknown provider results return 503 `BATCH_INCOMPLETE`, including a rate limit.
-Such errors can leave new immutable objects and must not advance a caller's checkpoint. Storage never replays uploads.
+A failure before finish commits nothing. A definite refusal keeps its own answer: an explicit rate limit returns 429
+with Retry-After, and an invalid connection or a wrong manifest hash returns 400. Another provider or transport
+failure returns 503 `BATCH_NOT_COMMITTED`; the caller may send the same batch again a bounded number of times.
+Once finish may have begun, partial, invalid or unknown provider results return 503 `BATCH_INCOMPLETE`, including a
+rate limit. Such errors can leave new immutable objects and must not advance a caller's checkpoint. Storage never
+replays uploads.
 The mutable control head continues using the original revision-matched PUT; no object format or permission changes.
 
 GET and HEAD also accept If-Match and reject a different revision before returning content. Valid ranges retain

@@ -40,10 +40,13 @@ function diagnosticRequest(): Request {
 const baseDiagnostic = {
   event: 'storage_batch_failed', phase: 'start', finish_started: false, finish_response_received: false,
   entry_tag: 'none', entry_failure_tag: 'none', entry_detail_tag: 'none', cause_reason: 'BATCH_INCOMPLETE', cause_http_status: 503,
+  answer_reason: 'BATCH_NOT_COMMITTED',
 };
 
 it.each([
-  { name: 'start', reason: 'BATCH_NOT_COMMITTED', expected: { cause_reason: 'BAD_REQUEST', cause_http_status: 400 } },
+  { name: 'start', reason: 'BAD_REQUEST', expected: { cause_reason: 'BAD_REQUEST', cause_http_status: 400 } },
+  { name: 'connection', reason: 'CONNECTION_INVALID', expected: { cause_reason: 'CONNECTION_INVALID', cause_http_status: 400 } },
+  { name: 'start outage', reason: 'BATCH_NOT_COMMITTED', expected: { cause_reason: 'UNAVAILABLE', cause_http_status: 503 } },
   { name: 'append', reason: 'BATCH_NOT_COMMITTED', expected: { phase: 'append', entry_tag: 'failure', entry_failure_tag: 'content_hash_mismatch' } },
   { name: 'untrusted entry', reason: 'BATCH_NOT_COMMITTED', expected: { phase: 'append', entry_tag: 'failure', entry_failure_tag: 'other' } },
   { name: 'finish', reason: 'BATCH_INCOMPLETE', expected: { phase: 'finish', finish_started: true, cause_reason: 'UNAVAILABLE' } },
@@ -56,9 +59,11 @@ it.each([
   const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
   vi.stubGlobal('FixedLengthStream', class extends TransformStream<Uint8Array, Uint8Array> { constructor(length: number) { super(); expect(length).toBe(3); } });
   vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
-    if (url.endsWith('/oauth2/token')) return Response.json({ access_token: 'synthetic-private-access', expires_in: 3600 });
-    if (url.endsWith('/start_batch')) return name === 'start'
+    if (url.endsWith('/oauth2/token')) return name === 'connection'
       ? new Response('synthetic-private-provider-body', { status: 400 })
+      : Response.json({ access_token: 'synthetic-private-access', expires_in: 3600 });
+    if (url.endsWith('/start_batch')) return name === 'start' || name === 'start outage'
+      ? new Response('synthetic-private-provider-body', { status: name === 'start' ? 400 : 503 })
       : Response.json({ session_ids: ['synthetic-private-session'] });
     if (url.endsWith('/append_batch')) {
       await new Response(init.body).arrayBuffer();
@@ -72,8 +77,10 @@ it.each([
       rev: 'synthetic', size: 3, content_hash: '0'.repeat(64), ...(name === 'metadata' ? { path_display: 'synthetic-private-invalid-path' } : {}) }] });
   });
   const provider = new Dropbox({ get: () => null, set: () => undefined, delete: () => undefined, connection: () => connection }, {});
-  await expect(batchCreate(diagnosticRequest(), client, provider)).rejects.toMatchObject({ reason, httpStatus: reason === 'INSUFFICIENT_SPACE' ? 507 : 503 });
-  expect(log).toHaveBeenCalledExactlyOnceWith(JSON.stringify({ ...baseDiagnostic, ...expected }));
+  await expect(batchCreate(diagnosticRequest(), client, provider)).rejects.toMatchObject({
+    reason, httpStatus: reason === 'INSUFFICIENT_SPACE' ? 507 : reason.startsWith('BATCH_') ? 503 : 400,
+  });
+  expect(log).toHaveBeenCalledExactlyOnceWith(JSON.stringify({ ...baseDiagnostic, ...expected, answer_reason: reason }));
   expect(JSON.stringify(log.mock.calls)).not.toContain('synthetic-private');
 });
 
@@ -167,5 +174,5 @@ it('refuses an item whose bytes differ from its manifest hash before any finish 
   });
   await expect(batchCreate(request, client, provider)).rejects.toMatchObject({ reason: 'UPLOAD_HASH_MISMATCH', httpStatus: 400 });
   expect(calls).toEqual(['/2/files/upload_session/start_batch', '/2/files/upload_session/append_batch']);
-  expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('"cause_reason":"UPLOAD_HASH_MISMATCH"'));
+  expect(log).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('"cause_reason":"UPLOAD_HASH_MISMATCH","cause_http_status":400,"answer_reason":"UPLOAD_HASH_MISMATCH"'));
 });

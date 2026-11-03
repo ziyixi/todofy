@@ -107,8 +107,8 @@ it('reuses identical conflicts without overwriting and rejects a different exist
 });
 
 it.each([
-  ['append_partial', 503, 'BATCH_NOT_COMMITTED'], ['finish_partial', 507, 'INSUFFICIENT_SPACE'], ['finish_unknown', 503, 'BATCH_INCOMPLETE'],
-  ['finish_metadata', 503, 'BATCH_INCOMPLETE'], ['finish_rate', 503, 'BATCH_INCOMPLETE'],
+  ['append_partial', 503, 'BATCH_NOT_COMMITTED'], ['finish_partial', 507, 'INSUFFICIENT_SPACE'], ['finish_failure', 503, 'BATCH_INCOMPLETE'],
+  ['finish_unknown', 503, 'BATCH_INCOMPLETE'], ['finish_metadata', 503, 'BATCH_INCOMPLETE'], ['finish_rate', 503, 'BATCH_INCOMPLETE'],
 ] as const)('does not acknowledge or replay a %s batch', async (fault, status, reason) => {
   const { active, token } = await setup();
   active.provider.batchFault = fault;
@@ -118,7 +118,7 @@ it.each([
   expect(active.provider.calls.filter((call) => call.path.endsWith('/start_batch'))).toHaveLength(1);
   expect(active.provider.calls.filter((call) => call.path.endsWith('/append_batch'))).toHaveLength(1);
   expect(active.provider.calls.filter((call) => call.path.endsWith('/finish_batch_v2'))).toHaveLength(fault === 'append_partial' ? 0 : 1);
-  expect(active.provider.files.size).toBe(fault === 'append_partial' || fault === 'finish_rate' ? 0 : fault === 'finish_partial' ? 1 : 2);
+  expect(active.provider.files.size).toBe(fault === 'append_partial' || fault === 'finish_rate' ? 0 : fault === 'finish_partial' || fault === 'finish_failure' ? 1 : 2);
 });
 
 it.each(['start_rate', 'append_rate'] as const)('preserves an explicit %s rejection before any file commit', async (fault) => {
@@ -131,11 +131,13 @@ it.each(['start_rate', 'append_rate'] as const)('preserves an explicit %s reject
   expect(active.provider.files.size).toBe(0);
 });
 
-it('checks the concatenated hash before committing and keeps old single-object CAS routes', async () => {
+it('refuses a wrong concatenated hash before committing and keeps old single-object CAS routes', async () => {
   const { active, token } = await setup();
   const valid = input();
   const manifest = JSON.parse(valid.headers['x-storage-batch']) as Record<string, unknown>;
-  await failure(await active.machine('content', token, { ...valid, headers: { ...valid.headers, 'x-storage-batch': JSON.stringify({ ...manifest, content_hash: 'f'.repeat(64) }) } }), 503, 'BATCH_NOT_COMMITTED');
+  // Sending the same batch again cannot succeed, so the definite refusal is not BATCH_NOT_COMMITTED.
+  await failure(await active.machine('content', token, { ...valid, headers: { ...valid.headers, 'x-storage-batch': JSON.stringify({ ...manifest, content_hash: 'f'.repeat(64) }) } }), 400, 'BAD_REQUEST');
+  expect(active.provider.calls.map((call) => call.path)).not.toContain('/2/files/upload_session/finish_batch_v2');
   expect(active.provider.files.size).toBe(0);
   const body = new TextEncoder().encode('mutable head');
   const first = await active.machine('content?key=control/head', token, { method: 'PUT', body, headers: { 'content-length': String(body.byteLength), 'if-none-match': '*' } });
