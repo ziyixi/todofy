@@ -765,7 +765,6 @@ pytest_test(
         "//newsletter/scripts:smoke_codex_startup",
         "//newsletter/scripts:smoke_image",
         "//newsletter/scripts:smoke_image_probe",
-        "//newsletter/scripts:trigger_run",
         "//newsletter/tests/support:editor",
         "//newsletter/tests/support:story_editor",
         "//newsletter/tests/support:story_pipeline",
@@ -1936,7 +1935,6 @@ pytest_test(
     plugins = ["pytest_asyncio.plugin"],
     deps = [
         ":package",
-        "//newsletter/scripts:trigger_run",
         "//newsletter/src/newsletter:trigger",
         "//newsletter/tests/support:editor",
         "//newsletter/tests/support:story_editor",

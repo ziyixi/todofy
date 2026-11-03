@@ -422,34 +422,6 @@ def test_standalone_module_is_stdlib_only_and_help_needs_no_dependencies():
     assert result.returncode == 0 and "--send" in result.stdout
 
 
-def test_checkout_wrapper_needs_no_install_pythonpath_or_repo_working_directory(
-    tmp_path,
-):
-    script = (
-        pathlib.Path(__file__).resolve().parents[1]
-        / "scripts"
-        / "trigger_run.py"
-    )
-    result = subprocess.run(
-        [sys.executable, "-I", "-S", str(script), "--check-config", "--send"],
-        cwd=tmp_path,
-        env={
-            "NEWSLETTER_SERVICE_URL": "https://newsletter.example.org",
-            "NEWSLETTER_EDITOR_TOKEN": "synthetic-editor-token-32-characters",
-            "NEWSLETTER_SEND_TOKEN": "synthetic-sender-token-32-characters",
-            "NEWSLETTER_ISSUE_DATE": "2026-09-05",
-        },
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
-    assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == {
-        "configuration": "valid",
-        "send_enabled": True,
-    }
-
-
 def test_only_declared_configuration_is_read_and_never_mutated(client):
     class Restricted(dict):
         def get(self, name, default=None):

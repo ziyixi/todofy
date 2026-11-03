@@ -110,7 +110,6 @@ filegroup(
         "uv.lock",
         "//.github/actions:action_files",
         "//.github/workflows:ci.yml",
-        "//.github/workflows:newsletter-daily.yml",
         "//.github/workflows:worker-release.yml",
     ],
     visibility = ["//visibility:public"],

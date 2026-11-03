@@ -349,22 +349,6 @@ def test_bazel_smokes_native_amd64_and_ci_saves_one_build_without_rebuild():
     assert publication["permissions"]["packages"] == "write"
 
 
-def test_daily_workflow_never_schedules_or_sends():
-    workflow = workflows.load("newsletter-daily.yml")
-    assert set(workflow["on"]) == {"workflow_dispatch", "repository_dispatch"}
-    steps = workflow["jobs"]["prepare"]["steps"]
-    trigger = next(step for step in steps if "run" in step)
-    assert trigger["run"] == "python3 newsletter/scripts/trigger_run.py"
-    assert "NEWSLETTER_EDITOR_TOKEN" in trigger["env"]
-    assert all(
-        not {"NEWSLETTER_SEND_TOKEN", "RESEND_API_KEY"}
-        & step.get("env", {}).keys()
-        and "latest send" not in step.get("run", "")
-        and "/send" not in step.get("run", "")
-        for step in steps
-    )
-
-
 def test_git_ignore_protects_variants_but_keeps_blank_templates(tmp_path):
     (tmp_path / ".gitignore").write_bytes((ROOT / ".gitignore").read_bytes())
     subprocess.run(["git", "init", "--quiet", str(tmp_path)], check=True)

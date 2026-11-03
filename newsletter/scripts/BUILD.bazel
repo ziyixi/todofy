@@ -107,12 +107,6 @@ py_library(
 )
 
 py_library(
-    name = "trigger_run",
-    srcs = ["trigger_run.py"],
-    imports = [".."],
-)
-
-py_library(
     name = "script_smoke_http",
     srcs = ["smoke_http.py"],
     imports = ["."],
