@@ -25,8 +25,13 @@ HTTP 200 returns `BatchCreateResponse` with one fully checked metadata record pe
 existing object is reusable only after its key, size and hash match. No partial result is acknowledged as success.
 Partial or unknown completion returns failure, and consumers keep their prior control head. A whole-response 429
 is reserved for an explicit rejection before any file commit; partially committed batches must not become a
-retryable whole-request 429. The service does not replay uploads. Existing caller recovery/fencing handles unknown
-outcomes. Mutable heads keep their original single-object revision CAS.
+retryable whole-request 429. Before finish nothing is committed: a definite refusal keeps its 4xx answer, such as
+400 for an invalid connection or a wrong manifest hash, and another provider failure is 503 `BATCH_NOT_COMMITTED`,
+after which the same batch may be sent again a bounded number of times. A consumer that does not know this reason
+may keep treating the 503 as an unknown outcome. Each item's bytes are checked against its own hash before commit;
+a difference is 400 `UPLOAD_HASH_MISMATCH`. A full Dropbox is 507 `INSUFFICIENT_SPACE`, before or after finish;
+retrying cannot succeed until space is freed. The service does not replay uploads. Existing caller recovery/fencing
+handles unknown outcomes. Mutable heads keep their original single-object revision CAS.
 
 Header/body size sums, nonempty batches, duplicate keys, path segments, actual stream lengths and confirmation
 ordering are transport rules beyond the generated field schema. The fixtures contain only synthetic bytes:

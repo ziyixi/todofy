@@ -90,6 +90,11 @@ An owner application may also gate paths on the platform runtime host (`vps.plat
 platform tunnel routes with the same application's audience (`infra/platform.tf`). Only paths under `/api/`, never the
 whole host, which the platform's machine application owns. The Newsletter console is the one user.
 
+An application's Workers release together under its ID. A Worker released on its own names its unit with
+`release = "<unit>"` (the website's relay is `website-relay`); the unit cannot be another application's ID. The
+release tools ([`deployments.py`](../tools/cloud-release/deployments.py)) read these units, and their Wrangler
+configs, from the manifests instead of keeping their own list.
+
 All fields are checked by [`catalog.py`](../tools/service-catalog/catalog.py); unknown fields fail at
 every level. There is no free-form configuration blob. Worker paths must be ordinary, non-symlinked
 files inside their owning application, with basename `wrangler.toml`. Test and development configs

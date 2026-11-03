@@ -80,4 +80,9 @@ message Settings {
   bool connected = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Public Dropbox App key of this service's separate App-folder app.
   string app_key = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The Storage reason of the newest error Dropbox answered on this connection, such as
+  // INSUFFICIENT_SPACE; empty when none was recorded. Never provider content.
+  string last_provider_error = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When Dropbox answered that error.
+  google.protobuf.Timestamp last_provider_error_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
 }

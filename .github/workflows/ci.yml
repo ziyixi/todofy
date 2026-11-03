@@ -86,12 +86,15 @@ jobs:
           curl -fsSL https://github.com/bazel-contrib/target-determinator/releases/download/v0.34.0/target-determinator.linux.amd64 -o "$RUNNER_TEMP/bazel-tools/target-determinator"
           echo "115e1c63d39e2cd0d0b011c9fadc80f059f021176a4ae0de2232cdd83b1f8011  $RUNNER_TEMP/bazel-tools/target-determinator" | sha256sum --check --status
           chmod +x "$RUNNER_TEMP/bazel-tools/target-determinator"
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # Planning analyzes the whole graph, so it alone saves the downloaded repositories every job restores.
+      # Their key is the lockfiles alone: main uploads them again only when a lockfile changes.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: repository-cache
         with:
-          path: ~/.cache/personal-cloud-bazel
-          key: bazel-9.3.1-${{ runner.os }}-plan-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-${{ github.sha }}
+          path: ~/.cache/personal-cloud-bazel/repository
+          key: bazel-9.3.1-${{ runner.os }}-repository-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}
           restore-keys: |
-            bazel-9.3.1-${{ runner.os }}-plan-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-
+            bazel-9.3.1-${{ runner.os }}-repository-
       - name: Select the cumulative comparison base
         id: baseline
         env:
@@ -129,12 +132,18 @@ jobs:
         if: steps.baseline.outputs.proto_breaking == 'true'
         env:
           BASE: ${{ steps.baseline.outputs.base }}
-        run: bazel run //proto:breaking -- "$BASE"
+        run: bazel run //proto:breaking "--repository_cache=$HOME/.cache/personal-cloud-bazel/repository" -- "$BASE"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bazel-plan-${{ github.sha }}
           path: bazel-plan.json
           retention-days: 7
+      # Only main pushes write caches; branches restore main's entries instead of filling the 10 GB quota.
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.repository-cache.outputs.cache-hit != 'true'
+        with:
+          path: ~/.cache/personal-cloud-bazel/repository
+          key: ${{ steps.repository-cache.outputs.cache-primary-key }}
 
   checks:
     name: Bazel (${{ matrix.group }})
@@ -151,22 +160,37 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup-bazel
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/personal-cloud-bazel
-          key: bazel-9.3.1-${{ runner.os }}-${{ matrix.group }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-${{ github.sha }}
+          path: ~/.cache/personal-cloud-bazel/repository
+          key: bazel-9.3.1-${{ runner.os }}-repository-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}
           restore-keys: |
-            bazel-9.3.1-${{ runner.os }}-${{ matrix.group }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-
+            bazel-9.3.1-${{ runner.os }}-repository-
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: action-cache
+        with:
+          path: ~/.cache/personal-cloud-bazel/actions
+          key: bazel-9.3.1-${{ runner.os }}-${{ matrix.cache }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-${{ github.sha }}
+          restore-keys: |
+            bazel-9.3.1-${{ runner.os }}-${{ matrix.cache }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-
+            bazel-9.3.1-${{ runner.os }}-${{ matrix.cache }}-
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: bazel-plan-${{ github.sha }}
       - name: Prepare the isolated browser environment
         if: matrix.group == 'browser'
-        run: bazel run //tools/bazel/browser:install_dependencies
+        run: |
+          bazel run //tools/bazel/browser:install_dependencies \
+            "--repository_cache=$HOME/.cache/personal-cloud-bazel/repository" "--disk_cache=$HOME/.cache/personal-cloud-bazel/actions"
       - name: Run selected leaf checks
         env:
           BAZEL_GROUP: ${{ matrix.group }}
         run: python3 tools/bazel/ci/run.py --plan bazel-plan.json --group "$BAZEL_GROUP"
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.action-cache.outputs.cache-hit != 'true'
+        with:
+          path: ~/.cache/personal-cloud-bazel/actions
+          key: ${{ steps.action-cache.outputs.cache-primary-key }}
 
   artifacts:
     name: Build artifact (${{ matrix.kind }}, ${{ matrix.app }})
@@ -182,12 +206,12 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-bazel
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/personal-cloud-bazel
-          key: bazel-9.3.1-${{ runner.os }}-artifact-${{ matrix.app }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-${{ github.sha }}
+          path: ~/.cache/personal-cloud-bazel/repository
+          key: bazel-9.3.1-${{ runner.os }}-repository-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}
           restore-keys: |
-            bazel-9.3.1-${{ runner.os }}-artifact-${{ matrix.app }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-
+            bazel-9.3.1-${{ runner.os }}-repository-
       - name: Build the declared Worker archive
         if: matrix.kind == 'worker'
         env:
@@ -203,19 +227,16 @@ jobs:
           path: ${{ runner.temp }}/worker-artifact
           if-no-files-found: error
           retention-days: 7
-      - name: Check and save Newsletter's image
+      # Bazel's container group probes each image; this stamped build only checks its identity.
+      - name: Build and save Newsletter's image
         if: matrix.kind == 'image' && matrix.app == 'newsletter'
-        uses: ./.github/actions/check-newsletter-image
-      - name: Check and save Platform's image
+        uses: ./.github/actions/build-newsletter
+      - name: Build and save Platform's image
         if: matrix.kind == 'image' && matrix.app == 'platform'
-        uses: ./.github/actions/check-platform
-        with:
-          build-image: 'true'
-      - name: Check and save Codex Gateway's image
+        uses: ./.github/actions/build-platform
+      - name: Build and save Codex Gateway's image
         if: matrix.kind == 'image' && matrix.app == 'codex-gateway'
-        uses: ./.github/actions/check-codex-gateway
-        with:
-          build-image: 'true'
+        uses: ./.github/actions/build-codex-gateway
       - name: Build Recall's independent extension archive
         if: matrix.kind == 'extension'
         env:
@@ -268,36 +289,6 @@ jobs:
           if [ "$HAS_ARTIFACTS" = true ]; then test "$ARTIFACTS" = success; fi
           if [ "$HAS_PRIVATE" = true ]; then test "$PRIVATE" = success; fi
 
-  private-release:
-    name: Private publication
-    needs: [changes, private, gate]
-    if: >-
-      ${{ !cancelled()
-      && github.repository == 'ziyixi/todofy'
-      && github.ref == 'refs/heads/main'
-      && needs.gate.result == 'success'
-      && needs.private.result == 'success'
-      && github.event_name == 'push'
-      && vars.PRIVATE_RELEASE_ENABLED == 'true' }}
-    uses: ./.github/workflows/private-release.yml
-    with:
-      revision: ${{ needs.changes.outputs.private_sha }}
-      operation: auto
-      fingerprint: ${{ needs.private.outputs.fingerprint }}
-    secrets:
-      private_ssh_key: ${{ secrets.TODOFY_PRIVATE_SSH_KEY }}
-      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-      INFRA_STATE_PASSPHRASE: ${{ secrets.INFRA_STATE_PASSPHRASE }}
-      INFRA_TFVARS: ${{ secrets.INFRA_TFVARS }}
-      PLATFORM_ACCESS_CLIENT_ID: ${{ secrets.PLATFORM_ACCESS_CLIENT_ID }}
-      PLATFORM_ACCESS_CLIENT_SECRET: ${{ secrets.PLATFORM_ACCESS_CLIENT_SECRET }}
-    permissions:
-      contents: read
-      checks: read
-      packages: write
-      deployments: write
-      id-token: write
-
   newsletter-deploy:
     name: Newsletter image publish
     outputs:
@@ -325,10 +316,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Run publish-newsletter steps
+      - name: Publish the tested newsletter image
         id: publish
-        uses: ./.github/actions/publish-newsletter
+        uses: ./.github/actions/publish-image
         with:
+          service: newsletter
           artifact-run-id: ${{ needs.changes.outputs.artifact_run_id || github.run_id }}
 
   platform-image:
@@ -358,10 +350,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Run publish-platform steps
+      - name: Publish the tested platform image
         id: publish
-        uses: ./.github/actions/publish-platform
+        uses: ./.github/actions/publish-image
         with:
+          service: platform
           artifact-run-id: ${{ needs.changes.outputs.artifact_run_id || github.run_id }}
 
   codex-gateway-image:
@@ -391,10 +384,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Run publish-codex-gateway steps
+      - name: Publish the tested codex-gateway image
         id: publish
-        uses: ./.github/actions/publish-codex-gateway
+        uses: ./.github/actions/publish-image
         with:
+          service: codex-gateway
           artifact-run-id: ${{ needs.changes.outputs.artifact_run_id || github.run_id }}
 
   vps-bootstrap-bundle:
@@ -712,7 +706,7 @@ jobs:
           path: ${{ runner.temp }}/recall-extension
           github-token: ${{ github.token }}
           run-id: ${{ needs.changes.outputs.artifact_run_id || github.run_id }}
-      - name: Publish the extension's version unless its tag exists
+      - name: Publish the extension's version unless its tag or content exists
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -738,6 +732,40 @@ jobs:
           if grep -Fxq "refs/tags/$tag" <<< "$refs"; then
             echo "::notice::$tag exists: nothing to publish"
             exit 0
+          fi
+          # Every build stamps a new version and commit into manifest.json and compiles the version string into
+          # its scripts (RECALL_BUILD); with both masked, the rest is the content users install.
+          content_hash() {
+            python3 - "$@" <<'PY'
+          import hashlib, json, sys, zipfile
+          digest = hashlib.sha256()
+          for name in sys.argv[1:]:
+              with zipfile.ZipFile(name) as archive:
+                  manifest = json.loads(archive.read("manifest.json"))
+                  version = json.dumps(manifest["version"]).encode()
+                  for entry in sorted(archive.namelist()):
+                      data = archive.read(entry)
+                      if entry == "manifest.json":
+                          for stamp in ("version", "version_name"):
+                              manifest.pop(stamp, None)
+                          data = json.dumps(manifest, sort_keys=True).encode()
+                      data = data.replace(version, b'"<version>"')
+                      digest.update(entry.encode() + b"\0" + hashlib.sha256(data).digest())
+          print(digest.hexdigest())
+          PY
+          }
+          latest=$(gh api "repos/$GH_REPO/releases?per_page=100" \
+            --jq '[.[] | select(.tag_name | startswith("recall-extension-v"))] | max_by(.published_at) | .tag_name // empty')
+          if [ -n "$latest" ]; then
+            previous="${latest#recall-extension-v}"
+            gh release download "$latest" --dir "$RUNNER_TEMP/previous" \
+              --pattern "recall-extension-v$previous.zip" --pattern "recall-orion-v$previous.zip"
+            current_content=$(content_hash "$ARCHIVE_DIR/recall-extension-${GITHUB_SHA:0:7}.zip" "$ARCHIVE_DIR/recall-orion-${GITHUB_SHA:0:7}.zip")
+            previous_content=$(content_hash "$RUNNER_TEMP/previous/recall-extension-v$previous.zip" "$RUNNER_TEMP/previous/recall-orion-v$previous.zip")
+            if [ "$current_content" = "$previous_content" ]; then
+              echo "::notice::Only the version differs from $latest: nothing to publish"
+              exit 0
+            fi
           fi
           zip="$RUNNER_TEMP/recall-extension-v$version.zip"
           cp "$ARCHIVE_DIR/recall-extension-${GITHUB_SHA:0:7}.zip" "$zip"

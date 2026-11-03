@@ -20,7 +20,6 @@ py_library(
 pytest_test(
     name = "host_fakes_test",
     srcs = ["test_fakes.py"],
-    args = ["$(rootpath test_fakes.py)"],
     config = "//todofy:pyproject.toml",
     data = [
         "//todofy:config",

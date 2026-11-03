@@ -6,7 +6,7 @@ import { Code } from '@ziyixi/proto/rpc-status';
 import { formatMatches } from '@ziyixi/proto/wire-json';
 import { ClientSchema, Client_Access, SettingsSchema } from '@ziyixi/proto/storage/ui/v1/client_pb';
 import { ConnectDropboxResponseSchema, DisconnectDropboxResponseSchema, ListClientsResponseSchema, type StorageUiService } from '@ziyixi/proto/storage/ui/v1/storage_ui_service_pb';
-import type { Dropbox } from './dropbox.ts';
+import type { Dropbox, ProviderError } from './dropbox.ts';
 import { badRequest, failure } from './errors.ts';
 import { digest, namespace, randomText } from './keys.ts';
 import type { ClientRow, Store } from './store.ts';
@@ -33,7 +33,11 @@ export const handlers: ServiceHandlers<typeof StorageUiService.method, OwnerCont
   getSettings: (input, context) => {
     if (input.name !== 'settings') badRequest();
     const appKey = context.store.get('app_key');
-    return Promise.resolve(create(SettingsSchema, { name: 'settings', connected: context.store.connection() !== null, appKey: typeof appKey === 'string' ? appKey : '' }));
+    const failed = context.store.get('provider_error') as ProviderError | null;
+    return Promise.resolve(create(SettingsSchema, {
+      name: 'settings', connected: context.store.connection() !== null, appKey: typeof appKey === 'string' ? appKey : '',
+      ...(failed === null ? {} : { lastProviderError: failed.reason, lastProviderErrorTime: timestampFromDate(new Date(failed.time)) }),
+    }));
   },
   listClients: (input, context) => {
     if (input.pageSize < 0) badRequest();

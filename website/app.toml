@@ -5,6 +5,8 @@ target = "cloudflare"
 
 [[workers]]
 config = "website/relay/wrangler.toml"
+# Released on its own by the Worker release recipe; the static site has its own release workflow.
+release = "website-relay"
 personal_secrets = []
 manual_secrets = ["GITHUB_DISPATCH_TOKEN"]
 optional_secrets = []

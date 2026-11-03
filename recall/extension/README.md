@@ -27,7 +27,8 @@ bundle); `test/contract.test.ts` reads what the extension builds with the genera
 Every version is kept on GitHub. A push to `main` that changes `extension/` or `../shared/` publishes the build CI
 tested as the Release `recall-extension-v<version>` (the repository's Releases page): its zip
 `recall-extension-v<version>.zip`, and the commit and the CI run in its notes. A version is published once (CI skips a
-tag that exists) and CI never deletes one. Nothing personal is in a build: recall's host is public and the token
+tag that exists) and CI never deletes one. A build whose files match the latest release's, apart from the version and
+commit stamped into `manifest.json`, publishes nothing, so a dependency-only change does not ship an empty version. Nothing personal is in a build: recall's host is public and the token
 is pasted into the installed extension, so a download cannot write to recall. CI also keeps every commit's build,
 branches included, as the artifact `recall-extension-<sha>` for 30 days; the release job publishes that artifact, so a
 release holds exactly the files CI tested.

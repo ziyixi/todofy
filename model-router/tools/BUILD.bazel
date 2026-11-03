@@ -1,6 +1,6 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library", "js_test")
 load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
-load("@npm//website:tsx/package_json.bzl", tsx = "bin")
+load("@npm//:tsx/package_json.bzl", tsx = "bin")
 load("@rules_python//python:defs.bzl", "py_library", "py_test")
 load("//tools/bazel/audit:sources.bzl", "source_audit_files")
 

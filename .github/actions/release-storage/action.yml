@@ -28,26 +28,13 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Install the selected Node workspaces
-      if: inputs.required == 'true'
-      uses: ./.github/actions/setup-workspace
-      with:
-        root: .release-source
-        filters: 'storage-worker...'
-    - name: Read the committed host and Access issuer
-      if: inputs.required == 'true'
+    - name: Prepare the release workspace
       id: config
-      working-directory: .release-source/storage
-      shell: bash -e {0}
-      run: |
-        python3 - >> "$GITHUB_OUTPUT" <<'PY'
-        import tomllib
-        with open("wrangler.toml", "rb") as file:
-            variables = tomllib.load(file)["vars"]
-        print("url=https://" + variables["PUBLIC_HOST"])
-        print("host=" + variables["PUBLIC_HOST"])
-        print("access_issuer=" + variables["ACCESS_ISSUER"])
-        PY
+      if: inputs.required == 'true'
+      uses: ./.github/actions/worker-prepare
+      with:
+        app: storage
+        filters: 'storage-worker...'
     - name: Write the owner identity secrets file
       if: inputs.required == 'true'
       working-directory: .release-source/storage/worker
@@ -57,50 +44,22 @@ runs:
         DASHBOARD_WORKER_SECRETS: ${{ inputs.dashboard-worker-secrets }}
       shell: bash -e {0}
       run: node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/storage-secrets.json"
-    - name: Validate the compiled Worker before changing production
+    - name: Deploy and verify the Worker
       if: inputs.required == 'true'
-      working-directory: .release-source/storage/worker
-      shell: bash -e {0}
-      run: |
-        node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy "$PWD/../.compiled/worker/index.js" --no-bundle --dry-run --config ../wrangler.toml \
-          --secrets-file "$RUNNER_TEMP/storage-secrets.json" --outdir "$RUNNER_TEMP/storage-bundle"
-        node ../deploy/bundle-size.mjs "$RUNNER_TEMP/storage-bundle"
-    - name: Check hostname ownership
-      if: inputs.required == 'true'
-      working-directory: .release-source
-      env:
-        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
-        CF_GUARD_ALLOW_REMOVE: ''
-        CF_GUARD_ALLOW_CONFLICT: ''
-      shell: bash -e {0}
-      run: node tools/cf-guard/cf-guard.mjs --config storage/wrangler.toml
-    - name: Deploy the Worker storage
-      if: inputs.required == 'true'
-      working-directory: .release-source/storage/worker
-      env:
-        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
-      shell: bash -e {0}
-      run: |
-        test -n "$CLOUDFLARE_API_TOKEN"
-        node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy "$PWD/../.compiled/worker/index.js" --no-bundle --config ../wrangler.toml \
-          --secrets-file "$RUNNER_TEMP/storage-secrets.json"
-    - name: Verify the running source through the provider API
-      if: inputs.required == 'true'
-      working-directory: .release-source/storage/worker
-      env:
-        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
-      shell: bash -e {0}
-      run: bash "$GITHUB_WORKSPACE/.release-source/tools/deploy-probes/production.sh" storage ../wrangler.toml
-    - name: Verify owner routes still require Access
-      if: inputs.required == 'true'
-      working-directory: .release-source/storage
-      env:
-        ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}
-        PUBLIC_HOST: ${{ steps.config.outputs.host }}
-      shell: bash -e {0}
-      run: |
-        bash "$GITHUB_WORKSPACE/.release-source/tools/deploy-probes/access.sh" / /api/v1/settings \
-          /api/dropbox/callback /api/storage/v1/other
+      uses: ./.github/actions/worker-deploy
+      with:
+        app: storage
+        worker: storage
+        worker-directory: worker
+        tools-directory: deploy
+        bundle-size: 'true'
+        d1: 'false'
+        assets: 'false'
+        production: 'true'
+        access-paths: / /api/v1/settings /api/dropbox/callback /api/storage/v1/other
+        cf-api-token: ${{ inputs.cf-api-token }}
+        host: ${{ steps.config.outputs.host }}
+        access-issuer: ${{ steps.config.outputs.access_issuer }}
     - name: Verify only the three machine routes bypass Access
       if: inputs.required == 'true'
       working-directory: .release-source/storage
@@ -119,6 +78,24 @@ runs:
           fi
           echo "Storage machine route: 401 without owner login."
         done
+    - name: Verify the Durable Object starts and refuses an unknown key
+      if: inputs.required == 'true'
+      working-directory: .release-source/storage
+      env:
+        PUBLIC_HOST: ${{ steps.config.outputs.host }}
+      shell: bash -e {0}
+      run: |
+        # The Worker answers keyless requests itself. A well-formed unknown key reaches the Durable Object, so this one
+        # request starts it after the deploy, including its first-start schema changes, before any caller does.
+        answer=$(curl -sS -o /dev/null --max-time 15 --proto '=https' -X POST -H "Authorization: Bearer sto_$(printf '%043d' 0)" \
+          -w '%{http_code}|%{content_type}|%{redirect_url}' "https://$PUBLIC_HOST/api/storage/v1/stat")
+        IFS='|' read -r code media location <<<"$answer"
+        media=${media%%;*}
+        if [ "$code" != 401 ] || [ "$media" != application/json ] || [ -n "$location" ]; then
+          echo "STORAGE_OBJECT_START_FAILED" >&2
+          exit 1
+        fi
+        echo "Storage Durable Object: 401 for an unknown key."
     - name: Remove the secrets file
       if: always() && inputs.required == 'true'
       working-directory: .release-source/storage

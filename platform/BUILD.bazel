@@ -1,6 +1,7 @@
 load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
 load("@rules_pkg//pkg:mappings.bzl", "REMOVE_BASE_DIRECTORY", "pkg_files", "strip_prefix")
 load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
+load("@rules_python//python:defs.bzl", "py_test")
 load("@rules_python//python:packaging.bzl", "py_package")
 load("//tools/bazel/audit:sources.bzl", "source_audit_files")
 load("//tools/bazel/images:images.bzl", "platform_image_identity", "platform_image_resources", "python_runtime_tree")
@@ -13,8 +14,8 @@ filegroup(
     name = "release",
     srcs = [
         ":platform",
-        "//.github/actions:check-platform/action.yml",
-        "//.github/actions:publish-platform/action.yml",
+        "//.github/actions:build-platform/action.yml",
+        "//.github/actions:publish-image/action.yml",
         "//tools/container-release:release_inputs",
     ],
     tags = [
@@ -213,6 +214,7 @@ alias(
 test_suite(
     name = "check",
     tests = [
+        ":apparmor_test",
         ":container_test",
         ":ruff_check_test",
         ":ruff_format_test",
@@ -262,6 +264,7 @@ source_audit_files(
 filegroup(
     name = "python_lint_inputs",
     srcs = [
+        "apparmor/compile_test.py",
         "pyproject.toml",
         "//platform/src/personal_cloud:python_sources",
         "//platform/tests:python_sources",
@@ -294,6 +297,18 @@ container_image_test(
     name = "container_test",
     service = "platform",
     sources = ":container_probe_inputs",
+)
+
+py_test(
+    name = "apparmor_test",
+    srcs = ["apparmor/compile_test.py"],
+    args = ["$(rootpath apparmor/personal-cloud-systemd-observer-v1)"],
+    data = ["apparmor/personal-cloud-systemd-observer-v1"],
+    legacy_create_init = False,
+    main = "apparmor/compile_test.py",
+    # The parser reads the host's /etc/apparmor.d includes.
+    tags = ["local"],
+    target_compatible_with = ["@platforms//os:linux"],
 )
 
 alias(

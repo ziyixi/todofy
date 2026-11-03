@@ -9,6 +9,8 @@ filegroup(
     srcs = [
         ":mailsort",
         "//.github/actions:release-mailsort/action.yml",
+        "//.github/actions:worker-deploy/action.yml",
+        "//.github/actions:worker-prepare/action.yml",
         "//mailsort/deploy:source_deploy_vars_mjs",
         "//tools:release_probes",
         "//tools/cloud-release:release_inputs",
@@ -65,4 +67,11 @@ js_library(
     visibility = ["//mailsort:__subpackages__"],
 )
 
-source_audit_files()
+source_audit_files(deps = [
+    "//mailsort/deploy:source_audit_files",
+    "//mailsort/docs:source_audit_files",
+    "//mailsort/prompts:source_audit_files",
+    "//mailsort/tools:source_audit_files",
+    "//mailsort/web:source_audit_files",
+    "//mailsort/worker:source_audit_files",
+])

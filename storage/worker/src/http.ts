@@ -1,6 +1,6 @@
 import { createAccessVerifier, verifyCsrf, withPrivateHeaders } from '@ziyixi/edge-auth';
 import { Code } from '@ziyixi/proto/rpc-status';
-import { STATE_NAME, type Env } from './env.ts';
+import { MACHINE_AUTHORIZATION, STATE_NAME, type Env } from './env.ts';
 import { errorResponse, failure } from './errors.ts';
 import { PAGE, SCRIPT } from './ui.ts';
 
@@ -14,7 +14,10 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   if (!local && (url.protocol !== 'https:' || url.host !== env.PUBLIC_HOST)) return new Response('Not found', { status: 404 });
   try {
     if (url.pathname === '/health' && request.method === 'GET') return Response.json({ ok: true, build_sha: env.BUILD_SHA ?? 'dev' });
-    if (!url.pathname.startsWith('/api/storage/v1/')) {
+    if (url.pathname.startsWith('/api/storage/v1/')) {
+      // Machine routes bypass Access; a request without a well-formed key never wakes the Durable Object.
+      if (!MACHINE_AUTHORIZATION.test(request.headers.get('authorization') ?? '')) throw failure(Code.UNAUTHENTICATED, 'UNAUTHORIZED');
+    } else {
       const auth = await verifier.verify(request, {
         issuer: env.ACCESS_ISSUER, audience: env.ACCESS_AUDIENCE, owner: env.ACCESS_OWNER, aliases: env.ACCESS_OWNER_ALIASES,
         emailMatch: 'case-insensitive', nbfLeewaySeconds: 60, tokenSource: { emptyHeader: 'use-cookie', cookie: 'last' },

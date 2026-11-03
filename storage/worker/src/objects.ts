@@ -7,7 +7,7 @@ import type { Dropbox } from './dropbox.ts';
 import { MAX_OBJECT_BYTES, MAX_PAGE_SIZE } from './env.ts';
 import { badRequest, failure, readJson } from './errors.ts';
 import { decodeCursor, encodeCursor, LIST_CURSOR_TTL_MS, matchedRevision, objectKey, providerPath, providerRoot, writeMode } from './keys.ts';
-import type { ClientRow, ListPage, ListPageData, Store } from './store.ts';
+import type { ClientRow } from './store.ts';
 
 export function objectMetadata(value: Record<string, unknown>, clientNamespace: string, expectedKey?: string): ObjectMetadata {
   const path = value.path_display;
@@ -33,71 +33,37 @@ export async function stat(request: Request, client: ClientRow, dropbox: Dropbox
   return json(ObjectMetadataSchema, result);
 }
 
-function providerPage(answer: Record<string, unknown>, clientNamespace: string, prefix: string, expires: number, generation: string): ListPageData {
-  // Dropbox's limit is approximate; its bounded JSON response can contain extra files or folders.
+export async function list(request: Request, client: ClientRow, dropbox: Dropbox, secret: string): Promise<Response> {
+  const input = fromWire(ListObjectsRequestSchema, await readJson(request) as never, { strict: true }).message;
+  const prefix = objectKey(input.prefix, true);
+  const pageSize = Math.min(input.pageSize || MAX_PAGE_SIZE, MAX_PAGE_SIZE);
+  let answer: Record<string, unknown>;
+  try {
+    answer = input.cursor !== ''
+      ? await dropbox.json('files/list_folder/continue', { cursor: await decodeCursor(secret, input.cursor, client.namespace, prefix) })
+      : await dropbox.json('files/list_folder', {
+        path: providerRoot(client.namespace) + (prefix.includes('/') ? '/' + prefix.slice(0, prefix.lastIndexOf('/')) : ''),
+        recursive: true, include_deleted: false, include_non_downloadable_files: false, limit: pageSize,
+      });
+  } catch (error) {
+    if (input.cursor === '' && error instanceof RpcError && error.code === Code.NOT_FOUND) return json(ListObjectsResponseSchema, create(ListObjectsResponseSchema, { objects: [], nextCursor: '' }));
+    throw error;
+  }
   if (!Array.isArray(answer.entries) || typeof answer.has_more !== 'boolean' || typeof answer.cursor !== 'string'
-    || (answer.has_more && answer.cursor === '')) throw failure(Code.UNAVAILABLE, 'PROVIDER_RESPONSE_INVALID');
+    || (answer.has_more && (answer.cursor === '' || answer.cursor.length > 4096))) throw failure(Code.UNAVAILABLE, 'PROVIDER_RESPONSE_INVALID');
   const objects: ObjectMetadata[] = [];
   for (const entry of answer.entries as unknown[]) {
     if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) throw failure(Code.UNAVAILABLE, 'PROVIDER_RESPONSE_INVALID');
     const item = entry as Record<string, unknown>;
     if (item['.tag'] === 'folder') continue;
-    const object = objectMetadata(item, clientNamespace);
+    const object = objectMetadata(item, client.namespace);
     if (object.key.startsWith(prefix)) objects.push(object);
   }
-  return { namespace: clientNamespace, prefix, expires, generation, provider: answer.has_more ? answer.cursor : '', objects };
-}
-
-type ListPages = Pick<Store, 'listPage' | 'saveListPage' | 'connection'>;
-
-function cachedPage(store: ListPages, id: string, clientNamespace: string, prefix: string, expires: number, generation: string): ListPage {
-  const page = store.listPage(id, Date.now());
-  if (page === null || page.namespace !== clientNamespace || page.prefix !== prefix || page.expires !== expires || page.generation !== generation) throw failure(Code.INVALID_ARGUMENT, 'CURSOR_INVALID');
-  return page;
-}
-
-export async function list(request: Request, client: ClientRow, dropbox: Dropbox, secret: string, store: ListPages): Promise<Response> {
-  const input = fromWire(ListObjectsRequestSchema, await readJson(request) as never, { strict: true }).message;
-  const prefix = objectKey(input.prefix, true);
-  const pageSize = Math.min(input.pageSize || MAX_PAGE_SIZE, MAX_PAGE_SIZE);
-  const cursor = input.cursor === '' ? null : await decodeCursor(secret, input.cursor, client.namespace, prefix);
-  const generation = store.connection()?.generation;
-  if (generation === undefined) throw failure(Code.FAILED_PRECONDITION, 'NOT_CONFIGURED');
-  let page: ListPage;
-  let offset = 0;
-  if (cursor !== null && 'page' in cursor) {
-    page = cachedPage(store, cursor.page, client.namespace, prefix, cursor.expires, generation);
-    offset = cursor.offset;
-    if (offset > page.objects.length) throw failure(Code.INVALID_ARGUMENT, 'CURSOR_INVALID');
-    if (offset === page.objects.length && page.provider !== '') {
-      if (page.nextPage !== null) page = cachedPage(store, page.nextPage, client.namespace, prefix, cursor.expires, generation);
-      else {
-        const answer = await dropbox.json('files/list_folder/continue', { cursor: page.provider });
-        page = store.saveListPage(providerPage(answer, client.namespace, prefix, cursor.expires, generation), Date.now(), page.id);
-      }
-      offset = 0;
-    }
-  } else {
-    let answer: Record<string, unknown>;
-    try {
-      answer = cursor !== null
-        ? await dropbox.json('files/list_folder/continue', { cursor: cursor.provider })
-        : await dropbox.json('files/list_folder', {
-          path: providerRoot(client.namespace) + (prefix.includes('/') ? '/' + prefix.slice(0, prefix.lastIndexOf('/')) : ''),
-          recursive: true, include_deleted: false, include_non_downloadable_files: false, limit: pageSize,
-        });
-    } catch (error) {
-      if (cursor === null && error instanceof RpcError && error.code === Code.NOT_FOUND) return json(ListObjectsResponseSchema, create(ListObjectsResponseSchema, { objects: [], nextCursor: '' }));
-      throw error;
-    }
-    const data = providerPage(answer, client.namespace, prefix, cursor?.expires ?? Date.now() + LIST_CURSOR_TTL_MS, generation);
-    if (data.provider === '' && data.objects.length <= pageSize) return json(ListObjectsResponseSchema, create(ListObjectsResponseSchema, { objects: [...data.objects], nextCursor: '' }));
-    page = store.saveListPage(data, Date.now());
-  }
-  const objects = page.objects.slice(offset, offset + pageSize);
-  const nextOffset = offset + objects.length;
-  const nextCursor = nextOffset < page.objects.length || page.provider !== ''
-    ? await encodeCursor(secret, { page: page.id, offset: nextOffset, namespace: client.namespace, prefix, expires: page.expires }) : '';
+  // Dropbox's limit is approximate. Without a page cache, an oversized page fails instead of being truncated.
+  if (objects.length > pageSize) throw failure(Code.UNAVAILABLE, 'PROVIDER_RESPONSE_INVALID');
+  const nextCursor = answer.has_more ? await encodeCursor(secret, {
+    provider: answer.cursor, namespace: client.namespace, prefix, expires: Date.now() + LIST_CURSOR_TTL_MS,
+  }) : '';
   return json(ListObjectsResponseSchema, create(ListObjectsResponseSchema, { objects, nextCursor }));
 }
 

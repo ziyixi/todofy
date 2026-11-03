@@ -36,7 +36,10 @@ Private services can attach optional `PRIVATE_CATALOG` JSON without publishing t
 this repository. The same attachment is supplied to Home and the production reconciliation job. Its shape is
 `{registry: {entries, workers, resources}, desired: {version, zones, workers}}`, using the existing registry and
 drift-desired fields. Empty/unset keeps the public catalog. A nonempty invalid attachment fails with
-`PRIVATE_CATALOG_INVALID`; it cannot replace public identities or hide unregistered resources.
+`PRIVATE_CATALOG_INVALID`; it cannot replace public identities or hide unregistered resources. Home's
+`parsePrivateCatalog` is the one validator: the Home release runs it, bundled into the checked archive
+(`deploy/private-catalog.mjs`), before the deploy, so an attachment the Worker would refuse fails that release instead
+of Home's API. The reconciliation job only reads the registered identities from it.
 
 Supplemental entries use `public_http` or `link_only`, owner-zone HTTPS links, and the existing groups. A public
 probe of an Access-protected service needs its own declared bypass path, a 2xx expectation and a content type.

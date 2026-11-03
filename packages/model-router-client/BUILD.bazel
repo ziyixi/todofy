@@ -66,6 +66,7 @@ source_audit_files(
         "docs/**",
     ],
     deps = [
+        "//packages/model-router-client/python:source_audit_files",
         "//packages/model-router-client/src:source_audit_files",
         "//packages/model-router-client/test:source_audit_files",
     ],

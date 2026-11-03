@@ -9,6 +9,8 @@ filegroup(
     srcs = [
         ":tasks",
         "//.github/actions:release-tasks/action.yml",
+        "//.github/actions:worker-deploy/action.yml",
+        "//.github/actions:worker-prepare/action.yml",
         "//tasks/deploy:deploy_vars",
         "//tools:release_probes",
         "//tools/cloud-release:release_inputs",
@@ -73,8 +75,17 @@ exports_files([
     "app.toml",
 ])
 
-source_audit_files(patterns = [
-    "*",
-    "docs/**",
-    "migrations/**",
-])
+source_audit_files(
+    patterns = [
+        "*",
+        "docs/**",
+        "migrations/**",
+    ],
+    deps = [
+        "//tasks/deploy:source_audit_files",
+        "//tasks/shared:source_audit_files",
+        "//tasks/tools:source_audit_files",
+        "//tasks/web:source_audit_files",
+        "//tasks/worker:source_audit_files",
+    ],
+)

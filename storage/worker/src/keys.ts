@@ -60,16 +60,12 @@ export function writeMode(request: Request): { readonly '.tag': 'add' } | { read
 
 export const LIST_CURSOR_TTL_MS = 24 * 60 * 60_000;
 
-interface CursorScope {
+export interface ListCursor {
+  readonly provider: string;
   readonly namespace: string;
   readonly prefix: string;
   readonly expires: number;
 }
-
-export type ListCursor = CursorScope & (
-  | { readonly provider: string }
-  | { readonly page: string; readonly offset: number }
-);
 
 async function cursorKey(secret: string): Promise<CryptoKey> {
   const key = await importHmacKeyHex(secret);
@@ -78,22 +74,16 @@ async function cursorKey(secret: string): Promise<CryptoKey> {
 }
 
 export async function encodeCursor(secret: string, cursor: ListCursor): Promise<string> {
-  return signClaims(await cursorKey(secret), { ...cursor, version: 'page' in cursor ? 2 : 1 });
+  return signClaims(await cursorKey(secret), { ...cursor, version: 1 });
 }
 
-export async function decodeCursor(secret: string, value: string, clientNamespace: string, prefix: string): Promise<ListCursor> {
+/** The provider cursor of a version 1 continuation; retired cached-page (version 2) cursors are refused. */
+export async function decodeCursor(secret: string, value: string, clientNamespace: string, prefix: string): Promise<string> {
   const cursor = await verifySignedClaims(await cursorKey(secret), value, 8192);
-  if (cursor === null || cursor.namespace !== clientNamespace || cursor.prefix !== prefix
+  if (cursor === null || cursor.version !== 1 || cursor.namespace !== clientNamespace || cursor.prefix !== prefix
+    || typeof cursor.provider !== 'string' || cursor.provider.length === 0 || cursor.provider.length > 4096
     || typeof cursor.expires !== 'number' || !Number.isSafeInteger(cursor.expires) || cursor.expires <= Date.now()) {
     throw failure(Code.INVALID_ARGUMENT, 'CURSOR_INVALID');
   }
-  const scope = { namespace: clientNamespace, prefix, expires: cursor.expires };
-  if (cursor.version === 1 && typeof cursor.provider === 'string' && cursor.provider.length > 0 && cursor.provider.length <= 4096) {
-    return { ...scope, provider: cursor.provider };
-  }
-  if (cursor.version === 2 && typeof cursor.page === 'string' && /^[0-9a-f-]{36}$/.test(cursor.page)
-    && typeof cursor.offset === 'number' && Number.isSafeInteger(cursor.offset) && cursor.offset >= 0) {
-    return { ...scope, page: cursor.page, offset: cursor.offset };
-  }
-  throw failure(Code.INVALID_ARGUMENT, 'CURSOR_INVALID');
+  return cursor.provider;
 }

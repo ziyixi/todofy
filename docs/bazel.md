@@ -44,7 +44,8 @@ Ordinary commands use `--lockfile_mode=error`; they do not update dependency res
 existing lock together. Rule upgrades explicitly refresh the module lock with
 `bazel mod deps --lockfile_mode=update`. There is no paid remote execution service or extra dependency mirror.
 
-Node remains 26.9.0 and Python 3.14.7. Python uses the pinned standalone archive, not a developer virtualenv. The Python
+Node remains 26.9.0 and Python 3.14.7. Actions installs exactly that Node from `.node-version`, and OpenTofu from
+`.opentofu-version`; a toolchain test keeps both equal to `MODULE.bazel`. Python uses the pinned standalone archive, not a developer virtualenv. The Python
 Worker keeps its own existing `pylock.toml` runtime contract. Package installation is separate from Bazel execution;
 checks do not depend on a local `node_modules` or `.venv`.
 

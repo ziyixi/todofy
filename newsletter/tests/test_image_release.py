@@ -312,7 +312,11 @@ def test_source_audit_rejects_unknown_package_files(smoke, source_root, name):
         smoke.source_hashes(source_root)
 
 
-def test_ci_smokes_native_amd64_before_publish_without_rebuild():
+def test_bazel_smokes_native_amd64_and_ci_saves_one_build_without_rebuild():
+    probe = (ROOT.parent / "tools/bazel/python/container_test.py").read_text()
+    assert '"newsletter/scripts/smoke_image.py"' in probe
+    assert '"linux/amd64"' in probe
+    assert '"newsletter/scripts/publish_content_config.py"' in probe
     jobs = workflows.load("ci.yml")["jobs"]
     image = jobs["artifacts"]
     assert image["runs-on"] == "ubuntu-24.04"
@@ -322,12 +326,9 @@ def test_ci_smokes_native_amd64_before_publish_without_rebuild():
     builder = "container-release/build.py --service newsletter"
     assert commands.count(builder) == 1
     assert "docker build" not in commands
-    assert "--platform linux/amd64" in commands
-    assert commands.index("--audit-source") < commands.index(builder)
-    assert commands.index(builder) < commands.index("smoke_image.py --image")
-    assert commands.index("smoke_image.py --image") < commands.index(
-        "image.py save"
-    )
+    # The container test already probed this image's unstamped twin.
+    assert "smoke_image.py" not in commands
+    assert commands.index(builder) < commands.index("image.py save")
     publication = jobs["newsletter-deploy"]
     assert "gate" in publication["needs"]
     assert "needs.gate.result == 'success'" in publication["if"]

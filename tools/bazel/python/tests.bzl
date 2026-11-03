@@ -7,8 +7,10 @@ _UNITTEST_MAIN = Label("//tools/bazel/python:unittest_main.py")
 _RUFF_MAIN = Label("//tools/bazel/python:check_ruff.py")
 _RUFF = Label("@python_deps//ruff:data")
 
-def pytest_test(name, srcs, config, plugins = [], args = [], data = [], env = {}, deps = [], **kwargs):
-    """Run explicit pytest selectors with the repository's locked runner."""
+def pytest_test(name, srcs, config, plugins = [], args = None, data = [], env = {}, deps = [], **kwargs):
+    """Run explicit pytest selectors with the repository's locked runner; by default the first source file."""
+    if args == None:
+        args = ["$(rootpath %s)" % srcs[0]]
     plugin_args = []
     for plugin in plugins:
         plugin_args.extend(["-p", plugin])

@@ -175,8 +175,11 @@ source_audit_files(
     deps = [
         "//todofy/api:source_audit_files",
         "//todofy/checks:source_audit_files",
+        "//todofy/deploy:source_audit_files",
+        "//todofy/gateway:source_audit_files",
         "//todofy/tests:source_audit_files",
         "//todofy/tools:source_audit_files",
+        "//todofy/web:source_audit_files",
         "//todofy/worker:source_audit_files",
     ],
 )

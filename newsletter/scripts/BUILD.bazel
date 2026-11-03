@@ -127,7 +127,6 @@ py_library(
 pytest_test(
     name = "smoke_http_test",
     srcs = ["//tools/bazel/python:newsletter_smoke_test.py"],
-    args = ["$(rootpath //tools/bazel/python:newsletter_smoke_test.py)"],
     config = "//newsletter:pyproject.toml",
     data = ["//tools/bazel/python:noto_cjk_font"],
     env = {
@@ -146,7 +145,6 @@ pytest_test(
 pytest_test(
     name = "smoke_codex_startup_test",
     srcs = ["//tools/bazel/python:newsletter_smoke_test.py"],
-    args = ["$(rootpath //tools/bazel/python:newsletter_smoke_test.py)"],
     config = "//newsletter:pyproject.toml",
     data = ["//tools/bazel/python:noto_cjk_font"],
     env = {
@@ -171,7 +169,6 @@ py_library(
 pytest_test(
     name = "wheel_smoke_test",
     srcs = ["//tools/bazel/python:newsletter_wheel_smoke.py"],
-    args = ["$(rootpath //tools/bazel/python:newsletter_wheel_smoke.py)"],
     config = "//newsletter:pyproject.toml",
     data = [
         "//newsletter:MANIFEST.in",

@@ -27,7 +27,6 @@ py_library(
 pytest_test(
     name = "status_daemon_test_codex_gateway",
     srcs = ["test_codex_gateway.py"],
-    args = ["$(rootpath test_codex_gateway.py)"],
     config = "//platform:pyproject.toml",
     data = [],
     env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},

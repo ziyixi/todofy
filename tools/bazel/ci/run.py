@@ -7,7 +7,10 @@ import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
-from plan import GROUPS
+from plan import GROUPS, cache_family
+
+# Main saves each family's action cache again, so this bounds every entry in the 10 GB quota.
+DISK_CACHE_LIMIT = 1536 * 1024 * 1024
 
 
 def command(
@@ -24,11 +27,30 @@ def command(
     ]
     args.append(
         "--local_test_jobs="
-        + ("1" if group in ("workerd", "cpu", "browser", "container") else "4")
+        + (
+            "1"
+            if cache_family(group) in ("workerd", "cpu", "browser", "container")
+            else "4"
+        )
     )
     if group == "cpu":
         args.append("--nocache_test_results")
     return args
+
+
+def collect_garbage(directory: Path, limit: int = DISK_CACHE_LIMIT) -> None:
+    """Drop the least recently used files first, as Bazel's size-based disk cache GC does."""
+    entries = []
+    for path in directory.rglob("*"):
+        if path.is_file():
+            status = path.stat()
+            entries.append((status.st_mtime, status.st_size, path))
+    total = sum(size for _, size, _ in entries)
+    for _, size, path in sorted(entries):
+        if total <= limit:
+            break
+        path.unlink()
+        total -= size
 
 
 if __name__ == "__main__":
@@ -41,16 +63,17 @@ if __name__ == "__main__":
     targets = json.loads(args.plan.read_text())["groups"].get(args.group, [])
     if not targets:
         raise SystemExit("The selected group has no targets")
+    cache = Path.home() / ".cache/personal-cloud-bazel"
     with tempfile.TemporaryDirectory(prefix="bazel-targets-") as temporary:
         patterns = Path(temporary) / "targets.txt"
         patterns.write_text("\n".join(targets) + "\n", encoding="utf-8")
         subprocess.run(
             command(
-                args.bazel,
-                args.group,
-                str(patterns),
-                Path.home() / ".cache/personal-cloud-bazel",
-                args.bazel_startup_option,
+                args.bazel, args.group, str(patterns), cache, args.bazel_startup_option
             ),
             check=True,
         )
+    # Bazel's own GC runs only once its server is idle and shutdown interrupts it, so the
+    # stopped server leaves the cache to this deterministic pass before Actions saves it.
+    subprocess.run([args.bazel, *args.bazel_startup_option, "shutdown"], check=True)
+    collect_garbage(cache / "actions")
