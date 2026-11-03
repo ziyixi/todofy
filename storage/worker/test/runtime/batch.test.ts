@@ -107,13 +107,13 @@ it('reuses identical conflicts without overwriting and rejects a different exist
 });
 
 it.each([
-  ['append_partial', 'BATCH_NOT_COMMITTED'], ['finish_partial', 'BATCH_INCOMPLETE'], ['finish_unknown', 'BATCH_INCOMPLETE'],
-  ['finish_metadata', 'BATCH_INCOMPLETE'], ['finish_rate', 'BATCH_INCOMPLETE'],
-] as const)('does not acknowledge or replay a %s batch', async (fault, reason) => {
+  ['append_partial', 503, 'BATCH_NOT_COMMITTED'], ['finish_partial', 507, 'INSUFFICIENT_SPACE'], ['finish_unknown', 503, 'BATCH_INCOMPLETE'],
+  ['finish_metadata', 503, 'BATCH_INCOMPLETE'], ['finish_rate', 503, 'BATCH_INCOMPLETE'],
+] as const)('does not acknowledge or replay a %s batch', async (fault, status, reason) => {
   const { active, token } = await setup();
   active.provider.batchFault = fault;
   const response = await active.machine('content', token, input());
-  await failure(response, 503, reason);
+  await failure(response, status, reason);
   expect(response.headers.get('retry-after')).toBeNull();
   expect(active.provider.calls.filter((call) => call.path.endsWith('/start_batch'))).toHaveLength(1);
   expect(active.provider.calls.filter((call) => call.path.endsWith('/append_batch'))).toHaveLength(1);
@@ -194,4 +194,21 @@ it('accepts the contract golden batch unchanged and answers the golden confirmat
   });
   expect(response.status).toBe(200);
   expect(await response.text()).toBe(readFileSync(fixture('response.json'), 'utf8'));
+});
+
+it('shows the newest error Dropbox answered, without provider content, until disconnect', async () => {
+  const { active, token } = await setup();
+  const settings = async () => await (await active.owner('settings')).json<{ last_provider_error?: string; last_provider_error_time?: string }>();
+  expect((await settings()).last_provider_error).toBeUndefined();
+  active.provider.batchFault = 'finish_partial';
+  await failure(await active.machine('content', token, input()), 507, 'INSUFFICIENT_SPACE');
+  const shown = await settings();
+  expect(shown.last_provider_error).toBe('INSUFFICIENT_SPACE');
+  expect(Date.parse(shown.last_provider_error_time ?? '')).toBeGreaterThan(Date.now() - 60_000);
+  expect(JSON.stringify(shown)).not.toContain('insufficient_space');
+  const missing = await active.machine('stat', token, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: 'raw/absent.bin' }) });
+  expect(missing.status).toBe(404);
+  expect((await settings()).last_provider_error).toBe('INSUFFICIENT_SPACE');
+  expect((await active.owner('dropbox:disconnect', 'POST', {})).status).toBe(200);
+  expect((await settings()).last_provider_error).toBeUndefined();
 });

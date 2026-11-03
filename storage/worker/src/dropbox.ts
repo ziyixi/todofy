@@ -34,6 +34,9 @@ function retryAfter(response: Response, error: Record<string, unknown> | null): 
   return '1';
 }
 
+/** Dropbox has no space left for the write. Not retryable: the caller waits for the owner to free space. */
+export function insufficientSpace(): RpcError { return failure(Code.RESOURCE_EXHAUSTED, 'INSUFFICIENT_SPACE', 507); }
+
 async function providerFailure(response: Response, upload = false): Promise<never> {
   let summary = '';
   let body: Record<string, unknown> = {};
@@ -50,11 +53,18 @@ async function providerFailure(response: Response, upload = false): Promise<neve
   if (response.status === 429 || (response.status === 409 && locked)) {
     throw new RpcError(Code.UNAVAILABLE, 'UNAVAILABLE', 'Storage provider is temporarily unavailable.', { httpStatus: 429, headers: { 'retry-after': retryAfter(response, error) } });
   }
+  if (response.status === 409 && (reason?.['.tag'] === 'insufficient_space' || /^path\/(?:reason\/)?insufficient_space(?:\/|$)/.test(summary))) throw insufficientSpace();
   if (response.status === 409 && /^path(?:_lookup)?\/not_found(?:\/|$)/.test(summary)) throw failure(Code.NOT_FOUND, 'NOT_FOUND');
   if (response.status === 409 && upload && (reason?.['.tag'] === 'conflict' || /^path\/(?:reason\/)?conflict(?:\/|$)/.test(summary))) throw failure(Code.ABORTED, 'REVISION_CONFLICT');
   if (response.status === 400 || error?.['.tag'] === 'content_hash_mismatch') throw failure(Code.INVALID_ARGUMENT, 'BAD_REQUEST');
   if (response.status === 401 || response.status === 403) throw failure(Code.FAILED_PRECONDITION, 'CONNECTION_INVALID');
   throw failure(Code.UNAVAILABLE, 'UNAVAILABLE');
+}
+
+/** The newest error Dropbox answered, shown to the owner; only a Storage reason, never provider content. */
+export interface ProviderError {
+  readonly reason: string;
+  readonly time: number;
 }
 
 export interface Download {
@@ -81,15 +91,31 @@ export class Dropbox {
     } finally { clearTimeout(timeout); }
   }
 
+  /** Maps a refused provider response; expected absent objects and create conflicts are not provider errors. */
+  private async refused(response: Response, upload = false): Promise<never> {
+    try {
+      return await providerFailure(response, upload);
+    } catch (error) {
+      if (error instanceof RpcError && error.reason !== 'NOT_FOUND' && error.reason !== 'REVISION_CONFLICT') this.recordFailure(error);
+      throw error;
+    }
+  }
+
+  /** Keeps the newest error Dropbox answered for the owner console; a network failure may be the caller's own stream. */
+  recordFailure(error: RpcError): RpcError {
+    this.store.set('provider_error', { reason: error.reason, time: Date.now() } satisfies ProviderError);
+    return error;
+  }
+
   private async oauth(fields: Record<string, string>): Promise<Record<string, unknown>> {
     const response = await this.fetch(this.origins.api + '/oauth2/token', {
       method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(fields).toString(),
     });
     if (!response.ok) {
-      if (response.status === 429) return providerFailure(response);
+      if (response.status === 429) return this.refused(response);
       await response.body?.cancel();
-      throw failure(response.status >= 500 || response.status === 429 ? Code.UNAVAILABLE : Code.FAILED_PRECONDITION,
-        response.status >= 500 || response.status === 429 ? 'UNAVAILABLE' : 'CONNECTION_INVALID');
+      throw this.recordFailure(failure(response.status >= 500 ? Code.UNAVAILABLE : Code.FAILED_PRECONDITION,
+        response.status >= 500 ? 'UNAVAILABLE' : 'CONNECTION_INVALID'));
     }
     return record(await readJson(response));
   }
@@ -128,6 +154,7 @@ export class Dropbox {
     this.store.delete('pending');
     const connection: Connection = { appKey: pending.appKey, refreshToken: response.refresh_token, generation: crypto.randomUUID() };
     this.store.set('connection', connection);
+    this.store.delete('provider_error');
     this.access = null;
   }
 
@@ -164,7 +191,10 @@ export class Dropbox {
   }
 
   private forget(connection: Connection): void {
-    if (this.store.connection()?.generation === connection.generation) this.store.delete('connection');
+    if (this.store.connection()?.generation === connection.generation) {
+      this.store.delete('connection');
+      this.store.delete('provider_error');
+    }
     this.access = null;
   }
 
@@ -178,7 +208,7 @@ export class Dropbox {
       const response = await this.fetch(this.origins.api + '/2/auth/token/revoke', {
         method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: 'null',
       });
-      if (!response.ok && response.status !== 400 && response.status !== 401 && response.status !== 403) await providerFailure(response);
+      if (!response.ok && response.status !== 400 && response.status !== 401 && response.status !== 403) await this.refused(response);
       await response.body?.cancel();
     }
     this.forget(connection);
@@ -188,7 +218,7 @@ export class Dropbox {
     const response = await this.fetch(this.origins.api + '/2/' + method, {
       method: 'POST', headers: { authorization: 'Bearer ' + await this.token(), 'content-type': 'application/json' }, body: JSON.stringify(args),
     });
-    if (!response.ok) return providerFailure(response);
+    if (!response.ok) return this.refused(response);
     return record(await readJson(response, 512 * 1024));
   }
 
@@ -198,7 +228,7 @@ export class Dropbox {
         authorization: 'Bearer ' + await this.token(), 'content-type': 'application/octet-stream', 'dropbox-api-arg': apiArg(args),
       }, body,
     });
-    if (!response.ok) return providerFailure(response);
+    if (!response.ok) return this.refused(response);
     return record(await readJson(response, 512 * 1024));
   }
 
@@ -207,7 +237,7 @@ export class Dropbox {
     if (range !== null) headers.set('range', range);
     const response = await this.fetch(this.origins.content + '/2/files/download', { method: 'GET', headers });
     if (response.status === 416) return { response, metadata: {} };
-    if (!response.ok) return providerFailure(response);
+    if (!response.ok) return this.refused(response);
     let metadata: Record<string, unknown>;
     try {
       const value = response.headers.get('dropbox-api-result');
@@ -226,7 +256,7 @@ export class Dropbox {
         authorization: 'Bearer ' + await this.token(), 'content-type': 'application/octet-stream', 'dropbox-api-arg': apiArg(args),
       }, body,
     });
-    if (!response.ok) return providerFailure(response, true);
+    if (!response.ok) return this.refused(response, true);
     return record(await readJson(response));
   }
 }

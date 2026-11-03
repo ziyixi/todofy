@@ -28,7 +28,8 @@ is reserved for an explicit rejection before any file commit; partially committe
 retryable whole-request 429. Another provider failure before finish is 503 `BATCH_NOT_COMMITTED`: nothing committed
 and the same batch may be sent again. A consumer that does not know this reason may keep treating the 503 as an
 unknown outcome. Each item's bytes are checked against its own hash before commit; a difference is 400
-`UPLOAD_HASH_MISMATCH`. The service does not replay uploads. Existing caller recovery/fencing handles unknown
+`UPLOAD_HASH_MISMATCH`. A full Dropbox is 507 `INSUFFICIENT_SPACE`, before or after finish; retrying cannot
+succeed until space is freed. The service does not replay uploads. Existing caller recovery/fencing handles unknown
 outcomes. Mutable heads keep their original single-object revision CAS.
 
 Header/body size sums, nonempty batches, duplicate keys, path segments, actual stream lengths and confirmation

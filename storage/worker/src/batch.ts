@@ -3,7 +3,7 @@ import { Code, RpcError } from '@ziyixi/proto/rpc-status';
 import { BatchCreateManifestSchema, BatchCreateResponseSchema, type BatchCreateObject, type ObjectMetadata } from '@ziyixi/proto/storage/objects/v1/objects_pb';
 import { Client_Access } from '@ziyixi/proto/storage/ui/v1/client_pb';
 import { fromWire, toWire } from '@ziyixi/proto/wire-json';
-import type { Dropbox } from './dropbox.ts';
+import { insufficientSpace, type Dropbox } from './dropbox.ts';
 import { MAX_OBJECT_BYTES } from './env.ts';
 import { badRequest, failure } from './errors.ts';
 import { hex, objectKey, providerPath } from './keys.ts';
@@ -13,7 +13,7 @@ import type { ClientRow } from './store.ts';
 type BatchPhase = 'start' | 'append' | 'finish' | 'verify';
 const DIAGNOSTIC_REASONS = new Set([
   'BATCH_INCOMPLETE', 'REVISION_CONFLICT', 'UPLOAD_LENGTH_MISMATCH', 'UPLOAD_HASH_MISMATCH', 'NOT_FOUND', 'BAD_REQUEST',
-  'PROVIDER_RESPONSE_INVALID', 'UNAVAILABLE', 'CONNECTION_INVALID', 'NOT_CONFIGURED', 'INTERNAL',
+  'PROVIDER_RESPONSE_INVALID', 'UNAVAILABLE', 'CONNECTION_INVALID', 'NOT_CONFIGURED', 'INTERNAL', 'INSUFFICIENT_SPACE',
 ]);
 const ENTRY_FAILURE_TAGS = new Set([
   'lookup_failed', 'not_closed', 'content_hash_mismatch', 'too_many_write_operations', 'path', 'not_found',
@@ -93,13 +93,14 @@ function records(value: unknown, length: number): Record<string, unknown>[] {
   return value as Record<string, unknown>[];
 }
 
-function conflict(entry: Record<string, unknown>): boolean {
+/** The write error of a failed finish entry, such as conflict or insufficient_space. */
+function pathFailure(entry: Record<string, unknown>): unknown {
   const error = entry.failure;
-  if (entry['.tag'] !== 'failure' || typeof error !== 'object' || error === null || Array.isArray(error)) return false;
+  if (entry['.tag'] !== 'failure' || typeof error !== 'object' || error === null || Array.isArray(error)) return undefined;
   const reason = error as Record<string, unknown>;
   const path = reason.path;
   return reason['.tag'] === 'path' && typeof path === 'object' && path !== null && !Array.isArray(path)
-    && (path as Record<string, unknown>)['.tag'] === 'conflict';
+    ? (path as Record<string, unknown>)['.tag'] : undefined;
 }
 
 export async function batchCreate(request: Request, client: ClientRow, dropbox: Dropbox): Promise<Response> {
@@ -178,15 +179,17 @@ export async function batchCreate(request: Request, client: ClientRow, dropbox: 
       const expected = manifest.objects[index];
       if (expected === undefined) throw incomplete();
       let metadata: ObjectMetadata;
+      const failed = pathFailure(entry);
       if (entry['.tag'] === 'success') metadata = objectMetadata({ ...entry, '.tag': 'file' }, client.namespace, expected.key);
-      else if (conflict(entry)) {
+      else if (failed === 'conflict') {
         // With refresh, start, append and finish, 32 conflicts use 36 of an invocation's 50 subrequests.
         const existing = await dropbox.json('files/get_metadata', { path: providerPath(client.namespace, expected.key), include_deleted: false });
         if (existing['.tag'] === 'folder') throw failure(Code.ABORTED, 'REVISION_CONFLICT');
         metadata = objectMetadata(existing, client.namespace, expected.key);
-      } else throw incomplete();
+      } else if (failed === 'insufficient_space') throw dropbox.recordFailure(insufficientSpace());
+      else throw incomplete();
       if (metadata.sizeBytes !== expected.sizeBytes || metadata.contentHash !== expected.contentHash) {
-        if (conflict(entry)) throw failure(Code.ABORTED, 'REVISION_CONFLICT');
+        if (failed === 'conflict') throw failure(Code.ABORTED, 'REVISION_CONFLICT');
         throw incomplete();
       }
       objects.push(metadata);
@@ -203,7 +206,8 @@ export async function batchCreate(request: Request, client: ClientRow, dropbox: 
     }
     logFailure(streamFailure ?? error, phase, finishing, diagnosticEntry);
     if (streamFailure !== undefined) throw streamFailure;
-    if (error instanceof RpcError && error.reason === 'REVISION_CONFLICT') throw error;
+    // Definite answers; either may still follow partial commits of other items, so neither acknowledges the batch.
+    if (error instanceof RpcError && (error.reason === 'REVISION_CONFLICT' || error.reason === 'INSUFFICIENT_SPACE')) throw error;
     // A finish response may describe partial commits; it never authorizes replay of the batch.
     if (finishing) throw incomplete();
     // Nothing is committed before finish: a rate limit keeps its Retry-After, and any other failure permits replay.

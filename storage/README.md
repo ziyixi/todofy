@@ -7,7 +7,8 @@ holds the connection, key hashes and a cursor-signing key. Storage uses no D1, R
 
 The separate Dropbox app uses `files.metadata.read`, `files.content.read` and `files.content.write` with offline PKCE.
 The callback is `/api/dropbox/callback`. Existing Recall connections, files and archive contracts are independent.
-Disconnecting revokes this connection and retains files. There is no delete-object endpoint.
+Disconnecting revokes this connection and retains files. There is no delete-object endpoint. If Dropbox already
+revoked the authorization, disconnecting removes the local connection, and connecting replaces it.
 
 ## HTTP protocol
 
@@ -43,6 +44,8 @@ Explicit provider rate limits and recognized namespace write contention return 4
 an absent delay becomes one second. The gateway does not repeat uploads. The caller can bound retries of those
 explicit rejections while preserving its body and condition. See [Dropbox's rate and namespace-lock semantics](https://docs.dropboxapi.com/dropbox-api/docs/performance).
 A lost successful upload response can be resolved by statting and verifying the intended size and hash.
+A full Dropbox (`insufficient_space`) returns 507 `INSUFFICIENT_SPACE` without Retry-After, also for a batch after
+finish: no retry can succeed until the owner frees space, so a caller should wait rather than retry or recover.
 
 `POST content` accepts only create-only objects in the caller's namespace. It has no query parameters and
 requires `Content-Type: application/octet-stream`, exact `Content-Length`, and an ASCII `X-Storage-Batch` header
@@ -71,6 +74,8 @@ they are not plain SHA256. An optional `X-Storage-Content-Hash` upload header as
 
 Owner HTTP is `storage.ui.v1` under `/api/v1/`, behind edge-auth. Mutations require the exact Origin,
 `X-CSRF-Token: 1` and JSON. Newly created application keys are returned once; listings and replays return metadata.
+Settings include the Storage reason and time of the newest error Dropbox answered, never provider content.
+Absent objects and create conflicts are ordinary answers and are not recorded. A new or removed connection clears it.
 
 ## Development
 

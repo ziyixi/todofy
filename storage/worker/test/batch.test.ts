@@ -49,6 +49,7 @@ it.each([
   { name: 'finish', reason: 'BATCH_INCOMPLETE', expected: { phase: 'finish', finish_started: true, cause_reason: 'UNAVAILABLE' } },
   { name: 'finish rate', reason: 'BATCH_INCOMPLETE', expected: { phase: 'finish', finish_started: true, cause_reason: 'UNAVAILABLE', cause_http_status: 429 } },
   { name: 'finish entry', reason: 'BATCH_INCOMPLETE', expected: { phase: 'verify', finish_started: true, finish_response_received: true, entry_tag: 'failure', entry_failure_tag: 'path', entry_detail_tag: 'not_found' } },
+  { name: 'finish space', reason: 'INSUFFICIENT_SPACE', expected: { phase: 'verify', finish_started: true, finish_response_received: true, entry_tag: 'failure', entry_failure_tag: 'path', entry_detail_tag: 'insufficient_space', cause_reason: 'INSUFFICIENT_SPACE', cause_http_status: 507 } },
   { name: 'verify', reason: 'BATCH_INCOMPLETE', expected: { phase: 'verify', finish_started: true, finish_response_received: true, entry_tag: 'success' } },
   { name: 'metadata', reason: 'BATCH_INCOMPLETE', expected: { phase: 'verify', finish_started: true, finish_response_received: true, entry_tag: 'success', cause_reason: 'PROVIDER_RESPONSE_INVALID' } },
 ])('logs one safe batch diagnostic for $name and answers $reason', async ({ name, reason, expected }) => {
@@ -66,12 +67,12 @@ it.each([
         : { '.tag': 'success' }] });
     }
     if (name === 'finish' || name === 'finish rate') return new Response('synthetic-private-provider-body', { status: name === 'finish' ? 503 : 429 });
-    if (name === 'finish entry') return Response.json({ entries: [{ '.tag': 'failure', failure: { '.tag': 'path', path: { '.tag': 'not_found' } } }] });
+    if (name === 'finish entry' || name === 'finish space') return Response.json({ entries: [{ '.tag': 'failure', failure: { '.tag': 'path', path: { '.tag': name === 'finish entry' ? 'not_found' : 'insufficient_space' } } }] });
     return Response.json({ entries: [{ '.tag': 'success', path_display: '/namespaces/synthetic/raw/synthetic-private-key.bin',
       rev: 'synthetic', size: 3, content_hash: '0'.repeat(64), ...(name === 'metadata' ? { path_display: 'synthetic-private-invalid-path' } : {}) }] });
   });
   const provider = new Dropbox({ get: () => null, set: () => undefined, delete: () => undefined, connection: () => connection }, {});
-  await expect(batchCreate(diagnosticRequest(), client, provider)).rejects.toMatchObject({ reason, httpStatus: 503 });
+  await expect(batchCreate(diagnosticRequest(), client, provider)).rejects.toMatchObject({ reason, httpStatus: reason === 'INSUFFICIENT_SPACE' ? 507 : 503 });
   expect(log).toHaveBeenCalledExactlyOnceWith(JSON.stringify({ ...baseDiagnostic, ...expected }));
   expect(JSON.stringify(log.mock.calls)).not.toContain('synthetic-private');
 });

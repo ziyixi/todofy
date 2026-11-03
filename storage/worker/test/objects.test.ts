@@ -106,6 +106,15 @@ describe('streamed conditional writes', () => {
     await expect(writeContent(request(), client, provider)).rejects.toMatchObject({ reason: 'REVISION_CONFLICT', httpStatus: 409 });
   });
 
+  it('reports a full Dropbox as a distinct non-retryable error rather than unavailable', async () => {
+    vi.stubGlobal('FixedLengthStream', class extends TransformStream<Uint8Array, Uint8Array> { constructor(length: number) { super(); expect(length).toBe(3); } });
+    const request = () => new Request('https://storage.example.test/api/storage/v1/content?key=file.bin', { method: 'PUT', headers: { 'if-none-match': '*', 'content-length': '3' }, body: 'abc' });
+    fakeFetch(() => Response.json({ error_summary: 'path/insufficient_space/..', error: { '.tag': 'path', path: { reason: { '.tag': 'insufficient_space' }, upload_session_id: 'synthetic-upload-session' } } }, { status: 409 }));
+    await expect(writeContent(request(), client, provider)).rejects.toMatchObject({ code: 8, reason: 'INSUFFICIENT_SPACE', httpStatus: 507, headers: {} });
+    fakeFetch(() => Response.json({ error_summary: 'path/insufficient_space/' }, { status: 409 }));
+    await expect(writeContent(request(), client, provider)).rejects.toMatchObject({ reason: 'INSUFFICIENT_SPACE', httpStatus: 507 });
+  });
+
   it('rejects short and oversized actual streams rather than trusting Content-Length', async () => {
     vi.stubGlobal('FixedLengthStream', class extends TransformStream<Uint8Array, Uint8Array> { constructor(length: number) { super(); expect(length).toBe(3); } });
     fakeFetch(async (_url, init) => {

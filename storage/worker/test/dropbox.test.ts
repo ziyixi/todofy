@@ -136,3 +136,32 @@ describe('connections Dropbox already revoked', () => {
     expect((revoked.store.get('pending') as { state: string } | null)?.state).toBe(authorize.searchParams.get('state'));
   });
 });
+
+describe('provider errors for the owner console', () => {
+  it('records only errors Dropbox answered, as a Storage reason and time', async () => {
+    const store = new Memory();
+    store.set('connection', connection);
+    const provider = new Dropbox(store, {});
+    let answer: () => Response = () => Response.json({ error_summary: 'path/not_found/..' }, { status: 409 });
+    vi.stubGlobal('fetch', (url: string) => url.endsWith('/oauth2/token')
+      ? Promise.resolve(Response.json({ access_token: 'synthetic-access-private', expires_in: 3600 })) : Promise.resolve(answer()));
+    const upload = () => provider.upload({ path: '/namespaces/synthetic/file.bin' }, new Blob(['abc']).stream());
+    await expect(provider.json('files/get_metadata', {})).rejects.toMatchObject({ reason: 'NOT_FOUND' });
+    answer = () => Response.json({ error_summary: 'path/conflict/file/..' }, { status: 409 });
+    await expect(upload()).rejects.toMatchObject({ reason: 'REVISION_CONFLICT' });
+    expect(store.get('provider_error')).toBeNull();
+    answer = () => Response.json({ error_summary: 'path/insufficient_space/synthetic-private-detail' }, { status: 409 });
+    await expect(upload()).rejects.toMatchObject({ reason: 'INSUFFICIENT_SPACE', httpStatus: 507 });
+    expect(store.get('provider_error')).toEqual({ reason: 'INSUFFICIENT_SPACE', time: expect.any(Number) as number });
+    answer = () => { throw new TypeError('synthetic network failure'); };
+    await expect(provider.json('files/get_metadata', {})).rejects.toMatchObject({ reason: 'UNAVAILABLE' });
+    expect(store.get('provider_error')).toMatchObject({ reason: 'INSUFFICIENT_SPACE' });
+    answer = () => new Response('synthetic-private-body', { status: 503 });
+    await expect(provider.json('files/get_metadata', {})).rejects.toMatchObject({ reason: 'UNAVAILABLE' });
+    expect(store.get('provider_error')).toMatchObject({ reason: 'UNAVAILABLE' });
+    expect(JSON.stringify(store.get('provider_error'))).not.toContain('synthetic-private');
+    answer = () => new Response('null');
+    await provider.disconnect();
+    expect(store.get('provider_error')).toBeNull();
+  });
+});
