@@ -1004,7 +1004,7 @@ class ApplyCommand(unittest.TestCase):
             "branch": dict(APPLY_CONTEXT, GITHUB_REF="refs/heads/iac-p4"),
             "push": dict(APPLY_CONTEXT, GITHUB_EVENT_NAME="push"),
             "another workflow": dict(APPLY_CONTEXT, GITHUB_WORKFLOW="CI and deploy"),
-            # The reconcile prints the expect line; it never applies one (its old reviewed apply is gone).
+            # The reconcile prints the expect line and never applies, even with its removed reviewed-apply input set.
             "reconcile": dict(APPLY_CONTEXT, GITHUB_WORKFLOW="Personal cloud reconcile",
                               INFRA_REVIEWED_APPLY="reviewed-plan"),
             "not a runner": {k: v for k, v in APPLY_CONTEXT.items() if k != "GITHUB_ACTIONS"},

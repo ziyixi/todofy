@@ -198,7 +198,8 @@ gh workflow run personal-cloud-reconcile.yml --ref main -R "$cloud_repo" -f oper
 | 普通发布 held/failed | 处理错误后运行下方 CI resume，填写原发布的完整 SHA |
 | daemon、K3s 或 Tunnel 不可达 | 恢复宿主入口 |
 
-审批绑定这次实际计划和 SHA；等待期间 state 或目标变化会拒绝旧计划，重新运行后重新审核。
+Infra apply 的 expect 只绑定动作计数和地址/动作指纹，不比较属性值和 SHA：重新计划后地址或动作不同会拒绝，只有值变化不会。
+只在 main 仍是该摘要 `Source` 时派发；之后有新提交就重新运行 `check` 再审。
 人工暂停和运维开关保留，修复不自动开启业务。
 
 恢复同一次操作，保留其请求身份：

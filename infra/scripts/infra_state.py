@@ -1092,8 +1092,9 @@ def github_output(path: Optional[Path], state: str) -> None:
 
 
 def apply_instruction(summary: dict, refused: bool) -> str:
-    """What the reconcile tells the reviewer to dispatch: the "Infra apply" inputs that apply exactly this plan (the
-    line `plan` prints), or that its gates would refuse the plan whatever the inputs."""
+    """What the reconcile tells the reviewer to dispatch: the "Infra apply" inputs for this plan's actions and
+    addresses (the line `plan` prints; values are not bound), or that its gates would refuse the plan whatever the
+    inputs."""
     if refused:
         return ("infra_state: \"Infra apply\" would refuse this plan (a type outside ALLOWED_TYPES, a FROZEN object, "
                 "or outputs that differ from a wrangler.toml); change infra/ or the configuration on main first")

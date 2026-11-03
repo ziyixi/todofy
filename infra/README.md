@@ -73,7 +73,8 @@ and regenerates committed configuration. Do not restore the old hand-written imp
 [Personal cloud reconcile](../.github/workflows/personal-cloud-reconcile.yml) is the only drift report. Its
 Infrastructure job plans current `main` after each successful main CI (so a pushed `infra/` change is compared
 once its CI passes), daily and on a manual `check`. Its summary shows the address table; for a plan it does not
-repair, it ends with the Infra apply `expect` for exactly that plan, or says that Infra apply would refuse it.
+repair, it ends with the Infra apply `expect` for that plan's actions and addresses, or says that Infra apply would
+refuse it.
 These production checks are separate from account-free source tests.
 
 | Result | Meaning | Next step |
@@ -95,8 +96,9 @@ There are two write paths for these resources, both on main and under the same i
    the Tunnel target and exact route/audience policy in [reconcile_policy.py](scripts/reconcile_policy.py).
 2. [Infra apply](../.github/workflows/infra-apply.yml) applies every other change. Its `expect` input is the action
    counts and plan fingerprint that the reconcile's Infrastructure summary prints for the reviewed address table; it
-   plans again and applies only an identical plan. Its destructive-confirmation input is only for an explicitly
-   reviewed retirement.
+   plans again and applies only a plan with the same actions on the same addresses. Attribute values and the source
+   revision are not compared, so dispatch it only while `main` is still the summary's `Source`. Its
+   destructive-confirmation input is only for an explicitly reviewed retirement.
 
 Private operations' `infra-apply` is a third, separate path: it writes only the private application's own
 infrastructure, under that application's release lock and its own reviewed plan fingerprint.
