@@ -3,7 +3,8 @@
 Storage gives applications a namespace-scoped HTTP interface to a separate Dropbox App-folder connection.
 The owner console connects Dropbox and creates independently revocable read-only or read/write keys.
 Each key selects a fixed namespace on the server. File data lives in Dropbox; the native SQLite Durable Object
-holds the connection, key hashes and a cursor-signing key. Storage uses no D1, R2 or scheduled job.
+holds the connection state, key hashes, a cursor-signing key and the last provider error reason. Storage uses no D1,
+R2 or scheduled job.
 
 The separate Dropbox app uses `files.metadata.read`, `files.content.read` and `files.content.write` with offline PKCE.
 The callback is `/api/dropbox/callback`. Existing Recall connections, files and archive contracts are independent.
@@ -31,10 +32,12 @@ backslashes, URI escapes and Dropbox `id:`, `ns:` and `rev:` selectors are rejec
 case-insensitive path behavior. A listing may return an empty page with a continuation; keep reading until
 `next_cursor` is empty. Continuations are authenticated and bound to the namespace and prefix.
 
-`page_size` defaults to 100 and is capped at 100. Each response is one Dropbox page requested with that limit
-and contains at most the requested number of objects. Dropbox's limit is approximate; a page with more matching
-objects fails with 503 `PROVIDER_RESPONSE_INVALID` instead of being truncated. A continuation carries the signed
-Dropbox cursor and expires after 24 hours; a continuation from the retired page cache returns `CURSOR_INVALID`.
+`page_size` defaults to 100 and is capped at 100. Each response is one Dropbox page with at most the requested
+number of objects. The first request asks Dropbox for that limit; continuations return Dropbox's next page, which
+keeps the first request's limit, so keep `page_size` the same throughout one listing. Dropbox's limit is approximate;
+a page with more matching objects than `page_size` fails with 503 `PROVIDER_RESPONSE_INVALID` instead of being
+truncated, and repeating the same request fails again. A continuation carries the signed Dropbox cursor and expires
+after 24 hours; a continuation from the retired page cache returns `CURSOR_INVALID`.
 Provider JSON remains bounded at 512 KiB. [Dropbox documents the approximate limit and continuation rules](https://github.com/dropbox/dropbox-api-spec/blob/main/files.stone#L1687-L1771).
 
 Each object is at most 32 MiB. Uploads require Content-Length and enforce the actual stream length.

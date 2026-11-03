@@ -27,7 +27,7 @@ export interface PendingConnection {
   readonly exchanging?: boolean;
 }
 
-/** Only connection credentials, namespace-key hashes and a cursor-signing key live here. */
+/** Connection state, namespace-key hashes, the cursor-signing key and the last provider error reason; no file data. */
 export class Store {
   private readonly sql: SqlStorage;
 
