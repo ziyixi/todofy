@@ -1,5 +1,5 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library", "js_test")
-load("@npm//website:tsx/package_json.bzl", tsx = "bin")
+load("@npm//:tsx/package_json.bzl", tsx = "bin")
 load("//tools/bazel/audit:sources.bzl", "source_audit_files")
 
 package(default_visibility = ["//mail-hero:__subpackages__"])

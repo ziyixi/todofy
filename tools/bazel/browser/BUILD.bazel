@@ -1,4 +1,4 @@
-load("@npm//website:@playwright/test/package_json.bzl", playwright = "bin")
+load("@npm//:@playwright/test/package_json.bzl", playwright = "bin")
 load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES", "source_audit_files")
 load(":defs.bzl", "browser_toolchain")
 
