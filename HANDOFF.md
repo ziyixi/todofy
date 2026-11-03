@@ -5,27 +5,16 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-`codex/automatic-publication` implements the owner's request to automate normal private publication, catalogue
-materialization and Home publication in one main workflow. Private dependency selection uses the existing fixed
-Target Determinator and a generic Bazel release facade. Selected public service publications precede private
-publication; Home follows it once, and the existing successful-workflow reconciliation remains the final check.
-App-specific dispatch and independent extension publication retain their scope.
-
-Home and inventory generate a runner-local catalogue from the selected source's exact private gitlink, using the
-existing private read credential. The old catalogue Secret is no longer a publication input. No private content
-enters public logs, artifacts or uploaded caches. Manual operating commands remain available for recovery.
-
-Implementation and all fifteen affected local Bazel targets passed. The real Git/Bazel dependency fixture passed
-private-code, shared-code, documentation-only, removed-input and missing-baseline cases. Complete exact
-branch/main admission, then observe one automatic publication and matching reconciliation. Private source and
-operating evidence are kept only in `private/HANDOFF.md`.
+No unpublished software changes remain from the automatic-publication work. Private application work, operating
+limits and owner follow-ups are recorded only in `private/HANDOFF.md`.
 
 ## Latest verified release
 
-Main `c5c1b7e0` passed its complete public publication. Home's later same-source publication and the matching
-Personal cloud reconcile also passed: all fourteen Worker comparisons, VPS identity, resource registration and
-resolved infrastructure drift ran successfully. The [November 3 archive](docs/history/handoff-2026-11-03.md)
-records the shared release changes; private application evidence is in the private HANDOFF.
+Main `9da2d116` passed its complete automatic publication: selected public service publications, the selected
+private publication, then one Home publication. The matching Personal cloud reconcile ran all fourteen actual
+Worker comparisons, VPS identity, complete resource registration and resolved infrastructure drift successfully.
+The [November 3 archive](docs/history/handoff-2026-11-03.md) records the shared changes and automatic chain;
+private application evidence is in the private HANDOFF. Documentation-only closure does not republish services.
 
 Shared Worker receipt recovery (`7ef001fe`) adds fixed failure stages, exact committed-result readback and a
 guarded receipt-only path without application redeployment. The old statusless Tasks receipt remains historical
