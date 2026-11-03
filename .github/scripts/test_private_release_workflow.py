@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from test_private_checkout import run_checkout
 from workflow_sources import workflow_data
 
 ROOT = Path(__file__).absolute().parents[2]
@@ -171,58 +172,93 @@ class PrivateReleaseWorkflow(unittest.TestCase):
         self.context["vars.VPS_DEPLOY_ENABLED"] = "true"
         self.assertFalse(self.condition("private-deploy"))
 
-    def test_publication_captures_private_output_and_preserves_the_exit_status(self):
+    def operate(self, directory, operation, status, output):
+        """Run the publisher's real step with a stand-in entry point that prints `output` and exits `status`."""
         publisher = workflow_data(ROOT / ".github/workflows/private-release.yml")
         script = publisher["jobs"]["release"]["steps"][-1]["run"]
-        private_output = "synthetic-private-source\nsynthetic-private-runtime\n"
+        temporary = Path(directory)
+        (temporary / "entry-output").write_text(output)
+        python = temporary / "python3"
+        python.write_text(
+            "#!/bin/sh\n"
+            '[ "$1" = private/ci/release.py ] && [ "$2" = --operation ] && '
+            '[ "$3" = "$PRIVATE_RELEASE_OPERATION" ] || exit 99\n'
+            'cat "$RUNNER_TEMP/entry-output"\n'
+            'echo "synthetic-private-runtime" >&2\n'
+            'exit "$SYNTHETIC_STATUS"\n'
+        )
+        python.chmod(0o755)
+        log = temporary / "private-operation.log"
+        log.unlink(missing_ok=True)
+        result = subprocess.run(
+            ["bash", "-e", "-c", script],
+            env={
+                **os.environ,
+                "PATH": f"{temporary}{os.pathsep}{os.environ['PATH']}",
+                "RUNNER_TEMP": str(temporary),
+                "PRIVATE_RELEASE_OPERATION": operation,
+                "SYNTHETIC_STATUS": str(status),
+            },
+            capture_output=True, text=True, check=False,
+        )
+        return result, log.read_text()
+
+    def test_every_operation_captures_private_output_and_preserves_the_exit_status(self):
+        private_output = '{"event":"synthetic","source":"synthetic-private-source"}\n'
+        operations = ("release", "publish", "finish-worker", "verify", "data-check", "infra-plan",
+                      "infra-apply", "k3s-check", "k3s-plan", "k3s-apply", "not-an-operation")
         with tempfile.TemporaryDirectory() as directory:
-            temporary = Path(directory)
-            python = temporary / "python3"
-            python.write_text(
-                "#!/bin/sh\n"
-                '[ "$1" = private/ci/release.py ] && [ "$2" = --operation ] && '
-                '[ "$3" = "$PRIVATE_RELEASE_OPERATION" ] || exit 99\n'
-                'echo "synthetic-private-source"\n'
-                'echo "synthetic-private-runtime" >&2\n'
-                'exit "$SYNTHETIC_STATUS"\n'
-            )
-            python.chmod(0o755)
-            for operation in ("release", "publish", "finish-worker", "verify", "infra-plan", "k3s-check"):
+            for operation in operations:
                 for status in (0, 7):
                     with self.subTest(operation=operation, status=status):
-                        log = temporary / "private-operation.log"
-                        log.unlink(missing_ok=True)
-                        result = subprocess.run(
-                            ["bash", "-e", "-c", script],
-                            env={
-                                **os.environ,
-                                "PATH": f"{temporary}{os.pathsep}{os.environ['PATH']}",
-                                "RUNNER_TEMP": str(temporary),
-                                "PRIVATE_RELEASE_OPERATION": operation,
-                                "SYNTHETIC_STATUS": str(status),
-                            },
-                            capture_output=True, text=True, check=False,
-                        )
+                        result, log = self.operate(directory, operation, status, private_output)
                         self.assertEqual(result.returncode, status)
-                        if operation in {"release", "publish", "finish-worker"}:
-                            expected = "::error::PRIVATE_PUBLICATION_FAILED\n" if status else "::notice::PRIVATE_PUBLICATION_COMPLETE\n"
-                            self.assertEqual(result.stdout + result.stderr, expected)
-                            self.assertEqual(log.read_text(), private_output)
-                        else:
-                            self.assertEqual(result.stdout + result.stderr, private_output)
-                            self.assertFalse(log.exists())
+                        outcome = ("PRIVATE_PUBLICATION" if operation in {"release", "publish", "finish-worker"}
+                                   else "PRIVATE_OPERATION")
+                        expected = f"::error::{outcome}_FAILED\n" if status else f"::notice::{outcome}_COMPLETE\n"
+                        self.assertEqual(result.stdout + result.stderr, expected)
+                        self.assertEqual(log, private_output + "synthetic-private-runtime\n")
+
+    def test_only_fixed_shape_plan_results_reach_the_public_log(self):
+        fingerprint = "create=1,update=12@0123456789abcdef"
+        plan = ("Private infrastructure plan: " + fingerprint + "\n"
+                '{"create":1,"update":12}\nsynthetic-private-resource\n')
+        k3s = ('{"event":"k3s_operation","operation":"plan","rendered_sha256":"' + "a" * 64
+               + '","rendered_bytes":42,"changed":%s}\n')
+        cases = [
+            ("infra-plan", 0, plan, "::notice::PRIVATE_INFRA_PLAN=" + fingerprint + "\n::notice::PRIVATE_OPERATION_COMPLETE\n"),
+            # A refused apply still shows the fresh plan it compared, then fails with the entry point's status.
+            ("infra-apply", 7, plan, "::notice::PRIVATE_INFRA_PLAN=" + fingerprint + "\n::error::PRIVATE_OPERATION_FAILED\n"),
+            ("infra-plan", 0, "Private infrastructure plan: synthetic-private-name@0123456789abcdef\n",
+             "::notice::PRIVATE_OPERATION_COMPLETE\n"),
+            ("infra-plan", 0, "Private infrastructure plan: " + fingerprint + " synthetic-private-name\n",
+             "::notice::PRIVATE_OPERATION_COMPLETE\n"),
+            ("k3s-plan", 0, k3s % "true", "::notice::PRIVATE_K3S_PLAN_CHANGED\n::notice::PRIVATE_OPERATION_COMPLETE\n"),
+            ("k3s-plan", 0, k3s % "false", "::notice::PRIVATE_K3S_PLAN_UNCHANGED\n::notice::PRIVATE_OPERATION_COMPLETE\n"),
+            ("k3s-plan", 7, k3s % "true", "::error::PRIVATE_OPERATION_FAILED\n"),
+            ("k3s-plan", 0, k3s % '"synthetic-private-name"', "::notice::PRIVATE_OPERATION_COMPLETE\n"),
+            ("k3s-apply", 0, k3s % "true", "::notice::PRIVATE_OPERATION_COMPLETE\n"),
+            ("verify", 0, plan + k3s % "true", "::notice::PRIVATE_OPERATION_COMPLETE\n"),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            for operation, status, output, expected in cases:
+                with self.subTest(operation=operation, status=status, output=output):
+                    result, _ = self.operate(directory, operation, status, output)
+                    self.assertEqual(result.returncode, status)
+                    self.assertEqual(result.stdout + result.stderr, expected)
 
     def test_private_history_fetches_only_pinned_ancestries_and_imports_a_divergent_base(self):
         check = workflow_data(ROOT / ".github/workflows/private-check.yml")["jobs"]["check"]
         private_checkouts = [step for step in check["steps"]
-                             if step.get("with", {}).get("repository") == "ziyixi/todofy-private"]
+                             if step.get("uses") == "./.github/actions/private-checkout"]
         self.assertEqual(len(private_checkouts), 2)
         for step in private_checkouts:
-            self.assertEqual(step["with"]["fetch-depth"], "2147483647")
-            self.assertEqual(step["with"]["fetch-tags"], "false")
-            self.assertEqual(step["with"]["persist-credentials"], "false")
-        self.assertEqual(private_checkouts[0]["with"]["ref"], "${{ inputs.revision }}")
-        self.assertEqual(private_checkouts[1]["with"]["ref"], "${{ steps.baseline.outputs.revision }}")
+            self.assertEqual(step["with"]["history"], "ancestry")
+            self.assertEqual(step["with"]["ssh-key"], "${{ secrets.private_ssh_key }}")
+        self.assertEqual(private_checkouts[0]["with"]["revision"], "${{ inputs.revision }}")
+        self.assertEqual(private_checkouts[0]["with"]["path"], "private")
+        self.assertEqual(private_checkouts[1]["with"]["revision"], "${{ steps.baseline.outputs.revision }}")
+        self.assertEqual(private_checkouts[1]["with"]["path"], ".private-baseline")
         importer = next(step for step in check["steps"]
                         if step.get("name") == "Import the pinned baseline ancestry locally")
         self.assertEqual(private_checkouts[1]["if"], importer["if"])
@@ -260,13 +296,13 @@ class PrivateReleaseWorkflow(unittest.TestCase):
             git("tag", "synthetic-unrelated-tag")
             git("checkout", "--quiet", "-b", "synthetic-current", common)
             current_private = commit("current")
-            for path, revision in (("private", current_private), (".private-baseline", base_private)):
-                checkout = parent / path
-                checkout.mkdir()
-                git("init", "--quiet", cwd=checkout)
-                git("-c", "protocol.file.allow=always", "fetch", "--quiet", "--no-tags",
-                    "--depth=2147483647", source.as_uri(), revision, cwd=checkout)
-                git("checkout", "--quiet", "--detach", "FETCH_HEAD", cwd=checkout)
+            for step, revision in zip(private_checkouts, (current_private, base_private), strict=True):
+                # The workflow's own quiet fetch, served from the synthetic source instead of GitHub.
+                result, calls, _ = run_checkout(parent, temporary, source, revision=revision,
+                                                path=step["with"]["path"], history=step["with"]["history"])
+                self.assertEqual((result.returncode, result.stdout + result.stderr, len(calls)), (0, "", 1))
+                checkout = parent / step["with"]["path"]
+                self.assertEqual(git("rev-parse", "HEAD", cwd=checkout), revision)
                 self.assertEqual(git("rev-parse", "--is-shallow-repository", cwd=checkout), "false")
                 self.assertEqual(git("for-each-ref", "--format=%(refname)", cwd=checkout), "")
                 git("cat-file", "-e", common + "^{commit}", cwd=checkout)

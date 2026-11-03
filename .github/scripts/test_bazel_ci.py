@@ -125,15 +125,21 @@ class BazelCI(unittest.TestCase):
         self.assertNotIn("environment", job)
         steps = job["steps"]
         checkout = next(
-            step["with"]
+            step
             for step in steps
             if step.get("with", {}).get("path") == "private"
         )
-        self.assertEqual(checkout["repository"], "ziyixi/todofy-private")
-        self.assertEqual(checkout["ref"], "${{ inputs.revision }}")
-        self.assertEqual(checkout["persist-credentials"], "false")
-        self.assertEqual(checkout["fetch-depth"], "2147483647")
-        self.assertEqual(checkout["fetch-tags"], "false")
+        # The quiet fetch keeps no credential and prints no private commit subject (test_private_checkout).
+        self.assertEqual(checkout["uses"], "./.github/actions/private-checkout")
+        self.assertEqual(
+            checkout["with"],
+            {
+                "revision": "${{ inputs.revision }}",
+                "path": "private",
+                "ssh-key": "${{ secrets.private_ssh_key }}",
+                "history": "ancestry",
+            },
+        )
         self.assertEqual(steps[0]["with"]["fetch-depth"], "0")
         cache_actions = [
             step["uses"].split("@")[0]
@@ -397,11 +403,13 @@ class BazelCI(unittest.TestCase):
         )
         publisher = workflow_data(ROOT / ".github/workflows/private-release.yml")
         entry = publisher["jobs"]["release"]["steps"][-1]
-        # Every operation, including finish-worker, runs through the pinned private entry point only. It is passed
-        # as an argument: an entry point pinned before an operation existed refuses it rather than defaulting.
+        # Every operation, including finish-worker, runs through the pinned private entry point only, once, with its
+        # output kept in a runner file. It is passed as an argument: an entry point pinned before an operation
+        # existed refuses it rather than defaulting.
+        self.assertEqual(entry["run"].count("python3 "), 1)
         self.assertEqual(entry["run"].count(
-            'python3 private/ci/release.py --operation "$PRIVATE_RELEASE_OPERATION"'
-        ), 2)
+            'python3 private/ci/release.py --operation "$PRIVATE_RELEASE_OPERATION" > "$log" 2>&1 || status=$?'
+        ), 1)
         self.assertEqual(
             entry["env"]["PRIVATE_RELEASE_OPERATION"], "${{ inputs.operation }}"
         )

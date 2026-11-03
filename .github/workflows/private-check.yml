@@ -58,26 +58,20 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a") as output:
               output.write("revision=" + revision + "\n")
           PY
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Fetch only the pinned commit's complete ancestry; no commit subject reaches the public log.
+      - uses: ./.github/actions/private-checkout
         with:
-          repository: ziyixi/todofy-private
+          revision: ${{ inputs.revision }}
           path: private
-          ref: ${{ inputs.revision }}
-          # Git's infinite ancestry depth keeps the fetch scoped to this commit instead of listing every ref.
-          fetch-depth: 2147483647
-          fetch-tags: false
           ssh-key: ${{ secrets.private_ssh_key }}
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+          history: ancestry
+      - uses: ./.github/actions/private-checkout
         if: steps.baseline.outputs.revision != '' && steps.baseline.outputs.revision != inputs.revision
         with:
-          repository: ziyixi/todofy-private
+          revision: ${{ steps.baseline.outputs.revision }}
           path: .private-baseline
-          ref: ${{ steps.baseline.outputs.revision }}
-          fetch-depth: 2147483647
-          fetch-tags: false
           ssh-key: ${{ secrets.private_ssh_key }}
-          persist-credentials: false
+          history: ancestry
       - name: Import the pinned baseline ancestry locally
         if: steps.baseline.outputs.revision != '' && steps.baseline.outputs.revision != inputs.revision
         env:

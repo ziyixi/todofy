@@ -127,6 +127,7 @@ class CompositeActions(unittest.TestCase):
                             self.assertIn(step["uses"], {
                                 "./.github/actions/setup-workspace", "./.github/actions/setup-bazel",
                                 "./.github/actions/worker-prepare", "./.github/actions/worker-deploy",
+                                "./.github/actions/private-checkout",
                             })
                             installer = workflow_data(ROOT / step["uses"] / "action.yml")
                             self.assertEqual(set(step.get("with", {})), set(installer.get("inputs", {})))
@@ -275,6 +276,22 @@ class CompositeActions(unittest.TestCase):
                 with self.subTest(app=app, action=name):
                     label = f'"//.github/actions:{name}/action.yml"'
                     self.assertTrue(label in build or label in shared)
+
+    def test_home_declares_every_action_its_private_registration_runs(self):
+        """Home's release runs the private catalogue action from worker-release.yml, outside release-dashboard, so
+        that action and the local actions it calls are declared in Home's release target directly."""
+        build = (ROOT / "dashboard/BUILD.bazel").read_text().split('name = "release"', 1)[1].split("\n)\n", 1)[0]
+        pending, used = ["private-catalog"], set()
+        while pending:
+            name = pending.pop()
+            used.add(name)
+            for step in workflow_data(ROOT / ".github/actions" / name / "action.yml")["runs"]["steps"]:
+                if step.get("uses", "").startswith("./.github/actions/"):
+                    pending.append(step["uses"].removeprefix("./.github/actions/"))
+        self.assertEqual(used, {"private-catalog", "private-checkout"})
+        for name in used:
+            with self.subTest(action=name):
+                self.assertIn(f'"//.github/actions:{name}/action.yml"', build)
 
     def test_the_reader_selects_shared_steps_by_literal_inputs(self):
         with tempfile.TemporaryDirectory() as tmp:

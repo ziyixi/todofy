@@ -1,0 +1,71 @@
+name: private-checkout
+description: Fetch one pinned private commit with the read-only key, printing no commit metadata and keeping no credential.
+inputs:
+  revision:
+    description: Exact 40-character private gitlink commit
+    required: true
+  path:
+    description: Absent or empty destination directory, relative to the workspace
+    required: true
+  ssh-key:
+    description: Existing read-only private repository deploy key
+    required: true
+  history:
+    description: "'commit' fetches only the pinned commit; 'ancestry' also fetches its complete ancestry"
+    required: true
+runs:
+  using: composite
+  steps:
+    # actions/checkout prints "HEAD is now at <sha> <subject>"; private subjects must not reach the public log.
+    # Git output goes to a runner-local file and the public log shows only a fixed code.
+    - name: Fetch the pinned private commit quietly
+      working-directory: .
+      env:
+        PRIVATE_CHECKOUT_REVISION: ${{ inputs.revision }}
+        PRIVATE_CHECKOUT_PATH: ${{ inputs.path }}
+        PRIVATE_CHECKOUT_KEY: ${{ inputs.ssh-key }}
+        PRIVATE_CHECKOUT_HISTORY: ${{ inputs.history }}
+      shell: bash -e {0}
+      run: |
+        set -uo pipefail
+        refuse() { echo "::error::$1"; exit 1; }
+        case "$PRIVATE_CHECKOUT_HISTORY" in
+          commit) depth=(--depth=1) ;;
+          ancestry) depth=() ;;
+          *) refuse PRIVATE_CHECKOUT_INPUT_INVALID ;;
+        esac
+        [[ "$PRIVATE_CHECKOUT_REVISION" =~ ^[0-9a-f]{40}$ ]] || refuse PRIVATE_CHECKOUT_INPUT_INVALID
+        destination="$PRIVATE_CHECKOUT_PATH"
+        case "/$destination/" in
+          //|/\/*|*/../*) refuse PRIVATE_CHECKOUT_INPUT_INVALID ;;
+        esac
+        if [ -e "$destination" ] && { [ ! -d "$destination" ] || [ -n "$(ls -A "$destination")" ]; }; then
+          refuse PRIVATE_CHECKOUT_INPUT_INVALID
+        fi
+        [ -n "$PRIVATE_CHECKOUT_KEY" ] || refuse PRIVATE_CHECKOUT_INPUT_INVALID
+        # The key exists only in this step's temporary directory and is removed however the step ends.
+        credentials=$(mktemp -d "$RUNNER_TEMP/private-checkout.XXXXXX")
+        trap 'rm -rf "$credentials"' EXIT
+        log=$(mktemp "$RUNNER_TEMP/private-checkout-log.XXXXXX")
+        (umask 077 && printf '%s\n' "$(printf '%s' "$PRIVATE_CHECKOUT_KEY" | tr -d '\r')" > "$credentials/key")
+        # GitHub's published SSH host keys (api.github.com/meta); fingerprints SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU,
+        # SHA256:p2QAMXNIC1TJYWeIOttrVc98/R1BUFWu3/LiyKgUfQM and SHA256:uNiVztksCsDhcc0u9e8BujQXVUpKZIDTMczCvj3tD2s.
+        cat > "$credentials/known_hosts" <<'KNOWN_HOSTS'
+        github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+        github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg=
+        github.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCj7ndNxQowgcQnjshcLrqPEiiphnt+VTTvDP6mHBL9j1aNUkY4Ue1gvwnGLVlOhGeYrnZaMgRK6+PKCUXaDbC7qtbW8gIkhL7aGCsOr/C56SJMy/BCZfxd1nWzAOxSDPgVsmerOBYfNqltV9/hWCqBywINIR+5dIg6JTJ72pcEpEjcYgXkE2YEFXV1JHnsKgbLWNlhScqb2UmyRkQyytRLtL+38TGxkxCflmO+5Z8CSSNY7GidjMIZ7Q4zMjA2n1nGrlTDkzwDCsw+wqFPGQA179cnfGWOWRVruj16z6XyvxvjJwbz0wQZ75XK5tKSb7FNyeIEs4TT4jk+S4dhPeAUC5y+bDYirYgM4GC7uEnztnZyaVWQ7B381AK4Qdrwt51ZqExKbQpTUNn+EjqoTwvqNj4kqx5QUCI0ThS/YkOxJCXmPUWZbhjpCg56i+2aB6CmK2JGhn57K5mj0MNdBXA4/WnwH6XoPWJzK5Nyu2zB3nAZp+S5hpQs+p1vN1/wsjk=
+        KNOWN_HOSTS
+        # Only this step's environment carries the SSH command; nothing is written to the checkout's Git config.
+        GIT_SSH_COMMAND="ssh -F /dev/null -i $(printf %q "$credentials/key") -o IdentitiesOnly=yes -o IdentityAgent=none"
+        GIT_SSH_COMMAND+=" -o BatchMode=yes -o StrictHostKeyChecking=yes -o GlobalKnownHostsFile=/dev/null"
+        GIT_SSH_COMMAND+=" -o UserKnownHostsFile=$(printf %q "$credentials/known_hosts") -o LogLevel=ERROR"
+        export GIT_SSH_COMMAND GIT_TERMINAL_PROMPT=0 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
+        if ! {
+          git -c init.defaultBranch=private init -q "$destination" &&
+            git -C "$destination" fetch -q --no-tags --no-recurse-submodules --no-write-fetch-head ${depth[@]+"${depth[@]}"} \
+              git@github.com:ziyixi/todofy-private.git "$PRIVATE_CHECKOUT_REVISION" &&
+            git -C "$destination" -c advice.detachedHead=false checkout -q --detach "$PRIVATE_CHECKOUT_REVISION" &&
+            test "$(git -C "$destination" rev-parse HEAD)" = "$PRIVATE_CHECKOUT_REVISION"
+        } > "$log" 2>&1; then
+          refuse PRIVATE_CHECKOUT_FAILED
+        fi

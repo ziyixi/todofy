@@ -20,13 +20,12 @@ runs:
         PRIVATE_CATALOG_SOURCE: ${{ inputs.source-root }}
       shell: bash -e {0}
       run: python3 .github/scripts/private_catalog.py revision --source-root "$PRIVATE_CATALOG_SOURCE" >> "$GITHUB_OUTPUT"
-    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - uses: ./.github/actions/private-checkout
       with:
-        repository: ziyixi/todofy-private
+        revision: ${{ steps.private_catalog_source.outputs.revision }}
         path: ${{ inputs.source-root }}/private
-        ref: ${{ steps.private_catalog_source.outputs.revision }}
         ssh-key: ${{ inputs.private-ssh-key }}
-        persist-credentials: false
+        history: commit
     - name: Generate private registration without exposing its contents
       working-directory: .
       env:

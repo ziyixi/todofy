@@ -140,18 +140,18 @@ class PrivateCatalogue(unittest.TestCase):
         checkout = next(
             step
             for step in sequence
-            if step.get("uses", "").startswith("actions/checkout@")
+            if step.get("uses") == "./.github/actions/private-checkout"
         )
         self.assertEqual(
             checkout["with"],
             {
-                "repository": "ziyixi/todofy-private",
+                "revision": "${{ steps.private_catalog_source.outputs.revision }}",
                 "path": "${{ inputs.source-root }}/private",
-                "ref": "${{ steps.private_catalog_source.outputs.revision }}",
                 "ssh-key": "${{ inputs.private-ssh-key }}",
-                "persist-credentials": "false",
+                "history": "commit",
             },
         )
+        self.assertFalse(any(step.get("uses", "").startswith("actions/checkout@") for step in sequence))
         self.assertIn(
             'revision --source-root "$PRIVATE_CATALOG_SOURCE" >> "$GITHUB_OUTPUT"',
             sequence[0]["run"],
