@@ -8,11 +8,10 @@ import sys
 
 from catalog import REPO, load_catalog, read_toml, require
 from cloud_profile import load_resources
-from private_catalog import configuration_changes, load_private_catalog, supplemental_expected
 
 sys.path.insert(0, str(REPO / "tools/cloud-release"))
 # Durable Object class -> its config/resources.toml key: the one list the release comparison also uses.
-from cloudflare import DO_KEYS  # noqa: E402
+from cloudflare import DO_KEYS, binding_differences, routes_differences  # noqa: E402
 
 # Workers awaiting namespace capture. Their Worker and buckets stay registered but may be absent;
 # namespaces are ignored until their first deployment assigns IDs. Record those IDs in config/resources.toml
@@ -20,7 +19,9 @@ from cloudflare import DO_KEYS  # noqa: E402
 FIRST_DEPLOY_PENDING: set[str] = set()
 OUTPUT = "dashboard/worker/src/account-inventory.json"
 BUCKET_NAME = re.compile(r"[a-z0-9][a-z0-9-]{1,61}[a-z0-9]")
+SCRIPT_NAME = re.compile(r"[a-z0-9][a-z0-9_-]{0,62}")
 PAGE_LIMIT = 100
+PRIVATE_CATALOG_ERROR = "PRIVATE_CATALOG_INVALID"
 
 
 def expected(root=REPO):
@@ -64,6 +65,70 @@ def pending(root=REPO):
     return {"workers": sorted(FIRST_DEPLOY_PENDING),
             "r2": sorted(b["bucket_name"] for script in FIRST_DEPLOY_PENDING
                          for b in configs[script].get("r2_buckets", []))}
+
+
+def private_attachment(raw):
+    """The optional PRIVATE_CATALOG registration, read for this comparison only.
+
+    Home's TypeScript parsePrivateCatalog is its one validator: the Home release runs it before every deploy, and the
+    Worker refuses what it refuses. This read-only comparison takes the registered identities and desired Worker
+    settings as they are, checks only what it puts in a provider request path, and names no supplied value.
+    """
+    if raw is None or raw == "":
+        return None
+    try:
+        value = json.loads(raw)
+        registry, desired = value["registry"], value["desired"]["workers"]
+        require(isinstance(registry["workers"], list) and isinstance(registry["resources"], list)
+                and isinstance(desired, dict), PRIVATE_CATALOG_ERROR)
+        scripts = [worker["script"] for worker in registry["workers"]]
+        require(all(isinstance(script, str) and SCRIPT_NAME.fullmatch(script) for script in [*scripts, *desired]),
+                PRIVATE_CATALOG_ERROR)
+        require(all(resource["kind"] in {"r2", "d1", "do"} and isinstance(resource["match"], str)
+                    for resource in registry["resources"]), PRIVATE_CATALOG_ERROR)
+        return value
+    except (ValueError, TypeError, KeyError):
+        raise ValueError(PRIVATE_CATALOG_ERROR) from None
+
+
+def supplemental_expected(wanted, attachment):
+    if attachment is None:
+        return wanted
+    registration = attachment["registry"]
+    return {kind: sorted([*names, *(worker["script"] for worker in registration["workers"])]) if kind == "workers"
+            else sorted([*names, *(resource["match"] for resource in registration["resources"] if resource["kind"] == kind)])
+            for kind, names in wanted.items()}
+
+
+def configuration_changes(api, account, zone_id, attachment):
+    """Read only: the private desired supplement uses Home's name/type/flag comparison semantics."""
+    if attachment is None or not attachment["desired"]["workers"]:
+        return 0
+    changes = 0
+    try:
+        for script, desired in attachment["desired"]["workers"].items():
+            base = "/accounts/" + account + "/workers/scripts/" + script
+            settings = api.call(base + "/settings")
+            require(isinstance(settings, dict), "PRIVATE_CATALOG_OBSERVATION_INVALID")
+            bindings = settings.get("bindings")
+            require(isinstance(bindings, list) and len(bindings) <= 100
+                    and all(isinstance(binding, dict) for binding in bindings), "PRIVATE_CATALOG_OBSERVATION_INVALID")
+            # Source identity belongs to the private release job; this comparison observes binding names/types only.
+            expected_bindings = [{**binding, "type": "secret_text" if binding["name"] in desired["personal"] else binding["type"]}
+                                 for binding in desired["bindings"]]
+            build = next((binding.get("text") for binding in bindings if binding.get("name") == "BUILD_SHA"), None)
+            names = binding_differences({}, {**desired, "bindings": expected_bindings}, {}, bindings, build)
+            schedules, flags = api.call(base + "/schedules"), api.call(base + "/subdomain")
+            rows = schedules.get("schedules") if isinstance(schedules, dict) else schedules
+            require(isinstance(rows, list) and len(rows) <= 10 and all(isinstance(row, dict) and isinstance(row.get("cron"), str) for row in rows)
+                    and isinstance(flags, dict) and all(type(flags.get(key)) is bool for key in ("enabled", "previews_enabled")), "PRIVATE_CATALOG_OBSERVATION_INVALID")
+            changes += len(names) + (sorted(row["cron"] for row in rows) != sorted(desired["crons"]))
+            changes += (flags["enabled"] != desired["workers_dev"]) + (flags["previews_enabled"] != desired["preview_urls"])
+            changes += len(routes_differences(api, account, zone_id, script, desired))
+    except (TypeError, KeyError, AttributeError):
+        # A registration shape Home's parser would refuse; its values stay out of the diagnostic.
+        raise ValueError(PRIVATE_CATALOG_ERROR) from None
+    return changes
 
 
 def compare(wanted, observed, may_be_absent=None):
@@ -124,7 +189,7 @@ def main():
     else:
         from api import Api
         try:
-            attachment = load_private_catalog(os.environ.get("PRIVATE_CATALOG"), load_catalog(), wanted, REPO)
+            attachment = private_attachment(os.environ.get("PRIVATE_CATALOG"))
             wanted = supplemental_expected(wanted, attachment)
             resources = load_resources(REPO)
             api = Api("cloudflare", os.environ.get("CLOUDFLARE_API_TOKEN", ""))

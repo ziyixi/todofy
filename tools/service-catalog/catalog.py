@@ -174,8 +174,11 @@ def load_catalog(root: Path = REPO, *, bootstrap: bool = False) -> Catalog:
         require(isinstance(data["entries"], list) and bool(data["entries"]), f"{app}.entries")
         apps[app] = data
         for raw in data.get("workers", []):
-            worker = fields(raw, {"config", "hosts", "entry", "role", "position", "personal_secrets", "manual_secrets", "optional_secrets", "owner_machine_secrets", "identity_from"},
+            worker = fields(raw, {"config", "hosts", "entry", "role", "position", "personal_secrets", "manual_secrets", "optional_secrets", "owner_machine_secrets", "identity_from", "release"},
                             {"config", "hosts", "entry", "role", "position"}, f"{app}.worker")
+            # A Worker releases with its application unless it names its own release unit (the website's relay).
+            release = identifier(worker.get("release", app), f"{app}.worker release")
+            require(release == app or not (root / release / "app.toml").exists(), f"{app}.worker release")
             config_path = file_path(root, worker["config"], app, f"{app}.config")
             require(config_path.name == "wrangler.toml" and worker["config"] not in paths, f"{app}.config")
             config = read_toml(config_path)
@@ -212,7 +215,8 @@ def load_catalog(root: Path = REPO, *, bootstrap: bool = False) -> Catalog:
             positions.add(position)
             configs[script] = config
             workers.append({"script": script, "config": worker["config"], "entry": identifier(worker["entry"], f"{app}.worker entry"),
-                            "role": text(worker["role"], f"{app}.worker role"), "position": position, "app": app})
+                            "role": text(worker["role"], f"{app}.worker role"), "position": position, "app": app,
+                            "release": release})
         for raw in data["entries"]:
             entry = fields(raw, {"id", "name", "description", "group", "icon", "accent", "worker", "url_path", "access",
                                  "status", "tile_metric", "app_only_signals", "order", "position"},
@@ -328,6 +332,9 @@ def load_catalog(root: Path = REPO, *, bootstrap: bool = False) -> Catalog:
             require(worker["script"] == "home" or linked or monitored_service, "visible entry coverage")
     for rule in access:
         require(rule["key"] == rule["worker"], "owner Access identity")
+    units = {}
+    for worker in workers:
+        require(units.setdefault(worker["release"], worker["app"]) == worker["app"], "release unit ownership")
     try:
         worker_secret_specs(root)
     except ProfileError as error:

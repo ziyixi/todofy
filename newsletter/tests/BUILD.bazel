@@ -32,7 +32,6 @@ py_library(
 pytest_test(
     name = "test_adapters",
     srcs = ["test_adapters.py"],
-    args = ["$(rootpath test_adapters.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -53,7 +52,6 @@ pytest_test(
 pytest_test(
     name = "test_admin",
     srcs = ["test_admin.py"],
-    args = ["$(rootpath test_admin.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = {
@@ -85,7 +83,6 @@ pytest_test(
 pytest_test(
     name = "test_adopted_packets",
     srcs = ["test_adopted_packets.py"],
-    args = ["$(rootpath test_adopted_packets.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -104,7 +101,6 @@ pytest_test(
 pytest_test(
     name = "test_api_surface",
     srcs = ["test_api_surface.py"],
-    args = ["$(rootpath test_api_surface.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = {
@@ -130,7 +126,6 @@ pytest_test(
 pytest_test(
     name = "test_attempt_settlement",
     srcs = ["test_attempt_settlement.py"],
-    args = ["$(rootpath test_attempt_settlement.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -154,7 +149,6 @@ pytest_test(
 pytest_test(
     name = "test_candidate_pooling",
     srcs = ["test_candidate_pooling.py"],
-    args = ["$(rootpath test_candidate_pooling.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = {
@@ -185,7 +179,6 @@ pytest_test(
 pytest_test(
     name = "test_charts",
     srcs = ["test_charts.py"],
-    args = ["$(rootpath test_charts.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -206,7 +199,6 @@ pytest_test(
 pytest_test(
     name = "test_collection",
     srcs = ["test_collection.py"],
-    args = ["$(rootpath test_collection.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -231,7 +223,6 @@ pytest_test(
 pytest_test(
     name = "test_collection_edges",
     srcs = ["test_collection_edges.py"],
-    args = ["$(rootpath test_collection_edges.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -256,7 +247,6 @@ pytest_test(
 pytest_test(
     name = "test_config_sync",
     srcs = ["test_config_sync.py"],
-    args = ["$(rootpath test_config_sync.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -278,7 +268,6 @@ pytest_test(
 pytest_test(
     name = "test_configured_story_pipeline",
     srcs = ["test_configured_story_pipeline.py"],
-    args = ["$(rootpath test_configured_story_pipeline.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -312,7 +301,6 @@ pytest_test(
 pytest_test(
     name = "test_console_access",
     srcs = ["test_console_access.py"],
-    args = ["$(rootpath test_console_access.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -338,7 +326,6 @@ pytest_test(
 pytest_test(
     name = "test_console_api_surface",
     srcs = ["test_console_api_surface.py"],
-    args = ["$(rootpath test_console_api_surface.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = {
@@ -364,7 +351,6 @@ pytest_test(
 pytest_test(
     name = "test_console_contract",
     srcs = ["test_console_contract.py"],
-    args = ["$(rootpath test_console_contract.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -387,7 +373,6 @@ pytest_test(
 pytest_test(
     name = "test_console_listener",
     srcs = ["test_console_listener.py"],
-    args = ["$(rootpath test_console_listener.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = {
@@ -418,7 +403,6 @@ pytest_test(
 pytest_test(
     name = "test_console_read",
     srcs = ["test_console_read.py"],
-    args = ["$(rootpath test_console_read.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -445,7 +429,6 @@ pytest_test(
 pytest_test(
     name = "test_console_readonly",
     srcs = ["test_console_readonly.py"],
-    args = ["$(rootpath test_console_readonly.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -466,7 +449,6 @@ pytest_test(
 pytest_test(
     name = "test_console_views",
     srcs = ["test_console_views.py"],
-    args = ["$(rootpath test_console_views.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -486,7 +468,6 @@ pytest_test(
 pytest_test(
     name = "test_content_config",
     srcs = ["test_content_config.py"],
-    args = ["$(rootpath test_content_config.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA + ["//newsletter:build_test_data"],
     env = {
@@ -518,11 +499,11 @@ pytest_test(
 pytest_test(
     name = "test_content_config_workflow",
     srcs = ["test_content_config_workflow.py"],
-    args = ["$(rootpath test_content_config_workflow.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA + [
         "//:python_repository_test_data",
         "//newsletter:build_test_data",
+        "//tools/bazel/python:container_test.py",
     ],
     env = _TEST_ENV,
     imports = _TEST_IMPORTS,
@@ -542,7 +523,6 @@ pytest_test(
 pytest_test(
     name = "test_contracts",
     srcs = ["test_contracts.py"],
-    args = ["$(rootpath test_contracts.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -563,7 +543,6 @@ pytest_test(
 pytest_test(
     name = "test_deployment_drain",
     srcs = ["test_deployment_drain.py"],
-    args = ["$(rootpath test_deployment_drain.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA + ["//:python_repository_test_data"],
     env = {
@@ -598,7 +577,6 @@ pytest_test(
 pytest_test(
     name = "test_editor",
     srcs = ["test_editor.py"],
-    args = ["$(rootpath test_editor.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -622,7 +600,6 @@ pytest_test(
 pytest_test(
     name = "test_editor_correction",
     srcs = ["test_editor_correction.py"],
-    args = ["$(rootpath test_editor_correction.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -642,7 +619,6 @@ pytest_test(
 pytest_test(
     name = "test_editor_provenance",
     srcs = ["test_editor_provenance.py"],
-    args = ["$(rootpath test_editor_provenance.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -663,7 +639,6 @@ pytest_test(
 pytest_test(
     name = "test_editor_schema",
     srcs = ["test_editor_schema.py"],
-    args = ["$(rootpath test_editor_schema.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -684,7 +659,6 @@ pytest_test(
 pytest_test(
     name = "test_editor_usage",
     srcs = ["test_editor_usage.py"],
-    args = ["$(rootpath test_editor_usage.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -705,7 +679,6 @@ pytest_test(
 pytest_test(
     name = "test_editorial_policy",
     srcs = ["test_editorial_policy.py"],
-    args = ["$(rootpath test_editorial_policy.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -723,7 +696,6 @@ pytest_test(
 pytest_test(
     name = "test_email_design",
     srcs = ["test_email_design.py"],
-    args = ["$(rootpath test_email_design.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -746,7 +718,6 @@ pytest_test(
 pytest_test(
     name = "test_email_templates",
     srcs = ["test_email_templates.py"],
-    args = ["$(rootpath test_email_templates.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -780,11 +751,11 @@ pytest_test(
 pytest_test(
     name = "test_image_release",
     srcs = ["test_image_release.py"],
-    args = ["$(rootpath test_image_release.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA + [
         "//:newsletter_ci_test_inputs",
         "//newsletter:build_test_data",
+        "//tools/bazel/python:container_test.py",
     ],
     env = _TEST_ENV,
     imports = _TEST_IMPORTS,
@@ -806,7 +777,6 @@ pytest_test(
 pytest_test(
     name = "test_legacy_retirement",
     srcs = ["test_legacy_retirement.py"],
-    args = ["$(rootpath test_legacy_retirement.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -831,7 +801,6 @@ pytest_test(
 pytest_test(
     name = "test_lifecycle",
     srcs = ["test_lifecycle.py"],
-    args = ["$(rootpath test_lifecycle.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = {
@@ -859,7 +828,6 @@ pytest_test(
 pytest_test(
     name = "test_maintenance_safety",
     srcs = ["test_maintenance_safety.py"],
-    args = ["$(rootpath test_maintenance_safety.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -890,7 +858,6 @@ pytest_test(
 pytest_test(
     name = "test_model_io",
     srcs = ["test_model_io.py"],
-    args = ["$(rootpath test_model_io.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -910,7 +877,6 @@ pytest_test(
 pytest_test(
     name = "test_model_router",
     srcs = ["test_model_router.py"],
-    args = ["$(rootpath test_model_router.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -932,7 +898,6 @@ pytest_test(
 pytest_test(
     name = "test_module_boundaries",
     srcs = ["test_module_boundaries.py"],
-    args = ["$(rootpath test_module_boundaries.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = {
@@ -962,7 +927,6 @@ pytest_test(
 pytest_test(
     name = "test_monitoring_api",
     srcs = ["test_monitoring_api.py"],
-    args = ["$(rootpath test_monitoring_api.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = {
@@ -989,7 +953,6 @@ pytest_test(
 pytest_test(
     name = "test_monitoring_status",
     srcs = ["test_monitoring_status.py"],
-    args = ["$(rootpath test_monitoring_status.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -1012,7 +975,6 @@ pytest_test(
 pytest_test(
     name = "test_news_first_policy",
     srcs = ["test_news_first_policy.py"],
-    args = ["$(rootpath test_news_first_policy.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -1045,7 +1007,6 @@ pytest_test(
 pytest_test(
     name = "test_newsroom_config",
     srcs = ["test_newsroom_config.py"],
-    args = ["$(rootpath test_newsroom_config.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA + ["//newsletter:build_test_data"],
     env = _TEST_ENV,
@@ -1071,7 +1032,6 @@ pytest_test(
 pytest_test(
     name = "test_notion_api",
     srcs = ["test_notion_api.py"],
-    args = ["$(rootpath test_notion_api.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -1092,7 +1052,6 @@ pytest_test(
 pytest_test(
     name = "test_notion_content",
     srcs = ["test_notion_content.py"],
-    args = ["$(rootpath test_notion_content.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -1112,7 +1071,6 @@ pytest_test(
 pytest_test(
     name = "test_notion_intake",
     srcs = ["test_notion_intake.py"],
-    args = ["$(rootpath test_notion_intake.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = {
@@ -1149,7 +1107,6 @@ pytest_test(
 pytest_test(
     name = "test_notion_lifecycle",
     srcs = ["test_notion_lifecycle.py"],
-    args = ["$(rootpath test_notion_lifecycle.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = {
@@ -1186,7 +1143,6 @@ pytest_test(
 pytest_test(
     name = "test_notion_settings",
     srcs = ["test_notion_settings.py"],
-    args = ["$(rootpath test_notion_settings.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -1205,7 +1161,6 @@ pytest_test(
 pytest_test(
     name = "test_notion_sync",
     srcs = ["test_notion_sync.py"],
-    args = ["$(rootpath test_notion_sync.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = {
@@ -1238,7 +1193,6 @@ pytest_test(
 pytest_test(
     name = "test_preflight",
     srcs = ["test_preflight.py"],
-    args = ["$(rootpath test_preflight.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -1266,7 +1220,6 @@ pytest_test(
 pytest_test(
     name = "test_prompt_evaluation",
     srcs = ["test_prompt_evaluation.py"],
-    args = ["$(rootpath test_prompt_evaluation.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -1292,7 +1245,6 @@ pytest_test(
 pytest_test(
     name = "test_prompt_examples",
     srcs = ["test_prompt_examples.py"],
-    args = ["$(rootpath test_prompt_examples.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -1319,7 +1271,6 @@ pytest_test(
 pytest_test(
     name = "test_proto_dependency",
     srcs = ["test_proto_dependency.py"],
-    args = ["$(rootpath test_proto_dependency.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -1340,7 +1291,6 @@ pytest_test(
 pytest_test(
     name = "test_publication",
     srcs = ["test_publication.py"],
-    args = ["$(rootpath test_publication.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -1366,7 +1316,6 @@ pytest_test(
 pytest_test(
     name = "test_publication_delivery",
     srcs = ["test_publication_delivery.py"],
-    args = ["$(rootpath test_publication_delivery.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -1391,7 +1340,6 @@ pytest_test(
 pytest_test(
     name = "test_python_structure",
     srcs = ["test_python_structure.py"],
-    args = ["$(rootpath test_python_structure.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA + ["//newsletter:python_sources"],
     env = _TEST_ENV,
@@ -1483,7 +1431,6 @@ pytest_test(
 pytest_test(
     name = "test_readability_boundaries",
     srcs = ["test_readability_boundaries.py"],
-    args = ["$(rootpath test_readability_boundaries.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -1511,7 +1458,6 @@ pytest_test(
 pytest_test(
     name = "test_reader_acceptance",
     srcs = ["test_reader_acceptance.py"],
-    args = ["$(rootpath test_reader_acceptance.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -1540,7 +1486,6 @@ pytest_test(
 pytest_test(
     name = "test_rendering",
     srcs = ["test_rendering.py"],
-    args = ["$(rootpath test_rendering.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -1566,7 +1511,6 @@ pytest_test(
 pytest_test(
     name = "test_researcher",
     srcs = ["test_researcher.py"],
-    args = ["$(rootpath test_researcher.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -1590,7 +1534,6 @@ pytest_test(
 pytest_test(
     name = "test_researcher_nodes",
     srcs = ["test_researcher_nodes.py"],
-    args = ["$(rootpath test_researcher_nodes.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = {
@@ -1621,7 +1564,6 @@ pytest_test(
 pytest_test(
     name = "test_schema_compat",
     srcs = ["test_schema_compat.py"],
-    args = ["$(rootpath test_schema_compat.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -1642,7 +1584,6 @@ pytest_test(
 pytest_test(
     name = "test_schema_smoke",
     srcs = ["test_schema_smoke.py"],
-    args = ["$(rootpath test_schema_smoke.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -1664,7 +1605,6 @@ pytest_test(
 pytest_test(
     name = "test_service",
     srcs = ["test_service.py"],
-    args = ["$(rootpath test_service.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = {
@@ -1694,7 +1634,6 @@ pytest_test(
 pytest_test(
     name = "test_settings_numeric_errors",
     srcs = ["test_settings_numeric_errors.py"],
-    args = ["$(rootpath test_settings_numeric_errors.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -1713,7 +1652,6 @@ pytest_test(
 pytest_test(
     name = "test_source_guides",
     srcs = ["test_source_guides.py"],
-    args = ["$(rootpath test_source_guides.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA + ["//newsletter:build_test_data"],
     env = {
@@ -1744,7 +1682,6 @@ pytest_test(
 pytest_test(
     name = "test_sql_boundaries",
     srcs = ["test_sql_boundaries.py"],
-    args = ["$(rootpath test_sql_boundaries.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -1767,7 +1704,6 @@ pytest_test(
 pytest_test(
     name = "test_story_editor",
     srcs = ["test_story_editor.py"],
-    args = ["$(rootpath test_story_editor.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -1791,7 +1727,6 @@ pytest_test(
 pytest_test(
     name = "test_story_pipeline",
     srcs = ["test_story_pipeline.py"],
-    args = ["$(rootpath test_story_pipeline.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = {
@@ -1828,7 +1763,6 @@ pytest_test(
 pytest_test(
     name = "test_story_recipe",
     srcs = ["test_story_recipe.py"],
-    args = ["$(rootpath test_story_recipe.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = {
@@ -1852,7 +1786,6 @@ pytest_test(
 pytest_test(
     name = "test_story_replay",
     srcs = ["test_story_replay.py"],
-    args = ["$(rootpath test_story_replay.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = {
@@ -1888,7 +1821,6 @@ pytest_test(
 pytest_test(
     name = "test_todofy",
     srcs = ["test_todofy.py"],
-    args = ["$(rootpath test_todofy.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -1909,7 +1841,6 @@ pytest_test(
 pytest_test(
     name = "test_todofy_integration",
     srcs = ["test_todofy_integration.py"],
-    args = ["$(rootpath test_todofy_integration.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = {
@@ -1940,7 +1871,6 @@ pytest_test(
 pytest_test(
     name = "test_todofy_selection",
     srcs = ["test_todofy_selection.py"],
-    args = ["$(rootpath test_todofy_selection.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -1959,7 +1889,6 @@ pytest_test(
 pytest_test(
     name = "test_tooling",
     srcs = ["test_tooling.py"],
-    args = ["$(rootpath test_tooling.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA + [
         "//:newsletter_ci_test_inputs",
@@ -1982,7 +1911,6 @@ pytest_test(
 pytest_test(
     name = "test_trigger_run",
     srcs = ["test_trigger_run.py"],
-    args = ["$(rootpath test_trigger_run.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -2001,7 +1929,6 @@ pytest_test(
 pytest_test(
     name = "test_trigger_send",
     srcs = ["test_trigger_send.py"],
-    args = ["$(rootpath test_trigger_send.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -2021,7 +1948,6 @@ pytest_test(
 pytest_test(
     name = "test_typing",
     srcs = ["test_typing.py"],
-    args = ["$(rootpath test_typing.py)"],
     config = _TEST_CONFIG,
     config_settings = {"@rules_python//python/config_settings:venvs_site_packages": "yes"},
     data = _TEST_DATA + ["//newsletter:python_sources"],
@@ -2120,7 +2046,6 @@ pytest_test(
 pytest_test(
     name = "test_usage",
     srcs = ["test_usage.py"],
-    args = ["$(rootpath test_usage.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -2142,7 +2067,6 @@ pytest_test(
 pytest_test(
     name = "test_usage_rendering",
     srcs = ["test_usage_rendering.py"],
-    args = ["$(rootpath test_usage_rendering.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -2165,7 +2089,6 @@ pytest_test(
 pytest_test(
     name = "test_verification_send",
     srcs = ["test_verification_send.py"],
-    args = ["$(rootpath test_verification_send.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = {
@@ -2195,7 +2118,6 @@ pytest_test(
 pytest_test(
     name = "test_worker_edges",
     srcs = ["test_worker_edges.py"],
-    args = ["$(rootpath test_worker_edges.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = {
@@ -2225,7 +2147,6 @@ pytest_test(
 pytest_test(
     name = "test_workflow_content",
     srcs = ["test_workflow_content.py"],
-    args = ["$(rootpath test_workflow_content.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -2257,7 +2178,6 @@ pytest_test(
 pytest_test(
     name = "test_workflow_engine",
     srcs = ["test_workflow_engine.py"],
-    args = ["$(rootpath test_workflow_engine.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -2279,7 +2199,6 @@ pytest_test(
 pytest_test(
     name = "test_workflow_repairs",
     srcs = ["test_workflow_repairs.py"],
-    args = ["$(rootpath test_workflow_repairs.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = {
@@ -2310,7 +2229,6 @@ pytest_test(
 pytest_test(
     name = "test_workflow_sources",
     srcs = ["test_workflow_sources.py"],
-    args = ["$(rootpath test_workflow_sources.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,
@@ -2329,7 +2247,6 @@ pytest_test(
 pytest_test(
     name = "test_workflow_state",
     srcs = ["test_workflow_state.py"],
-    args = ["$(rootpath test_workflow_state.py)"],
     config = _TEST_CONFIG,
     data = _TEST_DATA,
     env = _TEST_ENV,

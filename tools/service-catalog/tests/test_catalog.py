@@ -222,6 +222,29 @@ class CatalogTests(unittest.TestCase):
             (root / directory / 'wrangler.toml').write_text('name = "not-production"')
         self.assertEqual(catalog.load_catalog(root).worker_configs(), {'demo': 'demo/wrangler.toml'})
 
+    def test_a_worker_releases_with_its_app_unless_it_names_its_own_unit(self):
+        self.assertEqual([worker["release"] for worker in catalog.load_catalog(self.fixture()).workers], ["demo"])
+        own = DEMO.replace('position = 1\n[[entries]]', 'position = 1\nrelease = "demo-relay"\n[[entries]]', 1)
+        self.assertEqual([worker["release"] for worker in catalog.load_catalog(self.fixture(own)).workers], ["demo-relay"])
+        root = self.fixture(DEMO.replace('position = 1\n[[entries]]', 'position = 1\nrelease = "other"\n[[entries]]', 1))
+        (root / "other").mkdir()
+        (root / "other/app.toml").write_text("")
+        for invalid in (root, self.fixture(DEMO.replace('position = 1\n[[entries]]', 'position = 1\nrelease = "Demo"\n[[entries]]', 1))):
+            with self.subTest(root=invalid), self.assertRaisesRegex(catalog.CatalogError, "demo.worker release"):
+                catalog.load_catalog(invalid)
+
+    def test_a_release_unit_belongs_to_one_app(self):
+        root = self.fixture()
+        second = DEMO.replace("demo", "second").replace("position = 1", "position = 2").replace("order = 1", "order = 2")
+        (root / "second").mkdir()
+        (root / "second/app.toml").write_text(second)
+        (root / "second/wrangler.toml").write_text(CONFIG.replace("demo", "second"))
+        self.assertEqual([worker["release"] for worker in catalog.load_catalog(root).workers], ["demo", "second"])
+        (root / "demo/app.toml").write_text(DEMO.replace('position = 1\n[[entries]]', 'position = 1\nrelease = "shared"\n[[entries]]', 1))
+        (root / "second/app.toml").write_text(second.replace('position = 2\n[[entries]]', 'position = 2\nrelease = "shared"\n[[entries]]', 1))
+        with self.assertRaisesRegex(catalog.CatalogError, "release unit ownership"):
+            catalog.load_catalog(root)
+
     def test_manifest_symlink_is_refused(self):
         root = self.fixture()
         manifest = root / 'demo/app.toml'

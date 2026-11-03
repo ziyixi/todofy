@@ -27,7 +27,7 @@ export class FakeDropbox {
   readonly calls: { readonly path: string; readonly argument: unknown }[] = [];
   refreshes = 0;
   listPages: readonly ProviderPage[] | null = null;
-  batchFault: 'start_rate' | 'append_rate' | 'append_partial' | 'finish_rate' | 'finish_partial' | 'finish_unknown' | 'finish_metadata' | null = null;
+  batchFault: 'start_rate' | 'append_rate' | 'append_partial' | 'finish_rate' | 'finish_partial' | 'finish_failure' | 'finish_unknown' | 'finish_metadata' | null = null;
   private readonly sessions = new Map<string, Session>();
   private sessionSequence = 0;
   private revision = 0;
@@ -81,6 +81,7 @@ export class FakeDropbox {
       const entries = argument.entries.map((entry, index) => {
         if (entry.commit.mode['.tag'] !== 'add' || entry.commit.autorename || !entry.commit.strict_conflict || !entry.commit.mute) throw new Error('batch lost create-only commit');
         if (this.batchFault === 'finish_partial' && index === 1) return { '.tag': 'failure', failure: { '.tag': 'path', path: { '.tag': 'insufficient_space' } } };
+        if (this.batchFault === 'finish_failure' && index === 1) return { '.tag': 'failure', failure: { '.tag': 'path', path: { '.tag': 'no_write_permission' } } };
         if (this.files.has(entry.commit.path) || this.folders.has(entry.commit.path)) return { '.tag': 'failure', failure: { '.tag': 'path', path: { '.tag': 'conflict', conflict: { '.tag': this.files.has(entry.commit.path) ? 'file' : 'folder' } } } };
         const session = this.sessions.get(entry.cursor.session_id);
         if (!session?.closed || session.bytes.byteLength !== entry.cursor.offset) throw new Error('invalid synthetic finish cursor');

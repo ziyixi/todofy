@@ -3,6 +3,7 @@
 import ast
 import re
 import subprocess
+import sys
 import tempfile
 import textwrap
 import tomllib
@@ -10,6 +11,9 @@ import unittest
 from pathlib import Path
 
 REPO = Path(__file__).absolute().parents[2]
+sys.path.insert(0, str(REPO / "tools" / "service-catalog"))
+from catalog import load_catalog  # noqa: E402
+
 WORKFLOW = REPO / ".github/workflows/personal-cloud-reconcile.yml"
 
 
@@ -232,8 +236,14 @@ class ReconcileWorkflow(unittest.TestCase):
         block = job(self.text, "workers")
         matrix = block.split("      matrix:\n", 1)[1].split("\n    permissions:\n", 1)[0]
         apps = re.search(r"^        app: \[([^\]]+)\]$", matrix, re.MULTILINE).group(1).split(", ")
-        workers = constant("tools/cloud-release/control.py", "WORKERS")
+        # The Worker release units: the catalog's, without the assets-only website and its own release workflow.
+        workers = {}
+        for worker in load_catalog(REPO).workers:
+            workers.setdefault(worker["release"], []).append(worker["config"])
+        workers.pop("website")
         self.assertEqual(sorted(apps), sorted(workers))
+        options = re.search(r"^        options: \[([^\]]+)\]$", self.text.split("      record_app:\n", 1)[1], re.MULTILINE)
+        self.assertEqual(options.group(1).split(", "), apps)
         pending = constant("tools/service-catalog/inventory.py", "FIRST_DEPLOY_PENDING")
         scripts = {app: {tomllib.loads((REPO / path).read_text())["name"] for path in paths}
                    for app, paths in workers.items()}

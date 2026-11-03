@@ -52,6 +52,7 @@ unittest_test(
         "//tools/cloud-release:cloudflare",
         "//tools/cloud-release:control",
         "//tools/cloud-release:deployments",
+        "//tools/service-catalog:catalog",
     ],
 )
 

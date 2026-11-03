@@ -1,0 +1,22 @@
+name: build-platform
+description: Build Platform's stamped image, check its source identity and save it; Bazel's container test probes it.
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/setup-bazel
+    - name: Build the stamped image, check its installed identity and save it
+      working-directory: .
+      shell: bash -e {0}
+      run: |
+        python3 tools/container-release/build.py --service platform --sha "$GITHUB_SHA"
+        tested_image=$(docker image inspect --format '{{.Id}}' "platform-ci:$GITHUB_SHA")
+        docker run --rm --network none "$tested_image" identity | python3 -c 'import json, os, sys; assert json.load(sys.stdin)["source_sha"] == os.environ["GITHUB_SHA"]'
+        python3 tools/container-release/image.py save --image "$tested_image" --sha "$GITHUB_SHA" \
+          --directory "$RUNNER_TEMP/platform-image"
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: platform-image-${{ github.sha }}
+        path: ${{ runner.temp }}/platform-image/
+        if-no-files-found: error
+        retention-days: 1
+        compression-level: 6

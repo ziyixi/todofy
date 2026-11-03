@@ -9,6 +9,8 @@ filegroup(
     srcs = [
         ":personal-mcp",
         "//.github/actions:release-personal-mcp/action.yml",
+        "//.github/actions:worker-deploy/action.yml",
+        "//.github/actions:worker-prepare/action.yml",
         "//personal-mcp/deploy:source_deploy_vars_mjs",
         "//tools:release_probes",
         "//tools/cloud-release:release_inputs",
@@ -52,8 +54,15 @@ worker_artifact(
     visibility = ["//visibility:public"],
 )
 
-source_audit_files(patterns = [
-    "*",
-    "docs/**",
-    "plugin/**",
-])
+source_audit_files(
+    patterns = [
+        "*",
+        "docs/**",
+        "plugin/**",
+    ],
+    deps = [
+        "//personal-mcp/deploy:source_audit_files",
+        "//personal-mcp/tools:source_audit_files",
+        "//personal-mcp/worker:source_audit_files",
+    ],
+)

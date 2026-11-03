@@ -5,7 +5,7 @@ imports those locks for builds and tests. Third-party source is downloaded with 
 
 | Ecosystem | Version declaration | Lock |
 | --- | --- | --- |
-| Node | Root pnpm catalog, Node 26.9.0, pnpm 11.25.0 | `pnpm-lock.yaml` |
+| Node | Root pnpm catalog, Node 26.9.0 (`MODULE.bazel`, mirrored in `.node-version` for Actions), pnpm 11.25.0 | `pnpm-lock.yaml` |
 | Python | Root uv workspace/constraints, Python 3.14.7 | `uv.lock` |
 | Go | Root `go.mod`, Go 1.27.1 in `MODULE.bazel` | Root `go.sum` |
 | Bazel and rules | `.bazelversion`, `MODULE.bazel` | `MODULE.bazel.lock` |

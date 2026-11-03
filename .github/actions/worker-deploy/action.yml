@@ -1,0 +1,146 @@
+# The shared Worker release steps after the calling release action wrote "$RUNNER_TEMP/<worker>-secrets.json". The
+# calling action owns that file (its write and its removal) and every step only one app has. Except cf-api-token, host
+# and access-issuer, which reach the scripts through env, the inputs are literal per-app constants of the calling
+# action (test_composite_actions.py checks it): substituted into the scripts, each app runs exactly its own commands.
+name: worker-deploy
+description: Validate, guard, deploy and verify one checked Worker with its committed config.
+inputs:
+  app:
+    description: Application directory in the selected source
+    required: true
+  worker:
+    description: The Worker's committed name; names its secrets file and bundle in RUNNER_TEMP
+    required: true
+  worker-directory:
+    description: The application's Worker directory (worker, or mail-hero's cloudflare)
+    required: true
+  tools-directory:
+    description: The application's directory of deploy-vars.mjs and bundle-size.mjs (deploy, or model-router's tools)
+    required: true
+  bundle-size:
+    description: "'true' holds the dry run's bundle to the app's budget and the Workers Free limit"
+    required: true
+  d1:
+    description: "'true' applies the D1 migrations of binding DB before the deploy and checks none is pending"
+    required: true
+  assets:
+    description: "'true' for a Worker with static assets: the deploy repeats only an unopened asset upload session"
+    required: true
+  production:
+    description: "'true' reads the running version and its BUILD_SHA through the API after the deploy"
+    required: true
+  access-paths:
+    description: Space-separated paths that Access must answer for an unauthenticated request; empty for none
+    required: true
+  cf-api-token:
+    description: Cloudflare deployment token
+    required: true
+  host:
+    description: The committed public host
+    required: true
+  access-issuer:
+    description: The committed Access team domain
+    required: true
+runs:
+  using: composite
+  steps:
+    # deploy-vars.mjs adds BUILD_SHA and the app's declared production switches as --var and refuses placeholder
+    # identities (an all-zeros D1 id or Access AUD); bundle-size.mjs holds the bundle that ships to the app's budget
+    # and the Workers Free limit.
+    - name: Validate the bundle before changing production
+      if: inputs.bundle-size == 'true'
+      working-directory: .release-source/${{ inputs.app }}/${{ inputs.worker-directory }}
+      shell: bash -e {0}
+      run: |
+        node ../${{ inputs.tools-directory }}/deploy-vars.mjs exec -- npx --no-install wrangler deploy "$PWD/../.compiled/worker/index.js" --no-bundle --dry-run --config ../wrangler.toml \
+          --secrets-file "$RUNNER_TEMP/${{ inputs.worker }}-secrets.json" --outdir "$RUNNER_TEMP/${{ inputs.worker }}-bundle"
+        node ../${{ inputs.tools-directory }}/bundle-size.mjs "$RUNNER_TEMP/${{ inputs.worker }}-bundle"
+    - name: Validate the bundle before changing production
+      if: inputs.bundle-size != 'true'
+      working-directory: .release-source/${{ inputs.app }}/${{ inputs.worker-directory }}
+      shell: bash -e {0}
+      run: |
+        node ../${{ inputs.tools-directory }}/deploy-vars.mjs exec -- npx --no-install wrangler deploy "$PWD/../.compiled/worker/index.js" --no-bundle --dry-run --config ../wrangler.toml \
+          --secrets-file "$RUNNER_TEMP/${{ inputs.worker }}-secrets.json" --outdir "$RUNNER_TEMP/${{ inputs.worker }}-bundle"
+    # tools/cf-guard (read-only GETs; prints listed hostnames, counts, PASS/FAIL): wrangler applies a config's Custom
+    # Domains (or zone routes) as the Worker's complete set, so stop before any production change when a live
+    # hostname would be detached or another Worker's hostname or DNS record taken over. For an intentional
+    # change, set the exact hostnames here (space-separated) in the same commit that changes wrangler.toml.
+    - name: Check the hostnames against production
+      working-directory: .release-source
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
+        CF_GUARD_ALLOW_REMOVE: ''
+        CF_GUARD_ALLOW_CONFLICT: ''
+      shell: bash -e {0}
+      run: node tools/cf-guard/cf-guard.mjs --config ${{ inputs.app }}/wrangler.toml
+    # Every app with D1 also ships static assets, so its deploy repeats an unopened asset upload session too
+    # (test_worker_release_workflow.py checks the helper against each config's [assets]).
+    - name: Apply D1 migrations, then deploy the Worker
+      if: inputs.d1 == 'true'
+      working-directory: .release-source/${{ inputs.app }}/${{ inputs.worker-directory }}
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
+      shell: bash -e {0}
+      run: |
+        test -n "$CLOUDFLARE_API_TOKEN"
+        npx --no-install wrangler d1 migrations apply DB --remote --config ../wrangler.toml
+        bash "$GITHUB_WORKSPACE/tools/cloud-release/assets-session-retry.sh" \
+          node ../${{ inputs.tools-directory }}/deploy-vars.mjs exec -- npx --no-install wrangler deploy "$PWD/../.compiled/worker/index.js" --no-bundle --config ../wrangler.toml \
+          --secrets-file "$RUNNER_TEMP/${{ inputs.worker }}-secrets.json"
+    - name: Deploy the Worker
+      if: inputs.d1 != 'true' && inputs.assets == 'true'
+      working-directory: .release-source/${{ inputs.app }}/${{ inputs.worker-directory }}
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
+      shell: bash -e {0}
+      run: |
+        test -n "$CLOUDFLARE_API_TOKEN"
+        bash "$GITHUB_WORKSPACE/tools/cloud-release/assets-session-retry.sh" \
+          node ../${{ inputs.tools-directory }}/deploy-vars.mjs exec -- npx --no-install wrangler deploy "$PWD/../.compiled/worker/index.js" --no-bundle --config ../wrangler.toml \
+          --secrets-file "$RUNNER_TEMP/${{ inputs.worker }}-secrets.json"
+    - name: Deploy the Worker
+      if: inputs.d1 != 'true' && inputs.assets != 'true'
+      working-directory: .release-source/${{ inputs.app }}/${{ inputs.worker-directory }}
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
+      shell: bash -e {0}
+      run: |
+        test -n "$CLOUDFLARE_API_TOKEN"
+        node ../${{ inputs.tools-directory }}/deploy-vars.mjs exec -- npx --no-install wrangler deploy "$PWD/../.compiled/worker/index.js" --no-bundle --config ../wrangler.toml \
+          --secrets-file "$RUNNER_TEMP/${{ inputs.worker }}-secrets.json"
+    # Nothing anonymous on the host shows BUILD_SHA, so production is read through the API with the deploy token
+    # (GETs, and for D1 one read of the migrations table): the Worker serves exactly one version at 100%, that
+    # version's BUILD_SHA is this commit, and no D1 migration is pending. wrangler's JSON answers are parsed, never
+    # printed (they name the token's account email); only the version id and the results are.
+    - name: Check that production runs this commit
+      if: inputs.production == 'true' && inputs.d1 == 'true'
+      working-directory: .release-source/${{ inputs.app }}/${{ inputs.worker-directory }}
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
+      shell: bash -e {0}
+      run: |
+        bash "$GITHUB_WORKSPACE/.release-source/tools/deploy-probes/production.sh" ${{ inputs.worker }} ../wrangler.toml DB
+    - name: Check that production runs this commit
+      if: inputs.production == 'true' && inputs.d1 != 'true'
+      working-directory: .release-source/${{ inputs.app }}/${{ inputs.worker-directory }}
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
+      shell: bash -e {0}
+      run: |
+        bash "$GITHUB_WORKSPACE/.release-source/tools/deploy-probes/production.sh" ${{ inputs.worker }} ../wrangler.toml
+    # Cloudflare Access must answer every unauthenticated request for these paths with a 302 to its login page for
+    # this host, <issuer>/cdn-cgi/access/login/<host> (then end, "?" or "/"); the app itself must never answer one.
+    # Any other 302, even one to the team domain's root (a zone Redirect Rule to the App Launcher runs before Access
+    # and the Worker), fails. A first deploy waits for the Custom Domain's DNS and certificate, so only "no
+    # connection" and 5xx are retried (10 x 15 s). Nothing is followed or printed except the status code
+    # (test_release_probes.py runs this script).
+    - name: Check that Access answers unauthenticated requests
+      if: inputs.access-paths != ''
+      env:
+        ACCESS_ISSUER: ${{ inputs.access-issuer }}
+        PUBLIC_HOST: ${{ inputs.host }}
+      working-directory: .release-source/${{ inputs.app }}
+      shell: bash -e {0}
+      run: |
+        bash "$GITHUB_WORKSPACE/.release-source/tools/deploy-probes/access.sh" ${{ inputs.access-paths }}

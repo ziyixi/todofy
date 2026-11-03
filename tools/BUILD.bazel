@@ -59,7 +59,30 @@ filegroup(
     ],
 )
 
-source_audit_files(patterns = [
-    "*",
-    "deploy-probes/**",
-])
+source_audit_files(
+    patterns = [
+        "*",
+        "deploy-probes/**",
+    ],
+    deps = [
+        "//tools/bazel:source_audit_files",
+        "//tools/bazel/audit:source_audit_files",
+        "//tools/bazel/browser:source_audit_files",
+        "//tools/bazel/ci:source_audit_files",
+        "//tools/bazel/images:source_audit_files",
+        "//tools/bazel/lint:source_audit_files",
+        "//tools/bazel/python:source_audit_files",
+        "//tools/bundle-size:source_audit_files",
+        "//tools/cf-guard:source_audit_files",
+        "//tools/cloud-bootstrap:source_audit_files",
+        "//tools/cloud-config:source_audit_files",
+        "//tools/cloud-release:source_audit_files",
+        "//tools/container-release:source_audit_files",
+        "//tools/infra-plan-summary:source_audit_files",
+        "//tools/platform-build:source_audit_files",
+        "//tools/service-catalog:source_audit_files",
+        "//tools/vps-bootstrap:source_audit_files",
+        "//tools/vps-release:source_audit_files",
+        "//tools/workerd-cpu:source_audit_files",
+    ],
+)

@@ -4,8 +4,11 @@ load("@aspect_rules_js//js:defs.bzl", "js_run_binary")
 load("@rules_pkg//pkg:mappings.bzl", "pkg_files", "strip_prefix")
 load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
 
-def worker_artifact(name, srcs, tool, config = ":config", web = None, web_prefix = "web/dist", args = [], visibility = None, bundle_visibility = None):
-    """Build the existing Worker/config/UI tarball from explicit application inputs."""
+def worker_artifact(name, srcs, tool, config = ":config", web = None, web_prefix = "web/dist", tools = [], args = [], visibility = None, bundle_visibility = None):
+    """Build the existing Worker/config/UI tarball from explicit application inputs.
+
+    `tools` are prebuilt release-step scripts, packaged at their path in this package (for example tools/x.mjs).
+    """
     bundle_kwargs = {"visibility": bundle_visibility} if bundle_visibility != None else {}
     js_run_binary(
         name = "worker_bundle",
@@ -31,6 +34,13 @@ def worker_artifact(name, srcs, tool, config = ":config", web = None, web_prefix
         strip_prefix = strip_prefix.from_pkg(),
     )
     files = [":config_files", ":worker_files"]
+    if tools:
+        pkg_files(
+            name = "tool_files",
+            srcs = tools,
+            strip_prefix = strip_prefix.from_pkg(),
+        )
+        files.append(":tool_files")
     if web != None:
         pkg_files(
             name = "web_files",
@@ -38,7 +48,7 @@ def worker_artifact(name, srcs, tool, config = ":config", web = None, web_prefix
             prefix = web_prefix,
             strip_prefix = strip_prefix.from_root(Label(web).package + "/dist"),
         )
-        files = [":config_files", ":web_files", ":worker_files"]
+        files = [":config_files", ":web_files", ":worker_files"] + ([":tool_files"] if tools else [])
     archive_kwargs = {"visibility": visibility} if visibility != None else {}
     pkg_tar(
         name = name,

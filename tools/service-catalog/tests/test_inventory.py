@@ -3,9 +3,6 @@
 import sys
 import json
 import copy
-import os
-import subprocess
-import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,8 +11,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).absolute().parents[1]))
 from catalog import CatalogError
 import inventory
-from inventory import compare, expected, observe, pending
-from private_catalog import load_private_catalog, supplemental_expected, configuration_changes, attach_home_secrets
+from inventory import compare, configuration_changes, expected, observe, pending, private_attachment, supplemental_expected
 
 SYNTHETIC = {
     "workers": {"result": [{"id": "demo"}]},
@@ -42,45 +38,12 @@ class InventoryTests(unittest.TestCase):
         return json.loads((inventory.REPO / "dashboard/worker/test/fixtures/private-catalog.json").read_text())
 
     def attachment(self, value):
-        return load_private_catalog(json.dumps(value), inventory.load_catalog(), expected(), inventory.REPO)
-
-    def test_separate_registration_preserves_materialized_home_credentials(self):
-        secrets = {"ACCESS_OWNER": "owner@example.org", "ACCESS_OWNER_ALIASES": "alias@example.org",
-                   "CF_ANALYTICS_TOKEN": "synthetic-analytics-value"}
-        frozen = copy.deepcopy(secrets)
-        raw = json.dumps(self.private_fixture())
-        self.assertEqual(attach_home_secrets(secrets, raw), {**secrets, "PRIVATE_CATALOG": raw})
-        self.assertEqual(secrets, frozen)
-        self.assertIs(attach_home_secrets(secrets, ""), secrets)
-        with self.assertRaisesRegex(ValueError, "PRIVATE_CATALOG_INVALID"):
-            attach_home_secrets(secrets, '{"invalid":"synthetic-private-value"}')
-        self.assertEqual(secrets, frozen)
-
-    def test_registration_cli_uses_the_existing_owner_only_secrets_file_and_never_prints_values(self):
-        secrets = {"ACCESS_OWNER": "owner@example.org", "CF_ANALYTICS_TOKEN": "synthetic-analytics-value"}
-        raw = json.dumps(self.private_fixture())
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "home-secrets.json"
-            path.write_text(json.dumps(secrets))
-            path.chmod(0o600)
-            def call(value):
-                return subprocess.run([sys.executable, str(inventory.REPO / "tools/service-catalog/private_catalog.py"),
-                                       "--secrets-file", str(path)], env={**os.environ, "PRIVATE_CATALOG": value},
-                                      text=True, capture_output=True, check=False)
-            rejected = call('{"invalid":"synthetic-private-value"}')
-            self.assertEqual(rejected.returncode, 1)
-            self.assertEqual(json.loads(path.read_text()), secrets)
-            self.assertEqual(rejected.stderr.strip(), "PRIVATE_CATALOG_INVALID")
-            accepted = call(raw)
-            self.assertEqual(accepted.returncode, 0, accepted.stderr)
-            self.assertEqual(json.loads(path.read_text()), {**secrets, "PRIVATE_CATALOG": raw})
-            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
-            for value in (*secrets.values(), "demo-edge-one", "synthetic-private-value"):
-                self.assertNotIn(value, accepted.stdout + accepted.stderr + rejected.stdout + rejected.stderr)
+        return private_attachment(json.dumps(value))
 
     def test_private_attachment_adds_only_registered_identities(self):
         wanted = expected()
-        self.assertIsNone(load_private_catalog("", None, wanted, inventory.REPO))
+        self.assertIsNone(private_attachment(None))
+        self.assertIsNone(private_attachment(""))
         attachment = self.attachment(self.private_fixture())
         merged = supplemental_expected(wanted, attachment)
         self.assertEqual(set(merged["workers"]) - set(wanted["workers"]), {"demo-edge-one", "demo-edge-two"})
@@ -90,23 +53,24 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(compare(merged, actual), [{"kind": "workers", "identity": "unknown-extra", "change": "unregistered"}])
         self.assertEqual(attachment["registry"]["workers"][0]["entry"], attachment["registry"]["entries"][0]["id"])
 
-    def test_private_attachment_refuses_collisions_and_invalid_values_without_echoing_them(self):
+    def test_private_attachment_shapes_it_cannot_read_fail_without_echoing_them(self):
+        """Home's TypeScript parser validates the registration (dashboard/deploy/private-catalog.mjs runs it before
+        every Home release); this reader refuses only what it cannot compare or put in a request path."""
         edits = [
-            lambda value: value["registry"]["entries"][0].update(id="home"),
-            lambda value: value["registry"]["workers"][0].update(script="home"),
-            lambda value: value["registry"]["resources"][0].update(id="infra-state"),
-            lambda value: value["registry"]["resources"][0].update(match="infra-state"),
-            lambda value: value["registry"]["entries"][0]["status"].update(type="ops_v1"),
-            lambda value: value["registry"]["entries"][0]["status"].update(url="https://other.example/healthz"),
-            lambda value: value["desired"]["workers"]["demo-edge-one"].update(custom_domains=["home.ziyixi.science"]),
-            lambda value: value["desired"].update(zones=["other.example"]),
-            lambda value: value["desired"]["workers"]["demo-edge-one"]["bindings"].append({"name": "STORE", "type": "r2_bucket", "source": "config"}),
+            lambda value: value.pop("desired"),
+            lambda value: value["registry"].update(workers={"synthetic-private-value": 1}),
+            lambda value: value["registry"]["workers"][0].update(script="../synthetic-private-value"),
+            lambda value: value["desired"]["workers"].update({"synthetic-private-value?x": {}}),
+            lambda value: value["registry"]["resources"][0].update(kind="synthetic-private-value"),
         ]
         for edit in edits:
             value = copy.deepcopy(self.private_fixture())
             edit(value)
             with self.subTest(edit=edits.index(edit)), self.assertRaisesRegex(ValueError, "^PRIVATE_CATALOG_INVALID$"):
                 self.attachment(value)
+        for raw in ("{", "[]", '"synthetic-private-value"'):
+            with self.subTest(raw=raw), self.assertRaisesRegex(ValueError, "^PRIVATE_CATALOG_INVALID$"):
+                private_attachment(raw)
 
     def test_private_configuration_comparison_is_read_only_and_detects_each_difference(self):
         attachment = self.attachment(self.private_fixture())

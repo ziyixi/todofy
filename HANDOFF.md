@@ -8,42 +8,99 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 Private application work, releases, operating limits and owner items are tracked only in the private submodule's
 `private/HANDOFF.md`; this file names that side only generically (AGENTS).
 
-`claude/landable-now` (on `85ebd0b1`) holds three independent public changes:
+`codex/private-workflow-update` integrates the complete `claude/review-fixes-public` review branch onto
+`9a8f7704`, with main as the integration merge's first parent. The reviewed public changes below are retained.
+The checked private dependency revision is pinned to its pushed commit. The exact combined branch still needs CI
+before the authorized main landing. No publication has been performed from this branch.
 
-- Home's usage query raises its Durable Object and R2 storage row caps from 10 to 25 and the R2 operation cap from
-  50 to 250, above the account's 13 object classes and 14 buckets; DO requests, DO duration and R2 storage were
-  lower bounds before. Only `limit` values change: no `orderBy` is added because none was checked on the live
-  account, and the new values are not yet verified there. Unit and real-workerd checks passed.
-- Mailsort's one-time October 29 requeue of terminal model failures is removed. It had completed (see
-  [verification](mailsort/docs/verification.md#optional-accounting-and-recovery-2026-10-29)); running it again
-  would count those mails twice. Recovered decisions and recorded counts are unchanged; a real-workerd regression
-  fails on the old code and passes now.
-- AGENTS adds the generic-naming rule for the private submodule, and this file keeps only the pointer above. The
-  November 2 archive no longer carries two private image digests or the private application's name; the private
-  archive keeps both.
+The review source combines four public branches and its integration corrections:
 
-The 84 test targets that depend on the changed files passed locally, including both apps' worker, web, deploy
-bundle-budget and repository audit checks; the CPU group also passed uncached, as CI runs it. The branch reaches
-only `//dashboard:release` and `//mailsort:release`: landing deploys the Home and Mailsort Workers, not Storage, the
-VPS images or any private target, provided the newest main push run is green at landing time (a failed one widens
-the cumulative release diff). Land it as a merge with `origin/main` as first parent, together with or after the
-private HANDOFF update that takes over the owner items removed here in `eee152de`, so the pointer above is true.
-After release, check that Home's next usage refresh succeeds with Durable Object rows no longer marked as lower
-bounds; on a `graphql_error`, revert the usage change. Mailsort's following passes should classify as before.
+- `claude/storage-fixes`: Storage refuses malformed keys before waking its Durable Object, checks batch item hashes
+  before commit and answers `BATCH_NOT_COMMITTED` for failures before finish, drops a connection Dropbox already
+  revoked, reports a full Dropbox distinctly with the last provider error (written at most once a minute), removes
+  the unused list page cache and starts the Durable Object with one unknown-key request during release.
+- `claude/release-tools`: receipts read every job page; release units come from the app manifests; twelve Worker
+  release actions share `worker-prepare`/`worker-deploy` and the three image publishers share `publish-image`;
+  `PRIVATE_CATALOG` is validated with Home's own parser; tests cover the release checks no test exercised.
+- `claude/ci-build`: three workerd runners, caches saved only from main with one lockfile-keyed repository cache,
+  the never-enabled automatic private publication removed, private Bazel output kept off the public log, Recall's
+  extension published only when its content changed, release images built once (`check-*` become `build-*`), pinned
+  `.node-version`/`.opentofu-version`, tsx and Playwright from the root package, and an AppArmor compile test.
+- `claude/private-entry-point`: every private operation runs through the pinned private entry point with the
+  operation on its command line, so an older entry point refuses an operation it does not know; the public copy of
+  the finish step is removed.
+- Review corrections: the private release job may run 45 minutes instead of 30, enough for a slow private rollout
+  and the checks after it; the landing and rollback plan below.
+
+Only the three image release facades conflicted (`codex-gateway`, `newsletter`, `platform`): each now declares its
+`build-<service>` action and the shared `publish-image`, which is what `ci.yml` runs. The Storage release action and
+the private release workflow merged cleanly and were checked by hand. The gitlink and the entry-point change land in
+the same push; the private push, release gate, release, its checks and its rollback follow `private/HANDOFF.md`.
+
+Local checks on macOS with CI's flags and caches: the changed files reach 72 test targets in the check, node,
+python and workerd groups (Target Determinator was emulated from Bazel's query graph; the same emulation reproduced
+main's 84-target selection for `9a8f7704`). All passed except two Linux-only targets left to CI (AppArmor compile,
+platform export). A wider run of 329 targets in every changed BUILD package plus Storage, tools, proto, contracts
+and `.github` passed, Storage and the release/CI tool suites also uncached. These are the review source's checks;
+the final integrated revision still needs its own branch and main gates.
+
+Landing selects all fourteen Workers (Model Router, Todofy, Tasks, Watch, Mail Hero,
+Mailsort, Links, Fleet, Recall, Storage, Personal MCP, Newsletter console, website relay and Home), the website
+workflow, and all three VPS images with their paired VPS releases under the existing deployment switch, because
+their release inputs changed. Existing dependency chains remain; independent jobs, including Storage, can run in
+parallel after the gate. Website retains its no-change publication guard. The Recall extension's independent
+release inputs are unchanged. No private release runs automatically; its manual publication follows the complete
+public publication and matching reconciliation, including Storage's deployment and probes.
+
+Landing order: this branch first, then the private release.
+
+1. Coordinate the landing and subsequent private release using the private handoff. The cache layout changed, so
+   allow the first branch and main builds to complete without assuming an existing warm cache.
+2. Push the pinned private commit first: the Private Bazel check checks out the gitlink from the private repository
+   ([CI/CD](docs/ci-cd.md#private-checks)). If private main moved, the private merge is rebuilt and re-pinned here.
+3. Push this branch and wait for a complete green branch run whose Changes job selects exactly the set above. If
+   main moved, rebuild the integration merge on the new main and rerun the checks.
+4. Land the reviewed green source through the authorized main flow while the newest main run is green. Artifact
+   reuse requires an exact SHA match; a new landing SHA needs its own successful main gate and publication checks.
+5. Wait for the main workflow and its Personal cloud reconcile: every deploy job green, Storage's release logging the
+   Durable Object's 401 for an unknown key, and reconcile's fourteen Worker comparisons, VPS identity, registration
+   and resolved drift. Then the private release.
+6. Afterwards Storage's owner console shows its connection and no `INSUFFICIENT_SPACE`, `CONNECTION_INVALID` or
+   `BAD_REQUEST` timed after the deploy. The console keeps the newest provider error until a reconnect, and
+   `UNAVAILABLE` alone is a transient rate limit. Home shows every Worker, Storage and the private probes healthy at
+   their next refresh.
+
+Rollback:
+
+- Restore `9a8f7704`'s tree, gitlink included, in one checked commit; or revert any later follow-ups first, then
+  `git revert -m 1` the integration merge. Its first parent is main, so that one revert removes the complete
+  reviewed integration, including its nested source merges and pinned dependency revision.
+- After a green landing run, pushing the revert redeploys the same set from the old source. After a failed or
+  partial one, the cumulative base stays at the last green main, which the revert's tree equals, so nothing is
+  redeployed: dispatch `CI and deploy` on the reverted main with `app` set to each application that actually
+  deployed (`dashboard` for Home; `all` only if the VPS images also published, accepting the VPS restart), then
+  confirm the new receipts name the revert SHA.
+- `PERSONAL_CLOUD_AUTO_REPAIR` is on, so the 13:41 UTC reconcile and the one after each green main run redeploy
+  each Worker's last good receipt. Before an emergency `wrangler rollback`, the owner sets it to `false`, or the
+  revert and dispatch finish first; it is restored once receipts name the reverted source.
+- Storage's old code recreates the dropped cache table on start and ignores the new provider-error key, so reverting
+  Storage is safe.
 
 ## Latest verified release
 
-Main `85ebd0b1` passed its complete main workflow and the matching Personal cloud reconcile, whose fourteen
-Worker comparisons, VPS identity, resource registration and resolved infrastructure drift checks all ran and
-passed. Private application releases and their evidence are in the private HANDOFF.
+Main `9a8f7704` (Home usage limits, Mailsort cleanup and the generic-naming rule) passed its complete main
+workflow, which deployed only Home and Mailsort, and the matching Personal cloud reconcile, whose fourteen Worker
+comparisons, VPS identity, resource registration and resolved infrastructure drift checks all ran and passed. Its
+[November 3 archive](docs/history/handoff-2026-11-03.md) lists the post-release checks not yet observed. Private
+application releases and their evidence are in the private HANDOFF.
 
 Shared Worker receipt recovery (`7ef001fe`) adds fixed failure stages, exact committed-result readback and a
 guarded receipt-only path without application redeployment. The old statusless Tasks receipt remains historical
 and unconfirmed; the current main has its own successful Tasks receipt.
 Historical failure triggers without original evidence remain unknown.
 
-The [November 2 archive](docs/history/handoff-2026-11-02.md) records the earlier November 2 publications and
-corrections. Shared Storage's protocol/persistence checks remain in [November 1](docs/history/handoff-2026-11-01.md#shared-storage).
+The [November 2 archive](docs/history/handoff-2026-11-02.md) records the November 2 publications and corrections.
+Shared Storage's protocol/persistence checks remain in [November 1](docs/history/handoff-2026-11-01.md#shared-storage).
 Earlier integration and build configuration are in [October 31](docs/history/handoff-2026-10-31.md) and
 [October 30](docs/history/handoff-2026-10-30.md). Documentation closeout follows normal main CI and reconciliation.
 

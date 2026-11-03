@@ -28,29 +28,13 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Install the selected Node workspaces
-      if: inputs.required == 'true'
-      uses: ./.github/actions/setup-workspace
-      with:
-        root: .release-source
-        filters: 'links-worker... links-web...'
-    # Every static production value (account, D1, host, Access) is committed in links/wrangler.toml; the environment
-    # URL and the host probes read it there.
-    - name: Read the host and the Access issuer from the committed config
-      if: inputs.required == 'true'
+    - name: Prepare the release workspace
       id: config
-      working-directory: .release-source/links
-      shell: bash -e {0}
-      run: |
-        python3 - >> "$GITHUB_OUTPUT" <<'EOF'
-        import tomllib
-        with open("wrangler.toml", "rb") as file:
-            variables = tomllib.load(file)["vars"]
-        print("url=https://" + variables["PUBLIC_HOST"])
-        print("host=" + variables["PUBLIC_HOST"])
-        print("access_issuer=" + variables["ACCESS_ISSUER"])
-        EOF
-    # The launcher's build (web/dist) is the one that ships; its JavaScript budget is checked by the build.
+      if: inputs.required == 'true'
+      uses: ./.github/actions/worker-prepare
+      with:
+        app: links
+        filters: 'links-worker... links-web...'
     - name: Write the Worker secrets file
       if: inputs.required == 'true'
       working-directory: .release-source/links/worker
@@ -60,66 +44,23 @@ runs:
         LINKS_ACCESS_OWNER_ALIASES: ${{ inputs.dashboard-access-owner-aliases }}
       shell: bash -e {0}
       run: node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/links-secrets.json"
-    # deploy-vars.mjs adds BUILD_SHA as --var and refuses the all-zeros D1 id or Access AUD; the bundle that ships is
-    # held to the app's budget and the Workers Free limit (deploy/bundle-size.mjs).
-    - name: Validate the bundle before changing D1
+    # Access ("links") is path-scoped: its exact destination /_, the launcher /_/ and the owner API.
+    - name: Deploy and verify the Worker
       if: inputs.required == 'true'
-      working-directory: .release-source/links/worker
-      shell: bash -e {0}
-      run: |
-        node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy "$PWD/../.compiled/worker/index.js" --no-bundle --dry-run --config ../wrangler.toml \
-          --secrets-file "$RUNNER_TEMP/links-secrets.json" --outdir "$RUNNER_TEMP/links-bundle"
-        node ../deploy/bundle-size.mjs "$RUNNER_TEMP/links-bundle"
-    # tools/cf-guard (read-only GETs; prints listed hostnames, counts, PASS/FAIL): wrangler applies a config's Custom
-    # Domains (or zone routes) as the Worker's complete set, so stop before any production change when a live
-    # hostname would be detached or another Worker's hostname or DNS record taken over. For an intentional
-    # change, set the exact hostnames here (space-separated) in the same commit that changes wrangler.toml.
-    # s.ziyixi.science had no DNS record before L2, so its first deploy attaches the Custom Domain without either.
-    - name: Check the hostnames against production
-      if: inputs.required == 'true'
-      working-directory: .release-source
-      env:
-        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
-        CF_GUARD_ALLOW_REMOVE: ''
-        CF_GUARD_ALLOW_CONFLICT: ''
-      shell: bash -e {0}
-      run: node tools/cf-guard/cf-guard.mjs --config links/wrangler.toml
-    - name: Apply D1 migrations, then deploy the Worker links
-      if: inputs.required == 'true'
-      working-directory: .release-source/links/worker
-      env:
-        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
-      shell: bash -e {0}
-      run: |
-        test -n "$CLOUDFLARE_API_TOKEN"
-        npx --no-install wrangler d1 migrations apply DB --remote --config ../wrangler.toml
-        bash "$GITHUB_WORKSPACE/tools/cloud-release/assets-session-retry.sh" \
-          node ../deploy/deploy-vars.mjs exec -- npx --no-install wrangler deploy "$PWD/../.compiled/worker/index.js" --no-bundle --config ../wrangler.toml \
-          --secrets-file "$RUNNER_TEMP/links-secrets.json"
-    # Nothing anonymous on the host shows BUILD_SHA (the owner's half is behind Access), so production is read through
-    # the API with the deploy token (GETs and one D1 read of the migrations table): the Worker serves exactly one
-    # version at 100%, that version's BUILD_SHA is this commit, and no D1 migration is pending. wrangler's JSON answers
-    # are parsed, never printed (they name the token's account email); only the version id and the results are.
-    - name: Check that production runs this commit
-      if: inputs.required == 'true'
-      working-directory: .release-source/links/worker
-      env:
-        CLOUDFLARE_API_TOKEN: ${{ inputs.cf-api-token }}
-      shell: bash -e {0}
-      run: |
-        bash "$GITHUB_WORKSPACE/.release-source/tools/deploy-probes/production.sh" links ../wrangler.toml DB
-    # Cloudflare Access ("links", path-scoped) must answer every unauthenticated request for the owner's half with a
-    # 302 to its login page for this host: its exact destination /_, the launcher /_/ and the owner API, exactly as
-    # the dashboard's probe checks (same script; test_release_probes.py runs it).
-    - name: Check that Access answers unauthenticated requests
-      if: inputs.required == 'true'
-      env:
-        ACCESS_ISSUER: ${{ steps.config.outputs.access_issuer }}
-        PUBLIC_HOST: ${{ steps.config.outputs.host }}
-      working-directory: .release-source/links
-      shell: bash -e {0}
-      run: |
-        bash "$GITHUB_WORKSPACE/.release-source/tools/deploy-probes/access.sh" /_ /_/ /_/api/v1/links
+      uses: ./.github/actions/worker-deploy
+      with:
+        app: links
+        worker: links
+        worker-directory: worker
+        tools-directory: deploy
+        bundle-size: 'true'
+        d1: 'true'
+        assets: 'true'
+        production: 'true'
+        access-paths: /_ /_/ /_/api/v1/links
+        cf-api-token: ${{ inputs.cf-api-token }}
+        host: ${{ steps.config.outputs.host }}
+        access-issuer: ${{ steps.config.outputs.access_issuer }}
     # The rest of the host is outside Access and the Worker answers it itself, anonymously (docs/design.md §2, §4):
     # /robots.txt with its own text (200, text/plain, "Disallow: /" for every agent), and a key no link uses with the
     # 302 to /_/k/<key> on this host that a private, deleted or expired key gets too (the enumeration rule), both with

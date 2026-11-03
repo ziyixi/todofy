@@ -79,7 +79,8 @@ class RecallExtensionRelease(unittest.TestCase):
     permission in ci.yml, and nothing waits for it. Its step runs here against a stubbed gh and a synthetic build."""
 
     JOB = "recall-extension-release"
-    STEP = "Publish the extension's version unless its tag exists"
+    STEP = "Publish the extension's version unless its tag or content exists"
+    PREVIOUS = "2026.1010.900"
     VERSION = "2026.1011.1234"
     TAG = f"recall-extension-v{VERSION}"
 
@@ -129,7 +130,10 @@ class RecallExtensionRelease(unittest.TestCase):
         self.assertIn("name: recall-extensions-${{ github.sha }}\n", producer)
         script = workflow_run_step(self.JOB, self.STEP)[0]
         self.assertLess(
-            script.index("git/matching-refs/tags/"), script.index("gh release create")
+            script.index("git/matching-refs/tags/"), script.index("gh release download")
+        )
+        self.assertLess(
+            script.index("gh release download"), script.index("gh release create")
         )
         self.assertNotIn("zip -", script)
 
@@ -140,8 +144,13 @@ class RecallExtensionRelease(unittest.TestCase):
         fail_api=False,
         reused="",
         orion_version=None,
+        previous=None,
+        fail_list=False,
     ):
-        """Runs the step on a synthetic build. Returns (exit code, output, gh calls, the published zip's names, notes)."""
+        """Runs the step on a synthetic build. Returns (exit code, output, gh calls, the published zip's names, notes).
+
+        `previous` maps file names to the contents the latest earlier release had; None means there is none.
+        """
         if (
             shutil.which("jq") is None or shutil.which("zip") is None
         ) and os.environ.get("GITHUB_ACTIONS") != "true":
@@ -158,13 +167,16 @@ class RecallExtensionRelease(unittest.TestCase):
             (build / "manifest.json").write_text(json.dumps(manifest))
             for name in (
                 "sw.js",
-                "capture.js",
                 "options.html",
                 "options.js",
                 "options.css",
                 "icons/16.png",
             ):
                 (build / name).write_text("synthetic\n")
+            # esbuild compiles the build version into the injected scripts (RECALL_BUILD).
+            (build / "capture.js").write_text(
+                f"readPage(document, {json.dumps(self.VERSION)});\n"
+            )
             orion = Path(root, "recall-orion")
             shutil.copytree(build, orion)
             orion_manifest = {
@@ -173,13 +185,37 @@ class RecallExtensionRelease(unittest.TestCase):
                 "version": orion_version or self.VERSION,
             }
             (orion / "manifest.json").write_text(json.dumps(orion_manifest))
-            for folder, stem in ((build, "recall-extension"), (orion, "recall-orion")):
-                with zipfile.ZipFile(
-                    Path(root) / f"{stem}-{SHA[:7]}.zip", "w"
-                ) as packed:
+
+            def pack(folder, path, changes=None):
+                with zipfile.ZipFile(path, "w") as packed:
                     for file in sorted(folder.rglob("*")):
                         if file.is_file():
-                            packed.write(file, file.relative_to(folder).as_posix())
+                            name = file.relative_to(folder).as_posix()
+                            data = file.read_bytes()
+                            if name == "manifest.json" and changes is not None:
+                                data = json.dumps(
+                                    {
+                                        **json.loads(data),
+                                        "version": self.PREVIOUS,
+                                        "version_name": "b" * 7,
+                                    }
+                                ).encode()
+                            elif changes is not None:
+                                data = data.replace(
+                                    json.dumps(self.VERSION).encode(),
+                                    json.dumps(self.PREVIOUS).encode(),
+                                )
+                            packed.writestr(name, (changes or {}).get(name, data))
+
+            for folder, stem in ((build, "recall-extension"), (orion, "recall-orion")):
+                pack(folder, Path(root) / f"{stem}-{SHA[:7]}.zip")
+                if previous is not None:
+                    Path(root, "previous").mkdir(exist_ok=True)
+                    pack(
+                        folder,
+                        Path(root, "previous", f"{stem}-v{self.PREVIOUS}.zip"),
+                        previous,
+                    )
             bin_dir = Path(root, "bin")
             bin_dir.mkdir()
             Path(root, "refs.txt").write_text(refs)
@@ -190,6 +226,15 @@ class RecallExtensionRelease(unittest.TestCase):
                 'case "$1 $2" in\n'
                 f'  "api repos/{REPOSITORY}/git/matching-refs/tags/{self.TAG}") '
                 + ("exit 1 ;;\n" if fail_api else f'cat "{root}/refs.txt" ;;\n')
+                + f'  "api repos/{REPOSITORY}/releases?per_page=100") '
+                + (
+                    "exit 1 ;;\n"
+                    if fail_list
+                    else f'echo "recall-extension-v{self.PREVIOUS}" ;;\n'
+                    if previous is not None
+                    else ";;\n"
+                )
+                + f'  "release download") mkdir -p "$5"; cp "{root}"/previous/*.zip "$5"/ ;;\n'
                 + f'  "release create") cp "$4" "{root}/published.zip"; cp "$5" "{root}/orion.zip"; cp "${{11}}" "{root}/notes.md" ;;\n'
                 '  *) echo "unexpected gh call" >&2; exit 3 ;;\n'
                 "esac\n"
@@ -198,7 +243,12 @@ class RecallExtensionRelease(unittest.TestCase):
             runner_temp = Path(root, "runner")
             runner_temp.mkdir()
             env = {
-                **os.environ,
+                # The step's python3 is the runner's own, not this test's interpreter.
+                **{
+                    name: value
+                    for name, value in os.environ.items()
+                    if not name.startswith("PYTHON")
+                },
                 "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
                 "GH_TOKEN": "synthetic-token",
                 "GH_REPO": REPOSITORY,
@@ -252,8 +302,14 @@ class RecallExtensionRelease(unittest.TestCase):
                     calls[0],
                     f"api repos/{REPOSITORY}/git/matching-refs/tags/{self.TAG} --jq .[].ref",
                 )
-                self.assertRegex(
+                self.assertEqual(
                     calls[1],
+                    f"api repos/{REPOSITORY}/releases?per_page=100 --jq "
+                    '[.[] | select(.tag_name | startswith("recall-extension-v"))] '
+                    "| max_by(.published_at) | .tag_name // empty",
+                )
+                self.assertRegex(
+                    calls[2],
                     rf"^release create {re.escape(self.TAG)} \S+/recall-extension-v{re.escape(self.VERSION)}\.zip "
                     rf"\S+/recall-orion-v{re.escape(self.VERSION)}\.zip --target {SHA} --title recall extension {re.escape(self.VERSION)} --notes-file \S+$",
                 )
@@ -277,6 +333,48 @@ class RecallExtensionRelease(unittest.TestCase):
         reused = f"https://github.com/{REPOSITORY}/actions/runs/800"
         _, _, _, _, notes = self.publish(reused=reused)
         self.assertIn(f"Checked and built in: {reused}", notes)
+
+    def test_only_a_new_version_since_the_latest_release_publishes_nothing(self):
+        code, output, calls, names, _ = self.publish(previous={})
+        self.assertEqual(code, 0, output)
+        self.assertIn(
+            f"Only the version differs from recall-extension-v{self.PREVIOUS}", output
+        )
+        self.assertRegex(
+            calls[2],
+            rf"^release download recall-extension-v{re.escape(self.PREVIOUS)} --dir \S+ "
+            rf"--pattern recall-extension-v{re.escape(self.PREVIOUS)}\.zip "
+            rf"--pattern recall-orion-v{re.escape(self.PREVIOUS)}\.zip$",
+        )
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(names, [])
+
+    def test_changed_content_since_the_latest_release_is_published(self):
+        manifest = {
+            "manifest_version": 3,
+            "name": "recall",
+            "version": self.PREVIOUS,
+            "permissions": ["tabs"],
+        }
+        for previous in (
+            {"sw.js": b"older\n"},
+            # Masking the compiled version must not hide a change beside it.
+            {
+                "capture.js": f"readPage(window, {json.dumps(self.PREVIOUS)});\n".encode()
+            },
+            {"manifest.json": json.dumps(manifest).encode()},
+        ):
+            with self.subTest(changed=next(iter(previous))):
+                code, output, calls, names, _ = self.publish(previous=previous)
+                self.assertEqual(code, 0, output)
+                self.assertTrue(calls[-1].startswith(f"release create {self.TAG} "))
+                self.assertIn("sw.js", names)
+
+    def test_an_unknown_latest_release_publishes_nothing(self):
+        code, output, calls, names, _ = self.publish(fail_list=True)
+        self.assertNotEqual(code, 0, output)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(names, [])
 
     def test_a_mismatched_orion_build_publishes_nothing(self):
         code, output, calls, _, _ = self.publish(orion_version="2026.1010.900")
@@ -920,6 +1018,63 @@ class LinksWorkerProbe(unittest.TestCase):
         code, _, urls = self.check(self.good(), host="")
         self.assertNotEqual(code, 0)
         self.assertEqual(urls, [])
+
+
+class StorageObjectProbe(unittest.TestCase):
+    """Storage deploy's start of its Durable Object, run as the workflow runs it against a stubbed curl.
+
+    The Worker itself refuses a request without a well-formed key, so only a well-formed unknown key reaches the
+    Durable Object; its 401 JSON shows the object started after the deploy."""
+
+    STEP = "- name: Verify the Durable Object starts and refuses an unknown key\n"
+    HOST = "storage.example.org"
+
+    def script(self):
+        body = workflow_jobs()["storage-deploy"].split(self.STEP, 1)[1].split("        run: |\n", 1)[1]
+        lines = []
+        for line in body.splitlines():
+            if line.strip() and not line.startswith("          "):
+                break
+            lines.append(line[10:])
+        return "\n".join(lines) + "\n"
+
+    def check(self, answer):
+        """Runs the step; curl records its arguments and prints answer. Returns (exit code, output, arguments)."""
+        with tempfile.TemporaryDirectory() as root:
+            curl = Path(root, "curl")
+            curl.write_text(
+                f"#!{sys.executable}\n"
+                "import json, sys\n"
+                f"open({root!r} + '/args', 'w').write(json.dumps(sys.argv[1:]))\n"
+                f"sys.stdout.write({answer!r})\n"
+            )
+            curl.chmod(0o755)
+            result = subprocess.run(
+                ["bash", "-e", "-c", self.script()],
+                cwd=REPO,
+                env={**os.environ, "PATH": f"{root}{os.pathsep}{os.environ['PATH']}", "PUBLIC_HOST": self.HOST},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            return result.returncode, result.stdout + result.stderr, json.loads(Path(root, "args").read_text())
+
+    def test_the_objects_refusal_of_a_well_formed_key_passes(self):
+        code, output, args = self.check("401|application/json; charset=utf-8|")
+        self.assertEqual(code, 0, output)
+        self.assertEqual(args[-1], f"https://{self.HOST}/api/storage/v1/stat")
+        self.assertIn("--proto", args)
+        # A key the Worker's own format check refused would be answered there, and the object would never start.
+        env = (REPO / "storage" / "worker" / "src" / "env.ts").read_text()
+        pattern = re.search(r"^export const MACHINE_AUTHORIZATION = /(.+)/;$", env, re.MULTILINE).group(1)
+        self.assertRegex(args[args.index("-H") + 1].removeprefix("Authorization: "), pattern)
+
+    def test_an_object_that_did_not_answer_fails_the_release(self):
+        for answer in ("500|application/json|", "401|text/html|", "401|application/json|https://example.org/login"):
+            with self.subTest(answer=answer):
+                code, output, _ = self.check(answer)
+                self.assertEqual(code, 1, output)
+                self.assertIn("STORAGE_OBJECT_START_FAILED", output)
 
 
 class LinksProductionCheck(unittest.TestCase):

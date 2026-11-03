@@ -13,10 +13,7 @@ py_library(
     ],
 )
 
-source_audit_files(patterns = [
-    "*",
-    "tests/**",
-])
+source_audit_files(patterns = ["*"])
 
 filegroup(
     name = "python_lint_inputs",

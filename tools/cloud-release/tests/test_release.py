@@ -2,6 +2,7 @@ import io
 import json
 import os
 import sys
+import tempfile
 import unittest
 import urllib.error
 from contextlib import redirect_stdout
@@ -17,7 +18,10 @@ from cloudflare import (
     verify_resources,
 )
 from control import WORKERS, prepare
-from deployments import last_good, record_success
+from deployments import APPS, last_good, record_success, release_units
+
+sys.path.insert(0, str(Path(__file__).absolute().parents[2] / "service-catalog"))
+from catalog import REPO, load_catalog  # noqa: E402
 
 SHA = "a" * 40
 UUID = "6b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e"
@@ -193,6 +197,47 @@ class ReleaseTests(unittest.TestCase):
                 "tasks", "", False, api, "b" * 40, record_only=True, deployment_id="1"
             )
 
+    def test_record_only_reads_every_job_page_of_a_rerun_main_run(self):
+        saved = {"id": 1, "sha": SHA, "task": "deploy:tasks", "environment": "production",
+                 "payload": {"format": "personal-cloud-release-v1"}}
+        run = {"id": 7, "head_sha": SHA, "head_branch": "main", "event": "push", "status": "completed"}
+
+        def job(identifier, name="Bazel (node)", conclusion="success"):
+            return {"id": identifier, "name": name, "head_sha": SHA, "status": "completed", "conclusion": conclusion}
+
+        first = [job(identifier) for identifier in range(100, 200)]
+        gated = [*first[:99], job(300, "CI gate")]
+        # A listing longer than MAX_JOB_PAGES full pages.
+        longest = [{"total_count": 501, "jobs": gated},
+                   *({"total_count": 501, "jobs": [job(1000 + 100 * page + index) for index in range(100)]}
+                     for page in range(1, 5))]
+        # The gate is the 101st job: one page alone reports it missing and fails closed.
+        for pages, verified in (
+            ([{"total_count": 101, "jobs": first}, {"total_count": 101, "jobs": [job(300, "CI gate")]}], True),
+            ([{"total_count": 101, "jobs": first}, {"total_count": 101, "jobs": [job(300, "CI gate", "failure")]}], False),
+            ([{"total_count": 101, "jobs": first}, {"total_count": 101, "jobs": []}], False),
+            ([{"total_count": 101, "jobs": [*first, job(300, "CI gate")]}], True),
+            # A listing short of its total fails closed even when the gate it did return succeeded.
+            ([{"total_count": 101, "jobs": gated}, {"total_count": 101, "jobs": []}], False),
+            (longest, False),
+        ):
+            api = FakeApi([{"object": {"sha": "b" * 40}}, saved, {"status": "ahead", "merge_base_commit": {"sha": SHA}},
+                           {"workflow_runs": [run]}, *pages])
+            with (
+                self.subTest(pages=len(pages), verified=verified),
+                patch.dict(os.environ, {"GITHUB_REPOSITORY": "example/cloud", "GITHUB_SHA": "b" * 40}),
+            ):
+                if verified:
+                    self.assertEqual(prepare("tasks", "", False, api, "b" * 40, record_only=True, deployment_id="1"), SHA)
+                else:
+                    with self.assertRaisesRegex(ReleaseError, "RECEIPT_CI_GATE_NOT_VERIFIED"):
+                        prepare("tasks", "", False, api, "b" * 40, record_only=True, deployment_id="1")
+                listings = [path for path, _ in api.requests if "/jobs?" in path]
+                self.assertEqual(listings, [
+                    f"/repos/example/cloud/actions/runs/7/jobs?filter=latest&per_page=100&page={page}"
+                    for page in range(1, len(pages) + 1)
+                ])
+
     def test_only_latest_single_version_at_full_traffic_is_accepted(self):
         self.assertEqual(
             deployment_version(
@@ -303,6 +348,26 @@ class ReleaseTests(unittest.TestCase):
             for app in ("model_router", "model-router-extra", "unknown"):
                 with self.subTest(app=app), self.assertRaisesRegex(ReleaseError, "DEPLOYMENT_IDENTITY_INVALID"):
                     prepare(app, SHA, False, FakeApi([]))
+
+    def test_release_units_are_the_validated_catalog_workers(self):
+        units = {}
+        for worker in load_catalog(REPO).workers:
+            units.setdefault(worker["release"], set()).add(worker["config"])
+        self.assertEqual({unit: set(paths) for unit, paths in WORKERS.items()},
+                         {unit: paths for unit, paths in units.items() if unit != "website"})
+        self.assertEqual(APPS, set(units) | {"platform", "codex-gateway"})
+        # The application's root config comes first, so Todofy's receipt keeps its evidence order.
+        self.assertEqual(WORKERS["todofy"], ["todofy/wrangler.toml", "todofy/gateway/wrangler.toml"])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for app, text in (("demo", 'id = "demo"\n[[workers]]\nconfig = "demo/edge/wrangler.toml"\n'
+                                       '[[workers]]\nconfig = "demo/wrangler.toml"\n'
+                                       '[[workers]]\nconfig = "demo/relay/wrangler.toml"\nrelease = "demo-relay"\n'),
+                              ("image", 'id = "image"\ntarget = "vps"\n')):
+                (root / app).mkdir()
+                (root / app / "app.toml").write_text(text)
+            self.assertEqual(release_units(root), {"demo": ["demo/wrangler.toml", "demo/edge/wrangler.toml"],
+                                                   "demo-relay": ["demo/relay/wrangler.toml"]})
 
     def test_router_verification_records_the_same_release_identity(self):
         api = FakeApi([{"id": 1, "sha": SHA}, {}])

@@ -9,6 +9,8 @@ filegroup(
     srcs = [
         ":mail-hero",
         "//.github/actions:release-mail-hero/action.yml",
+        "//.github/actions:worker-deploy/action.yml",
+        "//.github/actions:worker-prepare/action.yml",
         "//mail-hero/deploy:source_deploy_vars_mjs",
         "//tools:release_probes",
         "//tools/cloud-release:release_inputs",
@@ -62,7 +64,15 @@ worker_artifact(
     web_prefix = "uiassets/dist",
 )
 
-source_audit_files(patterns = [
-    "*",
-    "docs/**",
-])
+source_audit_files(
+    patterns = [
+        "*",
+        "docs/**",
+    ],
+    deps = [
+        "//mail-hero/cloudflare:source_audit_files",
+        "//mail-hero/deploy:source_audit_files",
+        "//mail-hero/deploy/backup:source_audit_files",
+        "//mail-hero/web:source_audit_files",
+    ],
+)

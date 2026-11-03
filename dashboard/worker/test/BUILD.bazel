@@ -84,6 +84,12 @@ js_library(
     srcs = ["runtime/tsconfig.json"],
 )
 
+# The synthetic registration the release step's check runs against (//dashboard/deploy:private-catalog_test).
+js_library(
+    name = "private_catalog_fixture",
+    srcs = ["fixtures/private-catalog.json"],
+)
+
 copied_source_files(
     name = "types_srcs",
     srcs = [
