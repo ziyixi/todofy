@@ -3,16 +3,19 @@
 Storage gives applications a namespace-scoped HTTP interface to a separate Dropbox App-folder connection.
 The owner console connects Dropbox and creates independently revocable read-only or read/write keys.
 Each key selects a fixed namespace on the server. File data lives in Dropbox; the native SQLite Durable Object
-holds the connection, key hashes and short-lived pagination metadata. Storage uses no D1, R2 or scheduled job.
+holds the connection state, key hashes, a cursor-signing key and the last provider error reason. Storage uses no D1,
+R2 or scheduled job.
 
 The separate Dropbox app uses `files.metadata.read`, `files.content.read` and `files.content.write` with offline PKCE.
 The callback is `/api/dropbox/callback`. Existing Recall connections, files and archive contracts are independent.
-Disconnecting revokes this connection and retains files. There is no delete-object endpoint.
+Disconnecting revokes this connection and retains files. There is no delete-object endpoint. If Dropbox already
+revoked the authorization, disconnecting removes the local connection, and connecting replaces it.
 
 ## HTTP protocol
 
 Machine requests use `Authorization: Bearer <application key>`. Owner cookies and Access assertions do not replace
-that key. Authentication precedes reading JSON or binary bodies. The three machine paths are:
+that key. Authentication precedes reading JSON or binary bodies, and the ordinary Worker refuses a malformed key
+with 401 before waking the Durable Object. The three machine paths are:
 
 | Method and path | Request | Response |
 | --- | --- | --- |
@@ -29,13 +32,12 @@ backslashes, URI escapes and Dropbox `id:`, `ns:` and `rev:` selectors are rejec
 case-insensitive path behavior. A listing may return an empty page with a continuation; keep reading until
 `next_cursor` is empty. Continuations are authenticated and bound to the namespace and prefix.
 
-`page_size` defaults to 100 and is capped at 100; each response contains at most the requested number of objects.
-Dropbox's page-size limit is approximate, so Storage retains one sanitized provider page per cache entry and
-returns any extra objects before fetching the next provider page. Replaying a cursor returns its cached page;
-the caller may change page size. Cursors and their cached pages expire after 24 hours. Existing provider cursors
-remain accepted. The cache is limited to 1,024 pages, 512 KiB per page and 64 MiB of metadata JSON in total.
-Expired pages are removed lazily. Capacity exhaustion returns `RESOURCE_EXHAUSTED`, without evicting valid pages.
-Connecting or disconnecting Dropbox invalidates cached pages from the previous connection.
+`page_size` defaults to 100 and is capped at 100. Each response is one Dropbox page with at most the requested
+number of objects. The first request asks Dropbox for that limit; continuations return Dropbox's next page, which
+keeps the first request's limit, so keep `page_size` the same throughout one listing. Dropbox's limit is approximate;
+a page with more matching objects than `page_size` fails with 503 `PROVIDER_RESPONSE_INVALID` instead of being
+truncated, and repeating the same request fails again. A continuation carries the signed Dropbox cursor and expires
+after 24 hours; a continuation from the retired page cache returns `CURSOR_INVALID`.
 Provider JSON remains bounded at 512 KiB. [Dropbox documents the approximate limit and continuation rules](https://github.com/dropbox/dropbox-api-spec/blob/main/files.stone#L1687-L1771).
 
 Each object is at most 32 MiB. Uploads require Content-Length and enforce the actual stream length.
@@ -46,6 +48,8 @@ Explicit provider rate limits and recognized namespace write contention return 4
 an absent delay becomes one second. The gateway does not repeat uploads. The caller can bound retries of those
 explicit rejections while preserving its body and condition. See [Dropbox's rate and namespace-lock semantics](https://docs.dropboxapi.com/dropbox-api/docs/performance).
 A lost successful upload response can be resolved by statting and verifying the intended size and hash.
+A full Dropbox (`insufficient_space`) returns 507 `INSUFFICIENT_SPACE` without Retry-After, also for a batch after
+finish: no retry can succeed until the owner frees space, so a caller should wait rather than retry or recover.
 
 `POST content` accepts only create-only objects in the caller's namespace. It has no query parameters and
 requires `Content-Type: application/octet-stream`, exact `Content-Length`, and an ASCII `X-Storage-Batch` header
@@ -55,12 +59,18 @@ across object boundaries. There are 1 to 32 objects, at most 32 MiB each and at 
 including case variants, are refused. Zero-byte objects continue using the existing conditional PUT route.
 
 The existing Durable Object streams the body through Dropbox's native `start_batch`, `append_batch` and synchronous
-`finish_batch_v2`. The ordinary Worker only forwards the request. Every commit uses `add`, `autorename: false`
-and `strict_conflict: true`. An existing object is reused only after stat confirms its key, length and hash;
-different bytes return 409 `REVISION_CONFLICT`. A complete response contains every metadata record in order.
-Partial, invalid or unknown provider results return 503 `BATCH_INCOMPLETE`, including a rate-limit response after
-finish may have begun. Such errors can leave new immutable objects and must not advance a caller's checkpoint.
-Only an explicit rejection before finish can return 429 with Retry-After. Storage never replays the upload.
+`finish_batch_v2`. The ordinary Worker only forwards the request. While streaming, the object hashes each item and
+refuses one whose bytes differ from its manifest hash with 400 `UPLOAD_HASH_MISMATCH` before finish, so wrong bytes
+never commit under a create-only key. Every commit uses `add`, `autorename: false` and `strict_conflict: true`.
+An existing object is reused only after stat confirms its key, length and hash; different bytes return 409
+`REVISION_CONFLICT`. With 32 items, even a batch of existing objects uses at most 36 of the 50 provider subrequests
+one invocation may make. A complete response contains every metadata record in order.
+A failure before finish commits nothing. A definite refusal keeps its own answer: an explicit rate limit returns 429
+with Retry-After, and an invalid connection or a wrong manifest hash returns 400. Another provider or transport
+failure returns 503 `BATCH_NOT_COMMITTED`; the caller may send the same batch again a bounded number of times.
+Once finish may have begun, partial, invalid or unknown provider results return 503 `BATCH_INCOMPLETE`, including a
+rate limit. Such errors can leave new immutable objects and must not advance a caller's checkpoint. Storage never
+replays uploads.
 The mutable control head continues using the original revision-matched PUT; no object format or permission changes.
 
 GET and HEAD also accept If-Match and reject a different revision before returning content. Valid ranges retain
@@ -70,6 +80,8 @@ they are not plain SHA256. An optional `X-Storage-Content-Hash` upload header as
 
 Owner HTTP is `storage.ui.v1` under `/api/v1/`, behind edge-auth. Mutations require the exact Origin,
 `X-CSRF-Token: 1` and JSON. Newly created application keys are returned once; listings and replays return metadata.
+Settings include the Storage reason and time of the newest error Dropbox answered, never provider content.
+Absent objects and create conflicts are ordinary answers and are not recorded. A new or removed connection clears it.
 
 ## Development
 

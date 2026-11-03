@@ -119,6 +119,24 @@ runs:
           fi
           echo "Storage machine route: 401 without owner login."
         done
+    - name: Verify the Durable Object starts and refuses an unknown key
+      if: inputs.required == 'true'
+      working-directory: .release-source/storage
+      env:
+        PUBLIC_HOST: ${{ steps.config.outputs.host }}
+      shell: bash -e {0}
+      run: |
+        # The Worker answers keyless requests itself. A well-formed unknown key reaches the Durable Object, so this one
+        # request starts it after the deploy, including its first-start schema changes, before any caller does.
+        answer=$(curl -sS -o /dev/null --max-time 15 --proto '=https' -X POST -H "Authorization: Bearer sto_$(printf '%043d' 0)" \
+          -w '%{http_code}|%{content_type}|%{redirect_url}' "https://$PUBLIC_HOST/api/storage/v1/stat")
+        IFS='|' read -r code media location <<<"$answer"
+        media=${media%%;*}
+        if [ "$code" != 401 ] || [ "$media" != application/json ] || [ -n "$location" ]; then
+          echo "STORAGE_OBJECT_START_FAILED" >&2
+          exit 1
+        fi
+        echo "Storage Durable Object: 401 for an unknown key."
     - name: Remove the secrets file
       if: always() && inputs.required == 'true'
       working-directory: .release-source/storage

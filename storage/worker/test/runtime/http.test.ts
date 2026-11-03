@@ -10,7 +10,7 @@ describe('Storage in workerd with native SQLite', () => {
     const unauthorized = await current.machine('stat', null, { method: 'POST', body: '{', headers: { 'content-type': 'application/json' } });
     expect(unauthorized.status).toBe(401);
     expect(current.provider.calls).toHaveLength(0);
-    const key = await current.client('quant');
+    const key = await current.client('synthetic');
     await current.owner(key.name, 'DELETE');
     const revoked = await current.machine('stat', key.api_key, { method: 'POST', body: '{}', headers: { 'content-type': 'application/json' } });
     expect(revoked.status).toBe(401);
@@ -21,7 +21,7 @@ describe('Storage in workerd with native SQLite', () => {
   it('reveals a created credential only once and refuses request ID reuse for another namespace', async () => {
     current = await harness();
     const requestId = crypto.randomUUID();
-    const input = { label: 'Synthetic', namespace: 'quant', access: 'read_only' };
+    const input = { label: 'Synthetic', namespace: 'synthetic', access: 'read_only' };
     const created = await current.owner('clients?request_id=' + requestId, 'POST', input);
     const first = await created.json<{ api_key: string; name: string }>();
     expect(first.api_key).toMatch(/^sto_[A-Za-z0-9_-]{43}$/);
@@ -36,8 +36,8 @@ describe('Storage in workerd with native SQLite', () => {
     current = await harness();
     await current.connect();
     const active = current;
-    const write = await current.client('quant');
-    const read = await current.client('quant', 'read_only');
+    const write = await current.client('synthetic');
+    const read = await current.client('synthetic', 'read_only');
     const other = await current.client('other');
     const bytes = new TextEncoder().encode('synthetic-object');
     const put = (token: string, headers: Record<string, string>) => active.machine('content?key=datasets/part.bin', token, {
@@ -75,7 +75,7 @@ describe('Storage in workerd with native SQLite', () => {
   it('streams a multi-block 8 MiB object and zero-byte object through native FixedLengthStream', async () => {
     current = await harness();
     await current.connect();
-    const key = await current.client('quant');
+    const key = await current.client('synthetic');
     const bytes = new Uint8Array(8 * 1024 * 1024);
     bytes.fill(97, 0, 4 * 1024 * 1024);
     bytes.fill(98, 4 * 1024 * 1024);
@@ -93,67 +93,43 @@ describe('Storage in workerd with native SQLite', () => {
     }
   });
 
-  it('persists provider tails and replayable page transitions across fresh SQLite DO instances', async () => {
+  it('continues signed provider cursors across fresh SQLite DO instances without a page cache', async () => {
     current = await harness();
     await current.connect();
     const active = current;
-    const key = await current.client('quant', 'read_only');
+    const key = await current.client('synthetic', 'read_only');
     const other = await current.client('other');
-    const file = (index: number) => ({ '.tag': 'file', path_display: '/namespaces/quant/parts/' + String(index), rev: 'abc123', size: 1, content_hash: 'b'.repeat(64) });
+    const file = (index: number) => ({ '.tag': 'file', path_display: '/namespaces/synthetic/parts/' + String(index), rev: 'abc123', size: 1, content_hash: 'b'.repeat(64) });
     current.provider.listPages = [
-      { entries: [...Array.from({ length: 151 }, (_, index) => file(index)), { '.tag': 'folder' }], has_more: true, cursor: 'next-provider' },
-      { entries: Array.from({ length: 51 }, (_, index) => file(151 + index)), has_more: false, cursor: 'done-provider' },
+      { entries: [{ '.tag': 'folder' }], has_more: true, cursor: 'empty-page' },
+      { entries: [...Array.from({ length: 100 }, (_, index) => file(index)), { '.tag': 'folder' }], has_more: true, cursor: 'next-provider' },
+      { entries: Array.from({ length: 51 }, (_, index) => file(100 + index)), has_more: false, cursor: 'done-provider' },
     ];
-    const read = async (cursor = '', pageSize = 100, prefix = 'parts/', token = key.api_key) => {
-      const response = await active.machine('list', token, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prefix, page_size: pageSize, cursor }) });
+    const list = (cursor: string, pageSize = 100, prefix = 'parts/', token = key.api_key) => active.machine('list', token, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prefix, page_size: pageSize, cursor }),
+    });
+    const read = async (cursor = '', pageSize = 100) => {
+      const response = await list(cursor, pageSize);
       expect(response.status).toBe(200);
       return await response.json<{ objects: { key: string }[]; next_cursor: string }>();
     };
-    const first = await read();
+    const empty = await read();
+    expect(empty.objects).toEqual([]);
+    const first = await read(empty.next_cursor);
     expect(first.objects).toHaveLength(100);
     expect(first.next_cursor.length).toBeLessThan(1024);
     await current.restart();
-    expect((await read(first.next_cursor, 10)).objects).toHaveLength(10);
-    const tail = await read(first.next_cursor);
-    expect(tail.objects).toHaveLength(51);
-    expect(current.provider.calls).toHaveLength(1);
-    const second = await read(tail.next_cursor, 50);
-    expect(second.objects).toHaveLength(50);
-    expect(current.provider.calls).toHaveLength(2);
-    await current.restart();
-    expect(await read(tail.next_cursor, 50)).toEqual(second);
-    expect(current.provider.calls).toHaveLength(2);
-    const last = await read(second.next_cursor);
-    expect(last.objects).toHaveLength(1);
+    const last = await read(first.next_cursor);
+    expect(last.objects).toHaveLength(51);
     expect(last.next_cursor).toBe('');
-    expect(new Set([...first.objects, ...tail.objects, ...second.objects, ...last.objects].map((object) => object.key)).size).toBe(202);
+    expect(new Set([...first.objects, ...last.objects].map((object) => object.key)).size).toBe(151);
+    const oversized = await list(first.next_cursor, 50);
+    expect(oversized.status).toBe(503);
+    expect(await oversized.text()).toContain('PROVIDER_RESPONSE_INVALID');
     for (const [prefix, token] of [['other/', key.api_key], ['parts/', other.api_key]]) {
-      const invalid = await active.machine('list', token ?? '', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prefix, cursor: first.next_cursor }) });
-      expect(invalid.status).toBe(400);
+      expect((await list(first.next_cursor, 100, prefix, token)).status).toBe(400);
     }
     await current.owner('dropbox:disconnect', 'POST', {});
-    const disconnected = await current.machine('list', key.api_key, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prefix: 'parts/', cursor: first.next_cursor }) });
-    expect(disconnected.status).toBe(400);
-  });
-
-  it('continues an empty filtered provider page and bounds 51 files to a request for 50', async () => {
-    current = await harness();
-    await current.connect();
-    const key = await current.client('quant', 'read_only');
-    current.provider.listPages = [
-      { entries: [{ '.tag': 'folder' }], has_more: true, cursor: 'empty-page' },
-      { entries: Array.from({ length: 51 }, (_, index) => ({ '.tag': 'file', path_display: '/namespaces/quant/parts/' + String(index), rev: 'abc123', size: 0, content_hash: 'b'.repeat(64) })), has_more: false, cursor: 'end' },
-    ];
-    let cursor = '';
-    const counts = [];
-    do {
-      const response = await current.machine('list', key.api_key, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prefix: 'parts/', cursor, page_size: 50 }) });
-      expect(response.status).toBe(200);
-      const page = await response.json<{ objects: unknown[]; next_cursor: string }>();
-      counts.push(page.objects.length);
-      cursor = page.next_cursor;
-    } while (cursor !== '' && counts.length < 5);
-    expect(counts).toEqual([0, 50, 1]);
-    expect(cursor).toBe('');
+    expect((await list(first.next_cursor)).status).toBe(400);
   });
 });

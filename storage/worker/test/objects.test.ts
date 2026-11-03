@@ -2,10 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Dropbox } from '../src/dropbox.ts';
 import { list, readContent, stat, writeContent } from '../src/objects.ts';
 import type { ClientRow, Connection } from '../src/store.ts';
-import { sqliteStore } from './sqlite.ts';
 
-const client: ClientRow = { id: 'synthetic', label: 'Synthetic', namespace: 'quant', access: 2, token_sha256: 'a'.repeat(64), create_time: 0, revoked: 0 };
-const object = { name: 'file.bin', path_display: '/namespaces/quant/file.bin', rev: 'abc123', size: 3, content_hash: 'b'.repeat(64) };
+const client: ClientRow = { id: 'synthetic', label: 'Synthetic', namespace: 'synthetic', access: 2, token_sha256: 'a'.repeat(64), create_time: 0, revoked: 0 };
+const object = { name: 'file.bin', path_display: '/namespaces/synthetic/file.bin', rev: 'abc123', size: 3, content_hash: 'b'.repeat(64) };
 let provider: Dropbox;
 
 beforeEach(() => {
@@ -20,15 +19,10 @@ function fakeFetch(handler: (url: string, init: RequestInit) => Response | Promi
 }
 
 describe('metadata and binary reads', () => {
-  it('returns a bounded service page when the provider exceeds its approximate limit', async () => {
-    fakeFetch(() => Response.json({ entries: Array.from({ length: 101 }, (_, index) => ({ '.tag': 'file', ...object, path_display: '/namespaces/quant/part-' + String(index) })), has_more: false, cursor: 'synthetic-provider-cursor' }));
-    const cache = sqliteStore();
-    try {
-      const response = await list(new Request('https://storage.example.test/api/storage/v1/list', { method: 'POST', body: JSON.stringify({ page_size: 100 }) }), client, provider, 'a'.repeat(64), cache.store);
-      const page = await response.json<{ objects: unknown[]; next_cursor: string }>();
-      expect(page.objects).toHaveLength(100);
-      expect(page.next_cursor).not.toBe('');
-    } finally { cache.database.close(); }
+  it('fails rather than truncating a provider page above its approximate limit', async () => {
+    fakeFetch(() => Response.json({ entries: Array.from({ length: 101 }, (_, index) => ({ '.tag': 'file', ...object, path_display: '/namespaces/synthetic/part-' + String(index) })), has_more: false, cursor: 'synthetic-provider-cursor' }));
+    await expect(list(new Request('https://storage.example.test/api/storage/v1/list', { method: 'POST', body: JSON.stringify({ page_size: 100 }) }), client, provider, 'a'.repeat(64)))
+      .rejects.toMatchObject({ reason: 'PROVIDER_RESPONSE_INVALID' });
   });
 
   it('returns the complete wire metadata including a zero byte size', async () => {
@@ -69,7 +63,7 @@ describe('metadata and binary reads', () => {
   });
 
   it('never forwards a provider answer for another object or namespace', async () => {
-    for (const path of ['/namespaces/other/file.bin', '/namespaces/quant/other.bin']) {
+    for (const path of ['/namespaces/other/file.bin', '/namespaces/synthetic/other.bin']) {
       let cancelled = false;
       fakeFetch(() => new Response(new ReadableStream({ cancel() { cancelled = true; } }), { headers: { 'dropbox-api-result': JSON.stringify({ ...object, path_display: path }) } }));
       await expect(readContent(new Request('https://storage.example.test/api/storage/v1/content?key=file.bin'), client, provider)).rejects.toMatchObject({ reason: 'PROVIDER_RESPONSE_INVALID' });
@@ -92,7 +86,7 @@ describe('streamed conditional writes', () => {
     vi.stubGlobal('FixedLengthStream', class extends TransformStream<Uint8Array, Uint8Array> { constructor(length: number) { super(); expect(length).toBe(3); } });
     fakeFetch(async (_url, init) => {
       const argument = JSON.parse(new Headers(init.headers).get('dropbox-api-arg') ?? '{}') as Record<string, unknown>;
-      expect(argument).toMatchObject({ path: '/namespaces/quant/file.bin', mode: { '.tag': 'update', update: 'abc123' }, strict_conflict: true, autorename: false });
+      expect(argument).toMatchObject({ path: '/namespaces/synthetic/file.bin', mode: { '.tag': 'update', update: 'abc123' }, strict_conflict: true, autorename: false });
       expect(await new Response(init.body).text()).toBe('abc');
       return Response.json({ ...object, rev: 'def456' });
     });
@@ -110,6 +104,15 @@ describe('streamed conditional writes', () => {
     await expect(writeContent(request(), client, provider)).rejects.toMatchObject({ httpStatus: 429, headers: { 'retry-after': '0' } });
     fakeFetch(() => Response.json({ error: { '.tag': 'path', path: { reason: { '.tag': 'conflict' } } } }, { status: 409 }));
     await expect(writeContent(request(), client, provider)).rejects.toMatchObject({ reason: 'REVISION_CONFLICT', httpStatus: 409 });
+  });
+
+  it('reports a full Dropbox as a distinct non-retryable error rather than unavailable', async () => {
+    vi.stubGlobal('FixedLengthStream', class extends TransformStream<Uint8Array, Uint8Array> { constructor(length: number) { super(); expect(length).toBe(3); } });
+    const request = () => new Request('https://storage.example.test/api/storage/v1/content?key=file.bin', { method: 'PUT', headers: { 'if-none-match': '*', 'content-length': '3' }, body: 'abc' });
+    fakeFetch(() => Response.json({ error_summary: 'path/insufficient_space/..', error: { '.tag': 'path', path: { reason: { '.tag': 'insufficient_space' }, upload_session_id: 'synthetic-upload-session' } } }, { status: 409 }));
+    await expect(writeContent(request(), client, provider)).rejects.toMatchObject({ code: 8, reason: 'INSUFFICIENT_SPACE', httpStatus: 507, headers: {} });
+    fakeFetch(() => Response.json({ error_summary: 'path/insufficient_space/' }, { status: 409 }));
+    await expect(writeContent(request(), client, provider)).rejects.toMatchObject({ reason: 'INSUFFICIENT_SPACE', httpStatus: 507 });
   });
 
   it('rejects short and oversized actual streams rather than trusting Content-Length', async () => {

@@ -88,3 +88,110 @@ describe('separate Dropbox authorization', () => {
     expect(store.connection()).toBeNull();
   });
 });
+
+describe('connections Dropbox already revoked', () => {
+  function provider(token: number, revoke = 200): { readonly store: Memory; readonly dropbox: Dropbox; readonly paths: string[] } {
+    const store = new Memory();
+    store.set('connection', connection);
+    const paths: string[] = [];
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      paths.push(new URL(url).pathname);
+      if (url.endsWith('/oauth2/token')) return Promise.resolve(token === 200 ? Response.json({ access_token: 'synthetic-access-private', expires_in: 3600 }) : new Response(null, { status: token }));
+      return Promise.resolve(new Response(revoke === 200 ? 'null' : null, { status: revoke }));
+    }));
+    return { store, dropbox: new Dropbox(store, {}), paths };
+  }
+
+  it('disconnects without a revoke call when Dropbox refuses the refresh token', async () => {
+    for (const status of [400, 401, 403]) {
+      const { store, dropbox, paths } = provider(status);
+      await dropbox.disconnect();
+      expect(store.connection()).toBeNull();
+      expect(paths).toEqual(['/oauth2/token']);
+    }
+  });
+
+  it('treats a refused revoke as already revoked and keeps the connection after a transient failure', async () => {
+    for (const status of [400, 401, 403]) {
+      const { store, dropbox, paths } = provider(200, status);
+      await dropbox.disconnect();
+      expect(store.connection()).toBeNull();
+      expect(paths).toEqual(['/oauth2/token', '/2/auth/token/revoke']);
+    }
+    for (const [token, revoke] of [[200, 503], [200, 429], [503, 200]] as const) {
+      const { store, dropbox } = provider(token, revoke);
+      await expect(dropbox.disconnect()).rejects.toMatchObject({ code: 14 });
+      expect(store.connection()).toEqual(connection);
+    }
+  });
+
+  it('reconnects only after Dropbox refused the installed authorization', async () => {
+    const valid = provider(200);
+    await expect(valid.dropbox.connect('syntheticappkey', 'https://storage.example.test/api/dropbox/callback')).rejects.toMatchObject({ code: 6 });
+    expect(valid.store.connection()).toEqual(connection);
+    expect(valid.store.get('pending')).toBeNull();
+    const revoked = provider(400);
+    const authorize = new URL(await revoked.dropbox.connect('syntheticappkey', 'https://storage.example.test/api/dropbox/callback'));
+    expect(revoked.store.connection()).toBeNull();
+    expect((revoked.store.get('pending') as { state: string } | null)?.state).toBe(authorize.searchParams.get('state'));
+  });
+});
+
+describe('provider errors for the owner console', () => {
+  it('records only errors Dropbox answered, as a Storage reason and time', async () => {
+    const store = new Memory();
+    store.set('connection', connection);
+    const provider = new Dropbox(store, {});
+    let answer: () => Response = () => Response.json({ error_summary: 'path/not_found/..' }, { status: 409 });
+    vi.stubGlobal('fetch', (url: string) => url.endsWith('/oauth2/token')
+      ? Promise.resolve(Response.json({ access_token: 'synthetic-access-private', expires_in: 3600 })) : Promise.resolve(answer()));
+    const upload = () => provider.upload({ path: '/namespaces/synthetic/file.bin' }, new Blob(['abc']).stream());
+    await expect(provider.json('files/get_metadata', {})).rejects.toMatchObject({ reason: 'NOT_FOUND' });
+    answer = () => Response.json({ error_summary: 'path/conflict/file/..' }, { status: 409 });
+    await expect(upload()).rejects.toMatchObject({ reason: 'REVISION_CONFLICT' });
+    expect(store.get('provider_error')).toBeNull();
+    answer = () => Response.json({ error_summary: 'path/insufficient_space/synthetic-private-detail' }, { status: 409 });
+    await expect(upload()).rejects.toMatchObject({ reason: 'INSUFFICIENT_SPACE', httpStatus: 507 });
+    expect(store.get('provider_error')).toEqual({ reason: 'INSUFFICIENT_SPACE', time: expect.any(Number) as number });
+    answer = () => { throw new TypeError('synthetic network failure'); };
+    await expect(provider.json('files/get_metadata', {})).rejects.toMatchObject({ reason: 'UNAVAILABLE' });
+    expect(store.get('provider_error')).toMatchObject({ reason: 'INSUFFICIENT_SPACE' });
+    answer = () => new Response('synthetic-private-body', { status: 503 });
+    await expect(provider.json('files/get_metadata', {})).rejects.toMatchObject({ reason: 'UNAVAILABLE' });
+    expect(store.get('provider_error')).toMatchObject({ reason: 'UNAVAILABLE' });
+    expect(JSON.stringify(store.get('provider_error'))).not.toContain('synthetic-private');
+    answer = () => new Response('null');
+    await provider.disconnect();
+    expect(store.get('provider_error')).toBeNull();
+  });
+
+  it('writes a repeated reason at most once a minute and a new reason at once', async () => {
+    vi.useFakeTimers();
+    const store = new Memory();
+    store.set('connection', connection);
+    const writes = vi.spyOn(store, 'set');
+    const provider = new Dropbox(store, {});
+    let answer: () => Response = () => new Response(null, { status: 429 });
+    vi.stubGlobal('fetch', (url: string) => url.endsWith('/oauth2/token')
+      ? Promise.resolve(Response.json({ access_token: 'synthetic-access-private', expires_in: 3600 })) : Promise.resolve(answer()));
+    const refused = async (reason: string) => { await expect(provider.json('files/get_metadata', {})).rejects.toMatchObject({ reason }); };
+    const recorded = () => writes.mock.calls.filter(([key]) => key === 'provider_error').map(([, value]) => value);
+    await refused('UNAVAILABLE');
+    await vi.advanceTimersByTimeAsync(59_000);
+    await refused('UNAVAILABLE');
+    expect(recorded()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await refused('UNAVAILABLE');
+    expect(recorded()).toHaveLength(2);
+    answer = () => new Response(null, { status: 400 });
+    await refused('BAD_REQUEST');
+    expect(recorded()).toHaveLength(3);
+    expect(store.get('provider_error')).toEqual({ reason: 'BAD_REQUEST', time: Date.now() });
+    answer = () => new Response('null');
+    await provider.disconnect();
+    answer = () => new Response(null, { status: 400 });
+    store.set('connection', connection);
+    await refused('BAD_REQUEST');
+    expect(store.get('provider_error')).toMatchObject({ reason: 'BAD_REQUEST' });
+  });
+});

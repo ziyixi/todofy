@@ -8,6 +8,8 @@ export const MAX_OBJECT_BYTES = objectLimit;
 export const MAX_CLIENTS = 64;
 export const MAX_PAGE_SIZE = fieldRules(ListObjectsResponseSchema.field.objects).maxItems;
 export const DOMAIN = 'storage.ziyixi.science';
+/** The only Authorization form an application key can take. */
+export const MACHINE_AUTHORIZATION = /^Bearer sto_[A-Za-z0-9_-]{43}$/;
 
 export interface Env {
   readonly STORAGE: DurableObjectNamespace;

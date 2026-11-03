@@ -5,7 +5,7 @@ import { StorageUiService } from '@ziyixi/proto/storage/ui/v1/storage_ui_service
 import { WireJsonError } from '@ziyixi/proto/wire-json';
 import { batchCreate } from './batch.ts';
 import { Dropbox } from './dropbox.ts';
-import { DOMAIN, type Env } from './env.ts';
+import { DOMAIN, MACHINE_AUTHORIZATION, type Env } from './env.ts';
 import { badRequest, errorResponse, failure } from './errors.ts';
 import { digest, hex } from './keys.ts';
 import { list, readContent, stat, writeContent } from './objects.ts';
@@ -25,7 +25,7 @@ export class StorageState extends DurableObject<Env> {
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    this.store = new Store(ctx.storage);
+    this.store = new Store(ctx.storage.sql);
     this.dropbox = new Dropbox(this.store, env);
     void ctx.blockConcurrencyWhile(() => {
       const existing = this.store.get('cursor_key') as string | null;
@@ -37,7 +37,7 @@ export class StorageState extends DurableObject<Env> {
 
   private async machine(request: Request): Promise<Response> {
     const authorization = request.headers.get('authorization') ?? '';
-    if (!/^Bearer sto_[A-Za-z0-9_-]{43}$/.test(authorization)) throw failure(Code.UNAUTHENTICATED, 'UNAUTHORIZED');
+    if (!MACHINE_AUTHORIZATION.test(authorization)) throw failure(Code.UNAUTHENTICATED, 'UNAUTHORIZED');
     const client = this.store.authenticate(await digest(authorization.slice('Bearer '.length)));
     if (client === null) throw failure(Code.UNAUTHENTICATED, 'UNAUTHORIZED');
     const path = new URL(request.url).pathname;
@@ -50,7 +50,7 @@ export class StorageState extends DurableObject<Env> {
     if (path !== '/api/storage/v1/stat' && path !== '/api/storage/v1/list') throw failure(Code.NOT_FOUND, 'NOT_FOUND');
     if (request.method !== 'POST') throw failure(Code.UNIMPLEMENTED, 'METHOD_NOT_ALLOWED', 405);
     if (!/^application\/json(?:\s*;|\s*$)/i.test(request.headers.get('content-type') ?? '')) badRequest();
-    return path === '/api/storage/v1/stat' ? stat(request, client, this.dropbox) : list(request, client, this.dropbox, this.cursorSecret, this.store);
+    return path === '/api/storage/v1/stat' ? stat(request, client, this.dropbox) : list(request, client, this.dropbox, this.cursorSecret);
   }
 
   override async fetch(request: Request): Promise<Response> {

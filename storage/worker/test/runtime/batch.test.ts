@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { URL as NodeURL } from 'node:url';
 import { afterEach, expect, it } from 'vitest';
 import { HASH, harness } from './harness.ts';
 
@@ -20,7 +22,7 @@ function input(files: readonly Item[] = items) {
 async function setup() {
   current = await harness();
   await current.connect();
-  const key = await current.client('quant');
+  const key = await current.client('synthetic');
   return { active: current, token: key.api_key };
 }
 
@@ -45,7 +47,7 @@ it('creates one ordered batch with native streams and three Dropbox requests', a
   ]);
   for (const [index, item] of items.entries()) {
     expect(metadata.objects[index]).toMatchObject({ key: item.key, size_bytes: item.data.byteLength, content_hash: HASH(item.data) });
-    const file = active.provider.files.get('/namespaces/quant/' + item.key);
+    const file = active.provider.files.get('/namespaces/synthetic/' + item.key);
     expect(file?.bytes).toEqual(item.data);
   }
   expect(active.provider.refreshes).toBe(1);
@@ -53,7 +55,7 @@ it('creates one ordered batch with native streams and three Dropbox requests', a
 
 it('rejects unauthenticated and readonly batches before parsing headers or forwarding bytes', async () => {
   const { active } = await setup();
-  const reader = await active.client('quant', 'read_only');
+  const reader = await active.client('synthetic', 'read_only');
   const invalid = { ...input(), headers: { ...input().headers, 'x-storage-batch': '{invalid' } };
   await failure(await active.machine('content', null, invalid), 401, 'UNAUTHORIZED');
   await failure(await active.machine('content', reader.api_key, invalid), 403, 'READ_ONLY');
@@ -98,22 +100,25 @@ it('reuses identical conflicts without overwriting and rejects a different exist
   const different = [items[0], { ...items[1], data: new TextEncoder().encode('different bytes') }];
   await failure(await active.machine('content', token, input(different)), 409, 'REVISION_CONFLICT');
   expect([...active.provider.files.values()].map((file) => file.revision)).toEqual(revisions);
-  expect(active.provider.files.get('/namespaces/quant/' + items[1].key)?.bytes).toEqual(items[1].data);
-  active.provider.folders.add('/namespaces/quant/raw/folder');
+  expect(active.provider.files.get('/namespaces/synthetic/' + items[1].key)?.bytes).toEqual(items[1].data);
+  active.provider.folders.add('/namespaces/synthetic/raw/folder');
   await failure(await active.machine('content', token, input([{ ...items[0], key: 'raw/folder' }])), 409, 'REVISION_CONFLICT');
-  expect(active.provider.folders.has('/namespaces/quant/raw/folder')).toBe(true);
+  expect(active.provider.folders.has('/namespaces/synthetic/raw/folder')).toBe(true);
 });
 
-it.each(['append_partial', 'finish_partial', 'finish_unknown', 'finish_metadata', 'finish_rate'] as const)('does not acknowledge or replay a %s batch', async (fault) => {
+it.each([
+  ['append_partial', 503, 'BATCH_NOT_COMMITTED'], ['finish_partial', 507, 'INSUFFICIENT_SPACE'], ['finish_failure', 503, 'BATCH_INCOMPLETE'],
+  ['finish_unknown', 503, 'BATCH_INCOMPLETE'], ['finish_metadata', 503, 'BATCH_INCOMPLETE'], ['finish_rate', 503, 'BATCH_INCOMPLETE'],
+] as const)('does not acknowledge or replay a %s batch', async (fault, status, reason) => {
   const { active, token } = await setup();
   active.provider.batchFault = fault;
   const response = await active.machine('content', token, input());
-  await failure(response, 503, 'BATCH_INCOMPLETE');
+  await failure(response, status, reason);
   expect(response.headers.get('retry-after')).toBeNull();
   expect(active.provider.calls.filter((call) => call.path.endsWith('/start_batch'))).toHaveLength(1);
   expect(active.provider.calls.filter((call) => call.path.endsWith('/append_batch'))).toHaveLength(1);
   expect(active.provider.calls.filter((call) => call.path.endsWith('/finish_batch_v2'))).toHaveLength(fault === 'append_partial' ? 0 : 1);
-  expect(active.provider.files.size).toBe(fault === 'append_partial' || fault === 'finish_rate' ? 0 : fault === 'finish_partial' ? 1 : 2);
+  expect(active.provider.files.size).toBe(fault === 'append_partial' || fault === 'finish_rate' ? 0 : fault === 'finish_partial' || fault === 'finish_failure' ? 1 : 2);
 });
 
 it.each(['start_rate', 'append_rate'] as const)('preserves an explicit %s rejection before any file commit', async (fault) => {
@@ -126,11 +131,13 @@ it.each(['start_rate', 'append_rate'] as const)('preserves an explicit %s reject
   expect(active.provider.files.size).toBe(0);
 });
 
-it('checks the concatenated hash before committing and keeps old single-object CAS routes', async () => {
+it('refuses a wrong concatenated hash before committing and keeps old single-object CAS routes', async () => {
   const { active, token } = await setup();
   const valid = input();
   const manifest = JSON.parse(valid.headers['x-storage-batch']) as Record<string, unknown>;
-  await failure(await active.machine('content', token, { ...valid, headers: { ...valid.headers, 'x-storage-batch': JSON.stringify({ ...manifest, content_hash: 'f'.repeat(64) }) } }), 503, 'BATCH_INCOMPLETE');
+  // Sending the same batch again cannot succeed, so the definite refusal is not BATCH_NOT_COMMITTED.
+  await failure(await active.machine('content', token, { ...valid, headers: { ...valid.headers, 'x-storage-batch': JSON.stringify({ ...manifest, content_hash: 'f'.repeat(64) }) } }), 400, 'BAD_REQUEST');
+  expect(active.provider.calls.map((call) => call.path)).not.toContain('/2/files/upload_session/finish_batch_v2');
   expect(active.provider.files.size).toBe(0);
   const body = new TextEncoder().encode('mutable head');
   const first = await active.machine('content?key=control/head', token, { method: 'PUT', body, headers: { 'content-length': String(body.byteLength), 'if-none-match': '*' } });
@@ -148,4 +155,62 @@ it('streams the bounded 32-object 32-MiB batch without putting binary bytes in J
   expect((await response.json<{ objects: Metadata[] }>()).objects).toHaveLength(32);
   expect(active.provider.calls).toHaveLength(3);
   expect(active.provider.files.size).toBe(32);
+  // The worst case: every item conflicts and needs its own stat, still within the 50 subrequests of one invocation.
+  const repeated = await active.machine('content', token, input(files));
+  expect(repeated.status).toBe(200);
+  expect(active.provider.calls).toHaveLength(3 + 35);
+});
+
+it('checks every item hash across 4 MiB blocks and refuses different bytes before finish', async () => {
+  const { active, token } = await setup();
+  const block = 4 * 1024 * 1024;
+  const files = [
+    { key: 'raw/multi-block.bin', data: new Uint8Array(block + 5).map((_, index) => index % 251) },
+    { key: 'raw/after-boundary.bin', data: new Uint8Array(block - 3).fill(7) },
+    { key: 'raw/small.bin', data: new TextEncoder().encode('synthetic tail') },
+  ];
+  const response = await active.machine('content', token, input(files));
+  expect(response.status).toBe(200);
+  for (const item of files) {
+    const stored = active.provider.files.get('/namespaces/synthetic/' + item.key)?.bytes ?? new Uint8Array();
+    expect([stored.byteLength, HASH(stored)]).toEqual([item.data.byteLength, HASH(item.data)]);
+  }
+  const swapped = input([{ ...items[0], key: 'raw/swapped-first.bin' }, { ...items[1], key: 'raw/swapped-second.bin' }]);
+  const manifest = JSON.parse(swapped.headers['x-storage-batch']) as { objects: { content_hash: string }[] };
+  const [first, second] = manifest.objects;
+  if (first === undefined || second === undefined) throw new Error('synthetic manifest');
+  [first.content_hash, second.content_hash] = [second.content_hash, first.content_hash];
+  const calls = active.provider.calls.length;
+  await failure(await active.machine('content', token, { ...swapped, headers: { ...swapped.headers, 'x-storage-batch': JSON.stringify(manifest) } }), 400, 'UPLOAD_HASH_MISMATCH');
+  expect(active.provider.calls.slice(calls).map((call) => call.path)).not.toContain('/2/files/upload_session/finish_batch_v2');
+  expect(active.provider.files.has('/namespaces/synthetic/raw/swapped-first.bin')).toBe(false);
+});
+
+it('accepts the contract golden batch unchanged and answers the golden confirmation bytes', async () => {
+  const { active, token } = await setup();
+  const fixture = (name: string) => new NodeURL('../../../../contracts/storage-objects-v1/fixtures/' + name, import.meta.url);
+  const body = new Uint8Array(readFileSync(fixture('body.bin')));
+  const response = await active.machine('content', token, {
+    method: 'POST', body,
+    headers: { 'content-type': 'application/octet-stream', 'content-length': String(body.byteLength), 'x-storage-batch': readFileSync(fixture('manifest.json'), 'utf8') },
+  });
+  expect(response.status).toBe(200);
+  expect(await response.text()).toBe(readFileSync(fixture('response.json'), 'utf8'));
+});
+
+it('shows the newest error Dropbox answered, without provider content, until disconnect', async () => {
+  const { active, token } = await setup();
+  const settings = async () => await (await active.owner('settings')).json<{ last_provider_error?: string; last_provider_error_time?: string }>();
+  expect((await settings()).last_provider_error).toBeUndefined();
+  active.provider.batchFault = 'finish_partial';
+  await failure(await active.machine('content', token, input()), 507, 'INSUFFICIENT_SPACE');
+  const shown = await settings();
+  expect(shown.last_provider_error).toBe('INSUFFICIENT_SPACE');
+  expect(Date.parse(shown.last_provider_error_time ?? '')).toBeGreaterThan(Date.now() - 60_000);
+  expect(JSON.stringify(shown)).not.toContain('insufficient_space');
+  const missing = await active.machine('stat', token, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: 'raw/absent.bin' }) });
+  expect(missing.status).toBe(404);
+  expect((await settings()).last_provider_error).toBe('INSUFFICIENT_SPACE');
+  expect((await active.owner('dropbox:disconnect', 'POST', {})).status).toBe(200);
+  expect((await settings()).last_provider_error).toBeUndefined();
 });
