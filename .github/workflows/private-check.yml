@@ -53,8 +53,16 @@ jobs:
             bazel-9.3.1-${{ runner.os }}-python-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-
             bazel-9.3.1-${{ runner.os }}-workerd-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-
             bazel-9.3.1-${{ runner.os }}-node-
+      # Bazel names every private target and prints failing test logs, so its output stays on the runner.
       - name: Build and test private targets
         run: |
           options=("--repository_cache=$HOME/.cache/personal-cloud-bazel/repository" "--disk_cache=$HOME/.cache/personal-cloud-bazel/actions")
-          bazel build @private//:private "${options[@]}"
-          bazel test @private//:check "${options[@]}"
+          log="$RUNNER_TEMP/private-bazel.log"
+          if ! bazel build @private//:private "${options[@]}" > "$log" 2>&1; then
+            echo "::error::PRIVATE_BUILD_FAILED"
+            exit 1
+          fi
+          if ! bazel test @private//:check "${options[@]}" >> "$log" 2>&1; then
+            echo "::error::PRIVATE_TEST_FAILED"
+            exit 1
+          fi

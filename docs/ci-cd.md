@@ -47,7 +47,9 @@ private commit before updating the parent gitlink. Fork builds without private a
 use the same public graph without an initialized submodule.
 
 The private job restores the public Bazel cache but never saves a cache or uploads build/test artifacts. Public
-cache producers run without the private checkout.
+cache producers run without the private checkout. Its Bazel output stays in a file on the runner because it names
+private targets and prints failing test logs; the public log shows only `PRIVATE_BUILD_FAILED` or
+`PRIVATE_TEST_FAILED`. Reproduce a failure locally with `bazel test @private//:check`.
 
 Private publication is manual. The main-only `Private operations` workflow runs
 [Private release](../.github/workflows/private-release.yml), which delegates to the pinned private entry point and

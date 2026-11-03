@@ -118,6 +118,52 @@ class BazelCI(unittest.TestCase):
             any("upload-artifact@" in step.get("uses", "") for step in steps)
         )
 
+    def test_private_bazel_output_stays_off_the_public_log(self):
+        workflow = workflow_data(ROOT / ".github/workflows/private-check.yml")
+        script = next(
+            step["run"]
+            for step in workflow["jobs"]["check"]["steps"]
+            if step.get("name") == "Build and test private targets"
+        )
+        for failing, code in (
+            ("build", "PRIVATE_BUILD_FAILED"),
+            ("test", "PRIVATE_TEST_FAILED"),
+            ("", ""),
+        ):
+            with (
+                self.subTest(failing=failing),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                temporary = Path(directory)
+                bazel = temporary / "bazel"
+                bazel.write_text(
+                    "#!/bin/sh\n"
+                    'echo "//synthetic-private:target $1"\n'
+                    'echo "synthetic private test log" >&2\n'
+                    f'[ "$1" != "{failing}" ]\n'
+                )
+                bazel.chmod(0o755)
+                result = subprocess.run(
+                    ["bash", "-e", "-c", script],
+                    env={
+                        **os.environ,
+                        "PATH": f"{temporary}{os.pathsep}{os.environ['PATH']}",
+                        "RUNNER_TEMP": str(temporary),
+                        "HOME": str(temporary),
+                    },
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 1 if code else 0)
+                self.assertEqual(
+                    result.stdout + result.stderr, f"::error::{code}\n" if code else ""
+                )
+                self.assertIn(
+                    "synthetic private test log",
+                    (temporary / "private-bazel.log").read_text(),
+                )
+
     def test_public_planning_skips_private_submodule_initialization(self):
         step = next(
             step for step in self.jobs["changes"]["steps"] if step.get("id") == "plan"
