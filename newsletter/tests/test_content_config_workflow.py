@@ -113,7 +113,6 @@ def api_fixture(
 @pytest.mark.parametrize(
     "event_name,event",
     [
-        ("push", {"ref": "refs/heads/main", "after": NEW}),
         ("workflow_dispatch", {}),
         ("workflow_run", {"workflow_run": run_record(OLD)}),
     ],
@@ -128,31 +127,6 @@ def test_config_only_publication_reuses_successful_ancestor_engine(
         "engine_sha": OLD,
     }
     assert all(method == "GET" for method, *_ in api.calls)
-
-
-def test_diverged_configuration_pr_can_validate_without_building_candidate_code(
-    release,
-):
-    api = api_fixture(
-        differences={
-            f"/compare/{NEW}...{PR}": {
-                "status": "diverged",
-                "files": [
-                    {
-                        "filename": (
-                            "newsletter/content-config/policy/editorial.md"
-                        )
-                    }
-                ],
-            }
-        }
-    )
-    event = {"pull_request": {"head": {"sha": PR}, "base": {"sha": NEW}}}
-    assert release.plan(api, "pull_request", event) == {
-        "ready": "true",
-        "revision": PR,
-        "engine_sha": OLD,
-    }
 
 
 @pytest.mark.parametrize(
@@ -171,17 +145,19 @@ def test_diverged_configuration_pr_can_validate_without_building_candidate_code(
         None,
     ],
 )
-def test_mixed_pr_cannot_misrepresent_engine_changes_as_config_only(
+def test_mixed_change_cannot_misrepresent_engine_changes_as_config_only(
     release, file
 ):
     api = api_fixture(
         differences={
-            f"/compare/{NEW}...{PR}": {"status": "ahead", "files": [file]}
+            f"/compare/{OLD}...{NEW}": {"status": "ahead", "files": [file]}
         }
     )
-    event = {"pull_request": {"head": {"sha": PR}, "base": {"sha": NEW}}}
-    assert release.plan(api, "pull_request", event)["ready"] == "false"
-    assert not any("/actions/" in path for _, path, *_ in api.calls)
+    assert release.plan(api, "workflow_dispatch", {}) == {
+        "ready": "false",
+        "reason": "candidate_engine_ci_required",
+    }
+    assert not any("/actions/runs/" in path for _, path, *_ in api.calls)
 
 
 def test_main_engine_change_waits_for_its_own_successful_ci(release):
@@ -195,12 +171,7 @@ def test_main_engine_change_waits_for_its_own_successful_ci(release):
             }
         }
     )
-    assert (
-        release.plan(api, "push", {"ref": "refs/heads/main", "after": NEW})[
-            "ready"
-        ]
-        == "false"
-    )
+    assert release.plan(api, "workflow_dispatch", {})["ready"] == "false"
     api = api_fixture(runs=[run_record(NEW)])
     assert release.plan(
         api, "workflow_run", {"workflow_run": run_record(NEW)}
@@ -234,7 +205,7 @@ def test_post_ci_without_new_image_uses_actual_published_engine(release):
         ("newsletter/src/newsletter/content_config.py", False),
     ],
 )
-def test_config_push_uses_latest_tested_source_for_compatibility(
+def test_config_change_uses_latest_tested_source_for_compatibility(
     release, filename, ready
 ):
     api = api_fixture(
@@ -255,7 +226,7 @@ def test_config_push_uses_latest_tested_source_for_compatibility(
             },
         },
     )
-    result = release.plan(api, "push", {"ref": "refs/heads/main", "after": PR})
+    result = release.plan(api, "workflow_dispatch", {})
     if ready:
         assert result == {"ready": "true", "revision": PR, "engine_sha": OLD}
     else:
@@ -279,12 +250,7 @@ def test_deferred_config_recovers_after_its_no_image_ci_succeeds(release):
         }
     }
     before_ci = api_fixture(current=PR, differences=differences)
-    assert (
-        release.plan(
-            before_ci, "push", {"ref": "refs/heads/main", "after": PR}
-        )["ready"]
-        == "false"
-    )
+    assert release.plan(before_ci, "workflow_dispatch", {})["ready"] == "false"
     after_ci = api_fixture(
         current=PR,
         runs=[run_record(PR), run_record(NEW), run_record(OLD)],
@@ -378,8 +344,6 @@ def test_oversized_compare_cannot_prove_compatibility_or_fail_the_run(
     assert release.plan(
         api, "workflow_run", {"workflow_run": run_record(NEW)}
     ) == {"ready": "false", "reason": "candidate_engine_ci_required"}
-    event = {"pull_request": {"head": {"sha": PR}, "base": {"sha": NEW}}}
-    assert release.plan(api, "pull_request", event)["ready"] == "false"
     # Every other endpoint still fails closed.
     api.opener.open.side_effect = None
     api.opener.open.return_value = io.BytesIO(b" " * (release.MAX_RESPONSE + 1))
@@ -401,17 +365,13 @@ def test_only_successful_main_push_service_ci_is_eligible(release, bad):
 
 
 @pytest.mark.parametrize(
-    "event",
-    [
-        {"ref": "refs/heads/main", "after": OLD},
-        {"ref": "refs/heads/published", "after": NEW},
-    ],
+    "event_name", ["push", "pull_request", "pull_request_target", "schedule"]
 )
-def test_stale_or_wrong_branch_push_never_validates_or_publishes(
-    release, event
-):
+def test_only_main_ci_or_manual_runs_can_plan_publication(release, event_name):
+    # Branch CI validates candidate configuration in its own image.
     api = api_fixture()
-    assert release.plan(api, "push", event)["reason"] == "stale_push"
+    with pytest.raises(release.ReleaseError):
+        release.plan(api, event_name, {"ref": "refs/heads/main", "after": NEW})
     api.request.assert_not_called()
 
 

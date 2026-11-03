@@ -140,9 +140,7 @@ class GitHub:
         return sha(self.request("GET", "/git/ref/heads/main")["object"]["sha"])
 
 
-def config_only_difference(
-    api: GitHub, base: str, head: str, *, pull_request: bool = False
-) -> bool:
+def config_only_difference(api: GitHub, base: str, head: str) -> bool:
     """Check that a complete comparison changes only authored configuration."""
     if base == head:
         return True
@@ -153,15 +151,12 @@ def config_only_difference(
         # commit and passed 2 MiB on 2026-10-14; an unreadable comparison
         # cannot certify compatibility, like a truncated file list below.
         return False
-    # A PR may diverge because main advanced; its merge-base diff still tells
-    # whether that PR changes only configuration. Engine reuse is stricter:
-    # the tested source must be the same commit or an ancestor of the revision.
+    # The tested source must be the same commit or an ancestor of the revision.
     # GitHub caps a compare response at 300 changed files. Treat that boundary
     # conservatively; a truncated list cannot certify engine compatibility.
     files = compared.get("files")
     return bool(
-        compared.get("status")
-        in ({"ahead", "diverged"} if pull_request else {"ahead"})
+        compared.get("status") == "ahead"
         and isinstance(files, list)
         and len(files) < 300
         and all(
@@ -242,39 +237,21 @@ def compatible_engine(api: GitHub, revision: str) -> str | None:
 
 def plan(api: GitHub, event_name: str, event: dict[str, Any]) -> dict[str, str]:
     """Choose a tested engine and reject untested mixed-code releases."""
-    current = api.main()
-    if event_name == "pull_request":
-        revision = sha(event["pull_request"]["head"]["sha"])
-        # Mixed PRs must first validate their new engine in Service CI, whose
-        # image job includes this same offline config validation before release.
-        if not config_only_difference(
-            api,
-            sha(event["pull_request"]["base"]["sha"]),
-            revision,
-            pull_request=True,
+    revision = api.main()
+    if event_name == "workflow_run":
+        run = event.get("workflow_run", {})
+        if (
+            run.get("conclusion") != "success"
+            or run.get("event") != "push"
+            or run.get("head_branch") != "main"
         ):
-            return {"ready": "false", "reason": "candidate_engine_ci_required"}
-        engine = compatible_engine(api, current)
-    else:
-        if event_name == "push" and (
-            event.get("ref") != "refs/heads/main"
-            or sha(event.get("after")) != current
-        ):
-            return {"ready": "false", "reason": "stale_push"}
-        if event_name == "workflow_run":
-            run = event.get("workflow_run", {})
-            if (
-                run.get("conclusion") != "success"
-                or run.get("event") != "push"
-                or run.get("head_branch") != "main"
-            ):
-                return {"ready": "false", "reason": "engine_ci_not_successful"}
-        if event_name not in {"push", "workflow_run", "workflow_dispatch"}:
-            raise ReleaseError("Unsupported configuration workflow event")
-        # A late engine CI may publish a newer config-only main commit, but not
-        # config accompanying another still-untested engine change.
-        revision = current
-        engine = compatible_engine(api, revision)
+            return {"ready": "false", "reason": "engine_ci_not_successful"}
+    elif event_name != "workflow_dispatch":
+        # Branch CI validates candidate configuration in its own image.
+        raise ReleaseError("Unsupported configuration workflow event")
+    # A late engine CI may publish a newer config-only main commit, but not
+    # config accompanying another still-untested engine change.
+    engine = compatible_engine(api, revision)
     if engine is None:
         return {"ready": "false", "reason": "candidate_engine_ci_required"}
     return {"ready": "true", "revision": revision, "engine_sha": engine}
