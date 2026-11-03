@@ -192,7 +192,7 @@ gh workflow run personal-cloud-reconcile.yml --ref main -R "$cloud_repo" -f oper
 | --- | --- |
 | clean | 无需操作 |
 | repairable | 运行 repair，等待实际状态再次核验 |
-| Access/密钥/字段归属变化 | 核对差异；敏感 infra 计划需 `reviewed_apply=true` 和 infra-review 审批 |
+| Access/密钥/字段归属变化 | 核对地址表差异；按对账 Infrastructure 摘要中的 expect 在 main 上运行 Infra apply |
 | 数据库、桶、DO 或 PVC 身份缺失/变化 | 进入恢复，普通 repair 不创建空资源替代 |
 | 修复事务 held/failed | 处理错误后运行下方修复 resume，填写该修复的原 `releases/<UUID>` |
 | 普通发布 held/failed | 处理错误后运行下方 CI resume，填写原发布的完整 SHA |

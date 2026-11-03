@@ -1,16 +1,13 @@
-"""Reconcile permissions and approved-plan identity; all fixtures are synthetic."""
+"""Which drift the reconcile repairs unattended, and where it may run; all fixtures are synthetic."""
 
 import json
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).absolute().parents[1] / "scripts"))
-import infra_state
 import reconcile_policy
-import reviewed_plans
 
 
 class Classification(unittest.TestCase):
@@ -180,27 +177,6 @@ class Classification(unittest.TestCase):
         self.assertFalse(reconcile_policy._unknown_required({"config": {"ingress": [{"hostname": False}]}, "version": True}))
         self.assertTrue(reconcile_policy._unknown_required({"config": {"ingress": [{"hostname": True}]}}))
 
-    def test_fingerprint_binds_actual_authentication_values(self):
-        plan = self.dns()
-        resource = plan["resource_changes"][0]
-        resource["address"] = "cloudflare_zero_trust_access_policy.owner"
-        resource["change"]["after"] = {"require": [{"login_method": {"id": "original"}}]}
-        original = infra_state.exact_fingerprint(plan, "synthetic-passphrase")
-        resource["change"]["after"]["require"][0]["login_method"]["id"] = "different"
-        self.assertNotEqual(original, infra_state.exact_fingerprint(plan, "synthetic-passphrase"))
-
-    def test_fingerprint_ignores_unrelated_noop_d1_size(self):
-        plan = self.dns()
-        noop = {"address": 'cloudflare_d1_database.app["mail-hero"]', "change": {
-            "actions": ["no-op"], "before": {"file_size": 10}, "after": {"file_size": 10}}}
-        plan["resource_changes"].append(noop)
-        first = infra_state.exact_fingerprint(plan, "synthetic-passphrase")
-        noop["change"]["before"]["file_size"] = 40
-        noop["change"]["after"]["file_size"] = 40
-        self.assertEqual(first, infra_state.exact_fingerprint(plan, "synthetic-passphrase"))
-        plan["resource_changes"][0]["change"]["after"]["proxied"] = False
-        self.assertNotEqual(first, infra_state.exact_fingerprint(plan, "synthetic-passphrase"))
-
 
 class Context(unittest.TestCase):
     def env(self):
@@ -226,35 +202,6 @@ class Context(unittest.TestCase):
                                ("head_repository", {"full_name": "fork/cloud"})):
                 event.write_text(json.dumps({"workflow_run": {**run, key: value}}))
                 self.assertEqual(reconcile_policy.context_problem(env), "RECONCILE_SOURCE_UNVERIFIED")
-
-
-class SavedPlan(unittest.TestCase):
-    def test_reviewed_plan_is_bound_to_sha_hash_and_expect(self):
-        with tempfile.TemporaryDirectory() as directory:
-            work = Path(directory)
-            plan = work / "source.tfplan"
-            plan.write_bytes(b"synthetic-encrypted-plan")
-            objects = {}
-
-            def s3(method, key, body=b""):
-                if method == "HEAD":
-                    return (200 if key in objects else 404), b""
-                if method == "PUT":
-                    objects[key] = body
-                    return 200, b""
-                return (200, objects[key]) if key in objects else (404, b"")
-
-            session = SimpleNamespace(passphrase="synthetic-passphrase", work=work, s3=s3)
-            env = {"GITHUB_SHA": "a" * 40, "GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "1"}
-            key = reviewed_plans.save(session, plan, "update=1@synthetic", env)
-            self.assertEqual(reviewed_plans.read(session, key, "update=1@synthetic", env).read_bytes(), plan.read_bytes())
-            for wrong_env, wrong_expect in (({**env, "GITHUB_SHA": "b" * 40}, "update=1@synthetic"),
-                                           (env, "update=2@synthetic")):
-                with self.assertRaises(infra_state.Refused):
-                    reviewed_plans.read(session, key, wrong_expect, wrong_env)
-            objects[key] = b"tampered"
-            with self.assertRaisesRegex(infra_state.Refused, "CONTENT_INVALID"):
-                reviewed_plans.read(session, key, "update=1@synthetic", env)
 
 
 if __name__ == "__main__":

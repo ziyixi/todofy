@@ -1,4 +1,5 @@
-# Inspection is the default. Routine repair is opt-in; sensitive plans require a separate approval.
+# Inspection is the default and routine repair is opt-in. Any other infrastructure change is applied only by
+# "Infra apply", with the expect line this run prints.
 name: Personal cloud reconcile
 
 on:
@@ -28,10 +29,6 @@ on:
         description: Existing releases/UUID, required only for resume
         type: string
         default: ''
-      reviewed_apply:
-        description: Request an approval of this run's exact saved infrastructure plan
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -94,8 +91,6 @@ jobs:
       cancel-in-progress: false
     outputs:
       state: ${{ steps.reconcile.outputs.state }}
-      expect: ${{ steps.reconcile.outputs.expect }}
-      plan_key: ${{ steps.reconcile.outputs.plan_key }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -126,102 +121,13 @@ jobs:
           python3 infra/scripts/infra_state.py reconcile --environment production \
             --github-output "$GITHUB_OUTPUT" "${args[@]}" || status=$?
           if [ "$status" != 0 ] && [ "$status" != 2 ]; then exit "$status"; fi
-      - name: Show the exact plan available for review
+      # The comparison's summary above ends with the "Infra apply" expect line for a plan it does not repair.
+      - name: Show the comparison result
         env:
           PLAN_STATE: ${{ steps.reconcile.outputs.state }}
-          PLAN_EXPECT: ${{ steps.reconcile.outputs.expect }}
-          PLAN_KEY: ${{ steps.reconcile.outputs.plan_key }}
           PLAN_SOURCE: ${{ needs.context.outputs.source_sha }}
         run: |
-          printf 'Infrastructure: %s\n\nSource: `%s`\n\nExpected actions: `%s`\n\nSaved plan: `%s`\n' \
-            "$PLAN_STATE" "$PLAN_SOURCE" "$PLAN_EXPECT" "$PLAN_KEY" >> "$GITHUB_STEP_SUMMARY"
-
-  review-protection:
-    name: Require a protected review environment
-    needs: [context, infra]
-    if: >-
-      ${{ github.event_name == 'workflow_dispatch' && inputs.reviewed_apply
-      && needs.context.outputs.enabled == 'true'
-      && (needs.infra.outputs.state == 'needs_manual' || needs.infra.outputs.state == 'repairable') }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      actions: read
-    steps:
-      - name: Refuse an absent or unprotected infra-review environment
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          protected=$(gh api "repos/$GITHUB_REPOSITORY/environments/infra-review" \
-            --jq '[.protection_rules[] | select(.type == "required_reviewers") | .reviewers | length] | any(. > 0)')
-          test "$protected" = true
-
-  infra-review:
-    name: Approve the saved plan for ${{ needs.context.outputs.source_sha }}
-    needs: [context, infra, review-protection]
-    if: >-
-      ${{ github.event_name == 'workflow_dispatch' && inputs.reviewed_apply
-      && needs.context.outputs.enabled == 'true' && needs.review-protection.result == 'success'
-      && (needs.infra.outputs.state == 'needs_manual' || needs.infra.outputs.state == 'repairable') }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    environment: infra-review
-    steps:
-      - name: Bind this approval to the detection job's exact saved plan
-        env:
-          REVIEWED_PLAN_KEY: ${{ needs.infra.outputs.plan_key }}
-          REVIEWED_EXPECT: ${{ needs.infra.outputs.expect }}
-        run: |
-          test -n "$REVIEWED_PLAN_KEY"
-          test -n "$REVIEWED_EXPECT"
-
-  infra-apply:
-    name: Apply the approved saved infrastructure plan
-    needs: [context, infra, infra-review]
-    if: >-
-      ${{ github.event_name == 'workflow_dispatch' && inputs.reviewed_apply
-      && needs.context.outputs.enabled == 'true' && needs.infra-review.result == 'success'
-      && (needs.infra.outputs.state == 'needs_manual' || needs.infra.outputs.state == 'repairable') }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    environment: production
-    permissions:
-      contents: read
-      actions: read
-    concurrency:
-      group: infra-production
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.context.outputs.source_sha }}
-          persist-credentials: false
-      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
-        with:
-          tofu_version_file: .opentofu-version
-          tofu_wrapper: false
-          github_token: ${{ github.token }}
-      - name: Recheck main and review protection after taking the infrastructure lock
-        env:
-          GH_TOKEN: ${{ github.token }}
-          EXPECTED_SOURCE: ${{ needs.context.outputs.source_sha }}
-        run: |
-          test "$EXPECTED_SOURCE" = "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
-          protected=$(gh api "repos/$GITHUB_REPOSITORY/environments/infra-review" \
-            --jq '[.protection_rules[] | select(.type == "required_reviewers") | .reviewers | length] | any(. > 0)')
-          test "$protected" = true
-      - name: Apply only the still-matching saved plan, then verify no remaining changes
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          INFRA_STATE_PASSPHRASE: ${{ secrets.INFRA_STATE_PASSPHRASE }}
-          INFRA_TFVARS: ${{ secrets.INFRA_TFVARS }}
-          INFRA_REVIEWED_APPLY: reviewed-plan
-          PLAN_KEY: ${{ needs.infra.outputs.plan_key }}
-          PLAN_EXPECT: ${{ needs.infra.outputs.expect }}
-        run: |
-          python3 infra/scripts/infra_state.py approved-apply --environment production \
-            --plan-key "$PLAN_KEY" --expect "$PLAN_EXPECT"
+          printf 'Infrastructure: %s\n\nSource: `%s`\n' "$PLAN_STATE" "$PLAN_SOURCE" >> "$GITHUB_STEP_SUMMARY"
 
   workers:
     name: Compare or repair ${{ matrix.app }}
@@ -347,30 +253,30 @@ jobs:
 
   infra-result:
     name: Require resolved infrastructure drift
-    needs: [context, infra, infra-apply]
+    needs: [context, infra]
     if: >-
       ${{ always() && needs.context.outputs.enabled == 'true'
       && needs.context.outputs.operation != 'resume' && needs.context.outputs.operation != 'record' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Verify the comparison or approved apply resolved the plan
+      - name: Verify the comparison or repair resolved the plan
         env:
           INFRA_STATE: ${{ needs.infra.outputs.state }}
-          INFRA_APPLY_RESULT: ${{ needs.infra-apply.result }}
         run: |
           case "$INFRA_STATE" in
             in_sync|repaired)
               echo 'Infrastructure reconciliation verified.' >> "$GITHUB_STEP_SUMMARY"
               ;;
-            needs_manual|repairable)
-              if [ "$INFRA_APPLY_RESULT" = success ]; then
-                echo 'Infrastructure reconciliation verified after reviewed apply.' >> "$GITHUB_STEP_SUMMARY"
-              else
-                echo '有待人工处理的计划。请检查本次 Infrastructure 摘要，并使用受保护的 reviewed apply 流程。' >> "$GITHUB_STEP_SUMMARY"
-                echo '::error::Infrastructure reconciliation has an unresolved plan.'
-                exit 1
-              fi
+            repairable)
+              echo '有可自动修复的差异。请以 repair 重新运行本对账，或按本次 Infrastructure 摘要中的 expect 运行 Infra apply。' >> "$GITHUB_STEP_SUMMARY"
+              echo '::error::Infrastructure reconciliation has an unresolved plan.'
+              exit 1
+              ;;
+            needs_manual)
+              echo '有待人工处理的计划。请审阅本次 Infrastructure 摘要的地址表，按其中 "Infra apply" 一行处理（通常是在 main 上用该 expect 运行 Infra apply），再以 check 重新运行本对账。' >> "$GITHUB_STEP_SUMMARY"
+              echo '::error::Infrastructure reconciliation has an unresolved plan.'
+              exit 1
               ;;
             *)
               echo '基础设施核对未获得有效结果。请检查本次 Infrastructure job，修正后重新运行。' >> "$GITHUB_STEP_SUMMARY"

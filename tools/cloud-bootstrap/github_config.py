@@ -61,22 +61,12 @@ def initialize(repository: str, *, mode: str = "fresh", call=api) -> dict:
     repo = call("repos/" + repository)
     if not isinstance(repo, dict) or repo.get("default_branch") != "main":
         raise BootstrapError("GITHUB_MAIN_BRANCH_REQUIRED")
-    owner = repo.get("owner", {})
     created = []
-    for name in ("production", "infra-review"):
-        path = "repos/" + repository + "/environments/" + name
-        current = call(path, missing=True)
-        if current is not None:
-            continue
-        if name == "infra-review" and (owner.get("type") != "User" or type(owner.get("id")) is not int):
-            raise BootstrapError("INFRA_REVIEW_OWNER_SELECTION_REQUIRED")
-        body = {"deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True}}
-        if name == "infra-review":
-            body["reviewers"] = [{"type": "User", "id": owner["id"]}]
-            body["prevent_self_review"] = False  # A personal cloud has one owner; review remains explicit.
-        call(path, "PUT", body)
+    path = "repos/" + repository + "/environments/production"
+    if call(path, missing=True) is None:
+        call(path, "PUT", {"deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True}})
         call(path + "/deployment-branch-policies", "POST", {"name": "main", "type": "branch"})
-        created.append(name)
+        created.append("production")
     root = "repos/" + repository
     existing = variable_names(root + "/actions/variables", call)
     existing |= variable_names(root + "/environments/production/variables", call)

@@ -136,7 +136,6 @@ class ReconcileWorkflow(unittest.TestCase):
     def test_runtime_jobs_take_the_existing_locks_and_recheck_main(self):
         for name, group in (
             ("infra", "infra-production"),
-            ("infra-apply", "infra-production"),
             ("vps", "vps-production"),
         ):
             block = job(self.text, name)
@@ -158,96 +157,67 @@ class ReconcileWorkflow(unittest.TestCase):
             'if [ "$status" != 0 ] && [ "$status" != 2 ]; then exit "$status"; fi',
             block,
         )
-        self.assertNotIn("approved-apply", block)
-        self.assertNotIn("INFRA_REVIEWED_APPLY", block)
+        self.assertIn("    outputs:\n      state: ${{ steps.reconcile.outputs.state }}\n    steps:\n", block)
 
-    def test_sensitive_apply_requires_actual_protection_and_this_runs_exact_saved_plan(
-        self,
-    ):
-        protection = job(self.text, "review-protection")
-        self.assertIn(
-            "github.event_name == 'workflow_dispatch' && inputs.reviewed_apply",
-            protection,
-        )
-        self.assertIn("environments/infra-review", protection)
-        self.assertIn("required_reviewers", protection)
-        self.assertIn("actions: read", protection)
-        self.assertIn('test "$protected" = true', protection)
-        review = job(self.text, "infra-review")
-        self.assertIn("environment: infra-review", review)
-        self.assertIn("needs.review-protection.result == 'success'", review)
-        self.assertNotIn("secrets.", review)
-        apply = job(self.text, "infra-apply")
-        self.assertIn("needs: [context, infra, infra-review]", apply)
-        self.assertIn("needs.infra-review.result == 'success'", apply)
-        self.assertIn(
-            "github.event_name == 'workflow_dispatch' && inputs.reviewed_apply", apply
-        )
-        self.assertIn("environment: production", apply)
-        self.assertIn("actions: read", apply)
-        self.assertIn("INFRA_REVIEWED_APPLY: reviewed-plan", apply)
-        self.assertIn("PLAN_KEY: ${{ needs.infra.outputs.plan_key }}", apply)
-        self.assertIn("PLAN_EXPECT: ${{ needs.infra.outputs.expect }}", apply)
-        self.assertIn("approved-apply --environment production", apply)
-        self.assertIn('--plan-key "$PLAN_KEY" --expect "$PLAN_EXPECT"', apply)
-        self.assertIn('test "$protected" = true', apply)
-        self.assertNotIn("tofu apply", apply)
+    def test_infra_apply_is_the_only_approved_infrastructure_write(self):
+        """A plan the routine repair does not cover is applied by "Infra apply" with the expect line the infra job
+        prints; the reconcile keeps no saved plan, approval environment or apply job of its own."""
+        jobs = re.findall(r"(?m)^  ([a-z-]+):$", self.text.split("\njobs:\n", 1)[1])
+        self.assertEqual(jobs, ["context", "infra", "workers", "record-worker", "vps", "inventory", "infra-result"])
+        for forbidden in ("reviewed_apply", "infra-review", "approved-apply", "INFRA_REVIEWED_APPLY", "plan_key",
+                          "infra_state.py apply"):
+            self.assertNotIn(forbidden, self.text)
+        self.assertEqual(self.text.count("infra/scripts/infra_state.py"), 1)
 
-    def test_infrastructure_result_waits_for_review_without_running_during_resume(self):
+    def test_infrastructure_result_runs_after_the_comparison_but_not_during_resume(self):
         block = job(self.text, "infra-result")
-        self.assertIn("needs: [context, infra, infra-apply]", block)
+        self.assertIn("needs: [context, infra]", block)
         self.assertIn("always()", block)
         self.assertIn("needs.context.outputs.enabled == 'true'", block)
         self.assertIn("needs.context.outputs.operation != 'resume'", block)
         self.assertIn("INFRA_STATE: ${{ needs.infra.outputs.state }}", block)
-        self.assertIn("INFRA_APPLY_RESULT: ${{ needs.infra-apply.result }}", block)
         for forbidden in ("environment:", "permissions:", "uses:", "secrets.", "gh api"):
             self.assertNotIn(forbidden, block)
 
     def test_infrastructure_result_rejects_unresolved_or_unknown_states(self):
         block = job(self.text, "infra-result")
         script = textwrap.dedent(block.split("        run: |\n", 1)[1])
-        apply_results = ("success", "skipped", "failure", "cancelled", "")
         cases = (
-            ("in_sync", (0, 0, 0, 0, 0)),
-            ("repaired", (0, 0, 0, 0, 0)),
-            ("needs_manual", (0, 1, 1, 1, 1)),
-            ("repairable", (0, 1, 1, 1, 1)),
-            ("", (1, 1, 1, 1, 1)),
-            ("unknown", (1, 1, 1, 1, 1)),
-            ("$(printf private_marker)", (1, 1, 1, 1, 1)),
+            ("in_sync", 0),
+            ("repaired", 0),
+            ("needs_manual", 1),
+            ("repairable", 1),
+            ("", 1),
+            ("unknown", 1),
+            ("$(printf private_marker)", 1),
         )
-        for state, expected_exits in cases:
-            for apply_result, expected_exit in zip(
-                apply_results, expected_exits, strict=True
+        for state, expected_exit in cases:
+            with (
+                self.subTest(state=state),
+                tempfile.TemporaryDirectory() as directory,
             ):
-                with (
-                    self.subTest(state=state, apply_result=apply_result),
-                    tempfile.TemporaryDirectory() as directory,
-                ):
-                    summary = Path(directory) / "summary.md"
-                    result = subprocess.run(
-                        ["bash", "-e", "-o", "pipefail", "-c", script],
-                        env={
-                            "INFRA_STATE": state,
-                            "INFRA_APPLY_RESULT": apply_result,
-                            "GITHUB_STEP_SUMMARY": str(summary),
-                        },
-                        capture_output=True,
-                        text=True,
-                        check=False,
-                    )
-                    self.assertEqual(result.returncode, expected_exit, result.stderr)
-                    message = summary.read_text()
-                    self.assertTrue(message.strip())
-                    self.assertNotIn("private_marker", message + result.stdout + result.stderr)
-                    if expected_exit == 0:
-                        self.assertIn("Infrastructure reconciliation verified", message)
-                    else:
-                        self.assertIn("::error::", result.stdout)
-                        if state in {"needs_manual", "repairable"}:
-                            self.assertIn("有待人工处理的计划", message)
-                            self.assertIn("reviewed apply", message)
+                summary = Path(directory) / "summary.md"
+                result = subprocess.run(
+                    ["bash", "-e", "-o", "pipefail", "-c", script],
+                    env={"INFRA_STATE": state, "GITHUB_STEP_SUMMARY": str(summary)},
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, expected_exit, result.stderr)
+                message = summary.read_text()
+                self.assertTrue(message.strip())
+                self.assertNotIn("private_marker", message + result.stdout + result.stderr)
+                if expected_exit == 0:
+                    self.assertIn("Infrastructure reconciliation verified", message)
+                else:
+                    self.assertIn("::error::", result.stdout)
+                if state == "needs_manual":
+                    self.assertIn("有待人工处理的计划", message)
+                    self.assertIn("Infra apply", message)
+                if state == "repairable":
+                    self.assertIn("repair", message)
+                    self.assertIn("Infra apply", message)
 
     def test_worker_repair_reuses_last_good_recipe_and_app_locks(self):
         block = job(self.text, "workers")

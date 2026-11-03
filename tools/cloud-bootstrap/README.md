@@ -76,7 +76,7 @@ python3 tools/cloud-bootstrap/bootstrap.py secrets --mode fresh \
 
 `cloud` 先验证 token 所属账户、zone 和 workers.dev 子域，再创建私有 state 桶并运行同一 HCL。已有对象的任何 update/delete 都会拒绝。成功后导出公开 AUD/D1/owned ID 并正常生成配置；部署 token 和 connector token 只写回私有文件。失败可以从同一 prepared 文件继续，不创建另一套资源。
 
-`secrets` 通过 `gh` 的 stdin 写 GitHub `production` secrets，输出 VPS bootstrap 使用的私有 JSON。仅创建缺失的 operation variables：Mail Hero 投递暂停、Todofy 处理暂停、Model Router 不维护；VPS 自动发布、自动修复、网站定时更新初始关闭。已有暂停/维护值不覆盖。缺失 `production` 限定 main；缺失 `infra-review` 在个人仓库要求 owner 显式审核。已有环境保护不修改，组织仓库需自行选择审核人。
+`secrets` 通过 `gh` 的 stdin 写 GitHub `production` secrets，输出 VPS bootstrap 使用的私有 JSON。仅创建缺失的 operation variables：Mail Hero 投递暂停、Todofy 处理暂停、Model Router 不维护；VPS 自动发布、自动修复、网站定时更新初始关闭。已有暂停/维护值不覆盖。缺失的 `production` 限定 main；已有环境保护不修改。
 
 随后按主手册提交公开配置，让同一通过分支检查的 SHA 进入 main，Actions 构建镜像和固定 bundle。
 将新镜像设为公开，再下载该 bundle 执行一次 VPS bootstrap，最后启动首次 VPS 发布。
@@ -126,7 +126,7 @@ python3 tools/cloud-bootstrap/bootstrap.py plan --mode adopt \
 
 `Personal cloud reconcile` 自动修复仅限专用 runtime CNAME 指回同一个 Tunnel、已认证 loopback ingress。认证策略、IdP、邮件 rule、资源 ID、create/delete 和未知 provider shape 都进入人工审核。
 
-检查输出 `state`、`expect`、`plan_key`。敏感变更经 `infra-review` 审核后，只应用该 SHA 的原始加密计划； apply 前再次比较实际变化的 HMAC。正常邮件写入造成的无变更 D1 大小差异不影响审核。根域邮件 DNS、其他 tunnel、其他账号资源不进入修复范围。
+检查输出 `state`，并在 Infrastructure 摘要中给出 Infra apply 可直接使用的 `expect`（动作计数和计划指纹）。其他变更审阅地址表后在 main 上运行 Infra apply；它重新计划，动作和指纹完全一致才应用。正常邮件写入造成的无变更 D1 大小差异不影响指纹。根域邮件 DNS、其他 tunnel、其他账号资源不进入修复范围。
 
 出现权限错误时，在正规 Cloudflare/GitHub 登录页补足对应权限后重新运行原命令，不要把 token 发到聊天，也不要继续尝试绕过。输出只含固定错误码、缺失名称、状态和公开 PR URL；它不证明新账户的真实邮件、Codex 登录或端到端业务已验收。
 

@@ -11,7 +11,7 @@ locks, deployment ordering and live verification.
 | [CI and deploy](../.github/workflows/ci.yml) | Every push; manual dispatch with `app` | Selected checks and artifacts; on `main`, the selected publications, the private application and Home |
 | [Worker release](../.github/workflows/worker-release.yml) | Called by CI and by reconcile | One Worker's locked publication, verification and receipt |
 | [Private Bazel](../.github/workflows/private-check.yml), [Private release](../.github/workflows/private-release.yml) | Called by CI (Private release also by Private operations) | Check and publish the pinned private source |
-| [Personal cloud reconcile](../.github/workflows/personal-cloud-reconcile.yml) | After each successful `main` CI; daily (GitHub often starts it hours late); manual | Compares infrastructure, every Worker, the VPS and resource registration; repairs only when asked or `PERSONAL_CLOUD_AUTO_REPAIR` is on |
+| [Personal cloud reconcile](../.github/workflows/personal-cloud-reconcile.yml) | After each successful `main` CI; daily (GitHub often starts it hours late); manual | Compares infrastructure, every Worker, the VPS and resource registration; repairs only when asked or `PERSONAL_CLOUD_AUTO_REPAIR` is on; for any other infrastructure change, prints the Infra apply `expect` |
 | [Newsletter Content Config](../.github/workflows/content-config.yml) | `main` pushes that touch `newsletter/content-config/`; PRs that touch it, the workflow or its publisher; after each successful CI of a `main` push; manual | Validates the configuration in a released image; on `main`, publishes the bundle when it changed |
 | [Infra drift](../.github/workflows/infra.yml) | `main` pushes that touch `infra/`, its plan summary tool or the workflow; manual | Plan only. Red while the plan has actions; prints the `expect` line for Infra apply |
 | [Infra apply](../.github/workflows/infra-apply.yml) | Manual only | Applies one reviewed infrastructure plan |
@@ -26,7 +26,7 @@ locks, deployment ordering and live verification.
 | Resume a held VPS repair that reconcile started | Personal cloud reconcile, `operation=resume` and its `resume_release` |
 | Check or repair cloud drift | Personal cloud reconcile, `check` or `repair` (Fleet links it) |
 | See the infrastructure plan | Infra drift, dispatched on `main` |
-| Apply an infrastructure change | Infra apply: `expect` from the Infra drift run; `confirm_destructive` only for a reviewed delete, replace or forget |
+| Apply an infrastructure change | Infra apply: `expect` from the Infrastructure summary of Personal cloud reconcile (or Infra drift); `confirm_destructive` only for a reviewed delete, replace or forget |
 | Complete a Worker receipt | Personal cloud reconcile, `record` with `record_app` and `record_deployment_id` |
 | Operate the private application | Private operations, choose `operation` |
 | Update the website from Notion now | Home's 立即同步 |
@@ -35,7 +35,7 @@ locks, deployment ordering and live verification.
 | Send the daily Newsletter | Nothing in Actions: the k3s `newsletter-daily` CronJob runs at 07:00 America/Los_Angeles |
 | Know a delivery is done | CI for the `main` SHA is green, and Personal cloud reconcile for that same SHA ran (not skipped because `main` moved on) and passed, including Require resolved infrastructure drift |
 
-Reconcile's `reviewed_apply` input requests an `infra-review` approval of that run's exact saved plan; see the
+Beyond the reconcile's routine repair, Infra apply is the only write of `infra/` resources; see the
 [infra README](../infra/README.md#apply-p4).
 
 ## Application entrypoints

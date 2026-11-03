@@ -15,7 +15,6 @@ _CONFIG_INPUTS = glob([
     "//infra/scripts:local_tfvars.py",
     "//infra/scripts:platform_export.py",
     "//infra/scripts:reconcile_policy.py",
-    "//infra/scripts:reviewed_plans.py",
     "//infra/tests:test_apply_diagnostics.py",
     "//infra/tests:test_infra_state.py",
     "//infra/tests:test_local_tfvars.py",

@@ -87,16 +87,16 @@ action or fail the drift check. A successful source test is not a current Cloudf
 
 ## Apply (P4)
 
-There are three existing write paths for these resources, all on main and under the same infrastructure lock:
+There are two write paths for these resources, both on main and under the same infrastructure lock:
 
 1. Routine reconcile repairs only the dedicated runtime/API CNAMEs and authenticated loopback Tunnel ingress, preserving
    the Tunnel target and exact route/audience policy in [reconcile_policy.py](scripts/reconcile_policy.py).
-2. Reviewed reconcile applies the original saved plan through the protected `infra-review` environment. Its source
-   revision and current differences must still match the review.
-3. [Infra apply](../.github/workflows/infra-apply.yml) accepts reviewed action counts and the plan fingerprint from
-   the matching drift run. Its destructive-confirmation input is only for an explicitly reviewed retirement.
+2. [Infra apply](../.github/workflows/infra-apply.yml) applies every other change. Its `expect` input is the action
+   counts and plan fingerprint that the reconcile's Infrastructure summary (or the matching drift run) prints for the
+   reviewed address table; it plans again and applies only an identical plan. Its destructive-confirmation input is
+   only for an explicitly reviewed retirement.
 
-Private operations' `infra-apply` is a fourth, separate path: it writes only the private application's own
+Private operations' `infra-apply` is a third, separate path: it writes only the private application's own
 infrastructure, under that application's release lock and its own reviewed plan fingerprint.
 
 Access permissions, identity providers, receiving rules, resource creation/deletion and unknown provider shapes

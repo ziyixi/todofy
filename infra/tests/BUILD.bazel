@@ -88,10 +88,7 @@ unittest_test(
         "../scripts",
     ],
     modules = ["test_reconcile"],
-    deps = [
-        "//infra/scripts:infra_state",
-        "//infra/scripts:reconcile_policy",
-    ],
+    deps = ["//infra/scripts:reconcile_policy"],
 )
 
 py_library(

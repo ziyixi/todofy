@@ -22,10 +22,7 @@ py_library(
 
 py_library(
     name = "infra_state",
-    srcs = [
-        "infra_state.py",
-        "reviewed_plans.py",
-    ],
+    srcs = ["infra_state.py"],
     imports = ["."],
     deps = [
         ":apply_diagnostics",

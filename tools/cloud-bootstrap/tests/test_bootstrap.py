@@ -208,7 +208,7 @@ class GitHub(unittest.TestCase):
                     self.assertEqual(str(caught.exception), "WORKER_SECRET_OWNER_MACHINE_ONLY")
                     self.assertNotIn("synthetic-private-provider", str(caught.exception))
 
-    def test_new_environments_require_owner_review_and_pause_defaults(self):
+    def test_a_new_production_environment_admits_main_and_pause_defaults(self):
         calls = []
 
         def api(path, method="GET", body=None, missing=False):
@@ -222,9 +222,13 @@ class GitHub(unittest.TestCase):
             return {}
 
         result = github_config.initialize("owner/cloud", call=api)
-        review = next(body for path, method, body in calls if method == "PUT" and path.endswith("infra-review"))
-        self.assertEqual(review["reviewers"], [{"type": "User", "id": 7}])
-        self.assertIn("production", result["environments_created"])
+        self.assertEqual(result["environments_created"], ["production"])
+        environments = [(path, body) for path, method, body in calls if method in ("PUT", "POST") and "/environments/" in path]
+        self.assertEqual(environments, [
+            ("repos/owner/cloud/environments/production",
+             {"deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True}}),
+            ("repos/owner/cloud/environments/production/deployment-branch-policies", {"name": "main", "type": "branch"}),
+        ])
         variables = {body["name"]: body["value"] for path, method, body in calls if method == "POST" and path.endswith("variables")}
         self.assertEqual(variables["TODOFY_PROCESSING_PAUSED"], "true")
         self.assertEqual(variables["MAIL_HERO_FORCE_SEND_PAUSED"], "true")

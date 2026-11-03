@@ -827,8 +827,7 @@ def command_plan(args: argparse.Namespace, env: dict[str, str]) -> int:
         if verdict in (EXIT_DRIFT, EXIT_DESTRUCTIVE):
             # Counts and the plan fingerprint (addresses only): the expect input that applies exactly this plan. A
             # reviewer compares it with the line they expected from the address table; never copy a differing line.
-            print(f"infra_state: \"Infra apply\" expect for this plan: "
-                  f"{format_expect(plan_counts(summary), plan_fingerprint(summary))}")
+            print(apply_instruction(summary, refused=False))
         if verdict == EXIT_OK:
             print("infra_state: no changes")
         return verdict
@@ -901,18 +900,6 @@ def plan_fingerprint(summary: dict) -> str:
     return digest[:FINGERPRINT_DIGITS]
 
 
-def exact_fingerprint(plan_json: dict, phrase: str) -> str:
-    """Bind reviewed before/after values without exposing their low-entropy content in a public hash."""
-    resources = [{"address": item.get("address"), "change": item.get("change")}
-                 for item in plan_json.get("resource_changes", [])
-                 if item.get("change", {}).get("actions") != ["no-op"] or item.get("change", {}).get("importing")]
-    document = {"resources": sorted(resources, key=lambda item: item["address"] or ""),
-                "outputs": {name: change for name, change in plan_json.get("output_changes", {}).items()
-                            if change.get("actions") != ["no-op"]}}
-    encoded = json.dumps(document, separators=(",", ":"), sort_keys=True).encode()
-    return hmac.new(phrase.encode(), encoded, hashlib.sha256).hexdigest()[:FINGERPRINT_DIGITS]
-
-
 def format_expect(found: dict[str, int], fingerprint: Optional[str] = None) -> str:
     """plan_counts() and plan_fingerprint() as the expect text "Infra apply" takes (parse_expect round-trips it)."""
     if not found:
@@ -980,7 +967,7 @@ def frozen_violations(plan_json: Any) -> list[str]:
 
 
 def apply_gate(summary: dict, plan_json: Any, expected: dict[str, int], fingerprint: Optional[str],
-               allow_destructive: bool, problems: list[str], exact: Optional[str] = None) -> None:
+               allow_destructive: bool, problems: list[str]) -> None:
     """Refuses (fixed messages, FROZEN addresses, type names, counts and fingerprints only) unless the plan may be
     applied: exactly the reviewed plan, and nothing a gate forbids."""
     if destructive(summary) and not allow_destructive:
@@ -998,7 +985,7 @@ def apply_gate(summary: dict, plan_json: Any, expected: dict[str, int], fingerpr
     if found != expected:
         raise Refused(f"the plan's actions {dict(sorted(found.items()))} are not the expected "
                       f"{dict(sorted(expected.items()))}")
-    actual = exact or plan_fingerprint(summary)
+    actual = plan_fingerprint(summary)
     if found and actual != fingerprint:
         raise Refused(f"the plan's fingerprint {actual} is not the reviewed {fingerprint}: main or "
                       "Cloudflare changed since that \"Infra drift\" run; review a new run before dispatching again")
@@ -1090,19 +1077,35 @@ def command_list_backups(args: argparse.Namespace, env: dict[str, str]) -> int:
 
 def require_apply_context(env: dict[str, str]) -> None:
     """Refuses unless this is the "Infra apply" workflow, dispatched on main, on a GitHub Actions runner."""
-    reviewed_reconcile = (env.get("GITHUB_WORKFLOW") == "Personal cloud reconcile"
-                          and env.get("INFRA_REVIEWED_APPLY") == "reviewed-plan")
     if not (on_actions_runner(env) and env.get("GITHUB_REF") == APPLY_REF
-            and env.get("GITHUB_EVENT_NAME") == APPLY_EVENT
-            and (env.get("GITHUB_WORKFLOW") == APPLY_WORKFLOW or reviewed_reconcile)):
+            and env.get("GITHUB_EVENT_NAME") == APPLY_EVENT and env.get("GITHUB_WORKFLOW") == APPLY_WORKFLOW):
         raise Refused(f"apply runs only in the \"{APPLY_WORKFLOW}\" workflow dispatched on main "
                       "(infra/README.md \"Apply\"); locally, run `plan`")
+
+
+def github_output(path: Optional[Path], state: str) -> None:
+    """The reconcile's verdict for the workflow's result job."""
+    if path is not None:
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(f"state={state}\n")
+
+
+def apply_instruction(summary: dict, refused: bool) -> str:
+    """What the reconcile tells the reviewer to dispatch: the "Infra apply" inputs that apply exactly this plan (the
+    line `plan` prints), or that its gates would refuse the plan whatever the inputs."""
+    if refused:
+        return ("infra_state: \"Infra apply\" would refuse this plan (a type outside ALLOWED_TYPES, a FROZEN object, "
+                "or outputs that differ from a wrangler.toml); change infra/ or the configuration on main first")
+    text = (f"infra_state: \"Infra apply\" expect for this plan: "
+            f"{format_expect(plan_counts(summary), plan_fingerprint(summary))}")
+    if destructive(summary):
+        text += f"; confirm_destructive {CONFIRM_PHRASE} only if the delete, replace or forget above is intended"
+    return text
 
 
 def command_reconcile(args: argparse.Namespace, env: dict[str, str]) -> int:
     from reconcile_policy import context_problem, manual_reasons
     from cloud_profile import load_profile
-    from reviewed_plans import github_output, save
     problem = context_problem(env)
     if problem:
         raise Refused(problem)
@@ -1122,14 +1125,13 @@ def command_reconcile(args: argparse.Namespace, env: dict[str, str]) -> int:
         keys = module.Keys(module.config_keys(str(INFRA)))
         reasons = [{"address": module.safe_address(item["address"], keys), "reason": item["reason"]}
                    for item in reasons]
-        unsafe = bool(type_violations(document) or frozen_violations(document) or problems or reasons or destructive(summary))
+        refused = bool(type_violations(document) or frozen_violations(document) or problems)
+        unsafe = bool(refused or reasons or destructive(summary))
         if unsafe or (getattr(args, "check_only", False) and plan_counts(summary)):
-            expected = format_expect(plan_counts(summary), exact_fingerprint(document, session.passphrase))
-            key = save(session, work / "reconcile.tfplan", expected, env)
             state = "needs_manual" if unsafe else "repairable"
-            github_output(getattr(args, "github_output", None), state, expected, key)
+            report(apply_instruction(summary, refused) + "\n", env)
+            github_output(getattr(args, "github_output", None), state)
             print(json.dumps({"event": "infra_reconcile", "status": state,
-                              "expect": expected, "plan_key": key,
                               "reasons": reasons, "output_mismatch": bool(problems)}, sort_keys=True))
             return EXIT_DRIFT
         if not plan_counts(summary):
@@ -1149,43 +1151,6 @@ def command_reconcile(args: argparse.Namespace, env: dict[str, str]) -> int:
         return EXIT_OK
     finally:
         if session is not None:
-            session.cleanup()
-        if not args.keep_work_dir:
-            shutil.rmtree(work, ignore_errors=True)
-
-
-def command_approved_apply(args: argparse.Namespace, env: dict[str, str]) -> int:
-    from reviewed_plans import read
-    require_apply_context(env)
-    if env.get("GITHUB_WORKFLOW") != "Personal cloud reconcile" or env.get("INFRA_REVIEWED_APPLY") != "reviewed-plan":
-        raise Refused("REVIEWED_APPLY_CONTEXT_INVALID")
-    values = read_values_argument(args.var_file, env)
-    expected, fingerprint = parse_expect(args.expect)
-    work = new_work_dir(args.work_dir, env)
-    session = None
-    try:
-        session = Session(environment=args.environment, values=values, work=work, env=env)
-        session.tofu.init(args.environment)
-        saved = read(session, args.plan_key, args.expect, env)
-        approved = session.tofu.show_json(saved)
-        if exact_fingerprint(approved, session.passphrase) != fingerprint:
-            raise Refused("REVIEWED_PLAN_FINGERPRINT_INVALID")
-        _, summary, rendered, current = session.plan_full("review-current")
-        report(rendered, env)
-        if exact_fingerprint(current, session.passphrase) != fingerprint:
-            raise Refused("REVIEWED_PLAN_CHANGED_REVIEW_AGAIN")
-        apply_gate(summary, current, expected, fingerprint, False, check_outputs(current, env), exact=fingerprint)
-        require_hostname_availability(current, env, values["account_id"])
-        backup_state(session, args.environment, env)
-        session.tofu.apply(saved, diagnostic_plan=approved)
-        code, summary, rendered, current = session.plan_full("verify")
-        report(rendered, env)
-        if code != EXIT_OK or drift_exit(summary) != EXIT_OK or check_outputs(current, env):
-            raise Refused("REVIEWED_APPLY_VERIFY_FAILED")
-        print('{"event":"infra_reconcile","status":"repaired"}')
-        return EXIT_OK
-    finally:
-        if session:
             session.cleanup()
         if not args.keep_work_dir:
             shutil.rmtree(work, ignore_errors=True)
@@ -1402,20 +1367,14 @@ def main(argv: Optional[list[str]] = None) -> int:
     backups = sub.add_parser("list-backups", help="print the keys of the apply's state backups (keys only)")
     backups.add_argument("--environment", default="production", choices=ENVIRONMENTS)
     backups.add_argument("--var-file", type=Path, help=f"values file outside the repository (default: ${VALUES_ENV})")
-    reconcile = sub.add_parser("reconcile", help="repair only supported in-place drift; otherwise require review")
+    reconcile = sub.add_parser("reconcile", help="repair only supported in-place drift; otherwise print the "
+                               "\"Infra apply\" inputs")
     reconcile.add_argument("--environment", default="production", choices=ENVIRONMENTS)
     reconcile.add_argument("--var-file", type=Path)
     reconcile.add_argument("--work-dir", type=Path)
     reconcile.add_argument("--keep-work-dir", action="store_true")
-    reconcile.add_argument("--check-only", action="store_true", help="classify and save drift without repairing")
+    reconcile.add_argument("--check-only", action="store_true", help="classify drift without repairing")
     reconcile.add_argument("--github-output", type=Path)
-    reviewed = sub.add_parser("approved-apply", help="apply the exact signed plan after review, refusing any intervening change")
-    reviewed.add_argument("--environment", default="production", choices=ENVIRONMENTS)
-    reviewed.add_argument("--var-file", type=Path)
-    reviewed.add_argument("--work-dir", type=Path)
-    reviewed.add_argument("--keep-work-dir", action="store_true")
-    reviewed.add_argument("--expect", required=True)
-    reviewed.add_argument("--plan-key", required=True)
     plan = sub.add_parser("plan", help="init + plan against the remote state; print the redacted summary only")
     plan.add_argument("--environment", default="production", choices=ENVIRONMENTS)
     plan.add_argument("--var-file", type=Path, help=f"values file outside the repository (default: ${VALUES_ENV})")
@@ -1431,8 +1390,6 @@ def main(argv: Optional[list[str]] = None) -> int:
             return command_apply(args, env)
         if args.command == "reconcile":
             return command_reconcile(args, env)
-        if args.command == "approved-apply":
-            return command_approved_apply(args, env)
         if args.command == "rotate-passphrase":
             return command_rotate(args, env)
         if args.command == "list-backups":

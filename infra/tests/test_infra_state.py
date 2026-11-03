@@ -1004,6 +1004,9 @@ class ApplyCommand(unittest.TestCase):
             "branch": dict(APPLY_CONTEXT, GITHUB_REF="refs/heads/iac-p4"),
             "push": dict(APPLY_CONTEXT, GITHUB_EVENT_NAME="push"),
             "drift workflow": dict(APPLY_CONTEXT, GITHUB_WORKFLOW="Infra drift"),
+            # The reconcile prints the expect line; it never applies one (its old reviewed apply is gone).
+            "reconcile": dict(APPLY_CONTEXT, GITHUB_WORKFLOW="Personal cloud reconcile",
+                              INFRA_REVIEWED_APPLY="reviewed-plan"),
             "not a runner": {k: v for k, v in APPLY_CONTEXT.items() if k != "GITHUB_ACTIONS"},
         }
         for name, context in contexts.items():
@@ -1022,6 +1025,79 @@ class ApplyCommand(unittest.TestCase):
         self.assertTrue(out.startswith("::add-mask::"))
         rest = "\n".join(line for line in out.splitlines() if not line.startswith("::add-mask::"))
         self.assert_clean(rest + err)
+
+
+class ReconcileCommand(unittest.TestCase):
+    """infra_state.py reconcile as "Personal cloud reconcile" runs it: a plan it does not repair ends with the
+    "Infra apply" inputs that apply exactly that plan, and nothing is saved or written."""
+
+    def run_reconcile(self, document, plan_exit=2):
+        with tempfile.TemporaryDirectory() as directory:
+            fake = FakeTofu(Path(directory))
+            summary_file, output_file = Path(directory) / "summary.md", Path(directory) / "output.txt"
+            env = dict(fake.env, GITHUB_ACTIONS="true", GITHUB_RUN_ID="1", RUNNER_TEMP=directory,
+                       GITHUB_WORKFLOW="Personal cloud reconcile", GITHUB_REF="refs/heads/main",
+                       GITHUB_EVENT_NAME="workflow_dispatch", GITHUB_STEP_SUMMARY=str(summary_file),
+                       CLOUDFLARE_API_TOKEN=TOKEN, INFRA_STATE_PASSPHRASE=PASSPHRASE, INFRA_TFVARS=json.dumps(VALUES),
+                       FAKE_PLAN=fake.fixture("plan", document), FAKE_PLAN_EXIT=str(plan_exit))
+            requests = []
+            out, err = io.StringIO(), io.StringIO()
+            with mock.patch.dict(os.environ, env, clear=True), synthetic_configs(), \
+                    mock.patch.object(infra_state, "cloudflare_get", lambda token, path: fake_fetch(path)), \
+                    mock.patch.object(infra_state, "s3_request", lambda *args, **kwargs: requests.append(args)), \
+                    contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = infra_state.main(["reconcile", "--check-only", "--github-output", str(output_file)])
+            self.assertEqual(requests, [])  # no saved plan, no state backup
+            self.assertNotIn("apply", [call["args"][0] for call in fake.calls()])
+            output = output_file.read_text() if output_file.exists() else ""
+            return code, out.getvalue(), err.getvalue(), summary_file.read_text(), output
+
+    def expect_line(self, text):
+        [line] = [line for line in text.splitlines() if '"Infra apply" expect for this plan: ' in line]
+        return line.split(": ", 2)[2].split(";", 1)[0]
+
+    def test_a_manual_plan_prints_the_expect_that_infra_apply_accepts(self):
+        document = plan((["update"], False), (["no-op"], False))
+        code, out, err, summary, output = self.run_reconcile(document)
+        self.assertEqual(code, 2, err)
+        self.assertEqual(output, "state=needs_manual\n")
+        self.assertIn("`cloudflare_zero_trust_access_policy.owner`", summary)
+        expect = self.expect_line(summary)
+        self.assertEqual(expect, self.expect_line(out))
+        # The same text a reviewer of this address table would dispatch, and it passes Infra apply's gate.
+        self.assertEqual(expect, expect_for(document))
+        infra_state.apply_gate(infra_state.summarize(document)[0], document, *infra_state.parse_expect(expect),
+                               False, [])
+        self.assertNotIn("confirm_destructive", summary)
+        self.assertNotIn("plan_key", out + summary + output)
+        for secret in SECRETS + ("raw output",):
+            self.assertNotIn(secret, "\n".join(line for line in out.splitlines() if not line.startswith("::add-mask::"))
+                             + err + summary)
+
+    def test_a_destructive_plan_names_the_confirmation_too(self):
+        document = plan((["delete"], False), (["no-op"], False))
+        code, _, _, summary, output = self.run_reconcile(document)
+        self.assertEqual(code, 2)
+        self.assertEqual(output, "state=needs_manual\n")
+        expect = self.expect_line(summary)
+        self.assertEqual(expect, expect_for(document))
+        self.assertIn(f"; confirm_destructive {infra_state.CONFIRM_PHRASE} only if", summary)
+        infra_state.apply_gate(infra_state.summarize(document)[0], document, *infra_state.parse_expect(expect),
+                               True, [])
+
+    def test_a_plan_infra_apply_would_refuse_says_so_instead_of_an_expect(self):
+        changed = dict(OUTPUTS, access_aud={"value": {"app": "c" * 64}})
+        code, _, _, summary, output = self.run_reconcile(plan((["update"], False), planned_outputs=changed))
+        self.assertEqual(code, 2)
+        self.assertEqual(output, "state=needs_manual\n")
+        self.assertIn('"Infra apply" would refuse this plan', summary)
+        self.assertNotIn("expect for this plan", summary)
+
+    def test_no_changes_print_no_expect(self):
+        code, out, _, summary, output = self.run_reconcile(plan(*[(["no-op"], False)] * 2), plan_exit=0)
+        self.assertEqual(code, 0)
+        self.assertEqual(output, "state=in_sync\n")
+        self.assertNotIn("Infra apply", out + summary)
 
 
 # A ListObjectsV2 answer: two backups and one key that is not a backup name (counted, never printed).
