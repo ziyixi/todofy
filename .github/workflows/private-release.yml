@@ -84,4 +84,5 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           INFRA_STATE_PASSPHRASE: ${{ secrets.INFRA_STATE_PASSPHRASE }}
           INFRA_TFVARS: ${{ secrets.INFRA_TFVARS }}
-        run: python3 private/ci/release.py
+        # On the command line, an operation the pinned entry point does not know is refused before any action.
+        run: python3 private/ci/release.py --operation "$PRIVATE_RELEASE_OPERATION"
