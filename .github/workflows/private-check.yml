@@ -120,6 +120,11 @@ jobs:
           fi
           if ! bazel test @private//:check "${options[@]}" >> "$log" 2>&1; then
             echo "::error::PRIVATE_TEST_FAILED"
+            # Name each failed target only by a short hash of its label; docs/ci-cd.md shows how to map it back locally.
+            grep -E '^@{1,2}[^/ ]*//[^ ]+ +(FAILED|TIMEOUT|NO STATUS|INCOMPLETE)' "$log" | while read -r label status _; do
+              label=${label#@}; label=${label#@}
+              echo "PRIVATE_TEST_${status} $(printf '%s' "$label" | sha256sum | cut -c1-10)"
+            done || true
             exit 1
           fi
       - name: Select the pinned private release inputs

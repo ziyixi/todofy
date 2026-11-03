@@ -82,7 +82,14 @@ use the same public graph without an initialized submodule.
 The private job restores the public Bazel cache but never saves a cache or uploads build/test artifacts. Public
 cache producers run without the private checkout. Its Bazel output stays in a file on the runner because it names
 private targets and prints failing test logs; the public log shows only fixed `PRIVATE_*` error codes for the
-baseline, build, test and selection steps. Reproduce a failure locally with `bazel test @private//:check`.
+baseline, build, test and selection steps. A failed test step also prints one `PRIVATE_TEST_<STATUS> <hash>` line per
+failed target, where the hash is the first 10 hex digits of the SHA-256 of the target label without its leading `@`.
+Map a hash back locally and rerun that target (a Linux-only target needs a Linux machine):
+
+```sh
+bazel query 'tests(@private//:check)' 2>/dev/null | sed 's/^@*//' | while read -r label; do
+  printf '%s %s\n' "$(printf '%s' "$label" | shasum -a 256 | cut -c1-10)" "$label"; done
+```
 
 Normal private publication is part of the main workflow. The pinned private check uses the same Target Determinator
 and its release dependency graph to select it; documentation changes do not select publication. After the gate and
