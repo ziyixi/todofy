@@ -193,6 +193,39 @@ class ReleaseTests(unittest.TestCase):
                 "tasks", "", False, api, "b" * 40, record_only=True, deployment_id="1"
             )
 
+    def test_record_only_reads_every_job_page_of_a_rerun_main_run(self):
+        saved = {"id": 1, "sha": SHA, "task": "deploy:tasks", "environment": "production",
+                 "payload": {"format": "personal-cloud-release-v1"}}
+        run = {"id": 7, "head_sha": SHA, "head_branch": "main", "event": "push", "status": "completed"}
+
+        def job(identifier, name="Bazel (node)", conclusion="success"):
+            return {"id": identifier, "name": name, "head_sha": SHA, "status": "completed", "conclusion": conclusion}
+
+        first = [job(identifier) for identifier in range(100, 200)]
+        # The gate is the 101st job: one page alone reports it missing and fails closed.
+        for pages, verified in (
+            ([{"total_count": 101, "jobs": first}, {"total_count": 101, "jobs": [job(300, "CI gate")]}], True),
+            ([{"total_count": 101, "jobs": first}, {"total_count": 101, "jobs": [job(300, "CI gate", "failure")]}], False),
+            ([{"total_count": 101, "jobs": first}, {"total_count": 101, "jobs": []}], False),
+            ([{"total_count": 101, "jobs": [*first, job(300, "CI gate")]}], True),
+        ):
+            api = FakeApi([{"object": {"sha": "b" * 40}}, saved, {"status": "ahead", "merge_base_commit": {"sha": SHA}},
+                           {"workflow_runs": [run]}, *pages])
+            with (
+                self.subTest(pages=len(pages), verified=verified),
+                patch.dict(os.environ, {"GITHUB_REPOSITORY": "example/cloud", "GITHUB_SHA": "b" * 40}),
+            ):
+                if verified:
+                    self.assertEqual(prepare("tasks", "", False, api, "b" * 40, record_only=True, deployment_id="1"), SHA)
+                else:
+                    with self.assertRaisesRegex(ReleaseError, "RECEIPT_CI_GATE_NOT_VERIFIED"):
+                        prepare("tasks", "", False, api, "b" * 40, record_only=True, deployment_id="1")
+                listings = [path for path, _ in api.requests if "/jobs?" in path]
+                self.assertEqual(listings, [
+                    f"/repos/example/cloud/actions/runs/7/jobs?filter=latest&per_page=100&page={page}"
+                    for page in range(1, len(pages) + 1)
+                ])
+
     def test_only_latest_single_version_at_full_traffic_is_accepted(self):
         self.assertEqual(
             deployment_version(
