@@ -452,8 +452,30 @@ def validate(
     )
 
 
+def already_published(api: GitHub, parent: str, raw: bytes) -> bool:
+    """Whether the published bundle already carries this configuration.
+
+    Every bundle embeds its source revision and a digest over it, so the raw
+    bytes differ for each main commit. Compare everything else: the schema
+    version, the authored files and the limits the engine derived from them.
+    A published bundle that cannot be read counts as different.
+    """
+    try:
+        current = api.request("GET", f"/contents/bundle.json?ref={parent}")
+        published = json.loads(base64.b64decode(current["content"]))
+        candidate = json.loads(raw)
+    except (ReleaseError, KeyError, TypeError, ValueError, RecursionError):
+        return False
+    if not isinstance(published, dict) or not isinstance(candidate, dict):
+        return False
+    identity = {"revision", "digest"}
+    return {key: published[key] for key in published.keys() - identity} == {
+        key: candidate[key] for key in candidate.keys() - identity
+    }
+
+
 def publish(api: GitHub, revision: str, directory: pathlib.Path) -> bool:
-    """Publish a receipted bundle using stale-main checks and non-force CAS."""
+    """Publish a changed, receipted bundle with stale-main checks and CAS."""
     sha(revision)
     receipt = json.loads((directory / "validation.json").read_bytes())
     bundle = directory / "bundle.json"
@@ -479,6 +501,9 @@ def publish(api: GitHub, revision: str, directory: pathlib.Path) -> bool:
         "GET", f"/git/ref/heads/{PUBLISHED_BRANCH}", missing=True
     )
     parent = sha(previous["object"]["sha"]) if previous else None
+    if parent and already_published(api, parent, raw):
+        print("Skipped publication; the published bundle has this content.")
+        return False
     blob = api.request(
         "POST",
         "/git/blobs",

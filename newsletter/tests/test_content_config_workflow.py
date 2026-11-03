@@ -28,6 +28,13 @@ TREE = "f" * 40
 COMMIT = "1" * 40
 IMAGE = "sha256:" + "2" * 64
 SECRET = "synthetic-private-token-never-print"
+BUNDLE = {
+    "revision": NEW,
+    "digest": "sha256:" + "3" * 64,
+    "synthetic": "image-validated artifact",
+}
+# The same content built from an older main commit.
+PREVIOUS = {**BUNDLE, "revision": OLD, "digest": "sha256:" + "4" * 64}
 
 
 @pytest.fixture
@@ -38,6 +45,11 @@ def release():
     module = util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def encoded(bundle: object) -> dict:
+    content = base64.encodebytes(json.dumps(bundle).encode()).decode()
+    return {"type": "file", "encoding": "base64", "content": content}
 
 
 def run_record(engine: str, **overrides) -> dict:
@@ -422,9 +434,7 @@ def test_untrusted_workflow_run_cannot_start_publication(release, run):
 
 @pytest.fixture
 def artifact(tmp_path):
-    raw = json.dumps(
-        {"revision": NEW, "synthetic": "image-validated artifact"}
-    ).encode()
+    raw = json.dumps(BUNDLE).encode()
     (tmp_path / "bundle.json").write_bytes(raw)
     (tmp_path / "validation.json").write_text(
         json.dumps(
@@ -439,13 +449,22 @@ def artifact(tmp_path):
     return tmp_path
 
 
-def publisher(*, parent: str | None = PARENT, mains: list | None = None):
+def publisher(
+    *,
+    parent: str | None = PARENT,
+    mains: list | None = None,
+    published: object = None,
+):
     calls = []
 
     def request(method, path, value=None, **kwargs):
         calls.append((method, path, value, kwargs))
         if path == "/git/ref/heads/published":
             return {"object": {"sha": parent}} if parent else None
+        if path == f"/contents/bundle.json?ref={parent}" and method == "GET":
+            if isinstance(published, Exception):
+                raise published
+            return published or encoded({"revision": OLD, "synthetic": "old"})
         if path == "/git/blobs":
             return {"sha": BLOB}
         if path == "/git/trees":
@@ -505,6 +524,7 @@ def test_publisher_writes_single_bundle_tree_with_nonforce_parent_cas(
 def test_first_publication_creates_only_published_branch(release, artifact):
     api = publisher(parent=None)
     assert release.publish(api, NEW, artifact)
+    assert not any(path.startswith("/contents") for _, path, *_ in api.calls)
     assert api.calls[-1] == (
         "POST",
         "/git/refs",
@@ -515,6 +535,46 @@ def test_first_publication_creates_only_published_branch(release, artifact):
         value for _, path, value, _ in api.calls if path == "/git/commits"
     )
     assert commit["parents"] == []
+
+
+def test_unchanged_content_is_not_published_again(release, artifact, capsys):
+    # Each bundle embeds its revision and a digest over it; nothing else
+    # differs, so the published branch keeps its commit.
+    api = publisher(published=encoded(PREVIOUS))
+    assert not release.publish(api, NEW, artifact)
+    assert [path for _, path, *_ in api.calls] == [
+        "/git/ref/heads/published",
+        f"/contents/bundle.json?ref={PARENT}",
+    ]
+    assert "Skipped publication" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "published",
+    [
+        encoded({**PREVIOUS, "synthetic": "another artifact"}),
+        encoded({**PREVIOUS, "editorial": {"max_deep": 1}}),
+        encoded({"revision": OLD}),
+        encoded([PREVIOUS]),
+        {"type": "file", "encoding": "base64", "content": "%%%"},
+        {"type": "file", "encoding": "none", "content": ""},
+        {"type": "dir"},
+    ],
+)
+def test_changed_or_unreadable_published_content_is_published(
+    release, artifact, published
+):
+    api = publisher(published=published)
+    assert release.publish(api, NEW, artifact)
+    assert api.calls[-1][:2] == ("PATCH", "/git/refs/heads/published")
+
+
+def test_unavailable_published_bundle_does_not_block_publication(
+    release, artifact
+):
+    api = publisher(published=release.ReleaseError("GitHub request failed"))
+    assert release.publish(api, NEW, artifact)
+    assert api.calls[-1][:2] == ("PATCH", "/git/refs/heads/published")
 
 
 @pytest.mark.parametrize("mains", [[OLD], [NEW, OLD]])
