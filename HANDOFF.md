@@ -52,16 +52,12 @@ Earlier integration and build configuration are in [October 31](docs/history/han
 - Natural Newsletter/send/researcher runs, daily/weekly backup observations, Recall cold archive reads and a complete
   clean-account/clean-VPS historical restore remain distinct from the build migration. Follow each app's verification
   page and [rebuild verification](docs/rebuild-verification.md); do not infer them from uploads or replay real work.
-- Durable Object errors on November 2 (Fleet 135 of 549 requests, Mailsort 46 of 369 in the 22:18 UTC reading)
-  were reviewed from code only; no bug was found and no application change was made. Fleet's count equals its
-  three Ops status calls in each of the 45 Home ticks by then, but also about half of its observer's five-minute
-  receipts, and Mailsort's is within one of its single call per tick, so the counts do not identify a cause; that
-  day's four deploys of each do not fit. No Home status failure is known, but none was checked. Watch and Recall
-  forward Home's status the same way; their absence from that reading proves nothing, as it may have been cut by the
-  old unordered 10-row cap. The item stays open. First read Home's own status records (ok, error, consecutive
-  failures) for the three Fleet entries and Mailsort; once the larger usage caps are live, run a read-only
-  `durableObjectsInvocationsAdaptiveGroups` query by `scriptName` and `status` for Fleet, Mailsort, Watch and
-  Recall. Change Fleet or Mailsort code only after that.
+- Durable Object errors on November 2 are all `clientDisconnected`, none a failed invocation: a read-only
+  `durableObjectsInvocationsAdaptiveGroups` query by `scriptName` and `status` gave Fleet 144, Watch 48, Recall 48,
+  Mailsort 49, Mail Hero 4, with every other invocation `success`. That is one per Home status tick (48 a day) for
+  each Durable Object behind an Ops status entrypoint, three for Fleet: Home closes the call after reading the answer
+  and the object records the disconnect. Home received valid statuses all day, so nothing failed and no application
+  change is needed; the counts only inflate the error column of Home's usage view.
 - Recall phone acceptance is paused by the owner's choice. Stopped scheduler observations remain stopped.
   Do not request device reinstallation or restart retired Compose services for this task.
 - Model Router's Ops currently reports maintenance in `modes` while deriving health from request/backup signals;
