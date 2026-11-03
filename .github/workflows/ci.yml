@@ -154,9 +154,9 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/personal-cloud-bazel
-          key: bazel-9.3.1-${{ runner.os }}-${{ matrix.group }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-${{ github.sha }}
+          key: bazel-9.3.1-${{ runner.os }}-${{ matrix.cache }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-${{ github.sha }}
           restore-keys: |
-            bazel-9.3.1-${{ runner.os }}-${{ matrix.group }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-
+            bazel-9.3.1-${{ runner.os }}-${{ matrix.cache }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: bazel-plan-${{ github.sha }}

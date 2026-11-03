@@ -155,7 +155,7 @@ class BazelCI(unittest.TestCase):
         }
 
         def render(template, *, sha, group="", files=dependencies, runner="Linux"):
-            values = {"runner.os": runner, "github.sha": sha, "matrix.group": group}
+            values = {"runner.os": runner, "github.sha": sha, "matrix.cache": group}
 
             def expression(match):
                 value = match[1].strip()
@@ -180,7 +180,6 @@ class BazelCI(unittest.TestCase):
         for group, producer in (
             ("node", checks),
             ("python", checks),
-            ("go", checks),
             ("workerd", checks),
             ("", planning),
         ):

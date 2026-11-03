@@ -21,7 +21,8 @@ Building a configuration target never applies infrastructure or changes a runnin
 
 The Changes job discovers public `:check` facades and tagged release inputs. Fixed Target Determinator compares their
 Bazel dependency graphs with the selected Git base. CI runs the affected **leaf tests**, grouped by Node, Python,
-Go, browser, workerd, CPU, container and generic checks. It does not run an entire app because one test file changed.
+browser, workerd (three shards), CPU, container and generic checks. It does not run an entire app because one test file
+changed.
 
 Release targets include their production code, assets, static configuration and the publication scripts they use.
 A test-only change does not publish the app. A deployment-script change selects its actual users. Independent units,

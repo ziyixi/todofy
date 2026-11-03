@@ -7,7 +7,7 @@ import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
-from plan import GROUPS
+from plan import GROUPS, cache_family
 
 
 def command(
@@ -24,7 +24,11 @@ def command(
     ]
     args.append(
         "--local_test_jobs="
-        + ("1" if group in ("workerd", "cpu", "browser", "container") else "4")
+        + (
+            "1"
+            if cache_family(group) in ("workerd", "cpu", "browser", "container")
+            else "4"
+        )
     )
     if group == "cpu":
         args.append("--nocache_test_results")

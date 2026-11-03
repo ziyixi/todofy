@@ -23,9 +23,11 @@ libraries; release groups add the execution inputs publication consumes.
 Newsletter/Platform pairing, held VPS resume and exact-SHA green branch artifact reuse. Reuse requires all producers
 and their unexpired artifacts. It skips neither the current cumulative check plan nor production verification.
 
-`run.py` executes one affected group with Bazel. Node/Python/Go checks run up to four at once; workerd, CPU, browser and container
-groups run one at a time. CPU test results are not reused. Repository/action caches are separate by execution group
-and platform. Browser environment preparation is an explicit CI step; owner browser profiles are never used.
+`run.py` executes one affected group with Bazel. Node, Python and generic checks (including Go) run up to four at once;
+workerd, CPU, browser and container groups run one at a time. The serial workerd leaves are dealt round-robin over three
+shards that run on separate runners and share one cache. CPU test results are not reused. Repository/action caches are
+separate by execution group and platform. Browser environment preparation is an explicit CI step; owner browser
+profiles are never used.
 
 ```sh
 python3 -m unittest discover -s tools/bazel/ci
