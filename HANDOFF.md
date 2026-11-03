@@ -14,6 +14,12 @@ documentation-only follow-up describes Home's generated private registration in 
 naming rule to the private repository's own commit subjects and branch names, and names the private check's error
 codes generically. It changes no source, so it publishes no service and no private application.
 
+- Private source in public CI: every job fetches the pinned private commit through the quiet
+  `.github/actions/private-checkout` action and keeps private operation output in a runner-side file, so public logs
+  show only fixed `PRIVATE_*` codes. The scheduled reconcile also compares the private application's live sources with
+  the pinned gitlink (or its newest settled release). Verify after landing: the release, Home and reconcile jobs print
+  no checkout subject, and the next scheduled reconcile reports `PRIVATE_REVISION_MATCHES_PIN`.
+
 ## Latest verified release
 
 Main `9da2d116` passed its complete automatic publication: selected public service publications, the selected
