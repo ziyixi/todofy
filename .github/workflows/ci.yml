@@ -730,20 +730,23 @@ jobs:
             echo "::notice::$tag exists: nothing to publish"
             exit 0
           fi
-          # Every build stamps a new version and commit into manifest.json; the rest is the content users install.
+          # Every build stamps a new version and commit into manifest.json and compiles the version string into
+          # its scripts (RECALL_BUILD); with both masked, the rest is the content users install.
           content_hash() {
             python3 - "$@" <<'PY'
           import hashlib, json, sys, zipfile
           digest = hashlib.sha256()
           for name in sys.argv[1:]:
               with zipfile.ZipFile(name) as archive:
+                  manifest = json.loads(archive.read("manifest.json"))
+                  version = json.dumps(manifest["version"]).encode()
                   for entry in sorted(archive.namelist()):
                       data = archive.read(entry)
                       if entry == "manifest.json":
-                          manifest = json.loads(data)
                           for stamp in ("version", "version_name"):
                               manifest.pop(stamp, None)
                           data = json.dumps(manifest, sort_keys=True).encode()
+                      data = data.replace(version, b'"<version>"')
                       digest.update(entry.encode() + b"\0" + hashlib.sha256(data).digest())
           print(digest.hexdigest())
           PY

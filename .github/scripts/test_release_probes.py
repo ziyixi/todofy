@@ -167,13 +167,16 @@ class RecallExtensionRelease(unittest.TestCase):
             (build / "manifest.json").write_text(json.dumps(manifest))
             for name in (
                 "sw.js",
-                "capture.js",
                 "options.html",
                 "options.js",
                 "options.css",
                 "icons/16.png",
             ):
                 (build / name).write_text("synthetic\n")
+            # esbuild compiles the build version into the injected scripts (RECALL_BUILD).
+            (build / "capture.js").write_text(
+                f"readPage(document, {json.dumps(self.VERSION)});\n"
+            )
             orion = Path(root, "recall-orion")
             shutil.copytree(build, orion)
             orion_manifest = {
@@ -197,6 +200,11 @@ class RecallExtensionRelease(unittest.TestCase):
                                         "version_name": "b" * 7,
                                     }
                                 ).encode()
+                            elif changes is not None:
+                                data = data.replace(
+                                    json.dumps(self.VERSION).encode(),
+                                    json.dumps(self.PREVIOUS).encode(),
+                                )
                             packed.writestr(name, (changes or {}).get(name, data))
 
             for folder, stem in ((build, "recall-extension"), (orion, "recall-orion")):
@@ -342,9 +350,16 @@ class RecallExtensionRelease(unittest.TestCase):
         self.assertEqual(names, [])
 
     def test_changed_content_since_the_latest_release_is_published(self):
-        manifest = {"manifest_version": 3, "name": "recall", "permissions": ["tabs"]}
+        manifest = {
+            "manifest_version": 3,
+            "name": "recall",
+            "version": self.PREVIOUS,
+            "permissions": ["tabs"],
+        }
         for previous in (
             {"sw.js": b"older\n"},
+            # Masking the compiled version must not hide a change beside it.
+            {"capture.js": f"readPage(window, {json.dumps(self.PREVIOUS)});\n".encode()},
             {"manifest.json": json.dumps(manifest).encode()},
         ):
             with self.subTest(changed=next(iter(previous))):
