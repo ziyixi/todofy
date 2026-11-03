@@ -96,7 +96,11 @@ export class Dropbox {
 
   async connect(appKey: string, redirectUri: string): Promise<string> {
     if (!/^[a-z0-9]{8,32}$/.test(appKey)) throw failure(Code.INVALID_ARGUMENT, 'BAD_REQUEST');
-    if (this.store.connection() !== null) throw failure(Code.ALREADY_EXISTS, 'CONNECTION_INVALID');
+    const existing = this.store.connection();
+    if (existing !== null) {
+      if (await this.usableToken() !== null) throw failure(Code.ALREADY_EXISTS, 'CONNECTION_INVALID');
+      this.forget(existing);
+    }
     const pending: PendingConnection = { appKey, redirectUri, state: randomText(), verifier: randomText(48), expires: Date.now() + 15 * 60_000 };
     const challenge = base64UrlEncode(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pending.verifier))));
     this.store.set('pending', pending);
@@ -149,18 +153,35 @@ export class Dropbox {
     try { return await this.refreshing; } finally { this.refreshing = null; }
   }
 
+  /** The access token, or null when Dropbox refused this connection's refresh token. */
+  private async usableToken(): Promise<string | null> {
+    try {
+      return await this.token();
+    } catch (error) {
+      if (error instanceof RpcError && error.reason === 'CONNECTION_INVALID') return null;
+      throw error;
+    }
+  }
+
+  private forget(connection: Connection): void {
+    if (this.store.connection()?.generation === connection.generation) this.store.delete('connection');
+    this.access = null;
+  }
+
   async disconnect(): Promise<void> {
     const connection = this.store.connection();
     this.store.delete('pending');
     if (connection === null) return;
-    const token = await this.token();
-    const response = await this.fetch(this.origins.api + '/2/auth/token/revoke', {
-      method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: 'null',
-    });
-    if (!response.ok) await providerFailure(response);
-    await response.body?.cancel();
-    if (this.store.connection()?.generation === connection.generation) this.store.delete('connection');
-    this.access = null;
+    // A refused refresh token or a 400/401/403 revoke means Dropbox already revoked it; only the local copy remains.
+    const token = await this.usableToken();
+    if (token !== null) {
+      const response = await this.fetch(this.origins.api + '/2/auth/token/revoke', {
+        method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: 'null',
+      });
+      if (!response.ok && response.status !== 400 && response.status !== 401 && response.status !== 403) await providerFailure(response);
+      await response.body?.cancel();
+    }
+    this.forget(connection);
   }
 
   async json(method: 'files/get_metadata' | 'files/list_folder' | 'files/list_folder/continue' | 'files/upload_session/start_batch' | 'files/upload_session/finish_batch_v2', args: unknown): Promise<Record<string, unknown>> {

@@ -88,3 +88,51 @@ describe('separate Dropbox authorization', () => {
     expect(store.connection()).toBeNull();
   });
 });
+
+describe('connections Dropbox already revoked', () => {
+  function provider(token: number, revoke = 200): { readonly store: Memory; readonly dropbox: Dropbox; readonly paths: string[] } {
+    const store = new Memory();
+    store.set('connection', connection);
+    const paths: string[] = [];
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      paths.push(new URL(url).pathname);
+      if (url.endsWith('/oauth2/token')) return Promise.resolve(token === 200 ? Response.json({ access_token: 'synthetic-access-private', expires_in: 3600 }) : new Response(null, { status: token }));
+      return Promise.resolve(new Response(revoke === 200 ? 'null' : null, { status: revoke }));
+    }));
+    return { store, dropbox: new Dropbox(store, {}), paths };
+  }
+
+  it('disconnects without a revoke call when Dropbox refuses the refresh token', async () => {
+    for (const status of [400, 401, 403]) {
+      const { store, dropbox, paths } = provider(status);
+      await dropbox.disconnect();
+      expect(store.connection()).toBeNull();
+      expect(paths).toEqual(['/oauth2/token']);
+    }
+  });
+
+  it('treats a refused revoke as already revoked and keeps the connection after a transient failure', async () => {
+    for (const status of [400, 401, 403]) {
+      const { store, dropbox, paths } = provider(200, status);
+      await dropbox.disconnect();
+      expect(store.connection()).toBeNull();
+      expect(paths).toEqual(['/oauth2/token', '/2/auth/token/revoke']);
+    }
+    for (const [token, revoke] of [[200, 503], [200, 429], [503, 200]] as const) {
+      const { store, dropbox } = provider(token, revoke);
+      await expect(dropbox.disconnect()).rejects.toMatchObject({ code: 14 });
+      expect(store.connection()).toEqual(connection);
+    }
+  });
+
+  it('reconnects only after Dropbox refused the installed authorization', async () => {
+    const valid = provider(200);
+    await expect(valid.dropbox.connect('syntheticappkey', 'https://storage.example.test/api/dropbox/callback')).rejects.toMatchObject({ code: 6 });
+    expect(valid.store.connection()).toEqual(connection);
+    expect(valid.store.get('pending')).toBeNull();
+    const revoked = provider(400);
+    const authorize = new URL(await revoked.dropbox.connect('syntheticappkey', 'https://storage.example.test/api/dropbox/callback'));
+    expect(revoked.store.connection()).toBeNull();
+    expect((revoked.store.get('pending') as { state: string } | null)?.state).toBe(authorize.searchParams.get('state'));
+  });
+});
