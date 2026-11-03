@@ -1,8 +1,9 @@
-# The apply of infra/ (IaC P4, infra/README.md "Apply"). One of the three CI paths that write Cloudflare objects and the
-# remote state; the other two are the routine repair and the reviewed apply of personal-cloud-reconcile.yml.
+# The apply of infra/ (IaC P4, infra/README.md "Apply"). One of the three CI paths that write these Cloudflare objects
+# and the remote state; the other two are the routine repair and the reviewed apply of personal-cloud-reconcile.yml.
+# (Private operations' infra-apply writes only the private application's own infrastructure.)
 # A separate workflow, not a job in infra.yml, because:
-# - its trigger differs: a manual dispatch only, while "Infra drift" runs on pushes and daily. In one workflow every
-#   push or schedule would also have to skip an apply job, and one wrong `if:` would turn a drift run into an apply;
+# - its trigger differs: a manual dispatch only, while "Infra drift" runs on pushes to main. In one workflow every
+#   push would also have to skip an apply job, and one wrong `if:` would turn a drift run into an apply;
 # - infra.yml stays plan-only, and test_infra_workflow.py pins that ("apply" never appears in it);
 # - a dispatch needs inputs (the expected actions, the destructive confirmation) that the drift plan must not have.
 # Manual only, for now: an apply should be watched, and the drift run of the merged commit has already shown its
