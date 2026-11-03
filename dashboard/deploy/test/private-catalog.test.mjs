@@ -79,3 +79,22 @@ test("only Home's declared secrets file is rewritten", () => {
     assert.deepEqual(result.file, secrets)
   }
 })
+
+test('a registration the Worker secrets map carried is deployed as it is, so it is checked the same way', () => {
+  const kept = attach(undefined, { ...SECRETS, PRIVATE_CATALOG: FIXTURE })
+  assert.equal(kept.status, 0, kept.stderr)
+  assert.deepEqual(kept.file, { ...SECRETS, PRIVATE_CATALOG: FIXTURE })
+  assert.equal(kept.stdout + kept.stderr, '')
+  const secrets = { ...SECRETS, PRIVATE_CATALOG: '{"invalid":"synthetic-private-value"}' }
+  for (const raw of [undefined, '']) {
+    const result = attach(raw, secrets)
+    assert.equal(result.status, 1)
+    assert.equal(result.stderr.trim(), 'PRIVATE_CATALOG_INVALID')
+    assert.deepEqual(result.file, secrets)
+    assert.ok(!(result.stdout + result.stderr).includes('synthetic'))
+  }
+  // The PRIVATE_CATALOG secret replaces it.
+  const replaced = attach(FIXTURE, secrets)
+  assert.equal(replaced.status, 0, replaced.stderr)
+  assert.deepEqual(replaced.file, { ...SECRETS, PRIVATE_CATALOG: FIXTURE })
+})

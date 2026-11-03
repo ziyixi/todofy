@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 // The Home release's check of the optional PRIVATE_CATALOG secret, with Home's own parsePrivateCatalog: a value the
 // Worker would refuse at runtime fails this step instead, before the deploy. A valid value is added to the Worker
-// secrets file that deploy-vars.mjs wrote; an empty one adds nothing. Bazel bundles this file into Home's release
-// archive (.compiled/tools/private-catalog.mjs), because the release job has no generated proto sources.
+// secrets file that deploy-vars.mjs wrote; an empty one adds nothing, and a registration that file already holds (the
+// DASHBOARD_WORKER_SECRETS map may carry one) is deployed as it is, so it is checked the same way. Bazel bundles this
+// file into Home's release archive (.compiled/tools/private-catalog.mjs), because the release job has no generated
+// proto sources.
 //
 //   PRIVATE_CATALOG=... node ../.compiled/tools/private-catalog.mjs "$RUNNER_TEMP/home-secrets.json"   (from worker/)
 //
@@ -11,9 +13,12 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import specs from '../../tools/cloud-config/worker-secrets.json' with { type: 'json' }
 import { parsePrivateCatalog, PRIVATE_CATALOG_ERROR } from '../worker/src/private-catalog.ts'
 
-/** Home's materialized secrets with the registration added, or unchanged without one. */
+/** Home's materialized secrets with the registration added, or null when there is none to add. */
 function attach(secrets, raw) {
-  if (raw === undefined || raw === '') return secrets
+  if (raw === undefined || raw === '') {
+    if (secrets?.PRIVATE_CATALOG !== undefined) parsePrivateCatalog(secrets.PRIVATE_CATALOG)
+    return null
+  }
   parsePrivateCatalog(raw)
   // Only the file deploy-vars.mjs wrote for Home: its declared names, each a nonempty string.
   const { required, optional } = specs.home
@@ -32,9 +37,10 @@ if (!path || extra.length) {
   process.exit(2)
 }
 try {
-  if (raw !== undefined && raw !== '') {
+  const secrets = attach(JSON.parse(readFileSync(path, 'utf8')), raw)
+  if (secrets) {
     // Rewriting the owner-only file in place keeps its mode.
-    writeFileSync(path, JSON.stringify(attach(JSON.parse(readFileSync(path, 'utf8')), raw), null, 2) + '\n')
+    writeFileSync(path, JSON.stringify(secrets, null, 2) + '\n')
     console.log('Private registration added to the Worker secrets file (values not printed).')
   }
 } catch {
