@@ -54,7 +54,9 @@ class ReconcileWorkflow(unittest.TestCase):
 
     def test_scheduled_inventory_compares_live_private_sources_without_naming_them(self):
         block = job(self.text, "inventory")
-        self.assertIn("    permissions:\n      contents: read\n      deployments: read\n    steps:\n", block)
+        # Deployment records and CI runs on main, read with the job token only.
+        self.assertIn("    permissions:\n      contents: read\n      actions: read\n      deployments: read\n    steps:\n",
+                      block)
         step = block.split("      - name: Compare the live private sources with the pinned gitlink\n", 1)[1]
         step = step.split("\n      - ", 1)[0]
         self.assertEqual(

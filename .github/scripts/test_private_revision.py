@@ -7,6 +7,7 @@ import json
 import tempfile
 import threading
 import unittest
+import urllib.error
 import urllib.request
 from pathlib import Path
 from unittest.mock import patch
@@ -15,7 +16,7 @@ import private_revision
 from private_revision import Refused
 
 PINNED, RELEASED, OTHER = "a" * 40, "b" * 40, "c" * 40
-SOURCE, PARENT = "d" * 40, "e" * 40
+SOURCE, PARENT, SETTLED, NEWER = "d" * 40, "e" * 40, "1" * 40, "2" * 40
 HOST = "synthetic-private.example.invalid"
 REPOSITORY = "synthetic-owner/synthetic-repository"
 
@@ -127,13 +128,17 @@ class LiveSources(unittest.TestCase):
     def test_a_degraded_json_answer_still_reports_identities_but_needs_both(self):
         sources, _, _ = self.probe(answer(503, identities(status="degraded")))
         self.assertEqual(sources, {PINNED})
-        sources, _, _ = self.probe(answer(503, identities(collector="", status="degraded")))
-        self.assertEqual(sources, "PRIVATE_REVISION_UNAVAILABLE")
+        # A briefly unreachable collector reports no identity; it is retried like a gateway error.
+        unreachable = answer(503, identities(collector="", status="degraded"))
+        sources, paths, sleeps = self.probe(unreachable, answer(document=identities()))
+        self.assertEqual((sources, len(paths), sleeps), ({PINNED}, 2, [10]))
+        sources, paths, _ = self.probe(*[unreachable] * 3)
+        self.assertEqual((sources, len(paths)), ("PRIVATE_REVISION_UNAVAILABLE", 3))
 
     def test_gateway_errors_retry_a_bounded_number_of_times(self):
         sources, paths, sleeps = self.probe(answer(502, body=b"gateway"), answer(504, body=b"gateway"),
                                             answer(document=identities()))
-        self.assertEqual((sources, len(paths), sleeps), ({PINNED}, 3, [5, 5]))
+        self.assertEqual((sources, len(paths), sleeps), ({PINNED}, 3, [10, 10]))
         sources, paths, _ = self.probe(*[answer(503, content_type="text/html", body=b"<html>")] * 3)
         self.assertEqual((sources, len(paths)), ("PRIVATE_REVISION_UNAVAILABLE", 3))
 
@@ -160,7 +165,20 @@ class LiveSources(unittest.TestCase):
         with self.assertRaisesRegex(Refused, "^PRIVATE_REVISION_UNAVAILABLE$"):
             private_revision.live_sources(url, urllib.request.build_opener(urllib.request.ProxyHandler({})),
                                           sleeps.append)
-        self.assertEqual(sleeps, [5, 5])
+        self.assertEqual(sleeps, [10, 10])
+
+
+class GitHubApi(unittest.TestCase):
+    def test_a_redirect_is_refused_without_sending_the_token_on(self):
+        with FakeService([answer(document={})]) as target, FakeService([]) as api:
+            api.responses.append(answer(302, headers={"Location": target.url}))
+            environment = {"GITHUB_API_URL": api.url.removesuffix("/healthz"), "GH_TOKEN": "synthetic-token"}
+            with (patch.dict("os.environ", environment), patch.object(urllib.request, "getproxies", return_value={}),
+                  self.assertRaises(urllib.error.HTTPError) as raised):
+                private_revision.github("/repos/" + REPOSITORY + "/deployments")
+            raised.exception.close()
+        self.assertEqual(api.paths, [("/repos/" + REPOSITORY + "/deployments", "Bearer synthetic-token", None)])
+        self.assertEqual(target.paths, [])
 
 
 class Comparison(unittest.TestCase):
@@ -175,6 +193,11 @@ class Comparison(unittest.TestCase):
         self.statuses = [{"state": "success"}, {"state": "in_progress"}]
         self.comparison = {"status": "ahead"}
         self.contents = {"type": "submodule", "sha": RELEASED}
+        # The newest successful main push run of CI, at a later commit pinning the current gitlink.
+        self.runs = {"workflow_runs": [self.ci_run(SETTLED)]}
+        self.settled_on_source = {"status": "ahead"}
+        self.release_before_settled = {"status": "ahead"}
+        self.settled_contents = {"type": "submodule", "sha": PINNED}
 
         def git(root, *arguments):
             self.assertEqual(root, "selected-source")
@@ -185,6 +208,10 @@ class Comparison(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
+    @staticmethod
+    def ci_run(head, **extra):
+        return {"head_sha": head, "head_branch": "main", "event": "push", "conclusion": "success", **extra}
+
     def api(self, path):
         self.calls.append(path)
         base = "/repos/" + REPOSITORY
@@ -193,6 +220,11 @@ class Comparison(unittest.TestCase):
             base + "/deployments/41/statuses?per_page=10": self.statuses,
             base + f"/compare/{PARENT}...{SOURCE}?per_page=1": self.comparison,
             base + f"/contents/private?ref={PARENT}": self.contents,
+            base + "/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=5": self.runs,
+            base + f"/compare/{NEWER}...{SOURCE}?per_page=1": {"status": "behind"},
+            base + f"/compare/{SETTLED}...{SOURCE}?per_page=1": self.settled_on_source,
+            base + f"/compare/{PARENT}...{SETTLED}?per_page=1": self.release_before_settled,
+            base + f"/contents/private?ref={SETTLED}": self.settled_contents,
         }
         value = responses[path]
         if isinstance(value, Exception):
@@ -220,11 +252,45 @@ class Comparison(unittest.TestCase):
 
     def test_an_unpublished_pin_matches_the_newest_verified_release_on_this_main(self):
         self.assertEqual(self.check(RELEASED), "PRIVATE_REVISION_MATCHES_RELEASE")
-        self.assertEqual(len(self.calls), 4)
+        self.assertEqual(len(self.calls), 8)
         self.calls.clear()
         self.statuses = [{"state": "inactive"}, {"state": "success"}]
         self.comparison = {"status": "identical"}
+        self.settled_on_source = {"status": "identical"}
+        self.release_before_settled = {"status": "identical"}
+        # A successful run for a newer main than this source is skipped.
+        self.runs = {"workflow_runs": [self.ci_run(NEWER), self.ci_run(SETTLED)]}
         self.assertEqual(self.check(RELEASED), "PRIVATE_REVISION_MATCHES_RELEASE")
+
+    def test_a_pin_no_successful_run_has_settled_since_the_release_is_pending(self):
+        cases = [
+            # The pin advanced, and no successful run has decided whether it needed a publication.
+            ("settled_contents", {"type": "submodule", "sha": RELEASED}),
+            ("runs", {"workflow_runs": []}),
+            ("runs", {"workflow_runs": [self.ci_run(NEWER)]}),
+            ("settled_on_source", {"status": "behind"}),
+            # A later failed run published a source that no successful run has settled.
+            ("release_before_settled", {"status": "behind"}),
+        ]
+        for name, value in cases:
+            with self.subTest(name=name, value=value):
+                original = getattr(self, name)
+                setattr(self, name, value)
+                try:
+                    self.assertEqual(self.check(RELEASED), "PRIVATE_REVISION_RELEASE_PENDING")
+                finally:
+                    setattr(self, name, original)
+
+    def test_malformed_run_answers_are_invalid(self):
+        for value in ({}, {"workflow_runs": [{"head_sha": SETTLED}]}, {"workflow_runs": [self.ci_run(7)]},
+                      {"workflow_runs": [self.ci_run(SETTLED, event="workflow_dispatch")]},
+                      {"workflow_runs": [self.ci_run(SETTLED, conclusion="failure")]}):
+            with self.subTest(value=value):
+                self.runs = value
+                self.assertEqual(self.check(RELEASED), "PRIVATE_REVISION_RECORD_INVALID")
+        self.runs = {"workflow_runs": [self.ci_run(SETTLED)]}
+        self.settled_contents = {"type": "submodule", "sha": PINNED.upper()}
+        self.assertEqual(self.check(RELEASED), "PRIVATE_REVISION_RECORD_INVALID")
 
     def test_mixed_or_other_live_sources_are_a_mismatch(self):
         for live in ((PINNED, RELEASED), (OTHER,), (RELEASED, OTHER)):
