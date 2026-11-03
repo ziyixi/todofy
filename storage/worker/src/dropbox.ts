@@ -8,6 +8,7 @@ import type { Connection, PendingConnection, Store } from './store.ts';
 const DROPBOX = { authorize: 'https://www.dropbox.com', api: 'https://api.dropboxapi.com', content: 'https://content.dropboxapi.com' } as const;
 const SCOPES = 'files.metadata.read files.content.read files.content.write';
 const PROVIDER_TIMEOUT = 30_000;
+const PROVIDER_ERROR_WRITE_INTERVAL = 60_000;
 
 export function endpoints(env: Pick<Env, 'DEV_AUTH_BYPASS' | 'DEV_DROPBOX_ORIGIN'>): { readonly authorize: string; readonly api: string; readonly content: string } {
   const origin = env.DEV_DROPBOX_ORIGIN ?? '';
@@ -78,6 +79,7 @@ export class Dropbox {
   private readonly origins: ReturnType<typeof endpoints>;
   private access: { readonly token: string; readonly expires: number; readonly generation: string } | null = null;
   private refreshing: Promise<string> | null = null;
+  private recorded: ProviderError | null = null;
 
   constructor(store: Pick<Store, 'get' | 'set' | 'delete' | 'connection'>, env: Pick<Env, 'DEV_AUTH_BYPASS' | 'DEV_DROPBOX_ORIGIN'>) { this.store = store; this.origins = endpoints(env); }
 
@@ -103,7 +105,12 @@ export class Dropbox {
 
   /** Keeps the newest error Dropbox answered for the owner console; a network failure may be the caller's own stream. */
   recordFailure(error: RpcError): RpcError {
-    this.store.set('provider_error', { reason: error.reason, time: Date.now() } satisfies ProviderError);
+    // The console shows the newest reason and an approximate time, so a burst of one reason writes one row a minute.
+    const now = Date.now();
+    if (this.recorded?.reason !== error.reason || now - this.recorded.time >= PROVIDER_ERROR_WRITE_INTERVAL) {
+      this.recorded = { reason: error.reason, time: now };
+      this.store.set('provider_error', this.recorded);
+    }
     return error;
   }
 
@@ -155,6 +162,7 @@ export class Dropbox {
     const connection: Connection = { appKey: pending.appKey, refreshToken: response.refresh_token, generation: crypto.randomUUID() };
     this.store.set('connection', connection);
     this.store.delete('provider_error');
+    this.recorded = null;
     this.access = null;
   }
 
@@ -194,6 +202,7 @@ export class Dropbox {
     if (this.store.connection()?.generation === connection.generation) {
       this.store.delete('connection');
       this.store.delete('provider_error');
+      this.recorded = null;
     }
     this.access = null;
   }

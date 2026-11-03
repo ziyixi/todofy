@@ -164,4 +164,34 @@ describe('provider errors for the owner console', () => {
     await provider.disconnect();
     expect(store.get('provider_error')).toBeNull();
   });
+
+  it('writes a repeated reason at most once a minute and a new reason at once', async () => {
+    vi.useFakeTimers();
+    const store = new Memory();
+    store.set('connection', connection);
+    const writes = vi.spyOn(store, 'set');
+    const provider = new Dropbox(store, {});
+    let answer: () => Response = () => new Response(null, { status: 429 });
+    vi.stubGlobal('fetch', (url: string) => url.endsWith('/oauth2/token')
+      ? Promise.resolve(Response.json({ access_token: 'synthetic-access-private', expires_in: 3600 })) : Promise.resolve(answer()));
+    const refused = async (reason: string) => { await expect(provider.json('files/get_metadata', {})).rejects.toMatchObject({ reason }); };
+    const recorded = () => writes.mock.calls.filter(([key]) => key === 'provider_error').map(([, value]) => value);
+    await refused('UNAVAILABLE');
+    await vi.advanceTimersByTimeAsync(59_000);
+    await refused('UNAVAILABLE');
+    expect(recorded()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await refused('UNAVAILABLE');
+    expect(recorded()).toHaveLength(2);
+    answer = () => new Response(null, { status: 400 });
+    await refused('BAD_REQUEST');
+    expect(recorded()).toHaveLength(3);
+    expect(store.get('provider_error')).toEqual({ reason: 'BAD_REQUEST', time: Date.now() });
+    answer = () => new Response('null');
+    await provider.disconnect();
+    answer = () => new Response(null, { status: 400 });
+    store.set('connection', connection);
+    await refused('BAD_REQUEST');
+    expect(store.get('provider_error')).toMatchObject({ reason: 'BAD_REQUEST' });
+  });
 });
