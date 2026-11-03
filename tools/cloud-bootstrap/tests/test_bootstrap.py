@@ -252,22 +252,8 @@ class GitHub(unittest.TestCase):
         self.assertEqual(github_config.initialize("owner/cloud", call=api), {"environments_created": [], "variables_created": []})
         self.assertFalse(writes)
 
-    def test_adoption_preserves_an_absent_website_schedule_flag(self):
-        writes = []
-
-        def api(path, method="GET", body=None, missing=False):
-            if method != "GET":
-                writes.append(body)
-                return {}
-            if path == "repos/owner/cloud":
-                return {"default_branch": "main", "owner": {"id": 7, "type": "User"}}
-            if "/variables?" in path:
-                return {"variables": []}
-            return {"protection_rules": [{"type": "required_reviewers"}]}
-
-        result = github_config.initialize("owner/cloud", mode="adopt", call=api)
-        self.assertNotIn("WEBSITE_SCHEDULED_RECONCILE", result["variables_created"])
-        self.assertNotIn("WEBSITE_SCHEDULED_RECONCILE", [body["name"] for body in writes])
+    def test_the_retired_website_schedule_flag_is_never_created(self):
+        self.assertNotIn("WEBSITE_SCHEDULED_RECONCILE", github_config.DEFAULT_VARIABLES)
 
 
 class Cloud(unittest.TestCase):

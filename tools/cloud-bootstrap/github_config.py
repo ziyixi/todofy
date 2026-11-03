@@ -17,7 +17,6 @@ DEFAULT_VARIABLES = {
     "TODOFY_PROCESSING_PAUSED": "true",
     "VPS_DEPLOY_ENABLED": "false",
     "PERSONAL_CLOUD_AUTO_REPAIR": "false",
-    "WEBSITE_SCHEDULED_RECONCILE": "false",
 }
 
 
@@ -72,8 +71,6 @@ def initialize(repository: str, *, mode: str = "fresh", call=api) -> dict:
     existing |= variable_names(root + "/environments/production/variables", call)
     variables = []
     for name, value in DEFAULT_VARIABLES.items():
-        if mode == "adopt" and name == "WEBSITE_SCHEDULED_RECONCILE":
-            continue  # Existing website schedules interpret an absent variable as enabled.
         if name not in existing:
             call(root + "/actions/variables", "POST", {"name": name, "value": value})
             variables.append(name)
