@@ -116,6 +116,11 @@ Production acceptance on 2026-10-30 UTC used the existing Alarm, with no manual 
 This verifies actual Gmail application and optional accounting independently. No message content was read for the
 acceptance, and no mail was sent, deleted, marked read or reclassified from a valid historical verdict.
 
+The one-time requeue was removed on 2026-11-02, after this acceptance. A requeued mail kept its earlier no-model
+counts on the day it failed and was counted again when classified, so running it again (for example after a restore
+from an older backup) would count those mails twice. The 12 recovered decisions and their recorded counts stay as
+they are; the stored marker is no longer read. Terminal model failures stay frozen, as for any later failure.
+
 ## History
 
 - 2026-10-24: a one-off comparison of six Claude configurations on 100 private messages (one request each, about
