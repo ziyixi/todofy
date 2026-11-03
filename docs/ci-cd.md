@@ -11,7 +11,7 @@ locks, deployment ordering and live verification.
 | [CI and deploy](../.github/workflows/ci.yml) | Every push; manual dispatch with `app` | Selected checks and artifacts; on `main`, the selected publications, the private application and Home |
 | [Worker release](../.github/workflows/worker-release.yml) | Called by CI and by reconcile | One Worker's locked publication, verification and receipt |
 | [Private Bazel](../.github/workflows/private-check.yml), [Private release](../.github/workflows/private-release.yml) | Called by CI (Private release also by Private operations) | Check and publish the pinned private source |
-| [Personal cloud reconcile](../.github/workflows/personal-cloud-reconcile.yml) | After each successful `main` CI; daily (GitHub often starts it hours late); manual | Compares infrastructure, every Worker, the VPS and resource registration; repairs only when asked or `PERSONAL_CLOUD_AUTO_REPAIR` is on; for any other infrastructure change, prints the Infra apply `expect` |
+| [Personal cloud reconcile](../.github/workflows/personal-cloud-reconcile.yml) | After each successful `main` CI; daily (GitHub often starts it hours late); manual | Compares infrastructure, the VPS and resource registration, and in daily and manual runs every Worker; repairs only when asked or `PERSONAL_CLOUD_AUTO_REPAIR` is on; for any other infrastructure change, prints the Infra apply `expect` |
 | [Newsletter Content Config](../.github/workflows/content-config.yml) | `main` pushes that touch `newsletter/content-config/`; PRs that touch it, the workflow or its publisher; after each successful CI of a `main` push; manual | Validates the configuration in a released image; on `main`, publishes the bundle when it changed |
 | [Infra apply](../.github/workflows/infra-apply.yml) | Manual only | Applies one reviewed infrastructure plan |
 | [Private operations](../.github/workflows/private-ops.yml) | Manual only | Private infrastructure, k3s, publication and verification operations |
@@ -32,7 +32,7 @@ locks, deployment ordering and live verification.
 | Recover or rebuild the website | Website release, `recovery` or `bootstrap` |
 | Change Newsletter content | Edit `newsletter/content-config/` and push to `main`; Newsletter Content Config publishes it when the bundle changed |
 | Send the daily Newsletter | Nothing in Actions: the k3s `newsletter-daily` CronJob runs at 07:00 America/Los_Angeles |
-| Know a delivery is done | CI for the `main` SHA is green, and Personal cloud reconcile for that same SHA ran (not skipped because `main` moved on) and passed, including Require resolved infrastructure drift |
+| Know a delivery is done | CI for the `main` SHA is green (its release jobs verify each Worker they publish), and Personal cloud reconcile for that same SHA ran (not skipped because `main` moved on) and passed, including Require resolved infrastructure drift |
 
 Beyond the reconcile's routine repair, Infra apply is the only write of `infra/` resources; see the
 [infra README](../infra/README.md#apply-p4).
@@ -146,6 +146,8 @@ The existing bootstrap, draining, admission and persistence rules continue to ap
 
 After merging the same green SHA, wait for its main publication **and** matching Personal cloud reconcile. A branch
 check, image build or upload alone does not prove production is running the revision or that drift is resolved.
+The reconcile after CI does not compare Workers: CI's release jobs verify the Workers it publishes, and every Worker is
+compared in the daily run or a manual `check`.
 
 ## Local use
 

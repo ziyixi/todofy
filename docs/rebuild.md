@@ -184,7 +184,8 @@ gh workflow run personal-cloud-reconcile.yml --ref main -R "$cloud_repo" -f oper
 gh workflow run personal-cloud-reconcile.yml --ref main -R "$cloud_repo" -f operation=repair
 ```
 
-每日和成功发布后也执行检查。`PERSONAL_CLOUD_AUTO_REPAIR=true` 开放常规自动修复，首次上线先保持 false。
+每日和成功发布后也执行检查；成功发布后的检查不比对 Worker（CI 已核验它发布的 Worker），全部 Worker 在每日和手动运行时比对。
+`PERSONAL_CLOUD_AUTO_REPAIR=true` 开放常规自动修复，首次上线先保持 false。
 各服务与正常发布共用锁，锁内重新确认目标。Worker 使用最后一次核验成功的源码；VPS 修复当前已接受的 release，另建事务和排空 ID。
 无差异时跳过部署和重启。Fleet 显示检查时间、差异和下一步，Home 提醒仍可关闭。
 

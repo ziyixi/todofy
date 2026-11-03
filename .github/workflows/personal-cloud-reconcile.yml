@@ -132,7 +132,10 @@ jobs:
   workers:
     name: Compare or repair ${{ matrix.app }}
     needs: context
-    if: needs.context.outputs.enabled == 'true' && needs.context.outputs.operation != 'resume' && needs.context.outputs.operation != 'record'
+    # Daily and on dispatch only: after CI, each Worker it published was already verified by its own release job.
+    if: >-
+      ${{ needs.context.outputs.enabled == 'true' && github.event_name != 'workflow_run'
+      && needs.context.outputs.operation != 'resume' && needs.context.outputs.operation != 'record' }}
     strategy:
       fail-fast: false
       max-parallel: 3

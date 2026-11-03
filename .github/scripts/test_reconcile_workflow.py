@@ -235,6 +235,13 @@ class ReconcileWorkflow(unittest.TestCase):
         self.assertIn("secrets: inherit", block)
         self.assertIn("website-relay", block)
 
+    def test_worker_comparisons_run_daily_and_on_dispatch_but_not_after_ci(self):
+        """CI's release jobs verify each Worker they publish; comparing every Worker after each main CI raced the ones
+        still deploying. Infrastructure, VPS and registration still follow each successful main CI."""
+        self.assertIn("github.event_name != 'workflow_run'", job(self.text, "workers"))
+        for name in ("infra", "vps", "inventory", "infra-result"):
+            self.assertNotIn("workflow_run", job(self.text, name))
+
     def test_every_worker_app_is_compared_from_its_first_deploy_on(self):
         """The matrix covers every release app and excludes only CHECK_ONLY apps. Namespace capture may
         remain FIRST_DEPLOY_PENDING through the first release; it does not disable that app's reconciliation."""
