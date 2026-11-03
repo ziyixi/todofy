@@ -1,15 +1,8 @@
 name: Newsletter Content Config
 
+# Branch CI already validates the configuration inside the candidate image (Bazel's newsletter container test), so
+# publication waits for a successful main CI; a manual run retries it.
 on:
-  push:
-    branches: [main]
-    paths: ['newsletter/content-config/**']
-  pull_request:
-    branches: [main]
-    paths:
-      - 'newsletter/content-config/**'
-      - '.github/workflows/content-config.yml'
-      - 'newsletter/scripts/publish_content_config.py'
   workflow_run:
     workflows: [CI and deploy]
     types: [completed]
@@ -22,7 +15,7 @@ permissions:
 # Publication is serialized. An old run also checks the current main SHA before
 # updating published; a late engine build must never roll configuration back.
 concurrency:
-  group: newsletter-content-config-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'publish' }}
+  group: newsletter-content-config-publish
   cancel-in-progress: false
 
 jobs:
@@ -37,7 +30,7 @@ jobs:
       validated: ${{ steps.validate.outputs.validated }}
       revision: ${{ steps.plan.outputs.revision }}
     steps:
-      # Only the default branch's tooling executes on the runner. Candidate PR
+      # Only the default branch's tooling executes on the runner. The configuration
       # files are mounted as read-only data into an already-tested service image.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -84,7 +77,7 @@ jobs:
 
   publish:
     needs: validate
-    if: github.event_name != 'pull_request' && needs.validate.outputs.validated == 'true'
+    if: needs.validate.outputs.validated == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:

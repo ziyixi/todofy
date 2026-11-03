@@ -802,16 +802,13 @@ def test_workflow_permissions_and_event_isolation_are_least_privilege():
         "actions": "read",
     }
     assert config["jobs"]["publish"]["permissions"] == {"contents": "write"}
-    assert (
-        "github.event_name != 'pull_request'" in config["jobs"]["publish"]["if"]
-    )
-    assert config["on"]["push"] == {
-        "branches": ["main"],
-        "paths": ["newsletter/content-config/**"],
-    }
+    # Branch CI validates candidate configuration in its own image (below), so
+    # only a successful main CI or a manual run reaches publication.
+    assert set(config["on"]) == {"workflow_run", "workflow_dispatch"}
     assert config["on"]["workflow_run"]["workflows"] == ["CI and deploy"]
     assert config["on"]["workflow_run"]["branches"] == ["main"]
-    assert "pull_request_target" not in config["on"]
+    validate_if = config["jobs"]["validate"]["if"]
+    assert "github.event.workflow_run.conclusion == 'success'" in validate_if
     assert service["jobs"]["checks"]["if"] == (
         "needs.changes.outputs.has_checks == 'true'"
     )
