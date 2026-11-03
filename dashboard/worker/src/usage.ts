@@ -22,22 +22,26 @@ export const GRAPHQL_MAX_BYTES = 1_000_000;
  * returned (errors, subrequests, CPU quantiles, DO requests per script) and the per-resource rows. The
  * `ai` dataset (Workers AI neurons by model, same day window as `workers`) was added on 2026-09-30 after
  * the owner checked `aiInferenceAdaptiveGroups` with these filters and fields on the live account: it is
- * part of this one request, so a tick still makes a single GraphQL call.
+ * part of this one request, so a tick still makes a single GraphQL call. On 2026-11-02 only the `limit`
+ * values of the per-resource datasets were raised above the account's resources (13 Durable Object classes
+ * and 14 buckets had been cut at 10; R2 operations are one row per bucket and action, free actions
+ * included); those values are not yet verified on the live account. No `orderBy` was added, as none was
+ * checked there: rows stay unordered, and a dataset that fills its cap is still marked truncated.
  */
 export const USAGE_QUERY = `query($a: string!, $day: Date!, $start: Time!, $end: Time!, $month: Date!) { viewer { accounts(filter: {accountTag: $a}) {
   workers: workersInvocationsAdaptive(limit: 50, filter: {datetime_geq: $start, datetime_leq: $end}) { sum { requests errors subrequests } dimensions { scriptName } quantiles { cpuTimeP50 cpuTimeP99 } }
   d1: d1AnalyticsAdaptiveGroups(limit: 10, filter: {date: $day}) { sum { rowsRead rowsWritten readQueries writeQueries } dimensions { databaseId } }
   d1s: d1StorageAdaptiveGroups(limit: 10, filter: {date: $day}) { max { databaseSizeBytes } dimensions { databaseId } }
-  doInv: durableObjectsInvocationsAdaptiveGroups(limit: 10, filter: {date: $day}) { sum { requests errors } dimensions { scriptName } }
-  doPer: durableObjectsPeriodicGroups(limit: 10, filter: {date: $day}) { sum { activeTime rowsRead rowsWritten cpuTime storageDeletes storageReadUnits storageWriteUnits } dimensions { namespaceId } }
+  doInv: durableObjectsInvocationsAdaptiveGroups(limit: 25, filter: {date: $day}) { sum { requests errors } dimensions { scriptName } }
+  doPer: durableObjectsPeriodicGroups(limit: 25, filter: {date: $day}) { sum { activeTime rowsRead rowsWritten cpuTime storageDeletes storageReadUnits storageWriteUnits } dimensions { namespaceId } }
   doSto: durableObjectsStorageGroups(limit: 5, filter: {date: $day}) { max { storedBytes } }
-  r2ops: r2OperationsAdaptiveGroups(limit: 50, filter: {date_geq: $month, date_leq: $day}) { sum { requests } dimensions { actionType bucketName } }
-  r2sto: r2StorageAdaptiveGroups(limit: 10, filter: {date: $day}) { max { payloadSize metadataSize objectCount } dimensions { bucketName } }
+  r2ops: r2OperationsAdaptiveGroups(limit: 250, filter: {date_geq: $month, date_leq: $day}) { sum { requests } dimensions { actionType bucketName } }
+  r2sto: r2StorageAdaptiveGroups(limit: 25, filter: {date: $day}) { max { payloadSize metadataSize objectCount } dimensions { bucketName } }
   ai: aiInferenceAdaptiveGroups(limit: 20, filter: {datetime_geq: $start, datetime_leq: $end}) { sum { totalNeurons } dimensions { modelId } }
 } } }`;
 
 /** The `limit` of each dataset in USAGE_QUERY: a dataset returning this many rows is truncated. */
-const DATASET_LIMITS = { workers: WORKERS_QUERY_LIMIT, d1: 10, d1s: 10, doInv: 10, doPer: 10, doSto: 5, r2ops: 50, r2sto: 10, ai: 20 } as const;
+export const DATASET_LIMITS = { workers: WORKERS_QUERY_LIMIT, d1: 10, d1s: 10, doInv: 25, doPer: 25, doSto: 5, r2ops: 250, r2sto: 25, ai: 20 } as const;
 type Dataset = keyof typeof DATASET_LIMITS;
 /**
  * Datasets whose absence (not an array), or whose own GraphQL error (an `errors` entry whose path is
@@ -91,7 +95,7 @@ export interface ResourceUsage {
 export interface UsageData {
   readonly rows: QuotaRow[];
   readonly unclassified_r2_operations: number;
-  /** Scripts of `workers` or `doInv`, most requests first (at most WORKERS_QUERY_LIMIT + doInv's 10). */
+  /** Scripts of `workers` or `doInv`, most requests first (at most WORKERS_QUERY_LIMIT + doInv's 25). */
   readonly scripts: ScriptUsage[];
   /** `workers` returned WORKERS_QUERY_LIMIT rows: more scripts may have run. */
   readonly workers_truncated: boolean;

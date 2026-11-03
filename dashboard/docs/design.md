@@ -85,7 +85,11 @@ text. One failed source does not erase another source's evidence.
 
 The frozen [reviewed query](../worker/test/fixtures/usage-query-reviewed.graphql) preserves the September 29
 field/filter baseline, the September 30 Workers AI dataset addition and the reviewed Worker row cap of 50 from the
-original design. `usage.test.ts` compares the runtime query with it verbatim after whitespace normalization.
+original design. On November 2 the Durable Object and R2 storage caps rose from 10 to 25 and the R2 operation cap
+from 50 to 250, above the account's 13 object classes and 14 buckets (R2 operations are one row per bucket and
+action, free actions included). Only `limit` values changed and rows stay unordered; no `orderBy` was added
+because none was checked on the live account. A dataset that fills its cap is still shown as a lower bound.
+`usage.test.ts` compares the runtime query with it verbatim after whitespace normalization.
 This preserves a reviewed reference, not a new live-account verification; current execution is in `usage.ts`.
 
 Usage is one GraphQL query per tick, and at most once per minute on an owner refresh. Non-200/error/malformed,

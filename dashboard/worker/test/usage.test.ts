@@ -5,6 +5,7 @@ import { QUOTA_RESOURCES } from '../src/idl.ts';
 import { ALLOWANCES } from '../src/limits.ts';
 import limitsDoc from '../../docs/limits.md?raw';
 import {
+  DATASET_LIMITS,
   GRAPHQL_URL,
   R2_ASSUMED_CLASS_A,
   R2_CLASS_A,
@@ -35,6 +36,11 @@ describe('the usage query', () => {
   it('matches the frozen reviewed query verbatim', () => {
     expect(reviewedQuery.trim()).not.toBe('');
     expect(normalise(USAGE_QUERY)).toBe(normalise(reviewedQuery));
+  });
+
+  it('marks a dataset truncated at the same row limit the query asks for', () => {
+    const asked = Object.fromEntries([...USAGE_QUERY.matchAll(/(\w+): \w+\(limit: (\d+),/g)].map(([, name = '', limit]) => [name, Number(limit)]));
+    expect(asked).toEqual(DATASET_LIMITS);
   });
 
   it('asks for the UTC day so far and the UTC month to date', () => {
@@ -145,10 +151,31 @@ describe('parseUsage', () => {
   });
 
   it('marks a dataset that returned as many rows as its limit as truncated', () => {
-    const r2Ops = Array.from({ length: 50 }, (_, i) => ({ actionType: 'GetObject', bucketName: `b${String(i)}`, requests: 1 }));
-    const rows = parseUsage(graphqlBody({ r2Ops }), NOW)?.rows ?? [];
-    expect(row(rows, 'r2_class_b')).toMatchObject({ used: 50, truncated: true });
+    const r2Ops = (count: number) => Array.from({ length: count }, (_, i) => ({ actionType: 'GetObject', bucketName: `b${String(i)}`, requests: 1 }));
+    const rows = parseUsage(graphqlBody({ r2Ops: r2Ops(250) }), NOW)?.rows ?? [];
+    expect(row(rows, 'r2_class_b')).toMatchObject({ used: 250, truncated: true });
     expect(row(rows, 'r2_class_b').breakdown).toHaveLength(5);
+    expect(row(parseUsage(graphqlBody({ r2Ops: r2Ops(249) }), NOW)?.rows ?? [], 'r2_class_b').truncated).toBe(false);
+  });
+
+  it("reads the account's current Durable Object classes and buckets untruncated", () => {
+    // The 2026-11-02 account: 13 Durable Object classes and 14 buckets, each bucket with four billed actions this month.
+    const doScripts = Array.from({ length: 13 }, (_, i) => ({ script: `do-${String(i)}`, requests: 100 + i, errors: 0 }));
+    const doNamespaces = Array.from({ length: 13 }, (_, i) => ({ id: `ns-${String(i)}`, activeTimeUs: 1_000_000, rowsRead: 1, rowsWritten: 1 }));
+    const r2Ops = Array.from({ length: 14 }, (_, i) =>
+      ['PutObject', 'ListObjects', 'GetObject', 'HeadObject'].map((actionType) => ({ actionType, bucketName: `b${String(i)}`, requests: 1 })),
+    ).flat();
+    const r2Storage = Array.from({ length: 14 }, (_, i) => ({ bucketName: `b${String(i)}`, payloadSize: 1000, metadataSize: 0 }));
+    const rows = parseUsage(graphqlBody({ doScripts, doNamespaces, r2Ops, r2Storage }), NOW)?.rows ?? [];
+    expect(row(rows, 'do_requests')).toMatchObject({ used: 13 * 100 + 78, truncated: false });
+    expect(row(rows, 'do_requests').breakdown[0]).toEqual({ name: 'do-12', value: 112 });
+    expect(row(rows, 'do_duration')).toMatchObject({ truncated: false });
+    expect(row(rows, 'r2_class_a')).toMatchObject({ used: 28, truncated: false });
+    expect(row(rows, 'r2_class_b')).toMatchObject({ used: 28, truncated: false });
+    expect(row(rows, 'r2_storage')).toMatchObject({ used: 14_000, truncated: false });
+    // A full page of the new cap is still a lower bound.
+    const full = parseUsage(graphqlBody({ doScripts: Array.from({ length: 25 }, (_, i) => ({ script: `do-${String(i)}`, requests: 1, errors: 0 })) }), NOW)?.rows ?? [];
+    expect(row(full, 'do_requests')).toMatchObject({ used: 25, truncated: true });
   });
 
   it('reads empty storage datasets as no data, never 0', () => {
