@@ -132,7 +132,7 @@ jobs:
         if: steps.baseline.outputs.proto_breaking == 'true'
         env:
           BASE: ${{ steps.baseline.outputs.base }}
-        run: bazel run //proto:breaking -- "$BASE"
+        run: bazel run //proto:breaking "--repository_cache=$HOME/.cache/personal-cloud-bazel/repository" -- "$BASE"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bazel-plan-${{ github.sha }}
@@ -179,7 +179,9 @@ jobs:
           name: bazel-plan-${{ github.sha }}
       - name: Prepare the isolated browser environment
         if: matrix.group == 'browser'
-        run: bazel run //tools/bazel/browser:install_dependencies
+        run: |
+          bazel run //tools/bazel/browser:install_dependencies \
+            "--repository_cache=$HOME/.cache/personal-cloud-bazel/repository" "--disk_cache=$HOME/.cache/personal-cloud-bazel/actions"
       - name: Run selected leaf checks
         env:
           BAZEL_GROUP: ${{ matrix.group }}

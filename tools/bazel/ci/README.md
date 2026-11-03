@@ -36,9 +36,10 @@ then. Each check family saves its action cache after `run.py` stops Bazel and tr
 first. Those keys carry the revision so the entries stay current: every family that runs on a `main` push uploads a new
 entry, the 10 GB quota fills within a few pushes, and GitHub evicts the least recently used entries. Superseded entries
 of busy families go first, but a family that has not run for several pushes can also lose its entry and then starts cold
-once. Branch, artifact and private jobs only restore. Restore keys prefer the same lockfiles and fall back to the newest
-entry for the platform, so a dependency change starts warm instead of downloading every repository again. Downloaded
-repositories are not trimmed: if their entry grows large, change the key prefix once.
+once. Branch, artifact and private jobs only restore. Artifact jobs restore just the repositories: their stamped builds
+took 30 to 90 seconds without action cache hits, far less than the check groups. Restore keys prefer the same lockfiles
+and fall back to the newest entry for the platform, so a dependency change starts warm instead of downloading every
+repository again. Downloaded repositories are not trimmed: if their entry grows large, change the key prefix once.
 
 ```sh
 python3 -m unittest discover -s tools/bazel/ci
