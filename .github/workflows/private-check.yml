@@ -6,6 +6,13 @@ on:
       revision:
         type: string
         required: true
+      base:
+        type: string
+        required: true
+    outputs:
+      release_required:
+        description: Whether the pinned private release inputs changed
+        value: ${{ jobs.check.outputs.release_required }}
     secrets:
       private_ssh_key:
         required: true
@@ -18,17 +25,68 @@ jobs:
     name: Build and test pinned private sources
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    outputs:
+      release_required: ${{ steps.plan.outputs.release_required }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
+      - name: Read the baseline private revision
+        id: baseline
+        env:
+          BASE_SHA: ${{ inputs.base }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          import subprocess
+
+          base = os.environ["BASE_SHA"]
+          revision = ""
+          if base:
+              if not re.fullmatch(r"[0-9a-f]{40}", base):
+                  raise SystemExit("PRIVATE_BASE_INVALID")
+              result = subprocess.run(["git", "ls-tree", base, "private"], capture_output=True, text=True)
+              entry = result.stdout.split()
+              if result.returncode or (entry and (
+                  len(entry) != 4 or entry[:2] != ["160000", "commit"] or entry[3] != "private"
+                  or not re.fullmatch(r"[0-9a-f]{40}", entry[2])
+              )):
+                  raise SystemExit("PRIVATE_BASE_INVALID")
+              revision = entry[2] if entry else ""
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write("revision=" + revision + "\n")
+          PY
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ziyixi/todofy-private
           path: private
           ref: ${{ inputs.revision }}
+          # Git's infinite ancestry depth keeps the fetch scoped to this commit instead of listing every ref.
+          fetch-depth: 2147483647
+          fetch-tags: false
           ssh-key: ${{ secrets.private_ssh_key }}
           persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.baseline.outputs.revision != '' && steps.baseline.outputs.revision != inputs.revision
+        with:
+          repository: ziyixi/todofy-private
+          path: .private-baseline
+          ref: ${{ steps.baseline.outputs.revision }}
+          fetch-depth: 2147483647
+          fetch-tags: false
+          ssh-key: ${{ secrets.private_ssh_key }}
+          persist-credentials: false
+      - name: Import the pinned baseline ancestry locally
+        if: steps.baseline.outputs.revision != '' && steps.baseline.outputs.revision != inputs.revision
+        env:
+          BASE_PRIVATE_REVISION: ${{ steps.baseline.outputs.revision }}
+        run: |
+          if ! git -C private -c protocol.file.allow=always fetch --quiet --no-tags ../.private-baseline "$BASE_PRIVATE_REVISION" > "$RUNNER_TEMP/private-baseline.log" 2>&1; then
+            echo "::error::PRIVATE_BASE_FETCH_FAILED"
+            exit 1
+          fi
       - name: Verify the parent submodule revision
         env:
           PRIVATE_REVISION: ${{ inputs.revision }}
@@ -36,6 +94,11 @@ jobs:
           test "$(git rev-parse HEAD:private)" = "$PRIVATE_REVISION"
           test "$(git -C private rev-parse HEAD)" = "$PRIVATE_REVISION"
       - uses: ./.github/actions/setup-bazel
+      - name: Install fixed Target Determinator
+        run: |
+          curl -fsSL https://github.com/bazel-contrib/target-determinator/releases/download/v0.34.0/target-determinator.linux.amd64 -o "$RUNNER_TEMP/bazel-tools/target-determinator"
+          echo "115e1c63d39e2cd0d0b011c9fadc80f059f021176a4ae0de2232cdd83b1f8011  $RUNNER_TEMP/bazel-tools/target-determinator" | sha256sum --check --status
+          chmod +x "$RUNNER_TEMP/bazel-tools/target-determinator"
       # Restore public dependencies/actions; private outputs never enter an uploaded cache.
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -63,5 +126,14 @@ jobs:
           fi
           if ! bazel test @private//:check "${options[@]}" >> "$log" 2>&1; then
             echo "::error::PRIVATE_TEST_FAILED"
+            exit 1
+          fi
+      - name: Select the pinned private release inputs
+        id: plan
+        env:
+          BASE_SHA: ${{ inputs.base }}
+        run: |
+          if ! python3 private/ci/plan.py --base "$BASE_SHA" --github-output "$GITHUB_OUTPUT" > "$RUNNER_TEMP/private-plan.log" 2>&1; then
+            echo "::error::PRIVATE_PLAN_FAILED"
             exit 1
           fi

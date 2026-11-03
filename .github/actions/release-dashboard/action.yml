@@ -21,8 +21,8 @@ inputs:
     description: "dashboard worker secrets"
     required: false
     default: ''
-  private-catalog:
-    description: "Optional private service registration"
+  private-catalog-file:
+    description: "Catalogue generated from the selected private sources"
     required: false
     default: ''
   required:
@@ -60,9 +60,9 @@ runs:
       if: inputs.required == 'true'
       working-directory: .release-source/dashboard/worker
       env:
-        PRIVATE_CATALOG: ${{ inputs.private-catalog }}
+        PRIVATE_CATALOG_FILE: ${{ inputs.private-catalog-file }}
       shell: bash -e {0}
-      run: node ../.compiled/tools/private-catalog.mjs "$RUNNER_TEMP/home-secrets.json"
+      run: node ../.compiled/tools/private-catalog.mjs "$RUNNER_TEMP/home-secrets.json" "$PRIVATE_CATALOG_FILE"
     # No D1 and no migration step: the HomeState class migration (v1, new_sqlite_classes) is in the config.
     # The Access probe proves Access guards the host, not that the Worker runs: /health (BUILD_SHA) needs an
     # owner login (docs/verification.md).

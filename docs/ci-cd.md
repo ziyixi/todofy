@@ -51,11 +51,17 @@ cache producers run without the private checkout. Its Bazel output stays in a fi
 private targets and prints failing test logs; the public log shows only `PRIVATE_BUILD_FAILED` or
 `PRIVATE_TEST_FAILED`. Reproduce a failure locally with `bazel test @private//:check`.
 
-Private publication is manual. The main-only `Private operations` workflow runs
-[Private release](../.github/workflows/private-release.yml), which delegates to the pinned private entry point and
-reuses the same source's green gate without re-running public application builds; application names and deployment
-implementation stay private. A main push never publishes private sources. Private images stay private and are pushed
-from the same checked sources. Successful publication records its verified identity through GitHub Deployments.
+Normal private publication is part of the main workflow. The pinned private check uses the same Target Determinator
+and its release dependency graph to select it; documentation changes do not select publication. After the gate and
+selected public publications pass, [Private release](../.github/workflows/private-release.yml) runs, then Home
+publishes once. A private-only selection builds Home's public archive without private credentials. Branch checks
+never deploy. An explicit `all` dispatch follows the same order; app-specific dispatches retain their scope.
+
+Home and resource reconciliation generate their private catalogue from the selected source's exact gitlink.
+The temporary file stays on the runner, is validated by Home's parser and is deleted afterwards. No catalogue
+Secret update or second Home dispatch is required. Private source, configuration and build output remain outside
+public artifacts and logs. Successful publication records its verified identity through GitHub Deployments.
+The main-only `Private operations` workflow remains available for recovery and explicit operating commands.
 Private infrastructure has its own reviewed plan/apply path; public resources keep their existing publication and
 reconciliation owners.
 

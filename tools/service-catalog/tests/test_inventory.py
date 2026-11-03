@@ -3,7 +3,10 @@
 import sys
 import json
 import copy
+import contextlib
+import io
 import unittest
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -34,6 +37,45 @@ class FakeApi:
 
 
 class InventoryTests(unittest.TestCase):
+    def test_catalogue_file_replaces_an_older_environment_value(self):
+        fixture = json.dumps(self.private_fixture())
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "catalogue.json"
+            path.write_text(fixture)
+            with patch.dict(inventory.os.environ, {"PRIVATE_CATALOG": "synthetic-invalid-value"}):
+                self.assertEqual(inventory.private_catalog_input(path), fixture)
+                self.assertEqual(inventory.private_catalog_input(None), "synthetic-invalid-value")
+
+    def test_missing_or_empty_catalogue_file_never_uses_an_older_environment_value(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "catalogue.json"
+            with patch.dict(inventory.os.environ, {"PRIVATE_CATALOG": json.dumps(self.private_fixture())}):
+                for raw in (None, b"", b"\xff", b'{"invalid":"synthetic-value"}'):
+                    if raw is not None:
+                        path.write_bytes(raw)
+                    with self.subTest(raw=raw), self.assertRaisesRegex(ValueError, "^PRIVATE_CATALOG_INVALID$"):
+                        private_attachment(inventory.private_catalog_input(path))
+
+    def test_catalogue_file_failure_is_sanitized_before_any_provider_request(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "catalogue.json"
+            for raw in (None, "", '{"invalid":"synthetic-private-value"}'):
+                if raw is not None:
+                    path.write_text(raw)
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with (
+                    self.subTest(raw=raw),
+                    patch.object(sys, "argv", ["inventory.py", "--private-catalog-file", str(path)]),
+                    patch.dict(inventory.os.environ, {"PRIVATE_CATALOG": json.dumps(self.private_fixture())}),
+                    patch("api.Api") as api,
+                    contextlib.redirect_stdout(stdout),
+                    contextlib.redirect_stderr(stderr),
+                ):
+                    self.assertEqual(inventory.main(), 1)
+                    api.assert_not_called()
+                self.assertEqual(stdout.getvalue(), "")
+                self.assertEqual(stderr.getvalue().strip(), "PRIVATE_CATALOG_INVALID")
+
     def private_fixture(self):
         return json.loads((inventory.REPO / "dashboard/worker/test/fixtures/private-catalog.json").read_text())
 

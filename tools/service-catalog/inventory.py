@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sys
+from pathlib import Path
 
 from catalog import REPO, load_catalog, read_toml, require
 from cloud_profile import load_resources
@@ -22,6 +23,18 @@ BUCKET_NAME = re.compile(r"[a-z0-9][a-z0-9-]{1,61}[a-z0-9]")
 SCRIPT_NAME = re.compile(r"[a-z0-9][a-z0-9_-]{0,62}")
 PAGE_LIMIT = 100
 PRIVATE_CATALOG_ERROR = "PRIVATE_CATALOG_INVALID"
+
+
+def private_catalog_input(path):
+    if path is None:
+        return os.environ.get("PRIVATE_CATALOG")
+    try:
+        value = Path(path).read_text()
+        if not value:
+            raise ValueError(PRIVATE_CATALOG_ERROR)
+        return value
+    except (OSError, UnicodeError):
+        raise ValueError(PRIVATE_CATALOG_ERROR) from None
 
 
 def expected(root=REPO):
@@ -178,6 +191,7 @@ def main():
     action = parser.add_mutually_exclusive_group()
     action.add_argument("--generate", action="store_true")
     action.add_argument("--check", action="store_true")
+    parser.add_argument("--private-catalog-file")
     args = parser.parse_args()
     wanted = expected()
     text = json.dumps(wanted, indent=2, ensure_ascii=False) + "\n"
@@ -189,7 +203,7 @@ def main():
     else:
         from api import Api
         try:
-            attachment = private_attachment(os.environ.get("PRIVATE_CATALOG"))
+            attachment = private_attachment(private_catalog_input(args.private_catalog_file))
             wanted = supplemental_expected(wanted, attachment)
             resources = load_resources(REPO)
             api = Api("cloudflare", os.environ.get("CLOUDFLARE_API_TOKEN", ""))

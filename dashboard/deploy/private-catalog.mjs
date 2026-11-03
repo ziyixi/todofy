@@ -1,12 +1,9 @@
 #!/usr/bin/env node
-// The Home release's check of the optional PRIVATE_CATALOG secret, with Home's own parsePrivateCatalog: a value the
-// Worker would refuse at runtime fails this step instead, before the deploy. A valid value is added to the Worker
-// secrets file that deploy-vars.mjs wrote; an empty one adds nothing, and a registration that file already holds (the
-// DASHBOARD_WORKER_SECRETS map may carry one) is deployed as it is, so it is checked the same way. Bazel bundles this
-// file into Home's release archive (.compiled/tools/private-catalog.mjs), because the release job has no generated
-// proto sources.
+// Home validates the catalogue generated from its selected private source before deployment. The file replaces any
+// older value in the secrets map. The optional environment input remains available to standalone callers.
+// Bazel bundles this script with Home's parser into the checked release archive.
 //
-//   PRIVATE_CATALOG=... node ../.compiled/tools/private-catalog.mjs "$RUNNER_TEMP/home-secrets.json"   (from worker/)
+//   node ../.compiled/tools/private-catalog.mjs "$RUNNER_TEMP/home-secrets.json" "$RUNNER_TEMP/private-catalog.json"
 //
 // Diagnostics are the fixed PRIVATE_CATALOG_INVALID; no supplied value or secret is ever printed.
 import { readFileSync, writeFileSync } from 'node:fs'
@@ -30,13 +27,14 @@ function attach(secrets, raw) {
   return { ...secrets, PRIVATE_CATALOG: raw }
 }
 
-const [path, ...extra] = process.argv.slice(2)
-const raw = process.env.PRIVATE_CATALOG
+const [path, catalogPath, ...extra] = process.argv.slice(2)
 if (!path || extra.length) {
-  console.error('Usage: private-catalog.mjs <secrets file>')
+  console.error('Usage: private-catalog.mjs <secrets file> [catalogue file]')
   process.exit(2)
 }
 try {
+  const raw = catalogPath === undefined ? process.env.PRIVATE_CATALOG : readFileSync(catalogPath, 'utf8')
+  if (catalogPath !== undefined && !raw) throw new Error(PRIVATE_CATALOG_ERROR)
   const secrets = attach(JSON.parse(readFileSync(path, 'utf8')), raw)
   if (secrets) {
     // Rewriting the owner-only file in place keeps its mode.

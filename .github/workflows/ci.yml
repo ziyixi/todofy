@@ -262,14 +262,49 @@ jobs:
     uses: ./.github/workflows/private-check.yml
     with:
       revision: ${{ needs.changes.outputs.private_sha }}
+      base: ${{ needs.changes.outputs.base }}
     secrets:
       private_ssh_key: ${{ secrets.TODOFY_PRIVATE_SSH_KEY }}
     permissions:
       contents: read
 
+  private-home-artifact:
+    name: Build Home artifact for private publication
+    needs: [changes, private]
+    if: >-
+      ${{ needs.changes.result == 'success'
+      && needs.private.result == 'success'
+      && needs.private.outputs.release_required == 'true'
+      && needs.changes.outputs.dashboard_deploy != 'true'
+      && (github.event_name == 'push'
+        || (github.event_name == 'workflow_dispatch' && inputs.app == 'all' && !inputs.resume_vps_release)) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-bazel
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/personal-cloud-bazel/repository
+          key: bazel-9.3.1-${{ runner.os }}-repository-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}
+          restore-keys: |
+            bazel-9.3.1-${{ runner.os }}-repository-
+      - name: Build the checked Home archive
+        run: |
+          python3 tools/cloud-release/artifact.py build --app dashboard --sha "$GITHUB_SHA" \
+            --target //dashboard --directory "$RUNNER_TEMP/worker-artifact"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: worker-dashboard-${{ github.sha }}
+          path: ${{ runner.temp }}/worker-artifact
+          if-no-files-found: error
+          retention-days: 7
+
   gate:
     name: CI gate
-    needs: [changes, checks, artifacts, private]
+    needs: [changes, checks, artifacts, private, private-home-artifact]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -283,11 +318,14 @@ jobs:
           HAS_ARTIFACTS: ${{ needs.changes.outputs.has_artifacts }}
           PRIVATE: ${{ needs.private.result }}
           HAS_PRIVATE: ${{ github.repository == 'ziyixi/todofy' && needs.changes.outputs.private_sha != '' }}
+          PRIVATE_HOME_ARTIFACT: ${{ needs.private-home-artifact.result }}
+          HAS_PRIVATE_HOME_ARTIFACT: ${{ needs.private.outputs.release_required == 'true' && needs.changes.outputs.dashboard_deploy != 'true' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.app == 'all' && !inputs.resume_vps_release)) }}
         run: |
           test "$CHANGES" = success
           if [ "$HAS_CHECKS" = true ]; then test "$CHECKS" = success; fi
           if [ "$HAS_ARTIFACTS" = true ]; then test "$ARTIFACTS" = success; fi
           if [ "$HAS_PRIVATE" = true ]; then test "$PRIVATE" = success; fi
+          if [ "$HAS_PRIVATE_HOME_ARTIFACT" = true ]; then test "$PRIVATE_HOME_ARTIFACT" = success; fi
 
   newsletter-deploy:
     name: Newsletter image publish
@@ -543,9 +581,61 @@ jobs:
       artifact_run_id: ${{ needs.changes.outputs.artifact_run_id || github.run_id }}
     secrets: inherit
 
+  private-deploy:
+    name: Private deploy
+    needs: [changes, gate, private, newsletter-deploy, platform-image, codex-gateway-image, vps-bootstrap-bundle, vps-deploy, codex-gateway-deploy, todofy-deploy, mail-hero-deploy, links-deploy, tasks-deploy, watch-deploy, mailsort-deploy, recall-deploy, fleet-deploy, model-router-deploy, personal-mcp-deploy, newsletter-console-deploy, storage-deploy, website-deploy, website-relay-deploy]
+    if: >-
+      ${{ !cancelled()
+      && needs.changes.result == 'success'
+      && needs.gate.result == 'success'
+      && needs.private.result == 'success'
+      && !contains(needs.*.result, 'failure')
+      && !contains(needs.*.result, 'cancelled')
+      && (needs.newsletter-deploy.result == 'success' || needs.changes.outputs.newsletter_deploy != 'true')
+      && (needs.platform-image.result == 'success' || needs.changes.outputs.platform_publish != 'true')
+      && (needs.codex-gateway-image.result == 'success' || needs.changes.outputs.codex_gateway_deploy != 'true')
+      && (needs.vps-bootstrap-bundle.result == 'success' || needs.changes.outputs.platform_publish != 'true')
+      && (needs.vps-deploy.result == 'success' || needs.changes.outputs.platform_deploy != 'true' || vars.VPS_DEPLOY_ENABLED != 'true')
+      && (needs.codex-gateway-deploy.result == 'success' || needs.changes.outputs.codex_gateway_deploy != 'true' || vars.VPS_DEPLOY_ENABLED != 'true')
+      && (needs.todofy-deploy.result == 'success' || needs.changes.outputs.todofy_deploy != 'true')
+      && (needs.mail-hero-deploy.result == 'success' || needs.changes.outputs.mail_hero_deploy != 'true')
+      && (needs.links-deploy.result == 'success' || needs.changes.outputs.links_deploy != 'true')
+      && (needs.tasks-deploy.result == 'success' || needs.changes.outputs.tasks_deploy != 'true')
+      && (needs.watch-deploy.result == 'success' || needs.changes.outputs.watch_deploy != 'true')
+      && (needs.mailsort-deploy.result == 'success' || needs.changes.outputs.mailsort_deploy != 'true')
+      && (needs.recall-deploy.result == 'success' || needs.changes.outputs.recall_deploy != 'true')
+      && (needs.fleet-deploy.result == 'success' || needs.changes.outputs.fleet_deploy != 'true')
+      && (needs.model-router-deploy.result == 'success' || needs.changes.outputs.model_router_deploy != 'true')
+      && (needs.personal-mcp-deploy.result == 'success' || needs.changes.outputs.personal_mcp_deploy != 'true')
+      && (needs.newsletter-console-deploy.result == 'success' || needs.changes.outputs.newsletter_console_deploy != 'true')
+      && (needs.storage-deploy.result == 'success' || needs.changes.outputs.storage_deploy != 'true')
+      && (needs.website-deploy.result == 'success' || needs.changes.outputs.website_deploy != 'true')
+      && (needs.website-relay-deploy.result == 'success' || needs.changes.outputs.website_relay_deploy != 'true')
+      && github.repository == 'ziyixi/todofy'
+      && github.ref == 'refs/heads/main'
+      && (github.event_name == 'push'
+        || (github.event_name == 'workflow_dispatch' && inputs.app == 'all' && !inputs.resume_vps_release))
+      && needs.private.outputs.release_required == 'true' }}
+    permissions:
+      contents: read
+      checks: read
+      packages: write
+      deployments: write
+      id-token: write
+    uses: ./.github/workflows/private-release.yml
+    with:
+      revision: ${{ needs.changes.outputs.private_sha }}
+    secrets:
+      private_ssh_key: ${{ secrets.TODOFY_PRIVATE_SSH_KEY }}
+      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      INFRA_STATE_PASSPHRASE: ${{ secrets.INFRA_STATE_PASSPHRASE }}
+      INFRA_TFVARS: ${{ secrets.INFRA_TFVARS }}
+      PLATFORM_ACCESS_CLIENT_ID: ${{ secrets.PLATFORM_ACCESS_CLIENT_ID }}
+      PLATFORM_ACCESS_CLIENT_SECRET: ${{ secrets.PLATFORM_ACCESS_CLIENT_SECRET }}
+
   dashboard-deploy:
     name: Dashboard deploy
-    needs: [changes, gate, todofy-deploy, mail-hero-deploy, links-deploy, watch-deploy, fleet-deploy, mailsort-deploy, recall-deploy, tasks-deploy, website-relay-deploy, personal-mcp-deploy, model-router-deploy]
+    needs: [changes, gate, private, private-deploy, todofy-deploy, mail-hero-deploy, links-deploy, watch-deploy, fleet-deploy, mailsort-deploy, recall-deploy, tasks-deploy, website-relay-deploy, personal-mcp-deploy, model-router-deploy]
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
@@ -561,9 +651,16 @@ jobs:
       && (needs.tasks-deploy.result == 'success' || needs.tasks-deploy.result == 'skipped')
       && (needs.personal-mcp-deploy.result == 'success' || needs.personal-mcp-deploy.result == 'skipped')
       && (needs.website-relay-deploy.result == 'success' || needs.website-relay-deploy.result == 'skipped')
+      && (needs.private-deploy.result == 'success'
+        || !(needs.private.outputs.release_required == 'true'
+          && (github.event_name == 'push'
+            || (github.event_name == 'workflow_dispatch' && inputs.app == 'all' && !inputs.resume_vps_release))))
       && github.ref == 'refs/heads/main'
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-      && needs.changes.outputs.dashboard_deploy == 'true' }}
+      && (needs.changes.outputs.dashboard_deploy == 'true'
+        || (needs.private.outputs.release_required == 'true'
+          && (github.event_name == 'push'
+            || (github.event_name == 'workflow_dispatch' && inputs.app == 'all' && !inputs.resume_vps_release)))) }}
     permissions:
       contents: read
       actions: read
@@ -572,7 +669,7 @@ jobs:
     with:
       app: dashboard
       source_sha: ${{ github.sha }}
-      artifact_run_id: ${{ needs.changes.outputs.artifact_run_id || github.run_id }}
+      artifact_run_id: ${{ needs.changes.outputs.dashboard_deploy != 'true' && github.run_id || needs.changes.outputs.artifact_run_id || github.run_id }}
     secrets: inherit
 
   links-deploy:

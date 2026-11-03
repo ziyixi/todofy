@@ -9,8 +9,10 @@ filegroup(
     srcs = [
         ":dashboard",
         "//.github/actions:release-dashboard/action.yml",
+        "//.github/actions:private-catalog/action.yml",
         "//.github/actions:worker-deploy/action.yml",
         "//.github/actions:worker-prepare/action.yml",
+        "//.github/scripts:private_catalog.py",
         "//dashboard/deploy:source_deploy_vars_mjs",
         "//tools:release_probes",
         "//tools/cloud-release:release_inputs",
@@ -58,7 +60,7 @@ worker_artifact(
     web = "//dashboard/web:bundle",
 )
 
-# The release step's check of PRIVATE_CATALOG runs Home's own parser (deploy/private-catalog.mjs) with plain Node.
+# The generated private catalogue is checked with Home's own parser and plain Node before release.
 js_run_binary(
     name = "private_catalog_cli",
     srcs = [

@@ -772,7 +772,7 @@ class Workflow(unittest.TestCase):
         repository-read key. No pre-gate job may deploy or touch the Cloudflare account."""
         self.assertEqual(production_reach(effective_ci().split("\njobs:\n", 1)[0]), [])
         before = {name: block for name, block in self.jobs.items() if name == "gate" or "gate" not in needs(block)}
-        self.assertEqual(set(before), {"changes", "checks", "artifacts", "private", "gate"})
+        self.assertEqual(set(before), {"changes", "checks", "artifacts", "private", "private-home-artifact", "gate"})
         for name, block in before.items():
             with self.subTest(job=name):
                 self.assertEqual(

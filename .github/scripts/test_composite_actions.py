@@ -240,7 +240,7 @@ class CompositeActions(unittest.TestCase):
                            Loader=yaml.BaseLoader)["steps"]
         runs = [step.get("run", "") for step in recipe]
         written = runs.index('node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/home-secrets.json"')
-        check = runs.index('node ../.compiled/tools/private-catalog.mjs "$RUNNER_TEMP/home-secrets.json"')
+        check = runs.index('node ../.compiled/tools/private-catalog.mjs "$RUNNER_TEMP/home-secrets.json" "$PRIVATE_CATALOG_FILE"')
         wrangler = [index for index, run in enumerate(runs) if "wrangler " in run]
         self.assertLess(written, check)
         self.assertLess(check, wrangler[0])
@@ -248,7 +248,7 @@ class CompositeActions(unittest.TestCase):
             self.assertIn('--secrets-file "$RUNNER_TEMP/home-secrets.json"', runs[index])
         for index in (written, check):
             self.assertEqual(recipe[index]["working-directory"], ".release-source/dashboard/worker")
-        self.assertEqual(recipe[check]["env"], {"PRIVATE_CATALOG": "${{ secrets.PRIVATE_CATALOG }}"})
+        self.assertEqual(recipe[check]["env"], {"PRIVATE_CATALOG_FILE": "${{ runner.temp }}/private-catalog.json"})
         self.assertEqual(recipe[check]["if"], "steps.preflight.outputs.required == 'true'")
         # The archive stages its tools beside the compiled Worker (.compiled/tools/, tools/bazel/cloudflare.bzl).
         build = (ROOT / "dashboard/BUILD.bazel").read_text()

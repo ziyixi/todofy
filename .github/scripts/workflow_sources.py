@@ -122,9 +122,12 @@ def release_jobs():
         for step in calls:
             if ".github/actions/release-" in step and step != call:
                 continue
-            target = re.search(r"^        if: inputs.app == '([a-z-]+)'$", step, re.M)
+            target = re.search(r"^        if: (?:always\(\) && )?inputs.app == '([a-z-]+)'(?: && .+)?$", step, re.M)
             if target and target.group(1) != app:
                 continue
+            if target:
+                step = step.replace(f"inputs.app == '{app}' && ", "", 1)
+                step = step.replace(f"always() && inputs.app == '{app}'", "always()", 1)
             selected.append(step)
         concrete = header.replace("${{ inputs.app }}", app)
         concrete = re.sub(

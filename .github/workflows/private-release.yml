@@ -82,4 +82,16 @@ jobs:
           INFRA_STATE_PASSPHRASE: ${{ secrets.INFRA_STATE_PASSPHRASE }}
           INFRA_TFVARS: ${{ secrets.INFRA_TFVARS }}
         # On the command line, an operation the pinned entry point does not know is refused before any action.
-        run: python3 private/ci/release.py --operation "$PRIVATE_RELEASE_OPERATION"
+        run: |
+          case "$PRIVATE_RELEASE_OPERATION" in
+            release|publish|finish-worker)
+              if python3 private/ci/release.py --operation "$PRIVATE_RELEASE_OPERATION" > "$RUNNER_TEMP/private-operation.log" 2>&1; then
+                echo "::notice::PRIVATE_PUBLICATION_COMPLETE"
+              else
+                status=$?
+                echo "::error::PRIVATE_PUBLICATION_FAILED"
+                exit "$status"
+              fi
+              ;;
+            *) python3 private/ci/release.py --operation "$PRIVATE_RELEASE_OPERATION" ;;
+          esac

@@ -97,6 +97,13 @@ jobs:
           if [ "$RELEASE_REPAIR" = true ]; then args+=(--repair); fi
           if [ "$RELEASE_CHECK_ONLY" = true ]; then args+=(--check-only); fi
           python3 tools/cloud-release/control.py preflight --app "$RELEASE_APP" --source-sha "$RELEASE_SOURCE" --source-root .release-source "${args[@]}"
+      - name: Generate Home registration from the selected private source
+        if: inputs.app == 'dashboard' && steps.preflight.outputs.required == 'true'
+        uses: ./.github/actions/private-catalog
+        with:
+          source-root: .release-source
+          private-ssh-key: ${{ secrets.TODOFY_PRIVATE_SSH_KEY }}
+          output-file: ${{ runner.temp }}/private-catalog.json
       - name: Download the checked Worker archive
         if: steps.preflight.outputs.required == 'true' && !inputs.repair
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -162,7 +169,7 @@ jobs:
           dashboard-access-owner-aliases: ${{ secrets.DASHBOARD_ACCESS_OWNER_ALIASES }}
           dashboard-cf-analytics-token: ${{ secrets.DASHBOARD_CF_ANALYTICS_TOKEN }}
           dashboard-worker-secrets: ${{ secrets.DASHBOARD_WORKER_SECRETS }}
-          private-catalog: ${{ secrets.PRIVATE_CATALOG }}
+          private-catalog-file: ${{ runner.temp }}/private-catalog.json
       - name: Release links
         id: links
         if: inputs.app == 'links' && steps.preflight.outputs.required == 'true'
@@ -283,6 +290,9 @@ jobs:
           RELEASE_APP: ${{ inputs.app }}
           RELEASE_SOURCE: ${{ steps.source.outputs.source_sha }}
         run: python3 tools/cloud-release/control.py record --app "$RELEASE_APP" --source-sha "$RELEASE_SOURCE" --source-root .release-source
+      - name: Remove the generated private registration
+        if: always() && inputs.app == 'dashboard'
+        run: rm -f "$RUNNER_TEMP/private-catalog.json"
 
   record:
     name: ${{ inputs.app }} receipt only

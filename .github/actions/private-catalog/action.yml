@@ -1,0 +1,36 @@
+name: private-catalog
+description: Generate the selected source's private catalogue on the protected runner.
+inputs:
+  source-root:
+    description: Checked parent source directory
+    required: true
+  private-ssh-key:
+    description: Existing read-only private repository checkout key
+    required: true
+  output-file:
+    description: New runner-local catalogue file
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Read the selected private revision
+      id: private_catalog_source
+      working-directory: .
+      env:
+        PRIVATE_CATALOG_SOURCE: ${{ inputs.source-root }}
+      shell: bash -e {0}
+      run: python3 .github/scripts/private_catalog.py revision --source-root "$PRIVATE_CATALOG_SOURCE" >> "$GITHUB_OUTPUT"
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        repository: ziyixi/todofy-private
+        path: ${{ inputs.source-root }}/private
+        ref: ${{ steps.private_catalog_source.outputs.revision }}
+        ssh-key: ${{ inputs.private-ssh-key }}
+        persist-credentials: false
+    - name: Generate private registration without exposing its contents
+      working-directory: .
+      env:
+        PRIVATE_CATALOG_SOURCE: ${{ inputs.source-root }}
+        PRIVATE_CATALOG_OUTPUT: ${{ inputs.output-file }}
+      shell: bash -e {0}
+      run: python3 .github/scripts/private_catalog.py generate --source-root "$PRIVATE_CATALOG_SOURCE" --output "$PRIVATE_CATALOG_OUTPUT"

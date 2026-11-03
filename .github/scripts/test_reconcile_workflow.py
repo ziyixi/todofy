@@ -39,6 +39,19 @@ def job(text, name):
 
 
 class ReconcileWorkflow(unittest.TestCase):
+    def test_inventory_generates_private_registration_from_the_context_source_without_a_secret_fallback(self):
+        block = job(self.text, "inventory")
+        self.assertIn("environment: production", block)
+        self.assertIn("ref: ${{ needs.context.outputs.source_sha }}", block)
+        self.assertIn("uses: ./.github/actions/private-catalog", block)
+        self.assertIn("source-root: .", block)
+        self.assertIn("private-ssh-key: ${{ secrets.TODOFY_PRIVATE_SSH_KEY }}", block)
+        self.assertIn("output-file: ${{ runner.temp }}/private-catalog.json", block)
+        self.assertIn('inventory.py --private-catalog-file "$RUNNER_TEMP/private-catalog.json"', block)
+        self.assertIn('if: always()\n        run: rm -f "$RUNNER_TEMP/private-catalog.json"', block)
+        self.assertNotIn("secrets.PRIVATE_CATALOG", block)
+        self.assertNotIn("upload-artifact", block)
+
     def test_explicit_record_operation_reuses_only_the_protected_receipt_job(self):
         block = job(self.text, "record-worker")
         self.assertIn("github.event_name == 'workflow_dispatch'", block)
