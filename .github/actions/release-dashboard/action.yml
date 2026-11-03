@@ -54,13 +54,15 @@ runs:
         CF_API_TOKEN: ${{ inputs.cf-api-token }}
       shell: bash -e {0}
       run: node ../deploy/deploy-vars.mjs secrets "$RUNNER_TEMP/home-secrets.json"
+    # Home's own parsePrivateCatalog, bundled into the checked archive: a value the Worker would refuse fails here,
+    # before the deploy (deploy/private-catalog.mjs).
     - name: Validate and attach private service registration
       if: inputs.required == 'true'
-      working-directory: .release-source
+      working-directory: .release-source/dashboard/worker
       env:
         PRIVATE_CATALOG: ${{ inputs.private-catalog }}
       shell: bash -e {0}
-      run: python3 tools/service-catalog/private_catalog.py --secrets-file "$RUNNER_TEMP/home-secrets.json"
+      run: node ../.compiled/tools/private-catalog.mjs "$RUNNER_TEMP/home-secrets.json"
     # No D1 and no migration step: the HomeState class migration (v1, new_sqlite_classes) is in the config.
     # The Access probe proves Access guards the host, not that the Worker runs: /health (BUILD_SHA) needs an
     # owner login (docs/verification.md).
