@@ -922,6 +922,63 @@ class LinksWorkerProbe(unittest.TestCase):
         self.assertEqual(urls, [])
 
 
+class StorageObjectProbe(unittest.TestCase):
+    """Storage deploy's start of its Durable Object, run as the workflow runs it against a stubbed curl.
+
+    The Worker itself refuses a request without a well-formed key, so only a well-formed unknown key reaches the
+    Durable Object; its 401 JSON shows the object started after the deploy."""
+
+    STEP = "- name: Verify the Durable Object starts and refuses an unknown key\n"
+    HOST = "storage.example.org"
+
+    def script(self):
+        body = workflow_jobs()["storage-deploy"].split(self.STEP, 1)[1].split("        run: |\n", 1)[1]
+        lines = []
+        for line in body.splitlines():
+            if line.strip() and not line.startswith("          "):
+                break
+            lines.append(line[10:])
+        return "\n".join(lines) + "\n"
+
+    def check(self, answer):
+        """Runs the step; curl records its arguments and prints answer. Returns (exit code, output, arguments)."""
+        with tempfile.TemporaryDirectory() as root:
+            curl = Path(root, "curl")
+            curl.write_text(
+                f"#!{sys.executable}\n"
+                "import json, sys\n"
+                f"open({root!r} + '/args', 'w').write(json.dumps(sys.argv[1:]))\n"
+                f"sys.stdout.write({answer!r})\n"
+            )
+            curl.chmod(0o755)
+            result = subprocess.run(
+                ["bash", "-e", "-c", self.script()],
+                cwd=REPO,
+                env={**os.environ, "PATH": f"{root}{os.pathsep}{os.environ['PATH']}", "PUBLIC_HOST": self.HOST},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            return result.returncode, result.stdout + result.stderr, json.loads(Path(root, "args").read_text())
+
+    def test_the_objects_refusal_of_a_well_formed_key_passes(self):
+        code, output, args = self.check("401|application/json; charset=utf-8|")
+        self.assertEqual(code, 0, output)
+        self.assertEqual(args[-1], f"https://{self.HOST}/api/storage/v1/stat")
+        self.assertIn("--proto", args)
+        # A key the Worker's own format check refused would be answered there, and the object would never start.
+        env = (REPO / "storage" / "worker" / "src" / "env.ts").read_text()
+        pattern = re.search(r"^export const MACHINE_AUTHORIZATION = /(.+)/;$", env, re.MULTILINE).group(1)
+        self.assertRegex(args[args.index("-H") + 1].removeprefix("Authorization: "), pattern)
+
+    def test_an_object_that_did_not_answer_fails_the_release(self):
+        for answer in ("500|application/json|", "401|text/html|", "401|application/json|https://example.org/login"):
+            with self.subTest(answer=answer):
+                code, output, _ = self.check(answer)
+                self.assertEqual(code, 1, output)
+                self.assertIn("STORAGE_OBJECT_START_FAILED", output)
+
+
 class LinksProductionCheck(unittest.TestCase):
     """Links deploy's hostname-free check, run as the workflow runs it against a stubbed npx (wrangler). Nothing
     anonymous on the host shows the build, so the deployed version's BUILD_SHA tells whether this commit serves.
