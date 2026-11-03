@@ -359,7 +359,9 @@ class RecallExtensionRelease(unittest.TestCase):
         for previous in (
             {"sw.js": b"older\n"},
             # Masking the compiled version must not hide a change beside it.
-            {"capture.js": f"readPage(window, {json.dumps(self.PREVIOUS)});\n".encode()},
+            {
+                "capture.js": f"readPage(window, {json.dumps(self.PREVIOUS)});\n".encode()
+            },
             {"manifest.json": json.dumps(manifest).encode()},
         ):
             with self.subTest(changed=next(iter(previous))):

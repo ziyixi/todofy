@@ -161,7 +161,10 @@ class DependencyWorkspaces(unittest.TestCase):
         }
         seen = set()
         for path in sorted(
-            [*(ROOT / ".github/workflows").glob("*.yml"), *(ROOT / ".github/actions").glob("*/action.yml")]
+            [
+                *(ROOT / ".github/workflows").glob("*.yml"),
+                *(ROOT / ".github/actions").glob("*/action.yml"),
+            ]
         ):
             source = workflow_data(path)
             jobs = source.get("jobs", {"action": source.get("runs", {})})
@@ -171,10 +174,14 @@ class DependencyWorkspaces(unittest.TestCase):
                         if step.get("uses", "").startswith(action):
                             seen.add(action)
                             with self.subTest(path=path.name, action=action):
-                                self.assertLessEqual(expected.items(), step["with"].items())
+                                self.assertLessEqual(
+                                    expected.items(), step["with"].items()
+                                )
                                 self.assertNotIn("node-version", step["with"])
                                 self.assertNotIn("tofu_version", step["with"])
-                                self.assertTrue((ROOT / next(iter(expected.values()))).is_file())
+                                self.assertTrue(
+                                    (ROOT / next(iter(expected.values()))).is_file()
+                                )
         self.assertEqual(seen, set(pins))
 
     def test_all_check_installers_use_the_workspace_and_root_uv_lock(self):

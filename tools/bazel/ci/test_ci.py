@@ -74,7 +74,9 @@ class GroupsTest(unittest.TestCase):
         groups = plan.target_groups(xml, {"//a:worker"})
         self.assertEqual(groups, {"workerd-1": ["//a:worker"]})
         self.assertEqual(
-            plan.ci_matrix({"node": [], **dict.fromkeys(plan.WORKERD_SHARDS, [])}),
+            plan.ci_matrix(
+                {"node": [], **{shard: [] for shard in plan.WORKERD_SHARDS}}
+            ),
             {
                 "include": [
                     {"group": "node", "cache": "node"},

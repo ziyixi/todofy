@@ -264,6 +264,7 @@ source_audit_files(
 filegroup(
     name = "python_lint_inputs",
     srcs = [
+        "apparmor/compile_test.py",
         "pyproject.toml",
         "//platform/src/personal_cloud:python_sources",
         "//platform/tests:python_sources",
