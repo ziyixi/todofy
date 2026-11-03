@@ -5,55 +5,45 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-The owner withdrew weekly adjusted-history refresh and chose the original policy: daily raw prices with seven
-days of overlap plus complete adjusted history; weekly raw prices with 90 days of overlap. Restore that policy,
-its existing regression checks and original plan copy on `codex/quant-daily-adjusted` in both repositories.
-The weekly-policy publication was cancelled. Independent public health still reports source `893837b`, healthy
-and collector reachable, so the desired daily policy is already live. Do not publish another image merely to
-restore source text. Local collector and web facades passed all 15 targets after restoration; branch/main CI and
-repository merges remain before closing this reversal.
-Price catch-up `94c9f8b9-6785-4bdb-a485-dcff582de8e1` was cancelled at zero progress at 02:08 UTC. Queue the saved
-daily price plan once under the retained daily policy; do not resume the cancelled execution. Initial events
-continue independently, last observed at 854/1,022.
+Private application work, releases, operating limits and owner items are tracked only in the private submodule's
+`private/HANDOFF.md`; this file names that side only generically (AGENTS).
 
-Software delivery is complete: source `893837b` runs with private image
-`sha256:efe22000d785125a836772faaa202dedde44b8909c826bd4d651e55ed5fd0109`; the Worker stage finished through main
-`c05f4ee5` without rebuilding the image or replacing the ready collector. Independent health and a later same-main
-check-only reconciliation passed. Do not repeat the full release, add features or block delivery on unrepeatable
-network/exit137 details. Existing bounded retry, metadata confirmation and checkpoint continuation are authoritative.
+`claude/landable-now` (on `85ebd0b1`) holds three independent public changes:
 
-Remaining work is data initialization and plan acceptance. The owner's 90,000 shared-account Workers line is an
-operator line. Home's 21:30 UTC cache reached 88,587, so queued price job `6036c4bc-d1cd-4a68-a64a-e9db6dd69010`
-was cancelled at zero progress, then original event job `63e5d584-d9e5-4ce6-ae43-6129034add86` stopped at its asset
-boundary: 663/1,022 with 675,611 matched observations. The UI offers continuation of the remaining 359 identities.
-On November 3 at 00:03 UTC, the account statistic day reset was confirmed (21 requests), and this same event
-execution resumed from 663. A fresh UI observation confirmed 664/1,022 and 676,459 matched observations, with its
-original ID/start/range preserved. It is running: do not create a replacement or repeat Resume while active.
-Both old zero-progress price executions remain cancelled. Their raw+vendor-adjusted daily behavior is the
-owner's latest retained policy; a fresh saved-plan catch-up can use it after the reversal above.
+- Home's usage query raises its Durable Object and R2 storage row caps from 10 to 25 and the R2 operation cap from
+  50 to 250, above the account's 13 object classes and 14 buckets; DO requests, DO duration and R2 storage were
+  lower bounds before. Only `limit` values change: no `orderBy` is added because none was checked on the live
+  account, and the new values are not yet verified there. Unit and real-workerd checks passed.
+- Mailsort's one-time October 29 requeue of terminal model failures is removed. It had completed (see
+  [verification](mailsort/docs/verification.md#optional-accounting-and-recovery-2026-10-29)); running it again
+  would count those mails twice. Recovered decisions and recorded counts are unchanged; a real-workerd regression
+  fails on the old code and passes now.
+- AGENTS adds the generic-naming rule for the private submodule, and this file keeps only the pointer above. The
+  November 2 archive no longer carries two private image digests or the private application's name; the private
+  archive keeps both.
 
-After initialization, accept actual source coverage/limitations, catch up through the saved daily price plan if
-needed, and enable saved daily events at 03:00 America/Los_Angeles. Its end date is already blank; subsequent source
-updates overlap seven days. Daily price 01:00 and weekly Sunday price 02:00 remain enabled. Preserve existing files,
-keep automatic private publication disabled and use no paid upgrade or old-library migration. Do not repeat old
-price/SDK/captured-head audits or run rejected production upload fixtures. Earlier GFL actions need their normal
-revisit; foreign-market earnings semantics remain explicitly unverified rather than silently remapped.
+The 84 test targets that depend on the changed files passed locally, including both apps' worker, web, deploy
+bundle-budget and repository audit checks; the CPU group also passed uncached, as CI runs it. The branch reaches
+only `//dashboard:release` and `//mailsort:release`: landing deploys the Home and Mailsort Workers, not Storage, the
+VPS images or any private target, provided the newest main push run is green at landing time (a failed one widens
+the cumulative release diff). Land it as a merge with `origin/main` as first parent, together with or after the
+private HANDOFF update that takes over the owner items removed here in `eee152de`, so the pointer above is true.
+After release, check that Home's next usage refresh succeeds with Durable Object rows no longer marked as lower
+bounds; on a `graphql_error`, revert the usage change. Mailsort's following passes should classify as before.
 
 ## Latest verified release
 
-Producer `893837b` passed exact-source admission. Its collector became Ready after the original rollout wait had
-expired; the checked `finish-worker` operation through main `c05f4ee5` completed only the remaining Worker and
-recorded a new verified receipt. Native source/digest/readiness guards and Worker source health passed. Independent
-health returned 200/healthy/reachable/completed at the expected source. A later same-main check-only reconciliation
-actually passed all fourteen Worker comparisons, VPS identity, registration and resolved drift.
+Main `85ebd0b1` passed its complete main workflow and the matching Personal cloud reconcile, whose fourteen
+Worker comparisons, VPS identity, resource registration and resolved infrastructure drift checks all ran and
+passed. Private application releases and their evidence are in the private HANDOFF.
 
-The release handles verifiable immutable single/batch uncertainty without replaying a batch or mutable head and
-retains bounded failure/recovery evidence. Existing UI, price archive, SDK and captured-head evidence remains
-separately scoped. Data initialization and daily-event enablement remain unfinished; physical network/exit137
-details remain open without blocking practical continuation under the owner's latest instruction.
+Shared Worker receipt recovery (`7ef001fe`) adds fixed failure stages, exact committed-result readback and a
+guarded receipt-only path without application redeployment. The old statusless Tasks receipt remains historical
+and unconfirmed; the current main has its own successful Tasks receipt.
+Historical failure triggers without original evidence remain unknown.
 
-The [November 2 archive](docs/history/handoff-2026-11-02.md) records this publication and earlier corrections.
-Shared Storage's protocol/persistence checks remain in [November 1](docs/history/handoff-2026-11-01.md#shared-storage).
+The [November 2 archive](docs/history/handoff-2026-11-02.md) records the earlier November 2 publications and
+corrections. Shared Storage's protocol/persistence checks remain in [November 1](docs/history/handoff-2026-11-01.md#shared-storage).
 Earlier integration and build configuration are in [October 31](docs/history/handoff-2026-10-31.md) and
 [October 30](docs/history/handoff-2026-10-30.md). Documentation closeout follows normal main CI and reconciliation.
 
@@ -62,6 +52,16 @@ Earlier integration and build configuration are in [October 31](docs/history/han
 - Natural Newsletter/send/researcher runs, daily/weekly backup observations, Recall cold archive reads and a complete
   clean-account/clean-VPS historical restore remain distinct from the build migration. Follow each app's verification
   page and [rebuild verification](docs/rebuild-verification.md); do not infer them from uploads or replay real work.
+- Durable Object errors on November 2 (Fleet 135 of 549 requests, Mailsort 46 of 369 in the 22:18 UTC reading)
+  were reviewed from code only; no bug was found and no application change was made. Fleet's count equals its
+  three Ops status calls in each of the 45 Home ticks by then, but also about half of its observer's five-minute
+  receipts, and Mailsort's is within one of its single call per tick, so the counts do not identify a cause; that
+  day's four deploys of each do not fit. No Home status failure is known, but none was checked. Watch and Recall
+  forward Home's status the same way; their absence from that reading proves nothing, as it may have been cut by the
+  old unordered 10-row cap. The item stays open. First read Home's own status records (ok, error, consecutive
+  failures) for the three Fleet entries and Mailsort; once the larger usage caps are live, run a read-only
+  `durableObjectsInvocationsAdaptiveGroups` query by `scriptName` and `status` for Fleet, Mailsort, Watch and
+  Recall. Change Fleet or Mailsort code only after that.
 - Recall phone acceptance is paused by the owner's choice. Stopped scheduler observations remain stopped.
   Do not request device reinstallation or restart retired Compose services for this task.
 - Model Router's Ops currently reports maintenance in `modes` while deriving health from request/backup signals;
