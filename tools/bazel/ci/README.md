@@ -55,8 +55,15 @@ For release selection, resolve a cumulative base and pass `--base COMMIT` plus
 checkout and the pinned Bazel/Target Determinator binaries are required. Current-graph failures stop planning;
 a baseline predating the new roots selects all candidates rather than silently omitting them.
 
-The real Git/Bazel/Target Determinator fixture verifies source-only, unused-document, release-input-only and image
-changes, worker dispatch isolation and resume source checks. Its image actions deliberately fail if built, so the
-resume acceptance also proves that no image action ran.
-Other tests cover grouping, cumulative publication retry, paired images, resume and artifact reuse. See
-[CI/CD](../../../docs/ci-cd.md) for publication gates and runtime verification.
+CI runs only the unit tests (`//tools/bazel/ci:check`): grouping, sharding, cache trimming, cumulative publication
+retry, paired images, resume and artifact reuse. `graph_test.py` is a separate manual fixture, not part of any check
+or CI run. It builds a synthetic repository and runs real Git, Bazel and Target Determinator over source-only,
+unused-document, release-input-only and image changes, worker dispatch isolation and resume source checks. Its image
+actions deliberately fail if built, so the resume case also proves that no image action ran. Run it after changing
+the planner's queries or upgrading Bazel or Target Determinator:
+
+```sh
+bazel run //tools/bazel/ci:graph_test -- --bazel "$(command -v bazel)" --determinator "$(command -v target-determinator)"
+```
+
+See [CI/CD](../../../docs/ci-cd.md) for publication gates and runtime verification.

@@ -523,6 +523,7 @@ pytest_test(
     data = _TEST_DATA + [
         "//:python_repository_test_data",
         "//newsletter:build_test_data",
+        "//tools/bazel/python:container_test.py",
     ],
     env = _TEST_ENV,
     imports = _TEST_IMPORTS,
@@ -785,6 +786,7 @@ pytest_test(
     data = _TEST_DATA + [
         "//:newsletter_ci_test_inputs",
         "//newsletter:build_test_data",
+        "//tools/bazel/python:container_test.py",
     ],
     env = _TEST_ENV,
     imports = _TEST_IMPORTS,

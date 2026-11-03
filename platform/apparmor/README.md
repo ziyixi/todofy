@@ -35,7 +35,7 @@ is loaded again by the existing OS service after reboot.
 
 The controlled profile-only installer accepts only the compiled policy checksum, validates ownership and paths, and checks enforce mode. A matching retry reuses managed bytes; foreign state is refused. Host policy updates require separate owner authorization before a manifest can reference the profile.
 
-CI uses the Ubuntu runner's real parser with `--skip-kernel-load --skip-cache`.
+`//platform:apparmor_test` uses the Ubuntu runner's real parser with `--skip-kernel-load --skip-cache`.
 Absence of the parser fails the check. Synthetic installer tests do not prove
 host loading, D-Bus access or Fleet receipts. Acceptance additionally needs a
 natural observer run, matching image identity, successful snapshot read, safe

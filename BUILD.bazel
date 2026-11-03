@@ -13,6 +13,7 @@ exports_files([
     "package.json",
     "pnpm-lock.yaml",
     "pnpm-workspace.yaml",
+    "pyproject.toml",
     "uv.lock",
 ])
 
@@ -206,10 +207,6 @@ filegroup(
     ],
     visibility = ["//visibility:public"],
 )
-
-exports_files(["pyproject.toml"])
-
-exports_files([".python-version"])
 
 filegroup(
     name = "newsletter_ci_test_inputs",
