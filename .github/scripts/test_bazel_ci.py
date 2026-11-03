@@ -272,7 +272,8 @@ class BazelCI(unittest.TestCase):
         )
         publisher = workflow_data(ROOT / ".github/workflows/private-release.yml")
         entry = publisher["jobs"]["release"]["steps"][-1]
-        self.assertEqual(entry["run"], 'if [ "$PRIVATE_RELEASE_OPERATION" = finish-worker ]; then\n  python3 .github/scripts/private_finish_worker.py\nelse\n  python3 private/ci/release.py\nfi\n')
+        # Every operation, including finish-worker, runs through the pinned private entry point only.
+        self.assertEqual(entry["run"], "python3 private/ci/release.py")
         self.assertEqual(publisher["concurrency"], {"group": "private-production", "cancel-in-progress": "false"})
         self.assertEqual(publisher["jobs"]["release"]["environment"], "production")
 
