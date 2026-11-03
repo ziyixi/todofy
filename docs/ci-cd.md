@@ -12,8 +12,8 @@ locks, deployment ordering and live verification.
 | [Worker release](../.github/workflows/worker-release.yml) | Called by CI and by reconcile | One Worker's locked publication, verification and receipt |
 | [Private Bazel](../.github/workflows/private-check.yml), [Private release](../.github/workflows/private-release.yml) | Called by CI (Private release also by Private operations) | Check and publish the pinned private source |
 | [Personal cloud reconcile](../.github/workflows/personal-cloud-reconcile.yml) | After each successful `main` CI; daily (GitHub often starts it hours late); manual | Compares infrastructure, every Worker, the VPS and resource registration; repairs only when asked or `PERSONAL_CLOUD_AUTO_REPAIR` is on |
-| [Newsletter Content Config](../.github/workflows/content-config.yml) | `main` pushes and PRs that touch `newsletter/content-config/`; after each successful `main` CI; manual | Validates the configuration in a released image; on `main`, publishes the bundle when it changed |
-| [Infra drift](../.github/workflows/infra.yml) | `main` pushes that touch `infra/` or its plan summary tool; manual | Plan only. Red while the plan has actions; prints the `expect` line for Infra apply |
+| [Newsletter Content Config](../.github/workflows/content-config.yml) | `main` pushes that touch `newsletter/content-config/`; PRs that touch it, the workflow or its publisher; after each successful CI of a `main` push; manual | Validates the configuration in a released image; on `main`, publishes the bundle when it changed |
+| [Infra drift](../.github/workflows/infra.yml) | `main` pushes that touch `infra/`, its plan summary tool or the workflow; manual | Plan only. Red while the plan has actions; prints the `expect` line for Infra apply |
 | [Infra apply](../.github/workflows/infra-apply.yml) | Manual only | Applies one reviewed infrastructure plan |
 | [Private operations](../.github/workflows/private-ops.yml) | Manual only | Private infrastructure, k3s, publication and verification operations |
 | [Website release](../.github/workflows/website-release.yml) | CI's Website deploy, the relay Worker's daily dispatch, Home's 立即同步; manual | Notion snapshot, build, deploy and verification; unchanged content is not redeployed |
@@ -22,7 +22,7 @@ locks, deployment ordering and live verification.
 | --- | --- |
 | Release normally | Push to `main`; nothing to press |
 | Republish one application | CI and deploy, `app=<name>` (`all` for every release, `both` for Todofy and Mail Hero) |
-| Resume a held VPS release that CI started | CI and deploy, `app=platform`, `resume_vps_release` and the original `resume_source_sha` |
+| Resume a held VPS release that CI started | CI and deploy, `app=platform` (`codex-gateway` for its own held release), `resume_vps_release` and the original `resume_source_sha` |
 | Resume a held VPS repair that reconcile started | Personal cloud reconcile, `operation=resume` and its `resume_release` |
 | Check or repair cloud drift | Personal cloud reconcile, `check` or `repair` (Fleet links it) |
 | See the infrastructure plan | Infra drift, dispatched on `main` |
@@ -33,7 +33,7 @@ locks, deployment ordering and live verification.
 | Recover or rebuild the website | Website release, `recovery` or `bootstrap` |
 | Change Newsletter content | Edit `newsletter/content-config/` and push to `main`; Newsletter Content Config publishes it when the bundle changed |
 | Send the daily Newsletter | Nothing in Actions: the k3s `newsletter-daily` CronJob runs at 07:00 America/Los_Angeles |
-| Know a delivery is done | The SHA's CI is green and the reconcile that follows it is green |
+| Know a delivery is done | CI for the `main` SHA is green, and Personal cloud reconcile for that same SHA ran (not skipped because `main` moved on) and passed, including Require resolved infrastructure drift |
 
 Reconcile's `reviewed_apply` input requests an `infra-review` approval of that run's exact saved plan; see the
 [infra README](../infra/README.md#apply-p4).
