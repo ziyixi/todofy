@@ -110,12 +110,8 @@ class RecallExtensionRelease(unittest.TestCase):
         for name, other in blocks.items():
             with self.subTest(job=name):
                 self.assertNotIn(self.JOB, needs(other))
-        condition = job_condition(block)
-        self.assertIn("github.ref == 'refs/heads/main'", condition)
-        self.assertIn(
-            "(github.event_name == 'push' || github.event_name == 'workflow_dispatch')",
-            condition,
-        )
+        # CI runs only on pushes and dispatches (test_bazel_ci.py), so this is a main push or a dispatch on main.
+        self.assertIn("github.ref == 'refs/heads/main'", job_condition(block))
 
     def test_it_publishes_the_checked_zip_without_rebuilding(self):
         block = workflow_jobs()[self.JOB]

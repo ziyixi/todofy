@@ -337,7 +337,6 @@ jobs:
       && needs.changes.result == 'success'
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
-      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && !(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release)
       && needs.changes.outputs.newsletter_deploy == 'true' }}
     runs-on: ubuntu-24.04
@@ -369,7 +368,6 @@ jobs:
       && needs.changes.result == 'success'
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
-      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && !(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release)
       && needs.changes.outputs.platform_publish == 'true' }}
     runs-on: ubuntu-24.04
@@ -403,7 +401,6 @@ jobs:
       && needs.changes.result == 'success'
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
-      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && !(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release)
       && needs.changes.outputs.codex_gateway_deploy == 'true' }}
     runs-on: ubuntu-24.04
@@ -469,7 +466,6 @@ jobs:
       && (needs.model-router-deploy.result == 'success' || needs.changes.outputs.model_router_deploy != 'true')
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
-      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.platform_deploy == 'true'
       && vars.VPS_DEPLOY_ENABLED == 'true' }}
     runs-on: ubuntu-24.04
@@ -509,7 +505,6 @@ jobs:
           && needs.codex-gateway-image.result == 'success'))
       && (needs.fleet-deploy.result == 'success' || needs.fleet-deploy.result == 'skipped')
       && needs.gate.result == 'success' && github.ref == 'refs/heads/main'
-      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.codex_gateway_deploy == 'true'
       && vars.VPS_DEPLOY_ENABLED == 'true' }}
     runs-on: ubuntu-24.04
@@ -547,7 +542,6 @@ jobs:
       && (needs.model-router-deploy.result == 'success' || needs.changes.outputs.model_router_deploy != 'true')
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
-      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.todofy_deploy == 'true' }}
     permissions:
       contents: read
@@ -568,7 +562,6 @@ jobs:
       && needs.changes.result == 'success'
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
-      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.mail_hero_deploy == 'true' }}
     permissions:
       contents: read
@@ -656,7 +649,6 @@ jobs:
           && (github.event_name == 'push'
             || (github.event_name == 'workflow_dispatch' && inputs.app == 'all' && !inputs.resume_vps_release))))
       && github.ref == 'refs/heads/main'
-      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && (needs.changes.outputs.dashboard_deploy == 'true'
         || (needs.private.outputs.release_required == 'true'
           && (github.event_name == 'push'
@@ -680,7 +672,6 @@ jobs:
       && needs.changes.result == 'success'
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
-      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.links_deploy == 'true' }}
     permissions:
       contents: read
@@ -703,7 +694,6 @@ jobs:
       && needs.gate.result == 'success'
       && (needs.todofy-deploy.result == 'success' || needs.changes.outputs.todofy_deploy != 'true')
       && github.ref == 'refs/heads/main'
-      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.tasks_deploy == 'true' }}
     permissions:
       contents: read
@@ -725,7 +715,6 @@ jobs:
       && needs.gate.result == 'success'
       && (needs.tasks-deploy.result == 'success' || needs.changes.outputs.tasks_deploy != 'true')
       && github.ref == 'refs/heads/main'
-      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.watch_deploy == 'true' }}
     permissions:
       contents: read
@@ -747,7 +736,6 @@ jobs:
       && (needs.model-router-deploy.result == 'success' || needs.changes.outputs.model_router_deploy != 'true')
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
-      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.mailsort_deploy == 'true' }}
     permissions:
       contents: read
@@ -768,7 +756,6 @@ jobs:
       && needs.changes.result == 'success'
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
-      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.recall_deploy == 'true' }}
     permissions:
       contents: read
@@ -789,7 +776,6 @@ jobs:
       && needs.changes.result == 'success'
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
-      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.recall_extension_publish == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -891,7 +877,6 @@ jobs:
       && needs.changes.result == 'success'
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
-      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.fleet_deploy == 'true' }}
     permissions:
       contents: read
@@ -913,7 +898,6 @@ jobs:
       && (needs.codex-gateway-deploy.result == 'success' || needs.changes.outputs.codex_gateway_deploy != 'true' || vars.VPS_DEPLOY_ENABLED != 'true')
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
-      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.model_router_deploy == 'true' }}
     permissions:
       contents: read
@@ -938,7 +922,6 @@ jobs:
       && (needs.recall-deploy.result == 'success' || needs.recall-deploy.result == 'skipped')
       && (needs.watch-deploy.result == 'success' || needs.changes.outputs.watch_deploy != 'true')
       && github.ref == 'refs/heads/main'
-      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.personal_mcp_deploy == 'true' }}
     permissions:
       contents: read
@@ -960,7 +943,6 @@ jobs:
       && needs.gate.result == 'success'
       && (needs.vps-deploy.result == 'success' || needs.vps-deploy.result == 'skipped')
       && github.ref == 'refs/heads/main'
-      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.newsletter_console_deploy == 'true' }}
     permissions:
       contents: read
@@ -981,7 +963,6 @@ jobs:
       && needs.changes.result == 'success'
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
-      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.storage_deploy == 'true' }}
     permissions:
       contents: read
@@ -1002,7 +983,6 @@ jobs:
       && needs.changes.result == 'success'
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
-      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.website_deploy == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -1024,7 +1004,6 @@ jobs:
       && needs.changes.result == 'success'
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
-      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.changes.outputs.website_relay_deploy == 'true' }}
     permissions:
       contents: read

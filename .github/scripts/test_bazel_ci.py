@@ -418,6 +418,11 @@ class BazelCI(unittest.TestCase):
         # The private rollout may wait out its whole startup window before observation and checks begin.
         self.assertEqual(publisher["jobs"]["release"]["timeout-minutes"], "45")
 
+    def test_publication_jobs_need_only_the_main_ref_check(self):
+        # With no other trigger, a job that checks for main runs only for a main push or a dispatch on main.
+        # A schedule or workflow_run trigger would also run on main, so adding one needs event checks again.
+        self.assertEqual(set(self.workflow["on"]), {"push", "workflow_dispatch"})
+
     def test_worker_publication_uses_checked_sha_artifacts_and_main_gate(self):
         for name, job in self.jobs.items():
             if job.get("uses") != "./.github/workflows/worker-release.yml":
