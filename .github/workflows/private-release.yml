@@ -12,9 +12,6 @@ on:
       expect:
         type: string
         default: ''
-      fingerprint:
-        type: string
-        default: ''
       manifests:
         type: string
         default: private/k3s/manifests
@@ -75,7 +72,6 @@ jobs:
           PRIVATE_REVISION: ${{ inputs.revision }}
           PRIVATE_RELEASE_OPERATION: ${{ inputs.operation }}
           PRIVATE_INFRA_EXPECT: ${{ inputs.expect }}
-          PRIVATE_BUILD_FINGERPRINT: ${{ inputs.fingerprint }}
           PRIVATE_K3S_MANIFESTS: ${{ inputs.manifests }}
           K3S_CLUSTER_CA: ${{ vars.K3S_CLUSTER_CA }}
           PLATFORM_ACCESS_CLIENT_ID: ${{ secrets.PLATFORM_ACCESS_CLIENT_ID }}
