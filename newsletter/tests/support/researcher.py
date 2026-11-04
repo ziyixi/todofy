@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+import datetime
 import json
 from typing import Any
 
@@ -10,6 +11,8 @@ import httpx
 import yaml
 
 DAY = "2026-10-28"
+# The headline window closes at this time on DAY.
+NOW = datetime.datetime(2026, 10, 28, 14, 0, tzinfo=datetime.UTC)
 DIRECTIONS = (
     "01-ai-ml",
     "02-science",
@@ -186,3 +189,148 @@ class Network:
     def transport(self) -> httpx.MockTransport:
         """Expose the handler as an httpx transport."""
         return httpx.MockTransport(self.handle)
+
+
+# A synthetic front page modelled on a real day's headline feeds: five
+# outlets lead with one election in their own words, a busy war beat runs
+# many different strikes past the same words (two outlets report one strike,
+# three one ceasefire), a busy public figure appears in unrelated stories,
+# and each outlet carries its own local stories.
+OUTLETS = ("BBC", "NPR", "The Guardian", "DW", "Al Jazeera")
+ELECTION = (
+    (
+        "Liberty Party wins majority in Freedonia parliamentary election",
+        "Voters in Freedonia handed the Liberty Party a parliamentary "
+        "majority, ending a decade of coalition rule.",
+    ),
+    (
+        "Freedonia election: Liberty Party sweeps to parliamentary majority",
+        "Final results show the Liberty Party with a clear majority in "
+        "Freedonia's parliament.",
+    ),
+    (
+        "Freedonia's ruling coalition ousted as Liberty Party takes majority",
+        "The Liberty Party won a majority of seats in Freedonia's parliament "
+        "in Sunday's vote.",
+    ),
+    (
+        "Liberty Party leader claims victory after Freedonia election",
+        "Freedonia's Liberty Party secured a parliamentary majority, "
+        "official results show.",
+    ),
+    (
+        "What the Liberty Party's majority means for Freedonia",
+        "After winning a parliamentary majority, the Liberty Party must now "
+        "form a government in Freedonia.",
+    ),
+)
+WAR = (
+    (
+        "BBC",
+        "Sylvanian drones strike Port Vell power plant",
+        "Sylvania's drones hit a power plant in Port Vell overnight, "
+        "officials said.",
+    ),
+    (
+        "NPR",
+        "Sylvania war: market strike in Ostrava kills nine",
+        "A Sylvanian missile strike on a market in Ostrava killed nine people.",
+    ),
+    (
+        "The Guardian",
+        "Sylvania mobilises reservists as war enters third year",
+        "Sylvania called up 50,000 reservists to the front.",
+    ),
+    (
+        "DW",
+        "Aid convoy shelled near Brenik as Sylvania war grinds on",
+        "An aid convoy came under shelling near Brenik, the latest attack in "
+        "the Sylvania war.",
+    ),
+    (
+        "Al Jazeera",
+        "Sylvanian strike damages hospital in Kellen",
+        "Shelling damaged a hospital in Kellen, doctors said.",
+    ),
+    (
+        "BBC",
+        "Sylvania war: rail depot in Drava hit by rockets",
+        "The depot burned for hours, railway staff said.",
+    ),
+    (
+        "The Guardian",
+        "Port Vell power plant struck by Sylvanian drones",
+        "Drones hit the Port Vell power plant, cutting electricity to "
+        "thousands.",
+    ),
+    (
+        "NPR",
+        "Sylvania war: talks on prisoner exchange stall",
+        "Talks on a prisoner exchange in the Sylvania war stalled, mediators "
+        "said.",
+    ),
+    (
+        "DW",
+        "Sylvania and Ruritania agree 30-day ceasefire",
+        "Sylvania and Ruritania agreed a ceasefire in talks brokered by "
+        "Andorra.",
+    ),
+    (
+        "Al Jazeera",
+        "Ruritania, Sylvania sign ceasefire deal brokered by Andorra",
+        "The ceasefire between Ruritania and Sylvania takes effect at "
+        "midnight.",
+    ),
+    (
+        "NPR",
+        "Ceasefire between Sylvania and Ruritania to take effect at midnight",
+        "Andorra brokered the truce after months of fighting.",
+    ),
+)
+FIGURE = (
+    (
+        "BBC",
+        "Chancellor Ostrander announces steel tariffs",
+        "Chancellor Ostrander said tariffs on imported steel would rise.",
+    ),
+    (
+        "NPR",
+        "Ostrander meets Andorran premier at summit",
+        "Chancellor Ostrander met the Andorran premier at a regional summit.",
+    ),
+    (
+        "DW",
+        "Court rules against Ostrander pension reform",
+        "A court struck down Chancellor Ostrander's pension reform.",
+    ),
+    (
+        "Al Jazeera",
+        "Ostrander faces protests over housing plan",
+        "Protesters marched against Chancellor Ostrander's housing plan.",
+    ),
+)
+_LOCAL = (
+    "apricot basalt cobalt dahlia ember fjord granite harbor iris jasper kelp "
+    "lantern meadow nectar opal pine quartz reef saffron tundra umber violet "
+    "willow xenon yarrow zephyr acorn birch cedar dune elm fern grove heath "
+    "ivy juniper"
+).split()
+
+
+def front_page() -> dict[str, list[tuple[str, str]]]:
+    """Each outlet's (title, description) items, newest first."""
+    page: dict[str, list[tuple[str, str]]] = {
+        outlet: [story] for outlet, story in zip(OUTLETS, ELECTION, strict=True)
+    }
+    for outlet, title, text in WAR + FIGURE:
+        page[outlet].append((title, text))
+    for n, word in enumerate(_LOCAL):
+        town = _LOCAL[(n + 7) % len(_LOCAL)]
+        page[OUTLETS[n % len(OUTLETS)]].append(
+            (
+                f"{word.title()} festival draws record crowds in {town}ville",
+                f"Organisers of the {word} festival reported record "
+                "attendance this year.",
+            )
+        )
+    return page

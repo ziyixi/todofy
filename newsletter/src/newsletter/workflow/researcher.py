@@ -1,11 +1,12 @@
 """Read a frozen registry of public feeds into routed metadata-only leads.
 
 Registry (``researcher.yaml``, frozen with the run's content configuration)
-→ per-host serial fetch → parse → filter → merge by identity keys → rank →
-route per discovery direction. Every lead is a metadata-scope Candidate with a
-code-written source basis; feed text survives only as a short untrusted excerpt
-in ``notes``, never in a Candidate, the candidate pool or Notion. There is no
-model call, no retry and no state between runs.
+→ per-host serial fetch → parse → filter → merge by identity keys (headline
+feeds: group by event) → rank → route per discovery direction. Every lead is a
+metadata-scope Candidate with a code-written source basis; feed text survives
+only as a short untrusted excerpt in ``notes``, never in a Candidate, the
+candidate pool or Notion. There is no model call, no retry and no state
+between runs.
 
 Fetch policy: only registry URLs, HTTPS with TLS verification, no redirects,
 no proxies or credentials, every resolved address globally routable and the
@@ -22,6 +23,7 @@ Hugging Face daily papers is an undocumented public endpoint and optional.
 from __future__ import annotations
 
 import asyncio
+import collections
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 import dataclasses
 import datetime
@@ -31,6 +33,7 @@ import ipaddress
 import itertools
 import json
 import logging
+import math
 import re
 import socket
 from typing import Any
@@ -60,6 +63,8 @@ MAX_ENTRIES = 200
 EXCERPT_CHARS = 300
 ABSTRACT_CHARS = 80
 REQUEST_SECONDS = 15
+# A headline feed's entries count toward today's front page for this long.
+HEADLINE_HOURS = 48
 HOST_CHAINS = 4
 USER_AGENT = "personal-newsletter/0.1 public-metadata"
 # Seconds between consecutive requests to one host.
@@ -89,6 +94,7 @@ _OPTIONAL = frozenset(
         "max_bytes",
         "max_age_days",
         "enabled",
+        "role",
     }
 )
 _ARXIV_HOSTS = frozenset({"arxiv.org", "www.arxiv.org", "export.arxiv.org"})
@@ -124,11 +130,14 @@ _RDF_ABOUT = "{http://www.w3.org/1999/02/22-rdf-syntax-ns#}about"
 _NAT64 = ipaddress.ip_network("64:ff9b::/96")
 # A merged lead names at most this many feeds in its source basis.
 _BASIS_NAMES = 5
+# A headline group's basis names at most this many outlets.
+_GROUP_NAMES = 10
 _DATE_FIELDS = ("date", "pubDate", "published", "publicationDate", "updated")
 _BODY_FIELDS = ("encoded", "content", "description", "summary")
 
 Resolver = Callable[[str], Awaitable[Sequence[str]]]
 Sleep = Callable[[float], Awaitable[None]]
+Clock = Callable[[], datetime.datetime]
 
 
 class RegistryError(ValueError):
@@ -155,11 +164,16 @@ class Source:
     max_bytes: int
     max_age_days: int
     enabled: bool
+    role: str = ""
 
 
 @dataclasses.dataclass(frozen=True)
 class Entry:
-    """One parsed feed item before filtering; all text is untrusted."""
+    """One parsed feed item before filtering; all text is untrusted.
+
+    ``published`` is the item's own calendar date; ``moment`` is its UTC
+    time when the feed gives one with a zone, else ``None``.
+    """
 
     title: str
     url: str
@@ -169,6 +183,7 @@ class Entry:
     text: str
     excerpt: bool
     upvotes: int | None = None
+    moment: datetime.datetime | None = None
 
 
 @dataclasses.dataclass
@@ -186,13 +201,17 @@ class _Lead:
     names: list[str]
     excerpt: str
     percentile: int | None
+    # Set on a headline group: its other outlets' URLs and newest time.
+    alternates: list[str] | None = None
+    moment: float = 0.0
 
-    def rank(self) -> tuple[int, int, int, int, int]:
+    def rank(self) -> tuple[int, int, int, float, int, int]:
         day = datetime.date.fromisoformat(self.candidate["published_at"])
         return (
             -len(self.names),
             -(self.percentile if self.percentile is not None else -1),
             -day.toordinal(),
+            -self.moment,
             self.source.index,
             self.position,
         )
@@ -292,6 +311,9 @@ def _source(index: int, item: object, directions: frozenset[str]) -> Source:
     keywords = item.get("keywords", [])
     if not isinstance(keywords, list) or len(keywords) > 40:
         raise RegistryError()
+    role = item.get("role", "")
+    if "role" in item and (role != "headline" or kind != "feed"):
+        raise RegistryError()
     return Source(
         index=index,
         id=identifier,
@@ -312,6 +334,7 @@ def _source(index: int, item: object, directions: frozenset[str]) -> Source:
             item.get("max_age_days", 4 if kind == "arxiv" else 7), 1, 30
         ),
         enabled=_flag(item.get("enabled", True)),
+        role=role,
     )
 
 
@@ -442,6 +465,21 @@ def _date(value: str) -> str:
         return ""
 
 
+def _moment(value: str) -> datetime.datetime | None:
+    value = value.strip()
+    try:
+        moment = datetime.datetime.fromisoformat(value)
+    except ValueError:
+        try:
+            moment = utils.parsedate_to_datetime(value)
+        except (TypeError, ValueError, IndexError, OverflowError):
+            return None
+    # A bare date, or RFC 2822's -0000 "zone unknown", has no usable time.
+    if moment.tzinfo is None:
+        return None
+    return moment.astimezone(datetime.UTC)
+
+
 def canonical_url(value: str) -> tuple[str, str]:
     """Normalize a feed link and split an arXiv version from its abs URL.
 
@@ -490,10 +528,10 @@ def _feed_entry(element: ElementTree.Element) -> Entry | None:
     if title is None or not link:
         return None
     url, version = canonical_url(link)
-    published = ""
+    published, moment = "", None
     for name in _DATE_FIELDS:
         if name in fields and (stamp := "".join(fields[name].itertext())):
-            published = _date(stamp)
+            published, moment = _date(stamp), _moment(stamp)
             break
     doi = ""
     for name in ("doi", "identifier"):
@@ -519,6 +557,7 @@ def _feed_entry(element: ElementTree.Element) -> Entry | None:
         published=published,
         text=clean_text(body),
         excerpt=True,
+        moment=moment if published else None,
     )
 
 
@@ -804,8 +843,9 @@ def failed(result: sources.MetadataResult) -> bool:
 class Researcher:
     """Fetch registry sources once per run and route their leads.
 
-    ``transport``, ``resolver`` and ``sleep`` are injected by offline tests;
-    production uses the system resolver and real pacing.
+    ``transport``, ``resolver``, ``sleep`` and ``clock`` are injected by
+    offline tests; production uses the system resolver, real pacing and the
+    UTC wall clock that bounds the headline window.
     """
 
     def __init__(
@@ -814,10 +854,12 @@ class Researcher:
         transport: httpx.AsyncBaseTransport | None = None,
         resolver: Resolver | None = None,
         sleep: Sleep | None = None,
+        clock: Clock | None = None,
     ) -> None:
         self.transport = transport
         self.resolver = resolver or resolve
         self.sleep = sleep or asyncio.sleep
+        self.clock = clock or (lambda: datetime.datetime.now(datetime.UTC))
 
     async def fetch(
         self,
@@ -859,7 +901,9 @@ class Researcher:
                 pass
         for source in enabled:
             outcomes.setdefault(source.index, _Outcome("deadline", []))
-        result = assemble(enabled, outcomes, issue_date, history)
+        result = assemble(
+            enabled, outcomes, issue_date, history, now=self.clock()
+        )
         _LOGGER.info(
             "Researcher finished: sources=%d ok=%d failed=%d seeds=%d",
             len(enabled),
@@ -964,6 +1008,17 @@ def _basis(names: Sequence[str]) -> str:
     return "研究员订阅源：" + shown + more + "（仅元数据，未打开原文）"
 
 
+def _group_basis(names: Sequence[str]) -> str:
+    if len(names) == 1:
+        return _basis(names)
+    shown = "、".join(names[:_GROUP_NAMES])
+    more = "等" if len(names) > _GROUP_NAMES else ""
+    return (
+        f"研究员头条订阅源：{shown}{more}共{len(names)}家标题相近"
+        "（代码按标题聚类，仅元数据，未打开原文）"
+    )
+
+
 def _accept(
     source: Source,
     entry: Entry,
@@ -978,6 +1033,164 @@ def _accept(
     return not (source.requires_abstract and len(entry.text) < ABSTRACT_CHARS)
 
 
+# Words that say nothing about which event a headline reports, including
+# weekdays, months and photo credits.
+_STOP = frozenset(
+    """
+    about above according after again against ahead all also amid among and
+    any are around authorities back because been before behind being between
+    both but call can could did does donald down during each even every face
+    few first for from further get getty had has have her here his how image
+    into its just last latest least like live local look made make many may
+    might more most much must near new news next not now off official once one
+    only other our out over own people photo photograph picture president
+    reuters report said same say see she should shutterstock since some still
+    such take than that the their them then there these they this those three
+    through time today too two under until upon very want was watch way week
+    were what when where which while who why will with within without world
+    would year you your monday tuesday wednesday thursday friday saturday
+    sunday january february march april june july august september october
+    november december
+    """.split()
+)
+_WORD = re.compile(r"[^\W\d_]+")
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s")
+_CREDIT = re.compile(
+    r"\b(?:photograph|photo|picture|image|illustration)s?\s*:[^.]*",
+    re.IGNORECASE,
+)
+# Leader clustering thresholds, calibrated offline on a day's real headline
+# feeds and pinned by synthetic tests: a member shares at least
+# _SHARED_RARE words used by at most _RARE_SHARE of the direction's headline
+# entries with its leader, and all the words they share weigh, as
+# log(entries / uses), at least _MIN_WEIGHT together.
+_SHARED_RARE = 2
+_RARE_SHARE = 0.3
+_MIN_WEIGHT = 8.0
+
+
+def _words(entry: Entry) -> frozenset[str]:
+    """Title and first description sentence as lowercase stems.
+
+    A stem is the singular's first six letters, so a country and its people
+    (Ukraine, Ukrainian) or a word's forms (elected, elections) count once.
+    """
+    text = _CREDIT.sub(" ", entry.text)
+    first = _SENTENCE_END.split(text, maxsplit=1)[0][:300]
+    words = set()
+    for word in _WORD.findall((entry.title + " " + first).casefold()):
+        if word in _STOP:
+            continue
+        if len(word) > 3 and word.endswith("s") and not word.endswith("ss"):
+            word = word[:-1]
+        if len(word) > 2 and word not in _STOP:
+            words.add(word[:6])
+    return frozenset(words)
+
+
+@dataclasses.dataclass
+class _Group:
+    leader: _Lead
+    words: frozenset[str]
+    keys: set[str]
+
+
+def _cluster(
+    items: Sequence[tuple[_Lead, set[str], frozenset[str]]],
+) -> list[_Lead]:
+    """Group one direction's headline leads that report the same event.
+
+    Leads are taken newest first. Each joins the earlier group whose leader
+    (its first, newest lead) carries the same identity, or else shares enough
+    of the day's rare words with it, the best-weighted such leader winning;
+    otherwise it leads a new group. Matching only leaders, never every
+    member, keeps a busy beat such as a war's daily strikes from chaining
+    unrelated stories into one group. Groups only rank leads and offer
+    alternative URLs; they are never treated as facts.
+    """
+    uses = collections.Counter(word for _, _, words in items for word in words)
+    total = len(items)
+    rare = max(2.0, _RARE_SHARE * total)
+    weight = {word: math.log(total / count) for word, count in uses.items()}
+    groups: list[_Group] = []
+    for lead, keys, words in sorted(
+        items,
+        key=lambda item: (
+            -item[0].moment,
+            item[0].source.index,
+            item[0].position,
+        ),
+    ):
+        best, score = None, 0.0
+        for group in groups:
+            if keys & group.keys:
+                best = group
+                break
+            shared = words & group.words
+            if sum(uses[word] <= rare for word in shared) < _SHARED_RARE:
+                continue
+            value = sum(weight[word] for word in shared)
+            if value >= _MIN_WEIGHT and value > score:
+                best, score = group, value
+        if best is None:
+            groups.append(_Group(lead, words, set(keys)))
+            continue
+        best.keys |= keys
+        leader = best.leader
+        if lead.source.name not in leader.names:
+            leader.names.append(lead.source.name)
+            url = lead.candidate["url"]
+            alternates = leader.alternates
+            if (
+                alternates is not None
+                and len(alternates) < content.MAX_ALTERNATE_URLS
+                and url not in {leader.candidate["url"], *alternates}
+            ):
+                alternates.append(url)
+    return [group.leader for group in groups]
+
+
+def _seed(source: Source, entry: Entry) -> sources.Candidate | None:
+    try:
+        return content.seed_view(
+            sources.metadata_candidate(
+                entry.title,
+                entry.url,
+                entry.doi,
+                entry.published,
+                "crossref_metadata"
+                if source.kind == "crossref"
+                else "rss_metadata",
+                direction=source.direction,
+                version=entry.version,
+                venue=source.name,
+                source_basis=_basis([source.name]),
+            )
+        )
+    except (ValueError, errors.EditorError):
+        return None
+
+
+def _merge(
+    lead: _Lead, keys: set[str], leads: list[_Lead], index: dict[str, _Lead]
+) -> None:
+    """Add a lead, or merge it into the earlier lead with its identity."""
+    existing = next((index[key] for key in keys if key in index), None)
+    if existing is None:
+        existing = lead
+        leads.append(existing)
+    else:
+        if lead.source.name not in existing.names:
+            existing.names.append(lead.source.name)
+        existing.excerpt = existing.excerpt or lead.excerpt
+        if lead.percentile is not None:
+            existing.percentile = max(
+                existing.percentile or 0, lead.percentile or 0
+            )
+    for key in keys:
+        index.setdefault(key, existing)
+
+
 def _leads(
     registry: Sequence[Source],
     outcomes: Mapping[int, _Outcome],
@@ -985,13 +1198,16 @@ def _leads(
     history: Sequence[Mapping[str, object]],
     diagnostics: list[str],
     accepted: dict[int, int],
-) -> list[_Lead]:
+    now: datetime.datetime | None,
+) -> tuple[list[_Lead], list[types.Payload]]:
     known: set[str] = set()
     for record in history:
         known |= sources.identity_keys(record)
     day = datetime.date.fromisoformat(issue_date)
+    window = now - datetime.timedelta(hours=HEADLINE_HOURS) if now else None
     leads: list[_Lead] = []
     index: dict[str, _Lead] = {}
+    headlines: dict[str, list[tuple[_Lead, set[str], frozenset[str]]]] = {}
     for source in registry:
         outcome = outcomes[source.index]
         diagnostics.append(f"{source.id}:{outcome.code}")
@@ -1000,76 +1216,113 @@ def _leads(
         since = (day - datetime.timedelta(days=source.max_age_days)).isoformat()
         undated = invalid = 0
         percentiles = _percentiles(outcome.entries)
+        headline = source.role == "headline"
         for position, entry in enumerate(outcome.entries):
-            if not entry.published:
+            # A headline entry needs its time: the window is in hours.
+            if not entry.published or (headline and entry.moment is None):
                 undated += 1
                 continue
             if not _accept(source, entry, since, issue_date):
                 continue
-            try:
-                candidate = content.seed_view(
-                    sources.metadata_candidate(
-                        entry.title,
-                        entry.url,
-                        entry.doi,
-                        entry.published,
-                        "crossref_metadata"
-                        if source.kind == "crossref"
-                        else "rss_metadata",
-                        direction=source.direction,
-                        version=entry.version,
-                        venue=source.name,
-                        source_basis=_basis([source.name]),
-                    )
-                )
-            except (ValueError, errors.EditorError):
+            if headline and window and entry.moment and entry.moment < window:
+                continue
+            candidate = _seed(source, entry)
+            if candidate is None:
                 invalid += 1
                 continue
             keys = sources.identity_keys(candidate)
+            # Seen before: only this entry drops, never its headline group.
             if keys & known:
                 continue
             accepted[source.index] = accepted.get(source.index, 0) + 1
             excerpt = _excerpt(entry.text) if entry.excerpt else ""
-            existing = next((index[key] for key in keys if key in index), None)
-            if existing is None:
-                existing = _Lead(
-                    candidate,
-                    source,
-                    position,
-                    [source.name],
-                    excerpt,
-                    percentiles[position],
+            lead = _Lead(
+                candidate,
+                source,
+                position,
+                [source.name],
+                excerpt,
+                percentiles[position],
+            )
+            if headline and entry.moment:
+                lead.alternates, lead.moment = [], entry.moment.timestamp()
+                headlines.setdefault(source.direction, []).append(
+                    (lead, keys, _words(entry))
                 )
-                leads.append(existing)
-            else:
-                if source.name not in existing.names:
-                    existing.names.append(source.name)
-                existing.excerpt = existing.excerpt or excerpt
-                if percentiles[position] is not None:
-                    existing.percentile = max(
-                        existing.percentile or 0, percentiles[position] or 0
-                    )
-            for key in keys:
-                index.setdefault(key, existing)
+                continue
+            _merge(lead, keys, leads, index)
         if undated:
             diagnostics.append(f"{source.id}:undated:{undated}")
         if invalid:
             diagnostics.append(f"{source.id}:invalid_items:{invalid}")
-    return leads
+    summaries = _headline_groups(registry, headlines, set(index), leads)
+    return leads, summaries
+
+
+def _headline_groups(
+    registry: Sequence[Source],
+    headlines: Mapping[str, list[tuple[_Lead, set[str], frozenset[str]]]],
+    taken: set[str],
+    leads: list[_Lead],
+) -> list[types.Payload]:
+    """Add each direction's best headline groups to the leads; count them.
+
+    The direction's headline feeds' max_seeds add up to its group budget.
+    The returned counts and top titles are public metadata for the console.
+    """
+    summaries = []
+    for direction in sorted(headlines):
+        # An item a plain feed or another direction already leads stays there.
+        fresh = [item for item in headlines[direction] if not item[1] & taken]
+        for _, keys, _ in fresh:
+            taken |= keys
+        groups = sorted(_cluster(fresh), key=_Lead.rank)
+        budget = sum(
+            source.max_seeds
+            for source in registry
+            if source.role == "headline" and source.direction == direction
+        )
+        leads.extend(groups[:budget])
+        summaries.append(
+            {
+                "direction": direction,
+                "entries": len(fresh),
+                "groups": len(groups),
+                "consensus_groups": sum(
+                    len(group.names) >= content.CONSENSUS_OUTLETS
+                    for group in groups
+                ),
+                "max_outlets": len(groups[0].names) if groups else 0,
+                "top": [
+                    {
+                        "title": group.candidate["title"],
+                        "outlets": len(group.names),
+                    }
+                    for group in groups[:3]
+                ],
+            }
+        )
+    return summaries
 
 
 def _route(leads: Sequence[_Lead]) -> list[_Lead]:
-    """Round-robin sources within a direction, then interleave directions."""
+    """Round-robin sources within a direction, then interleave directions.
+
+    A direction's headline groups, already ranked and capped, take one turn
+    per round like a single source.
+    """
     grouped: dict[str, dict[int, list[_Lead]]] = {}
     for lead in leads:
         grouped.setdefault(lead.candidate["direction"], {}).setdefault(
-            lead.source.index, []
+            -1 if lead.alternates is not None else lead.source.index, []
         ).append(lead)
     routed = []
     for direction in sorted(grouped):
         per_source = [
-            sorted(items, key=_Lead.rank)[: items[0].source.max_seeds]
-            for _, items in sorted(grouped[direction].items())
+            sorted(items, key=_Lead.rank)[
+                : len(items) if key < 0 else items[0].source.max_seeds
+            ]
+            for key, items in sorted(grouped[direction].items())
         ]
         ordered = [
             lead
@@ -1091,11 +1344,17 @@ def _note(lead: _Lead) -> types.Payload:
     signals = {"independent_sources": len(lead.names)}
     if lead.percentile is not None:
         signals["hf_upvote_percentile"] = lead.percentile
-    return {
+    note: types.Payload = {
         "source": "、".join(lead.names[:_BASIS_NAMES]),
         "excerpt_untrusted": lead.excerpt,
         "signals": signals,
     }
+    if lead.alternates is not None:
+        # Marks a headline group; the window bounds its outlets' entries.
+        signals["headline_window_hours"] = HEADLINE_HOURS
+    if lead.alternates:
+        note["alternate_urls"] = list(lead.alternates)
+    return note
 
 
 def _source_counts(
@@ -1131,18 +1390,29 @@ def assemble(
     outcomes: Mapping[int, _Outcome],
     issue_date: str,
     history: Sequence[Mapping[str, object]] = (),
+    *,
+    now: datetime.datetime | None = None,
 ) -> sources.MetadataResult:
-    """Filter, merge, rank and route fetched entries into a bounded result."""
+    """Filter, merge, rank and route fetched entries into a bounded result.
+
+    ``now`` closes the headline window; without it only the date window
+    applies.
+    """
     diagnostics: list[str] = []
     accepted: dict[int, int] = {}
-    routed = _route(
-        _leads(registry, outcomes, issue_date, history, diagnostics, accepted)
+    leads, headlines = _leads(
+        registry, outcomes, issue_date, history, diagnostics, accepted, now
     )
+    routed = _route(leads)
     candidates: list[sources.Candidate] = []
     notes: dict[str, types.Payload] = {}
     for lead in routed:
         candidate = lead.candidate.copy()
-        candidate["source_basis"] = _basis(lead.names)
+        candidate["source_basis"] = (
+            _basis(lead.names)
+            if lead.alternates is None
+            else _group_basis(lead.names)
+        )
         candidates.append(content.seed_view(candidate))
         notes[candidate["id"]] = _note(lead)
     # The per-source counts sit outside this lead budget (at most MAX_SOURCES
@@ -1170,4 +1440,6 @@ def assemble(
     counts = _source_counts(
         registry, outcomes, accepted, routed[: len(candidates)]
     )
-    return sources.MetadataResult(candidates, diagnostics, notes, counts)
+    return sources.MetadataResult(
+        candidates, diagnostics, notes, counts, headlines
+    )

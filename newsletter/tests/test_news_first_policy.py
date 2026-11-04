@@ -294,9 +294,17 @@ def test_authored_world_rules_mark_must_know_events_for_selection():
         )
     )
     assert world == packaged
-    # The marker is the only contract between the two stages.
+    # The markers are the only contract between the stages.
     assert "change_basis以“必知：”开头" in world
     assert "basis以“必知：”开头" in selection
+    assert f"basis以“{content.CONSENSUS_BASIS}”开头" in selection
+    # Selection judges a headline consensus against the world definition.
+    definition = world[world.index("必知事件指：") : world.index("这类事件")]
+    assert definition.endswith("冲击。") and definition in selection
+    assert "家数多不等于必知" in selection
+    for required in ("independent_sources", "alternate_urls"):
+        assert required in world
+    assert "alternate_urls" in discovery
     for required in (
         "含美国",
         "metadata_seeds",

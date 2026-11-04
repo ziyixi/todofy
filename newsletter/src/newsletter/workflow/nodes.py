@@ -265,12 +265,33 @@ class EditorialNodes:
             for candidate in batch
             if candidate is not None
         ]
-        candidates.extend(
-            item
-            for value in self.inputs(ctx, "api_feed")
-            if value
-            for item in value["candidates"]
-        )
+        feeds = [value for value in self.inputs(ctx, "api_feed") if value]
+        leads = [item for value in feeds for item in value["candidates"]]
+        if limits is not None:
+            # Headline consensus enters as news ahead of the other leads;
+            # an unopened copy discovery handed back gives way to it.
+            picked = content.consensus_leads(
+                leads,
+                {
+                    key: note
+                    for value in feeds
+                    for key, note in value.get("notes", {}).items()
+                },
+                candidates,
+                classifications,
+            )
+            consensus = {lead["id"]: lead for lead, _ in picked}
+            classifications.update(
+                (lead["id"], basis) for lead, basis in picked
+            )
+            candidates = [
+                c
+                if c["provenance"] == "web_open"
+                else consensus.get(c["id"], c)
+                for c in candidates
+            ]
+            candidates.extend(consensus.values())
+        candidates.extend(leads)
         candidates = sources.deduplicate_candidates(
             candidates,
             history["candidates"],

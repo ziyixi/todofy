@@ -5,6 +5,8 @@ resolver and sleep, so no DNS, socket or real feed is touched.
 """
 
 import asyncio
+import dataclasses
+import datetime
 import json
 import pathlib
 import time
@@ -32,7 +34,57 @@ def run(network, registry, *, budget=60.0, history=()):
         transport=network.transport(),
         resolver=network.resolver,
         sleep=network.sleep,
+        clock=lambda: fake.NOW,
     ).fetch(registry, DAY, history=history, budget_seconds=budget)
+
+
+def headline_registry(**changes):
+    return load(
+        *[
+            fake.source(
+                id=f"outlet-{n}",
+                name=name,
+                direction="04-economy",
+                url=f"https://outlet{n}.example.org/rss",
+                max_seeds=4,
+                max_age_days=2,
+                role="headline",
+                **changes,
+            )
+            for n, name in enumerate(fake.OUTLETS)
+        ]
+    )
+
+
+def headline_entry(outlet, number, title, text, *, minutes=None):
+    """Entry ``number`` of an outlet; earlier entries and outlets are newer."""
+    moment = fake.NOW - datetime.timedelta(
+        minutes=minutes if minutes is not None else 30 * number + 5 * outlet
+    )
+    return researcher.Entry(
+        title=title,
+        url=f"https://outlet{outlet}.example.org/{number}",
+        doi="",
+        version="",
+        published=moment.date().isoformat(),
+        text=text,
+        excerpt=True,
+        moment=moment,
+    )
+
+
+def front_page_outcomes(registry, page=None):
+    page = page or fake.front_page()
+    return {
+        source.index: researcher._Outcome(
+            "ok",
+            [
+                headline_entry(source.index, number, title, text)
+                for number, (title, text) in enumerate(page[source.name])
+            ],
+        )
+        for source in registry
+    }
 
 
 # Registry validation.
@@ -58,6 +110,11 @@ def test_authored_registry_is_valid_and_bounded():
     assert by_id["ahead-of-ai"].max_bytes == researcher.MAX_SOURCE_BYTES
     assert not by_id["nature"].keywords and not by_id["science"].keywords
     assert by_id["science"].requires_abstract
+    # Front pages are read as one per direction, for world and economy only.
+    headline = {s.direction for s in registry if s.role == "headline"}
+    assert headline == {"03-world", "04-economy"}
+    for direction in ("05-health", "06-technology"):
+        assert len({s.name for s in registry if s.direction == direction}) >= 4
 
 
 @pytest.mark.parametrize(
@@ -89,6 +146,13 @@ def test_authored_registry_is_valid_and_bounded():
         fake.source(max_bytes=8 * 1024 * 1024),
         fake.source(max_age_days=31),
         fake.source(enabled=1),
+        fake.source(role="lead"),
+        fake.source(role=True),
+        fake.source(
+            kind="crossref",
+            url="https://api.crossref.org/journals/0000-0000/works",
+            role="headline",
+        ),
     ],
 )
 def test_registry_rejects_unknown_or_unsafe_entries(entry):
@@ -152,6 +216,22 @@ def test_keywords_keep_brief_semantics(keyword, text, expected):
 
 
 # Parsers.
+
+
+@pytest.mark.parametrize(
+    ("stamp", "moment"),
+    [
+        ("Wed, 28 Oct 2026 06:12:31 GMT", "2026-10-28T06:12:31+00:00"),
+        ("Wed, 28 Oct 2026 01:30:00 -0400", "2026-10-28T05:30:00+00:00"),
+        ("2026-10-28T08:00:00Z", "2026-10-28T08:00:00+00:00"),
+        ("2026-10-27", None),
+        ("Wed, 28 Oct 2026 06:12:31 -0000", None),
+    ],
+)
+def test_feed_items_keep_a_time_only_with_a_zone(stamp, moment):
+    (entry,) = researcher.parse_feed(fake.rss(fake.rss_item(date=stamp)))
+    assert entry.published
+    assert (entry.moment.isoformat() if entry.moment else None) == moment
 
 
 def test_atom_with_several_links_uses_canonical_arxiv_without_doi():
@@ -949,31 +1029,175 @@ async def test_routing_round_robins_sources_and_caps_each_direction():
     assert set(result.notes) == {c["id"] for c in result.candidates}
 
 
+def test_headline_groups_rank_a_story_many_outlets_carry_first():
+    # Thresholds calibrated on a real day's feeds, pinned here: five outlets'
+    # differently worded election stories form one group, the war beat's
+    # strikes stay apart except two reports of one strike and the ceasefire,
+    # and the busy public figure's unrelated stories never merge.
+    registry = headline_registry()
+    result = researcher.assemble(
+        registry, front_page_outcomes(registry), DAY, now=fake.NOW
+    )
+    by_title = {c["title"]: c for c in result.candidates}
+    outlets = {
+        c["title"]: result.notes[c["id"]]["signals"]["independent_sources"]
+        for c in result.candidates
+    }
+    election, ceasefire = result.candidates[:2]
+    assert election["title"] == fake.ELECTION[0][0]
+    assert election["url"] == "https://outlet0.example.org/0"
+    assert result.notes[election["id"]] == {
+        "source": "BBC、NPR、The Guardian、DW、Al Jazeera",
+        "excerpt_untrusted": fake.ELECTION[0][1],
+        "signals": {"independent_sources": 5, "headline_window_hours": 48},
+        "alternate_urls": [
+            "https://outlet1.example.org/0",
+            "https://outlet2.example.org/0",
+            "https://outlet3.example.org/0",
+        ],
+    }
+    assert election["source_basis"] == (
+        "研究员头条订阅源：BBC、NPR、The Guardian、DW、Al Jazeera共5家标题相近"
+        "（代码按标题聚类，仅元数据，未打开原文）"
+    )
+    assert ceasefire["title"] == "Sylvania and Ruritania agree 30-day ceasefire"
+    assert outlets[ceasefire["title"]] == 3
+    # Two outlets on one strike join; the beat's other strikes stay apart.
+    strike = "Sylvanian drones strike Port Vell power plant"
+    assert outlets[strike] == 2
+    assert "Port Vell power plant struck by Sylvanian drones" not in by_title
+    assert sorted(outlets.values(), reverse=True)[:4] == [5, 3, 2, 1]
+    for _, title, _ in fake.FIGURE:
+        assert outlets[title] == 1
+    # The five outlets' budgets cap the groups; every group is one seed.
+    assert len(result.candidates) == 20
+    assert result.headlines == [
+        {
+            "direction": "04-economy",
+            # 56 entries less 4 + 2 + 1 that joined the three groups.
+            "entries": 56,
+            "groups": 49,
+            "consensus_groups": 2,
+            "max_outlets": 5,
+            "top": [
+                {"title": fake.ELECTION[0][0], "outlets": 5},
+                {"title": ceasefire["title"], "outlets": 3},
+                {"title": strike, "outlets": 2},
+            ],
+        }
+    ]
+    assert sum(item["seeds"] for item in result.sources) == 20
+    for candidate in result.candidates:
+        assert content.seed_view(candidate) == candidate
+
+
+def test_headline_window_history_and_times():
+    registry = headline_registry()
+    page = fake.front_page()
+    outcomes = front_page_outcomes(registry, page)
+    stale = headline_entry(0, 90, "Stale synthetic headline", "", minutes=2881)
+    timeless = dataclasses.replace(
+        headline_entry(1, 91, "Untimed synthetic headline", ""), moment=None
+    )
+    outcomes[0].entries.append(stale)
+    outcomes[1].entries.append(timeless)
+    history = [{"url": "https://outlet0.example.org/0", "title": "Seen"}]
+    result = researcher.assemble(registry, outcomes, DAY, history, now=fake.NOW)
+    titles = [c["title"] for c in result.candidates]
+    assert "Untimed synthetic headline" not in titles
+    assert "outlet-1:undated:1" in result.diagnostics
+    # 56 front-page entries and the stale one, less the seen and the stale.
+    assert result.headlines[0]["entries"] == 55
+    # History drops only the outlet's entry it saw, never the group.
+    election = result.candidates[0]
+    assert election["url"] == "https://outlet1.example.org/0"
+    assert result.notes[election["id"]]["signals"]["independent_sources"] == 4
+    # Without a clock only the date window applies.
+    dated = researcher.assemble(registry, outcomes, DAY, history)
+    assert dated.headlines[0]["entries"] == 56
+
+
+def test_a_directions_headline_groups_take_one_turn_per_round():
+    registry = load(
+        *[
+            fake.source(
+                id=f"outlet-{n}",
+                name=name,
+                direction="04-economy",
+                url=f"https://outlet{n}.example.org/rss",
+                max_seeds=1,
+                role="headline",
+            )
+            for n, name in enumerate(fake.OUTLETS)
+        ],
+        fake.source(
+            id="bank",
+            name="Synthetic Bank",
+            direction="04-economy",
+            url="https://bank.example.org/rss",
+        ),
+    )
+    outcomes = front_page_outcomes(registry[:5])
+    outcomes[5] = researcher._Outcome(
+        "ok",
+        [
+            researcher.Entry(
+                title=f"Synthetic bank release {n}",
+                url=f"https://bank.example.org/{n}",
+                doi="",
+                version="",
+                published="2026-10-27",
+                text="",
+                excerpt=True,
+            )
+            for n in range(3)
+        ],
+    )
+    result = researcher.assemble(registry, outcomes, DAY, now=fake.NOW)
+    assert [c["title"] for c in result.candidates] == [
+        fake.ELECTION[0][0],
+        "Synthetic bank release 0",
+        "Sylvania and Ruritania agree 30-day ceasefire",
+        "Synthetic bank release 1",
+        result.candidates[4]["title"],
+        "Synthetic bank release 2",
+        *[c["title"] for c in result.candidates[6:]],
+    ]
+    # Five headline feeds with one seed each: five groups.
+    assert len(result.candidates) == 5 + 3
+
+
 async def test_authored_headline_feeds_bring_a_major_story_from_every_outlet():
     # 03-world once had no leads and missed an election result; its headline
-    # feeds now carry a story that leads many front pages as several leads.
+    # feeds now carry a story every front page leads with as one lead that
+    # names every outlet and offers three other outlets' pages.
     path = pathlib.Path(__file__).resolve().parents[1] / "content-config"
     registry = researcher.validate_registry(
         (path / "researcher.yaml").read_text(encoding="utf-8"),
         [item.stem for item in (path / "discovery").glob("*.md")],
     )
     world = [s for s in registry if s.direction == "03-world"]
-    economy = {s.name for s in registry if s.direction == "04-economy"}
-    assert len({s.name for s in world}) >= 4
-    assert all(s.kind == "feed" and s.max_age_days <= 2 for s in world)
-    assert sum(s.max_seeds for s in world) <= researcher.MAX_SEEDS_PER_DIRECTION
-    assert economy - {"Federal Reserve"}
+    economy = [s for s in registry if s.direction == "04-economy"]
+    assert len({s.name for s in world}) >= 6
+    assert all(s.role == "headline" and s.max_age_days <= 2 for s in world)
+    assert {s.role for s in economy} == {"", "headline"}
+    page = fake.front_page()
+    for name, story in (("PBS NewsHour", 0), ("France 24", 1)):
+        page[name] = [
+            fake.ELECTION[story],
+            *[(f"{name} synthetic local story {n}", "") for n in range(6)],
+        ]
+    assert set(page) == {s.name for s in world}
 
-    story = "Synthetic national election flips the legislative majority"
-
-    def front_page(host, stamp):
+    def front_page(host, items):
+        slug = host.split(".")[-2]
+        stamps = [
+            (fake.NOW - datetime.timedelta(minutes=10 * n + 10)).isoformat()
+            for n in range(len(items))
+        ]
         items = [
-            (f"{story} ({host})", "election", stamp),
-            (f"Old synthetic summit ({host})", "summit", "2026-10-24"),
-            *[
-                (f"Synthetic story {n} ({host})", f"s{n}", "2026-10-27")
-                for n in range(6)
-            ],
+            *zip(items, stamps, strict=True),
+            (("Old synthetic summit", ""), "2026-10-24T09:00:00+00:00"),
         ]
         if host == "rss.dw.com":  # DW serves RDF dated with dc:date
             return (
@@ -982,10 +1206,10 @@ async def test_authored_headline_feeds_bring_a_major_story_from_every_outlet():
                 'xmlns="http://purl.org/rss/1.0/" '
                 'xmlns:dc="http://purl.org/dc/elements/1.1/">'
                 + "".join(
-                    f'<item rdf:about="https://dw.example.org/{slug}">'
-                    f"<title>{title}</title><dc:date>{day}T08:00:00Z</dc:date>"
-                    f"<description>{fake.LONG}</description></item>"
-                    for title, slug, day in items
+                    f'<item rdf:about="https://{slug}.example.org/{n}">'
+                    f"<title>{title}</title><dc:date>{stamp}</dc:date>"
+                    f"<description>{text}</description></item>"
+                    for n, ((title, text), stamp) in enumerate(items)
                 )
                 + "</rdf:RDF>"
             ).encode()
@@ -993,34 +1217,32 @@ async def test_authored_headline_feeds_bring_a_major_story_from_every_outlet():
             *[
                 fake.rss_item(
                     title=title,
-                    link=f"https://{host.split('.')[-2]}.example.org/{slug}",
-                    date=day,
+                    link=f"https://{slug}.example.org/{n}",
+                    date=stamp,
+                    description=text,
                 )
-                for title, slug, day in items
+                for n, ((title, text), stamp) in enumerate(items)
             ]
         )
 
-    stamps = {
-        "feeds.bbci.co.uk": "Wed, 28 Oct 2026 06:12:31 GMT",
-        "feeds.npr.org": "Wed, 28 Oct 2026 01:30:00 -0400",
-        "www.theguardian.com": "Wed, 28 Oct 2026 05:00:00 +0000",
-        "rss.dw.com": "2026-10-28",
-        "www.aljazeera.com": "Wed, 28 Oct 2026 04:00:00 +0000",
-    }
-    hosts = [parse.urlsplit(s.url).hostname or "" for s in world]
-    assert set(hosts) == set(stamps)
     network = fake.Network(
-        {host: front_page(host, stamps[host]) for host in hosts}
+        {
+            parse.urlsplit(s.url).hostname or "": front_page(
+                parse.urlsplit(s.url).hostname or "", page[s.name]
+            )
+            for s in world
+        }
     )
     result = await run(network, world)
     assert all(code.endswith(":ok") for code in result.diagnostics)
     assert {c["direction"] for c in result.candidates} == {"03-world"}
-    assert len(result.candidates) == sum(s.max_seeds for s in world)
-    # The first round takes each outlet's newest lead: the shared story.
-    assert {c["title"] for c in result.candidates[: len(world)]} == {
-        f"{story} ({host})" for host in hosts
-    }
-    assert not any("summit" in c["title"] for c in result.candidates)
+    assert len(result.candidates) <= researcher.MAX_SEEDS_PER_DIRECTION
+    lead = result.candidates[0]
+    note = result.notes[lead["id"]]
+    assert note["signals"]["independent_sources"] == len(world)
+    assert len(note["alternate_urls"]) == content.MAX_ALTERNATE_URLS
+    assert "Old synthetic summit" not in [c["title"] for c in result.candidates]
+    assert result.headlines[0]["consensus_groups"] == 2
 
 
 async def test_every_lead_is_a_valid_metadata_seed_and_notes_are_bounded():

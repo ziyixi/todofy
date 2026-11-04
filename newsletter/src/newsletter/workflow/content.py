@@ -154,7 +154,22 @@ _RESEARCHER_NOTES = (
     "有研究员线索时仍必须实际调用hosted web search；"
     "采用某条研究员线索时，在source_basis写明它来自哪个订阅源。\n"
 )
+# Appended only when a shown note carries headline alternates.
+_HEADLINE_NOTES = (
+    "带alternate_urls的线索是代码按标题把多家头条订阅源归成的同一事件组，"
+    "signals.independent_sources是组内不同媒体数，alternate_urls是其他媒体的报道地址；"
+    "聚类可能有误。主url打不开时先逐个open这些地址并核对是否同一事件，"
+    "只有本轮实际open过的地址才能写进url或evidence_urls。\n"
+)
 MAX_SEED_NOTE_CHARS = 1200
+# Other outlets' URLs a headline group's note may offer besides its lead's.
+MAX_ALTERNATE_URLS = 3
+# A headline group carried by at least this many distinct outlets enters the
+# candidate pool as news, at most MAX_CONSENSUS_LEADS a run.
+CONSENSUS_OUTLETS = 3
+MAX_CONSENSUS_LEADS = 3
+# Opens a consensus lead's classification basis; selection.md keys on it.
+CONSENSUS_BASIS = "头条共识："
 # Editable editorial policy is deliberately separate from the fixed provider
 # permissions and source/protobuf validation. Legacy frozen runs use the exact
 # original instructions above, not whatever configuration is active today.
@@ -502,14 +517,30 @@ def seed_view(candidate: sources.Candidate) -> sources.Candidate:
     return _candidate_view(candidate)
 
 
+def _alternates(value: object) -> bool:
+    if not isinstance(value, list) or len(value) > MAX_ALTERNATE_URLS:
+        return False
+    try:
+        for url in value:
+            if not isinstance(url, str) or len(url) > MAX_SEED_NOTE_CHARS:
+                return False
+            contracts.validate_public_url(url)
+    except contracts.ContractError:
+        return False
+    return len(set(value)) == len(value)
+
+
 def _seed_notes(
     notes: Mapping[str, object], seeds: Sequence[sources.Candidate]
 ) -> dict[str, types.Payload]:
-    """Keep bounded notes for the shown seeds; drop anything malformed."""
+    """Keep bounded notes for the shown seeds; drop anything malformed.
+
+    A headline group's note also lists up to three other outlets' URLs.
+    """
     result: dict[str, types.Payload] = {}
     for seed in seeds:
         note = notes.get(seed["id"])
-        if not isinstance(note, dict) or set(note) != {
+        if not isinstance(note, dict) or set(note) - {"alternate_urls"} != {
             "source",
             "excerpt_untrusted",
             "signals",
@@ -527,9 +558,80 @@ def _seed_notes(
                 isinstance(key, str) and type(value) is int
                 for key, value in signals.items()
             )
+            and _alternates(note.get("alternate_urls", []))
         ):
             result[seed["id"]] = dict(note)
     return result
+
+
+def consensus_leads(
+    leads: Sequence[sources.Candidate],
+    notes: Mapping[str, object],
+    discovered: Sequence[sources.Candidate],
+    classifications: Mapping[str, types.Payload],
+) -> list[tuple[sources.Candidate, types.Payload]]:
+    """Pick headline groups enough outlets carried to enter the pool as news.
+
+    The count is code's, from feed metadata; the classification says so and
+    claims nothing a body would. Whether such a lead is must-know is left to
+    selection. Most outlets first, at most MAX_CONSENSUS_LEADS. A group is
+    skipped when a discovered candidate already covers it: its URL or an
+    evidence URL is the lead's or another outlet's. Only an unknown
+    classification of the lead itself, such as an unopened seed handed
+    back, yields to the count. The other outlets' URLs become the lead's
+    evidence_urls, still metadata scope: nobody opened them.
+    """
+    valid = _seed_notes(notes, leads)
+
+    def urls(values: Sequence[str]) -> set[str]:
+        return {
+            key
+            for value in values
+            for key in sources.identity_keys({"url": value})
+            if key.startswith("url:")
+        }
+
+    found = [
+        (
+            candidate,
+            urls([candidate["url"], *candidate.get("evidence_urls", [])]),
+            candidate_classification(
+                candidate, classifications.get(candidate["id"])
+            )["kind"],
+        )
+        for candidate in discovered
+    ]
+    groups = []
+    for lead in leads:
+        note = valid.get(lead["id"])
+        signals = note["signals"] if note else {}
+        outlets = signals.get("independent_sources", 0)
+        hours = signals.get("headline_window_hours", 0)
+        if note is None or hours <= 0 or outlets < CONSENSUS_OUTLETS:
+            continue
+        alternates = note.get("alternate_urls", [])
+        members = urls([lead["url"], *alternates])
+        if any(
+            keys & members and not (c["id"] == lead["id"] and kind == "unknown")
+            for c, keys, kind in found
+        ):
+            continue
+        names = note["source"]
+        more = "等" if len(names.split("、")) < outlets else "共"
+        basis = (
+            f"{CONSENSUS_BASIS}{names}{more}{outlets}家独立媒体"
+            f"{hours}小时内的头条订阅源均有报道"
+            "（代码按标题聚类计数，仅元数据，正文未核对）"
+        )
+        candidate = cast(
+            sources.Candidate, {**lead, "evidence_urls": alternates}
+        )
+        groups.append((outlets, _candidate_view(candidate), basis))
+    groups.sort(key=lambda group: -group[0])
+    return [
+        (candidate, {"kind": "news", "basis": basis})
+        for _, candidate, basis in groups[:MAX_CONSENSUS_LEADS]
+    ]
 
 
 def _evidence_urls(value: object, opened: set[str] | None = None) -> list[str]:
@@ -830,6 +932,8 @@ class ContentPreparation:
         if notes:
             prompt["metadata_seed_notes_untrusted"] = notes
             rules += _RESEARCHER_NOTES
+            if any("alternate_urls" in note for note in notes.values()):
+                rules += _HEADLINE_NOTES
         with newsletter_usage.purpose_scope("discovery"):
             text, opened, searched = await self.engine.execute(
                 contracts.canonical_json(prompt),

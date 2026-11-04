@@ -21,10 +21,15 @@
 #                      matches the start of a word; a keyword written with capitals matches
 #                      case-sensitively
 #   requires_abstract  skip items whose summary or abstract is under 80 characters
-#   max_seeds          leads per run from this source, 1-20 (default 5); each direction gets 20
+#   max_seeds          leads per run from this source, 1-20 (default 5); each direction gets 20;
+#                      for headline feeds, their sum caps the direction's event groups
 #   max_bytes          read cap, 65536-4194304 (default 1048576); a feed is parsed as far as it got
 #   max_age_days       freshness window, 1-30 (default 4 for arxiv, 7 otherwise); undated items drop
 #   enabled            false keeps an entry without fetching it
+#   role               headline (feeds only): a front-page feed. A direction's headline feeds are
+#                      read as one front page: entries from the last 48 hours (they need a time
+#                      with a zone) are grouped by event, and groups that more outlets (distinct
+#                      names) carry rank first, with up to 3 other outlets' URLs as alternates
 
 version: 1
 
@@ -231,9 +236,11 @@ sources:
 
   # ---------- World and economy ----------
   # Headline feeds put the day's front pages in front of 03-world, so a story several outlets lead
-  # with (an election result, a change of government) arrives as several leads instead of hanging on
-  # a few searches. Open, unpaywalled publishers whose article pages usually load; two days keep
-  # them to the current news cycle, and 5 x 4 seeds fill the direction's 20 leads.
+  # with (an election result, a change of government) arrives as one lead that names every outlet
+  # instead of hanging on a few searches. Open, unpaywalled publishers: each answered 200 without a
+  # redirect when added, which says nothing about whether the hosted model can open their article
+  # pages. Two days keep them to the current news cycle; NPR, Al Jazeera, France 24 and PBS hold
+  # only the last 5-13 hours.
   - id: bbc-world
     name: BBC
     direction: 03-world
@@ -241,6 +248,7 @@ sources:
     url: "https://feeds.bbci.co.uk/news/world/rss.xml" # one-sentence descriptions
     max_seeds: 4
     max_age_days: 2
+    role: headline
   - id: npr-news
     name: NPR
     direction: 03-world
@@ -248,6 +256,7 @@ sources:
     url: "https://feeds.npr.org/1001/rss.xml" # top news incl. US politics; Brief read 1004 (world)
     max_seeds: 4
     max_age_days: 2
+    role: headline
   - id: guardian-world
     name: The Guardian
     direction: 03-world
@@ -255,6 +264,7 @@ sources:
     url: "https://www.theguardian.com/world/rss"
     max_seeds: 4
     max_age_days: 2
+    role: headline
   - id: dw-world
     name: DW
     direction: 03-world
@@ -262,6 +272,7 @@ sources:
     url: "https://rss.dw.com/rdf/rss-en-world" # RDF with dc:date
     max_seeds: 4
     max_age_days: 2
+    role: headline
   - id: aljazeera
     name: Al Jazeera
     direction: 03-world
@@ -269,11 +280,33 @@ sources:
     url: "https://www.aljazeera.com/xml/rss/all.xml"
     max_seeds: 4
     max_age_days: 2
+    role: headline
+  - id: pbs-newshour
+    name: PBS NewsHour
+    direction: 03-world
+    kind: feed
+    url: "https://www.pbs.org/newshour/feeds/rss/headlines" # carries AP copy on a readable site
+    max_seeds: 4
+    max_age_days: 2
+    role: headline
+  - id: france24
+    name: France 24
+    direction: 03-world
+    kind: feed
+    url: "https://www.france24.com/en/rss"
+    max_seeds: 4
+    max_age_days: 2
+    role: headline
   - id: fed-press
     name: Federal Reserve
     direction: 04-economy
     kind: feed
     url: "https://www.federalreserve.gov/feeds/press_all.xml"
+  - id: ecb-press
+    name: European Central Bank
+    direction: 04-economy
+    kind: feed
+    url: "https://www.ecb.europa.eu/rss/press.html" # titles only
   - id: bbc-business
     name: BBC
     direction: 04-economy
@@ -281,10 +314,81 @@ sources:
     url: "https://feeds.bbci.co.uk/news/business/rss.xml"
     max_seeds: 4
     max_age_days: 2
+    role: headline
   - id: guardian-economics
     name: The Guardian
     direction: 04-economy
     kind: feed
     url: "https://www.theguardian.com/business/economics/rss"
     max_seeds: 4
+    max_age_days: 2
+    role: headline
+  - id: cnbc-top
+    name: CNBC
+    direction: 04-economy
+    kind: feed
+    url: "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114"
+    max_seeds: 4
+    max_age_days: 2
+    role: headline
+
+  # ---------- Health ----------
+  - id: bbc-health
+    name: BBC
+    direction: 05-health
+    kind: feed
+    url: "https://feeds.bbci.co.uk/news/health/rss.xml"
+    max_seeds: 4
+    max_age_days: 3
+  - id: kff-health-news
+    name: KFF Health News
+    direction: 05-health
+    kind: feed
+    url: "https://kffhealthnews.org/feed/" # full articles, about 150 KB
+    max_seeds: 4
+  - id: npr-health
+    name: NPR
+    direction: 05-health
+    kind: feed
+    url: "https://feeds.npr.org/1128/rss.xml"
+    max_seeds: 4
+  - id: fda-press
+    name: FDA
+    direction: 05-health
+    kind: feed
+    url: "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/press-releases/rss.xml"
+    max_seeds: 4
+    max_age_days: 7 # a few releases a week
+  - id: ema-news
+    name: European Medicines Agency
+    direction: 05-health
+    kind: feed
+    url: "https://www.ema.europa.eu/en/news.xml"
+    max_seeds: 4
+    max_age_days: 7 # a few items a week
+
+  # ---------- Technology ----------
+  - id: ars-technica
+    name: Ars Technica
+    direction: 06-technology
+    kind: feed
+    url: "https://feeds.arstechnica.com/arstechnica/index"
+    max_age_days: 2
+  - id: techcrunch
+    name: TechCrunch
+    direction: 06-technology
+    kind: feed
+    url: "https://techcrunch.com/feed/"
+    max_age_days: 2
+  - id: bleepingcomputer
+    name: BleepingComputer
+    direction: 06-technology
+    kind: feed
+    url: "https://www.bleepingcomputer.com/feed/" # security
+    max_age_days: 2
+  - id: the-verge
+    name: The Verge
+    direction: 06-technology
+    kind: feed
+    url: "https://www.theverge.com/rss/index.xml"
     max_age_days: 2

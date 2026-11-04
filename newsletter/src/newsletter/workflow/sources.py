@@ -194,12 +194,18 @@ class MetadataResult:
     source (id, outcome code, parsed entries, accepted entries, routed seeds,
     truncation) for the owner console. It is also additive: older artifacts
     lack it, and no workflow node reads it.
+
+    ``headlines`` holds one record per direction with headline feeds: entries
+    in the window, event groups, groups with enough outlets for a consensus,
+    the largest group's outlets and the top three groups' public titles.
+    Additive and read by no workflow node, like ``sources``.
     """
 
     candidates: list[Candidate]
     diagnostics: list[str]
     notes: dict[str, types.Payload] = dataclasses.field(default_factory=dict)
     sources: list[types.Payload] = dataclasses.field(default_factory=list)
+    headlines: list[types.Payload] = dataclasses.field(default_factory=list)
 
 
 def metadata_candidate(
