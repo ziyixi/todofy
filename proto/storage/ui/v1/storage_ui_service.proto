@@ -13,6 +13,7 @@ import "google/api/field_info.proto";
 import "google/api/resource.proto";
 import "google/protobuf/empty.proto";
 import "storage/ui/v1/client.proto";
+import "storage/ui/v1/overview.proto";
 
 option java_multiple_files = true;
 option java_outer_classname = "StorageUiServiceProto";
@@ -28,6 +29,14 @@ service StorageUiService {
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   rpc GetSettings(GetSettingsRequest) returns (Settings) {
     option (google.api.http) = {get: "/api/v1/{name=settings}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // Status, credentials and the last 14 UTC days of application requests in one read. Writes the
+  // pending in-memory counters first.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  rpc GetOverview(GetOverviewRequest) returns (Overview) {
+    option (google.api.http) = {get: "/api/v1/{name=overview}"};
     option (google.api.method_signature) = "name";
   }
 
@@ -80,6 +89,15 @@ message GetSettingsRequest {
   string name = 1 [
     (google.api.field_behavior) = REQUIRED,
     (google.api.resource_reference).type = "storage.ziyixi.science/Settings"
+  ];
+}
+
+// Input of GetOverview.
+message GetOverviewRequest {
+  // Always overview.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "storage.ziyixi.science/Overview"
   ];
 }
 

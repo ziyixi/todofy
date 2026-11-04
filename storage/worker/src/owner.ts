@@ -3,24 +3,69 @@ import { EmptySchema, timestampFromDate } from '@ziyixi/proto/protobuf/wkt';
 import { decodePageToken, encodePageToken, PageTokenError } from '@ziyixi/proto/page-token';
 import type { ServiceHandlers } from '@ziyixi/proto/http-transcoder';
 import { Code } from '@ziyixi/proto/rpc-status';
-import { formatMatches } from '@ziyixi/proto/wire-json';
+import { fieldRules, formatMatches } from '@ziyixi/proto/wire-json';
 import { ClientSchema, Client_Access, SettingsSchema } from '@ziyixi/proto/storage/ui/v1/client_pb';
+import { OverviewSchema, RequestFailureSchema, UsageCountSchema } from '@ziyixi/proto/storage/ui/v1/overview_pb';
 import { ConnectDropboxResponseSchema, DisconnectDropboxResponseSchema, ListClientsResponseSchema, type StorageUiService } from '@ziyixi/proto/storage/ui/v1/storage_ui_service_pb';
 import type { Dropbox, ProviderError } from './dropbox.ts';
+import { MAX_CLIENTS } from './env.ts';
 import { badRequest, failure } from './errors.ts';
 import { digest, namespace, randomText } from './keys.ts';
-import type { ClientRow, Store } from './store.ts';
+import type { ClientRow, FailureRow, Store, UsageRow } from './store.ts';
+import { DAY_MS, OPERATIONS, OUTCOMES, utcDay } from './usage.ts';
 
 export interface OwnerContext {
   readonly store: Store;
   readonly dropbox: Dropbox;
   readonly redirectUri: string;
+  /** Writes the pending in-memory counters, so an overview includes them. */
+  readonly flushUsage: () => void;
+  readonly buildSha: string;
+  readonly stateSizeBytes: () => number;
 }
+
+const OVERVIEW_DAYS = 14;
+const MAX_USAGE_COUNTS = fieldRules(OverviewSchema.field.usage).maxItems;
+
+const timestamp = (milliseconds: number) => timestampFromDate(new Date(milliseconds));
 
 function clientMessage(row: ClientRow, apiKey = ''): MessageShape<typeof ClientSchema> {
   return create(ClientSchema, {
     name: 'clients/' + row.id, label: row.label, namespace: row.namespace, access: row.access as Client_Access,
-    createTime: timestampFromDate(new Date(row.create_time)), ...(apiKey === '' ? {} : { apiKey }),
+    createTime: timestamp(row.create_time), ...(apiKey === '' ? {} : { apiKey }),
+    ...(row.last_use_time > 0 ? { lastUseTime: timestamp(row.last_use_time) } : {}),
+  });
+}
+
+function settingsMessage(store: Store): MessageShape<typeof SettingsSchema> {
+  const appKey = store.get('app_key');
+  const failed = store.get('provider_error') as ProviderError | null;
+  const connection = store.connection();
+  const success = store.get('last_success');
+  return create(SettingsSchema, {
+    name: 'settings', connected: connection !== null, appKey: typeof appKey === 'string' ? appKey : '',
+    ...(failed === null ? {} : { lastProviderError: failed.reason, lastProviderErrorTime: timestamp(failed.time) }),
+    ...(connection?.connectTime === undefined ? {} : { connectTime: timestamp(connection.connectTime) }),
+    ...(typeof success === 'number' && connection !== null ? { lastSuccessTime: timestamp(success) } : {}),
+  });
+}
+
+function usageMessage(row: UsageRow): MessageShape<typeof UsageCountSchema> | null {
+  const operation = OPERATIONS.value(row.operation);
+  const outcome = OUTCOMES.value(row.outcome);
+  if (operation === undefined || outcome === undefined) return null;
+  return create(UsageCountSchema, {
+    day: row.day, client: 'clients/' + row.client_id, namespace: row.namespace, operation, outcome, requestCount: row.requests,
+    objectCount: row.objects, uploadBytes: row.upload_bytes, downloadBytes: row.download_bytes, maxBatchObjectCount: row.max_batch,
+  });
+}
+
+function failureMessage(row: FailureRow): MessageShape<typeof RequestFailureSchema> | null {
+  const operation = OPERATIONS.value(row.operation);
+  if (operation === undefined) return null;
+  return create(RequestFailureSchema, {
+    failureTime: timestamp(row.time), client: 'clients/' + row.client_id, namespace: row.namespace, operation,
+    reason: row.reason, httpStatus: row.http_status, retryAfterSeconds: row.retry_after,
   });
 }
 
@@ -32,11 +77,20 @@ function clientId(name: string): string {
 export const handlers: ServiceHandlers<typeof StorageUiService.method, OwnerContext> = {
   getSettings: (input, context) => {
     if (input.name !== 'settings') badRequest();
-    const appKey = context.store.get('app_key');
-    const failed = context.store.get('provider_error') as ProviderError | null;
-    return Promise.resolve(create(SettingsSchema, {
-      name: 'settings', connected: context.store.connection() !== null, appKey: typeof appKey === 'string' ? appKey : '',
-      ...(failed === null ? {} : { lastProviderError: failed.reason, lastProviderErrorTime: timestampFromDate(new Date(failed.time)) }),
+    return Promise.resolve(settingsMessage(context.store));
+  },
+  getOverview: (input, context) => {
+    if (input.name !== 'overview') badRequest();
+    context.flushUsage();
+    const now = Date.now();
+    const counts = context.store.usage(utcDay(now - (OVERVIEW_DAYS - 1) * DAY_MS), MAX_USAGE_COUNTS + 1);
+    return Promise.resolve(create(OverviewSchema, {
+      name: 'overview', generateTime: timestamp(now), settings: settingsMessage(context.store),
+      clients: context.store.clients('', MAX_CLIENTS).map((row) => clientMessage(row)),
+      usage: counts.slice(0, MAX_USAGE_COUNTS).map(usageMessage).filter((count) => count !== null),
+      usageTruncated: counts.length > MAX_USAGE_COUNTS,
+      recentFailures: context.store.failures().map(failureMessage).filter((failed) => failed !== null),
+      buildSha: context.buildSha, stateSizeBytes: context.stateSizeBytes(),
     }));
   },
   listClients: (input, context) => {
@@ -76,7 +130,7 @@ export const handlers: ServiceHandlers<typeof StorageUiService.method, OwnerCont
     const apiKey = 'sto_' + randomText();
     const row: ClientRow = {
       id: input.requestId, label, namespace: clientNamespace, access: value.access,
-      token_sha256: await digest(apiKey), create_time: Date.now(), revoked: 0,
+      token_sha256: await digest(apiKey), create_time: Date.now(), revoked: 0, last_use_time: 0,
     };
     // No await separates the second replay check and insert in this object.
     const repeated = context.store.client(input.requestId);

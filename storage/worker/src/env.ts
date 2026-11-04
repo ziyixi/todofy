@@ -22,4 +22,6 @@ export interface Env {
   readonly DEV_AUTH_BYPASS?: string;
   /** Loopback fake only, enabled together with loopback owner authentication. */
   readonly DEV_DROPBOX_ORIGIN?: string;
+  /** Loopback tests only: a shorter counter write delay in milliseconds, honoured with the local bypass. */
+  readonly DEV_USAGE_FLUSH_MS?: string;
 }

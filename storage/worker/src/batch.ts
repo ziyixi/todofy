@@ -117,7 +117,13 @@ function pathFailure(entry: Record<string, unknown>): unknown {
     ? (path as Record<string, unknown>)['.tag'] : undefined;
 }
 
-export async function batchCreate(request: Request, client: ClientRow, dropbox: Dropbox): Promise<Response> {
+/** The complete answer and the number of objects it confirms, which the request counters record. */
+export interface BatchResult {
+  readonly response: Response;
+  readonly objectCount: number;
+}
+
+export async function batchCreate(request: Request, client: ClientRow, dropbox: Dropbox): Promise<BatchResult> {
   if (client.access !== Client_Access.READ_WRITE) throw failure(Code.PERMISSION_DENIED, 'READ_ONLY');
   if (new URL(request.url).search !== '' || !/^application\/octet-stream(?:\s*;|\s*$)/i.test(request.headers.get('content-type') ?? '')) badRequest();
   const raw = request.headers.get('x-storage-batch');
@@ -208,7 +214,8 @@ export async function batchCreate(request: Request, client: ClientRow, dropbox: 
       }
       objects.push(metadata);
     }
-    return Response.json(toWire(BatchCreateResponseSchema, create(BatchCreateResponseSchema, { objects })), { headers: { 'cache-control': 'no-store' } });
+    const response = Response.json(toWire(BatchCreateResponseSchema, create(BatchCreateResponseSchema, { objects })), { headers: { 'cache-control': 'no-store' } });
+    return { response, objectCount: objects.length };
   } catch (error) {
     controller.abort();
     await outgoing?.cancel().catch(() => undefined);

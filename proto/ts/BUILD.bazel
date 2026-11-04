@@ -565,6 +565,7 @@ ts_proto_library(
     outs = [
         "storage/ui/v1/client_pb.ts",
         "storage/ui/v1/errors_pb.ts",
+        "storage/ui/v1/overview_pb.ts",
         "storage/ui/v1/storage_ui_service_pb.ts",
     ],
     proto_package = "storage.ui.v1",
@@ -572,6 +573,7 @@ ts_proto_library(
     sources = [
         "storage/ui/v1/client.proto",
         "storage/ui/v1/errors.proto",
+        "storage/ui/v1/overview.proto",
         "storage/ui/v1/storage_ui_service.proto",
     ],
     deps = [

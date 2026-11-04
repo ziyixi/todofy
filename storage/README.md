@@ -3,8 +3,8 @@
 Storage gives applications a namespace-scoped HTTP interface to a separate Dropbox App-folder connection.
 The owner console connects Dropbox and creates independently revocable read-only or read/write keys.
 Each key selects a fixed namespace on the server. File data lives in Dropbox; the native SQLite Durable Object
-holds the connection state, key hashes, a cursor-signing key and the last provider error reason. Storage uses no D1,
-R2 or scheduled job.
+holds the connection state, key hashes, a cursor-signing key, the last provider error reason and request counters.
+Storage uses no D1, R2, cron trigger or alarm; counters are written periodically from memory (below).
 
 The separate Dropbox app uses `files.metadata.read`, `files.content.read` and `files.content.write` with offline PKCE.
 The callback is `/api/dropbox/callback`. Existing Recall connections, files and archive contracts are independent.
@@ -82,6 +82,34 @@ Owner HTTP is `storage.ui.v1` under `/api/v1/`, behind edge-auth. Mutations requ
 `X-CSRF-Token: 1` and JSON. Newly created application keys are returned once; listings and replays return metadata.
 Settings include the Storage reason and time of the newest error Dropbox answered, never provider content.
 Absent objects and create conflicts are ordinary answers and are not recorded. A new or removed connection clears it.
+Settings also carry the connection time and the last success; an error newer than the last success is still
+occurring, an older one has recovered.
+
+## Request counters
+
+The Durable Object counts each application request that presents a known key, by UTC day (when the quota resets), key,
+operation (`stat`, `list`, `get`, `head`, `put`, `batch_create`) and outcome:
+
+| Outcome | Meaning |
+| --- | --- |
+| `ok` | Answered successfully |
+| `not_found`, `conflict` | Ordinary answers: an absent object, or a revision or create precondition that did not hold |
+| `rate_limited` | 429 with Retry-After |
+| `failed` | Anything else; also listed in recent failures |
+
+Each count also sums the objects written (one per PUT, every object of a batch) and their bytes, download bytes by
+Content-Length, and the largest batch. Recent failures keep the newest 50, at most one a minute per key, operation and
+reason, with the reason code, HTTP status and Retry-After, never provider content. Malformed keys refused at the edge,
+unknown or revoked keys, unknown paths or methods, the console and `/health` are not counted; Home shows the
+account-wide totals.
+
+Counts accumulate in memory and are written in one transaction about 30 seconds after the first request that changed
+them, and before every overview: one row per changed day, key, operation and outcome rather than one per request, at
+most 2,880 writes a day. The pending timer keeps the object in memory until the write, so a burst can add up to about
+20 seconds of Durable Object duration; an alarm would wake a hibernated instance without the counts and cost a request.
+A deploy or eviction loses at most those 30 seconds. Daily counts are kept 90 days. Each key's last use and the
+connection's last success are written with the counts. `GetOverview` answers the settings, keys, 14 days of counts
+and recent failures in one call.
 
 ## Development
 

@@ -3,7 +3,7 @@ import { Dropbox } from '../src/dropbox.ts';
 import { list, readContent, stat, writeContent } from '../src/objects.ts';
 import type { ClientRow, Connection } from '../src/store.ts';
 
-const client: ClientRow = { id: 'synthetic', label: 'Synthetic', namespace: 'synthetic', access: 2, token_sha256: 'a'.repeat(64), create_time: 0, revoked: 0 };
+const client: ClientRow = { id: 'synthetic', label: 'Synthetic', namespace: 'synthetic', access: 2, token_sha256: 'a'.repeat(64), create_time: 0, revoked: 0, last_use_time: 0 };
 const object = { name: 'file.bin', path_display: '/namespaces/synthetic/file.bin', rev: 'abc123', size: 3, content_hash: 'b'.repeat(64) };
 let provider: Dropbox;
 

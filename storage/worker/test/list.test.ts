@@ -8,7 +8,7 @@ import type { ClientRow } from '../src/store.ts';
 import { sqliteStore } from './sqlite.ts';
 
 const secret = 'a'.repeat(64);
-const client: ClientRow = { id: 'synthetic', label: 'Synthetic', namespace: 'synthetic', access: 1, token_sha256: 'a'.repeat(64), create_time: 0, revoked: 0 };
+const client: ClientRow = { id: 'synthetic', label: 'Synthetic', namespace: 'synthetic', access: 1, token_sha256: 'a'.repeat(64), create_time: 0, revoked: 0, last_use_time: 0 };
 interface ProviderPage { readonly entries: readonly Record<string, unknown>[]; readonly has_more: boolean; readonly cursor: string }
 interface Listing { readonly objects: { readonly key: string; readonly revision: string }[]; readonly next_cursor: string }
 let dropbox: Dropbox;
@@ -127,7 +127,7 @@ describe('retired page cache', () => {
     sqliteStore(database);
     sqliteStore(database);
     expect(database.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'list_pages%'").all()).toEqual([]);
-    expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all()).toEqual([{ name: 'clients' }, { name: 'metadata' }]);
+    expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all()).toEqual([{ name: 'clients' }, { name: 'metadata' }, { name: 'recent_failures' }, { name: 'usage_daily' }]);
     database.close();
   });
 });

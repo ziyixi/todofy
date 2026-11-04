@@ -63,6 +63,9 @@ message Client {
   google.protobuf.Timestamp create_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Returned once on creation. Lists and repeated creates never return this value.
   string api_key = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The newest request this credential authenticated, written with the counters about every 30 seconds;
+  // absent before its first use.
+  google.protobuf.Timestamp last_use_time = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // The owner's connection status; never includes Dropbox tokens or account content.
@@ -85,4 +88,10 @@ message Settings {
   string last_provider_error = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
   // When Dropbox answered that error.
   google.protobuf.Timestamp last_provider_error_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When this connection was installed; absent for a connection installed before this field existed.
+  google.protobuf.Timestamp connect_time = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The newest application request Dropbox answered on this connection, an absent object or a create
+  // conflict included; written with the counters about every 30 seconds. An error newer than this
+  // is still occurring.
+  google.protobuf.Timestamp last_success_time = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
 }

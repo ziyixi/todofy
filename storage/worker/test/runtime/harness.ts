@@ -172,7 +172,7 @@ export async function harness(inspect = false): Promise<{
     ...(inspect ? { name: 'storage', inspectorPort: 0 } : {}),
     modules: true, script, compatibilityDate: '2026-09-08', resourcePersistencePath: temporary, host: '127.0.0.1', port: 0,
     durableObjects: { STORAGE: { className: 'StorageState', useSQLite: true } },
-    bindings: { PUBLIC_HOST: 'storage.example.test', ACCESS_ISSUER: 'https://synthetic.cloudflareaccess.com', ACCESS_AUDIENCE: 'a'.repeat(64), ACCESS_OWNER: 'owner@example.test', DEV_AUTH_BYPASS: 'true', BUILD_SHA: 'test' },
+    bindings: { PUBLIC_HOST: 'storage.example.test', ACCESS_ISSUER: 'https://synthetic.cloudflareaccess.com', ACCESS_AUDIENCE: 'a'.repeat(64), ACCESS_OWNER: 'owner@example.test', DEV_AUTH_BYPASS: 'true', BUILD_SHA: 'test', DEV_USAGE_FLUSH_MS: '50' },
     outboundService: (request) => provider.fetch(request as unknown as Request),
   }));
   let mf = start();

@@ -159,9 +159,10 @@ export class Dropbox {
     const current = this.store.get('pending') as PendingConnection | null;
     if (current?.state !== pending.state || current.exchanging !== true) throw failure(Code.ABORTED, 'REVISION_CONFLICT');
     this.store.delete('pending');
-    const connection: Connection = { appKey: pending.appKey, refreshToken: response.refresh_token, generation: crypto.randomUUID() };
+    const connection: Connection = { appKey: pending.appKey, refreshToken: response.refresh_token, generation: crypto.randomUUID(), connectTime: Date.now() };
     this.store.set('connection', connection);
     this.store.delete('provider_error');
+    this.store.delete('last_success');
     this.recorded = null;
     this.access = null;
   }
@@ -202,6 +203,7 @@ export class Dropbox {
     if (this.store.connection()?.generation === connection.generation) {
       this.store.delete('connection');
       this.store.delete('provider_error');
+      this.store.delete('last_success');
       this.recorded = null;
     }
     this.access = null;

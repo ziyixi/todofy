@@ -16,7 +16,7 @@ workspace_link(name = "unit_edge_auth_link", src = "//packages/edge-auth:pkg", p
 proto_vitest_test(
     name = "unit_test",
     config = "//storage/worker:test_config",
-    tests = [":keys.test.ts", ":dropbox.test.ts", ":objects.test.ts", ":batch.test.ts", ":http.test.ts", ":wire.test.ts", ":list.test.ts"],
+    tests = [":keys.test.ts", ":dropbox.test.ts", ":objects.test.ts", ":batch.test.ts", ":http.test.ts", ":wire.test.ts", ":list.test.ts", ":usage.test.ts"],
     deps = ["//storage/worker/src:lib"],
     data = [":sqlite_helper", ":unit_edge_auth_link", "//contracts/storage-objects-v1:js_fixtures", "//storage/worker:node_modules/vitest", "//storage/worker:package_json"],
     project = "storage/worker",
@@ -25,7 +25,7 @@ proto_vitest_test(
 )
 workerd_vitest_test(
     name = "runtime_test",
-    tests = [":runtime/http.test.ts", ":runtime/batch.test.ts"],
+    tests = [":runtime/http.test.ts", ":runtime/batch.test.ts", ":runtime/usage.test.ts"],
     project = "storage/worker",
     runner = vitest.vitest_test,
     data = ["//contracts/storage-objects-v1:js_fixtures"],

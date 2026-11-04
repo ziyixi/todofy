@@ -1,0 +1,181 @@
+// The owner console's single read: connection status, active credentials and the application requests of the
+// last 14 UTC days. Counters accumulate in the Durable Object's memory and are written about every 30 seconds;
+// reading the overview writes the pending counts first, so a restart or deploy loses at most those 30 seconds.
+// Only requests that present a known credential are counted; malformed keys refused at the edge, the console
+// itself and /health are not.
+syntax = "proto3";
+
+package storage.ui.v1;
+
+import "common/wire/v1/wire.proto";
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+import "storage/ui/v1/client.proto";
+
+option java_multiple_files = true;
+option java_outer_classname = "OverviewProto";
+option java_package = "science.ziyixi.storage.ui.v1";
+option (common.wire.v1.formats) = {
+  name: "Day"
+  pattern: "[0-9]{4}-[0-9]{2}-[0-9]{2}"
+  description: "A UTC calendar day, YYYY-MM-DD; Workers Free quotas reset at 00:00 UTC."
+};
+
+// The console overview (a singleton).
+message Overview {
+  option (google.api.resource) = {
+    type: "storage.ziyixi.science/Overview"
+    pattern: "overview"
+    singular: "overview"
+    plural: "overviews"
+  };
+
+  // Always overview.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // When this view was read.
+  google.protobuf.Timestamp generate_time = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The connection status, as GetSettings answers it.
+  // (-- api-linter: core::0122::embedded-resource=disabled
+  //     aip.dev/not-precedent: read with the counters in one call, so the console opens with one API request. --)
+  Settings settings = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Every active credential in name order, as ListClients answers them.
+  // (-- api-linter: core::0122::embedded-resource=disabled
+  //     aip.dev/not-precedent: read with the counters in one call, so the console opens with one API request. --)
+  repeated Client clients = 4 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field).max_items = 64
+  ];
+  // Counts of the last 14 UTC days, today included, the newest day first.
+  repeated UsageCount usage = 5 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field).max_items = 2000
+  ];
+  // True when the 14 days hold more counts than `usage` carries; the oldest are left out.
+  bool usage_truncated = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The newest failed application requests, the newest first: at most one a minute for each credential,
+  // operation and reason. Absent objects and create conflicts are ordinary answers and never listed.
+  repeated RequestFailure recent_failures = 7 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field).max_items = 50
+  ];
+  // The deployed build: a commit SHA, or dev locally.
+  string build_sha = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The Durable Object's SQLite size in bytes: connection, credentials and counters, never file data.
+  double state_size_bytes = 9 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field).minimum = 0
+  ];
+}
+
+// One UTC day's requests of one credential, operation and outcome.
+message UsageCount {
+  // The application operation.
+  enum Operation {
+    // Never written.
+    OPERATION_UNSPECIFIED = 0;
+    // POST stat.
+    OPERATION_STAT = 1;
+    // POST list: one listing page.
+    OPERATION_LIST = 2;
+    // GET content: a download.
+    OPERATION_GET = 3;
+    // HEAD content.
+    OPERATION_HEAD = 4;
+    // PUT content: one conditional write.
+    OPERATION_PUT = 5;
+    // POST content: one create-only batch.
+    OPERATION_BATCH_CREATE = 6;
+  }
+
+  // How the request ended.
+  enum Outcome {
+    // Never written.
+    OUTCOME_UNSPECIFIED = 0;
+    // Answered successfully.
+    OUTCOME_OK = 1;
+    // The object was absent: an ordinary answer.
+    OUTCOME_NOT_FOUND = 2;
+    // A revision or create precondition did not hold: an ordinary answer.
+    OUTCOME_CONFLICT = 3;
+    // Refused with 429 and Retry-After.
+    OUTCOME_RATE_LIMITED = 4;
+    // Any other failure; recent_failures keeps its reason.
+    OUTCOME_FAILED = 5;
+  }
+
+  // The UTC day.
+  string day = 1 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field).format = "Day"
+  ];
+  // The credential, revoked ones included.
+  string client = 2 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "storage.ziyixi.science/Client"
+  ];
+  // That credential's namespace.
+  string namespace = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The operation.
+  Operation operation = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The outcome.
+  Outcome outcome = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Requests.
+  int32 request_count = 6 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // Objects written: one per successful PUT, every object of a successful batch.
+  int32 object_count = 7 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // Bytes of the objects written.
+  double upload_bytes = 8 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // Bytes of successful downloads, by their Content-Length.
+  double download_bytes = 9 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // The largest successful batch, in objects.
+  int32 max_batch_object_count = 10 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field).minimum = 0,
+    (common.wire.v1.field).maximum = 32
+  ];
+}
+
+// One failed application request.
+message RequestFailure {
+  // When it failed.
+  google.protobuf.Timestamp failure_time = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The credential.
+  string client = 2 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "storage.ziyixi.science/Client"
+  ];
+  // That credential's namespace.
+  string namespace = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The operation.
+  UsageCount.Operation operation = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The answer's ErrorInfo reason, such as INSUFFICIENT_SPACE. Never provider content.
+  string reason = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The answer's HTTP status.
+  int32 http_status = 6 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field).minimum = 400,
+    (common.wire.v1.field).maximum = 599
+  ];
+  // The answer's Retry-After in seconds; 0 without one.
+  // (-- api-linter: core::0140::prepositions=disabled
+  //     aip.dev/not-precedent: named after the Retry-After header it reports. --)
+  // (-- api-linter: core::0142::time-field-type=disabled
+  //     aip.dev/not-precedent: a delay in the header's own unit; the wire profile has no Duration. --)
+  int32 retry_after_seconds = 7 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field).minimum = 0
+  ];
+}
