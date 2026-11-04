@@ -398,6 +398,37 @@ def test_feed_quirks_cdata_doctype_text_and_leading_whitespace():
     assert entry.title == "Synthetic feed item"
 
 
+def test_media_credits_never_stand_in_for_the_description():
+    raw = (
+        b'<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/">'
+        b"<channel><title>Synthetic</title><item>"
+        b"<title>Synthetic minister resigns</title>"
+        b"<link>https://outlet.example.org/world/resigns</link>"
+        b"<pubDate>Wed, 04 Nov 2026 10:00:00 GMT</pubDate>"
+        b'<media:content url="https://img.example.org/a.jpg">'
+        b"<media:credit>Photograph: Synthetic Agency/AP</media:credit>"
+        b"</media:content>"
+        b"<description>&lt;p&gt;The synthetic minister quit after a vote"
+        b"&lt;/p&gt;&lt;p&gt;Parliament met on Wednesday. It voted 201 to "
+        b"110.&lt;/p&gt;</description>"
+        b"</item></channel></rss>"
+    )
+    (entry,) = researcher.parse_feed(raw)
+    # The standfirst's paragraph ends its sentence even without a full stop.
+    assert entry.text == (
+        "The synthetic minister quit after a vote. Parliament met on "
+        "Wednesday. It voted 201 to 110."
+    )
+    # Atom's own <content> still counts.
+    atom = fake.atom(
+        fake.arxiv_entry()
+        .replace("<summary>", "<content>", 1)
+        .replace("</summary>", "</content>", 1)
+    )
+    (entry,) = researcher.parse_feed(atom)
+    assert entry.text == fake.LONG
+
+
 # Fetch policy.
 
 

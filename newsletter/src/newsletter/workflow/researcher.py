@@ -140,6 +140,12 @@ _BASIS_NAMES = 5
 _GROUP_NAMES = 10
 _DATE_FIELDS = ("date", "pubDate", "published", "publicationDate", "updated")
 _BODY_FIELDS = ("encoded", "content", "description", "summary")
+# Media RSS children (<media:content>, <media:description>) describe an
+# attached image or video: their photo credit is not the item's text.
+_MEDIA_RSS = "{http://search.yahoo.com/mrss/}"
+# A paragraph ending in a word, such as a Guardian standfirst, still ends a
+# sentence, so a first sentence is the lede and never runs on.
+_PARAGRAPH_END = re.compile(r"(?<=\w)</p>", re.IGNORECASE)
 
 Resolver = Callable[[str], Awaitable[Sequence[str]]]
 Sleep = Callable[[float], Awaitable[None]]
@@ -535,7 +541,8 @@ def _feed_link(element: ElementTree.Element) -> str:
 def _feed_entry(element: ElementTree.Element) -> Entry | None:
     fields: dict[str, ElementTree.Element] = {}
     for child in element:
-        fields.setdefault(_local(child.tag), child)
+        if not str(child.tag).startswith(_MEDIA_RSS):
+            fields.setdefault(_local(child.tag), child)
     title = fields.get("title")
     link = _feed_link(element)
     if title is None or not link:
@@ -568,7 +575,7 @@ def _feed_entry(element: ElementTree.Element) -> Entry | None:
         doi="" if version or url.startswith("https://arxiv.org/") else doi,
         version=version,
         published=published,
-        text=clean_text(body),
+        text=clean_text(_PARAGRAPH_END.sub(".</p>", body)),
         excerpt=True,
         moment=moment if published else None,
     )
