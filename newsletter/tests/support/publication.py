@@ -154,13 +154,14 @@ def delivery_receipt(
     state: types.DeliveryState = "simulated",
     *,
     verification: bool = False,
+    issue_date: str = DAY,
 ) -> types.EditionRecord:
     """Persist an edition and optionally its simulated delivery receipt."""
     store = repository.store
     store.save_workflow_supplements(run_id, built["packets"])
     ids = [packet["id"] for packet in built["packets"]]
     issue = store.prepare(
-        {"request_key": run_id, "issue_date": DAY, "packet_ids": ids},
+        {"request_key": run_id, "issue_date": issue_date, "packet_ids": ids},
         workflow_binding={
             "run_id": run_id,
             "result": {"draft": built["draft"], "review": built["review"]},
@@ -169,7 +170,7 @@ def delivery_receipt(
         },
     )
     rendered = rendering.render_edition(
-        built["draft"], built["packets"], DAY, is_fixture=True
+        built["draft"], built["packets"], issue_date, is_fixture=True
     )
     store.finish(
         issue["id"],

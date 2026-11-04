@@ -24,6 +24,7 @@ import newsletter.workflow.engine as engine
 import newsletter.workflow.researcher as researcher
 import newsletter.workflow.sources as sources
 import newsletter.workflow.state as newsletter_workflow_state
+import newsletter.workflow.threads as workflow_threads
 
 
 class EditorialNodes:
@@ -140,16 +141,23 @@ class EditorialNodes:
     async def _history(
         self, ctx: engine.NodeContext, path: pathlib.Path
     ) -> types.Payload:
-        """Read the frozen candidate and edition history."""
-        return {
-            "candidates": ctx.run_inputs["history"],
-            "editions": ctx.run_inputs["editions"],
+        """Read the frozen candidate and edition history.
+
+        Runs frozen with threads also carry them and the recent candidate
+        index; older runs keep showing the full records to their prompts.
+        """
+        inputs = ctx.run_inputs
+        history = {
+            "candidates": inputs["history"],
+            "editions": inputs["editions"],
             "watchlist": [
-                c
-                for c in ctx.run_inputs["history"]
-                if c.get("disposition") == "watch"
+                c for c in inputs["history"] if c.get("disposition") == "watch"
             ][:20],
         }
+        if "threads" in inputs:
+            history["threads"] = inputs["threads"]
+            history["recent_candidates"] = inputs["recent_candidates"]
+        return history
 
     async def _api_feed(
         self, ctx: engine.NodeContext, path: pathlib.Path
@@ -222,6 +230,8 @@ class EditorialNodes:
             history=history["candidates"],
             watchlist=history["watchlist"],
             seed_notes=notes,
+            threads=history.get("threads"),
+            recent=history.get("recent_candidates"),
             **(
                 {"content_config": ctx.run_inputs["content_config"]}
                 if "content_config" in ctx.run_inputs
@@ -321,17 +331,32 @@ class EditorialNodes:
                 if limits is not None
                 else {}
             ),
+            **(
+                {
+                    "threads": workflow_threads.annotate(
+                        normalized, history["threads"]
+                    )
+                }
+                if "threads" in history
+                else {}
+            ),
         }
 
     async def _select(
         self, ctx: engine.NodeContext, path: pathlib.Path
     ) -> types.Payload:
-        """Select research tasks and persist their watch disposition."""
+        """Select research tasks and record which candidates were chosen.
+
+        Chosen candidates become researched; their outcome is followed through
+        the publication record. The rest are only seen, so the watchlist keeps
+        unfinished topics instead of every pooled candidate.
+        """
         date = ctx.run_inputs["issue_date"]
         history = self.one(
             ctx, "history", {"candidates": [], "editions": [], "watchlist": []}
         )
-        candidates = self.one(ctx, "deduplicate")["candidates"]
+        pool = self.one(ctx, "deduplicate")
+        candidates = pool["candidates"]
         selected = await self.content.shortlist(
             candidates,
             date,
@@ -342,12 +367,13 @@ class EditorialNodes:
             reader_profile=ctx.run_inputs.get("policy", {}).get(
                 "reader-profile.md", ""
             ),
+            threads=history.get("threads"),
+            recent=history.get("recent_candidates"),
+            candidate_threads=pool.get("threads"),
             **(
                 {
                     "content_config": ctx.run_inputs["content_config"],
-                    "classifications": self.one(ctx, "deduplicate").get(
-                        "classifications", {}
-                    ),
+                    "classifications": pool.get("classifications", {}),
                 }
                 if "content_config" in ctx.run_inputs
                 else {}
@@ -355,9 +381,21 @@ class EditorialNodes:
         )
         if not selected.research_tasks:
             raise engine.NodeError("no_findings")
+        chosen = {
+            ref
+            for task in selected.research_tasks
+            for ref in task["candidate_ids"]
+        }
         self.state.mark(
-            [c["id"] for c in candidates],
-            "watch",
-            "未优先深入；只有新的证据变化才重新选入。",
+            sorted(chosen),
+            "researched",
+            "入选本期调查；刊出与否见本期处理记录。",
+            replacing=("seen", "watch"),
+        )
+        self.state.mark(
+            [c["id"] for c in candidates if c["id"] not in chosen],
+            "seen",
+            "未入选；只有新的证据变化才重新选入。",
+            replacing=("seen", "watch"),
         )
         return {**dataclasses.asdict(selected), "coverage": self.coverage(ctx)}

@@ -21,6 +21,7 @@ import newsletter.workflow.publication as newsletter_workflow_publication
 import newsletter.workflow.sources as sources
 import newsletter.workflow.story_editor as story_editor
 import newsletter.workflow.story_nodes as story_nodes
+import newsletter.workflow.threads as threads
 import tests.support.publication as tests_support_publication
 import tests.support.workflow_content as workflow_content
 
@@ -620,10 +621,21 @@ async def test_unfinished_source_survives_history_without_false_novelty(
     )
     assert selected_again["research_tasks"] == [chosen]
     assert len(engine.calls) == 2
-    assert (
-        engine.calls[0][0]["history_untrusted"][0]["id"]
-        == covered_candidate["id"]
-    )
+    # Prompts show the compact index, which also drops reopened topics, and
+    # the delivered deep story as a thread; deferred topics are no thread.
+    for prompt, _, _, _ in engine.calls:
+        assert prompt["history_untrusted"] == [
+            {
+                "title": covered_candidate["title"],
+                "seen": tests_support_publication.DAY,
+                "status": "seen",
+            }
+        ]
+        assert [
+            (thread["times"], thread["urls"])
+            for thread in prompt["threads_untrusted"]
+        ] == [(1, [covered_task["source_urls"][0]])]
+    assert engine.calls[1][0]["candidate_threads"] == {}
     assert (
         engine.calls[1][0]["candidates_untrusted"][0]["published_at"]
         == tests_support_publication.DAY
@@ -803,3 +815,216 @@ def test_render_recovery_keeps_evidence_legacy_and_send_guards(
         assert rejected["error_code"] == "editor_invalid_result"
     if unsafe == "render_already_frozen":
         assert rejected["rendered"]["render_hash"] == "hash"
+
+
+THREAD_ISSUE = "2026-10-20"
+THREAD_DIRECTION = {
+    "id": "03-world",
+    "text": "Synthetic direction",
+    "digest": "a" * 64,
+}
+
+
+def thread_nodes(rig):
+    nodes = story_nodes.StoryNodes(
+        rig.store, rig.definition, rig.pipeline.editor, rig.path / "threads"
+    )
+    return nodes, rig.path / "thread-nodes"
+
+
+def thread_context(node_id, inputs, run_inputs, item=None):
+    return newsletter_workflow_engine.NodeContext(
+        run_id="threads",
+        node_id=node_id,
+        item_id=item["id"] if item else "",
+        params={},
+        inputs=inputs,
+        run_inputs=run_inputs,
+        item=item,
+    )
+
+
+@pytest.mark.asyncio
+async def test_threads_replace_history_in_prompts_and_annotate_the_pool(
+    rig_factory,
+):
+    nodes, workspace = thread_nodes(rig_factory())
+    remembered = workflow_content.candidate(
+        id="remembered",
+        title="A synthetic report already pooled last week",
+        url="https://example.org/remembered",
+        published_at="2026-10-15",
+    )
+    nodes.state.remember([remembered], "2026-10-15")
+    published = threads.build(
+        [
+            {
+                "issue_date": "2026-10-16",
+                "title": "合成选题",
+                "candidate_ids": ["remembered"],
+                "source_urls": [remembered["url"]],
+            }
+        ],
+        {"remembered": remembered},
+        THREAD_ISSUE,
+    )
+    key = published[0]["thread_key"]
+    # An earlier follow-up already reused the key as its event_key.
+    earlier = workflow_content.candidate(
+        id="earlier",
+        title="A synthetic first follow-up of the published event",
+        url="https://example.org/earlier",
+        event_key=key,
+        published_at="2026-10-17",
+    )
+    nodes.state.remember([earlier], "2026-10-17")
+    run_inputs = {
+        "issue_date": THREAD_ISSUE,
+        "history": nodes.state.history(THREAD_ISSUE),
+        "editions": [],
+        "threads": published,
+        "recent_candidates": nodes.state.recent(THREAD_ISSUE),
+    }
+    follow_up = workflow_content.candidate(
+        title="A synthetic later development of the same event",
+        url="https://example.org/follow-up",
+        event_key=key,
+        published_at=THREAD_ISSUE,
+        direction="03-world",
+    )
+    follow_up["id"] = sources.candidate_id(follow_up)
+    # Same key without a newer date: a repeat, whatever its URL.
+    repeat = workflow_content.candidate(
+        title="A synthetic rewrite of the first follow-up",
+        url="https://example.org/rewrite",
+        event_key=key,
+        published_at="2026-10-17",
+    )
+    assert sources.deduplicate_candidates([repeat], run_inputs["history"]) == []
+    plan = workflow_content.task(
+        candidate_ids=[follow_up["id"]], source_urls=[follow_up["url"]]
+    )
+    engine_fake = workflow_content.Engine(
+        (
+            workflow_content.discovered(follow_up, remembered),
+            {follow_up["url"], remembered["url"]},
+            True,
+        ),
+        (workflow_content.planned(plan), set(), False),
+    )
+    nodes.content = content.ContentPreparation(engine_fake)
+    history = await nodes.execute(
+        "history",
+        thread_context("history", {}, run_inputs),
+        workspace / "history",
+    )
+    found = await nodes.execute(
+        "discovery",
+        thread_context(
+            "discovery",
+            {"history": history, "feeds": {"candidates": []}},
+            run_inputs,
+            THREAD_DIRECTION,
+        ),
+        workspace / "discovery",
+    )
+    # The full records still deduplicate: the unchanged repeat is dropped,
+    # while the follow-up sharing the earlier event_key has a newer date.
+    assert [c["id"] for c in found["candidates"]] == [follow_up["id"]]
+    pool = await nodes.execute(
+        "deduplicate",
+        thread_context(
+            "candidates", {"history": history, "discovery": [found]}, run_inputs
+        ),
+        workspace / "pool",
+    )
+    assert pool["threads"] == {
+        follow_up["id"]: {
+            "thread_key": key,
+            "last_published": "2026-10-16",
+            "times_14d": 1,
+        }
+    }
+    selected = await nodes.execute(
+        "selection",
+        thread_context(
+            "selection", {"history": history, "candidates": pool}, run_inputs
+        ),
+        workspace / "selection",
+    )
+    assert selected["research_tasks"] == [plan]
+    (discovery, _, rules, _), (selection, _, choice_rules, _) = (
+        engine_fake.calls
+    )
+    index = [
+        {
+            "title": earlier["title"],
+            "seen": "2026-10-17",
+            "status": "seen",
+            "event_key": key,
+        },
+        {
+            "title": remembered["title"],
+            "seen": "2026-10-15",
+            "status": "seen",
+        },
+    ]
+    for prompt in (discovery, selection):
+        assert prompt["history_untrusted"] == index
+        assert prompt["threads_untrusted"] == threads.prompt_threads(published)
+    assert selection["candidate_threads"] == pool["threads"]
+    assert "event_key逐字填它的thread_key" in rules
+    assert "candidate_threads" in choice_rules
+    dispositions = {
+        row["id"]: row["disposition"]
+        for row in nodes.state.history("2026-10-21")
+    }
+    assert dispositions == {
+        "remembered": "seen",
+        "earlier": "seen",
+        follow_up["id"]: "researched",
+    }
+
+
+@pytest.mark.asyncio
+async def test_runs_frozen_before_threads_keep_their_full_history_prompt(
+    rig_factory,
+):
+    nodes, workspace = thread_nodes(rig_factory())
+    remembered = workflow_content.candidate(
+        id="remembered", url="https://example.org/remembered"
+    )
+    nodes.state.remember([remembered], "2026-10-15")
+    nodes.state.mark(["remembered"], "watch", "legacy")
+    run_inputs = {
+        "issue_date": THREAD_ISSUE,
+        "history": nodes.state.history(THREAD_ISSUE),
+        "editions": [],
+    }
+    engine_fake = workflow_content.Engine(
+        (workflow_content.discovered(), set(), True)
+    )
+    nodes.content = content.ContentPreparation(engine_fake)
+    history = await nodes.execute(
+        "history",
+        thread_context("history", {}, run_inputs),
+        workspace / "history",
+    )
+    assert set(history) == {"candidates", "editions", "watchlist"}
+    await nodes.execute(
+        "discovery",
+        thread_context(
+            "discovery",
+            {"history": history, "feeds": {"candidates": []}},
+            run_inputs,
+            THREAD_DIRECTION,
+        ),
+        workspace / "discovery",
+    )
+    prompt, _, rules, _ = engine_fake.calls[0]
+    assert prompt["history_untrusted"] == content.public_context(
+        run_inputs["history"]
+    )
+    assert prompt["watchlist_untrusted"][0]["id"] == "remembered"
+    assert "threads_untrusted" not in prompt
+    assert "thread_key" not in rules

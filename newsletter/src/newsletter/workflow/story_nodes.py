@@ -105,9 +105,23 @@ class StoryNodes(nodes.EditorialNodes):
         """Add unfinished investigations to the frozen discovery history."""
         history = await super()._history(ctx, path)
         unfinished = ctx.run_inputs.get("pending_stories", [])
-        history["candidates"] = _covered_history(
-            history["candidates"], unfinished
-        )
+        covered = _covered_history(history["candidates"], unfinished)
+        if "recent_candidates" in history:
+            # The prompt index must not list them as covered either.
+            reopened = {
+                candidate_id
+                for story in unfinished
+                for candidate_id in story["candidate_ids"]
+            }
+            reopened |= {c["id"] for c in history["candidates"]} - {
+                c["id"] for c in covered
+            }
+            history["recent_candidates"] = [
+                record
+                for record in history["recent_candidates"]
+                if record["id"] not in reopened
+            ]
+        history["candidates"] = covered
         # These are questions to investigate, never recycled verified claims.
         pending = [
             {

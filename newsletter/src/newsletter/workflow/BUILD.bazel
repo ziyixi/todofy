@@ -29,6 +29,7 @@ py_library(
         ":prompt_examples",
         ":schema",
         ":sources",
+        ":threads",
         "//newsletter/src/newsletter:contracts",
         "//newsletter/src/newsletter:errors",
         "//newsletter/src/newsletter:model_io",
@@ -76,6 +77,7 @@ py_library(
         ":researcher",
         ":sources",
         ":state",
+        ":threads",
         "//newsletter/src/newsletter:contracts",
         "//newsletter/src/newsletter:drain",
         "//newsletter/src/newsletter:editor",
@@ -103,6 +105,7 @@ py_library(
         ":state",
         ":story_nodes",
         ":story_recipe",
+        ":threads",
         ":types",
         "//newsletter/src/newsletter:content_config",
         "//newsletter/src/newsletter:contracts",
@@ -287,6 +290,17 @@ py_library(
 )
 
 py_library(
+    name = "threads",
+    srcs = ["threads.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        ":sources",
+        "//newsletter/src/newsletter:types",
+    ],
+)
+
+py_library(
     name = "types",
     srcs = ["types.py"],
     imports = ["../.."],
@@ -318,6 +332,7 @@ py_library(
         ":story_recipe",
         ":story_replay",
         ":story_replay_repository",
+        ":threads",
         ":types",
     ],
 )
