@@ -1,6 +1,8 @@
+import { Script } from 'node:vm';
 import { describe, expect, it, vi } from 'vitest';
 import { handleRequest } from '../src/http.ts';
 import type { Env } from '../src/env.ts';
+import { PAGE, SCRIPT } from '../src/ui.ts';
 
 function environment() {
   const get = vi.fn();
@@ -57,5 +59,18 @@ describe('machine gate', () => {
     }), env);
     expect(response.status).toBe(401);
     expect(forwarded).toHaveBeenCalledOnce();
+  });
+});
+
+describe('owner console', () => {
+  it('ships a script that parses, reads only the overview and never polls', () => {
+    expect(() => new Script(SCRIPT)).not.toThrow();
+    for (const tab of ['#overview', '#keys', '#activity']) expect(PAGE).toContain('href="' + tab + '"');
+    expect(SCRIPT.match(/api\('[a-z]+'\)/g)).toEqual(["api('overview')"]);
+    expect(SCRIPT).not.toMatch(/setInterval|setTimeout/);
+    // Revoking and disconnecting each need a second, explicit confirmation.
+    expect(SCRIPT).toContain('确认撤销');
+    expect(SCRIPT).toContain('立即收到 401');
+    expect(SCRIPT).toContain('确认断开');
   });
 });

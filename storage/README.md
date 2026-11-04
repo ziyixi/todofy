@@ -85,7 +85,13 @@ Absent objects and create conflicts are ordinary answers and are not recorded. A
 Settings also carry the connection time and the last success; an error newer than the last success is still
 occurring, an older one has recovered.
 
-## Request counters
+## Owner console and counters
+
+The console at `/` loads with one `GetOverview` call and never polls. 概览 shows the status, today's requests against
+the account's 100,000 daily Workers Free requests, writes and reads, a 14-day chart, namespace cards and the
+connection; 密钥 groups keys by namespace with their created and last-use times behind a collapsed create form; 活动
+lists recent failures, a 14-day table and today's operations. Revoking a key and disconnecting Dropbox each ask for a
+second confirmation. Dropbox space and per-namespace object totals are placeholders that fetch nothing yet.
 
 The Durable Object counts each application request that presents a known key, by UTC day (when the quota resets), key,
 operation (`stat`, `list`, `get`, `head`, `put`, `batch_create`) and outcome:
