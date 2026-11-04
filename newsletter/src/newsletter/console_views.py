@@ -450,9 +450,11 @@ class Funnel:
 
     All as stored, so possibly from before a field existed: ``seeds`` is None
     when the feeds gave every direction every lead, ``dropped`` None for a
-    pool from before its drops were kept, and a discovery artifact may lack
-    ``observed``. ``directions`` are the discovery node's items, ``stories``
-    the publication's coverage.
+    pool from before its drops were kept, ``threads`` None for one from
+    before threads, and a discovery artifact may lack ``observed``.
+    ``directions`` are the discovery node's items, ``stories`` the
+    publication's coverage, ``excerpts`` the frozen excerpts the pool carried
+    per headline group's lead.
     """
 
     directions: list[Row]
@@ -466,6 +468,8 @@ class Funnel:
     dropped: list[Row] | None
     tasks: list[Row]
     stories: list[Row]
+    threads: Row | None
+    excerpts: Mapping[str, int]
 
     def cited(self, record: Row) -> set[str]:
         """The pool candidates a task or story cites, by ID or source URL."""
@@ -561,6 +565,9 @@ def _direction(
         metadata_count=scopes.count("metadata"),
         pooled_count=len(own),
         dropped_count=None if drops is None else len(drops),
+        thread_count=None
+        if funnel.threads is None
+        else len(own & set(funnel.threads)),
         drops=tuple(
             run_pb.DropCount(reason=reason, count=(drops or []).count(reason))
             for reason in DROP_REASONS
@@ -655,6 +662,7 @@ def consensus_leads(funnel: Funnel) -> list[run_pb.ConsensusLead]:
                 outlet_count=int32(signals.get("independent_sources")),
                 stage=stage,
                 disposition=fate,
+                excerpt_count=int32(funnel.excerpts.get(identifier)),
             )
         )
     return result

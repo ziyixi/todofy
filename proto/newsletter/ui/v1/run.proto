@@ -310,6 +310,9 @@ message DirectionFunnel {
   optional double elapsed_seconds = 18 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Its discovery calls' totals.
   UsageTotals usage = 19 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Of its pooled candidates, the ones the pool tied to a story published in the last 30 days (one event thread);
+  // absent for runs from before threads.
+  optional int32 thread_count = 20 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // How many candidates the pool left out for one reason.
@@ -378,6 +381,9 @@ message ConsensusLead {
   Stage stage = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The publication's disposition of its story (deep, brief, watch or deferred); empty before one.
   string disposition = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The outlets whose frozen feed excerpt (headline and lede, sha256-pinned) the pool carried for its group: what a
+  // brief may cite for one signal paragraph without opening a page. 0 when none was frozen.
+  int32 excerpt_count = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // An independent list of the day before the issue date's events (Wikipedia's Current events: conflicts, politics and

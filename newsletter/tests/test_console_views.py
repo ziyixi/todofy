@@ -428,6 +428,8 @@ def funnel(**changes):
         "dropped": None,
         "tasks": [],
         "stories": [],
+        "threads": None,
+        "excerpts": {},
     }
     value.update(changes)
     return views.Funnel(**value)
@@ -514,6 +516,29 @@ def test_a_direction_counts_each_stage_and_its_own_calls():
     assert (row.usage.call_count, row.usage.failed_count) == (1, 1)
 
 
+def test_a_direction_counts_its_pooled_candidates_on_a_thread():
+    pool = [
+        candidate("a"),
+        candidate("b"),
+        {**candidate("c"), "direction": "x"},
+    ]
+    thread = {"thread_key": "thread-0123456789ab", "times_14d": 2}
+    (row,) = views.direction_funnel(
+        funnel(pool=pool, threads={"a": thread, "c": thread, "gone": thread}),
+        "discovery",
+        [],
+        [],
+    )
+    assert row.thread_count == 1
+    (row,) = views.direction_funnel(
+        funnel(pool=pool, threads={}), "discovery", [], []
+    )
+    assert row.thread_count == 0
+    # A pool from before threads did not record them.
+    (row,) = views.direction_funnel(funnel(pool=pool), "discovery", [], [])
+    assert row.thread_count is None
+
+
 def test_consensus_leads_go_as_far_as_their_stories():
     basis = {"kind": "news", "basis": "头条共识：BBC、NPR、DW共3家"}
     pool = [candidate(f"c{n}", f"Lead {n}") for n in range(5)]
@@ -544,6 +569,19 @@ def test_consensus_leads_go_as_far_as_their_stories():
         ("Lead 3", LEAD.PUBLISHED, "watch"),
     ]
     assert [lead.outlet_count for lead in leads] == [4, 0, 0, 0]
+
+
+def test_a_consensus_lead_counts_the_excerpts_the_pool_carried():
+    basis = {"kind": "news", "basis": "头条共识：BBC、NPR、DW共3家"}
+    pool = [candidate("c0", "Lead 0"), candidate("c1", "Lead 1")]
+    leads = views.consensus_leads(
+        funnel(
+            pool=pool,
+            classifications={"c0": basis, "c1": basis},
+            excerpts={"c0": 3, "other": 2},
+        )
+    )
+    assert [lead.excerpt_count for lead in leads] == [3, 0]
 
 
 def test_a_consensus_lead_counts_a_candidate_at_another_outlets_report():

@@ -140,7 +140,10 @@ function FunnelRow({ row }: { row: DirectionFunnel }) {
         <span className="cell-sub">{parts([['新闻', row.news_count], ['研究', row.research_count], ['未定', row.unknown_count]])}</span>
         <span className="cell-sub">{parts([['全文', row.full_text_count], ['摘要', row.abstract_count], ['仅线索', row.metadata_count]])}</span>
       </td>
-      <td data-label="入池" className="num">{row.pooled_count ?? 0}</td>
+      <td data-label="入池" className="num">
+        {row.pooled_count ?? 0}
+        <span className="cell-sub">{parts([['接续', row.thread_count]])}</span>
+      </td>
       <td data-label="丢弃" className="num">
         {shown(row.dropped_count)}
         <span className="cell-sub">{(row.drops ?? []).map((drop) => `${dropReason(drop.reason)} ${String(drop.count ?? 0)}`).join(' · ')}</span>
@@ -163,7 +166,7 @@ function Funnel({ rows }: { rows: readonly DirectionFunnel[] }) {
     <section className="card funnel" aria-labelledby="funnel-title">
       <header className="card-head">
         <h2 id="funnel-title">检索漏斗</h2>
-        <p className="muted">每个方向从订阅源线索到刊出。尝试打开只记录打开动作，不代表读到了页面；交接含仅线索的候选。</p>
+        <p className="muted">每个方向从订阅源线索到刊出。尝试打开只记录打开动作，不代表读到了页面；交接含仅线索的候选；接续指与近 30 天已刊故事同属一条线索。</p>
       </header>
       <div className="table-scroll">
         <table className="funnel-table">
@@ -203,6 +206,7 @@ function Headlines({ run }: { run: Run }) {
                 <span className="must-title">{href ? <a href={href} target="_blank" rel="noopener noreferrer">{lead.title}</a> : lead.title}</span>
                 <span className="must-tags">
                   <span className="chip quiet">{lead.outlet_count ?? 0} 家</span>
+                  {lead.excerpt_count ? <span className="chip quiet">摘要 {lead.excerpt_count} 家</span> : null}
                   <Mark word={leadStage(lead.stage, lead.disposition)} />
                 </span>
               </li>
@@ -210,7 +214,7 @@ function Headlines({ run }: { run: Run }) {
           })}
         </ul>
       )}
-      <p className="muted small">家数由代码按标题聚类算出，可能把同一议题的不同事件并在一起；是否必知由选题判断。</p>
+      <p className="muted small">家数由代码按标题聚类算出，可能把同一议题的不同事件并在一起；是否必知由选题判断。摘要是代码冻结的各家标题与导语，最多支撑一段注明来源的信号。</p>
     </div>
   );
 }

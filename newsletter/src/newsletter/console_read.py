@@ -602,7 +602,8 @@ class ConsoleReader:
 
         Each is one bounded artifact subtree: the feeds' routed leads, notes,
         headline counts and reference, each direction's discovery output, the
-        pool, the selected tasks and the publication's coverage.
+        pool with its thread links and excerpt counts, the selected tasks and
+        the publication's coverage.
         """
         discovery = views.node_of(run.definition, "discovery")
         directions: list[views.Row] = []
@@ -636,7 +637,14 @@ class ConsoleReader:
                     views.node_of(run.definition, "deduplicate"),
                     "json_extract(body,'$.candidates') AS candidates,"
                     " json_extract(body,'$.classifications') AS kinds,"
-                    " json_extract(body,'$.dropped') AS dropped",
+                    " json_extract(body,'$.dropped') AS dropped,"
+                    " json_extract(body,'$.threads') AS threads,"
+                    # Only each frozen group's lead and outlet count.
+                    " (SELECT json_group_object(json_extract(e.value,'$.lead'),"
+                    " json_array_length(e.value,'$.items')) FROM"
+                    " json_each(workflow_artifacts.body,'$.excerpts') e"
+                    " WHERE json_type(e.value,'$.lead')='text')"
+                    " AS excerpts",
                 )
                 or {}
             )
@@ -671,6 +679,8 @@ class ConsoleReader:
         dropped = _json(pool["dropped"]) if pool else None
         reference = _json(feeds["reference"]) if feeds else None
         classifications = _json(pool["kinds"]) if pool else None
+        threads = _json(pool["threads"]) if pool else None
+        excerpts = _json(pool["excerpts"]) if pool else None
         return views.Funnel(
             directions=directions,
             # Feeds from before notes gave every direction every lead.
@@ -688,6 +698,9 @@ class ConsoleReader:
             dropped=views.rows(dropped) if isinstance(dropped, list) else None,
             tasks=views.rows(tasks),
             stories=views.rows(stories),
+            # Pools from before threads have none, not an empty map.
+            threads=threads if isinstance(threads, dict) else None,
+            excerpts=excerpts if isinstance(excerpts, dict) else {},
         )
 
     def _find_run(self, snap: Snapshot, name: str, prefix: str) -> _Run:

@@ -117,7 +117,7 @@ describe('the retrieval funnel and must-know tracking', () => {
     const cells = (row: HTMLElement | undefined) => within(row!).getAllByRole('cell').map((cell) => cell.textContent);
     expect(cells(ai).slice(0, 3)).toEqual(['7', '4', '3新闻 1 · 研究 2全文 2 · 摘要 1']);
     expect(cells(ai)[4]).toBe('7已见过 1 · 重复 1 · 研究名额已满 4 · 候选池已满 1');
-    expect(cells(worldRow).slice(3, 7)).toEqual(['2', '0', '1', '1']);
+    expect(cells(worldRow).slice(3, 7)).toEqual(['2接续 1', '0', '1', '1']);
     expect(cells(worldRow)[7]).toBe('1 分 30 秒估算 $0.0012');
     expect(funnel.queryByText(/上线前未记录/)).toBeNull();
   });
@@ -128,7 +128,7 @@ describe('the retrieval funnel and must-know tracking', () => {
     const must = await section('必知追踪');
     const lead = must.getByRole('link', { name: 'Harbor workers end strike after port deal' });
     expect(lead).toHaveAttribute('rel', 'noopener noreferrer');
-    expect(lead.closest('li')).toHaveTextContent('3 家●已刊 · 简讯');
+    expect(lead.closest('li')).toHaveTextContent('3 家摘要 3 家●已刊 · 简讯');
     expect(must.getByText(/03-world · 头条源 3\/3 正常 · 窗口内 41 条，\s*29 组，3 家及以上 1 组/)).toBeVisible();
     const reference = must.getByRole('link', { name: '维基百科时事 · 10月26日（UTC）' });
     expect(reference).toHaveAttribute('href', 'https://reference.example.org/wiki/Portal:Current_events/2026_October_26');

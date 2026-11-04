@@ -510,6 +510,42 @@ POOL: Payload = {
             "reason": "duplicate",
         },
     ],
+    # The flood vote follows a story published two days before.
+    "threads": {
+        "candidate-flood": {
+            "thread_key": "thread-0123456789ab",
+            "last_published": "2026-10-25",
+            "times_14d": 1,
+        }
+    },
+    # Each harbor outlet's frozen headline, pinned as the researcher pins it.
+    "excerpts": [
+        {
+            "lead": "candidate-harbor",
+            "items": [
+                {
+                    "outlet": outlet,
+                    "url": url,
+                    "title": "Harbor workers end strike after port deal",
+                    "published_at": "2026-10-27T12:00:00Z",
+                    "text": "Harbor workers end strike after port deal",
+                    "sha256": hashlib.sha256(
+                        b"Harbor workers end strike after port deal"
+                    ).hexdigest(),
+                }
+                for outlet, url in zip(
+                    HARBOR_OUTLETS.split("、"),
+                    [
+                        WORLD + "harbor-strike-ends",
+                        *FEEDS_EXTRA["notes"]["candidate-harbor"][
+                            "alternate_urls"
+                        ],
+                    ],
+                    strict=True,
+                )
+            ],
+        }
+    ],
 }
 TASKS = [
     {
