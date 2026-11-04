@@ -501,6 +501,26 @@ def test_different_dois_with_same_event_are_separate_materials(rig):
     assert rig.journal.summary()["import_errors"] == []
 
 
+def test_reports_sharing_a_thread_key_are_separate_materials(rig):
+    # A code thread key spans weeks of developments, unlike an event_key.
+    thread = "thread-0123456789ab"
+    reports = [
+        notion_content.candidate(
+            id=name, doi="", url=url, event_key=thread, published_at=day
+        )
+        for name, url, day in (
+            ("strike", "https://example.org/strike", "2026-10-17"),
+            ("truce", "https://example.org/truce", "2026-10-18"),
+            ("landing-1", "https://agency.example.org/news", "2026-10-17"),
+            ("landing-2", "https://agency.example.org/news", "2026-10-18"),
+        )
+    ]
+    add_artifact(rig, reports)
+    rig.intake.scan()
+    assert len(entities(rig)) == 4
+    assert rig.journal.summary()["import_errors"] == []
+
+
 @pytest.mark.parametrize("bad_index", [0, 1])
 def test_one_invalid_candidate_is_diagnosed_without_losing_other_candidates(
     rig, bad_index

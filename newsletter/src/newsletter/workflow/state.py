@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Collection
+import datetime
 import json
 import sqlite3
 from typing import cast
@@ -222,17 +223,80 @@ class WorkflowState:
             for row in rows
         ]
 
-    def mark(self, ids: list[str], disposition: str, reason: str = "") -> None:
-        """Set a finite disposition and bounded reason for known candidates."""
-        if disposition not in {"seen", "researched", "used", "watch"}:
+    def recent(
+        self, issue_date: str, days: int = 7, limit: int = 210
+    ) -> list[types.Payload]:
+        """Index candidates pooled in the days before the issue date.
+
+        One compact record each, enough to recognise a repeat in a prompt;
+        deduplication keeps reading the full records from history().
+        """
+        since = datetime.date.fromisoformat(issue_date) - datetime.timedelta(
+            days=days
+        )
+        with self.store.lock:
+            rows = self.store.db.execute(
+                "SELECT id,body,last_seen,disposition FROM candidate_history "
+                "WHERE first_seen<? AND last_seen>=? "
+                "ORDER BY last_seen DESC,id LIMIT ?",
+                (issue_date, since.isoformat(), limit),
+            ).fetchall()
+        index = []
+        for row in rows:
+            body = json.loads(row["body"])
+            event = body.get("event_key", "")
+            index.append(
+                {
+                    "id": row["id"],
+                    "title": body["title"][:80],
+                    "seen": row["last_seen"],
+                    "status": row["disposition"],
+                    **({"event_key": event[:80]} if event else {}),
+                }
+            )
+        return index
+
+    def candidates(self, ids: Collection[str]) -> dict[str, types.Payload]:
+        """Read remembered candidates by ID; unknown IDs are simply absent."""
+        if not ids:
+            return {}
+        with self.store.lock:
+            rows = self.store.db.execute(
+                "SELECT id,body FROM candidate_history WHERE id IN "
+                f"({','.join('?' for _ in ids)})",
+                sorted(ids),
+            ).fetchall()
+        return {row["id"]: json.loads(row["body"]) for row in rows}
+
+    def mark(
+        self,
+        ids: list[str],
+        disposition: str,
+        reason: str = "",
+        *,
+        replacing: Collection[str] = (),
+    ) -> None:
+        """Set a finite disposition and bounded reason for known candidates.
+
+        With ``replacing``, only candidates whose current disposition is one
+        of those change, so a later pass never downgrades a used candidate.
+        """
+        allowed = {"seen", "researched", "used", "watch"}
+        if disposition not in allowed or not set(replacing) <= allowed:
             raise ValueError("Invalid candidate disposition")
+        only = (
+            f" AND disposition IN ({','.join('?' for _ in replacing)})"
+            if replacing
+            else ""
+        )
         with self.store.transaction():
             self.store.db.executemany(
-                (
-                    "UPDATE candidate_history SET disposition=?,reason=? "
-                    "WHERE id=?"
-                ),
-                [(disposition, reason[:2000], item) for item in ids],
+                "UPDATE candidate_history SET disposition=?,reason=? "
+                "WHERE id=?" + only,
+                [
+                    (disposition, reason[:2000], item, *sorted(replacing))
+                    for item in ids
+                ],
             )
 
     def bind_edition(

@@ -1,6 +1,7 @@
 """Test durable publication with synthetic SQLite data, never real mail."""
 
 import copy
+import hashlib
 import sqlite3
 
 import pytest
@@ -9,8 +10,12 @@ import newsletter.collection.repository as repository
 import newsletter.editor as editor
 import newsletter.store as newsletter_store
 import newsletter.workflow.pipeline as newsletter_workflow_pipeline
+import newsletter.workflow.publication as newsletter_workflow_publication
 import newsletter.workflow.state as newsletter_workflow_state
+import newsletter.workflow.threads as threads
+import tests.support.publication as publication
 import tests.support.usage as usage
+import tests.support.workflow_content as workflow_content
 import tests.support.workflow_state as workflow_state
 
 
@@ -373,3 +378,262 @@ def test_restart_unknown_send_is_not_reserved_again(store):
         store.reserve_send(workflow_state.approval(edition, "another-key"))[1]
         is False
     )
+
+
+# Cross-day publication threads and the compact candidate index.
+
+ISSUE = "2026-10-20"
+
+
+def story(day, ids, urls=(), title="合成选题"):
+    return {
+        "issue_date": day,
+        "title": title,
+        "candidate_ids": list(ids),
+        "source_urls": list(urls),
+    }
+
+
+def member(identifier, url, event_key=""):
+    return {
+        "id": identifier,
+        "title": f"Synthetic remembered candidate {identifier}",
+        "url": url,
+        "doi": "",
+        "event_key": event_key,
+    }
+
+
+def key_of(*ids):
+    digest = hashlib.sha256("\n".join(sorted(ids)).encode()).hexdigest()
+    return "thread-" + digest[:12]
+
+
+def test_stories_sharing_a_source_form_one_thread_with_day_counts():
+    candidates = {
+        "c1": member("c1", "https://example.org/vote"),
+        "c2": member("c2", "https://example.org/vote-result"),
+        "c3": member("c3", "https://example.org/quake"),
+    }
+    built = threads.build(
+        [
+            story("2026-10-01", ["c1"], title="合成大选开始投票"),
+            # Two editions on one day still count as one publication day.
+            story("2026-10-12", ["c2"], ["https://example.org/vote"]),
+            story("2026-10-12", ["c2"], title="合成大选公布结果"),
+            story("2026-10-15", ["c3"], title="合成地震"),
+        ],
+        candidates,
+        ISSUE,
+    )
+    assert [thread["thread_key"] for thread in built] == [
+        key_of("c3"),
+        key_of("c1"),
+    ]
+    vote = threads.prompt_threads(built)[1]
+    assert vote == {
+        "thread_key": key_of("c1"),
+        "title": "合成大选公布结果",
+        "first_published": "2026-10-01",
+        "last_published": "2026-10-12",
+        "times": 2,
+        "times_14d": 1,
+        "urls": [
+            "https://example.org/vote-result",
+            "https://example.org/vote",
+        ],
+    }
+    assert "url:https://example.org/vote" in built[1]["keys"]
+    assert len(built[1]["keys"]) <= threads.MAX_KEYS
+
+
+def test_thread_key_survives_its_first_story_leaving_the_window():
+    first = story("2026-09-25", ["c1"])
+    original = key_of("c1")
+    later = story("2026-10-10", ["c2"])
+    candidates = {
+        "c1": member("c1", "https://example.org/first"),
+        # Discovery reused the key as event_key on a new report.
+        "c2": member("c2", "https://example.org/second", original),
+    }
+    built = threads.build([first, later], candidates, ISSUE)
+    assert [t["thread_key"] for t in built] == [original]
+    # The reused key links the story but is never a matching identity.
+    assert not any(key.startswith("event:") for key in built[0]["keys"])
+    assert [
+        t["thread_key"] for t in threads.build([later], candidates, ISSUE)
+    ] == [original]
+    # Without a reused key a story starts its own thread.
+    candidates["c2"] = member("c2", "https://example.org/second")
+    assert [
+        t["thread_key"]
+        for t in threads.build([first, later], candidates, ISSUE)
+    ] == [key_of("c2"), original]
+
+
+def test_a_reused_key_beats_a_shared_url_and_counts_stay_capped():
+    candidates = {
+        "old": member("old", "https://example.org/a"),
+        "new": member("new", "https://example.org/b"),
+    }
+    built = threads.build(
+        [
+            story("2026-10-01", ["old"]),
+            story("2026-10-02", ["new"]),
+            story(
+                "2026-10-03",
+                ["x"],
+                [f"https://example.org/source-{n}" for n in range(9)],
+            ),
+        ],
+        candidates,
+        ISSUE,
+    )
+    assert built[0]["urls"] == [
+        f"https://example.org/source-{n}" for n in range(threads.MAX_URLS)
+    ]
+    pool = [
+        workflow_content.candidate(
+            id="claims-old",
+            url="https://example.org/b",
+            event_key=key_of("old"),
+        ),
+        workflow_content.candidate(
+            id="shares-url", url="https://example.org/b"
+        ),
+        workflow_content.candidate(id="unrelated", url="https://example.org/z"),
+    ]
+    # Both stories are older than the 14-day window.
+    assert threads.annotate(pool, built) == {
+        "claims-old": {
+            "thread_key": key_of("old"),
+            "last_published": "2026-10-01",
+            "times_14d": 0,
+        },
+        "shares-url": {
+            "thread_key": key_of("new"),
+            "last_published": "2026-10-02",
+            "times_14d": 0,
+        },
+    }
+
+
+def publish(repository, run_id, day, tasks, results, state="simulated"):
+    repository.save_plan(run_id, day, tasks)
+    for task, result in zip(tasks, results, strict=True):
+        if result is not None:
+            repository.save(run_id, task, "brief", result, issue_date=day)
+    built = newsletter_workflow_publication.assemble(
+        run_id, day, tasks, [r for r in results if r is not None]
+    )
+    repository.record_publication(run_id, day, tasks, built)
+    publication.delivery_receipt(
+        repository, run_id, built, state, issue_date=day
+    )
+
+
+def test_only_delivered_published_stories_count(store):
+    repository = newsletter_workflow_publication.PublicationRepository(store)
+    sent = [publication.task(1), publication.task(2)]
+    publish(
+        repository, "sent", "2026-10-10", sent, [publication.result(1), None]
+    )
+    held = [publication.task(3)]
+    publish(
+        repository,
+        "held",
+        "2026-10-11",
+        held,
+        [publication.result(3)],
+        "not_requested",
+    )
+    old = [publication.task(4)]
+    publish(repository, "old", "2026-09-15", old, [publication.result(4)])
+    assert repository.published_stories(ISSUE, threads.THREAD_DAYS) == [
+        {
+            "issue_date": "2026-10-10",
+            "title": "Synthetic verified topic 1",
+            "candidate_ids": ["candidate-1"],
+            "source_urls": [publication.URL],
+        }
+    ]
+    assert repository.published_stories("2026-10-10", 30) == [
+        {
+            "issue_date": "2026-09-15",
+            "title": "Synthetic verified topic 4",
+            "candidate_ids": ["candidate-4"],
+            "source_urls": [publication.URL],
+        }
+    ]
+
+
+def test_recent_index_is_compact_and_bounded_by_days(store):
+    state = newsletter_workflow_state.WorkflowState(store)
+    long_title = "Synthetic long candidate title " * 5
+    rows = [
+        (workflow_content.candidate(id="week", title=long_title), "2026-10-14"),
+        (
+            workflow_content.candidate(
+                id="keyed", url="https://example.org/k", event_key="vote"
+            ),
+            "2026-10-19",
+        ),
+        (
+            workflow_content.candidate(id="stale", url="https://example.org/s"),
+            "2026-10-12",
+        ),
+        (
+            workflow_content.candidate(id="today", url="https://example.org/t"),
+            ISSUE,
+        ),
+    ]
+    for candidate, day in rows:
+        state.remember([candidate], day)
+    assert state.recent(ISSUE) == [
+        {
+            "id": "keyed",
+            "title": "Synthetic research candidate",
+            "seen": "2026-10-19",
+            "status": "seen",
+            "event_key": "vote",
+        },
+        {
+            "id": "week",
+            "title": long_title[:80],
+            "seen": "2026-10-14",
+            "status": "seen",
+        },
+    ]
+    assert threads.prompt_index(state.recent(ISSUE))[1] == {
+        "title": long_title[:80],
+        "seen": "2026-10-14",
+        "status": "seen",
+    }
+    assert set(state.candidates({"keyed", "missing"})) == {"keyed"}
+
+
+def test_marking_never_downgrades_a_used_candidate(store):
+    state = newsletter_workflow_state.WorkflowState(store)
+    pool = [
+        workflow_content.candidate(id=name, url=f"https://example.org/{name}")
+        for name in ("used", "watched", "fresh")
+    ]
+    state.remember(pool, "2026-10-18")
+    state.mark(["used"], "used", "cited")
+    state.mark(["watched"], "watch", "legacy")
+    state.mark(
+        ["used", "watched", "fresh"],
+        "seen",
+        "not chosen",
+        replacing=("seen", "watch"),
+    )
+    assert {
+        row["id"]: (row["disposition"], row["selection_reason"])
+        for row in state.history(ISSUE)
+    } == {
+        "used": ("used", "cited"),
+        "watched": ("seen", "not chosen"),
+        "fresh": ("seen", "not chosen"),
+    }
+    with pytest.raises(ValueError, match="disposition"):
+        state.mark(["fresh"], "seen", replacing=("archived",))

@@ -24,6 +24,7 @@ import newsletter.usage as newsletter_usage
 import newsletter.workflow.prompt_examples as prompt_examples
 import newsletter.workflow.schema as newsletter_workflow_schema
 import newsletter.workflow.sources as sources
+import newsletter.workflow.threads as workflow_threads
 
 _ID = re.compile(contracts.IDENTIFIER_PATTERN + r"\Z")
 _SAFETY = (
@@ -161,6 +162,33 @@ _HEADLINE_NOTES = (
     "signals.headline_echo为1表示它和排在前面的某个多家组标题相近、可能是同一件事；"
     "聚类可能有误。主url打不开时先逐个open这些地址并核对是否同一事件，"
     "只有本轮实际open过的地址才能写进url或evidence_urls。\n"
+)
+# Appended only for runs frozen with publication threads; older runs keep
+# their full history records and exact original instructions. {basis} is the
+# discovery field that carries what changed: change_basis exists only in
+# classified runs.
+_DISCOVERY_THREADS = (
+    "\n"
+    "history_untrusted是近7天进入候选池的标题索引：status为used表示已被刊出正文引用，"
+    "researched表示入选过调查，seen表示入池未选（旧记录的watch同seen）；"
+    "同一事件没有新证据不重复交接。"
+    "threads_untrusted是代码把近30天读者已收到的选题按URL、DOI和event_key归成的事件线索，"
+    "可能漏并或误并：times是刊出天数，times_14d是近14天的刊出天数，last_published是最后刊出日。"
+    "候选与某条thread是同一事件时，event_key逐字填它的thread_key；只有last_published之后的"
+    "新事实才交接，并在{basis}写明这次比上次刊出新增了什么，published_at写新事实的日期。"
+    "thread_key只标线索、不合并候选，同一事件仍只交接一条。times_14d不小于2的高频线索"
+    "写不出这样的新事实时不交接；真有新事实时照常交接，刊出过本身不是排除理由。"
+    "watchlist_untrusted里的未完成调查不受本段限制，照原有方式继续核验。\n"
+)
+_SELECTION_THREADS = (
+    "\n"
+    "history_untrusted是近7天候选池的标题索引，threads_untrusted是代码把近30天读者已收到的"
+    "选题归成的事件线索，可能漏配或误配。candidate_threads标出与某条thread相符的候选："
+    "last_published是最后刊出日，times_14d是近14天的刊出天数；没有标注但明显与某条thread是"
+    "同一事件的候选同样对待。这类候选只有标题、summary或basis能看出last_published之后的"
+    "具体新事实才选，并在why写明这次比上次刊出多了什么；times_14d不小于2的高频线索只是延续、"
+    "例行进展或新一轮数字的不选。符合必知定义的新进展照常必选，刊出过本身不是排除理由。"
+    "与watchlist_untrusted里未完成调查对应的候选不受本段限制，照原有方式继续跟进。\n"
 )
 MAX_SEED_NOTE_CHARS = 1200
 # Other outlets' URLs a headline group's note may offer besides its lead's.
@@ -916,12 +944,16 @@ class ContentPreparation:
         watchlist: Sequence[Mapping[str, object]] = (),
         content_config: Mapping[str, object] | None = None,
         seed_notes: Mapping[str, object] | None = None,
+        threads: Sequence[types.Payload] | None = None,
+        recent: Sequence[types.Payload] | None = None,
     ) -> DiscoveryResult:
         """Discover candidates from public inputs and untrusted context.
 
         ``seed_notes`` are researcher excerpts and ranking signals keyed by
         seed ID. They reach only this prompt, labelled untrusted; validation
-        of the model output is unchanged.
+        of the model output is unchanged. With frozen ``threads`` the prompt
+        shows them and the ``recent`` candidate index in place of the full
+        ``history`` records, which still drive deduplication.
         """
         contracts.validate_issue_date(issue_date)
         seeds = [_candidate_view(seed) for seed in seeds]
@@ -938,6 +970,16 @@ class ContentPreparation:
             "watchlist_untrusted": public_context(watchlist),
         }
         rules = _DISCOVERY
+        if threads is not None:
+            prompt["history_untrusted"] = workflow_threads.prompt_index(
+                recent or ()
+            )
+            prompt["threads_untrusted"] = workflow_threads.prompt_threads(
+                threads
+            )
+            rules += _DISCOVERY_THREADS.format(
+                basis="change_basis" if limits is not None else "why_now"
+            )
         if notes:
             prompt["metadata_seed_notes_untrusted"] = notes
             rules += _RESEARCHER_NOTES
@@ -983,8 +1025,16 @@ class ContentPreparation:
         reader_profile: str = "",
         content_config: Mapping[str, object] | None = None,
         classifications: Mapping[str, types.Payload] | None = None,
+        threads: Sequence[types.Payload] | None = None,
+        recent: Sequence[types.Payload] | None = None,
+        candidate_threads: Mapping[str, types.Payload] | None = None,
     ) -> SelectionResult:
-        """Select bounded research tasks without treating selection as proof."""
+        """Select bounded research tasks without treating selection as proof.
+
+        Frozen ``threads`` replace the full history records in the prompt as
+        in discovery, and ``candidate_threads`` marks the pool candidates code
+        linked to a published thread.
+        """
         contracts.validate_issue_date(issue_date)
         if not 1 <= max_tasks <= 12 or len(candidates) > 60:
             raise errors.EditorError("invalid_input")
@@ -1032,21 +1082,35 @@ class ContentPreparation:
                 else {}
             ),
         }
+        rules = (
+            _SELECTION
+            if content_config is None
+            else _CLASSIFIED_SELECTION_RULES
+        )
+        if threads is not None:
+            prompt["history_untrusted"] = workflow_threads.prompt_index(
+                recent or ()
+            )
+            prompt["threads_untrusted"] = workflow_threads.prompt_threads(
+                threads
+            )
+            prompt["candidate_threads"] = {
+                key: value
+                for key, value in (candidate_threads or {}).items()
+                if key in ids
+            }
+            rules += _SELECTION_THREADS
+        if content_config is not None:
+            rules += "\n" + _configured_policy(
+                content_config, "prompts/selection.md", DEFAULT_SELECTION_POLICY
+            )
         with newsletter_usage.purpose_scope("selection"):
             text, _, _ = await self.engine.execute(
                 contracts.canonical_json(prompt),
                 newsletter_workflow_schema.planning_schema(
                     ids, urls, max_tasks, classified=limits is not None
                 ),
-                _SELECTION
-                if content_config is None
-                else _CLASSIFIED_SELECTION_RULES
-                + "\n"
-                + _configured_policy(
-                    content_config,
-                    "prompts/selection.md",
-                    DEFAULT_SELECTION_POLICY,
-                ),
+                rules,
                 model_io.prepare_workspace(workspace, issue_date),
             )
         if limits is not None:

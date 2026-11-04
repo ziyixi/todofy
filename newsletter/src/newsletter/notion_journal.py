@@ -42,11 +42,11 @@ def material_aliases(candidate: types.Payload) -> list[str]:
                 "/blog",
             }:
                 keys.remove(key)
-                event = str(
-                    candidate.get("event_key")
-                    or candidate.get("published_at")
-                    or ""
-                )
+                event = str(candidate.get("event_key") or "")
+                if sources.THREAD_KEY.fullmatch(event):
+                    # A thread spans many developments, not one material.
+                    event = ""
+                event = event or str(candidate.get("published_at") or "")
                 if event:
                     keys.add(key + "#event:" + event.casefold())
     if not keys:

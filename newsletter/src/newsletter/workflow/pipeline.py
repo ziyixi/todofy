@@ -25,6 +25,7 @@ import newsletter.workflow.sources as sources
 import newsletter.workflow.state as newsletter_workflow_state
 import newsletter.workflow.story_nodes as story_nodes
 import newsletter.workflow.story_recipe as story_recipe
+import newsletter.workflow.threads as workflow_threads
 import newsletter.workflow.types as newsletter_workflow_types
 
 _LOGGER = logging.getLogger(__name__)
@@ -76,15 +77,27 @@ def freeze_workflow(
         }
         for e in state.store.recent_history()
     ]
+    publications = workflow_publication.PublicationRepository(state.store)
+    published = publications.published_stories(
+        issue_date, workflow_threads.THREAD_DAYS
+    )
+    threads = workflow_threads.build(
+        published,
+        state.candidates(
+            {item for story in published for item in story["candidate_ids"]}
+        ),
+        issue_date,
+    )
     return instructions, {
         "definition": definition.snapshot(),
         "inputs": {
             "issue_date": issue_date,
             "instructions": [item.snapshot() for item in instructions],
             "history": state.history(issue_date),
-            "pending_stories": workflow_publication.PublicationRepository(
-                state.store
-            ).pending_history(issue_date),
+            "pending_stories": publications.pending_history(issue_date),
+            # Prompts read these compact views; dedup keeps the full history.
+            "threads": threads,
+            "recent_candidates": state.recent(issue_date),
             "editions": editions,
             "policy": policy,
             "started_at": datetime.datetime.now(datetime.UTC).isoformat(),

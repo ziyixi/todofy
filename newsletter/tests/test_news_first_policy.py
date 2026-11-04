@@ -462,8 +462,13 @@ async def test_configured_prompts_and_budgets_reach_only_new_run_models(
         instructions.startswith(content._SAFETY)
         and "Frozen editorial marker" in instructions
     )
-    assert "只比较给定候选" in instructions
-    assert cfg["files"]["prompts/selection.md"] in instructions
+    # Runs frozen without threads keep the exact pre-thread instructions.
+    assert instructions == (
+        content._CLASSIFIED_SELECTION_RULES
+        + "\n"
+        + cfg["files"]["prompts/selection.md"]
+    )
+    assert not {"threads_untrusted", "candidate_threads"} & set(prompt)
 
 
 async def test_configured_discovery_policy_and_classifications_reach_the_run(

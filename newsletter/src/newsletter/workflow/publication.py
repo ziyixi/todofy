@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 import copy
+import datetime
 import json
 import re
 import urllib.parse as parse
@@ -1071,3 +1072,47 @@ class PublicationRepository:
                     }
                 )
         return sorted(pending, key=lambda item: item["priority"])[:limit]
+
+    def published_stories(
+        self, issue_date: str, days: int
+    ) -> list[types.Payload]:
+        """Read the stories readers received in the days before a date.
+
+        A story counts when its frozen publication shows it as deep, brief or
+        watch and the provider accepted that edition, the same delivery test
+        pending_history applies. Oldest first, in each edition's story order.
+        """
+        contracts.validate_issue_date(issue_date)
+        since = datetime.date.fromisoformat(issue_date) - datetime.timedelta(
+            days=days
+        )
+        with self.store.lock:
+            rows = self.store.db.execute(
+                (
+                    "SELECT s.issue_date,s.tasks,s.body,e.body AS edition "
+                    "FROM publication_snapshots s JOIN workflow_editions w "
+                    "ON w.run_id=s.run_id JOIN editions e ON e.id=w.edition_id "
+                    "WHERE s.issue_date>=? AND s.issue_date<? AND (EXISTS("
+                    "SELECT 1 FROM sends d WHERE d.edition_id=e.id) OR EXISTS("
+                    "SELECT 1 FROM verification_sends v WHERE v.edition_id=e.id"
+                    ")) ORDER BY s.issue_date,s.rowid"
+                ),
+                (since.isoformat(), issue_date),
+            ).fetchall()
+        stories: list[types.Payload] = []
+        for row in rows:
+            delivery = json.loads(row["edition"])["delivery_state"]
+            if delivery not in {"provider_accepted", "simulated"}:
+                continue
+            tasks = {task["id"]: task for task in json.loads(row["tasks"])}
+            stories.extend(
+                {
+                    "issue_date": row["issue_date"],
+                    "title": story["title"],
+                    "candidate_ids": story["candidate_ids"],
+                    "source_urls": tasks[story["story_id"]]["source_urls"],
+                }
+                for story in json.loads(row["body"])["coverage"]["stories"]
+                if story["disposition"] != "deferred"
+            )
+        return stories
