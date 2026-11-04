@@ -13,6 +13,23 @@ class Memory {
 
 const connection: Connection = { appKey: 'syntheticappkey', refreshToken: 'synthetic-refresh-private', generation: 'synthetic-generation' };
 
+/** A Dropbox answer whose body sends its first bytes and then stalls until the request is aborted. */
+function stalled(init: RequestInit, first: string): Response {
+  return new Response(new ReadableStream<Uint8Array>({
+    start: (controller) => {
+      controller.enqueue(new TextEncoder().encode(first));
+      init.signal?.addEventListener('abort', () => { controller.error(new Error('synthetic abort')); });
+    },
+  }));
+}
+
+/** Stubs Dropbox with a token refresh and a stalled body for every other call. */
+function stallBodies(first: string): void {
+  vi.stubGlobal('fetch', (url: string, init: RequestInit) => url.endsWith('/oauth2/token')
+    ? Promise.resolve(Response.json({ access_token: 'synthetic-access-private', expires_in: 3600 }))
+    : Promise.resolve(stalled(init, first)));
+}
+
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('separate Dropbox authorization', () => {
@@ -319,6 +336,20 @@ describe('Dropbox space for the owner console', () => {
     expect(store.get('space')).toBeNull();
   });
 
+  it('gives up on an answer whose body stalls after five seconds, not only on its headers', async () => {
+    vi.useFakeTimers();
+    const store = new Memory();
+    store.set('connection', connection);
+    stallBodies('{"used":');
+    let settled = false;
+    const pending = new Dropbox(store, {}).space().finally(() => { settled = true; });
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await pending).toMatchObject({ state: 'unavailable', time: 0 });
+    expect(store.get('provider_error')).toBeNull();
+  });
+
   it('maps team allocations and refuses malformed answers', () => {
     expect(spaceAnswer(200, { used: 5, allocation: { '.tag': 'team', used: 50, allocated: 100 } }, 1)).toEqual({ state: 'observed', used: 50, allocated: 100, time: 1 });
     for (const body of [{ used: -1, allocation: { allocated: 9 } }, { used: 1 }, { used: 1.5, allocation: { allocated: 9 } }, null, 'synthetic']) {
@@ -366,6 +397,21 @@ describe('object scan pages', () => {
     await expect(provider.scanPage('files/list_folder', { path: '/namespaces' })).rejects.toMatchObject({ code: Code.UNAVAILABLE, reason: 'PROVIDER_RESPONSE_INVALID' });
     answer = () => new Response('{"entries":[');
     await expect(provider.scanPage('files/list_folder', { path: '/namespaces' })).rejects.toMatchObject({ code: Code.UNAVAILABLE, reason: 'PROVIDER_RESPONSE_INVALID' });
+    expect(store.get('provider_error')).toBeNull();
+  });
+
+  it('gives up on a page whose body stalls after 30 seconds, as a retryable provider answer', async () => {
+    vi.useFakeTimers();
+    const store = new Memory();
+    store.set('connection', connection);
+    stallBodies('{"entries":[');
+    let settled = false;
+    const pending = new Dropbox(store, {}).scanPage('files/list_folder', { path: '/namespaces' }).finally(() => { settled = true; });
+    const outcome = expect(pending).rejects.toMatchObject({ code: Code.UNAVAILABLE, reason: 'PROVIDER_RESPONSE_INVALID' });
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await outcome;
     expect(store.get('provider_error')).toBeNull();
   });
 

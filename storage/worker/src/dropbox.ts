@@ -122,13 +122,23 @@ export class Dropbox {
 
   constructor(store: Pick<Store, 'get' | 'set' | 'delete' | 'connection'>, env: Pick<Env, 'DEV_AUTH_BYPASS' | 'DEV_DROPBOX_ORIGIN'>) { this.store = store; this.origins = endpoints(env); }
 
-  private async fetch(url: string, init: RequestInit, timeoutMs = PROVIDER_TIMEOUT): Promise<Response> {
+  /** The provider's response within the timeout; reading its body is the caller's and is not covered. */
+  private fetch(url: string, init: RequestInit, timeoutMs = PROVIDER_TIMEOUT): Promise<Response> {
+    return this.exchange(url, init, timeoutMs, (response) => Promise.resolve(response));
+  }
+
+  /** Sends a request and reads its answer within one timeout, so a body that stalls cannot hold the caller either. */
+  private async exchange<T>(url: string, init: RequestInit, timeoutMs: number, read: (response: Response) => Promise<T>): Promise<T> {
     const controller = new AbortController();
     const timeout = setTimeout(() => { controller.abort(); }, timeoutMs);
     try {
-      return await fetch(url, { ...init, redirect: 'manual', signal: controller.signal });
-    } catch {
-      throw failure(Code.UNAVAILABLE, 'UNAVAILABLE');
+      let response: Response;
+      try {
+        response = await fetch(url, { ...init, redirect: 'manual', signal: controller.signal });
+      } catch {
+        throw failure(Code.UNAVAILABLE, 'UNAVAILABLE');
+      }
+      return await read(response);
     } finally { clearTimeout(timeout); }
   }
 
@@ -300,10 +310,9 @@ export class Dropbox {
     this.spaceAttempt = now;
     const generation = this.store.connection()?.generation;
     try {
-      const response = await this.fetch(this.origins.api + '/2/users/get_space_usage', {
+      const answer = await this.exchange(this.origins.api + '/2/users/get_space_usage', {
         method: 'POST', headers: { authorization: 'Bearer ' + await this.token(), 'content-type': 'application/json' }, body: 'null',
-      }, SPACE_TIMEOUT);
-      const answer = spaceAnswer(response.status, await readJson(response, 16 * 1024).catch(() => null), now);
+      }, SPACE_TIMEOUT, async (response) => spaceAnswer(response.status, await readJson(response, 16 * 1024).catch(() => null), now));
       if (answer !== null) {
         if (this.store.connection()?.generation === generation) this.store.set('space', answer);
         return answer;
@@ -317,16 +326,16 @@ export class Dropbox {
    * breaks off or cannot be read is Dropbox's answer, retried like an outage, never the owner's bad request.
    */
   async scanPage(method: 'files/list_folder' | 'files/list_folder/continue', args: unknown): Promise<Record<string, unknown>> {
-    const response = await this.fetch(this.origins.api + '/2/' + method, {
+    const page = await this.exchange(this.origins.api + '/2/' + method, {
       method: 'POST', headers: { authorization: 'Bearer ' + await this.token(), 'content-type': 'application/json' }, body: JSON.stringify(args),
+    }, PROVIDER_TIMEOUT, async (response) => {
+      if (!response.ok) return providerFailure(response);
+      try {
+        return await readJson(response, SCAN_PAGE_BYTES);
+      } catch {
+        throw failure(Code.UNAVAILABLE, 'PROVIDER_RESPONSE_INVALID');
+      }
     });
-    if (!response.ok) return providerFailure(response);
-    let page: unknown;
-    try {
-      page = await readJson(response, SCAN_PAGE_BYTES);
-    } catch {
-      throw failure(Code.UNAVAILABLE, 'PROVIDER_RESPONSE_INVALID');
-    }
     return record(page);
   }
 

@@ -84,8 +84,8 @@ message DropboxSpace {
     STATE_UNSPECIFIED = 0;
     // Read from Dropbox at observe_time.
     STATE_OBSERVED = 1;
-    // The connection was authorized without account_info.read; reconnecting after the Dropbox app gains that
-    // permission shows the space. Not a connection error: files keep working.
+    // The connection was authorized without account_info.read, which Dropbox enables on every user-linked app;
+    // reconnecting shows the space. Not a connection error: files keep working.
     STATE_SCOPE_MISSING = 2;
     // Dropbox did not answer, and no earlier reading is kept.
     STATE_UNAVAILABLE = 3;
