@@ -6,7 +6,8 @@ exact title or event_key with. Its key stays stable while any story keeps it:
 discovery is asked to reuse a thread key as event_key, and a thread whose
 oldest story left the window adopts the key its later candidates carry;
 otherwise the key hashes the first story's candidate IDs. Threads only inform
-prompts and annotate the pool; nothing is dropped because of them.
+prompts and annotate the pool; a thread key is never a deduplication identity
+(see ``sources.THREAD_KEY``), so nothing is dropped because of them.
 """
 
 from __future__ import annotations
@@ -14,7 +15,6 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 import datetime
 import hashlib
-import re
 
 import newsletter.types as types
 import newsletter.workflow.sources as sources
@@ -26,7 +26,7 @@ MAX_THREADS = 100
 MAX_URLS = 3
 # Matching keys a frozen thread keeps, newest story first. Not prompt text.
 MAX_KEYS = 24
-KEY = re.compile(r"thread-[0-9a-f]{12}\Z")
+KEY = sources.THREAD_KEY
 
 
 def _new_key(story: types.Payload) -> str:
@@ -52,6 +52,8 @@ def build(
             *(sources.identity_keys(item) for item in members),
             *(sources.identity_keys({"url": url}) for url in urls),
         )
+        # Claims read today's candidate bodies, which a later pooling of the
+        # same URL may overwrite; a moved claim only changes a prompt hint.
         claimed = sorted(
             {
                 str(item.get("event_key", ""))
@@ -93,9 +95,7 @@ def build(
                 "urls": list(
                     dict.fromkeys(url for _, urls, _ in newest for url in urls)
                 )[:MAX_URLS],
-                "keys": sorted(
-                    {"event:" + key, *list(ordered)[: MAX_KEYS - 1]}
-                ),
+                "keys": sorted(list(ordered)[:MAX_KEYS]),
             }
         )
     threads.sort(

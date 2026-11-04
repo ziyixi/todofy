@@ -443,7 +443,7 @@ def test_stories_sharing_a_source_form_one_thread_with_day_counts():
             "https://example.org/vote",
         ],
     }
-    assert "event:" + key_of("c1") in built[1]["keys"]
+    assert "url:https://example.org/vote" in built[1]["keys"]
     assert len(built[1]["keys"]) <= threads.MAX_KEYS
 
 
@@ -456,10 +456,10 @@ def test_thread_key_survives_its_first_story_leaving_the_window():
         # Discovery reused the key as event_key on a new report.
         "c2": member("c2", "https://example.org/second", original),
     }
-    assert [
-        t["thread_key"]
-        for t in threads.build([first, later], candidates, ISSUE)
-    ] == [original]
+    built = threads.build([first, later], candidates, ISSUE)
+    assert [t["thread_key"] for t in built] == [original]
+    # The reused key links the story but is never a matching identity.
+    assert not any(key.startswith("event:") for key in built[0]["keys"])
     assert [
         t["thread_key"] for t in threads.build([later], candidates, ISSUE)
     ] == [original]

@@ -22,6 +22,10 @@ _ARXIV = re.compile(
     "\\d+)?(?:\\.pdf)?/?\\Z"
 )
 _TRACKING = {"fbclid", "gclid", "mc_cid", "mc_eid"}
+# A code-generated thread key names weeks of published developments, not one
+# event: it links a candidate to its thread but is never a candidate identity,
+# so a new development on a thread is not deduplicated against the old ones.
+THREAD_KEY = re.compile(r"thread-[0-9a-f]{12}\Z")
 
 
 class Candidate(TypedDict):
@@ -108,8 +112,10 @@ def identity_keys(value: Mapping[str, object]) -> set[str]:
         except (ValueError, contracts.ContractError):
             pass
     event = value.get("event_key", "")
-    if isinstance(event, str) and event.strip():
-        keys.add("event:" + " ".join(event.lower().split()))
+    if isinstance(event, str):
+        event = " ".join(event.lower().split())
+        if event and not THREAD_KEY.fullmatch(event):
+            keys.add("event:" + event)
     title = value.get("title", "")
     if isinstance(title, str) and len(title.strip()) >= 12:
         keys.add("title:" + " ".join(title.casefold().split()))

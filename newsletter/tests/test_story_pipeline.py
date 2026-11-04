@@ -885,22 +885,27 @@ async def test_threads_replace_history_in_prompts_and_annotate_the_pool(
         "threads": published,
         "recent_candidates": nodes.state.recent(THREAD_ISSUE),
     }
+    # A new development dated the same day as the earlier follow-up: the
+    # shared thread key must not make code drop it as a repeat.
     follow_up = workflow_content.candidate(
         title="A synthetic later development of the same event",
         url="https://example.org/follow-up",
         event_key=key,
-        published_at=THREAD_ISSUE,
+        published_at="2026-10-17",
         direction="03-world",
     )
     follow_up["id"] = sources.candidate_id(follow_up)
-    # Same key without a newer date: a repeat, whatever its URL.
-    repeat = workflow_content.candidate(
-        title="A synthetic rewrite of the first follow-up",
-        url="https://example.org/rewrite",
+    # Nor does it drop an undated one, or merge two in one batch; repeats
+    # are still found by URL, DOI, title or a model's own event_key.
+    undated = workflow_content.candidate(
+        title="A synthetic undated reaction to the same event",
+        url="https://example.org/undated",
         event_key=key,
-        published_at="2026-10-17",
+        published_at="",
     )
-    assert sources.deduplicate_candidates([repeat], run_inputs["history"]) == []
+    assert sources.deduplicate_candidates(
+        [follow_up, undated, earlier], run_inputs["history"]
+    ) == [follow_up, undated]
     plan = workflow_content.task(
         candidate_ids=[follow_up["id"]], source_urls=[follow_up["url"]]
     )
@@ -928,8 +933,7 @@ async def test_threads_replace_history_in_prompts_and_annotate_the_pool(
         ),
         workspace / "discovery",
     )
-    # The full records still deduplicate: the unchanged repeat is dropped,
-    # while the follow-up sharing the earlier event_key has a newer date.
+    # The full records still deduplicate: the unchanged repeat is dropped.
     assert [c["id"] for c in found["candidates"]] == [follow_up["id"]]
     pool = await nodes.execute(
         "deduplicate",
@@ -975,6 +979,11 @@ async def test_threads_replace_history_in_prompts_and_annotate_the_pool(
     assert selection["candidate_threads"] == pool["threads"]
     assert "event_key逐字填它的thread_key" in rules
     assert "candidate_threads" in choice_rules
+    # Unclassified runs have no change_basis field to write the change in.
+    assert "在why_now写明" in rules and "change_basis" not in rules
+    # Unfinished topics keep their own follow-up rule over the thread rule.
+    assert "未完成调查不受本段限制" in rules
+    assert "未完成调查对应的候选不受本段限制" in choice_rules
     dispositions = {
         row["id"]: row["disposition"]
         for row in nodes.state.history("2026-10-21")
@@ -1001,8 +1010,17 @@ async def test_runs_frozen_before_threads_keep_their_full_history_prompt(
         "history": nodes.state.history(THREAD_ISSUE),
         "editions": [],
     }
+    pooled = workflow_content.candidate(
+        id="pooled",
+        title="A synthetic pooled candidate of a legacy run",
+        url="https://example.org/pooled",
+    )
+    plan = workflow_content.task(
+        candidate_ids=["pooled"], source_urls=[pooled["url"]]
+    )
     engine_fake = workflow_content.Engine(
-        (workflow_content.discovered(), set(), True)
+        (workflow_content.discovered(), set(), True),
+        (workflow_content.planned(plan), set(), False),
     )
     nodes.content = content.ContentPreparation(engine_fake)
     history = await nodes.execute(
@@ -1028,3 +1046,16 @@ async def test_runs_frozen_before_threads_keep_their_full_history_prompt(
     assert prompt["watchlist_untrusted"][0]["id"] == "remembered"
     assert "threads_untrusted" not in prompt
     assert "thread_key" not in rules
+    await nodes.execute(
+        "selection",
+        thread_context(
+            "selection",
+            {"history": history, "candidates": {"candidates": [pooled]}},
+            run_inputs,
+        ),
+        workspace / "selection",
+    )
+    selection, _, choice_rules, _ = engine_fake.calls[1]
+    assert selection["history_untrusted"] == prompt["history_untrusted"]
+    assert not {"threads_untrusted", "candidate_threads"} & set(selection)
+    assert choice_rules == content._SELECTION
