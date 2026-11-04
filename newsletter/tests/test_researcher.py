@@ -8,6 +8,7 @@ import asyncio
 import json
 import pathlib
 import time
+import urllib.parse as parse
 
 import httpx
 import pytest
@@ -946,6 +947,80 @@ async def test_routing_round_robins_sources_and_caps_each_direction():
         "04-economy",
     ]
     assert set(result.notes) == {c["id"] for c in result.candidates}
+
+
+async def test_authored_headline_feeds_bring_a_major_story_from_every_outlet():
+    # 03-world once had no leads and missed an election result; its headline
+    # feeds now carry a story that leads many front pages as several leads.
+    path = pathlib.Path(__file__).resolve().parents[1] / "content-config"
+    registry = researcher.validate_registry(
+        (path / "researcher.yaml").read_text(encoding="utf-8"),
+        [item.stem for item in (path / "discovery").glob("*.md")],
+    )
+    world = [s for s in registry if s.direction == "03-world"]
+    economy = {s.name for s in registry if s.direction == "04-economy"}
+    assert len({s.name for s in world}) >= 4
+    assert all(s.kind == "feed" and s.max_age_days <= 2 for s in world)
+    assert sum(s.max_seeds for s in world) <= researcher.MAX_SEEDS_PER_DIRECTION
+    assert economy - {"Federal Reserve"}
+
+    story = "Synthetic national election flips the legislative majority"
+
+    def front_page(host, stamp):
+        items = [
+            (f"{story} ({host})", "election", stamp),
+            (f"Old synthetic summit ({host})", "summit", "2026-10-24"),
+            *[
+                (f"Synthetic story {n} ({host})", f"s{n}", "2026-10-27")
+                for n in range(6)
+            ],
+        ]
+        if host == "rss.dw.com":  # DW serves RDF dated with dc:date
+            return (
+                "<rdf:RDF "
+                'xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" '
+                'xmlns="http://purl.org/rss/1.0/" '
+                'xmlns:dc="http://purl.org/dc/elements/1.1/">'
+                + "".join(
+                    f'<item rdf:about="https://dw.example.org/{slug}">'
+                    f"<title>{title}</title><dc:date>{day}T08:00:00Z</dc:date>"
+                    f"<description>{fake.LONG}</description></item>"
+                    for title, slug, day in items
+                )
+                + "</rdf:RDF>"
+            ).encode()
+        return fake.rss(
+            *[
+                fake.rss_item(
+                    title=title,
+                    link=f"https://{host.split('.')[-2]}.example.org/{slug}",
+                    date=day,
+                )
+                for title, slug, day in items
+            ]
+        )
+
+    stamps = {
+        "feeds.bbci.co.uk": "Wed, 28 Oct 2026 06:12:31 GMT",
+        "feeds.npr.org": "Wed, 28 Oct 2026 01:30:00 -0400",
+        "www.theguardian.com": "Wed, 28 Oct 2026 05:00:00 +0000",
+        "rss.dw.com": "2026-10-28",
+        "www.aljazeera.com": "Wed, 28 Oct 2026 04:00:00 +0000",
+    }
+    hosts = [parse.urlsplit(s.url).hostname or "" for s in world]
+    assert set(hosts) == set(stamps)
+    network = fake.Network(
+        {host: front_page(host, stamps[host]) for host in hosts}
+    )
+    result = await run(network, world)
+    assert all(code.endswith(":ok") for code in result.diagnostics)
+    assert {c["direction"] for c in result.candidates} == {"03-world"}
+    assert len(result.candidates) == sum(s.max_seeds for s in world)
+    # The first round takes each outlet's newest lead: the shared story.
+    assert {c["title"] for c in result.candidates[: len(world)]} == {
+        f"{story} ({host})" for host in hosts
+    }
+    assert not any("summit" in c["title"] for c in result.candidates)
 
 
 async def test_every_lead_is_a_valid_metadata_seed_and_notes_are_bounded():

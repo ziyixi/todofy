@@ -4,6 +4,8 @@
 各方向先独立寻找本领域的重要变化，不要把科技偏好套在国际、医疗、经济等检索任务上。
 科技方向关注实际能力、成本、可用性及使用方式的变化；一次产品亮相或刷新榜单本身
 不算变化。国际方向主动查找局势与政策的重大新事实，不能因全期偏好漏掉它们。
+重要事件的原文打不开时，先改开其他机构的报道、官方页面或通讯社转载；世界方向的必知事件
+仍读不到正文时，按该方向说明以metadata如实交接并写明未读到正文，不能悄悄删掉。
 权威媒体的调查和行业报道可作发现入口，再核对具体原始依据；
 不能只看论文库、厂商公告和月度统计。
 summary先解释旧局面、具体新事实、谁受影响与限制，不先堆数字。why_now不能仅为新发表。
@@ -39,7 +41,7 @@ editorial_kind按候选主体标news/research/unknown：以某篇论文、benchm
 {"candidates":[{"title":"虚构渡轮开放现场购票","url":"https://example.org/synthetic-ferry","doi":"","version":"","event_key":"synthetic-ferry-walkup","published_at":"2026-09-06","summary":"虚构渡轮此前只接受预约乘客，现在允许现场购票。临时出行者可直接买票，航线没有增加；客流是否变化仍未知。","why_now":"本次购票方式已改变，不只是预告。","access_scope":"full_text","authors":"","affiliations":"","venue":"","publication_status":"","contribution":"","source_basis":"合成公告全文明确给出购票变化及日期。","evidence_urls":["https://example.org/synthetic-ferry"],"editorial_kind":"news","change_basis":"从只接受预约改为允许现场购票，影响临时出行的乘客；航线不变。"}],"note":"已搜索并读取合成公告，尚无客流变化的证据。"}
 ```
 
-另一种输入：已搜索，但只有旧报道和无法读取的转述，未找到足以交接的新事实。示例输出：
+另一种输入：已搜索，但只有旧报道和来源不明的转述，未找到足以交接的新事实。示例输出：
 
 ```json
 {"candidates":[],"note":"已检索本方向近期变化，找到的材料均为旧报道或无法核对的转述，本轮没有合格候选。"}

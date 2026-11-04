@@ -17,6 +17,7 @@ import newsletter.workflow.definition as newsletter_workflow_definition
 import newsletter.workflow.engine as newsletter_workflow_engine
 import newsletter.workflow.publication as newsletter_workflow_publication
 import newsletter.workflow.schema as newsletter_workflow_schema
+import newsletter.workflow.sources as sources
 import newsletter.workflow.story_nodes as story_nodes
 import tests.support.news_first_policy as news_first_policy
 import tests.support.publication as publication
@@ -158,6 +159,161 @@ def test_missing_classification_or_change_basis_is_not_assumed_to_be_news():
     assert (
         parsed.classifications[parsed.candidates[0]["id"]]["kind"] == "unknown"
     )
+
+
+def test_must_know_event_with_unreadable_bodies_stays_news_at_metadata_scope():
+    # The world direction hands off a major event whose bodies would not load.
+    # An open action counts even when the page fails, so the honest metadata
+    # scope keeps it news; an unopened lead never becomes news.
+    primary = "https://news.example.org/national-election-result"
+    second = "https://wire.example.org/national-election-result"
+    event = news_first_policy.news(
+        url=primary,
+        title="Synthetic national election flips the legislative majority",
+        access_scope="metadata",
+        evidence_urls=[primary, second],
+        source_basis="Two synthetic outlets report it; no body was read.",
+    )
+    output = json.loads(workflow_content.discovered(event))
+    output["candidates"][0].update(
+        editorial_kind="news",
+        change_basis="必知：two synthetic outlets report a new majority.",
+    )
+    seed = sources.metadata_candidate(
+        event["title"],
+        primary,
+        "",
+        workflow_content.DAY,
+        "rss_metadata",
+        direction="03-world",
+        venue="Synthetic Outlet",
+    )
+
+    def parse_with(opened, seeds=(seed,)):
+        return content.parse_discovery(
+            json.dumps(output),
+            opened,
+            True,
+            "03-world",
+            workflow_content.DAY,
+            seeds=seeds,
+            classified=True,
+        )
+
+    parsed = parse_with({primary, second})
+    (candidate,) = parsed.candidates
+    assert candidate["provenance"] == "web_open"
+    assert candidate["access_scope"] == "metadata"
+    assert candidate["evidence_urls"] == [primary, second]
+    classification = parsed.classifications[candidate["id"]]
+    assert classification["kind"] == "news"
+    assert classification["basis"].startswith("必知：")
+    papers = [news_first_policy.paper(n) for n in range(1, 13)]
+    retained, kinds = content.candidate_budget(
+        papers + [candidate],
+        parsed.classifications,
+        maximum=30,
+        research_maximum=10,
+    )
+    assert retained[0] == candidate
+    assert kinds[candidate["id"]]["kind"] == "news"
+    # Not opened: the same output falls back to the bare feed seed.
+    unopened = parse_with(set())
+    (lead,) = unopened.candidates
+    assert lead["provenance"] == "rss_metadata"
+    assert unopened.classifications[lead["id"]]["kind"] == "unknown"
+    # Not opened and not a feed seed: the whole direction is rejected.
+    with pytest.raises(errors.EditorError):
+        parse_with(set(), seeds=())
+    # One unopened evidence URL also rejects the whole direction, which is why
+    # 03-world names other outlets in source_basis instead.
+    with pytest.raises(errors.EditorError):
+        parse_with({primary})
+
+
+def test_unopened_headline_leads_must_not_join_a_must_know_news_task():
+    # Feed leads reach selection as unknown candidates. Merging one into the
+    # opened news task turns the task into research; two drop it entirely.
+    event = news_first_policy.news(1)
+    leads = [
+        sources.metadata_candidate(
+            f"Synthetic outlet {name} leads with the same election",
+            f"https://{name}.example.org/election",
+            "",
+            workflow_content.DAY,
+            "rss_metadata",
+            direction="03-world",
+            venue=f"Synthetic {name}",
+        )
+        for name in ("a", "b")
+    ]
+    paper = news_first_policy.paper(1)
+    pool = [event, *leads, paper]
+    kinds = {
+        event["id"]: {"kind": "news", "basis": "必知：two outlets report it."}
+    }
+
+    def plan(*extra_leads):
+        merged = topic(event)
+        merged["candidate_ids"] += [lead["id"] for lead in extra_leads]
+        result = content.parse_classified_plan(
+            workflow_content.planned(merged, topic(paper, 2)),
+            pool,
+            kinds,
+            6,
+            content.editorial_limits(config()),
+        )
+        return (
+            {
+                t["id"]: result.task_classifications[t["id"]]
+                for t in result.research_tasks
+            },
+            {o["task"]["id"]: o["reason"] for o in result.omitted_tasks},
+        )
+
+    assert plan() == ({"topic-1": "news", "topic-2": "research"}, {})
+    assert plan(leads[0]) == (
+        {"topic-1": "research"},
+        {"topic-2": "research_quota"},
+    )
+    assert plan(*leads) == (
+        {"topic-2": "research"},
+        {"topic-1": "mixed_research_topics"},
+    )
+
+
+def test_authored_world_rules_mark_must_know_events_for_selection():
+    root = pathlib.Path(__file__).resolve().parents[1]
+    world, packaged, discovery, selection = (
+        path.read_text(encoding="utf-8")
+        for path in (
+            root / "content-config/discovery/03-world.md",
+            root / "src/newsletter/instructions/discovery/03-world.md",
+            root / "content-config/prompts/discovery.md",
+            root / "content-config/prompts/selection.md",
+        )
+    )
+    assert world == packaged
+    # The marker is the only contract between the two stages.
+    assert "change_basis以“必知：”开头" in world
+    assert "basis以“必知：”开头" in selection
+    for required in (
+        "含美国",
+        "metadata_seeds",
+        "又一处援助点或避难所遇袭",
+        "最多再试两个替代来源",
+        "access_scope写metadata",
+        "evidence_urls都只列本轮调用过open的地址",
+    ):
+        assert required in world
+    assert "不能悄悄删掉" in discovery
+    for required in (
+        "最多两项",
+        "只读到metadata的必知事件不排在这些位置",
+        "引用两条以上会整题丢弃",
+        "会不会意外",
+    ):
+        assert required in selection
 
 
 def test_large_research_pool_cannot_crowd_actual_news_out_of_candidate_budget():

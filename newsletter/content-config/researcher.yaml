@@ -3,9 +3,10 @@
 # model decides what to open. Code owns request parameters (arXiv window, Crossref filter,
 # Hugging Face date), pacing, size caps and network checks; this file only names sources.
 #
-# Ported from the retired Brief app's registry at b55b29b1. Entries dropped here (headline news,
-# signal-only feeds, the Anthropic sitemap, PyTorch, USGS, disabled entries and the Crossref
-# alternates) stay recoverable:  git show b55b29b1:brief/content-config/sources.yaml
+# Ported from the retired Brief app's registry at b55b29b1; its open headline feeds came back on
+# 2026-11-04. Entries still left out (paywalled and signal-only feeds, CNA, the Anthropic sitemap,
+# PyTorch, USGS, disabled entries and the Crossref alternates) stay recoverable:
+#   git show b55b29b1:brief/content-config/sources.yaml
 #
 # Fields (the engine refuses unknown fields, anchors and tags):
 #   id                 [a-z0-9-], unique; diagnostics name it
@@ -229,8 +230,61 @@ sources:
                "deep learning", "neural network*"]
 
   # ---------- World and economy ----------
+  # Headline feeds put the day's front pages in front of 03-world, so a story several outlets lead
+  # with (an election result, a change of government) arrives as several leads instead of hanging on
+  # a few searches. Open, unpaywalled publishers whose article pages usually load; two days keep
+  # them to the current news cycle, and 5 x 4 seeds fill the direction's 20 leads.
+  - id: bbc-world
+    name: BBC
+    direction: 03-world
+    kind: feed
+    url: "https://feeds.bbci.co.uk/news/world/rss.xml" # one-sentence descriptions
+    max_seeds: 4
+    max_age_days: 2
+  - id: npr-news
+    name: NPR
+    direction: 03-world
+    kind: feed
+    url: "https://feeds.npr.org/1001/rss.xml" # top news incl. US politics; Brief read 1004 (world)
+    max_seeds: 4
+    max_age_days: 2
+  - id: guardian-world
+    name: The Guardian
+    direction: 03-world
+    kind: feed
+    url: "https://www.theguardian.com/world/rss"
+    max_seeds: 4
+    max_age_days: 2
+  - id: dw-world
+    name: DW
+    direction: 03-world
+    kind: feed
+    url: "https://rss.dw.com/rdf/rss-en-world" # RDF with dc:date
+    max_seeds: 4
+    max_age_days: 2
+  - id: aljazeera
+    name: Al Jazeera
+    direction: 03-world
+    kind: feed
+    url: "https://www.aljazeera.com/xml/rss/all.xml"
+    max_seeds: 4
+    max_age_days: 2
   - id: fed-press
     name: Federal Reserve
     direction: 04-economy
     kind: feed
     url: "https://www.federalreserve.gov/feeds/press_all.xml"
+  - id: bbc-business
+    name: BBC
+    direction: 04-economy
+    kind: feed
+    url: "https://feeds.bbci.co.uk/news/business/rss.xml"
+    max_seeds: 4
+    max_age_days: 2
+  - id: guardian-economics
+    name: The Guardian
+    direction: 04-economy
+    kind: feed
+    url: "https://www.theguardian.com/business/economics/rss"
+    max_seeds: 4
+    max_age_days: 2
