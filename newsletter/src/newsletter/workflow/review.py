@@ -1,5 +1,6 @@
 """Pure review parsing and evidence checks; no providers or durable writes."""
 
+from collections.abc import Mapping
 import dataclasses
 from typing import cast
 import urllib.parse as parse
@@ -9,12 +10,17 @@ import newsletter.errors as errors
 import newsletter.model_io as model_io
 import newsletter.types as types
 import newsletter.workflow.components as components
+import newsletter.workflow.feed_excerpts as feed_excerpts
 import newsletter.workflow.types as newsletter_workflow_types
 
 
 @dataclasses.dataclass(frozen=True)
 class ReviewEvidence:
-    """Code-observed sources and job identities for one reviewer invocation."""
+    """Code-observed sources and job identities for one reviewer invocation.
+
+    ``excerpts`` maps a citation to its outlet for code-built feed excerpts
+    that still match the sha256 pinned at fetch time.
+    """
 
     sources: types.Payload
     opened: set[str]
@@ -22,6 +28,20 @@ class ReviewEvidence:
     round_name: str
     writer_job: str
     reviewer_job: str
+    excerpts: Mapping[str, str] = dataclasses.field(default_factory=dict)
+
+
+def _pinned(
+    component: types.Payload, name: str, evidence: ReviewEvidence
+) -> dict[str, str]:
+    """Return the cited pinned excerpts a signal may treat as read."""
+    if name != "signal":
+        return {}
+    return {
+        ref: evidence.excerpts[ref]
+        for ref in components.component_citations(component, name)
+        if ref in evidence.excerpts
+    }
 
 
 def valid_strings(value: object) -> bool:
@@ -58,7 +78,12 @@ def _evidence_findings(
     sources, opened = evidence.sources, evidence.opened
     searched, round_name = evidence.searched, evidence.round_name
     refs = components.component_citations(component, name)
-    required_urls = {parse.urldefrag(sources[ref]["url"])[0] for ref in refs}
+    # Every other citation keeps the must-open rule.
+    pinned = _pinned(component, name, evidence)
+    required = [ref for ref in refs if ref not in pinned]
+    required_urls = {
+        parse.urldefrag(sources[ref]["url"])[0] for ref in required
+    }
     missing_urls = sorted(required_urls - opened)
     metadata_refs = [
         ref for ref in refs if sources[ref]["access_scope"] == "metadata"
@@ -72,7 +97,7 @@ def _evidence_findings(
                 "research",
             )
         )
-    if not required_urls:
+    if not refs:
         checks.append(
             (
                 "missing_review_citations: 此组件没有可核对的引用来源。",
@@ -80,10 +105,19 @@ def _evidence_findings(
                 "research",
             )
         )
+    if pinned and not required and len(set(pinned.values())) < 2:
+        checks.append(
+            (
+                "single_outlet_excerpt_signal: 一家媒体的冻结摘要不能单独确认"
+                "事件；须再引用另一家媒体的摘要或本轮打开的原文。",
+                list(pinned)[:16],
+                "research",
+            )
+        )
     if missing_urls:
         missing_refs = [
             ref
-            for ref in refs
+            for ref in required
             if parse.urldefrag(sources[ref]["url"])[0] not in opened
         ]
         details = [
@@ -197,6 +231,22 @@ def assess_component(
         "writer_job_id": writer_job,
         "reviewer_job_id": job,
     }
+    if component is not None and (pinned := _pinned(component, name, evidence)):
+        # The receipt binds each excerpt read from its frozen text, not from
+        # an observed open, to the exact text's sha256.
+        assessment["excerpts"] = sorted(
+            (
+                {
+                    "url": evidence.sources[ref]["url"],
+                    "sha256": feed_excerpts.digest(
+                        evidence.sources[ref]["excerpt"]
+                    ),
+                    "outlet": outlet,
+                }
+                for ref, outlet in pinned.items()
+            ),
+            key=lambda item: (item["url"], item["sha256"]),
+        )
     return assessment, issue
 
 

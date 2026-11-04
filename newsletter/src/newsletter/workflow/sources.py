@@ -199,6 +199,10 @@ class MetadataResult:
     in the window, event groups, groups with enough outlets for a consensus,
     the largest group's outlets and the top three groups' public titles.
     Additive and read by no workflow node, like ``sources``.
+
+    ``excerpts`` holds, for each seeded headline group enough outlets carry
+    for a consensus, one sha256-pinned excerpt per outlet (``feed_excerpts``).
+    Additive: the pool node passes on the groups its candidates point at.
     """
 
     candidates: list[Candidate]
@@ -206,6 +210,7 @@ class MetadataResult:
     notes: dict[str, types.Payload] = dataclasses.field(default_factory=dict)
     sources: list[types.Payload] = dataclasses.field(default_factory=list)
     headlines: list[types.Payload] = dataclasses.field(default_factory=list)
+    excerpts: list[types.Payload] = dataclasses.field(default_factory=list)
 
 
 def metadata_candidate(

@@ -22,6 +22,7 @@ from newsletter.workflow import types as workflow_types
 import newsletter.workflow.content as content
 import newsletter.workflow.definition as newsletter_workflow_definition
 import newsletter.workflow.engine as engine
+import newsletter.workflow.feed_excerpts as feed_excerpts
 import newsletter.workflow.publication as publication
 import newsletter.workflow.repository as newsletter_workflow_repository
 import newsletter.workflow.state as state
@@ -218,7 +219,8 @@ class StoryReplay:
                 or value["signal"] is not None
                 or value["assessments"]
                 or value.get("withdrawals")
-                or value["packets"]
+                # Frozen feed excerpts are code-built inputs, not writer work.
+                or not all(map(feed_excerpts.is_packet, value["packets"]))
                 or value["reason"] != "editor_unavailable"
                 or value["issues"]
                 != [

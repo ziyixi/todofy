@@ -93,12 +93,14 @@ def test_per_source_and_headline_counts_are_additive():
     current = sources.MetadataResult([lead()], ["nature:ok"], {})
     assert dataclasses.asdict(current)["sources"] == []
     assert dataclasses.asdict(current)["headlines"] == []
+    assert dataclasses.asdict(current)["excerpts"] == []
     assert list(dataclasses.asdict(current)) == [
         "candidates",
         "diagnostics",
         "notes",
         "sources",
         "headlines",
+        "excerpts",
     ]
 
 

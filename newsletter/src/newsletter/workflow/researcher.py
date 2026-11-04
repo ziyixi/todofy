@@ -4,9 +4,11 @@ Registry (``researcher.yaml``, frozen with the run's content configuration)
 → per-host serial fetch → parse → filter → merge by identity keys (headline
 feeds: group by event) → rank → route per discovery direction. Every lead is a
 metadata-scope Candidate with a code-written source basis; feed text survives
-only as a short untrusted excerpt in ``notes``, never in a Candidate, the
-candidate pool or Notion. There is no model call, no retry and no state
-between runs.
+only as a short untrusted excerpt in ``notes``, never in a Candidate or the
+candidate pool. The one exception is a consensus headline group's reports,
+frozen with their sha256 pins as ``excerpts`` (see ``feed_excerpts``): a story
+pointing at the group may cite them as abstract-scope evidence. There is no
+model call, no retry and no state between runs.
 
 Fetch policy: only registry URLs, HTTPS with TLS verification, no redirects,
 no proxies or credentials, every resolved address globally routable and the
@@ -47,6 +49,7 @@ import newsletter.contracts as contracts
 import newsletter.errors as errors
 import newsletter.types as types
 import newsletter.workflow.content as content
+import newsletter.workflow.feed_excerpts as feed_excerpts
 import newsletter.workflow.sources as sources
 
 _LOGGER = logging.getLogger(__name__)
@@ -204,11 +207,13 @@ class _Lead:
     names: list[str]
     excerpt: str
     percentile: int | None
-    # Set on a headline group: its other outlets' URLs, newest time and
-    # whether it echoes a better-ranked consensus group.
+    # Set on a headline group: its other outlets' URLs, newest time, whether
+    # it echoes a better-ranked consensus group and one frozen excerpt per
+    # outlet.
     alternates: list[str] | None = None
     moment: float = 0.0
     echo: bool = False
+    excerpts: list[types.Payload] | None = None
 
     def rank(self) -> tuple[int, int, int, float, int, int]:
         day = datetime.date.fromisoformat(self.candidate["published_at"])
@@ -1110,15 +1115,24 @@ class _Headline:
     ``words`` stem the title and first description sentence, so a word's
     forms (elected, elections) and some demonyms (Ukraine, Ukrainian; not
     Iran, Iranian) count once. ``names`` stem the title's capitalised words.
+    ``excerpt`` freezes the headline and its description, photo credits
+    removed, in case the lead's group reaches a consensus.
     """
 
     lead: _Lead
     keys: set[str]
     words: frozenset[str]
     names: frozenset[str]
+    excerpt: types.Payload
 
     @classmethod
-    def of(cls, lead: _Lead, keys: set[str], entry: Entry) -> _Headline:
+    def of(
+        cls,
+        lead: _Lead,
+        keys: set[str],
+        entry: Entry,
+        moment: datetime.datetime,
+    ) -> _Headline:
         text = _CREDIT.sub(" ", entry.text)
         first = _SENTENCE_END.split(text, maxsplit=1)[0][:300]
         words = _WORD.findall((entry.title + " " + first).casefold())
@@ -1129,6 +1143,13 @@ class _Headline:
             frozenset(stem for word in words if (stem := _stem(word))),
             frozenset(
                 stem for name in names if (stem := _stem(name.casefold()))
+            ),
+            feed_excerpts.excerpt(
+                lead.source.name,
+                lead.candidate["url"],
+                lead.candidate["title"],
+                moment,
+                " ".join(text.split()) if entry.excerpt else "",
             ),
         )
 
@@ -1147,6 +1168,8 @@ class _Group:
         if item.lead.source.name in lead.names:
             return
         lead.names.append(item.lead.source.name)
+        if lead.excerpts is not None:
+            lead.excerpts.append(item.excerpt)
         url = item.lead.candidate["url"]
         if (
             lead.alternates is not None
@@ -1214,6 +1237,7 @@ def _cluster(
 
     for item in sorted(items, key=newest):
         if (group := match(item)) is None:
+            item.lead.excerpts = [item.excerpt]
             groups.append(_Group(item, set(item.keys), [item]))
         else:
             group.join(item)
@@ -1331,7 +1355,7 @@ def _leads(
             if headline and entry.moment:
                 lead.alternates, lead.moment = [], entry.moment.timestamp()
                 headlines.setdefault(source.direction, []).append(
-                    _Headline.of(lead, keys, entry)
+                    _Headline.of(lead, keys, entry, entry.moment)
                 )
                 continue
             _merge(lead, keys, leads, index)
@@ -1536,9 +1560,33 @@ def assemble(
     if trimmed:
         diagnostics.append(f"artifact:trimmed:{trimmed}")
     # Trimming pops from the end, so the kept leads are a prefix of routed.
-    counts = _source_counts(
-        registry, outcomes, accepted, routed[: len(candidates)]
-    )
+    kept = routed[: len(candidates)]
+    counts = _source_counts(registry, outcomes, accepted, kept)
+    excerpts = _excerpts(kept, diagnostics)
     return sources.MetadataResult(
-        candidates, diagnostics, notes, counts, headlines
+        candidates, diagnostics, notes, counts, headlines, excerpts
     )
+
+
+def _excerpts(
+    kept: Sequence[_Lead], diagnostics: list[str]
+) -> list[types.Payload]:
+    """Freeze the excerpts of the kept groups enough outlets carry.
+
+    Groups keep their routed order within one byte budget, which sits outside
+    the leads' budget like the per-source counts.
+    """
+    frozen, size, skipped = [], 0, 0
+    for lead in kept:
+        if lead.excerpts is None or len(lead.names) < content.CONSENSUS_OUTLETS:
+            continue
+        group = {"lead": lead.candidate["id"], "items": lead.excerpts}
+        cost = len(contracts.canonical_json(group).encode())
+        if size + cost > feed_excerpts.MAX_BYTES:
+            skipped += 1
+            continue
+        frozen.append(group)
+        size += cost
+    if skipped:
+        diagnostics.append(f"excerpts:trimmed:{skipped}")
+    return frozen

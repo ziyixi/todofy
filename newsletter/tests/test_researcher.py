@@ -17,6 +17,7 @@ import pytest
 
 import newsletter.contracts as contracts
 import newsletter.workflow.content as content
+import newsletter.workflow.feed_excerpts as feed_excerpts
 import newsletter.workflow.researcher as researcher
 import newsletter.workflow.sources as sources
 import tests.support.researcher as fake
@@ -1157,6 +1158,50 @@ def test_headline_groups_rank_a_story_many_outlets_carry_first():
     assert sum(item["seeds"] for item in result.sources) == 20
     for candidate in result.candidates:
         assert content.seed_view(candidate) == candidate
+
+
+def test_consensus_groups_freeze_one_pinned_excerpt_per_outlet(monkeypatch):
+    registry = headline_registry()
+    page = fake.front_page()
+    title, text = page["The Guardian"][0]
+    page["The Guardian"][0] = (title, text + " Photograph: Synthetic Agency/AP")
+    outcomes = front_page_outcomes(registry, page)
+    result = researcher.assemble(registry, outcomes, DAY, now=fake.NOW)
+    outlets = {
+        c["id"]: result.notes[c["id"]]["signals"]["independent_sources"]
+        for c in result.candidates
+    }
+    # Only the groups three or more outlets carry, in routed order.
+    assert [group["lead"] for group in result.excerpts] == [
+        identifier for identifier, count in outlets.items() if count >= 3
+    ]
+    assert [len(group["items"]) for group in result.excerpts] == [5, 3, 3, 3]
+    election = result.excerpts[0]["items"]
+    assert [(item["outlet"], item["url"]) for item in election] == [
+        (name, f"https://outlet{n}.example.org/0")
+        for n, name in enumerate(fake.OUTLETS)
+    ]
+    # The headline, then its description without the photo credit.
+    assert election[2] == {
+        "outlet": "The Guardian",
+        "url": "https://outlet2.example.org/0",
+        "title": title,
+        "published_at": "2026-10-28T13:50:00Z",
+        "text": f"{title}\n{text}",
+        "sha256": feed_excerpts.digest(f"{title}\n{text}"),
+    }
+    assert all(
+        item["sha256"] == feed_excerpts.digest(item["text"])
+        for group in result.excerpts
+        for item in group["items"]
+    )
+    # The budget drops whole lower-ranked groups and says so.
+    first = len(contracts.canonical_json(result.excerpts[0]).encode())
+    monkeypatch.setattr(feed_excerpts, "MAX_BYTES", first)
+    trimmed = researcher.assemble(registry, outcomes, DAY, now=fake.NOW)
+    assert trimmed.excerpts == result.excerpts[:1]
+    assert trimmed.candidates == result.candidates
+    assert "excerpts:trimmed:3" in trimmed.diagnostics
 
 
 def test_headline_window_history_and_times():

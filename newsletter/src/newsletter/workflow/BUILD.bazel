@@ -65,6 +65,18 @@ py_library(
 )
 
 py_library(
+    name = "feed_excerpts",
+    srcs = ["feed_excerpts.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        ":sources",
+        "//newsletter/src/newsletter:contracts",
+        "//newsletter/src/newsletter:types",
+    ],
+)
+
+py_library(
     name = "nodes",
     srcs = ["nodes.py"],
     imports = ["../.."],
@@ -72,6 +84,7 @@ py_library(
         ":content",
         ":definition",
         ":engine",
+        ":feed_excerpts",
         ":package",
         ":researcher",
         ":sources",
@@ -134,6 +147,7 @@ py_library(
     imports = ["../.."],
     deps = [
         ":components",
+        ":feed_excerpts",
         ":package",
         "//newsletter/src/newsletter:contracts",
         "//newsletter/src/newsletter:drain",
@@ -162,6 +176,7 @@ py_library(
     imports = ["../.."],
     deps = [
         ":content",
+        ":feed_excerpts",
         ":package",
         ":sources",
         "//newsletter/src/newsletter:contracts",
@@ -178,6 +193,7 @@ py_library(
     imports = ["../.."],
     deps = [
         ":components",
+        ":feed_excerpts",
         ":package",
         ":types",
         "//newsletter/src/newsletter:contracts",
@@ -229,6 +245,7 @@ py_library(
     deps = [
         ":content",
         ":engine",
+        ":feed_excerpts",
         ":nodes",
         ":package",
         ":publication",
@@ -257,6 +274,7 @@ py_library(
         ":content",
         ":definition",
         ":engine",
+        ":feed_excerpts",
         ":package",
         ":publication",
         ":repository",
@@ -303,6 +321,7 @@ py_library(
         ":content",
         ":definition",
         ":engine",
+        ":feed_excerpts",
         ":nodes",
         ":package",
         ":pipeline",

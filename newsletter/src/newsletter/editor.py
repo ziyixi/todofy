@@ -272,38 +272,50 @@ def _unopened_sources(text: str, opened: set[str]) -> list[str]:
 
 
 def _unobserved_approval_actions(
-    text: str, opened: set[str], searched: bool
+    text: str,
+    opened: set[str],
+    searched: bool,
+    sources: ApprovalSources | None = None,
 ) -> list[str]:
     """A claimed pass needs both actions; an honest HOLD needs neither.
 
     Only the story review claims approval: an approved component assessment
     or a prior-withdrawal verdict. Writer, discovery and selection outputs
     carry no approval. This selects an existing correction opportunity; it
-    does not replace StoryEditor's fail-closed validation.
+    does not replace StoryEditor's fail-closed validation. A component whose
+    code-owned sources list no URL (a signal resting on pinned feed excerpts)
+    still needs the search, but no page to open.
     """
     value = model_io.load_json(text)
     if not isinstance(value, dict):
         raise errors.EditorError("invalid_output")
-    approved = False
+    approved: set[str] = set()
     assessments = value.get("assessments")
     if isinstance(assessments, list):
-        approved = any(
-            isinstance(item, dict)
+        approved = {
+            item["component"]
+            for item in assessments
+            if isinstance(item, dict)
             and item.get("component") in ("body", "reading", "chart", "signal")
             and item.get("status") == "approved"
-            for item in assessments
-        )
+        }
     withdrawal = value.get("prior_withdrawal")
-    approved |= isinstance(withdrawal, dict) and bool(
+    withdraws = isinstance(withdrawal, dict) and bool(
         withdrawal.get("target_body_hash")
     )
-    if not approved:
+    if not approved and not withdraws:
         return []
+    needs_open = withdraws or any(
+        sources is None
+        or name not in sources.components
+        or bool(sources.components[name])
+        for name in approved
+    )
     return [
         action
         for action, observed in (
             ("search", searched),
-            ("openPage", bool(opened)),
+            ("openPage", bool(opened) or not needs_open),
         )
         if not observed
     ]
@@ -505,7 +517,7 @@ class ModelEditor:
                         )
                     )
                     missing_actions = _unobserved_approval_actions(
-                        text, opened, searched
+                        text, opened, searched, approval_sources
                     )
                     if attempt == 0 and (missing or missing_actions):
                         turn_prompt = _provenance_correction(

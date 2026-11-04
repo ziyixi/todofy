@@ -2,6 +2,7 @@
 
 import asyncio
 import copy
+import datetime
 import json
 import pathlib
 import re
@@ -14,8 +15,10 @@ import newsletter.editor as newsletter_editor
 import newsletter.errors as errors
 import newsletter.usage as newsletter_usage
 import newsletter.workflow.components as components
+import newsletter.workflow.feed_excerpts as feed_excerpts
 import newsletter.workflow.publication as publication
 import newsletter.workflow.story_editor as newsletter_workflow_story_editor
+import tests.support.publication as publication_support
 import tests.support.story_editor as story_editor
 
 
@@ -1753,3 +1756,336 @@ async def test_explainer_guidance_has_no_formula_or_statistic_gate(rig, kind):
     assert len(rig.calls) == 2
     assert "writing_guidance" not in rig.calls[1]["prompt"]
     publication.validate_result(result)
+
+
+# Frozen headline excerpts: code pins each consensus group's feed excerpts
+# by sha256 at fetch time. A brief may confirm the event in one paragraph
+# citing two outlets' excerpts; the body, a lone outlet, an edited excerpt or
+# a writer's own packet keeps the must-open rule, and publication checks the
+# same binding again.
+
+NOW = datetime.datetime(2026, 9, 6, 6, 0, tzinfo=datetime.UTC)
+# Synthetic outlets reporting one fictional election.
+REPORTS = (
+    (
+        "Synthetic Wire",
+        "https://wire.example.org/freedonia-vote",
+        "Liberty Party wins majority in Freedonia election",
+        "Voters handed the Liberty Party a parliamentary majority.",
+    ),
+    (
+        "Synthetic Daily",
+        "https://daily.example.org/world/freedonia",
+        "Freedonia's ruling coalition ousted",
+        "",
+    ),
+    (
+        "Synthetic Radio",
+        "https://radio.example.org/2026/09/06/freedonia",
+        "Liberty Party leader claims victory",
+        "Official results give the Liberty Party a majority of seats.",
+    ),
+)
+
+
+def frozen_group(reports=REPORTS):
+    return {
+        "lead": "candidate-vote",
+        "items": [
+            feed_excerpts.excerpt(
+                outlet,
+                url,
+                title,
+                NOW - datetime.timedelta(minutes=10 * number),
+                text,
+            )
+            for number, (outlet, url, title, text) in enumerate(reports)
+        ],
+    }
+
+
+def cited(text, *numbers, packet_id):
+    value = story_editor.story(text)
+    value["paragraphs"][0]["citations"] = [
+        f"{packet_id}/excerpt-{number}" for number in numbers
+    ]
+    return value
+
+
+@pytest.fixture
+def excerpts(rig):
+    """Give the rig the pins and packets the story node would build."""
+    groups = [frozen_group()]
+    rig.editor = newsletter_workflow_story_editor.StoryEditor(
+        rig.editor.editor, pins=feed_excerpts.pins(groups)
+    )
+    return feed_excerpts.packets(groups, is_fixture=True)
+
+
+def signal_receipt(result):
+    return next(a for a in result["assessments"] if a["component"] == "signal")
+
+
+async def confirmed(rig, packets):
+    signal = cited(
+        "据Synthetic Wire、Synthetic Radio报道，虚构的自由党赢得议会多数。",
+        1,
+        3,
+        packet_id=packets[0]["id"],
+    )
+    rig.replies = [
+        story_editor.reply(story_editor.writer(None, signal), opened=set()),
+        story_editor.reply(
+            story_editor.review(body="not_present", signal="approved"),
+            opened=set(),
+        ),
+    ]
+    return signal, await rig.run(packets=packets)
+
+
+def test_excerpts_are_pinned_and_the_packet_is_the_same_every_time():
+    group = frozen_group()
+    wire, daily, _ = group["items"]
+    assert wire == {
+        "outlet": "Synthetic Wire",
+        "url": REPORTS[0][1],
+        "title": REPORTS[0][2],
+        "published_at": "2026-09-06T06:00:00Z",
+        "text": REPORTS[0][2] + "\n" + REPORTS[0][3],
+        "sha256": feed_excerpts.digest(REPORTS[0][2] + "\n" + REPORTS[0][3]),
+    }
+    # A headline with no description is still the outlet's own words.
+    assert daily["text"] == REPORTS[1][2]
+    (packet,) = feed_excerpts.packets([group], is_fixture=True)
+    assert packet == feed_excerpts.packet(copy.deepcopy(group), is_fixture=True)
+    assert packet["id"].startswith("feed-") and len(packet["id"]) == 37
+    assert packet["created_at"] == wire["published_at"]
+    assert feed_excerpts.is_packet(packet)
+    contracts.validate_packet_body(packet["content"])
+    assert [
+        (source["title"], source["access_scope"])
+        for source in packet["content"]["sources"]
+    ] == [(f"{outlet}：{title}", "abstract") for outlet, _, title, _ in REPORTS]
+    pins = feed_excerpts.pins([group])
+    assert feed_excerpts.pinned([packet], pins) == {
+        f"{packet['id']}/excerpt-{n}": outlet
+        for n, (outlet, *_) in enumerate(REPORTS, 1)
+    }
+    # The same text in a writer's own packet is never a frozen excerpt.
+    writer = {**packet, "workflow_id": "story-research"}
+    assert feed_excerpts.pinned([writer], pins) == {}
+    edited = copy.deepcopy(packet)
+    edited["content"]["sources"][0]["excerpt"] += " Edited."
+    assert list(feed_excerpts.pinned([edited], pins)) == [
+        f"{packet['id']}/excerpt-2",
+        f"{packet['id']}/excerpt-3",
+    ]
+
+
+def test_only_intact_groups_a_url_points_at_travel_on():
+    group, other = frozen_group(), frozen_group(REPORTS[1:])
+    other["lead"] = "candidate-other"
+    for item in other["items"]:
+        item["url"] = item["url"].replace(".org/", ".org/other/")
+    tampered = frozen_group()
+    tampered["items"][0]["text"] += " Edited."
+    tampered["items"][1]["sha256"] = "0" * 64
+    found = feed_excerpts.covered(
+        [group, other, tampered, "not a group", {"items": None}],
+        ["https://daily.example.org/world/freedonia?utm_source=x"],
+    )
+    # The tampered copy keeps one outlet, too few to confirm anything.
+    assert found == [group]
+    assert feed_excerpts.covered([group], ["https://example.org/x"]) == []
+    assert feed_excerpts.covered(None, [REPORTS[0][1]]) == []
+
+
+async def test_two_outlets_pinned_excerpts_confirm_a_signal_without_open(
+    rig, excerpts
+):
+    signal, result = await confirmed(rig, excerpts)
+    assert result["signal"] == signal and result["content"] is None
+    assert result["reason"] == "confirmed_signal" and len(rig.calls) == 2
+    receipt = signal_receipt(result)
+    assert receipt["status"] == "approved" and receipt["opened"] is False
+    assert receipt["excerpts"] == [
+        {
+            "url": url,
+            "sha256": feed_excerpts.digest(f"{title}\n{text}"),
+            "outlet": outlet,
+        }
+        for outlet, url, title, text in sorted(
+            (REPORTS[0], REPORTS[2]), key=lambda report: report[1]
+        )
+    ]
+    # Code never asks the review to open what it reads from the frozen text.
+    assert rig.calls[1]["approval_sources"].components == {"signal": []}
+    for call in rig.calls:
+        assert "feed_excerpt_rules" in call["prompt"]
+    assert "据X、Y报道" in rig.calls[0]["prompt"]["feed_excerpt_rules"]
+    assert "仍须本轮search" in rig.calls[1]["prompt"]["feed_excerpt_rules"]
+    publication.validate_result(result)
+    built = publication.assemble(
+        "run-1",
+        "2026-09-06",
+        [publication_support.task(1, id="story-a")],
+        [result],
+    )
+    assert built["coverage"]["stories"][0]["disposition"] == "watch"
+    assert built["packets"] == excerpts
+
+
+async def test_one_outlets_excerpt_cannot_confirm_a_signal(rig, excerpts):
+    signal = cited(
+        "据Synthetic Wire报道，虚构的自由党赢得议会多数。",
+        1,
+        packet_id=excerpts[0]["id"],
+    )
+    rig.replies = [
+        story_editor.reply(story_editor.writer(None, signal), opened=set()),
+        story_editor.reply(
+            story_editor.review(body="not_present", signal="approved"),
+            opened=set(),
+        ),
+    ]
+    result = await rig.run(packets=excerpts)
+    assert result["signal"] is None and result["reason"] == "withheld"
+    receipt = signal_receipt(result)
+    assert receipt["status"] == "blocked"
+    assert any(
+        "single_outlet_excerpt_signal" in finding
+        for finding in receipt["findings"]
+    )
+    publication.validate_result(result)
+
+
+async def test_a_body_citing_excerpts_still_needs_the_open(rig, excerpts):
+    packet_id = excerpts[0]["id"]
+    body = cited("虚构的自由党赢得议会多数。", 1, 3, packet_id=packet_id)
+    signal = cited(
+        "据两家虚构媒体报道，选举已有结果。", 1, 3, packet_id=packet_id
+    )
+    rig.replies = [
+        story_editor.reply(story_editor.writer(body, signal), opened=set()),
+        story_editor.reply(
+            story_editor.review(signal="approved"), opened=set()
+        ),
+        # The one repair gives up without a body: nothing left to review.
+        story_editor.reply(story_editor.writer(None), opened=set()),
+    ]
+    result = await rig.run(packets=excerpts)
+    assert result["content"] is None and result["signal"] == signal
+    assert len(rig.calls) == 3
+    receipt = next(a for a in result["assessments"] if a["component"] == "body")
+    assert receipt["status"] == "blocked" and "excerpts" not in receipt
+    assert any(
+        f"missing_review_open_url: {REPORTS[0][1]}" == finding
+        for finding in receipt["findings"]
+    )
+    assert set(rig.calls[1]["approval_sources"].components["body"]) == {
+        REPORTS[0][1],
+        REPORTS[2][1],
+    }
+    publication.validate_result(result)
+
+
+async def test_an_edited_excerpt_is_no_longer_read_from_its_text(rig, excerpts):
+    packet = excerpts[0]
+    packet["content"]["sources"][0]["excerpt"] += " Edited after freezing."
+    packet["content_hash"] = contracts.content_hash(packet["content"])
+    signal, result = await confirmed(rig, excerpts)
+    receipt = signal_receipt(result)
+    assert result["signal"] is None and receipt["status"] == "blocked"
+    assert f"missing_review_open_url: {REPORTS[0][1]}" in receipt["findings"]
+    assert rig.calls[1]["approval_sources"].components == {
+        "signal": [REPORTS[0][1]]
+    }
+    assert receipt["excerpts"] == [
+        {
+            "url": REPORTS[2][1],
+            "sha256": feed_excerpts.digest(f"{REPORTS[2][2]}\n{REPORTS[2][3]}"),
+            "outlet": "Synthetic Radio",
+        }
+    ]
+
+
+async def test_a_review_without_search_cannot_confirm_from_excerpts(
+    rig, excerpts
+):
+    signal = cited(
+        "据Synthetic Wire、Synthetic Radio报道，虚构的自由党赢得议会多数。",
+        1,
+        3,
+        packet_id=excerpts[0]["id"],
+    )
+    rig.replies = [
+        story_editor.reply(story_editor.writer(None, signal), opened=set()),
+        story_editor.reply(
+            story_editor.review(body="not_present", signal="approved"),
+            opened=set(),
+            searched=False,
+        ),
+    ]
+    result = await rig.run(packets=excerpts)
+    assert result["signal"] is None
+    assert any(
+        "missing_review_search" in finding
+        for finding in signal_receipt(result)["findings"]
+    )
+
+
+async def test_stories_without_frozen_excerpts_keep_their_prompts(rig):
+    rig.replies = [
+        story_editor.reply(story_editor.writer(story_editor.story())),
+        story_editor.reply(story_editor.review()),
+    ]
+    result = await rig.run()
+    assert result["reason"] == "approved"
+    assert all("feed_excerpt_rules" not in call["prompt"] for call in rig.calls)
+    assert all("excerpts" not in a for a in result["assessments"])
+
+
+@pytest.mark.parametrize(
+    "forge",
+    [
+        "receipt_hash",
+        "edited_text",
+        "writer_packet",
+        "one_outlet",
+        "body_receipt",
+    ],
+)
+async def test_publication_checks_the_pinned_binding_again(
+    rig, excerpts, forge
+):
+    _, result = await confirmed(rig, excerpts)
+    publication.validate_result(result)
+    forged = copy.deepcopy(result)
+    receipt = signal_receipt(forged)
+    packet = forged["packets"][0]
+    if forge == "receipt_hash":
+        receipt["excerpts"][0]["sha256"] = "0" * 64
+    elif forge == "edited_text":
+        packet["content"]["sources"][0]["excerpt"] += " Edited."
+        packet["content_hash"] = contracts.content_hash(packet["content"])
+    elif forge == "writer_packet":
+        packet["workflow_id"] = "story-research"
+    elif forge == "one_outlet":
+        receipt["excerpts"] = receipt["excerpts"][:1]
+    else:
+        # A body bound to the same excerpts still needs its opens.
+        forged["content"] = copy.deepcopy(forged["signal"])
+        forged["assessments"].append(
+            {
+                **copy.deepcopy(receipt),
+                "component": "body",
+                "content_hash": contracts.content_hash(
+                    components.body_content(forged["content"])
+                ),
+            }
+        )
+    forged["provenance"] = {
+        "packets_hash": contracts.content_hash(forged["packets"])
+    }
+    with pytest.raises(publication.PublicationError):
+        publication.validate_result(forged)

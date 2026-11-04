@@ -17,6 +17,7 @@ import newsletter.editor as editor
 import newsletter.settings as newsletter_settings
 import newsletter.store as newsletter_store
 import newsletter.workflow.engine as newsletter_workflow_engine
+import newsletter.workflow.feed_excerpts as feed_excerpts
 import newsletter.workflow.nodes as nodes
 import newsletter.workflow.story_editor as story_editor
 import newsletter.workflow.story_replay as story_replay
@@ -40,7 +41,7 @@ def failed_usage(stage):
     return value
 
 
-async def blocked_parent(rig, *, fatal=None, record_usage=True):
+async def blocked_parent(rig, *, fatal=None, record_usage=True, packets=()):
     rig.tasks = [publication.task(1), publication.task(2)]
     candidates = [
         workflow_content.candidate(
@@ -80,7 +81,7 @@ async def blocked_parent(rig, *, fatal=None, record_usage=True):
                 "mode": "brief" if kind == "story_brief" else "deep",
                 "content": None,
                 "signal": None,
-                "packets": [],
+                "packets": list(packets),
                 "assessments": [],
                 "issues": [
                     {
@@ -93,7 +94,9 @@ async def blocked_parent(rig, *, fatal=None, record_usage=True):
                     }
                 ],
                 "reason": "editor_unavailable",
-                "provenance": {"packets_hash": contracts.content_hash([])},
+                "provenance": {
+                    "packets_hash": contracts.content_hash(list(packets))
+                },
             }
             rig.publications.save(
                 ctx.run_id,
@@ -331,6 +334,37 @@ async def test_changed_or_ineligible_source_never_creates_a_child(
         ]
         == 1
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("frozen", [True, False])
+async def test_only_frozen_excerpt_inputs_leave_a_failed_writer_restartable(
+    rig_factory, frozen
+):
+    rig = rig_factory()
+    group = {
+        "lead": "candidate-1",
+        "items": [
+            feed_excerpts.excerpt(
+                outlet,
+                f"https://{outlet.lower()}.example.org/vote",
+                "Synthetic election result",
+                datetime.datetime(2026, 9, 6, 6, 0, tzinfo=datetime.UTC),
+                "",
+            )
+            for outlet in ("Wire", "Daily")
+        ],
+    }
+    packet = feed_excerpts.packet(group, is_fixture=True)
+    if not frozen:
+        packet["workflow_id"] = "story-research"
+    await blocked_parent(rig, packets=[packet])
+    replay = story_replay.StoryReplay(rig.store)
+    if frozen:
+        assert replay.start(rig.run["id"], request())["state"] == "queued"
+    else:
+        with pytest.raises(newsletter_store.StoreError):
+            replay.start(rig.run["id"], request())
 
 
 @pytest.mark.asyncio

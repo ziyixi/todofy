@@ -291,6 +291,7 @@ py_library(
         ":types",
         ":usage",
         "//newsletter/src/newsletter/workflow:components",
+        "//newsletter/src/newsletter/workflow:feed_excerpts",
         "//newsletter/src/newsletter/workflow:package",
         "//newsletter/src/newsletter/workflow:prompt_examples",
         "//newsletter/src/newsletter/workflow:publication",
