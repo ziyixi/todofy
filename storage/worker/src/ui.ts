@@ -267,7 +267,7 @@ if(s.connected){fact('连接时间',when(s.connect_time));fact('最近成功',wh
 const r=s.last_provider_error?reason(s.last_provider_error):null;
 fact('最近错误',r?h('span',{},mark(r.tone,r.title),h('span',{class:'muted',text:' · '+when(s.last_provider_error_time)})):'无');
 const reauthorize=state.space?.state==='scope_missing'?h('div',{class:'notice calm'},h('p',{},h('strong',{text:'显示 Dropbox 空间需要重新授权'})),
-h('p',{text:'在 Dropbox App Console 打开这个应用的 Permissions，勾选 account_info.read 并提交；再在这里断开并重新连接。断开期间应用读写会失败，请选应用空闲的时候。文件和应用密钥不受影响。'})):null;
+h('p',{text:'Dropbox 默认为这个应用启用 account_info.read，只是当前连接授权时没有申请。在这里断开并重新连接即可显示空间。断开期间应用读写会失败，请选应用空闲的时候。文件和应用密钥不受影响。'})):null;
 const actions=h('div',{class:'actions'});
 if(s.connected){const ask=h('button',{type:'button',text:'断开连接',onclick:()=>{actions.replaceChildren(confirmBox('断开后，所有应用的读写都会立即失败，直到重新连接；Dropbox 中的文件保留。','确认断开',
 async()=>{await api('dropbox:disconnect',{method:'POST',body:'{}'});await load();status('已断开连接，文件保留。');},()=>{actions.replaceChildren(ask);ask.focus();}));}});actions.append(ask);}

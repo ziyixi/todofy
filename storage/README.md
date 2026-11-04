@@ -130,17 +130,19 @@ failures, the Dropbox space and the newest object scan in one call.
 
 The space tile reads `users/get_space_usage` when the overview is read, at most once in ten minutes; the answer is
 cached in the Durable Object and a failed read keeps showing the earlier one with its time. After a failed read the
-next waits a minute, so a Dropbox outage does not hold every overview for the read's five-second timeout. Dropbox
-reports only the whole account (a team account's team space), never the App folder. The meter turns amber at 85% and
-red at 95%, and from 90% the status asks for attention, since a full Dropbox refuses writes with 507.
+next waits a minute, so a Dropbox outage does not hold every overview for the read's five-second timeout, which
+covers the answer's body as well as its headers. Dropbox reports only the whole account (a team account's team space),
+never the App folder. The meter turns amber at 85% and red at 95%, and from 90% the status asks for attention, since a
+full Dropbox refuses writes with 507.
 
 A connection authorized without `account_info.read` gets 401 `missing_scope`. The tile then says the connection must
-be authorized again to show space; this is not a provider error and files keep working. Dropbox refuses an
-authorization that asks for a permission the app lacks, so to show the space:
+be authorized again to show space; this is not a provider error and files keep working. [Dropbox enables
+`account_info.read` on every user-linked app](https://dropbox.tech/developers/customizing-scopes-in-oauth-flow) (this
+app's Permissions in the Dropbox App Console show it), but a connection authorized without asking for it does not
+have it. So to show the space:
 
-1. In the Dropbox App Console, open this app's Permissions, tick `account_info.read` and submit.
-2. Release the Storage version that requests it. The installed connection keeps working throughout.
-3. In the console, disconnect and connect again while applications are idle: their requests fail in between. Keys
+1. Release the Storage version that asks for it. The installed connection keeps working throughout.
+2. In the console, disconnect and connect again while applications are idle: their requests fail in between. Keys
    and files are unchanged.
 
 ## Object scan
@@ -149,13 +151,13 @@ Dropbox has no folder size, so 扫描对象 starts `StartObjectScan`: a read-onl
 Durable Object's alarm. Each run lists at most 40 pages of about 1,000 entries, or one minute, and sets the next run a
 second later: with a token refresh, 41 of the 50 subrequests an invocation may make. Start it while applications are
 idle: it lists through the same Dropbox app they use and runs in the same Durable Object. A page is about 450 KiB of
-JSON, read up to 4 MiB because Dropbox's limit is approximate; a 40-page run measured about 50 ms of CPU locally, far
-inside a Durable Object invocation's 30 seconds. Each page's totals are written with its continuation, so an
-interrupted run repeats at most one page. A rate limit, an outage or a page that breaks off or cannot be read waits
-for its Retry-After, up to five minutes, or 30 seconds, at most three times in a row; any other refusal ends the scan
-with its reason, and a continuation Dropbox reset ends it with `CURSOR_INVALID`. Listing refusals are not recorded as
-provider errors. A scan stops after 1,000 pages, about a million objects. Nothing is written, moved or deleted, and
-nothing repeats a scan on a schedule.
+JSON, read in full within 30 seconds and up to 4 MiB because Dropbox's limit is approximate; a 40-page run measured
+about 50 ms of CPU locally, far inside a Durable Object invocation's 30 seconds. Each page's totals are written with
+its continuation, so an interrupted run repeats at most one page. A rate limit, an outage or a page that breaks off,
+stalls or cannot be read waits for its Retry-After, up to five minutes, or 30 seconds, at most three times in a row;
+any other refusal ends the scan with its reason, and a continuation Dropbox reset ends it with `CURSOR_INVALID`.
+Listing refusals are not recorded as provider errors. A scan stops after 1,000 pages, about a million objects. Nothing
+is written, moved or deleted, and nothing repeats a scan on a schedule.
 
 The overview carries the newest scan. Per namespace it counts the objects, their bytes and those whose current
 revision Dropbox wrote in the seven days before the scan started (`server_modified`), with the eight largest top-level
