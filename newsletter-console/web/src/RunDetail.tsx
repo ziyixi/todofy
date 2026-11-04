@@ -146,7 +146,7 @@ function FunnelRow({ row }: { row: DirectionFunnel }) {
       </td>
       <td data-label="丢弃" className="num">
         {shown(row.dropped_count)}
-        <span className="cell-sub">{(row.drops ?? []).map((drop) => `${dropReason(drop.reason)} ${String(drop.count ?? 0)}`).join(' · ')}</span>
+        <span className="cell-sub">{(row.drops ?? []).map((drop, index) => <span key={drop.reason} className="drop-item">{index ? ' · ' : ''}<span>{`${dropReason(drop.reason)} ${String(drop.count ?? 0)}`}</span></span>)}</span>
       </td>
       <td data-label="入选" className="num">{row.selected_count ?? 0}</td>
       <td data-label="刊出" className="num">{row.published_count ?? 0}</td>

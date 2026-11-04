@@ -239,7 +239,10 @@ def unsupported_numbers(
     """
     allowed: set[str] = set()
     for source in cited:
-        text = f"{source.get('excerpt', '')} {source.get('published_at', '')}"
+        # The report's date only: its time of day would allow small counts.
+        text = (
+            f"{source.get('excerpt', '')} {source.get('published_at', '')[:10]}"
+        )
         for variant in (text, _THOUSANDS.sub("", text)):
             allowed.update(run.lstrip("0") for run in _DIGITS.findall(variant))
     written = " ".join(

@@ -2100,6 +2100,26 @@ async def test_an_excerpt_only_signal_writes_only_the_excerpts_numbers(
         publication.validate_result(result)
 
 
+def test_an_excerpt_report_time_of_day_allows_no_numbers():
+    cited = [
+        {
+            "excerpt": "Synthetic vote count continues.",
+            "published_at": "2026-11-04T19:40:20Z",
+        },
+        {
+            "excerpt": "Synthetic results awaited.",
+            "published_at": "2026-11-04T07:05:33Z",
+        },
+    ]
+    signal = {
+        "title": "",
+        "paragraphs": [
+            {"text": "11月4日，据两家虚构媒体报道，至少19人当选，40人待定。"}
+        ],
+    }
+    assert feed_excerpts.unsupported_numbers(signal, cited) == ["19", "40"]
+
+
 async def test_an_edited_excerpt_is_no_longer_read_from_its_text(rig, excerpts):
     packet = excerpts[0]
     packet["content"]["sources"][0]["excerpt"] += " Edited after freezing."

@@ -1070,6 +1070,10 @@ tbody tr:last-child th {
 .funnel-table td.num .cell-sub {
   white-space: normal;
 }
+/* A reason keeps its count on its line; the list breaks between reasons. */
+.funnel-table .drop-item > span {
+  white-space: nowrap;
+}
 .funnel-note {
   margin-top: 10px;
 }
