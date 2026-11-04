@@ -1,20 +1,25 @@
-"""Test the researcher inside the feeds, discovery and pool nodes offline.
+"""Test the researcher inside the feeds, discovery, pool and brief nodes.
 
 A synthetic engine stands in for the model; feeds come from MockTransport.
 """
 
+import copy
 import dataclasses
+import datetime
 import importlib.resources as resources
 import pathlib
 
 import pytest
 
+import newsletter.contracts as contracts
 import newsletter.store as newsletter_store
 import newsletter.workflow.content as content
 import newsletter.workflow.definition as newsletter_workflow_definition
 import newsletter.workflow.engine as engine
+import newsletter.workflow.feed_excerpts as feed_excerpts
 import newsletter.workflow.researcher as researcher
 import newsletter.workflow.sources as sources
+import newsletter.workflow.story_editor as story_editor
 import newsletter.workflow.story_nodes as story_nodes
 import tests.support.researcher as fake
 import tests.support.workflow_content as workflow_content
@@ -87,6 +92,7 @@ async def test_without_registry_no_feed_is_fetched(nodes, tmp_path):
             "notes": {},
             "sources": [],
             "headlines": [],
+            "excerpts": [],
         }
 
 
@@ -573,3 +579,156 @@ async def test_headline_notes_reach_discovery_with_their_alternates(
     notes = prompt["metadata_seed_notes_untrusted"]
     assert notes == {good[0]["id"]: good[1]}
     assert content._HEADLINE_NOTES in rules
+
+
+def front_page_feeds():
+    """The researcher's artifact for the synthetic front page."""
+    registry = researcher.validate_registry(
+        fake.registry(
+            *[
+                fake.source(
+                    id=f"outlet-{n}",
+                    name=name,
+                    direction="04-economy",
+                    url=f"https://outlet{n}.example.org/rss",
+                    max_seeds=4,
+                    max_age_days=2,
+                    role="headline",
+                )
+                for n, name in enumerate(fake.OUTLETS)
+            ]
+        ),
+        fake.DIRECTIONS,
+    )
+    page = fake.front_page()
+    outcomes = {}
+    for source in registry:
+        entries = []
+        for number, (title, text) in enumerate(page[source.name]):
+            moment = fake.NOW - datetime.timedelta(
+                minutes=30 * number + 5 * source.index
+            )
+            entries.append(
+                researcher.Entry(
+                    title=title,
+                    url=f"https://outlet{source.index}.example.org/{number}",
+                    doi="",
+                    version="",
+                    published=moment.date().isoformat(),
+                    text=text,
+                    excerpt=True,
+                    moment=moment,
+                )
+            )
+        outcomes[source.index] = researcher._Outcome("ok", entries)
+    return dataclasses.asdict(
+        researcher.assemble(registry, outcomes, DAY, now=fake.NOW)
+    )
+
+
+def brief_context(task, pool_value):
+    return engine.NodeContext(
+        run_id="researcher",
+        node_id="briefs",
+        item_id=task["id"],
+        params={"timeout_seconds": 300},
+        inputs={
+            "history": {"candidates": [], "editions": [], "watchlist": []},
+            "candidates": pool_value,
+        },
+        run_inputs={
+            "issue_date": DAY,
+            "policy": {"editorial.md": "", "reader-profile.md": ""},
+        },
+        item=task,
+    )
+
+
+async def test_a_consensus_brief_starts_from_its_frozen_excerpts(
+    nodes, tmp_path, monkeypatch
+):
+    feeds = front_page_feeds()
+    pooled = await pool(nodes, tmp_path, feeds, content_config=config())
+    # Every consensus group has a lead in the pool, so all travel on.
+    assert pooled["excerpts"] == feeds["excerpts"]
+    election = feeds["excerpts"][0]
+    lead = next(c for c in pooled["candidates"] if c["id"] == election["lead"])
+    seen = []
+
+    async def prepare(self, **values):
+        seen.append((self.pins, values))
+        packets = values["packets"]
+        return {
+            "story_id": values["task"]["id"],
+            "mode": values["mode"],
+            "content": None,
+            "signal": None,
+            "packets": copy.deepcopy(packets),
+            "assessments": [],
+            "issues": [],
+            "reason": "withheld",
+            "provenance": {"packets_hash": contracts.content_hash(packets)},
+        }
+
+    monkeypatch.setattr(story_editor.StoryEditor, "prepare", prepare)
+    task = {
+        "id": "story-vote",
+        "candidate_ids": [lead["id"]],
+        "question": "Synthetic election result",
+        "why": "Five synthetic outlets lead with it.",
+        "priority": 1,
+        "evidence_context": "Confirm the result.",
+        "source_urls": [lead["url"]],
+    }
+    for attempt in range(2):
+        await nodes.execute(
+            "story_brief",
+            brief_context(task, pooled),
+            tmp_path / f"brief-{attempt}",
+        )
+    (pins, values), (_, again) = seen
+    (packet,) = values["packets"]
+    assert feed_excerpts.is_packet(packet)
+    urls = [f"https://outlet{n}.example.org/0" for n in range(5)]
+    assert [s["url"] for s in packet["content"]["sources"]] == urls
+    assert {s["access_scope"] for s in packet["content"]["sources"]} == {
+        "abstract"
+    }
+    assert {url: pin[1] for url, pin in pins.items()} == dict(
+        zip(urls, fake.OUTLETS, strict=True)
+    )
+    assert len(feed_excerpts.pinned(values["packets"], pins)) == 5
+    # The same frozen excerpts always make the same stored packet.
+    assert again["packets"] == values["packets"]
+    stored = nodes.store.db.execute(
+        "SELECT COUNT(*) FROM packets WHERE id=?", (packet["id"],)
+    ).fetchone()[0]
+    assert stored == 1
+
+    # A task pointing at no consensus group starts from nothing.
+    local = next(
+        c
+        for c in pooled["candidates"]
+        if c["id"] not in {group["lead"] for group in feeds["excerpts"]}
+        and not set(c["evidence_urls"])
+    )
+    alone = {
+        **task,
+        "id": "story-local",
+        "candidate_ids": [local["id"]],
+        "source_urls": [local["url"]],
+    }
+    await nodes.execute(
+        "story_brief", brief_context(alone, pooled), tmp_path / "local"
+    )
+    assert seen[-1][0] == {} and seen[-1][1]["packets"] == []
+
+    # A pool that no longer holds a group's reports drops its excerpts.
+    others = [c for c in pooled["candidates"] if c["id"] != lead["id"]]
+    narrowed = feed_excerpts.covered(
+        feeds["excerpts"],
+        [url for c in others for url in (c["url"], *c["evidence_urls"])],
+    )
+    assert [group["lead"] for group in narrowed] == [
+        group["lead"] for group in feeds["excerpts"][1:]
+    ]

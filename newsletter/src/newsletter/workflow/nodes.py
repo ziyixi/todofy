@@ -21,6 +21,7 @@ import newsletter.usage as usage
 import newsletter.workflow.content as content
 import newsletter.workflow.definition as newsletter_workflow_definition
 import newsletter.workflow.engine as engine
+import newsletter.workflow.feed_excerpts as feed_excerpts
 import newsletter.workflow.researcher as researcher
 import newsletter.workflow.sources as sources
 import newsletter.workflow.state as newsletter_workflow_state
@@ -323,6 +324,15 @@ class EditorialNodes:
             for candidate in candidates
         ]
         self.state.remember(normalized, date)
+        # Frozen headline excerpts travel on only for the pool's events.
+        excerpts = feed_excerpts.covered(
+            [group for value in feeds for group in value.get("excerpts", [])],
+            [
+                url
+                for candidate in normalized
+                for url in (candidate["url"], *candidate["evidence_urls"])
+            ],
+        )
         return {
             "candidates": normalized,
             "coverage": self.coverage(ctx),
@@ -340,6 +350,7 @@ class EditorialNodes:
                 if "threads" in history
                 else {}
             ),
+            **({"excerpts": excerpts} if excerpts else {}),
         }
 
     async def _select(

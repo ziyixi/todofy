@@ -8,7 +8,7 @@ the frozen publication records an explicit disposition for every selected topic.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 import copy
 import datetime
 import json
@@ -21,6 +21,7 @@ import newsletter.contracts as contracts
 import newsletter.store as newsletter_store
 import newsletter.types as types
 import newsletter.workflow.components as components
+import newsletter.workflow.feed_excerpts as feed_excerpts
 
 MAX_STORIES = 99
 MAX_VERSIONS = 8
@@ -127,11 +128,46 @@ def _task(task: types.Payload) -> None:
         raise PublicationError() from None
 
 
+def _pinned(
+    assessment: types.Payload,
+    references: Iterable[str],
+    sources: types.Payload,
+    frozen: set[str],
+) -> dict[str, str]:
+    """Return citation → outlet for frozen excerpts the receipt pinned.
+
+    A citation counts only when it is in a code-built excerpt packet and the
+    receipt binds its URL to the sha256 of the exact excerpt published.
+    """
+    receipts = assessment.get("excerpts", [])
+    if not isinstance(receipts, list):
+        return {}
+    pins = {
+        (item.get("url"), item.get("sha256")): item.get("outlet")
+        for item in receipts
+        if isinstance(item, dict)
+    }
+    found = {}
+    for ref in references:
+        if ref not in frozen or sources[ref]["access_scope"] != "abstract":
+            continue
+        outlet = pins.get(
+            (
+                sources[ref]["url"],
+                feed_excerpts.digest(sources[ref].get("excerpt", "")),
+            )
+        )
+        if isinstance(outlet, str) and outlet:
+            found[ref] = outlet
+    return found
+
+
 def _receipt(
     component: str,
     value: types.Payload,
     result: types.Payload,
     sources: types.Payload,
+    frozen: set[str],
 ) -> None:
     references = components.citations(value)
     if not references or any(
@@ -139,7 +175,6 @@ def _receipt(
         for ref in references
     ):
         raise PublicationError()
-    urls = {parse.urldefrag(sources[ref]["url"])[0] for ref in references}
     digest = contracts.content_hash(value)
     for assessment in result["assessments"]:
         if not isinstance(assessment, dict):
@@ -150,7 +185,6 @@ def _receipt(
             or assessment.get("content_hash") != digest
             or assessment.get("round") not in {"initial", "repair"}
             or assessment.get("searched") is not True
-            or assessment.get("opened") is not True
         ):
             continue
         if any(
@@ -177,7 +211,23 @@ def _receipt(
             continue
         if any(not isinstance(url, str) for url in opened):
             continue
-        if urls <= {parse.urldefrag(url)[0] for url in opened}:
+        # Only a signal may rest on pinned excerpts, and then on two outlets
+        # of each cited group unless it also cites a source the review opened.
+        pinned = (
+            _pinned(assessment, references, sources, frozen)
+            if component == "signal"
+            else {}
+        )
+        urls = {
+            parse.urldefrag(sources[ref]["url"])[0]
+            for ref in references
+            if ref not in pinned
+        }
+        if (
+            urls
+            and assessment.get("opened") is True
+            and urls <= {parse.urldefrag(url)[0] for url in opened}
+        ) or (not urls and feed_excerpts.corroborated(pinned)):
             return
     raise PublicationError()
 
@@ -340,6 +390,7 @@ def validate_result(result: types.Payload) -> None:
                 raise PublicationError()
         sources: types.Payload = {}
         packet_ids: set[str] = set()
+        frozen: set[str] = set()
         for packet in packets:
             contracts.parse_message(packet, editorial_pb2.Packet)
             _identifier(packet["id"])
@@ -353,8 +404,10 @@ def validate_result(result: types.Payload) -> None:
                 raise PublicationError()
             for source in packet["content"]["sources"]:
                 sources[packet["id"] + "/" + source["id"]] = source
+                if feed_excerpts.is_packet(packet):
+                    frozen.add(packet["id"] + "/" + source["id"])
         _validate_withdrawals(result, sources)
-        _validate_components(result, sources)
+        _validate_components(result, sources, frozen)
     except PublicationError:
         raise
     except (
@@ -368,7 +421,9 @@ def validate_result(result: types.Payload) -> None:
         raise PublicationError() from None
 
 
-def _validate_components(result: types.Payload, sources: types.Payload) -> None:
+def _validate_components(
+    result: types.Payload, sources: types.Payload, frozen: set[str]
+) -> None:
     packets = result["packets"]
     for name in ("content", "signal"):
         content = result[name]
@@ -392,20 +447,21 @@ def _validate_components(result: types.Payload, sources: types.Payload) -> None:
         if name == "signal":
             if any(key in content for key in components.OPTIONAL_COMPONENTS):
                 raise PublicationError()
-            _receipt("signal", content, result, sources)
+            _receipt("signal", content, result, sources, frozen)
         else:
             _receipt(
                 "body",
                 components.body_content(content, copy_values=False),
                 result,
                 sources,
+                frozen,
             )
             for field, component in (
                 ("recommended_reading", "reading"),
                 ("chart", "chart"),
             ):
                 if field in content:
-                    _receipt(component, content[field], result, sources)
+                    _receipt(component, content[field], result, sources, frozen)
 
 
 def _merge_packets(chosen: Sequence[types.Payload]) -> list[types.Payload]:

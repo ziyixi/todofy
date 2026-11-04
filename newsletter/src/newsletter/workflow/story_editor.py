@@ -7,7 +7,7 @@ Approval receipts describe observed review actions, not a guarantee of truth.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 import copy
 import datetime
 import pathlib
@@ -27,6 +27,7 @@ import newsletter.model_schema as model_schema
 import newsletter.types as types
 import newsletter.usage as newsletter_usage
 import newsletter.workflow.components as components
+import newsletter.workflow.feed_excerpts as feed_excerpts
 import newsletter.workflow.prompt_examples as prompt_examples
 import newsletter.workflow.publication as publication
 import newsletter.workflow.review as newsletter_workflow_review
@@ -125,6 +126,29 @@ _CHART_GUIDANCE = (
     "值；已有材料不足以支持自足比较就chart=null。\n"
     "不造数据、对照组、尺度或因果含义，不为图增加模"
     "型轮次；图被弃用仍保留独立成立的正文。\n"
+)
+# Only for a story that starts from frozen headline excerpts.
+_EXCERPT_WRITER_RULES = (
+    "workflow_id为researcher-feed的packet是代码抓取头条订阅源时"
+    "冻结的摘要：每个source是一家媒体的标题和导语，sha256已固定，"
+    "不是你打开的原文；按标题聚类也可能把不同事件误并。\n"
+    "正文、阅读卡和图表引用这些来源时，仍须本轮独立open其URL。\n"
+)
+# Only a first brief writes a signal.
+_EXCERPT_SIGNAL_RULES = (
+    "原文打不开时，signal可以只依据这些摘要：一段，所引的每个packet"
+    "都至少引用其中两家不同媒体，并确认它们说的是同一件事，写明“据X、"
+    "Y报道”，只复述摘要明确写出的事件；数字只照抄摘要原文里的阿拉伯数"
+    "字（代码逐个核对），不加摘要没有的数字、引语、原因、后果或定性。\n"
+)
+_EXCERPT_REVIEW_RULES = (
+    "workflow_id为researcher-feed的来源是代码冻结的头条订阅源摘"
+    "要，代码已核对其sha256与抓取时一致。signal引用它们时按excerpt"
+    "核对，不必打开这些URL，但仍须本轮search，看有没有相反的更新。\n"
+    "signal只能陈述摘要明确写出的事件，并注明据哪些媒体报道；只靠"
+    "一家媒体的摘要、几条摘要说的不是同一件事，或写了摘要没有的数"
+    "字、引语、原因、后果或定性时，signal必须blocked。\n"
+    "body、reading、chart引用这些来源时，仍须独立open其URL。\n"
 )
 
 
@@ -501,10 +525,20 @@ def _supplements(
 
 
 class StoryEditor:
-    """Run draft, review and at most one repair with a second review."""
+    """Run draft, review and at most one repair with a second review.
 
-    def __init__(self, editor: newsletter_editor.ModelEditor) -> None:
+    ``pins`` maps a frozen feed excerpt's URL to the sha256 and outlet the
+    researcher froze; only a packet code built from those excerpts can match.
+    """
+
+    def __init__(
+        self,
+        editor: newsletter_editor.ModelEditor,
+        *,
+        pins: Mapping[str, tuple[str, str]] | None = None,
+    ) -> None:
         self.editor = editor
+        self.pins = dict(pins or {})
 
     async def prepare(
         self,
@@ -684,6 +718,9 @@ class StoryEditor:
         is_fixture: bool,
     ) -> tuple[types.Payload, str]:
         repair = "repair_untrusted" in context
+        excerpt_rules = _EXCERPT_WRITER_RULES
+        if context["mode"] == "brief" and not repair:
+            excerpt_rules += _EXCERPT_SIGNAL_RULES
         prompt = {
             **context,
             "task": (
@@ -714,6 +751,11 @@ class StoryEditor:
                 context["mode"], repair
             ),
             "packets_untrusted": packets,
+            **(
+                {"feed_excerpt_rules": excerpt_rules}
+                if feed_excerpts.pinned(packets, self.pins)
+                else {}
+            ),
             "available_citations": [
                 ref
                 for ref, source in _packet_sources(packets).items()
@@ -915,11 +957,15 @@ class StoryEditor:
         job = str(uuid.uuid4())
         prior = self._reviewable_prior(context, round_name)
         sources = _packet_sources(value["packets"])
+        # A signal's pinned excerpts are read from their frozen text, so the
+        # review is never asked to open those URLs.
+        excerpts = feed_excerpts.pinned(value["packets"], self.pins)
         approval_sources = newsletter_editor.ApprovalSources(
             components={
                 name: [
                     sources[ref]["url"]
                     for ref in components.component_citations(component, name)
+                    if name != "signal" or ref not in excerpts
                 ]
                 for name in components.COMPONENTS
                 if (
@@ -979,6 +1025,11 @@ class StoryEditor:
                             )
                         }
                         if value["content"] and value["content"].get("chart")
+                        else {}
+                    ),
+                    **(
+                        {"feed_excerpt_rules": _EXCERPT_REVIEW_RULES}
+                        if excerpts
                         else {}
                     ),
                     "packets_untrusted": value["packets"],
@@ -1051,7 +1102,13 @@ class StoryEditor:
         review = newsletter_workflow_review.parse_review(text)
         sources = _packet_sources(value["packets"])
         evidence = newsletter_workflow_review.ReviewEvidence(
-            sources, opened, searched, round_name, writer_job, job
+            sources,
+            opened,
+            searched,
+            round_name,
+            writer_job,
+            job,
+            feed_excerpts.pinned(value["packets"], self.pins),
         )
         output: newsletter_workflow_types.ReviewReceipt = {
             "assessments": [],

@@ -10,6 +10,7 @@ import datetime
 import json
 import pathlib
 import time
+import types
 import urllib.parse as parse
 
 import httpx
@@ -17,6 +18,7 @@ import pytest
 
 import newsletter.contracts as contracts
 import newsletter.workflow.content as content
+import newsletter.workflow.feed_excerpts as feed_excerpts
 import newsletter.workflow.researcher as researcher
 import newsletter.workflow.sources as sources
 import tests.support.researcher as fake
@@ -395,6 +397,37 @@ def test_feed_quirks_cdata_doctype_text_and_leading_whitespace():
     assert entry.text == fake.LONG
     (entry,) = researcher.parse_feed(b"\xef\xbb\xbf" + fake.rss(item))
     assert entry.title == "Synthetic feed item"
+
+
+def test_media_credits_never_stand_in_for_the_description():
+    raw = (
+        b'<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/">'
+        b"<channel><title>Synthetic</title><item>"
+        b"<title>Synthetic minister resigns</title>"
+        b"<link>https://outlet.example.org/world/resigns</link>"
+        b"<pubDate>Wed, 04 Nov 2026 10:00:00 GMT</pubDate>"
+        b'<media:content url="https://img.example.org/a.jpg">'
+        b"<media:credit>Photograph: Synthetic Agency/AP</media:credit>"
+        b"</media:content>"
+        b"<description>&lt;p&gt;The synthetic minister quit after a vote"
+        b"&lt;/p&gt;&lt;p&gt;Parliament met on Wednesday. It voted 201 to "
+        b"110.&lt;/p&gt;</description>"
+        b"</item></channel></rss>"
+    )
+    (entry,) = researcher.parse_feed(raw)
+    # The standfirst's paragraph ends its sentence even without a full stop.
+    assert entry.text == (
+        "The synthetic minister quit after a vote. Parliament met on "
+        "Wednesday. It voted 201 to 110."
+    )
+    # Atom's own <content> still counts.
+    atom = fake.atom(
+        fake.arxiv_entry()
+        .replace("<summary>", "<content>", 1)
+        .replace("</summary>", "</content>", 1)
+    )
+    (entry,) = researcher.parse_feed(atom)
+    assert entry.text == fake.LONG
 
 
 # Fetch policy.
@@ -1157,6 +1190,84 @@ def test_headline_groups_rank_a_story_many_outlets_carry_first():
     assert sum(item["seeds"] for item in result.sources) == 20
     for candidate in result.candidates:
         assert content.seed_view(candidate) == candidate
+
+
+def test_headline_groups_freeze_one_pinned_excerpt_per_outlet(monkeypatch):
+    registry = headline_registry()
+    page = fake.front_page()
+    title, text = page["The Guardian"][0]
+    page["The Guardian"][0] = (title, text + " Photograph: Synthetic Agency/AP")
+    outcomes = front_page_outcomes(registry, page)
+    result = researcher.assemble(registry, outcomes, DAY, now=fake.NOW)
+    outlets = {
+        c["id"]: result.notes[c["id"]]["signals"]["independent_sources"]
+        for c in result.candidates
+    }
+    # Only the groups two or more outlets carry, larger groups first.
+    assert [group["lead"] for group in result.excerpts] == sorted(
+        (identifier for identifier, count in outlets.items() if count >= 2),
+        key=lambda identifier: -outlets[identifier],
+    )
+    assert [len(group["items"]) for group in result.excerpts] == [
+        5,
+        3,
+        3,
+        3,
+        2,
+        2,
+    ]
+    election = result.excerpts[0]["items"]
+    assert [(item["outlet"], item["url"]) for item in election] == [
+        (name, f"https://outlet{n}.example.org/0")
+        for n, name in enumerate(fake.OUTLETS)
+    ]
+    # The headline, then its description without the photo credit.
+    assert election[2] == {
+        "outlet": "The Guardian",
+        "url": "https://outlet2.example.org/0",
+        "title": title,
+        "published_at": "2026-10-28T13:50:00Z",
+        "text": f"{title}\n{text}",
+        "sha256": feed_excerpts.digest(f"{title}\n{text}"),
+    }
+    assert all(
+        item["sha256"] == feed_excerpts.digest(item["text"])
+        for group in result.excerpts
+        for item in group["items"]
+    )
+    # The budget drops whole lower-ranked groups and says so.
+    first = len(contracts.canonical_json(result.excerpts[0]).encode())
+    monkeypatch.setattr(feed_excerpts, "MAX_BYTES", first)
+    trimmed = researcher.assemble(registry, outcomes, DAY, now=fake.NOW)
+    assert trimmed.excerpts == result.excerpts[:1]
+    assert trimmed.candidates == result.candidates
+    assert "excerpts:trimmed:5" in trimmed.diagnostics
+
+
+def test_excerpt_budget_goes_to_groups_more_outlets_carry_first():
+    def lead(name, outlets, *, headline=True):
+        return types.SimpleNamespace(
+            candidate={"id": name},
+            names=[f"Outlet {n}" for n in range(outlets)],
+            excerpts=[{"outlet": name}] if headline else None,
+        )
+
+    # Routed order interleaves directions; a lone report or a lead merged
+    # from ordinary feeds freezes nothing.
+    kept = [
+        lead("world-pair", 2),
+        lead("economy-three", 3),
+        lead("lone", 1),
+        lead("merged", 3, headline=False),
+        lead("world-four", 4),
+        lead("economy-pair", 2),
+    ]
+    assert [group["lead"] for group in researcher._excerpts(kept, [])] == [
+        "world-four",
+        "economy-three",
+        "world-pair",
+        "economy-pair",
+    ]
 
 
 def test_headline_window_history_and_times():

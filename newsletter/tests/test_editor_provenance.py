@@ -542,3 +542,73 @@ def test_review_source_snapshot_cannot_be_changed_by_later_caller_mutation():
     assert frozen.components == {"body": (SHORT_URL,)} and frozen.evidence == {
         "p/first": SHORT_URL
     }
+
+
+@pytest.mark.parametrize(
+    ("approved", "urls", "searched", "expected"),
+    [
+        (["signal"], {"signal": ()}, True, []),
+        (["signal"], {"signal": ()}, False, ["search"]),
+        (
+            ["signal", "body"],
+            {"signal": (), "body": ("https://e.org/",)},
+            True,
+            ["openPage"],
+        ),
+        (["signal"], {"signal": ("https://e.org/",)}, True, ["openPage"]),
+        (["chart"], {"signal": ()}, True, ["openPage"]),
+    ],
+)
+def test_only_an_excerpt_only_approval_skips_the_open_correction(
+    approved, urls, searched, expected
+):
+    value = {
+        "assessments": [
+            {"component": name, "status": "approved", "findings": []}
+            for name in approved
+        ],
+        "issues": [],
+    }
+    sources = newsletter_editor.ApprovalSources(components=urls)
+    assert (
+        newsletter_editor._unobserved_approval_actions(
+            json.dumps(value), set(), searched, sources
+        )
+        == expected
+    )
+    # Without code-owned sources every approval still needs an open.
+    assert "openPage" in newsletter_editor._unobserved_approval_actions(
+        json.dumps(value), set(), True
+    )
+
+
+def test_a_withdrawal_still_needs_its_open():
+    value = {
+        "assessments": [],
+        "prior_withdrawal": {"target_body_hash": "a" * 64},
+    }
+    sources = newsletter_editor.ApprovalSources(components={"signal": ()})
+    assert newsletter_editor._unobserved_approval_actions(
+        json.dumps(value), set(), True, sources
+    ) == ["openPage"]
+    with pytest.raises(newsletter_errors.EditorError):
+        newsletter_editor._unobserved_approval_actions("[]", set(), True)
+
+
+@pytest.mark.parametrize("signal_urls", [(), (CANONICAL_URL,)])
+async def test_the_open_correction_exempts_only_an_excerpt_only_signal(
+    tmp_path, fake_router, signal_urls
+):
+    value = component_review(body="approved", signal="approved")
+    fake_router.turns = [SourceTurn(value, []), SourceTurn(value, [SHORT_URL])]
+    sources = newsletter_editor.ApprovalSources(
+        {"body": [SHORT_URL], "signal": list(signal_urls)}
+    )
+    await editor.live_editor(tmp_path).execute(
+        "{}", {}, "fixture", tmp_path / "job", approval_sources=sources
+    )
+    correction = fake_router.prompts[1]
+    # The body's missing open still asks for the correction; only a signal
+    # resting on frozen excerpts is told it needs no open of its own.
+    assert SHORT_URL in correction["unverified_urls"]
+    assert ("excerpt_signal" in correction) is (not signal_urls)

@@ -12,6 +12,7 @@ from typing import Any, cast, Literal
 import newsletter.types as types
 import newsletter.workflow.content as content
 import newsletter.workflow.engine as engine
+import newsletter.workflow.feed_excerpts as feed_excerpts
 import newsletter.workflow.nodes as nodes
 import newsletter.workflow.publication as publication
 import newsletter.workflow.sources as sources
@@ -174,11 +175,25 @@ class StoryNodes(nodes.EditorialNodes):
         mode: Literal["brief", "deep"] = (
             "brief" if kind == "story_brief" else "deep"
         )
+        pool = self.one(ctx, "deduplicate")
         candidates = [
             item
-            for item in self.one(ctx, "deduplicate")["candidates"]
+            for item in pool["candidates"]
             if item["id"] in task["candidate_ids"]
         ]
+        # A task pointing at a headline group two or more outlets carry starts
+        # from its frozen excerpts: code-built, pinned, abstract-scope evidence.
+        groups = feed_excerpts.covered(
+            pool.get("excerpts", []),
+            [
+                *task["source_urls"],
+                *(
+                    url
+                    for item in candidates
+                    for url in (item["url"], *item.get("evidence_urls", []))
+                ),
+            ],
+        )[: feed_excerpts.MAX_GROUPS]
         prior = (
             publications.best_result(ctx.run_id, task["id"])
             if mode == "deep"
@@ -204,16 +219,21 @@ class StoryNodes(nodes.EditorialNodes):
                     "阅读卡仅补充当前已选topic，不新增另一个研究题。"
                 ),
             }
-        result = await story_editor.StoryEditor(self.editor).prepare(
+        is_fixture = self.store.mode == "mock"
+        result = await story_editor.StoryEditor(
+            self.editor, pins=feed_excerpts.pins(groups)
+        ).prepare(
             task=task,
             candidates=candidates,
-            packets=prior["packets"] if prior else [],
+            packets=prior["packets"]
+            if prior
+            else feed_excerpts.packets(groups, is_fixture=is_fixture),
             issue_date=date,
             policy=policy,
             workspace=path,
             mode=mode,
             prior=prior,
-            is_fixture=self.store.mode == "mock",
+            is_fixture=is_fixture,
             on_checkpoint=checkpoint,
         )
         checkpoint(result)

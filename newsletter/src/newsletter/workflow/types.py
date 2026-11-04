@@ -73,6 +73,9 @@ class Assessment(TypedDict):
     opened_urls: list[str]
     writer_job_id: str
     reviewer_job_id: str
+    # A signal's pinned feed excerpts read from their frozen text: url,
+    # sha256 and outlet each.
+    excerpts: NotRequired[list[dict[str, str]]]
 
 
 class ReviewIssue(TypedDict):
