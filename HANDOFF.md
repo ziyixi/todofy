@@ -1,12 +1,20 @@
 # Handoff
 
-Updated 2026-11-03 UTC. Read [AGENTS](AGENTS.md), then the target application's README/rules.
+Updated 2026-11-04 UTC. Read [AGENTS](AGENTS.md), then the target application's README/rules.
 Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-No unpublished software changes remain from the automatic-publication work. Private application work, operating
-limits and owner follow-ups are recorded only in `private/HANDOFF.md`.
+Main `71f87df7` carries the Storage console work and pins the private application's improvement waves. Normal main
+publication ships them; record its verification here once observed, then move this to the dated archive.
+
+- Storage owner console: overview, keys and activity tabs; per-key request counters by UTC day with recent
+  failures; the Dropbox account's space, cached in the Durable Object; and an owner-started, read-only object scan
+  that counts each namespace's objects and bytes. Space reads and scan pages give up on a stalled body.
+- Owner: while applications are idle, disconnect and reconnect Dropbox in the Storage console so the space tile
+  fills in (no Dropbox App Console change is needed), then start 扫描对象 to count each namespace's objects.
+- Private application work, operating limits and owner follow-ups, including a committed follow-up that waits for
+  its own pin, are recorded only in `private/HANDOFF.md`.
 
 Every Storage, shared release-tool, CI/build and private-entry-point change from the November 2 review landed with
 `c5c1b7e0`; the automatic publication replaced that review's removal of the never-enabled private path. A
