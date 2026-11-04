@@ -428,7 +428,8 @@ async def test_headline_consensus_enters_the_pool_as_news_first(
         "kind": "news",
         "basis": (
             "头条共识：BBC、NPR、The Guardian、DW、Al Jazeera共5家独立媒体"
-            "48小时内的头条订阅源均有报道（代码按标题聚类计数，仅元数据，正文未核对）"
+            "48小时内的头条订阅源标题相近（代码按标题聚类计数，"
+            "可能把同一议题下的不同事件误并；仅元数据，正文未核对）"
         ),
     }
     assert kinds[ids["three"]]["basis"].startswith("头条共识：BBC、NPR、")
@@ -490,6 +491,68 @@ async def test_discovered_coverage_wins_but_an_unknown_copy_yields(
         copied[0]["id"],
         read[0]["id"],
     ]
+
+
+async def test_an_unknown_report_leaves_the_count_standing(nodes, tmp_path):
+    other, own = headline_group(0, 5), headline_group(1, 4)
+    # Discovery opened another outlet's page of the first event and the
+    # second lead itself, but classified neither as news.
+    alternate = workflow_content.candidate(
+        id="candidate-alternate",
+        direction="04-economy",
+        title="Synthetic opened alternate",
+        url=other[1]["alternate_urls"][0],
+        version="",
+    )
+    opened = {**own[0], "provenance": "web_open", "access_scope": "full_text"}
+    unknown = {"kind": "unknown", "basis": ""}
+    result = await pool(
+        nodes,
+        tmp_path,
+        headline_feeds(other, own),
+        [alternate, opened],
+        {alternate["id"]: unknown, opened["id"]: unknown},
+        content_config=config(),
+    )
+    by_id = {c["id"]: c for c in result["candidates"]}
+    kinds = result["classifications"]
+    # The count stands beside the unknown page; selection merges the two.
+    assert kinds[other[0]["id"]]["basis"].startswith("头条共识：")
+    assert kinds[alternate["id"]] == unknown
+    assert by_id[other[0]["id"]]["access_scope"] == "metadata"
+    # The opened lead keeps its body, and its basis no longer calls it unread.
+    assert by_id[own[0]["id"]]["access_scope"] == "full_text"
+    assert kinds[own[0]["id"]] == {
+        "kind": "news",
+        "basis": (
+            "头条共识：BBC、NPR、The Guardian、DW共4家独立媒体"
+            "48小时内的头条订阅源标题相近（代码按标题聚类计数，"
+            "可能把同一议题下的不同事件误并）"
+        ),
+    }
+
+
+async def test_an_echo_gives_its_consensus_slot_to_another_event(
+    nodes, tmp_path
+):
+    big, echo, other, more = (
+        headline_group(number, outlets)
+        for number, outlets in enumerate((5, 4, 3, 3))
+    )
+    # The researcher marks a group repeating a bigger one's dominant words.
+    echo[1]["signals"]["headline_echo"] = 1
+    result = await pool(
+        nodes,
+        tmp_path,
+        headline_feeds(big, echo, other, more),
+        content_config=config(),
+    )
+    kinds = result["classifications"]
+    assert [
+        lead["id"]
+        for lead, _ in (big, echo, other, more)
+        if kinds[lead["id"]]["kind"] == "news"
+    ] == [big[0]["id"], other[0]["id"], more[0]["id"]]
 
 
 async def test_headline_notes_reach_discovery_with_their_alternates(

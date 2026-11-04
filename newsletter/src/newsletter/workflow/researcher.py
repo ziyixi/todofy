@@ -116,6 +116,9 @@ _TRACKING = frozenset(
         "at_medium",
         "at_campaign",
         "ocid",
+        # DW and Al Jazeera tag every feed link with these.
+        "maca",
+        "traffic_source",
     }
 )
 # Blocks dropped with their text: comments, scripts, styles and JATS
@@ -201,9 +204,11 @@ class _Lead:
     names: list[str]
     excerpt: str
     percentile: int | None
-    # Set on a headline group: its other outlets' URLs and newest time.
+    # Set on a headline group: its other outlets' URLs, newest time and
+    # whether it echoes a better-ranked consensus group.
     alternates: list[str] | None = None
     moment: float = 0.0
+    echo: bool = False
 
     def rank(self) -> tuple[int, int, int, float, int, int]:
         day = datetime.date.fromisoformat(self.candidate["published_at"])
@@ -477,7 +482,10 @@ def _moment(value: str) -> datetime.datetime | None:
     # A bare date, or RFC 2822's -0000 "zone unknown", has no usable time.
     if moment.tzinfo is None:
         return None
-    return moment.astimezone(datetime.UTC)
+    try:
+        return moment.astimezone(datetime.UTC)
+    except OverflowError:  # A zone pushes year 1 or 9999 out of range.
+        return None
 
 
 def canonical_url(value: str) -> tuple[str, str]:
@@ -808,16 +816,24 @@ def _parse(source: Source, raw: bytes, truncated: bool) -> list[Entry]:
 
 
 def _host_chains(registry: Sequence[Source]) -> list[list[Source]]:
-    """Group sources by host, longest chain first.
+    """Group sources by host, longest chain first, then headline feeds.
 
-    Long serial chains (arXiv, Crossref) take a slot before single feeds, so
-    they are not the ones the internal deadline cuts.
+    Long serial chains (arXiv, Crossref) take a slot before single feeds, and
+    a front page's single feeds before other ones, so they are not the ones
+    the internal deadline cuts.
     """
     chains: dict[str, list[Source]] = {}
     for source in registry:
         host = parse.urlsplit(source.url).hostname or ""
         chains.setdefault(host, []).append(source)
-    return sorted(chains.values(), key=len, reverse=True)
+    return sorted(
+        chains.values(),
+        key=lambda chain: (
+            len(chain),
+            any(source.role == "headline" for source in chain),
+        ),
+        reverse=True,
+    )
 
 
 def _public(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
@@ -944,7 +960,7 @@ class Researcher:
             return _Outcome("unavailable", [])
         try:
             return _Outcome("ok", _parse(source, raw, truncated), truncated)
-        except (ValueError, TypeError, KeyError, RecursionError):
+        except (ValueError, TypeError, KeyError, RecursionError, OverflowError):
             return _Outcome("parse_error", [])
 
     async def _address(self, host: str) -> str:
@@ -1067,87 +1083,155 @@ _CREDIT = re.compile(
 _SHARED_RARE = 2
 _RARE_SHARE = 0.3
 _MIN_WEIGHT = 8.0
+# A capitalised title word other than one opening the title, a sentence or
+# a clause after a colon: mostly a place, person or organisation. One used
+# by at most _NAME_USES entries names a particular event's place or person,
+# such as the city a strike hit.
+_NAME = re.compile(r"(?<![.:!?]\s)(?<!^)\b[A-Z][a-z]{2,}")
+_NAME_USES = 3
+# A story big enough to split into several groups fills the day's words: a
+# stem used by at least _DOMINANT_SHARE of the entries is a dominant one.
+_DOMINANT_SHARE = 0.1
 
 
-def _words(entry: Entry) -> frozenset[str]:
-    """Title and first description sentence as lowercase stems.
+def _stem(word: str) -> str:
+    """Return a casefolded word's singular cut to six letters, or ""."""
+    if word in _STOP:
+        return ""
+    if len(word) > 3 and word.endswith("s") and not word.endswith("ss"):
+        word = word[:-1]
+    return word[:6] if len(word) > 2 and word not in _STOP else ""
 
-    A stem is the singular's first six letters, so a country and its people
-    (Ukraine, Ukrainian) or a word's forms (elected, elections) count once.
+
+@dataclasses.dataclass
+class _Headline:
+    """A headline lead with its identity keys and the stems clustering reads.
+
+    ``words`` stem the title and first description sentence, so a word's
+    forms (elected, elections) and some demonyms (Ukraine, Ukrainian; not
+    Iran, Iranian) count once. ``names`` stem the title's capitalised words.
     """
-    text = _CREDIT.sub(" ", entry.text)
-    first = _SENTENCE_END.split(text, maxsplit=1)[0][:300]
-    words = set()
-    for word in _WORD.findall((entry.title + " " + first).casefold()):
-        if word in _STOP:
-            continue
-        if len(word) > 3 and word.endswith("s") and not word.endswith("ss"):
-            word = word[:-1]
-        if len(word) > 2 and word not in _STOP:
-            words.add(word[:6])
-    return frozenset(words)
+
+    lead: _Lead
+    keys: set[str]
+    words: frozenset[str]
+    names: frozenset[str]
+
+    @classmethod
+    def of(cls, lead: _Lead, keys: set[str], entry: Entry) -> _Headline:
+        text = _CREDIT.sub(" ", entry.text)
+        first = _SENTENCE_END.split(text, maxsplit=1)[0][:300]
+        words = _WORD.findall((entry.title + " " + first).casefold())
+        names = _NAME.findall(entry.title)
+        return cls(
+            lead,
+            keys,
+            frozenset(stem for word in words if (stem := _stem(word))),
+            frozenset(
+                stem for name in names if (stem := _stem(name.casefold()))
+            ),
+        )
 
 
 @dataclasses.dataclass
 class _Group:
-    leader: _Lead
-    words: frozenset[str]
+    leader: _Headline
     keys: set[str]
+    reports: list[_Headline]
+
+    def join(self, item: _Headline) -> None:
+        """Count another outlet's report; the leader stays the group's lead."""
+        self.keys |= item.keys
+        self.reports.append(item)
+        lead = self.leader.lead
+        if item.lead.source.name in lead.names:
+            return
+        lead.names.append(item.lead.source.name)
+        url = item.lead.candidate["url"]
+        if (
+            lead.alternates is not None
+            and len(lead.alternates) < content.MAX_ALTERNATE_URLS
+            and url not in {lead.candidate["url"], *lead.alternates}
+        ):
+            lead.alternates.append(url)
+
+    def recurring(self) -> set[str]:
+        """Return the stems at least two of the group's reports use."""
+        counts = collections.Counter(
+            word for report in self.reports for word in report.words
+        )
+        return {word for word, count in counts.items() if count >= 2}
 
 
 def _cluster(
-    items: Sequence[tuple[_Lead, set[str], frozenset[str]]],
+    items: Sequence[_Headline], others: Sequence[_Headline] = ()
 ) -> list[_Lead]:
-    """Group one direction's headline leads that report the same event.
+    """Group one direction's headline leads by event and rank the groups.
 
     Leads are taken newest first. Each joins the earlier group whose leader
     (its first, newest lead) carries the same identity, or else shares enough
     of the day's rare words with it, the best-weighted such leader winning;
     otherwise it leads a new group. Matching only leaders, never every
-    member, keeps a busy beat such as a war's daily strikes from chaining
-    unrelated stories into one group. Groups only rank leads and offer
-    alternative URLs; they are never treated as facts.
+    member, keeps stories from chaining into one group, and a title naming a
+    rare place or person the other report never mentions never joins it:
+    template headlines, such as one war's strikes on different cities, share
+    most words. ``others`` are reports another lead already carries; they only
+    add their outlet to a group. Groups rank by outlets, then recency. A
+    consensus group repeating two dominant stems a better-ranked consensus
+    group also repeats is marked an echo: most likely the same big story
+    split again. Groups only rank leads and offer alternative URLs; they are
+    never treated as facts.
     """
-    uses = collections.Counter(word for _, _, words in items for word in words)
-    total = len(items)
+    every = [*items, *others]
+    uses = collections.Counter(word for item in every for word in item.words)
+    total = len(every)
     rare = max(2.0, _RARE_SHARE * total)
     weight = {word: math.log(total / count) for word, count in uses.items()}
     groups: list[_Group] = []
-    for lead, keys, words in sorted(
-        items,
-        key=lambda item: (
-            -item[0].moment,
-            item[0].source.index,
-            item[0].position,
-        ),
-    ):
+
+    def named(item: _Headline) -> set[str]:
+        return {name for name in item.names if uses[name] <= _NAME_USES}
+
+    def match(item: _Headline) -> _Group | None:
         best, score = None, 0.0
         for group in groups:
-            if keys & group.keys:
-                best = group
-                break
-            shared = words & group.words
-            if sum(uses[word] <= rare for word in shared) < _SHARED_RARE:
+            if item.keys & group.keys:
+                return group
+            leader = group.leader
+            shared = item.words & leader.words
+            if sum(uses[word] <= rare for word in shared) < _SHARED_RARE or (
+                named(item) - leader.words or named(leader) - item.words
+            ):
                 continue
-            value = sum(weight[word] for word in shared)
+            # fsum: the same total in any set iteration order.
+            value = math.fsum(weight[word] for word in shared)
             if value >= _MIN_WEIGHT and value > score:
                 best, score = group, value
-        if best is None:
-            groups.append(_Group(lead, words, set(keys)))
-            continue
-        best.keys |= keys
-        leader = best.leader
-        if lead.source.name not in leader.names:
-            leader.names.append(lead.source.name)
-            url = lead.candidate["url"]
-            alternates = leader.alternates
-            if (
-                alternates is not None
-                and len(alternates) < content.MAX_ALTERNATE_URLS
-                and url not in {leader.candidate["url"], *alternates}
-            ):
-                alternates.append(url)
-    return [group.leader for group in groups]
+        return best
+
+    def newest(item: _Headline) -> tuple[float, int, int]:
+        return (-item.lead.moment, item.lead.source.index, item.lead.position)
+
+    for item in sorted(items, key=newest):
+        if (group := match(item)) is None:
+            groups.append(_Group(item, set(item.keys), [item]))
+        else:
+            group.join(item)
+    for item in sorted(others, key=newest):
+        if (group := match(item)) is not None:
+            group.join(item)
+    groups.sort(key=lambda group: group.leader.lead.rank())
+    dominant = {
+        word for word, count in uses.items() if count >= _DOMINANT_SHARE * total
+    }
+    consensus = [
+        (group.leader.lead, group.recurring() & dominant)
+        for group in groups
+        if len(group.leader.lead.names) >= content.CONSENSUS_OUTLETS
+    ]
+    for n, (lead, words) in enumerate(consensus):
+        lead.echo = any(len(words & other) >= 2 for _, other in consensus[:n])
+    return [group.leader.lead for group in groups]
 
 
 def _seed(source: Source, entry: Entry) -> sources.Candidate | None:
@@ -1207,7 +1291,7 @@ def _leads(
     window = now - datetime.timedelta(hours=HEADLINE_HOURS) if now else None
     leads: list[_Lead] = []
     index: dict[str, _Lead] = {}
-    headlines: dict[str, list[tuple[_Lead, set[str], frozenset[str]]]] = {}
+    headlines: dict[str, list[_Headline]] = {}
     for source in registry:
         outcome = outcomes[source.index]
         diagnostics.append(f"{source.id}:{outcome.code}")
@@ -1247,7 +1331,7 @@ def _leads(
             if headline and entry.moment:
                 lead.alternates, lead.moment = [], entry.moment.timestamp()
                 headlines.setdefault(source.direction, []).append(
-                    (lead, keys, _words(entry))
+                    _Headline.of(lead, keys, entry)
                 )
                 continue
             _merge(lead, keys, leads, index)
@@ -1255,38 +1339,51 @@ def _leads(
             diagnostics.append(f"{source.id}:undated:{undated}")
         if invalid:
             diagnostics.append(f"{source.id}:invalid_items:{invalid}")
-    summaries = _headline_groups(registry, headlines, set(index), leads)
+    summaries = _headline_groups(
+        registry, outcomes, headlines, set(index), leads
+    )
     return leads, summaries
 
 
 def _headline_groups(
     registry: Sequence[Source],
-    headlines: Mapping[str, list[tuple[_Lead, set[str], frozenset[str]]]],
+    outcomes: Mapping[int, _Outcome],
+    headlines: Mapping[str, list[_Headline]],
     taken: set[str],
     leads: list[_Lead],
 ) -> list[types.Payload]:
     """Add each direction's best headline groups to the leads; count them.
 
     The direction's headline feeds' max_seeds add up to its group budget.
-    The returned counts and top titles are public metadata for the console.
+    The returned counts and top titles are public metadata for the console;
+    ``feeds_ok`` below ``feeds`` tells a thin front page from a quiet day.
     """
     summaries = []
-    for direction in sorted(headlines):
-        # An item a plain feed or another direction already leads stays there.
-        fresh = [item for item in headlines[direction] if not item[1] & taken]
-        for _, keys, _ in fresh:
-            taken |= keys
-        groups = sorted(_cluster(fresh), key=_Lead.rank)
-        budget = sum(
-            source.max_seeds
+    for direction in sorted(
+        {source.direction for source in registry if source.role == "headline"}
+    ):
+        items = headlines.get(direction, [])
+        # An item a plain feed or another direction already leads stays
+        # there; it only adds its outlet to the group that reports it.
+        fresh = [item for item in items if not item.keys & taken]
+        others = [item for item in items if item.keys & taken]
+        for item in fresh:
+            taken |= item.keys
+        groups = _cluster(fresh, others)
+        feeds = [
+            source
             for source in registry
             if source.role == "headline" and source.direction == direction
-        )
-        leads.extend(groups[:budget])
+        ]
+        leads.extend(groups[: sum(source.max_seeds for source in feeds)])
         summaries.append(
             {
                 "direction": direction,
-                "entries": len(fresh),
+                "feeds": len(feeds),
+                "feeds_ok": sum(
+                    outcomes[source.index].code == "ok" for source in feeds
+                ),
+                "entries": len(items),
                 "groups": len(groups),
                 "consensus_groups": sum(
                     len(group.names) >= content.CONSENSUS_OUTLETS
@@ -1352,6 +1449,8 @@ def _note(lead: _Lead) -> types.Payload:
     if lead.alternates is not None:
         # Marks a headline group; the window bounds its outlets' entries.
         signals["headline_window_hours"] = HEADLINE_HOURS
+    if lead.echo:
+        signals["headline_echo"] = 1
     if lead.alternates:
         note["alternate_urls"] = list(lead.alternates)
     return note

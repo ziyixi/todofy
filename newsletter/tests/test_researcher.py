@@ -226,12 +226,40 @@ def test_keywords_keep_brief_semantics(keyword, text, expected):
         ("2026-10-28T08:00:00Z", "2026-10-28T08:00:00+00:00"),
         ("2026-10-27", None),
         ("Wed, 28 Oct 2026 06:12:31 -0000", None),
+        # In range locally, out of range in UTC.
+        ("0001-01-01T00:00:00+01:00", None),
+        ("Fri, 31 Dec 9999 23:59:59 -0500", None),
     ],
 )
 def test_feed_items_keep_a_time_only_with_a_zone(stamp, moment):
     (entry,) = researcher.parse_feed(fake.rss(fake.rss_item(date=stamp)))
     assert entry.published
     assert (entry.moment.isoformat() if entry.moment else None) == moment
+
+
+async def test_an_out_of_range_date_never_fails_the_other_feeds():
+    registry = load(
+        fake.source(id="good", url="https://good.example.org/rss"),
+        fake.source(id="bad", url="https://bad.example.org/rss"),
+    )
+    network = fake.Network(
+        {
+            "good.example.org": fake.rss(
+                fake.rss_item(link="https://good.example.org/1")
+            ),
+            "bad.example.org": fake.rss(
+                fake.rss_item(
+                    link="https://bad.example.org/1",
+                    date="0001-01-01T00:00:00+01:00",
+                )
+            ),
+        }
+    )
+    result = await run(network, registry)
+    assert result.diagnostics == ["good:ok", "bad:ok"]
+    assert [c["url"] for c in result.candidates] == [
+        "https://good.example.org/1"
+    ]
 
 
 def test_atom_with_several_links_uses_canonical_arxiv_without_doi():
@@ -271,6 +299,15 @@ def test_feed_links_drop_tracking_and_upgrade_scheme():
         "http://news.example.org/a?id=7&utm_source=x&ref_src=y&at_medium=z#c"
     )
     assert (url, version) == ("https://news.example.org/a?id=7", "")
+    # DW and Al Jazeera tag every feed link.
+    for tagged in (
+        "https://news.example.org/a?maca=en-rss-en-world-4025-rdf",
+        "https://news.example.org/a?traffic_source=rss",
+    ):
+        assert researcher.canonical_url(tagged) == (
+            "https://news.example.org/a",
+            "",
+        )
 
 
 @pytest.mark.parametrize(
@@ -651,6 +688,21 @@ def test_long_host_chains_take_a_slot_first():
     assert [[s.id for s in chain] for chain in chains] == [
         ["a1", "a2"],
         ["single"],
+    ]
+    # A front page's single feeds go before other single feeds.
+    front = load(
+        fake.source(id="single", url="https://one.example.org/rss"),
+        fake.source(id="page", url="https://page.example.org/rss"),
+        fake.source(id="news", url="https://two.example.org/rss"),
+        fake.source(
+            id="front", url="https://three.example.org/rss", role="headline"
+        ),
+    )
+    assert [chain[0].id for chain in researcher._host_chains(front)] == [
+        "front",
+        "single",
+        "page",
+        "news",
     ]
 
 
@@ -1033,7 +1085,9 @@ def test_headline_groups_rank_a_story_many_outlets_carry_first():
     # Thresholds calibrated on a real day's feeds, pinned here: five outlets'
     # differently worded election stories form one group, the war beat's
     # strikes stay apart except two reports of one strike and the ceasefire,
-    # and the busy public figure's unrelated stories never merge.
+    # template strikes on four cities never merge, two earthquakes keep their
+    # own three outlets each, and the busy public figures' unrelated stories
+    # never reach a consensus.
     registry = headline_registry()
     result = researcher.assemble(
         registry, front_page_outcomes(registry), DAY, now=fake.NOW
@@ -1061,28 +1115,42 @@ def test_headline_groups_rank_a_story_many_outlets_carry_first():
         "（代码按标题聚类，仅元数据，未打开原文）"
     )
     assert ceasefire["title"] == "Sylvania and Ruritania agree 30-day ceasefire"
-    assert outlets[ceasefire["title"]] == 3
     # Two outlets on one strike join; the beat's other strikes stay apart.
     strike = "Sylvanian drones strike Port Vell power plant"
-    assert outlets[strike] == 2
     assert "Port Vell power plant struck by Sylvanian drones" not in by_title
-    assert sorted(outlets.values(), reverse=True)[:4] == [5, 3, 2, 1]
-    for _, title, _ in fake.FIGURE:
-        assert outlets[title] == 1
+    norland, estmark = fake.DISASTERS[0][1], fake.DISASTERS[3][1]
+    # Multi-outlet groups rank first, so these are all of them. A title that
+    # names a rare city the other never mentions is another event, so the
+    # template strikes and the other country's earthquake never join. Two
+    # stories that name only the same figure can still pair up.
+    assert {title: n for title, n in outlets.items() if n > 1} == {
+        election["title"]: 5,
+        ceasefire["title"]: 3,
+        norland: 3,
+        estmark: 3,
+        strike: 2,
+        fake.FULL_NAME[1][1]: 2,
+    }
+    assert not any(
+        result.notes[c["id"]]["signals"].get("headline_echo")
+        for c in result.candidates
+    )
     # The five outlets' budgets cap the groups; every group is one seed.
     assert len(result.candidates) == 20
     assert result.headlines == [
         {
             "direction": "04-economy",
-            # 56 entries less 4 + 2 + 1 that joined the three groups.
-            "entries": 56,
-            "groups": 49,
-            "consensus_groups": 2,
+            "feeds": 5,
+            "feeds_ok": 5,
+            # 70 entries less the 12 that joined the six groups.
+            "entries": 70,
+            "groups": 58,
+            "consensus_groups": 4,
             "max_outlets": 5,
             "top": [
                 {"title": fake.ELECTION[0][0], "outlets": 5},
                 {"title": ceasefire["title"], "outlets": 3},
-                {"title": strike, "outlets": 2},
+                {"title": norland, "outlets": 3},
             ],
         }
     ]
@@ -1106,15 +1174,150 @@ def test_headline_window_history_and_times():
     titles = [c["title"] for c in result.candidates]
     assert "Untimed synthetic headline" not in titles
     assert "outlet-1:undated:1" in result.diagnostics
-    # 56 front-page entries and the stale one, less the seen and the stale.
-    assert result.headlines[0]["entries"] == 55
+    # 70 front-page entries and the stale one, less the seen and the stale.
+    assert result.headlines[0]["entries"] == 69
     # History drops only the outlet's entry it saw, never the group.
     election = result.candidates[0]
     assert election["url"] == "https://outlet1.example.org/0"
     assert result.notes[election["id"]]["signals"]["independent_sources"] == 4
     # Without a clock only the date window applies.
     dated = researcher.assemble(registry, outcomes, DAY, history)
-    assert dated.headlines[0]["entries"] == 56
+    assert dated.headlines[0]["entries"] == 70
+
+
+def test_a_report_another_lead_carries_still_counts_its_outlet():
+    # BBC's election report also runs in a plain feed, which keeps it as a
+    # seed; the headline group still counts BBC.
+    plain = fake.source(
+        id="bbc-plain",
+        name="BBC",
+        direction="02-science",
+        url="https://plain.example.org/rss",
+    )
+    registry = load(
+        plain,
+        *[
+            fake.source(
+                id=f"outlet-{n}",
+                name=name,
+                direction="04-economy",
+                url=f"https://outlet{n}.example.org/rss",
+                max_seeds=4,
+                max_age_days=2,
+                role="headline",
+            )
+            for n, name in enumerate(fake.OUTLETS)
+        ],
+    )
+    outcomes = front_page_outcomes(registry[1:])
+    bbc = outcomes[1].entries[0]
+    outcomes[0] = researcher._Outcome("ok", [bbc])
+    result = researcher.assemble(registry, outcomes, DAY, now=fake.NOW)
+    by_url = {c["url"]: c for c in result.candidates}
+    assert by_url[bbc.url]["direction"] == "02-science"
+    election = next(
+        c for c in result.candidates if c["direction"] == "04-economy"
+    )
+    note = result.notes[election["id"]]
+    assert election["url"] != bbc.url
+    assert note["signals"]["independent_sources"] == 5
+    assert note["source"].endswith("、BBC")
+    assert bbc.url not in note["alternate_urls"]
+    assert result.headlines[0]["entries"] == 70
+
+
+def test_a_big_story_split_in_several_groups_is_marked_an_echo():
+    # The election's market and regional reactions each reach three
+    # outlets but repeat the election's dominant words; an earthquake on the
+    # same day does not. Consensus picks the earthquake before the echoes.
+    page = {
+        outlet: [story]
+        for outlet, story in zip(fake.OUTLETS, fake.ELECTION, strict=True)
+    }
+    reactions = (
+        (
+            "BBC",
+            "Freedonia election result lifts markets",
+            "Shares in Freedonia rose after the election result.",
+        ),
+        (
+            "NPR",
+            "Markets rise after Freedonia election",
+            "Freedonia shares rose as investors welcomed the election result.",
+        ),
+        (
+            "DW",
+            "Freedonia shares climb as markets cheer election result",
+            "Investors in Freedonia bought shares after the election result.",
+        ),
+        (
+            "The Guardian",
+            "Neighbours welcome Freedonia election result",
+            "Leaders across the region welcomed the Freedonia election result.",
+        ),
+        (
+            "Al Jazeera",
+            "Regional leaders welcome Freedonia election",
+            "Leaders in the region welcomed the result of the Freedonia "
+            "election.",
+        ),
+        (
+            "BBC",
+            "Freedonia election: neighbours welcome result",
+            "Regional leaders welcomed Freedonia's election result.",
+        ),
+    )
+    for outlet, title, text in reactions + fake.DISASTERS[:3]:
+        page[outlet].append((title, text))
+    for outlet, items in fake.front_page().items():
+        page[outlet] += [item for item in items if "festival" in item[0]]
+    registry = headline_registry()
+    result = researcher.assemble(
+        registry, front_page_outcomes(registry, page), DAY, now=fake.NOW
+    )
+    signals = {
+        c["title"]: result.notes[c["id"]]["signals"] for c in result.candidates
+    }
+    consensus = {
+        title: bool(value.get("headline_echo"))
+        for title, value in signals.items()
+        if value["independent_sources"] >= content.CONSENSUS_OUTLETS
+    }
+    norland = fake.DISASTERS[1][1]
+    assert consensus == {
+        fake.ELECTION[0][0]: False,
+        norland: False,
+        reactions[0][1]: True,
+        reactions[3][1]: True,
+    }
+    picked = content.consensus_leads(result.candidates, result.notes, [], {})
+    assert [lead["title"] for lead, _ in picked][:2] == [
+        fake.ELECTION[0][0],
+        norland,
+    ]
+    assert result.headlines[0]["consensus_groups"] == 4
+
+
+def test_the_headline_record_counts_failed_front_pages():
+    registry = headline_registry()
+    outcomes = front_page_outcomes(registry)
+    outcomes[2] = researcher._Outcome("timeout", [])
+    result = researcher.assemble(registry, outcomes, DAY, now=fake.NOW)
+    (record,) = result.headlines
+    assert (record["feeds"], record["feeds_ok"]) == (5, 4)
+    # Every front page failed: a record with nothing in it, not a quiet day.
+    down = {index: researcher._Outcome("http_error", []) for index in outcomes}
+    (empty,) = researcher.assemble(registry, down, DAY, now=fake.NOW).headlines
+    assert empty == {
+        "direction": "04-economy",
+        "feeds": 5,
+        "feeds_ok": 0,
+        "entries": 0,
+        "groups": 0,
+        "consensus_groups": 0,
+        "max_outlets": 0,
+        "top": [],
+    }
 
 
 def test_a_directions_headline_groups_take_one_turn_per_round():
@@ -1242,7 +1445,8 @@ async def test_authored_headline_feeds_bring_a_major_story_from_every_outlet():
     assert note["signals"]["independent_sources"] == len(world)
     assert len(note["alternate_urls"]) == content.MAX_ALTERNATE_URLS
     assert "Old synthetic summit" not in [c["title"] for c in result.candidates]
-    assert result.headlines[0]["consensus_groups"] == 2
+    # The election, the ceasefire and the two earthquakes.
+    assert result.headlines[0]["consensus_groups"] == 4
 
 
 async def test_every_lead_is_a_valid_metadata_seed_and_notes_are_bounded():

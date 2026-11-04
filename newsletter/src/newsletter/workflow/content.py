@@ -157,7 +157,8 @@ _RESEARCHER_NOTES = (
 # Appended only when a shown note carries headline alternates.
 _HEADLINE_NOTES = (
     "带alternate_urls的线索是代码按标题把多家头条订阅源归成的同一事件组，"
-    "signals.independent_sources是组内不同媒体数，alternate_urls是其他媒体的报道地址；"
+    "signals.independent_sources是组内不同媒体数，alternate_urls是其他媒体的报道地址，"
+    "signals.headline_echo为1表示它和排在前面的某个多家组标题相近、可能是同一件事；"
     "聚类可能有误。主url打不开时先逐个open这些地址并核对是否同一事件，"
     "只有本轮实际open过的地址才能写进url或evidence_urls。\n"
 )
@@ -572,13 +573,15 @@ def consensus_leads(
 ) -> list[tuple[sources.Candidate, types.Payload]]:
     """Pick headline groups enough outlets carried to enter the pool as news.
 
-    The count is code's, from feed metadata; the classification says so and
-    claims nothing a body would. Whether such a lead is must-know is left to
-    selection. Most outlets first, at most MAX_CONSENSUS_LEADS. A group is
-    skipped when a discovered candidate already covers it: its URL or an
-    evidence URL is the lead's or another outlet's. Only an unknown
-    classification of the lead itself, such as an unopened seed handed
-    back, yields to the count. The other outlets' URLs become the lead's
+    The count is code's, from feed titles that may merge different events;
+    the classification says so and claims nothing a body would. Whether such
+    a lead is must-know is left to selection. Most outlets first, groups
+    that echo a better-ranked one last, at most MAX_CONSENSUS_LEADS. A group
+    is skipped only when a discovered news candidate already covers it: its
+    URL or an evidence URL is the lead's or another outlet's. Any other
+    candidate covering it, such as the lead handed back unopened or an
+    outlet's page discovery opened but left unknown, leaves the count to
+    stand beside it. The other outlets' URLs become the lead's
     evidence_urls, still metadata scope: nobody opened them.
     """
     valid = _seed_notes(notes, leads)
@@ -611,26 +614,32 @@ def consensus_leads(
             continue
         alternates = note.get("alternate_urls", [])
         members = urls([lead["url"], *alternates])
-        if any(
-            keys & members and not (c["id"] == lead["id"] and kind == "unknown")
-            for c, keys, kind in found
-        ):
+        covering = [(c, kind) for c, keys, kind in found if keys & members]
+        if any(kind == "news" for _, kind in covering):
             continue
+        # Discovery opened the lead itself: its body was read after all.
+        opened = any(
+            c["id"] == lead["id"] and c["provenance"] == "web_open"
+            for c, _ in covering
+        )
         names = note["source"]
         more = "等" if len(names.split("、")) < outlets else "共"
         basis = (
             f"{CONSENSUS_BASIS}{names}{more}{outlets}家独立媒体"
-            f"{hours}小时内的头条订阅源均有报道"
-            "（代码按标题聚类计数，仅元数据，正文未核对）"
+            f"{hours}小时内的头条订阅源标题相近（代码按标题聚类计数，"
+            "可能把同一议题下的不同事件误并"
+            + ("" if opened else "；仅元数据，正文未核对")
+            + "）"
         )
         candidate = cast(
             sources.Candidate, {**lead, "evidence_urls": alternates}
         )
-        groups.append((outlets, _candidate_view(candidate), basis))
-    groups.sort(key=lambda group: -group[0])
+        echo = signals.get("headline_echo", 0)
+        groups.append((echo, -outlets, _candidate_view(candidate), basis))
+    groups.sort(key=lambda group: group[:2])
     return [
         (candidate, {"kind": "news", "basis": basis})
-        for _, candidate, basis in groups[:MAX_CONSENSUS_LEADS]
+        for _, _, candidate, basis in groups[:MAX_CONSENSUS_LEADS]
     ]
 
 

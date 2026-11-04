@@ -194,8 +194,9 @@ class Network:
 # A synthetic front page modelled on a real day's headline feeds: five
 # outlets lead with one election in their own words, a busy war beat runs
 # many different strikes past the same words (two outlets report one strike,
-# three one ceasefire), a busy public figure appears in unrelated stories,
-# and each outlet carries its own local stories.
+# three one ceasefire) and through one wire template, two earthquakes strike
+# two countries, busy public figures appear in unrelated stories, and each
+# outlet carries its own local stories.
 OUTLETS = ("BBC", "NPR", "The Guardian", "DW", "Al Jazeera")
 ELECTION = (
     (
@@ -309,6 +310,90 @@ FIGURE = (
         "Protesters marched against Chancellor Ostrander's housing plan.",
     ),
 )
+# Wire-style headlines: one template, a different city and toll each time.
+TEMPLATE_WAR = (
+    (
+        "BBC",
+        "Sylvanian drone attack on Tarnov kills three",
+        "A Sylvanian drone attack on Tarnov killed three people overnight, "
+        "officials said.",
+    ),
+    (
+        "NPR",
+        "Sylvanian drone strike on Velika kills five",
+        "Sylvania struck Velika with drones, killing five, officials said.",
+    ),
+    (
+        "DW",
+        "Sylvanian drones kill two in Mirov as attacks continue",
+        "Sylvanian drones killed two people in the city of Mirov.",
+    ),
+    (
+        "Al Jazeera",
+        "Sylvanian drone attack kills four in Selna",
+        "Four people were killed in a Sylvanian drone attack on Selna.",
+    ),
+)
+# Two earthquakes in two countries, three outlets each.
+DISASTERS = (
+    (
+        "BBC",
+        "Magnitude 7.1 earthquake strikes off Norland's coast",
+        "A powerful earthquake struck off the coast of northern Norland, "
+        "prompting tsunami warnings.",
+    ),
+    (
+        "NPR",
+        "Powerful earthquake hits Norland, tsunami warning issued",
+        "A magnitude 7.1 earthquake hit northern Norland.",
+    ),
+    (
+        "DW",
+        "Norland earthquake: tsunami warning after magnitude 7.1 quake",
+        "Norland issued a tsunami warning after a strong earthquake.",
+    ),
+    (
+        "Al Jazeera",
+        "Magnitude 6.8 earthquake strikes Estmark, killing at least 12",
+        "A strong earthquake struck southern Estmark, killing at least 12 "
+        "people.",
+    ),
+    (
+        "NPR",
+        "Deadly earthquake hits southern Estmark",
+        "At least 12 people were killed when a strong earthquake hit Estmark.",
+    ),
+    (
+        "BBC",
+        "Earthquake in Estmark kills at least 12",
+        "A magnitude 6.8 earthquake struck southern Estmark.",
+    ),
+)
+# A leader always named in full with her title, in unrelated stories.
+FULL_NAME = (
+    (
+        "BBC",
+        "Prime Minister Lena Varga announces hospital funding boost",
+        "Prime Minister Lena Varga said hospitals would get extra money.",
+    ),
+    (
+        "The Guardian",
+        "Lena Varga faces backbench revolt over welfare cuts",
+        "Lawmakers threatened to vote against Prime Minister Lena Varga's "
+        "welfare plans.",
+    ),
+    (
+        "DW",
+        "Prime Minister Lena Varga visits Kestrel for defence talks",
+        "Prime Minister Lena Varga met Kestrel's chancellor to discuss "
+        "defence spending.",
+    ),
+    (
+        "Al Jazeera",
+        "Varga and Halvorsen agree on migrant returns deal",
+        "Prime Minister Lena Varga and Halvorsen signed a returns agreement.",
+    ),
+)
 _LOCAL = (
     "apricot basalt cobalt dahlia ember fjord granite harbor iris jasper kelp "
     "lantern meadow nectar opal pine quartz reef saffron tundra umber violet "
@@ -322,7 +407,9 @@ def front_page() -> dict[str, list[tuple[str, str]]]:
     page: dict[str, list[tuple[str, str]]] = {
         outlet: [story] for outlet, story in zip(OUTLETS, ELECTION, strict=True)
     }
-    for outlet, title, text in WAR + FIGURE:
+    for outlet, title, text in (
+        WAR + FIGURE + TEMPLATE_WAR + DISASTERS + FULL_NAME
+    ):
         page[outlet].append((title, text))
     for n, word in enumerate(_LOCAL):
         town = _LOCAL[(n + 7) % len(_LOCAL)]
