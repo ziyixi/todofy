@@ -140,6 +140,38 @@ def test_a_delivered_run_and_its_calls(world):
     assert len(kinds) == 5
 
 
+def test_an_unreadable_reference_is_not_a_feed_failure(world):
+    def feeds(dependencies):
+        return next(
+            d for d in dependencies if d.kind == run_pb.Dependency_Kind.FEEDS
+        )
+
+    run = _run(world, console_world.RUN_27)
+    before = (run.feeds, feeds(run.dependencies))
+    overview = feeds(world.reader.overview(healthy=True).dependencies)
+    reference = {
+        "id": "synthetic-reference",
+        "code": "http_error",
+        "entries": 0,
+        "accepted": 0,
+        "seeds": 0,
+        "truncated": False,
+    }
+    with world.store.transaction():
+        world.store.db.execute(
+            "UPDATE workflow_artifacts SET body=json_set(body,"
+            "'$.sources[#]',json(?),'$.reference.source',?,"
+            "'$.reference.code','http_error') "
+            "WHERE node_id='feeds' AND json_type(body,'$.sources')='array'",
+            (json.dumps(reference), reference["id"]),
+        )
+    run = _run(world, console_world.RUN_27)
+    # Its own card says it is unavailable; the lead sources' counts stay.
+    assert run.reference.state == run_pb.ReferenceCheck_State.UNAVAILABLE
+    assert (run.feeds, feeds(run.dependencies)) == before
+    assert feeds(world.reader.overview(healthy=True).dependencies) == overview
+
+
 def _records(world, run_id):
     rows = world.store.db.execute(
         "SELECT body FROM model_usage WHERE scope_id=? ORDER BY rowid",

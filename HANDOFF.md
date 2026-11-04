@@ -15,6 +15,12 @@ publication ships them; record its verification here once observed, then move th
   fills in (no Dropbox App Console change is needed), then start 扫描对象 to count each namespace's objects.
 - Private application work, operating limits and owner follow-ups, including a committed follow-up that waits for
   its own pin, are recorded only in `private/HANDOFF.md`.
+- Newsletter retrieval funnel and reference (not yet on main): the run page's 检索漏斗 and 必知追踪, and the
+  Wikipedia Current events reference ([content config](newsletter/docs/content-config.md#维基百科参照)). Release the
+  VPS Newsletter image first; the content config that registers the `current_events` source applies after it (the
+  old engine rejects the kind, and config sync keeps the previous version until then). The console Worker may go
+  either way. The todofy Worker also redeploys, unchanged: `//todofy:core_proto_sources` bundles every generated
+  proto module. Verify on the first natural run that the reference reads as available and the funnel has counts.
 
 Every Storage, shared release-tool, CI/build and private-entry-point change from the November 2 review landed with
 `c5c1b7e0`; the automatic publication replaced that review's removal of the never-enabled private path. A

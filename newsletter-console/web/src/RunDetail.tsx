@@ -227,7 +227,7 @@ function Reference({ check }: { check: ReferenceCheck }) {
         <p><Mark word={{ label: `参照不可用${check.error_code ? `（${check.error_code}）` : ''}`, tone: 'warn' }} /> <span className="muted">这次读不到参照，不能据此判断有没有漏掉大事。</span></p>
       ) : (
         <>
-          <p className="muted small">{events.length === 0 ? '参照这天没有冲突、政治、灾害、商业或健康类条目。' : parts(counts)}</p>
+          <p className="muted small">{events.length === 0 ? '参照里没有读到可比对的条目。' : parts(counts)}</p>
           <ul className="must-rows">
             {events.map((event, index) => (
               <li key={index}>
@@ -239,7 +239,7 @@ function Reference({ check }: { check: ReferenceCheck }) {
               </li>
             ))}
           </ul>
-          <p className="muted small">按英文词和引用来源比对；匹配的是最接近的一条，可能是同一地点或人物的另一件事，未确定只有弱匹配。这里不说明没有漏报。</p>
+          <p className="muted small">按英文词、引用来源和订阅条目地址比对；匹配的是最接近的一条，可能是同一地点或人物的另一件事；只有弱匹配、或弱匹配走得更远时记未确定。这里不说明没有漏报。</p>
         </>
       )}
     </div>

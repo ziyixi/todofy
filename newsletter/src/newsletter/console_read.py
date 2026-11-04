@@ -204,6 +204,8 @@ class _Run:
     workflow_started: str | None
     feeds_diagnostics: Any
     feeds_sources: Any
+    # The feeds' reference source, if any: it gives no leads.
+    feeds_reference: str
     candidate_count: int
     selected_count: int
     parent_run: str
@@ -219,6 +221,20 @@ class _Run:
     def issue_date(self) -> str:
         """The run's issue date."""
         return str(self.row["issue_date"] or "")
+
+    def lead_sources(self) -> list[run_pb.SourceOutcome]:
+        """The outcomes of the run's lead sources, without the reference.
+
+        A reference that could not be read degrades no lead; the run's
+        reference check says it is unavailable.
+        """
+        return [
+            outcome
+            for outcome in views.feed_outcomes(
+                self.issue_date, self.feeds_diagnostics, self.feeds_sources
+            )
+            if outcome.source_id != self.feeds_reference
+        ]
 
 
 def _utc_now() -> datetime.datetime:
@@ -335,6 +351,7 @@ class ConsoleReader:
             ]
         calls = self._calls(snap, run_id)
         diagnostics = sources = None
+        reference = ""
         candidates = selected = 0
         if snap.has("workflow_artifacts"):
             feeds = views.node_of(definition, "api_feed")
@@ -343,10 +360,12 @@ class ConsoleReader:
                 run_id,
                 feeds,
                 "json_extract(body,'$.diagnostics') AS a, "
-                "json_extract(body,'$.sources') AS b",
+                "json_extract(body,'$.sources') AS b, "
+                "json_extract(body,'$.reference.source') AS c",
             )
             if found is not None:
                 diagnostics, sources = _json(found["a"]), _json(found["b"])
+                reference = views.text(found["c"])
             pool = self._artifact(
                 snap,
                 run_id,
@@ -387,6 +406,7 @@ class ConsoleReader:
             workflow_started=started,
             feeds_diagnostics=diagnostics,
             feeds_sources=sources,
+            feeds_reference=reference,
             candidate_count=candidates,
             selected_count=selected,
             parent_run=parent,
@@ -450,9 +470,7 @@ class ConsoleReader:
             else ""
         )
         deadline = views.int32(row["deadline"])
-        outcomes = views.feed_outcomes(
-            run.issue_date, run.feeds_diagnostics, run.feeds_sources
-        )
+        outcomes = run.lead_sources()
         has_feeds = run.feeds_diagnostics is not None
         edition = run.edition or {}
         message = run_pb.Run(
@@ -1327,15 +1345,7 @@ class ConsoleReader:
             )
             usage = self._usage(snap, 7)
             message = self._run_message(snap, latest) if latest else None
-            outcomes = (
-                views.feed_outcomes(
-                    latest.issue_date,
-                    latest.feeds_diagnostics,
-                    latest.feeds_sources,
-                )
-                if latest
-                else []
-            )
+            outcomes = latest.lead_sources() if latest else []
             return overview_pb.Overview(
                 name="overview",
                 generate_time=views.timestamp(now.isoformat()),

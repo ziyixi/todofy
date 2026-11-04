@@ -267,6 +267,12 @@ FEEDS_EXTRA: Payload = {
                 "feeds": 2,
                 "feed_title": "Harbor workers end strike after port deal",
                 "seeds": ["candidate-harbor"],
+                "feed_urls": [
+                    WORLD + "harbor-strike-ends",
+                    "https://example.net/news/harbor-strike-over",
+                    "https://example.edu/post/port-deal",
+                ],
+                "previous": "",
             },
             {
                 "category": "Disasters and accidents",
@@ -281,6 +287,8 @@ FEEDS_EXTRA: Payload = {
                 "feeds": 2,
                 "feed_title": "River delta flood barrier vote delayed",
                 "seeds": [],
+                "feed_urls": ["https://example.net/news/delta-barrier-vote"],
+                "previous": "",
             },
             {
                 "category": "Business and economy",
@@ -293,6 +301,8 @@ FEEDS_EXTRA: Payload = {
                 "feeds": 2,
                 "feed_title": "Cloud GPU rental prices fall",
                 "seeds": ["candidate-gpu-prices"],
+                "feed_urls": [ML + "gpu-rental-prices"],
+                "previous": "",
             },
             {
                 "category": "Business and economy",
@@ -305,6 +315,8 @@ FEEDS_EXTRA: Payload = {
                 "feeds": 2,
                 "feed_title": "Sparse attention benchmark",
                 "seeds": ["candidate-sparse"],
+                "feed_urls": [ML + "sparse-attention-benchmark"],
+                "previous": "",
             },
             {
                 "category": "Business and economy",
@@ -320,6 +332,8 @@ FEEDS_EXTRA: Payload = {
                     "Synthetic Chipworks halts inference chip shipments"
                 ),
                 "seeds": [],
+                "feed_urls": ["https://example.net/news/chipworks-halt"],
+                "previous": "",
             },
             {
                 "category": "Health and environment",
@@ -333,6 +347,24 @@ FEEDS_EXTRA: Payload = {
                 "feeds": 1,
                 "feed_title": "Synthetic Province clinics busy",
                 "seeds": [],
+                "feed_urls": [],
+                "previous": "",
+            },
+            {
+                "category": "Disasters and accidents",
+                "topic": "",
+                "text": (
+                    "A landslide keeps the Synthetic Coast rail line closed "
+                    "for a third day."
+                ),
+                "urls": ["https://example.net/news/landslide"],
+                "entities": ["Synthetic Coast"],
+                "feeds": 0,
+                "feed_title": "",
+                "seeds": [],
+                "feed_urls": [],
+                # An earlier run had the only report the feeds carried.
+                "previous": "Landslide closes Synthetic Coast rail line",
             },
             {
                 "category": "Armed conflicts and attacks",
@@ -346,6 +378,8 @@ FEEDS_EXTRA: Payload = {
                 "feeds": 0,
                 "feed_title": "",
                 "seeds": [],
+                "feed_urls": [],
+                "previous": "",
             },
         ],
     },

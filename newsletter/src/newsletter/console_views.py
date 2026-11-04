@@ -421,6 +421,8 @@ def feed_summary(
 
 DROP_REASONS = ("history", "duplicate", "research_cap", "pool_cap")
 _PUBLISHED = frozenset({"deep", "brief", "watch"})
+# A story's dispositions, the furthest first.
+_FATES = ("deep", "brief", "watch", "deferred")
 _STAGE = run_pb.ReferenceEvent_Stage
 _LEAD = run_pb.ConsensusLead_Stage
 
@@ -604,9 +606,21 @@ def headline_summaries(
     ]
 
 
+def _addresses(candidate: Row) -> frozenset[str]:
+    """The URL identity keys of a candidate's URL and evidence URLs."""
+    return researcher.url_keys(
+        [text(candidate.get("url")), *_strings(candidate.get("evidence_urls"))]
+    )
+
+
 def consensus_leads(funnel: Funnel) -> list[run_pb.ConsensusLead]:
-    """The headline consensus leads in the pool, and how far each got."""
+    """The headline consensus leads in the pool, and how far each got.
+
+    A candidate at one of the group's reports (the lead's URL or its
+    alternates) is the same event, so a task or story citing either counts.
+    """
     selected, disposition = funnel.fates()
+    addresses = {text(c.get("id")): _addresses(c) for c in funnel.pool}
     result = []
     for candidate in funnel.pool:
         identifier = text(candidate.get("id"))
@@ -615,15 +629,21 @@ def consensus_leads(funnel: Funnel) -> list[run_pb.ConsensusLead]:
             content.CONSENSUS_BASIS
         ):
             continue
-        signals = _mapping(
-            _mapping(funnel.notes.get(identifier)).get("signals")
+        note = _mapping(funnel.notes.get(identifier))
+        signals = _mapping(note.get("signals"))
+        group = researcher.url_keys(
+            [text(candidate.get("url")), *_strings(note.get("alternate_urls"))]
         )
-        fate = disposition.get(identifier, "")
+        same = {identifier} | {
+            i for i, keys in addresses.items() if keys & group
+        }
+        fates = {disposition.get(i, "") for i in same}
+        fate = next((f for f in _FATES if f in fates), "")
         if fate in _PUBLISHED:
             stage = _LEAD.PUBLISHED
         elif fate == "deferred":
             stage = _LEAD.DEFERRED
-        elif identifier in selected:
+        elif same & selected:
             stage = _LEAD.SELECTED
         else:
             stage = _LEAD.POOLED
@@ -649,10 +669,14 @@ def reference_check(funnel: Funnel) -> run_pb.ReferenceCheck | None:
     """Where each reference event left the run, by its best strong match.
 
     Candidates further along win: published, selected, pooled, then handed
-    off by discovery; then the feeds' own record of it (a routed lead, an
-    entry routing cut). A strong match by words can still be another event
-    of the same actors, so ``match`` names it; weak matches alone are
-    UNCERTAIN, none at all UNSEEN. Nothing here says the run missed nothing.
+    off by discovery and left out of the pool; then the feeds' own record
+    of it: a routed lead the pool left out, an entry an earlier run already
+    had, an entry routing cut. A weak match further along than the strong
+    one makes the event UNCERTAIN, as weak matches alone do; none at all is
+    UNSEEN. Until the run reaches the pool, every stage but PREVIOUS is
+    PENDING. A strong match by words can still be another event of the
+    same actors, so ``match`` names it. Nothing here says the run missed
+    nothing.
     """
     reference = funnel.reference
     if not reference:
@@ -704,10 +728,13 @@ def reference_check(funnel: Funnel) -> run_pb.ReferenceCheck | None:
     seeds = {
         text(s.get("id")): text(s.get("title")) for s in funnel.seeds or []
     }
+    # The pool's artifact records its drops; without it the run is still
+    # before the pool (or stopped there).
+    pooled = funnel.dropped is not None or bool(funnel.pool)
     return dataclasses.replace(
         check,
         events=tuple(
-            _reference_event(item, ladder, dropped, seeds)
+            _reference_event(item, ladder, dropped, seeds, pooled=pooled)
             for item in rows(reference.get("items"))
         ),
     )
@@ -718,33 +745,52 @@ def _reference_event(
     ladder: _Ladder,
     dropped: Mapping[str, str],
     seeds: Mapping[str, str],
+    *,
+    pooled: bool,
 ) -> run_pb.ReferenceEvent:
     terms = researcher.ReferenceTerms.of(item)
+    # A candidate at a strongly matching feed entry's address, or at one of
+    # its group's, is that report, whatever language its title is in.
+    terms = dataclasses.replace(
+        terms,
+        urls=terms.urls | researcher.url_keys(_strings(item.get("feed_urls"))),
+    )
     # The routed leads the feeds matched strongly, with every entry's words.
     linked = _strings(item.get("seeds"))
     feed_title = text(item.get("feed_title"))
-    found: tuple[_STAGE, str, str] | None = None
-    weak = ""
-    for stage, entries in ladder:
+    # The first strong and weak matches as (rank, ...): a lower rank got
+    # further.
+    strong: tuple[int, _STAGE, str, str] | None = None
+    weak: tuple[int, str] | None = None
+    for rank, (stage, entries) in enumerate(ladder):
         for candidate, words, keys in entries:
             identifier = text(candidate.get("id"))
             strength = 2 if identifier in linked else terms.match(words, keys)
-            if strength == 2:
-                title = text(candidate.get("title"))
-                found = (stage, title, dropped.get(identifier, ""))
-                break
-            if strength and not weak:
-                weak = text(candidate.get("title"))
-        if found:
-            break
-    if found is None and linked:
+            title = text(candidate.get("title"))
+            if strength == 2 and strong is None:
+                strong = (rank, stage, title, dropped.get(identifier, ""))
+            elif strength == 1 and weak is None:
+                weak = (rank, title)
+    # Then the feeds' own record, behind every candidate.
+    behind = len(ladder)
+    if strong is None and linked:
         reason = next((dropped[s] for s in linked if s in dropped), "")
-        found = (_STAGE.NOT_HANDED, seeds.get(linked[0]) or feed_title, reason)
-    elif found is None and item.get("feeds") == 2:
-        found = (_STAGE.CUT, feed_title, "")
-    elif found is None and (weak or item.get("feeds") == 1):
-        found = (_STAGE.UNCERTAIN, weak or feed_title, "")
-    stage, match, reason = found or (_STAGE.UNSEEN, "", "")
+        title = seeds.get(linked[0]) or feed_title
+        strong = (behind, _STAGE.DROPPED, title, reason)
+    elif strong is None and item.get("previous"):
+        previous = text(item.get("previous"))
+        strong = (behind + 1, _STAGE.PREVIOUS, previous, "")
+    elif strong is None and item.get("feeds") == 2:
+        strong = (behind + 2, _STAGE.CUT, feed_title, "")
+    if strong and not (weak and weak[0] < strong[0]):
+        _, stage, match, reason = strong
+    elif weak or item.get("feeds") == 1:
+        stage, match = _STAGE.UNCERTAIN, weak[1] if weak else feed_title
+        reason = ""
+    else:
+        stage, match, reason = _STAGE.UNSEEN, "", ""
+    if not pooled and stage != _STAGE.PREVIOUS:
+        stage, reason = _STAGE.PENDING, ""
     return run_pb.ReferenceEvent(
         category=text(item.get("category")),
         topic=text(item.get("topic")),

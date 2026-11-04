@@ -132,9 +132,10 @@ describe('the retrieval funnel and must-know tracking', () => {
     expect(must.getByText(/03-world · 头条源 3\/3 正常 · 窗口内 41 条，\s*29 组，3 家及以上 1 组/)).toBeVisible();
     const reference = must.getByRole('link', { name: '维基百科时事 · 10月26日（UTC）' });
     expect(reference).toHaveAttribute('href', 'https://reference.example.org/wiki/Portal:Current_events/2026_October_26');
-    expect(must.getByText('已刊 1 · 未入选 1 · 入池被丢 1 · 给了没交接 1 · 种子被截 1 · 未见 1 · 未确定 1')).toBeVisible();
+    expect(must.getByText('已刊 1 · 未入选 1 · 入池被丢 2 · 往期已见 1 · 种子被截 1 · 未见 1 · 未确定 1')).toBeVisible();
     const row = (text: RegExp) => must.getByText(text).closest('li');
-    expect(row(/^Synthetic Cloud cuts/)).toHaveTextContent('▲给了没交接Business and economy · 研究名额已满 · 匹配：Cloud GPU rental prices fall');
+    expect(row(/^Synthetic Cloud cuts/)).toHaveTextContent('▲入池被丢Business and economy · 研究名额已满 · 匹配：Cloud GPU rental prices fall');
+    expect(row(/^A landslide keeps/)).toHaveTextContent('○往期已见Disasters and accidents · 匹配：Landslide closes Synthetic Coast rail line');
     expect(row(/^The River Delta Council/)).toHaveTextContent('匹配：合成：河口防洪闸表决推迟');
     expect(row(/^Border guards/)).toHaveTextContent('▲未见Armed conflicts and attacks');
     expect(must.getByText(/这里不说明没有漏报/)).toBeVisible();

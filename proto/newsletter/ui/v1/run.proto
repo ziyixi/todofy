@@ -405,7 +405,7 @@ message ReferenceCheck {
   State state = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The researcher's code when it could not (`http_error`, `parse_error`, ...).
   string error_code = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // Its events, in its order (at most 30).
+  // Its events, in its order (at most 30; past that the categories take turns).
   repeated ReferenceEvent events = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
@@ -421,16 +421,18 @@ message ReferenceEvent {
     STAGE_SELECTED = 2;
     // One was in the pool; selection did not choose it.
     STAGE_POOLED = 3;
-    // Discovery handed one off; the pool left it out (`drop_reason`).
+    // A candidate discovery handed off, or a routed feed lead, matched; the pool left it out (`drop_reason`).
     STAGE_DROPPED = 4;
-    // A routed feed lead matched; discovery handed nothing matching off and the lead did not reach the pool either.
-    STAGE_NOT_HANDED = 5;
+    // The run has not reached the pool (or stopped before it): nothing past the feeds is known yet.
+    STAGE_PENDING = 5;
     // A feed entry matched, but routing left it out of the leads.
     STAGE_CUT = 6;
     // Nothing in the run matched, not even weakly.
     STAGE_UNSEEN = 7;
-    // Only weak matches: it may or may not be there.
+    // Only weak matches, or a weak one further along than the strong one: it may or may not be there.
     STAGE_UNCERTAIN = 8;
+    // Only a feed entry an earlier run already had matched: the run did not take it up again.
+    STAGE_PREVIOUS = 9;
   }
 
   // Its category on the reference (`Politics and elections`).
@@ -443,9 +445,10 @@ message ReferenceEvent {
   repeated string source_urls = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The furthest stage a strong match reached.
   Stage stage = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // For DROPPED (and NOT_HANDED when the pool left the lead out): history, duplicate, research_cap or pool_cap.
+  // For DROPPED: history, duplicate, research_cap or pool_cap; empty when the pool did not record why.
   string drop_reason = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The title of the best match (untrusted); empty when UNSEEN.
+  // The title of the best match (untrusted): the earlier run's entry for PREVIOUS, the weak match for UNCERTAIN;
+  // empty when UNSEEN.
   string match = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 

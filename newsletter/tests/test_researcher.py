@@ -1572,11 +1572,54 @@ def test_current_events_keep_cited_events_of_the_kept_categories():
         json.dumps({"error": {"code": "missingtitle"}}).encode(),
         json.dumps({"parse": {"wikitext": 7}}).encode(),
         b"<html>",
+        # Category lines of another shape: no items would read as a quiet
+        # day.
+        fake.current_events(fake.CURRENT_EVENTS.replace("'''", ";")),
     ],
 )
 def test_a_missing_or_odd_reference_page_is_a_parse_error(body):
-    with pytest.raises(ValueError, match=r"parse answer|Malformed JSON"):
+    with pytest.raises(
+        ValueError, match=r"parse answer|Malformed JSON|category line"
+    ):
         researcher.parse_current_events(body)
+
+
+def test_a_category_line_is_read_by_its_text_or_names_none():
+    page = fake.CURRENT_EVENTS.replace(
+        "'''Politics and elections'''",
+        "<div role=\"heading\">'''Politics and elections'''</div>",
+    )
+    assert len(researcher.parse_current_events(fake.current_events(page))) == 2
+    # The prize below a line of another shape is filed under no category,
+    # never under the armed conflicts above it.
+    page = fake.CURRENT_EVENTS.replace(
+        "'''Arts and culture'''", ";Arts and culture"
+    )
+    items = researcher.parse_current_events(fake.current_events(page))
+    assert [item["urls"][0] for item in items] == [
+        "https://news.example.org/border-clash",
+        "https://news.example.org/referendum",
+    ]
+
+
+def test_past_the_limit_the_categories_take_turns():
+    limit = researcher.MAX_REFERENCE_ITEMS
+    lines = ["'''Armed conflicts and attacks'''"]
+    lines += [
+        f"*A strike hits [[Town {n}]]. [https://news.example.org/{n} (W)]"
+        for n in range(limit + 2)
+    ]
+    lines += [
+        "'''Politics and elections'''",
+        "*[[Norland]] votes. [https://news.example.org/vote (W)]",
+    ]
+    page = fake.current_events("\n".join(lines))
+    items = researcher.parse_current_events(page)
+    # Alphabetically last, politics still keeps its event; page order stays.
+    assert [item["category"] for item in items] == [
+        "Armed conflicts and attacks"
+    ] * (limit - 1) + ["Politics and elections"]
+    assert items[0]["urls"] == ["https://news.example.org/0"]
 
 
 def test_a_registry_has_at_most_one_reference():
@@ -1607,10 +1650,43 @@ def test_a_reference_matches_its_sources_and_named_words():
         == 2
     )
     assert terms.match(words("Norland voters approve a referendum")) == 1
+    assert terms.match(words("Norland holds a referendum")) == 0
     assert terms.match(words("A referendum in another country")) == 0
     assert researcher.reference_words(
         [], ["https://news.example.org/world/norland-votes-2026"]
     ) == {"norlan", "vote"}
+
+
+def test_the_same_actors_in_another_event_are_no_strong_match():
+    (strike,) = researcher.parse_current_events(
+        fake.current_events(
+            "'''Armed conflicts and attacks'''\n"
+            "*A [[Norland Defence Forces|Norland]] airstrike on a school "
+            "sheltering displaced people in [[Ostra]], [[Sudria Strip]], "
+            "kills 12 people, according to the [[Sudria Health Ministry]]. "
+            "[https://news.example.org/ostra-strike (W)]"
+        )
+    )
+    terms = researcher.ReferenceTerms.of(strike)
+
+    def match(title):
+        return terms.match(researcher.reference_words([title]))
+
+    # Every shared word is a name: who and where, not what happened.
+    assert (
+        match(
+            "Norland and Sudria negotiators resume ceasefire talks, Sudria "
+            "Strip health ministry says aid blocked"
+        )
+        == 1
+    )
+    assert (
+        match(
+            "Sudria Health Ministry says Norland airstrike kills 12 at Ostra "
+            "school"
+        )
+        == 2
+    )
 
 
 async def test_the_reference_is_yesterdays_page_and_never_a_lead():
@@ -1660,10 +1736,37 @@ async def test_the_reference_is_yesterdays_page_and_never_a_lead():
     border, referendum = reference["items"]
     assert (border["feeds"], border["seeds"]) == (2, [])
     assert border["feed_title"].startswith("Norland and Sudria")
+    assert border["feed_urls"] == ["https://feeds.example.org/ostra-pass"]
     assert (referendum["feeds"], referendum["seeds"]) == (2, [lead["id"]])
+    assert referendum["feed_urls"] == [lead["url"]]
+    assert referendum["previous"] == ""
     sources_by_id = {item["id"]: item for item in result.sources}
     assert sources_by_id["current-events"]["entries"] == 2
     assert sources_by_id["current-events"]["seeds"] == 0
+
+
+async def test_a_reference_event_an_earlier_run_had_is_previous():
+    url = "https://feeds.example.org/norland-referendum"
+    title = (
+        "Norland voters approve new constitution in referendum, electoral "
+        "commission says"
+    )
+    network = fake.Network(
+        {
+            "en.wikipedia.org": fake.current_events(),
+            "feeds.example.org": fake.rss(fake.rss_item(title, url)),
+        }
+    )
+    result = await run(
+        network,
+        load(fake.source(), reference_source()),
+        history=[{"url": url, "title": "合成：诺兰公投"}],
+    )
+    # Still never a lead, and not counted as one the feeds carried today.
+    assert result.candidates == []
+    _, referendum = result.reference["items"]
+    assert (referendum["feeds"], referendum["seeds"]) == (0, [])
+    assert (referendum["feed_urls"], referendum["previous"]) == ([], title)
 
 
 async def test_an_unavailable_reference_never_degrades_the_feeds():
@@ -1749,3 +1852,8 @@ async def test_a_group_member_matches_through_its_routed_leader():
     )
     assert researcher.ReferenceTerms.of(referendum).match(leader) < 2
     assert referendum["seeds"] == [group["id"]]
+    # The group's reports' addresses, where discovery may hand it off.
+    assert referendum["feed_urls"] == [
+        group["url"],
+        *result.notes[group["id"]]["alternate_urls"],
+    ]

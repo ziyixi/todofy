@@ -546,6 +546,33 @@ def test_consensus_leads_go_as_far_as_their_stories():
     assert [lead.outlet_count for lead in leads] == [4, 0, 0, 0]
 
 
+def test_a_consensus_lead_counts_a_candidate_at_another_outlets_report():
+    basis = {"kind": "news", "basis": "头条共识：BBC、NPR、DW共3家"}
+    lead = candidate("lead", "Norland votes")
+    opened = candidate("opened", "合成：诺兰公投", url="https://b.example/x")
+    run = {
+        "pool": [lead, opened],
+        "classifications": {"lead": basis},
+        "notes": {"lead": {"alternate_urls": ["https://b.example/x"]}},
+        "tasks": [{"candidate_ids": ["opened"]}],
+    }
+    (found,) = views.consensus_leads(
+        funnel(
+            **run,
+            stories=[{"candidate_ids": ["opened"], "disposition": "brief"}],
+        )
+    )
+    assert (found.title, found.stage, found.disposition) == (
+        "Norland votes",
+        LEAD.PUBLISHED,
+        "brief",
+    )
+    (found,) = views.consensus_leads(funnel(**run))
+    assert found.stage == LEAD.SELECTED
+    (found,) = views.consensus_leads(funnel(**{**run, "notes": {}}))
+    assert found.stage == LEAD.POOLED
+
+
 REFERENDUM = {
     "category": "Politics and elections",
     "text": "Norland's electoral commission confirms that voters approved "
@@ -614,9 +641,10 @@ def test_a_reference_event_left_before_the_pool_names_where():
         {"id": "lead", "direction": "03-world", "reason": "research_cap"}
     ]
     linked = {**REFERENDUM, "seeds": ["lead"]}
+    # The pool left the routed lead out: that is where it stopped.
     (event,) = check(linked, seeds=[lead], dropped=dropped).events
     assert (event.stage, event.match, event.drop_reason) == (
-        STAGE.NOT_HANDED,
+        STAGE.DROPPED,
         "Norland votes",
         "research_cap",
     )
@@ -625,10 +653,78 @@ def test_a_reference_event_left_before_the_pool_names_where():
         linked, seeds=[lead], dropped=dropped, discovered=handed
     ).events
     assert (event.stage, event.drop_reason) == (STAGE.DROPPED, "research_cap")
-    (event,) = check(REFERENDUM).events
+    (event,) = check(REFERENDUM, dropped=[]).events
     assert (event.stage, event.match) == (STAGE.CUT, "Norland votes")
     weak = candidate("weak", "Norland voters approve a referendum")
     (event,) = check({**REFERENDUM, "feeds": 0}, pool=[weak]).events
     assert (event.stage, event.match) == (STAGE.UNCERTAIN, weak["title"])
-    (event,) = check({**REFERENDUM, "feeds": 0}).events
+    (event,) = check({**REFERENDUM, "feeds": 0}, dropped=[]).events
     assert (event.stage, event.match) == (STAGE.UNSEEN, "")
+
+
+def test_before_the_pool_a_reference_event_is_pending():
+    # The run is still discovering: no pool, no drops yet.
+    lead = candidate("lead", "Norland votes")
+    linked = {**REFERENDUM, "seeds": ["lead"]}
+    handed = {"03-world": {"candidates": [lead]}}
+    for item in (linked, REFERENDUM, {**REFERENDUM, "feeds": 0}):
+        (event,) = check(item, seeds=[lead], discovered=handed).events
+        assert (event.stage, event.drop_reason) == (STAGE.PENDING, "")
+    (event,) = check({**REFERENDUM, "feeds": 0}).events
+    assert (event.stage, event.match) == (STAGE.PENDING, "")
+
+
+def test_an_event_an_earlier_run_had_is_not_unseen():
+    earlier = {
+        **REFERENDUM,
+        "feeds": 0,
+        "feed_title": "",
+        "previous": "Norland approves its constitution",
+    }
+    for changes in ({"dropped": []}, {}):
+        (event,) = check(earlier, **changes).events
+        assert (event.stage, event.match) == (
+            STAGE.PREVIOUS,
+            "Norland approves its constitution",
+        )
+    # A report this run carried further still wins.
+    words = candidate(
+        "words",
+        "Norland voters approve constitution in referendum, electoral "
+        "commission says",
+    )
+    (event,) = check(earlier, pool=[words]).events
+    assert event.stage == STAGE.POOLED
+
+
+def test_a_published_discovery_candidate_in_chinese_is_not_left_pooled():
+    # Discovery handed off a Chinese title at an address without a slug;
+    # the English feed lead it opened sat in the pool uncited.
+    lead = candidate(
+        "lead",
+        "Norland voters approve new constitution in referendum, electoral "
+        "commission says",
+    )
+    published = candidate(
+        "published",
+        "诺兰选民在公投中通过新宪法",
+        url="https://news.example.org/articles/c4g7x2y9",
+        event_key="norland-constitution-referendum-approved",
+    )
+    run = {
+        "seeds": [lead],
+        "pool": [published, lead],
+        "dropped": [],
+        "tasks": [{"candidate_ids": ["published"]}],
+        "stories": [{"candidate_ids": ["published"], "disposition": "brief"}],
+    }
+    linked = {**REFERENDUM, "seeds": ["lead"], "feed_urls": [lead["url"]]}
+    # Its address is one of the strong feed matches' (a group alternate).
+    (event,) = check(
+        {**linked, "feed_urls": [lead["url"], published["url"]]}, **run
+    ).events
+    assert (event.stage, event.match) == (STAGE.PUBLISHED, published["title"])
+    # It is not: its English event key is only a weak match, which got
+    # further than the lead, so it may be there.
+    (event,) = check(linked, **run).events
+    assert (event.stage, event.match) == (STAGE.UNCERTAIN, published["title"])
