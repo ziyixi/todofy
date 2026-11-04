@@ -42,11 +42,13 @@ function settingsMessage(store: Store): MessageShape<typeof SettingsSchema> {
   const failed = store.get('provider_error') as ProviderError | null;
   const connection = store.connection();
   const success = store.get('last_success');
+  const writeSuccess = store.get('last_write_success');
   return create(SettingsSchema, {
     name: 'settings', connected: connection !== null, appKey: typeof appKey === 'string' ? appKey : '',
     ...(failed === null ? {} : { lastProviderError: failed.reason, lastProviderErrorTime: timestamp(failed.time) }),
     ...(connection?.connectTime === undefined ? {} : { connectTime: timestamp(connection.connectTime) }),
     ...(typeof success === 'number' && connection !== null ? { lastSuccessTime: timestamp(success) } : {}),
+    ...(typeof writeSuccess === 'number' && connection !== null ? { lastWriteSuccessTime: timestamp(writeSuccess) } : {}),
   });
 }
 

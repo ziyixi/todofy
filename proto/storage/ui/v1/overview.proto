@@ -53,8 +53,9 @@ message Overview {
   ];
   // True when the 14 days hold more counts than `usage` carries; the oldest are left out.
   bool usage_truncated = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The newest failed application requests, the newest first: at most one a minute for each credential,
-  // operation and reason. Absent objects and create conflicts are ordinary answers and never listed.
+  // The newest failed or rate-limited application requests, the newest first: at most one a minute for
+  // each credential, operation and reason, and rate limits at most one a minute for each credential.
+  // Absent objects and create conflicts are ordinary answers and never listed.
   repeated RequestFailure recent_failures = 7 [
     (google.api.field_behavior) = OUTPUT_ONLY,
     (common.wire.v1.field).max_items = 50
@@ -148,7 +149,7 @@ message UsageCount {
   ];
 }
 
-// One failed application request.
+// One failed or rate-limited application request.
 message RequestFailure {
   // When it failed.
   google.protobuf.Timestamp failure_time = 1 [(google.api.field_behavior) = OUTPUT_ONLY];

@@ -3,7 +3,10 @@ import { HASH, harness } from './harness.ts';
 
 interface Count { readonly client: string; readonly namespace: string; readonly operation: string; readonly outcome: string; readonly request_count: number; readonly object_count?: number; readonly upload_bytes?: number; readonly download_bytes?: number; readonly max_batch_object_count?: number }
 interface Overview {
-  readonly settings: { readonly connected?: boolean; readonly connect_time?: string; readonly last_success_time?: string };
+  readonly settings: {
+    readonly connected?: boolean; readonly connect_time?: string; readonly last_success_time?: string; readonly last_write_success_time?: string;
+    readonly last_provider_error?: string; readonly last_provider_error_time?: string;
+  };
   readonly clients?: readonly { readonly name: string; readonly last_use_time?: string }[];
   readonly usage?: readonly Count[];
   readonly recent_failures?: readonly { readonly client: string; readonly operation: string; readonly reason: string; readonly http_status: number }[];
@@ -85,4 +88,41 @@ it('writes pending counts when the overview is read and keeps a revoked key in i
   const disconnected = await (await current.owner('settings')).json<Overview['settings']>();
   expect(disconnected).not.toHaveProperty('last_success_time');
   expect(disconnected).not.toHaveProperty('connect_time');
+});
+
+it('keeps a full Dropbox unresolved while reads succeed and records a malformed body as the 400 its caller got', async () => {
+  current = await harness();
+  await current.connect();
+  const active = current;
+  const writer = await current.client('synthetic');
+  const bytes = new TextEncoder().encode('synthetic-object');
+  const json = { method: 'POST', headers: { 'content-type': 'application/json' } };
+  // Each step lands in a later millisecond, so the times below are strictly ordered.
+  const step = async (path: string, init: Parameters<typeof active.machine>[2]): Promise<Response> => {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    return active.machine(path, writer.api_key, init);
+  };
+  const put = (key: string) => step('content?key=' + key, { method: 'PUT', body: bytes, headers: { 'if-none-match': '*', 'content-length': String(bytes.byteLength) } });
+  const time = (value: string | undefined) => Date.parse(value ?? '');
+  expect((await put('one.bin')).status).toBe(200);
+  active.provider.uploadFault = 'insufficient_space';
+  expect((await put('two.bin')).status).toBe(507);
+  expect((await step('stat', { ...json, body: JSON.stringify({ key: 'one.bin' }) })).status).toBe(200);
+  // A repeat within the minute moves the error time past the read that succeeded in between.
+  expect((await put('three.bin')).status).toBe(507);
+  expect((await step('stat', { ...json, body: JSON.stringify({ key: 'a.bin', unknown_field: 1 }) })).status).toBe(400);
+  const full = await (await active.owner('overview')).json<Overview>();
+  expect(full.settings.last_provider_error).toBe('INSUFFICIENT_SPACE');
+  expect(time(full.settings.last_provider_error_time)).toBeGreaterThan(time(full.settings.last_success_time));
+  expect(time(full.settings.last_write_success_time)).toBeLessThan(time(full.settings.last_success_time));
+  expect(full.recent_failures).toEqual([
+    expect.objectContaining({ client: writer.name, operation: 'stat', reason: 'BAD_REQUEST', http_status: 400 }),
+    expect.objectContaining({ client: writer.name, operation: 'put', reason: 'INSUFFICIENT_SPACE', http_status: 507 }),
+  ]);
+
+  // Freed space shows as a successful write after the error.
+  active.provider.uploadFault = null;
+  expect((await put('four.bin')).status).toBe(200);
+  const freed = await (await active.owner('overview')).json<Overview>();
+  expect(time(freed.settings.last_write_success_time)).toBeGreaterThan(time(freed.settings.last_provider_error_time));
 });

@@ -56,6 +56,8 @@ export interface PendingUsage {
   readonly failures: readonly Failure[];
   /** Milliseconds of the newest request Dropbox answered; 0 when none. */
   readonly success: number;
+  /** Milliseconds of the newest successful PUT or batch; 0 when none. A full Dropbox still answers reads. */
+  readonly writeSuccess: number;
   /** Deletes daily counts before this UTC day; empty to keep them. */
   readonly pruneBefore: string;
 }
@@ -158,8 +160,13 @@ export class Store {
       }
       this.set('failure_sequence', next % FAILURE_SLOTS);
     }
-    const success = this.get('last_success');
-    if (pending.success > (typeof success === 'number' ? success : 0)) this.set('last_success', pending.success);
+    // A success counted before the current connection was installed belongs to an earlier one.
+    const connection = this.connection();
+    const since = connection?.connectTime ?? 0;
+    for (const [key, time] of [['last_success', pending.success], ['last_write_success', pending.writeSuccess]] as const) {
+      const stored = this.get(key);
+      if (connection !== null && time >= since && time > (typeof stored === 'number' ? stored : 0)) this.set(key, time);
+    }
     if (pending.pruneBefore !== '') this.sql.exec('DELETE FROM usage_daily WHERE day < ?', pending.pruneBefore);
   }
 

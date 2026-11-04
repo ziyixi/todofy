@@ -86,7 +86,7 @@ message Settings {
   // The Storage reason of the newest error Dropbox answered on this connection, such as
   // INSUFFICIENT_SPACE; empty when none was recorded. Never provider content.
   string last_provider_error = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // When Dropbox answered that error.
+  // When Dropbox last answered that error; a repeat within a minute is written with the counters.
   google.protobuf.Timestamp last_provider_error_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
   // When this connection was installed; absent for a connection installed before this field existed.
   google.protobuf.Timestamp connect_time = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
@@ -94,4 +94,7 @@ message Settings {
   // conflict included; written with the counters about every 30 seconds. An error newer than this
   // is still occurring.
   google.protobuf.Timestamp last_success_time = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The newest successful PUT or batch on this connection, written with the counters. A full Dropbox
+  // still answers reads, so INSUFFICIENT_SPACE has recovered only once a write succeeds after it.
+  google.protobuf.Timestamp last_write_success_time = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
 }

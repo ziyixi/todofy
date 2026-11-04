@@ -39,6 +39,7 @@ export class Usage {
   private failures: Failure[] = [];
   private readonly failureSeen = new Map<string, number>();
   private success = 0;
+  private writeSuccess = 0;
   private prunedDay = '';
 
   /** Every counted request adds to a cell, so cells alone tell whether anything is pending. */
@@ -52,9 +53,10 @@ export class Usage {
     const outcome = outcomeOf(error);
     this.count(client, operation, outcome, {}, now);
     if (outcome === 'not_found' || outcome === 'conflict') return;
-    // Like the provider error row, one entry a minute for each credential, operation and reason.
+    // Like the provider error row, one entry a minute for each credential, operation and reason; rate limits once a
+    // minute for each credential, so a long run of 429s on every operation cannot push rarer failures out of the ring.
     const reason = error instanceof RpcError ? error.reason : 'INTERNAL';
-    const seen = client + '|' + operation + '|' + reason;
+    const seen = client + '|' + (outcome === 'rate_limited' ? '*' : operation) + '|' + reason;
     if (now - (this.failureSeen.get(seen) ?? 0) < FAILURE_INTERVAL_MS) return;
     this.failureSeen.set(seen, now);
     const retryAfter = error instanceof RpcError ? Number(error.headers['retry-after'] ?? 0) : 0;
@@ -79,6 +81,7 @@ export class Usage {
     if (operation === 'batch_create') cell.max_batch = Math.max(cell.max_batch, amounts.objects ?? 0);
     this.lastUse.set(client, now);
     if (outcome === 'ok' || outcome === 'not_found' || outcome === 'conflict') this.success = now;
+    if (outcome === 'ok' && (operation === 'put' || operation === 'batch_create')) this.writeSuccess = now;
   }
 
   /** Writes every pending count in one transaction, then forgets them; a failed write keeps them for the next flush. */
@@ -87,13 +90,14 @@ export class Usage {
     const today = utcDay(now);
     const pruneBefore = this.prunedDay === today ? '' : utcDay(now - KEEP_DAYS * DAY_MS);
     transaction(() => {
-      store.addUsage({ cells: [...this.cells.values()], lastUse: this.lastUse, failures: this.failures, success: this.success, pruneBefore });
+      store.addUsage({ cells: [...this.cells.values()], lastUse: this.lastUse, failures: this.failures, success: this.success, writeSuccess: this.writeSuccess, pruneBefore });
     });
     this.prunedDay = today;
     this.cells = new Map();
     this.lastUse = new Map();
     this.failures = [];
     this.success = 0;
+    this.writeSuccess = 0;
     for (const [seen, time] of this.failureSeen) if (now - time >= FAILURE_INTERVAL_MS) this.failureSeen.delete(seen);
   }
 }

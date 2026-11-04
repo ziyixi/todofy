@@ -82,16 +82,20 @@ Owner HTTP is `storage.ui.v1` under `/api/v1/`, behind edge-auth. Mutations requ
 `X-CSRF-Token: 1` and JSON. Newly created application keys are returned once; listings and replays return metadata.
 Settings include the Storage reason and time of the newest error Dropbox answered, never provider content.
 Absent objects and create conflicts are ordinary answers and are not recorded. A new or removed connection clears it.
-Settings also carry the connection time and the last success; an error newer than the last success is still
-occurring, an older one has recovered.
+Settings also carry the connection time, the last success and the last successful write; an error newer than the
+last success is still occurring, an older one has recovered. A full Dropbox still answers reads, so
+`INSUFFICIENT_SPACE` has recovered only once a write succeeds after it. A new reason is written at once; a repeat of
+the same reason within a minute is written with the counters, so its time stays newer than the successes between.
 
 ## Owner console and counters
 
 The console at `/` loads with one `GetOverview` call and never polls. 概览 shows the status, today's requests against
 the account's 100,000 daily Workers Free requests, writes and reads, a 14-day chart, namespace cards and the
 connection; 密钥 groups keys by namespace with their created and last-use times behind a collapsed create form; 活动
-lists recent failures, a 14-day table and today's operations. Revoking a key and disconnecting Dropbox each ask for a
-second confirmation. Dropbox space and per-namespace object totals are placeholders that fetch nothing yet.
+lists recent failures, a 14-day table and today's operations. Counts are by UTC day, labelled 本 UTC 日; event times
+use the browser's time zone. Revoking a key and disconnecting Dropbox each ask for a second confirmation that takes
+focus on 取消 and closes on Escape. Dropbox space and per-namespace object totals are placeholders that fetch nothing
+yet.
 
 The Durable Object counts each application request that presents a known key, by UTC day (when the quota resets), key,
 operation (`stat`, `list`, `get`, `head`, `put`, `batch_create`) and outcome:
@@ -100,22 +104,24 @@ operation (`stat`, `list`, `get`, `head`, `put`, `batch_create`) and outcome:
 | --- | --- |
 | `ok` | Answered successfully |
 | `not_found`, `conflict` | Ordinary answers: an absent object, or a revision or create precondition that did not hold |
-| `rate_limited` | 429 with Retry-After |
-| `failed` | Anything else; also listed in recent failures |
+| `rate_limited` | 429 with Retry-After; also listed in recent failures |
+| `failed` | Anything else, a malformed request body as `BAD_REQUEST`; also listed in recent failures |
 
 Each count also sums the objects written (one per PUT, every object of a batch) and their bytes, download bytes by
 Content-Length, and the largest batch. Recent failures keep the newest 50, at most one a minute per key, operation and
-reason, with the reason code, HTTP status and Retry-After, never provider content. Malformed keys refused at the edge,
-unknown or revoked keys, unknown paths or methods, the console and `/health` are not counted; Home shows the
-account-wide totals.
+reason; rate limits take at most one a minute per key, not one per operation, so a run of 429s pushes rarer failures
+out more slowly. Each has the reason code, HTTP status and Retry-After the caller received, never provider content;
+absent objects and conflicts are never listed. Malformed keys refused at the edge, unknown or revoked keys, unknown
+paths or methods, the console and `/health` are not counted; Home shows the account-wide totals.
 
 Counts accumulate in memory and are written in one transaction about 30 seconds after the first request that changed
 them, and before every overview: one row per changed day, key, operation and outcome rather than one per request, at
 most 2,880 writes a day. The pending timer keeps the object in memory until the write, so a burst can add up to about
 20 seconds of Durable Object duration; an alarm would wake a hibernated instance without the counts and cost a request.
 A deploy or eviction loses at most those 30 seconds. Daily counts are kept 90 days. Each key's last use and the
-connection's last success are written with the counts. `GetOverview` answers the settings, keys, 14 days of counts
-and recent failures in one call.
+connection's last success and last successful write are written with the counts; a success counted before a reconnect
+is not carried over to the new connection. `GetOverview` answers the settings, keys, 14 days of counts and recent
+failures in one call.
 
 ## Development
 

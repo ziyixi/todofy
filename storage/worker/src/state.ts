@@ -67,7 +67,9 @@ export class StorageState extends DurableObject<Env> {
       const { response, amounts } = await this.perform(operation, request, client);
       this.usage.succeeded(client.id, operation, amounts);
       return response;
-    } catch (error) {
+    } catch (caught) {
+      // Record the answer the caller receives: a malformed JSON body is its 400, not an internal error.
+      const error = caught instanceof WireJsonError ? failure(Code.INVALID_ARGUMENT, 'BAD_REQUEST') : caught;
       this.usage.failed(client.id, operation, error);
       throw error;
     } finally {
@@ -114,6 +116,7 @@ export class StorageState extends DurableObject<Env> {
 
   private flushUsage(): void {
     this.usage.flush(this.store, (write) => { this.ctx.storage.transactionSync(write); });
+    this.dropbox.flushRepeatedFailure();
   }
 
   override async fetch(request: Request): Promise<Response> {

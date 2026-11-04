@@ -165,13 +165,15 @@ return [...m.values()].sort((a,b)=>a.name.localeCompare(b.name));}
 
 function overall(){const s=state.settings??{};
 if(!s.connected)return{tone:'unknown',title:'未连接 Dropbox',line:'连接后，应用密钥才能读写文件。'};
-const errTime=s.last_provider_error_time?Date.parse(s.last_provider_error_time):0,okTime=s.last_success_time?Date.parse(s.last_success_time):0;
+const time=(v)=>v?Date.parse(v):0,errTime=time(s.last_provider_error_time),okTime=time(s.last_success_time);
+// A full Dropbox still answers reads, so only a later successful write shows that space was freed.
+const since=s.last_provider_error==='INSUFFICIENT_SPACE'?time(s.last_write_success_time):okTime;
 const t=today(),failed=sum(t,'request_count',isFailed),limited=sum(t,'request_count',(r)=>r.outcome==='rate_limited');
-const line=['Dropbox 已连接',okTime?'最近成功 '+ago(okTime):'尚无成功请求',failed?'今日 '+num(failed)+' 次失败':limited?'今日限流 '+num(limited)+' 次':'今日无异常'].join(' · ');
-if(s.last_provider_error&&errTime>=okTime){const r=reason(s.last_provider_error);
+const line=['Dropbox 已连接',okTime?'最近成功 '+ago(okTime):'尚无成功请求',failed?'本 UTC 日 '+num(failed)+' 次失败':limited?'本 UTC 日限流 '+num(limited)+' 次':'本 UTC 日无异常'].join(' · ');
+if(s.last_provider_error&&errTime>=since){const r=reason(s.last_provider_error);
 return{tone:r.tone,title:r.tone==='bad'?'需要处理':'需要注意',line,notice:{tone:r.tone,title:r.title+' · '+when(errTime),hint:r.hint}};}
 const past=s.last_provider_error?'最近一次错误“'+reason(s.last_provider_error).title+'”（'+when(errTime)+'）之后已恢复。':'';
-if(failed)return{tone:'warn',title:'需要注意',line,past,notice:{tone:'warn',title:'今日有 '+num(failed)+' 次请求失败',hint:'原因见“活动”。'}};
+if(failed)return{tone:'warn',title:'需要注意',line,past,notice:{tone:'warn',title:'本 UTC 日有 '+num(failed)+' 次请求失败',hint:'原因见“活动”。'}};
 return{tone:'ok',title:'运行正常',line,past};}
 
 function tile(label,value,...details){return h('div',{},h('dt',{text:label}),value,details.map((d)=>typeof d==='string'?h('dd',{text:d}):h('dd',{},d)));}
@@ -183,10 +185,10 @@ const batchCount=sum(batches,'request_count'),reads=sum(t,'request_count',(r)=>[
 fill('summary',h('h2',{},mark(o.tone,o.title)),h('p',{class:'line',text:o.line}),o.past?h('p',{class:'muted past',text:o.past}):null,
 o.notice?h('div',{class:'notice '+(o.notice.tone==='bad'?'bad':'')},h('p',{},h('strong',{},mark(o.notice.tone,o.notice.title))),o.notice.hint?h('p',{text:o.notice.hint}):null):null,
 h('dl',{class:'tiles'},
-tile('Dropbox 空间',h('dd',{class:'value idle',text:'—'}),'尚未接入'),
-tile('今日应用请求',h('dd',{class:'value',text:num(requests)}),meter(share,share>=.5?'warn':''),'占全账户每日 10 万免费请求的 '+(share*100).toFixed(1)+'% · UTC 0 点重置'),
-tile('今日写入',h('dd',{class:'value'},num(written),h('small',{text:'个对象'})),bytes(sum(t,'upload_bytes'))+(batchCount?' · '+num(batchCount)+' 批，平均 '+(sum(batches,'object_count')/batchCount).toFixed(1)+' 个':'')),
-tile('今日读取',h('dd',{class:'value'},num(reads),h('small',{text:'次'})),'下载 '+bytes(sum(t,'download_bytes'))+' · 列表 '+num(sum(t,'request_count',(r)=>r.operation==='list'))+' 页')));}
+tile('Dropbox 空间',h('dd',{class:'value idle',text:'—'}),'暂未统计'),
+tile('本 UTC 日应用请求',h('dd',{class:'value',text:num(requests)}),meter(share,share>=.5?'warn':''),'占全账户每日 10 万免费请求的 '+(share*100).toFixed(1)+'% · UTC 0 点重置'),
+tile('本 UTC 日写入',h('dd',{class:'value'},num(written),h('small',{text:'个对象'})),bytes(sum(t,'upload_bytes'))+(batchCount?' · '+num(batchCount)+' 批，平均 '+(sum(batches,'object_count')/batchCount).toFixed(1)+' 个':'')),
+tile('本 UTC 日读取',h('dd',{class:'value'},num(reads),h('small',{text:'次'})),'下载 '+bytes(sum(t,'download_bytes'))+' · 列表 '+num(sum(t,'request_count',(r)=>r.operation==='list'))+' 页')));}
 
 function renderTrend(){const box=byId('trend');box.hidden=false;
 const days=[...Array(14)].map((_,i)=>utcDay(13-i));
@@ -200,9 +202,9 @@ for(const f of [0,.5,1])chart.append(svg('line',{class:f?'grid':'base',x1:L,x2:W
 totals.forEach((v,i)=>{let base=0;const x=L+i*bw+bw*.18,w=bw*.64,g=svg('g',{});const total=Object.values(v).reduce((a,b)=>a+b,0);
 g.append(svg('title',{},days[i]+'：'+num(total)+' 次'+(series.length?'（'+series.map((n)=>n+' '+num(v[n])).join('，')+'）':'')));
 series.forEach((n,j)=>{if(!v[n])return;const yTop=y(base+v[n]);g.append(svg('rect',{x,y:yTop,width:w,height:Math.max(1,y(base)-yTop),fill:colors[j],rx:2,opacity:i===13?.6:1}));base+=v[n];});
-chart.append(g);if((13-i)%every===0)chart.append(svg('text',{class:'axis',x:x+w/2,y:H-6,'text-anchor':'middle'},i===13?'今日':shortDay(days[i])));});
+chart.append(g);if((13-i)%every===0)chart.append(svg('text',{class:'axis',x:x+w/2,y:H-6,'text-anchor':'middle'},shortDay(days[i])));});
 fill('trend',h('div',{class:'head'},h('h2',{text:'近 14 天应用请求'}),h('ul',{class:'legend'},series.map((n,j)=>h('li',{},h('span',{class:'key',style:'background:'+colors[j]}),n==='其他'?n:h('code',{text:n}))))),chart,
-h('p',{class:'note',text:'按 UTC 日统计带有效密钥的请求，今日的柱仍在累计。全账户 Workers 用量见 Home。'}),
+h('p',{class:'note',text:'按 UTC 日统计带有效密钥的请求，最右侧本 UTC 日的柱仍在累计。全账户 Workers 用量见 Home。'}),
 state.usage_truncated?h('p',{class:'note',text:'计数行超过上限，较早几天的部分数据未显示。'}):null);}
 
 function renderNamespaces(){const box=byId('namespaces');box.hidden=false;const list=namespaces();
@@ -211,12 +213,14 @@ const last=n.keys.map((k)=>k.last_use_time).filter(Boolean).sort().pop(),t=daysA
 const week=sum(rows,'request_count',(r)=>r.day>=utcDay(6));
 return h('article',{class:'card'},h('header',{},h('code',{text:n.name}),h('span',{class:'muted',text:last?'最近活动 '+ago(last):'近期无活动'})),
 h('p',{text:n.keys.length?n.keys.length+' 个密钥（'+[rw?rw+' 读写':null,ro?ro+' 只读':null].filter(Boolean).join(' · ')+'）':'没有有效密钥'}),
-h('p',{text:'今日 '+num(sum(t,'request_count'))+' 次 · 写入 '+num(sum(t,'object_count',isWrite))+' 个 / '+bytes(sum(t,'upload_bytes'))+' · 近 7 天 '+num(week)+' 次'}),
+h('p',{text:'本 UTC 日 '+num(sum(t,'request_count'))+' 次 · 写入 '+num(sum(t,'object_count',isWrite))+' 个 / '+bytes(sum(t,'upload_bytes'))+' · 近 7 天 '+num(week)+' 次'}),
 h('p',{class:'muted',text:'对象数量与占用尚未统计'}));});
 fill('namespaces',h('div',{class:'head'},h('h2',{text:'命名空间'})),cards.length?h('div',{class:'cards'},cards):h('p',{class:'empty',text:'还没有应用密钥。'}));}
 
-function confirmBox(text,label,action,onCancel){const box=h('div',{class:'confirm',role:'group'},h('span',{text}));
-box.append(h('button',{type:'button',class:'danger',text:label,onclick:(e)=>perform(e.currentTarget,action)}),h('button',{type:'button',class:'quiet',text:'取消',onclick:onCancel}));return box;}
+function confirmBox(text,label,action,onCancel){const cancel=h('button',{type:'button',class:'quiet',text:'取消',onclick:onCancel});
+const box=h('div',{class:'confirm',role:'group',onkeydown:(e)=>{if(e.key==='Escape')cancel.click();}},h('span',{text}),
+h('button',{type:'button',class:'danger',text:label,onclick:(e)=>perform(e.currentTarget,action)}),cancel);
+queueMicrotask(()=>cancel.focus());return box;}
 function renderConnection(){const box=byId('connection');box.hidden=false;const s=state.settings??{};const facts=[];
 const fact=(k,v)=>facts.push(h('div',{},h('dt',{text:k}),h('dd',{},v)));
 fact('状态',s.connected?mark('ok','已连接'):mark('unknown','未连接'));
@@ -226,7 +230,7 @@ const r=s.last_provider_error?reason(s.last_provider_error):null;
 fact('最近错误',r?h('span',{},mark(r.tone,r.title),h('span',{class:'muted',text:' · '+when(s.last_provider_error_time)})):'无');
 const actions=h('div',{class:'actions'});
 if(s.connected){const ask=h('button',{type:'button',text:'断开连接',onclick:()=>{actions.replaceChildren(confirmBox('断开后，所有应用的读写都会立即失败，直到重新连接；Dropbox 中的文件保留。','确认断开',
-async()=>{await api('dropbox:disconnect',{method:'POST',body:'{}'});await load();status('已断开连接，文件保留。');},()=>actions.replaceChildren(ask)));}});actions.append(ask);}
+async()=>{await api('dropbox:disconnect',{method:'POST',body:'{}'});await load();status('已断开连接，文件保留。');},()=>{actions.replaceChildren(ask);ask.focus();}));}});actions.append(ask);}
 else{const input=h('input',{required:true,pattern:'[a-z0-9]{8,32}',autocomplete:'off',spellcheck:'false',value:s.app_key??''});
 actions.append(h('form',{class:'connect',onsubmit:(e)=>{e.preventDefault();perform(e.submitter,async()=>{const result=await api('dropbox:connect',{method:'POST',body:JSON.stringify({app_key:input.value})});location.assign(result.authorize_url);});}},
 h('label',{},'Dropbox App key',input),h('button',{class:'primary',text:'连接 Dropbox'})));}
@@ -235,9 +239,9 @@ fill('connection',h('div',{class:'head'},h('h2',{text:'Dropbox 连接'})),h('dl'
 function keyRow(k){const todayCount=sum(today(),'request_count',(r)=>r.client===k.name);
 const revoke=h('button',{type:'button',class:'quiet',text:'撤销',onclick:()=>{if(row.querySelector('.confirm'))return;
 row.append(confirmBox('撤销后，使用“'+k.label+'”的应用会立即收到 401；文件不受影响，此密钥无法恢复。','确认撤销',
-async()=>{await api(k.name,{method:'DELETE'});await load();status('密钥“'+k.label+'”已撤销。');},(e)=>e.currentTarget.parentElement.remove()));}});
+async()=>{await api(k.name,{method:'DELETE'});await load();status('密钥“'+k.label+'”已撤销。');},(e)=>{e.currentTarget.parentElement.remove();revoke.focus();}));}});
 const row=h('div',{class:'row'},h('div',{class:'name'},h('span',{text:k.label}),h('span',{class:'badge'+(k.access==='read_write'?' rw':''),text:k.access==='read_write'?'读写':'只读'})),revoke,
-h('p',{class:'meta',text:['创建于 '+date(k.create_time),k.last_use_time?'最近使用 '+ago(k.last_use_time):'尚未使用','今日 '+num(todayCount)+' 次'].join(' · ')}));return row;}
+h('p',{class:'meta',text:['创建于 '+date(k.create_time),k.last_use_time?'最近使用 '+ago(k.last_use_time):'尚未使用','本 UTC 日 '+num(todayCount)+' 次'].join(' · ')}));return row;}
 function createForm(){const names=h('datalist',{id:'namespace-options'},namespaces().map((n)=>h('option',{value:n.name})));
 return h('form',{class:'create',onsubmit:(e)=>{e.preventDefault();const f=e.currentTarget;perform(e.submitter,async()=>{
 const result=await api('clients?request_id='+crypto.randomUUID(),{method:'POST',body:JSON.stringify({label:f.label.value,namespace:f.namespace.value,access:f.access.value})});
@@ -262,7 +266,7 @@ function renderActivity(){const label=(c)=>clients().find((k)=>k.name===c)?.labe
 const items=(state.recent_failures??[]).map((f)=>{const r=reason(f.reason,f.http_status);return h('li',{},h('time',{datetime:f.failure_time,text:when(f.failure_time)}),
 h('span',{class:'what'},mark(r.tone,r.title),h('span',{class:'who',text:label(f.client)+' · '+f.namespace+' · '+(OPS[f.operation]??f.operation)})),
 h('span',{class:'detail',text:'HTTP '+f.http_status+(f.retry_after_seconds?' · 等待 '+f.retry_after_seconds+' 秒':'')}));});
-fill('failures',h('div',{class:'head'},h('h2',{text:'最近异常'}),h('span',{class:'muted',text:'保留最近 50 条；同一密钥、操作和原因每分钟记一条'})),
+fill('failures',h('div',{class:'head'},h('h2',{text:'最近异常'}),h('span',{class:'muted',text:'保留最近 50 条；同一密钥、操作和原因每分钟记一条，限流每个密钥每分钟一条'})),
 items.length?h('ul',{class:'events'},items):h('p',{class:'empty',text:'近期没有异常。'}));
 const cols=[['请求',(r)=>r.request_count],['限流',(r)=>r.outcome==='rate_limited'?r.request_count:0],['失败',(r)=>isFailed(r)?r.request_count:0],
 ['写入对象',(r)=>isWrite(r)?r.object_count:0],['上传',(r)=>r.upload_bytes,true],['下载',(r)=>r.download_bytes,true]];
@@ -270,11 +274,11 @@ const cells=(rows)=>cols.map((c)=>{const v=rows.reduce((t,r)=>t+Number(c[1](r)??
 const table=(first,rows)=>h('div',{class:'table-scroll'},h('table',{},h('thead',{},h('tr',{},h('th',{text:first}),cols.map((c)=>h('th',{text:c[0]})))),h('tbody',{},rows)));
 const daily=byId('daily');daily.hidden=false;
 fill('daily',h('div',{class:'head'},h('h2',{text:'每日明细'}),h('span',{class:'muted',text:'UTC 日 · 所有命名空间'})),
-table('日期',[...Array(14)].map((_,i)=>h('tr',{},h('td',{text:shortDay(utcDay(i))+(i===0?' 今日':'')}),cells(daysAgo(usage(),i))))));
+table('日期',[...Array(14)].map((_,i)=>h('tr',{},h('td',{text:shortDay(utcDay(i))}),cells(daysAgo(usage(),i))))));
 const t=today(),ops=Object.keys(OPS).filter((o)=>t.some((r)=>r.operation===o)),batches=t.filter((r)=>r.operation==='batch_create'&&r.outcome==='ok'),batchCount=sum(batches,'request_count');
 const operations=byId('operations');operations.hidden=false;
-fill('operations',h('div',{class:'head'},h('h2',{text:'今日按操作'}),h('span',{class:'muted',text:'UTC 日'})),
-ops.length?table('操作',ops.map((o)=>h('tr',{},h('td',{text:OPS[o]}),cells(t.filter((r)=>r.operation===o))))):h('p',{class:'empty',text:'今天还没有应用请求。'}),
+fill('operations',h('div',{class:'head'},h('h2',{text:'本 UTC 日按操作'})),
+ops.length?table('操作',ops.map((o)=>h('tr',{},h('td',{text:OPS[o]}),cells(t.filter((r)=>r.operation===o))))):h('p',{class:'empty',text:'本 UTC 日还没有应用请求。'}),
 batchCount?h('p',{class:'note',text:'批量写入 '+num(batchCount)+' 次 · 平均 '+(sum(batches,'object_count')/batchCount).toFixed(1)+' 个对象/批 · 最大 '+Math.max(0,...batches.map((r)=>r.max_batch_object_count??0))+' 个（上限 32）'}):null,
 h('p',{class:'note',text:'只统计带有效应用密钥的请求；在边缘被拒绝的格式错误密钥、本页面和健康检查不计入。不存在的对象和版本冲突属于正常回答，不算失败。'}),
 h('p',{class:'note',text:'计数先在内存中累计，约 30 秒写入一次，打开本页时也会写入；部署或重启最多少计 30 秒。日期按 UTC 划分，与 Workers 免费额度的重置时间一致；其他时间按浏览器时区显示。'}));}

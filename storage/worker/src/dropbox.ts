@@ -80,6 +80,8 @@ export class Dropbox {
   private access: { readonly token: string; readonly expires: number; readonly generation: string } | null = null;
   private refreshing: Promise<string> | null = null;
   private recorded: ProviderError | null = null;
+  /** A repeat of the recorded reason within the write interval, written with the next counter flush. */
+  private repeated: ProviderError | null = null;
 
   constructor(store: Pick<Store, 'get' | 'set' | 'delete' | 'connection'>, env: Pick<Env, 'DEV_AUTH_BYPASS' | 'DEV_DROPBOX_ORIGIN'>) { this.store = store; this.origins = endpoints(env); }
 
@@ -105,13 +107,24 @@ export class Dropbox {
 
   /** Keeps the newest error Dropbox answered for the owner console; a network failure may be the caller's own stream. */
   recordFailure(error: RpcError): RpcError {
-    // The console shows the newest reason and an approximate time, so a burst of one reason writes one row a minute.
+    // A new reason is written at once; a burst of one reason writes one row a minute, and its newest time goes out with
+    // the counters, so a repeat stays newer than the successes between.
     const now = Date.now();
     if (this.recorded?.reason !== error.reason || now - this.recorded.time >= PROVIDER_ERROR_WRITE_INTERVAL) {
       this.recorded = { reason: error.reason, time: now };
+      this.repeated = null;
       this.store.set('provider_error', this.recorded);
+    } else {
+      this.repeated = { reason: error.reason, time: now };
     }
     return error;
+  }
+
+  /** Writes the newest repeat of the recorded reason; the counter flush calls it. */
+  flushRepeatedFailure(): void {
+    if (this.repeated === null) return;
+    this.store.set('provider_error', this.repeated);
+    this.repeated = null;
   }
 
   private async oauth(fields: Record<string, string>): Promise<Record<string, unknown>> {
@@ -163,7 +176,9 @@ export class Dropbox {
     this.store.set('connection', connection);
     this.store.delete('provider_error');
     this.store.delete('last_success');
+    this.store.delete('last_write_success');
     this.recorded = null;
+    this.repeated = null;
     this.access = null;
   }
 
@@ -204,7 +219,9 @@ export class Dropbox {
       this.store.delete('connection');
       this.store.delete('provider_error');
       this.store.delete('last_success');
+      this.store.delete('last_write_success');
       this.recorded = null;
+      this.repeated = null;
     }
     this.access = null;
   }

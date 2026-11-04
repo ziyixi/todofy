@@ -28,6 +28,7 @@ export class FakeDropbox {
   refreshes = 0;
   listPages: readonly ProviderPage[] | null = null;
   batchFault: 'start_rate' | 'append_rate' | 'append_partial' | 'finish_rate' | 'finish_partial' | 'finish_failure' | 'finish_unknown' | 'finish_metadata' | null = null;
+  uploadFault: 'insufficient_space' | null = null;
   private readonly sessions = new Map<string, Session>();
   private sessionSequence = 0;
   private revision = 0;
@@ -97,6 +98,10 @@ export class FakeDropbox {
       this.calls.push({ path: url.pathname, argument });
       const existing = this.files.get(argument.path);
       if (!argument.strict_conflict || argument.autorename) throw new Error('upload lost strict CAS');
+      if (this.uploadFault === 'insufficient_space') {
+        await request.body?.cancel();
+        return Response.json({ error_summary: 'path/insufficient_space/..' }, { status: 409 });
+      }
       if ((argument.mode['.tag'] === 'add' && existing !== undefined) || (argument.mode['.tag'] === 'update' && existing?.revision !== argument.mode.update)) {
         await request.body?.cancel();
         return Response.json({ error_summary: 'path/conflict/file/' }, { status: 409 });

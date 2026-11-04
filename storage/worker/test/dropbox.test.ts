@@ -165,7 +165,7 @@ describe('provider errors for the owner console', () => {
     expect(store.get('provider_error')).toBeNull();
   });
 
-  it('writes a repeated reason at most once a minute and a new reason at once', async () => {
+  it('writes a repeated reason at most once a minute, its newest time with the counters, and a new reason at once', async () => {
     vi.useFakeTimers();
     const store = new Memory();
     store.set('connection', connection);
@@ -177,18 +177,30 @@ describe('provider errors for the owner console', () => {
     const refused = async (reason: string) => { await expect(provider.json('files/get_metadata', {})).rejects.toMatchObject({ reason }); };
     const recorded = () => writes.mock.calls.filter(([key]) => key === 'provider_error').map(([, value]) => value);
     await refused('UNAVAILABLE');
+    const first = Date.now();
     await vi.advanceTimersByTimeAsync(59_000);
     await refused('UNAVAILABLE');
     expect(recorded()).toHaveLength(1);
+    // The counter flush writes the repeat's time, so it stays newer than any success in between.
+    provider.flushRepeatedFailure();
+    provider.flushRepeatedFailure();
+    expect(recorded()).toEqual([{ reason: 'UNAVAILABLE', time: first }, { reason: 'UNAVAILABLE', time: first + 59_000 }]);
     await vi.advanceTimersByTimeAsync(1_000);
     await refused('UNAVAILABLE');
-    expect(recorded()).toHaveLength(2);
+    expect(recorded()).toHaveLength(3);
+    await refused('UNAVAILABLE');
     answer = () => new Response(null, { status: 400 });
     await refused('BAD_REQUEST');
-    expect(recorded()).toHaveLength(3);
+    // A new reason replaces the pending repeat of the old one.
+    provider.flushRepeatedFailure();
+    expect(recorded()).toHaveLength(4);
     expect(store.get('provider_error')).toEqual({ reason: 'BAD_REQUEST', time: Date.now() });
+    await refused('BAD_REQUEST');
     answer = () => new Response('null');
     await provider.disconnect();
+    // Disconnecting forgets a pending repeat with the error.
+    provider.flushRepeatedFailure();
+    expect(store.get('provider_error')).toBeNull();
     answer = () => new Response(null, { status: 400 });
     store.set('connection', connection);
     await refused('BAD_REQUEST');

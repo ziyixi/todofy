@@ -72,5 +72,8 @@ describe('owner console', () => {
     expect(SCRIPT).toContain('确认撤销');
     expect(SCRIPT).toContain('立即收到 401');
     expect(SCRIPT).toContain('确认断开');
+    // A full Dropbox is judged against the last successful write; counts say they are by UTC day.
+    expect(SCRIPT).toContain('last_write_success_time');
+    expect(SCRIPT).not.toContain('今日');
   });
 });

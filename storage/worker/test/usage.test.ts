@@ -19,6 +19,8 @@ const refused = (reason: string, httpStatus: number, headers: Record<string, str
 
 function fixture() {
   const { store, database } = sqliteStore();
+  // A connection from before this client's records, so successes are kept.
+  store.set('connection', { appKey: 'syntheticappkey', refreshToken: 'synthetic-private-refresh', generation: 'synthetic', connectTime: NOW - 200 * DAY_MS });
   for (const [id, namespace, access] of [[WRITER, 'synthetic', 2], [READER, 'synthetic', 1], [OTHER, 'other', 2]] as const) {
     store.addClient({ id, label: 'Synthetic ' + id.slice(-1), namespace, access, token_sha256: id.replaceAll('-', '').padEnd(64, 'a'), create_time: NOW - DAY_MS, revoked: 0, last_use_time: 0 });
   }
@@ -27,7 +29,7 @@ function fixture() {
 }
 
 interface WireClient { readonly name: string; readonly last_use_time?: string }
-interface WireOverview { readonly usage?: readonly { readonly day: string }[]; readonly usage_truncated?: boolean; readonly clients?: readonly WireClient[] }
+interface WireOverview { readonly usage?: readonly { readonly day: string }[]; readonly usage_truncated?: boolean; readonly clients?: readonly WireClient[]; readonly settings?: Record<string, unknown> }
 
 function context(store: Store, flushUsage = vi.fn()): OwnerContext {
   return { store, dropbox: {} as Dropbox, redirectUri: 'https://storage.example.test/api/dropbox/callback', flushUsage, buildSha: 'synthetic', stateSizeBytes: () => 8192 };
@@ -74,14 +76,32 @@ describe('in-memory counters', () => {
     expect(rows('SELECT id, last_use_time FROM clients ORDER BY id')).toEqual([
       { id: WRITER, last_use_time: NOW + 3 }, { id: READER, last_use_time: NOW + 4 }, { id: OTHER, last_use_time: 0 },
     ]);
-    // An absent object is still a Dropbox answer.
+    // An absent object is still a Dropbox answer; only a successful PUT or batch is a write.
     expect(store.get('last_success')).toBe(NOW + 4);
+    expect(store.get('last_write_success')).toBe(NOW + 3);
     expect(rows('SELECT * FROM recent_failures')).toEqual([]);
 
     usage.flush(store, transaction, NOW + 6);
     usage.succeeded(WRITER, 'stat', {}, NOW + 7);
-    usage.flush(store, transaction, NOW + 8);
+    usage.failed(WRITER, 'put', refused('INSUFFICIENT_SPACE', 507), NOW + 8);
+    usage.flush(store, transaction, NOW + 9);
     expect(rows("SELECT requests FROM usage_daily WHERE client_id = '" + WRITER + "' AND operation = 'stat'")).toEqual([{ requests: 1001 }]);
+    expect([store.get('last_success'), store.get('last_write_success')]).toEqual([NOW + 7, NOW + 3]);
+  });
+
+  it('keeps successes counted before a reconnect or after a disconnect off the current connection', () => {
+    const { store, usage } = fixture();
+    store.set('connection', { appKey: 'syntheticappkey', refreshToken: 'synthetic-private-refresh', generation: 'synthetic-new', connectTime: NOW + 10 });
+    usage.succeeded(WRITER, 'put', { objects: 1, uploadBytes: 3 }, NOW);
+    usage.flush(store, transaction, NOW + 20);
+    expect([store.get('last_success'), store.get('last_write_success')]).toEqual([null, null]);
+    usage.succeeded(READER, 'get', { downloadBytes: 3 }, NOW + 30);
+    usage.flush(store, transaction, NOW + 40);
+    expect([store.get('last_success'), store.get('last_write_success')]).toEqual([NOW + 30, null]);
+    store.delete('connection');
+    usage.succeeded(WRITER, 'put', { objects: 1, uploadBytes: 3 }, NOW + 50);
+    usage.flush(store, transaction, NOW + 60);
+    expect([store.get('last_success'), store.get('last_write_success')]).toEqual([NOW + 30, null]);
   });
 
   it('starts a new row on the next UTC day and prunes days older than 90', () => {
@@ -94,18 +114,27 @@ describe('in-memory counters', () => {
     expect(rows('SELECT day, requests FROM usage_daily ORDER BY day')).toEqual([{ day: '2026-11-02', requests: 1 }, { day: '2026-11-03', requests: 1 }]);
   });
 
-  it('lists a failure once a minute per credential, operation and reason and keeps the newest 50', () => {
+  it('lists a failure once a minute per credential, operation and reason, a rate limit once per credential, and keeps the newest 50', () => {
     const { store, rows, usage } = fixture();
     usage.failed(WRITER, 'put', new RpcError(Code.ABORTED, 'REVISION_CONFLICT', 'Synthetic.'), NOW);
     usage.failed(WRITER, 'batch_create', refused('UNAVAILABLE', 429, { 'retry-after': '7' }), NOW);
     usage.failed(WRITER, 'batch_create', refused('UNAVAILABLE', 429, { 'retry-after': '7' }), NOW + 59_000);
+    usage.failed(WRITER, 'stat', refused('UNAVAILABLE', 429, { 'retry-after': '2' }), NOW + 3);
+    usage.failed(OTHER, 'stat', refused('UNAVAILABLE', 429, { 'retry-after': '2' }), NOW + 4);
+    usage.failed(WRITER, 'stat', refused('UNAVAILABLE', 503), NOW + 5);
+    usage.failed(WRITER, 'list', refused('UNAVAILABLE', 503), NOW + 6);
     usage.failed(READER, 'put', refused('READ_ONLY', 403), NOW + 1);
-    usage.flush(store, transaction, NOW + 2);
+    usage.flush(store, transaction, NOW + 7);
     expect(rows('SELECT client_id, operation, reason, http_status, retry_after FROM recent_failures ORDER BY time')).toEqual([
       { client_id: WRITER, operation: 'batch_create', reason: 'UNAVAILABLE', http_status: 429, retry_after: 7 },
       { client_id: READER, operation: 'put', reason: 'READ_ONLY', http_status: 403, retry_after: 0 },
+      { client_id: OTHER, operation: 'stat', reason: 'UNAVAILABLE', http_status: 429, retry_after: 2 },
+      { client_id: WRITER, operation: 'stat', reason: 'UNAVAILABLE', http_status: 503, retry_after: 0 },
+      { client_id: WRITER, operation: 'list', reason: 'UNAVAILABLE', http_status: 503, retry_after: 0 },
     ]);
-    expect(rows("SELECT outcome, requests FROM usage_daily WHERE operation = 'batch_create'")).toEqual([{ outcome: 'rate_limited', requests: 2 }]);
+    expect(rows("SELECT operation, outcome, requests FROM usage_daily WHERE client_id = '" + WRITER + "' AND outcome = 'rate_limited' ORDER BY operation")).toEqual([
+      { operation: 'batch_create', outcome: 'rate_limited', requests: 2 }, { operation: 'stat', outcome: 'rate_limited', requests: 1 },
+    ]);
 
     for (let index = 0; index < 60; index++) usage.failed(OTHER, 'list', refused('PROVIDER_RESPONSE_INVALID', 503), NOW + (index + 1) * 61_000);
     usage.flush(store, transaction, NOW + 61 * 61_000);
@@ -147,6 +176,10 @@ describe('overview', () => {
     });
     expect(answer.usage).toHaveLength(3);
     expect(answer.usage_truncated).toBeUndefined();
+    // Both writes predate this connection.
+    expect(answer.settings).not.toHaveProperty('last_write_success_time');
+    store.set('last_write_success', NOW - 45_000);
+    expect((await overview(store)).settings).toMatchObject({ last_write_success_time: '2026-11-03T11:59:15Z' });
     expect(answer.clients?.map((client) => [client.name, client.last_use_time])).toEqual([
       ['clients/' + WRITER, '2026-10-21T12:00:00Z'], ['clients/' + READER, '2026-11-03T11:59:30Z'], ['clients/' + OTHER, '2026-11-03T11:59:00Z'],
     ]);
