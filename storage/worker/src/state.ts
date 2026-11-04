@@ -10,6 +10,7 @@ import { badRequest, errorResponse, failure } from './errors.ts';
 import { digest, hex } from './keys.ts';
 import { list, readContent, stat, writeContent } from './objects.ts';
 import { handlers, type OwnerContext } from './owner.ts';
+import { runScan } from './scan.ts';
 import { Store, type ClientRow } from './store.ts';
 import { FLUSH_DELAY_MS, Usage, type Amounts, type Operation } from './usage.ts';
 
@@ -119,6 +120,12 @@ export class StorageState extends DurableObject<Env> {
     this.dropbox.flushRepeatedFailure();
   }
 
+  /** The only alarm: the owner's object scan, one bounded run at a time. */
+  override async alarm(): Promise<void> {
+    const next = await runScan(this.store, this.dropbox);
+    if (next !== null) await this.ctx.storage.setAlarm(next);
+  }
+
   override async fetch(request: Request): Promise<Response> {
     const id = crypto.randomUUID();
     const url = new URL(request.url);
@@ -131,7 +138,7 @@ export class StorageState extends DurableObject<Env> {
       const result = await ownerApi.handle(request, {
         store: this.store, dropbox: this.dropbox, redirectUri: url.origin + '/api/dropbox/callback',
         flushUsage: () => { this.flushUsage(); }, buildSha: this.env.BUILD_SHA ?? 'dev',
-        stateSizeBytes: () => this.ctx.storage.sql.databaseSize,
+        stateSizeBytes: () => this.ctx.storage.sql.databaseSize, scheduleScan: (time) => this.ctx.storage.setAlarm(time),
       }, id);
       return result?.response ?? errorResponse(failure(Code.NOT_FOUND, 'NOT_FOUND'), id, request.method === 'HEAD');
     } catch (error) {

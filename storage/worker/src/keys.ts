@@ -30,8 +30,11 @@ export function objectKey(value: string, prefix = false): string {
   return value;
 }
 
+/** The App-folder path that holds one folder per namespace. */
+export const NAMESPACES_ROOT = '/namespaces';
+
 export function providerRoot(clientNamespace: string): string {
-  return '/namespaces/' + namespace(clientNamespace);
+  return NAMESPACES_ROOT + '/' + namespace(clientNamespace);
 }
 
 export function providerPath(clientNamespace: string, key: string): string {

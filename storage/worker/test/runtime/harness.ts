@@ -14,7 +14,7 @@ export const HASH = (bytes: Uint8Array): string => {
   return hash.digest('hex');
 };
 
-interface File { readonly bytes: Uint8Array; readonly revision: string }
+interface File { readonly bytes: Uint8Array; readonly revision: string; readonly modified?: string }
 interface MachineInit { readonly method?: string; readonly headers?: Readonly<Record<string, string>>; readonly body?: string | Uint8Array }
 interface ProviderPage { readonly entries: readonly Record<string, unknown>[]; readonly has_more: boolean; readonly cursor: string }
 interface Session { readonly bytes: Uint8Array; readonly closed: boolean }
@@ -29,12 +29,18 @@ export class FakeDropbox {
   listPages: readonly ProviderPage[] | null = null;
   batchFault: 'start_rate' | 'append_rate' | 'append_partial' | 'finish_rate' | 'finish_partial' | 'finish_failure' | 'finish_unknown' | 'finish_metadata' | null = null;
   uploadFault: 'insufficient_space' | null = null;
+  /** The account's space, or a token without account_info.read. */
+  space: { readonly used: number; readonly allocated: number } | 'missing_scope' = { used: 600 * 2 ** 30, allocated: 2 * 2 ** 40 };
+  spaceReads = 0;
   private readonly sessions = new Map<string, Session>();
   private sessionSequence = 0;
   private revision = 0;
 
   metadata(path: string, file: File): Record<string, unknown> {
-    return { name: path.split('/').pop(), path_display: path, rev: file.revision, size: file.bytes.byteLength, content_hash: HASH(file.bytes) };
+    return {
+      name: path.split('/').pop(), path_display: path, path_lower: path.toLowerCase(), rev: file.revision, size: file.bytes.byteLength,
+      content_hash: HASH(file.bytes), server_modified: file.modified ?? '2026-01-01T00:00:00Z',
+    };
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -50,6 +56,11 @@ export class FakeDropbox {
     }
     if (request.headers.get('authorization') !== 'Bearer synthetic-private-access') return new Response(null, { status: 401 });
     if (url.pathname === '/2/auth/token/revoke') return new Response('null');
+    if (url.pathname === '/2/users/get_space_usage') {
+      this.spaceReads++;
+      if (this.space === 'missing_scope') return Response.json({ error_summary: 'missing_scope/..', error: { '.tag': 'missing_scope', required_scope: 'account_info.read' } }, { status: 401 });
+      return Response.json({ used: this.space.used, allocation: { '.tag': 'individual', allocated: this.space.allocated } });
+    }
     if (url.pathname === '/2/files/upload_session/start_batch') {
       const argument = await request.json<{ num_sessions: number }>();
       this.calls.push({ path: url.pathname, argument });
@@ -145,10 +156,14 @@ export class FakeDropbox {
       const file = this.files.get(argument.path ?? '');
       return file === undefined ? Response.json({ error_summary: 'path/not_found/' }, { status: 409 }) : Response.json({ '.tag': 'file', ...this.metadata(argument.path ?? '', file) });
     }
-    if (url.pathname === '/2/files/list_folder') {
-      const entries = [...this.files].filter(([path]) => path.startsWith((argument.path ?? '') + '/'))
-        .slice(0, argument.limit ?? 100).map(([path, file]) => ({ '.tag': 'file', ...this.metadata(path, file) }));
-      return Response.json({ entries, has_more: false, cursor: 'synthetic-provider-cursor' });
+    if (url.pathname === '/2/files/list_folder' || (url.pathname === '/2/files/list_folder/continue' && argument.cursor?.startsWith('synthetic-page:') === true)) {
+      // A continuation carries the offset, limit and folder: synthetic-page:<offset>:<limit>:<path>.
+      const continued = url.pathname.endsWith('/continue') ? /^synthetic-page:([0-9]+):([0-9]+):(.*)$/.exec(argument.cursor ?? '') : null;
+      const offset = Number(continued?.[1] ?? 0), limit = Number(continued?.[2] ?? argument.limit ?? 100), root = continued?.[3] ?? argument.path ?? '';
+      const matching = [...this.files].filter(([path]) => path.startsWith(root + '/')).sort(([a], [b]) => a.localeCompare(b));
+      const entries = matching.slice(offset, offset + limit).map(([path, file]) => ({ '.tag': 'file', ...this.metadata(path, file) }));
+      const more = offset + limit < matching.length;
+      return Response.json({ entries, has_more: more, cursor: more ? `synthetic-page:${String(offset + limit)}:${String(limit)}:${root}` : 'synthetic-provider-cursor' });
     }
     throw new Error('unexpected synthetic Dropbox method');
   }

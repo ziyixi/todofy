@@ -5,12 +5,16 @@ import type { ServiceHandlers } from '@ziyixi/proto/http-transcoder';
 import { Code } from '@ziyixi/proto/rpc-status';
 import { fieldRules, formatMatches } from '@ziyixi/proto/wire-json';
 import { ClientSchema, Client_Access, SettingsSchema } from '@ziyixi/proto/storage/ui/v1/client_pb';
-import { OverviewSchema, RequestFailureSchema, UsageCountSchema } from '@ziyixi/proto/storage/ui/v1/overview_pb';
+import {
+  DropboxSpace_State, DropboxSpaceSchema, FolderObjectsSchema, NamespaceObjectsSchema, ObjectScan_State, ObjectScanSchema, OverviewSchema,
+  RequestFailureSchema, UsageCountSchema,
+} from '@ziyixi/proto/storage/ui/v1/overview_pb';
 import { ConnectDropboxResponseSchema, DisconnectDropboxResponseSchema, ListClientsResponseSchema, type StorageUiService } from '@ziyixi/proto/storage/ui/v1/storage_ui_service_pb';
-import type { Dropbox, ProviderError } from './dropbox.ts';
+import type { Dropbox, ProviderError, Space } from './dropbox.ts';
 import { MAX_CLIENTS } from './env.ts';
 import { badRequest, failure } from './errors.ts';
 import { digest, namespace, randomText } from './keys.ts';
+import { startScan, storedScan, type Scan, type Totals } from './scan.ts';
 import type { ClientRow, FailureRow, Store, UsageRow } from './store.ts';
 import { DAY_MS, OPERATIONS, OUTCOMES, utcDay } from './usage.ts';
 
@@ -22,9 +26,12 @@ export interface OwnerContext {
   readonly flushUsage: () => void;
   readonly buildSha: string;
   readonly stateSizeBytes: () => number;
+  /** Sets the Durable Object's alarm, which runs the object scan. */
+  readonly scheduleScan: (time: number) => Promise<void>;
 }
 
 const OVERVIEW_DAYS = 14;
+const SHOWN_FOLDERS = fieldRules(NamespaceObjectsSchema.field.folders).maxItems;
 const MAX_USAGE_COUNTS = fieldRules(OverviewSchema.field.usage).maxItems;
 
 const timestamp = (milliseconds: number) => timestampFromDate(new Date(milliseconds));
@@ -71,6 +78,31 @@ function failureMessage(row: FailureRow): MessageShape<typeof RequestFailureSche
   });
 }
 
+const SPACE_STATES = { observed: DropboxSpace_State.OBSERVED, scope_missing: DropboxSpace_State.SCOPE_MISSING, unavailable: DropboxSpace_State.UNAVAILABLE } as const;
+const SCAN_STATES = { running: ObjectScan_State.RUNNING, succeeded: ObjectScan_State.SUCCEEDED, failed: ObjectScan_State.FAILED } as const;
+
+function spaceMessage(space: Space): MessageShape<typeof DropboxSpaceSchema> {
+  return create(DropboxSpaceSchema, {
+    state: SPACE_STATES[space.state], usedBytes: space.used, allocatedBytes: space.allocated,
+    ...(space.time > 0 ? { observeTime: timestamp(space.time) } : {}),
+  });
+}
+
+const totals = (value: Totals) => ({ objectCount: value.objects, totalBytes: value.bytes, recentObjectCount: value.recentObjects, recentBytes: value.recentBytes });
+
+function scanMessage(scan: Scan): MessageShape<typeof ObjectScanSchema> {
+  return create(ObjectScanSchema, {
+    name: 'objectScan', state: SCAN_STATES[scan.state], startTime: timestamp(scan.start), updateTime: timestamp(scan.update),
+    ...(scan.end > 0 ? { endTime: timestamp(scan.end) } : {}),
+    pageCount: scan.pages, runCount: scan.runs, failureReason: scan.reason, objectCount: scan.objects, totalBytes: scan.bytes,
+    namespaces: scan.namespaces.toSorted((a, b) => a.name.localeCompare(b.name)).map((item) => create(NamespaceObjectsSchema, {
+      namespace: item.name, ...totals(item),
+      folders: item.folders.toSorted((a, b) => b.bytes - a.bytes).slice(0, SHOWN_FOLDERS)
+        .map((folder) => create(FolderObjectsSchema, { folder: folder.name, ...totals(folder) })),
+    })),
+  });
+}
+
 function clientId(name: string): string {
   if (!/^clients\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(name)) badRequest();
   return name.slice('clients/'.length);
@@ -81,19 +113,23 @@ export const handlers: ServiceHandlers<typeof StorageUiService.method, OwnerCont
     if (input.name !== 'settings') badRequest();
     return Promise.resolve(settingsMessage(context.store));
   },
-  getOverview: (input, context) => {
+  getOverview: async (input, context) => {
     if (input.name !== 'overview') badRequest();
     context.flushUsage();
     const now = Date.now();
     const counts = context.store.usage(utcDay(now - (OVERVIEW_DAYS - 1) * DAY_MS), MAX_USAGE_COUNTS + 1);
-    return Promise.resolve(create(OverviewSchema, {
+    const space = context.store.connection() === null ? null : await context.dropbox.space();
+    const scan = storedScan(context.store);
+    return create(OverviewSchema, {
       name: 'overview', generateTime: timestamp(now), settings: settingsMessage(context.store),
       clients: context.store.clients('', MAX_CLIENTS).map((row) => clientMessage(row)),
       usage: counts.slice(0, MAX_USAGE_COUNTS).map(usageMessage).filter((count) => count !== null),
       usageTruncated: counts.length > MAX_USAGE_COUNTS,
       recentFailures: context.store.failures().map(failureMessage).filter((failed) => failed !== null),
       buildSha: context.buildSha, stateSizeBytes: context.stateSizeBytes(),
-    }));
+      ...(space === null ? {} : { space: spaceMessage(space) }),
+      ...(scan === null ? {} : { objectScan: scanMessage(scan) }),
+    });
   },
   listClients: (input, context) => {
     if (input.pageSize < 0) badRequest();
@@ -158,5 +194,12 @@ export const handlers: ServiceHandlers<typeof StorageUiService.method, OwnerCont
     if (input.name !== 'dropbox') badRequest();
     await context.dropbox.disconnect();
     return create(DisconnectDropboxResponseSchema);
+  },
+  startObjectScan: async (input, context) => {
+    if (input.name !== 'objectScan') badRequest();
+    if (context.store.connection() === null) throw failure(Code.FAILED_PRECONDITION, 'NOT_CONFIGURED');
+    const { scan, started } = startScan(context.store);
+    if (started) await context.scheduleScan(scan.start);
+    return scanMessage(scan);
   },
 };
