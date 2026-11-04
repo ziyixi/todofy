@@ -45,8 +45,8 @@ section{border:1px solid var(--border);border-radius:12px;background:var(--surfa
 .card{border:1px solid var(--line);border-radius:10px;padding:14px 16px;min-width:0}
 .card header{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:4px 12px;margin-bottom:6px}
 .card header code{font-size:1rem;font-weight:600}.card p{color:var(--fg-2);font-size:.88rem}.card p.muted{color:var(--muted);font-size:.82rem}
-.objects{margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}.folders{display:grid;gap:4px;margin-top:6px}
-.folders li{display:grid;grid-template-columns:minmax(0,8em) minmax(0,1fr) auto;gap:4px 10px;align-items:center;font-size:.82rem}
+.objects{margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}.folders{display:grid;grid-template-columns:minmax(0,8em) minmax(0,1fr) auto;gap:4px 10px;margin-top:6px}
+.folders li{display:grid;grid-column:1/-1;grid-template-columns:subgrid;gap:4px 10px;align-items:center;font-size:.82rem}
 .folders code,.folders .root{font-size:.8rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.folders .root{color:var(--muted)}.folders .size{color:var(--muted);text-align:right;white-space:nowrap}
 .bar{display:block;height:4px;border-radius:2px;background:var(--line);overflow:hidden}.bar>span{display:block;height:100%;background:var(--s1);opacity:.75}
 .scan{margin:-6px 0 14px}
@@ -191,7 +191,7 @@ function spaceFraction(){const sp=state.space;return sp?.state==='observed'&&sp.
 function spaceTile(){const sp=state.space,f=spaceFraction();
 if(f!==null){const read=Date.now()-Date.parse(sp.observe_time)>900000?' · 读取于 '+when(sp.observe_time):'';
 return tile('Dropbox 空间',h('dd',{class:'value'},percent(f),h('small',{text:'已用'})),meter(f,f>=.95?'bad':f>=.85?'warn':''),
-bytes(sp.used_bytes)+' / '+bytes(sp.allocated_bytes)+' · 整个 Dropbox 账户'+read);}
+bytes(sp.used_bytes)+' / '+bytes(sp.allocated_bytes)+read,'整个 Dropbox 账户');}
 if(sp?.state==='scope_missing')return tile('Dropbox 空间',h('dd',{class:'value idle',text:'—'}),'需重新授权后显示','步骤见下方“Dropbox 连接”');
 return tile('Dropbox 空间',h('dd',{class:'value idle',text:'—'}),state.settings?.connected?'暂时无法读取':'未连接');}
 function tile(label,value,...details){return h('div',{},h('dt',{text:label}),value,details.map((d)=>typeof d==='string'?h('dd',{text:d}):h('dd',{},d)));}
@@ -228,7 +228,7 @@ state.usage_truncated?h('p',{class:'note',text:'计数行超过上限，较早�
 const SCAN_STALE=600000;
 const scanStale=(s)=>s.state==='running'&&Date.now()-Date.parse(s.update_time)>=SCAN_STALE;
 function scanSummary(){const s=state.object_scan;
-if(!s)return h('p',{class:'note scan',text:'对象数量和占用需要扫描：逐页列出 Dropbox 应用文件夹并合计，只读，不改动任何文件。'});
+if(!s)return h('p',{class:'note scan',text:'对象数量和占用需要扫描：逐页列出 Dropbox 应用文件夹并合计，只读，不改动任何文件；请选应用空闲的时候。'});
 const listed=num(s.object_count)+' 个对象 · '+bytes(s.total_bytes);
 if(s.state==='succeeded')return h('p',{class:'note scan',text:'扫描于 '+when(s.end_time)+' · 共 '+listed+' · 用时 '+duration(s.start_time,s.end_time)});
 if(s.state==='failed')return h('p',{class:'note scan'},mark('warn','扫描未完成'),' '+reason(s.failure_reason).title+'（'+when(s.end_time)+'）· 已列出 '+listed+'，结果不完整。');
@@ -242,7 +242,7 @@ const n=(s.namespaces??[]).find((x)=>x.namespace===name),done=s.state==='succeed
 if(!n)return h('p',{class:'muted',text:done?'应用文件夹中没有对象':'扫描尚未列到对象'});
 const total=Number(n.total_bytes??0);
 return h('div',{class:'objects'},h('p',{text:num(n.object_count)+' 个对象 · '+bytes(total)+(n.recent_bytes?' · 近 7 天写入 '+bytes(n.recent_bytes):'')+(done?'':'（未完成）')}),
-h('ul',{class:'folders','aria-label':'按顶层目录'},(n.folders??[]).slice(0,4).map((f)=>{const size=Number(f.total_bytes??0);return h('li',{},f.folder?h('code',{text:f.folder}):h('span',{class:'root',text:'根目录'}),
+h('ul',{class:'folders','aria-label':'按顶层目录'},(n.folders??[]).map((f)=>{const size=Number(f.total_bytes??0);return h('li',{},f.folder?h('code',{text:f.folder}):h('span',{class:'root',text:'根目录'}),
 h('span',{class:'bar','aria-hidden':'true'},h('span',{style:'width:'+(total?Math.max(1,size/total*100):0).toFixed(1)+'%'})),
 h('span',{class:'size',text:bytes(size)+(f.recent_bytes?' · 7 天 +'+bytes(f.recent_bytes):'')}));})));}
 function renderNamespaces(){const box=byId('namespaces');box.hidden=false;const list=namespaces();

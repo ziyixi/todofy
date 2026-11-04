@@ -6,12 +6,14 @@ import { randomText } from './keys.ts';
 import type { Connection, PendingConnection, Store } from './store.ts';
 
 const DROPBOX = { authorize: 'https://www.dropbox.com', api: 'https://api.dropboxapi.com', content: 'https://content.dropboxapi.com' } as const;
-// account_info.read only reads the account's space; a connection authorized without it keeps every file operation.
+// account_info.read is used only for users/get_space_usage; a connection authorized without it keeps every file operation.
 const SCOPES = 'account_info.read files.metadata.read files.content.read files.content.write';
 const PROVIDER_TIMEOUT = 30_000;
 const PROVIDER_ERROR_WRITE_INTERVAL = 60_000;
 const SPACE_TTL = 10 * 60_000;
 const SPACE_TIMEOUT = 5_000;
+/** After a read, the next waits this long even when it failed, so an outage does not hold every overview. */
+const SPACE_RETRY = 60_000;
 /** An object scan page; Dropbox's page limit is approximate, so it is bounded well above 1,000 entries. */
 const SCAN_PAGE_BYTES = 4 * 1024 * 1024;
 
@@ -61,6 +63,8 @@ async function providerFailure(response: Response, upload = false): Promise<neve
   }
   if (response.status === 409 && (reason?.['.tag'] === 'insufficient_space' || /^path\/(?:reason\/)?insufficient_space(?:\/|$)/.test(summary))) throw insufficientSpace();
   if (response.status === 409 && /^path(?:_lookup)?\/not_found(?:\/|$)/.test(summary)) throw failure(Code.NOT_FOUND, 'NOT_FOUND');
+  // Only list_folder/continue answers reset: Dropbox invalidated the cursor, so only a new listing can follow.
+  if (response.status === 409 && (error?.['.tag'] === 'reset' || /^reset(?:\/|$)/.test(summary))) throw failure(Code.INVALID_ARGUMENT, 'CURSOR_INVALID');
   if (response.status === 409 && upload && (reason?.['.tag'] === 'conflict' || /^path\/(?:reason\/)?conflict(?:\/|$)/.test(summary))) throw failure(Code.ABORTED, 'REVISION_CONFLICT');
   if (response.status === 400 || error?.['.tag'] === 'content_hash_mismatch') throw failure(Code.INVALID_ARGUMENT, 'BAD_REQUEST');
   if (response.status === 401 || response.status === 403) throw failure(Code.FAILED_PRECONDITION, 'CONNECTION_INVALID');
@@ -111,6 +115,8 @@ export class Dropbox {
   private access: { readonly token: string; readonly expires: number; readonly generation: string } | null = null;
   private refreshing: Promise<string> | null = null;
   private recorded: ProviderError | null = null;
+  /** When the space was last read; in memory, so a new instance may read once more. */
+  private spaceAttempt = 0;
   /** A repeat of the recorded reason within the write interval, written with the next counter flush. */
   private repeated: ProviderError | null = null;
 
@@ -209,8 +215,10 @@ export class Dropbox {
     this.store.delete('last_success');
     this.store.delete('last_write_success');
     this.store.delete('space');
+    this.store.delete('object_scan');
     this.recorded = null;
     this.repeated = null;
+    this.spaceAttempt = 0;
     this.access = null;
   }
 
@@ -253,8 +261,11 @@ export class Dropbox {
       this.store.delete('last_success');
       this.store.delete('last_write_success');
       this.store.delete('space');
+      // The newest object scan described this connection's App folder; deleting it also ends a running scan.
+      this.store.delete('object_scan');
       this.recorded = null;
       this.repeated = null;
+      this.spaceAttempt = 0;
     }
     this.access = null;
   }
@@ -276,13 +287,17 @@ export class Dropbox {
   }
 
   /**
-   * The account's space for the owner console, read at most once in ten minutes. Never a provider error: a
-   * connection without account_info.read still reads and writes files. A failed read keeps the earlier answer.
+   * The account's space for the owner console, read at most once in ten minutes, and at most once a minute while
+   * reads fail. Never a provider error: a connection without account_info.read still reads and writes files. A
+   * failed read keeps the earlier answer.
    */
   async space(): Promise<Space> {
     const cached = this.store.get('space') as Space | null;
     const now = Date.now();
     if (cached !== null && now - cached.time < SPACE_TTL) return cached;
+    const unavailable: Space = cached ?? { state: 'unavailable', used: 0, allocated: 0, time: 0 };
+    if (now - this.spaceAttempt < SPACE_RETRY) return unavailable;
+    this.spaceAttempt = now;
     const generation = this.store.connection()?.generation;
     try {
       const response = await this.fetch(this.origins.api + '/2/users/get_space_usage', {
@@ -294,16 +309,25 @@ export class Dropbox {
         return answer;
       }
     } catch { /* A refused refresh token records its own reason; the space keeps its earlier answer. */ }
-    return cached ?? { state: 'unavailable', used: 0, allocated: 0, time: 0 };
+    return unavailable;
   }
 
-  /** One listing page of the owner's object scan. Its refusals are the scan's own, not provider errors. */
+  /**
+   * One listing page of the owner's object scan. Its refusals are the scan's own, not provider errors. A page that
+   * breaks off or cannot be read is Dropbox's answer, retried like an outage, never the owner's bad request.
+   */
   async scanPage(method: 'files/list_folder' | 'files/list_folder/continue', args: unknown): Promise<Record<string, unknown>> {
     const response = await this.fetch(this.origins.api + '/2/' + method, {
       method: 'POST', headers: { authorization: 'Bearer ' + await this.token(), 'content-type': 'application/json' }, body: JSON.stringify(args),
     });
     if (!response.ok) return providerFailure(response);
-    return record(await readJson(response, SCAN_PAGE_BYTES));
+    let page: unknown;
+    try {
+      page = await readJson(response, SCAN_PAGE_BYTES);
+    } catch {
+      throw failure(Code.UNAVAILABLE, 'PROVIDER_RESPONSE_INVALID');
+    }
+    return record(page);
   }
 
   async json(method: 'files/get_metadata' | 'files/list_folder' | 'files/list_folder/continue' | 'files/upload_session/start_batch' | 'files/upload_session/finish_batch_v2', args: unknown): Promise<Record<string, unknown>> {

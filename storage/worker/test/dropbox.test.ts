@@ -1,3 +1,4 @@
+import { Code } from '@ziyixi/proto/rpc-status';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Dropbox, endpoints, spaceAnswer } from '../src/dropbox.ts';
 import type { Connection } from '../src/store.ts';
@@ -24,6 +25,7 @@ describe('separate Dropbox authorization', () => {
     expect(authorize.searchParams.get('token_access_type')).toBe('offline');
     expect(authorize.searchParams.get('scope')).toBe('account_info.read files.metadata.read files.content.read files.content.write');
     store.set('space', { state: 'scope_missing', used: 0, allocated: 0, time: 1 });
+    store.set('object_scan', { id: 'synthetic' });
     const requests: URLSearchParams[] = [];
     vi.stubGlobal('fetch', vi.fn((_url: string, init: RequestInit) => {
       requests.push(new URLSearchParams(init.body as string));
@@ -32,8 +34,9 @@ describe('separate Dropbox authorization', () => {
     const search = new URLSearchParams({ state: authorize.searchParams.get('state') ?? '', code: 'synthetic-code' });
     await provider.callback(search);
     expect(store.connection()?.refreshToken).toBe('synthetic-refresh-private');
-    // A new connection reads its own space.
+    // A new connection reads its own space and scans its own App folder.
     expect(store.get('space')).toBeNull();
+    expect(store.get('object_scan')).toBeNull();
     expect(requests[0]?.get('code_verifier')).toMatch(/^[A-Za-z0-9_-]{64}$/);
     expect(requests[0]?.has('client_secret')).toBe(false);
     await expect(provider.callback(search)).rejects.toThrow();
@@ -266,13 +269,39 @@ describe('Dropbox space for the owner console', () => {
     await vi.advanceTimersByTimeAsync(11 * 60_000);
     context.answer = () => new Response('synthetic-private-body', { status: 503 });
     expect(await context.dropbox.space()).toEqual({ state: 'observed', used: 300, allocated: 1000, time: first });
+    await vi.advanceTimersByTimeAsync(60_000);
     context.answer = () => { throw new TypeError('synthetic network failure'); };
     expect(await context.dropbox.space()).toMatchObject({ time: first });
     expect(context.reads()).toBe(3);
     expect(context.store.get('provider_error')).toBeNull();
+    context.store.set('object_scan', { id: 'synthetic' });
     vi.stubGlobal('fetch', () => Promise.resolve(new Response('null')));
     await context.dropbox.disconnect();
     expect(context.store.get('space')).toBeNull();
+    expect(context.store.get('object_scan')).toBeNull();
+  });
+
+  it('waits a minute after a failed read, so an outage does not hold every overview', async () => {
+    vi.useFakeTimers();
+    const context = provider();
+    context.answer = () => new Response(null, { status: 503 });
+    for (let index = 0; index < 3; index++) expect(await context.dropbox.space()).toMatchObject({ state: 'unavailable' });
+    expect(context.reads()).toBe(1);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await context.dropbox.space();
+    expect(context.reads()).toBe(2);
+    // A removed connection's wait does not hold the next one's first read.
+    vi.stubGlobal('fetch', () => Promise.resolve(new Response('null')));
+    await context.dropbox.disconnect();
+    let reads = 0;
+    vi.stubGlobal('fetch', (url: string) => {
+      if (url.endsWith('/oauth2/token')) return Promise.resolve(Response.json({ access_token: 'synthetic-access-private', expires_in: 3600 }));
+      reads++;
+      return Promise.resolve(Response.json({ used: 1, allocation: { '.tag': 'individual', allocated: 2 } }));
+    });
+    context.store.set('connection', connection);
+    expect(await context.dropbox.space()).toMatchObject({ state: 'observed', used: 1 });
+    expect(reads).toBe(1);
   });
 
   it('does not keep an answer for a connection that changed while it was read', async () => {
@@ -312,6 +341,41 @@ describe('object scan pages', () => {
     await expect(provider.scanPage('files/list_folder/continue', { cursor: 'synthetic' })).rejects.toMatchObject({ reason: 'UNAVAILABLE', httpStatus: 429 });
     answer = () => new Response(null, { status: 401 });
     await expect(provider.scanPage('files/list_folder/continue', { cursor: 'synthetic' })).rejects.toMatchObject({ reason: 'CONNECTION_INVALID' });
+    // A reset cursor cannot be continued, so it is no outage to retry.
+    answer = () => Response.json({ error_summary: 'reset/..', error: { '.tag': 'reset' } }, { status: 409 });
+    await expect(provider.scanPage('files/list_folder/continue', { cursor: 'synthetic' })).rejects.toMatchObject({ reason: 'CURSOR_INVALID' });
     expect(store.get('provider_error')).toBeNull();
+  });
+
+  it('answers a page that breaks off or does not parse as a retryable provider answer, never a bad request', async () => {
+    const store = new Memory();
+    store.set('connection', connection);
+    const provider = new Dropbox(store, {});
+    let answer = (): Response => {
+      let sent = false;
+      return new Response(new ReadableStream<Uint8Array>({
+        pull: (controller) => {
+          if (sent) { controller.error(new Error('synthetic break')); return; }
+          sent = true;
+          controller.enqueue(new TextEncoder().encode('{"entries":['));
+        },
+      }));
+    };
+    vi.stubGlobal('fetch', (url: string) => url.endsWith('/oauth2/token')
+      ? Promise.resolve(Response.json({ access_token: 'synthetic-access-private', expires_in: 3600 })) : Promise.resolve(answer()));
+    await expect(provider.scanPage('files/list_folder', { path: '/namespaces' })).rejects.toMatchObject({ code: Code.UNAVAILABLE, reason: 'PROVIDER_RESPONSE_INVALID' });
+    answer = () => new Response('{"entries":[');
+    await expect(provider.scanPage('files/list_folder', { path: '/namespaces' })).rejects.toMatchObject({ code: Code.UNAVAILABLE, reason: 'PROVIDER_RESPONSE_INVALID' });
+    expect(store.get('provider_error')).toBeNull();
+  });
+
+  it('answers an application listing whose cursor Dropbox reset with CURSOR_INVALID', async () => {
+    const store = new Memory();
+    store.set('connection', connection);
+    const provider = new Dropbox(store, {});
+    vi.stubGlobal('fetch', (url: string) => url.endsWith('/oauth2/token')
+      ? Promise.resolve(Response.json({ access_token: 'synthetic-access-private', expires_in: 3600 }))
+      : Promise.resolve(Response.json({ error_summary: 'reset/..', error: { '.tag': 'reset' } }, { status: 409 })));
+    await expect(provider.json('files/list_folder/continue', { cursor: 'synthetic' })).rejects.toMatchObject({ reason: 'CURSOR_INVALID', httpStatus: 400 });
   });
 });

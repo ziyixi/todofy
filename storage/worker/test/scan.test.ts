@@ -152,6 +152,20 @@ describe('object scan runs', () => {
     expect(storedScan(store)).toMatchObject({ state: 'failed', reason: 'UNAVAILABLE', end: NOW + 1, objects: 1 });
   });
 
+  it('retries a page that broke off or was malformed, and fails at once on a reset cursor', async () => {
+    const { store } = sqliteStore();
+    startScan(store, NOW);
+    const { dropbox } = provider([
+      new RpcError(Code.UNAVAILABLE, 'PROVIDER_RESPONSE_INVALID', 'Synthetic.'), page([], true, ''),
+      page([file('/namespaces/alpha/a', 1)], true, 'synthetic-c1'), new RpcError(Code.INVALID_ARGUMENT, 'CURSOR_INVALID', 'Synthetic.'),
+    ]);
+    expect(await runScan(store, dropbox, () => NOW)).toBe(NOW + 30_000);
+    expect(await runScan(store, dropbox, () => NOW)).toBe(NOW + 30_000);
+    expect(storedScan(store)).toMatchObject({ state: 'running', retries: 2, pages: 0 });
+    expect(await runScan(store, dropbox, () => NOW)).toBeNull();
+    expect(storedScan(store)).toMatchObject({ state: 'failed', reason: 'CURSOR_INVALID', pages: 1, objects: 1, runs: 3 });
+  });
+
   it('fails at once on a definite refusal, and succeeds empty when no namespace has a folder', async () => {
     const { store } = sqliteStore();
     startScan(store, NOW);
@@ -160,9 +174,6 @@ describe('object scan runs', () => {
     startScan(store, NOW);
     await runScan(store, provider([new RpcError(Code.NOT_FOUND, 'NOT_FOUND', 'Synthetic.')]).dropbox, () => NOW);
     expect(storedScan(store)).toMatchObject({ state: 'succeeded', objects: 0, namespaces: [] });
-    startScan(store, NOW);
-    await runScan(store, provider([page([], true, '')]).dropbox, () => NOW);
-    expect(storedScan(store)).toMatchObject({ state: 'failed', reason: 'PROVIDER_RESPONSE_INVALID' });
   });
 
   it('keeps a running scan, restarts one that stopped moving, and drops a run a newer scan replaced', async () => {

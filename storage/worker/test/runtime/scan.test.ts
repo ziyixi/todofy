@@ -50,7 +50,8 @@ it('counts every namespace in a Durable Object alarm and changes no file', async
   expect(current.provider.calls.slice(before).map((call) => call.path)).toEqual(['/2/files/list_folder', '/2/files/list_folder/continue', '/2/files/list_folder/continue']);
   expect(current.provider.files.size).toBe(2401);
   expect(overview?.settings.last_provider_error).toBeUndefined();
-  // A scan needs the connection.
+  // A scan needs the connection, and a removed connection forgets its scan.
   expect((await current.owner('dropbox:disconnect', 'POST', {})).status).toBe(200);
+  expect(await (await current.owner('overview')).json<Overview>()).not.toHaveProperty('object_scan');
   expect((await current.owner('objectScan:start', 'POST', {})).status).toBe(400);
 });

@@ -165,7 +165,8 @@ export async function runScan(store: Pick<Store, 'get' | 'set'>, dropbox: Pick<D
       const reason = error instanceof RpcError ? error.reason : 'INTERNAL';
       // No namespace has written an object yet.
       if (reason === 'NOT_FOUND' && scan.cursor === '') return end('succeeded');
-      if (reason === 'UNAVAILABLE' && error instanceof RpcError && scan.retries < MAX_RETRIES) {
+      // A rate limit, an outage or a page that broke off or could not be read; a reset cursor or refusal is final.
+      if (error instanceof RpcError && error.code === Code.UNAVAILABLE && scan.retries < MAX_RETRIES) {
         scan.retries++;
         scan.update = now();
         store.set(KEY, scan);
