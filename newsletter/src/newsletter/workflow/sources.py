@@ -144,23 +144,32 @@ def deduplicate_candidates(
     history: Sequence[Mapping[str, object]] = (),
     *,
     limit: int = 30,
+    dropped: list[tuple[Candidate, str]] | None = None,
 ) -> list[Candidate]:
     """Suppress repeat coverage using stable public identity keys.
 
     Retain dated or new-version follow-ups only with explicit novelty reasons;
     watchlists guide selection, not repetition of unchanged items.
+    ``dropped`` receives each candidate left out and why: ``duplicate`` of an
+    earlier one, seen in ``history``, or past the limit (``pool_cap``).
     """
     if not 1 <= limit <= 60:
         raise ValueError("Candidate limit must be 1..60")
     known = [(identity_keys(item), item) for item in history]
     result: list[Candidate] = []
     seen: set[str] = set()
+
+    def drop(candidate: Candidate, reason: str) -> None:
+        if dropped is not None:
+            dropped.append((candidate, reason))
+
     for candidate in candidates:
         keys = identity_keys(candidate)
         if not keys:
             continue
         if keys & seen:
             seen |= keys
+            drop(candidate, "duplicate")
             continue
         repeated = [item for old_keys, item in known if keys & old_keys]
         if repeated:
@@ -180,11 +189,13 @@ def deduplicate_candidates(
             )
             if not updated or len(candidate["why_now"].strip()) < 20:
                 seen |= keys
+                drop(candidate, "history")
                 continue
-        result.append(candidate)
         seen |= keys
         if len(result) >= limit:
-            break
+            drop(candidate, "pool_cap")
+            continue
+        result.append(candidate)
     return result
 
 
@@ -209,6 +220,12 @@ class MetadataResult:
     ``excerpts`` holds, for each seeded headline group two or more outlets
     carry, one sha256-pinned excerpt per outlet (``feed_excerpts``).
     Additive: the pool node passes on the groups its candidates point at.
+
+    ``reference`` is the reference source's record: the day before the issue
+    date, its outcome code and its events (Wikipedia's Current events), each
+    with how well the run's feeds carried it. The console checks the rest of
+    the run against it; no workflow node reads it, and it is empty without
+    a reference source.
     """
 
     candidates: list[Candidate]
@@ -217,6 +234,7 @@ class MetadataResult:
     sources: list[types.Payload] = dataclasses.field(default_factory=list)
     headlines: list[types.Payload] = dataclasses.field(default_factory=list)
     excerpts: list[types.Payload] = dataclasses.field(default_factory=list)
+    reference: types.Payload = dataclasses.field(default_factory=dict)
 
 
 def metadata_candidate(

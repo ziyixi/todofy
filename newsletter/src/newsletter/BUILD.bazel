@@ -175,6 +175,7 @@ py_library(
     imports = [".."],
     deps = [
         ":package",
+        "//newsletter/src/newsletter/workflow:content",
         "//newsletter/src/newsletter/workflow:researcher",
         "//proto/newsletter/ui/v1:python",
     ],

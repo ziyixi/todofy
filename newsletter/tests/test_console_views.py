@@ -407,3 +407,324 @@ def test_usage_totals_count_failures_partials_and_cost():
     assert not totals.complete
     assert not views.usage_totals([]).complete
     assert views.usage_totals(records[:1]).complete
+
+
+# A run's funnel, consensus leads and reference check.
+
+LEAD = run_pb.ConsensusLead_Stage
+STAGE = run_pb.ReferenceEvent_Stage
+
+
+def funnel(**changes):
+    value = {
+        "directions": [{"id": "03-world", "state": "succeeded"}],
+        "seeds": None,
+        "notes": {},
+        "headlines": [],
+        "reference": {},
+        "discovered": {},
+        "pool": [],
+        "classifications": {},
+        "dropped": None,
+        "tasks": [],
+        "stories": [],
+    }
+    value.update(changes)
+    return views.Funnel(**value)
+
+
+def candidate(key, title="", **more):
+    return {
+        "id": key,
+        "direction": "03-world",
+        "title": title or key,
+        "url": f"https://example.org/{key}",
+        **more,
+    }
+
+
+def test_a_run_from_before_the_funnel_says_what_it_did_not_record():
+    found = {"candidates": [candidate("a", access_scope="full_text")]}
+    (row,) = views.direction_funnel(
+        funnel(discovered={"03-world": found}), "discovery", [], []
+    )
+    assert (row.seed_count, row.opened_count, row.dropped_count) == (
+        None,
+        None,
+        None,
+    )
+    assert (row.handed_count, row.full_text_count, row.news_count) == (1, 1, 0)
+    assert views.consensus_leads(funnel()) == []
+    assert views.reference_check(funnel()) is None
+
+
+def test_a_direction_counts_each_stage_and_its_own_calls():
+    pool = [
+        candidate("a"),
+        candidate("b"),
+        {**candidate("c"), "direction": "x"},
+    ]
+    row = views.direction_funnel(
+        funnel(
+            seeds=[candidate("s"), {"id": "t", "direction": "x"}],
+            discovered={
+                "03-world": {
+                    "candidates": [candidate("a", access_scope="metadata")],
+                    "classifications": {"a": {"kind": "unknown"}},
+                    "observed": {"opened": [], "opened_count": 0},
+                }
+            },
+            pool=pool,
+            dropped=[
+                {"id": "d", "direction": "03-world", "reason": "pool_cap"},
+                {"id": "e", "direction": "03-world", "reason": "history"},
+                {"id": "f", "direction": "x", "reason": "history"},
+            ],
+            tasks=[{"candidate_ids": ["a", "b"]}, {"candidate_ids": ["c"]}],
+            stories=[{"candidate_ids": ["a"], "disposition": "deferred"}],
+        ),
+        "discovery",
+        [
+            {
+                "node_id": "discovery",
+                "item_id": "03-world",
+                "started_at": "2026-10-28T14:00:00+00:00",
+                "finished_at": "2026-10-28T14:01:30.5+00:00",
+            }
+        ],
+        [
+            {"stage": "discovery:03-world", "status": "failed"},
+            {"stage": "discovery:x", "status": "completed"},
+        ],
+    )[0]
+    assert (row.seed_count, row.opened_count) == (1, 0)
+    assert (row.unknown_count, row.metadata_count, row.pooled_count) == (
+        1,
+        1,
+        2,
+    )
+    assert row.dropped_count == 2
+    assert [(d.reason, d.count) for d in row.drops] == [
+        ("history", 1),
+        ("pool_cap", 1),
+    ]
+    # One task cites two of its candidates; its only story was deferred.
+    assert (row.selected_count, row.published_count) == (1, 0)
+    assert row.elapsed_seconds == 90.5
+    assert (row.usage.call_count, row.usage.failed_count) == (1, 1)
+
+
+def test_consensus_leads_go_as_far_as_their_stories():
+    basis = {"kind": "news", "basis": "头条共识：BBC、NPR、DW共3家"}
+    pool = [candidate(f"c{n}", f"Lead {n}") for n in range(5)]
+    leads = views.consensus_leads(
+        funnel(
+            pool=pool,
+            classifications={
+                **{f"c{n}": basis for n in range(4)},
+                "c4": {"kind": "news", "basis": "Opened news"},
+            },
+            notes={"c0": {"signals": {"independent_sources": 4}}},
+            tasks=[
+                {"candidate_ids": ["c1"]},
+                {"candidate_ids": ["c2"]},
+                {"candidate_ids": [], "source_urls": [pool[3]["url"]]},
+            ],
+            stories=[
+                {"candidate_ids": ["c2"], "disposition": "deferred"},
+                {"candidate_ids": ["c3"], "disposition": "deferred"},
+                {"candidate_ids": ["c3"], "disposition": "watch"},
+            ],
+        )
+    )
+    assert [(lead.title, lead.stage, lead.disposition) for lead in leads] == [
+        ("Lead 0", LEAD.POOLED, ""),
+        ("Lead 1", LEAD.SELECTED, ""),
+        ("Lead 2", LEAD.DEFERRED, "deferred"),
+        ("Lead 3", LEAD.PUBLISHED, "watch"),
+    ]
+    assert [lead.outlet_count for lead in leads] == [4, 0, 0, 0]
+
+
+def test_a_consensus_lead_counts_a_candidate_at_another_outlets_report():
+    basis = {"kind": "news", "basis": "头条共识：BBC、NPR、DW共3家"}
+    lead = candidate("lead", "Norland votes")
+    opened = candidate("opened", "合成：诺兰公投", url="https://b.example/x")
+    run = {
+        "pool": [lead, opened],
+        "classifications": {"lead": basis},
+        "notes": {"lead": {"alternate_urls": ["https://b.example/x"]}},
+        "tasks": [{"candidate_ids": ["opened"]}],
+    }
+    (found,) = views.consensus_leads(
+        funnel(
+            **run,
+            stories=[{"candidate_ids": ["opened"], "disposition": "brief"}],
+        )
+    )
+    assert (found.title, found.stage, found.disposition) == (
+        "Norland votes",
+        LEAD.PUBLISHED,
+        "brief",
+    )
+    (found,) = views.consensus_leads(funnel(**run))
+    assert found.stage == LEAD.SELECTED
+    (found,) = views.consensus_leads(funnel(**{**run, "notes": {}}))
+    assert found.stage == LEAD.POOLED
+
+
+REFERENDUM = {
+    "category": "Politics and elections",
+    "text": "Norland's electoral commission confirms that voters approved "
+    "the referendum on the constitution.",
+    "urls": ["https://news.example.org/referendum", "javascript:alert(1)"],
+    "entities": ["Norland", "Electoral Commission Norland"],
+    "feeds": 2,
+    "feed_title": "Norland votes",
+    "seeds": [],
+}
+
+
+def check(*items, **changes):
+    reference = {
+        "source": "current-events",
+        "date": "2026-10-27",
+        "url": "https://en.wikipedia.org/wiki/Portal:Current_events/x",
+        "code": "ok",
+        "items": list(items),
+    }
+    return views.reference_check(funnel(reference=reference, **changes))
+
+
+def test_an_unreadable_reference_lists_nothing():
+    reference = {
+        "source": "current-events",
+        "url": "javascript:alert(1)",
+        "code": "parse_error",
+        "items": [REFERENDUM],
+    }
+    result = views.reference_check(funnel(reference=reference))
+    assert result.state == run_pb.ReferenceCheck_State.UNAVAILABLE
+    assert (result.error_code, result.url, result.events) == (
+        "parse_error",
+        "",
+        (),
+    )
+
+
+def test_a_reference_event_takes_its_furthest_strong_match():
+    words = candidate(
+        "words",
+        "Norland voters approve constitution in referendum, electoral "
+        "commission says",
+    )
+    cited = candidate(
+        "cited",
+        "合成：诺兰公投",
+        evidence_urls=["https://news.example.org/referendum"],
+    )
+    (event,) = check(
+        REFERENDUM,
+        pool=[words, cited],
+        tasks=[{"candidate_ids": ["cited"]}],
+        stories=[{"candidate_ids": ["cited"], "disposition": "brief"}],
+    ).events
+    assert (event.stage, event.match) == (STAGE.PUBLISHED, "合成：诺兰公投")
+    assert event.source_urls == ("https://news.example.org/referendum",)
+    (event,) = check(REFERENDUM, pool=[words]).events
+    assert (event.stage, event.match) == (STAGE.POOLED, words["title"])
+
+
+def test_a_reference_event_left_before_the_pool_names_where():
+    lead = candidate("lead", "Norland votes")
+    dropped = [
+        {"id": "lead", "direction": "03-world", "reason": "research_cap"}
+    ]
+    linked = {**REFERENDUM, "seeds": ["lead"]}
+    # The pool left the routed lead out: that is where it stopped.
+    (event,) = check(linked, seeds=[lead], dropped=dropped).events
+    assert (event.stage, event.match, event.drop_reason) == (
+        STAGE.DROPPED,
+        "Norland votes",
+        "research_cap",
+    )
+    handed = {"03-world": {"candidates": [lead]}}
+    (event,) = check(
+        linked, seeds=[lead], dropped=dropped, discovered=handed
+    ).events
+    assert (event.stage, event.drop_reason) == (STAGE.DROPPED, "research_cap")
+    (event,) = check(REFERENDUM, dropped=[]).events
+    assert (event.stage, event.match) == (STAGE.CUT, "Norland votes")
+    weak = candidate("weak", "Norland voters approve a referendum")
+    (event,) = check({**REFERENDUM, "feeds": 0}, pool=[weak]).events
+    assert (event.stage, event.match) == (STAGE.UNCERTAIN, weak["title"])
+    (event,) = check({**REFERENDUM, "feeds": 0}, dropped=[]).events
+    assert (event.stage, event.match) == (STAGE.UNSEEN, "")
+
+
+def test_before_the_pool_a_reference_event_is_pending():
+    # The run is still discovering: no pool, no drops yet.
+    lead = candidate("lead", "Norland votes")
+    linked = {**REFERENDUM, "seeds": ["lead"]}
+    handed = {"03-world": {"candidates": [lead]}}
+    for item in (linked, REFERENDUM, {**REFERENDUM, "feeds": 0}):
+        (event,) = check(item, seeds=[lead], discovered=handed).events
+        assert (event.stage, event.drop_reason) == (STAGE.PENDING, "")
+    (event,) = check({**REFERENDUM, "feeds": 0}).events
+    assert (event.stage, event.match) == (STAGE.PENDING, "")
+
+
+def test_an_event_an_earlier_run_had_is_not_unseen():
+    earlier = {
+        **REFERENDUM,
+        "feeds": 0,
+        "feed_title": "",
+        "previous": "Norland approves its constitution",
+    }
+    for changes in ({"dropped": []}, {}):
+        (event,) = check(earlier, **changes).events
+        assert (event.stage, event.match) == (
+            STAGE.PREVIOUS,
+            "Norland approves its constitution",
+        )
+    # A report this run carried further still wins.
+    words = candidate(
+        "words",
+        "Norland voters approve constitution in referendum, electoral "
+        "commission says",
+    )
+    (event,) = check(earlier, pool=[words]).events
+    assert event.stage == STAGE.POOLED
+
+
+def test_a_published_discovery_candidate_in_chinese_is_not_left_pooled():
+    # Discovery handed off a Chinese title at an address without a slug;
+    # the English feed lead it opened sat in the pool uncited.
+    lead = candidate(
+        "lead",
+        "Norland voters approve new constitution in referendum, electoral "
+        "commission says",
+    )
+    published = candidate(
+        "published",
+        "诺兰选民在公投中通过新宪法",
+        url="https://news.example.org/articles/c4g7x2y9",
+        event_key="norland-constitution-referendum-approved",
+    )
+    run = {
+        "seeds": [lead],
+        "pool": [published, lead],
+        "dropped": [],
+        "tasks": [{"candidate_ids": ["published"]}],
+        "stories": [{"candidate_ids": ["published"], "disposition": "brief"}],
+    }
+    linked = {**REFERENDUM, "seeds": ["lead"], "feed_urls": [lead["url"]]}
+    # Its address is one of the strong feed matches' (a group alternate).
+    (event,) = check(
+        {**linked, "feed_urls": [lead["url"], published["url"]]}, **run
+    ).events
+    assert (event.stage, event.match) == (STAGE.PUBLISHED, published["title"])
+    # It is not: its English event key is only a weak match, which got
+    # further than the lead, so it may be there.
+    (event,) = check(linked, **run).events
+    assert (event.stage, event.match) == (STAGE.UNCERTAIN, published["title"])

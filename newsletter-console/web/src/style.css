@@ -1042,6 +1042,81 @@ tbody tr:last-child th {
   grid-column: 1 / -1;
 }
 
+/* The retrieval funnel and must-know tracking */
+.funnel-table {
+  table-layout: fixed;
+}
+.funnel-table thead th:first-child,
+.funnel-table thead th:last-child {
+  width: 13%;
+}
+.funnel-table thead th:nth-child(4) {
+  width: 15%;
+}
+.funnel-table thead th:nth-child(6) {
+  width: 19%;
+}
+.funnel-table th[scope='row'] {
+  font-size: .86rem;
+  font-weight: 600;
+  color: var(--fg);
+  vertical-align: top;
+  border-bottom: 1px solid var(--line);
+  padding: 10px 12px 10px 0;
+}
+.funnel-table tbody tr:last-child th {
+  border-bottom: 0;
+}
+.funnel-table td.num .cell-sub {
+  white-space: normal;
+}
+.funnel-note {
+  margin-top: 10px;
+}
+.must-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 20px 32px;
+}
+.must-block h3 {
+  font-size: .92rem;
+  font-weight: 650;
+  margin-bottom: 6px;
+}
+.must-block > p + p,
+.must-block > .must-rows + p {
+  margin-top: 6px;
+}
+.must-rows {
+  margin-top: 4px;
+}
+.must-rows li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+}
+.must-rows li:last-child {
+  border-bottom: 0;
+}
+.must-title {
+  font-family: var(--serif);
+  font-size: .95rem;
+}
+.must-title.plain {
+  font-family: inherit;
+  font-size: .88rem;
+}
+.must-tags {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.must-note {
+  grid-column: 1 / -1;
+}
+
 /* Model calls */
 .call-table td:first-child strong {
   font-weight: 600;
@@ -1807,7 +1882,8 @@ footer {
   .lead,
   .pair,
   .pair.lean,
-  .issue-grid {
+  .issue-grid,
+  .must-grid {
     grid-template-columns: minmax(0, 1fr);
   }
   .directions {
@@ -2004,6 +2080,46 @@ footer {
   }
   .call-table td:first-child::before {
     display: none;
+  }
+  /* So do the funnel's directions: the direction across the top, its counts four to a line. */
+  .funnel-table thead {
+    display: none;
+  }
+  .funnel-table,
+  .funnel-table tbody {
+    display: block;
+  }
+  .funnel-table tr {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px 16px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .funnel-table tbody tr:last-child {
+    border-bottom: 0;
+  }
+  .funnel-table td,
+  .funnel-table th[scope='row'] {
+    display: block;
+    padding: 0;
+    border: 0;
+    text-align: left;
+  }
+  .funnel-table td::before {
+    content: attr(data-label);
+    display: block;
+    font-size: .72rem;
+    color: var(--muted);
+    margin-bottom: 1px;
+  }
+  .funnel-table th[scope='row'] {
+    grid-column: 1 / -1;
+  }
+  .funnel-table td:nth-child(4),
+  .funnel-table td:nth-child(6),
+  .funnel-table td:last-child {
+    grid-column: span 2;
   }
   .run-row {
     grid-template-columns: minmax(0, 1fr) auto;

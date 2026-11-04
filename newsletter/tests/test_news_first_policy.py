@@ -565,7 +565,12 @@ async def test_legacy_jobs_keep_exact_envelopes_and_instructions(
         tmp_path.resolve() / "legacy-discovery",
     )
     assert set(dataclasses.asdict(selection)) == {"research_tasks", "note"}
-    assert set(dataclasses.asdict(discovery)) == {"candidates", "note"}
+    # ``observed`` only records the call's opens for the console.
+    assert set(dataclasses.asdict(discovery)) == {
+        "candidates",
+        "note",
+        "observed",
+    }
     assert (
         engine.calls[0][2] == content._SELECTION
         and engine.calls[1][2] == content._DISCOVERY

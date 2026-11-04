@@ -84,6 +84,9 @@ that login expires.
 | `ListModelCalls` | One run, at most 200 |
 | `ModelCall.reported_models`, `ModelCall.router_requests` | 4 each |
 | `RunNode.items` | 64 over the whole run |
+| `Run.funnel` | One row per discovery direction of the run's graph |
+| `Run.consensus_leads` | 3 (the candidates node offers at most three) |
+| `ReferenceCheck.events` | 30; `source_urls` 2 each |
 | `SummarizeModelUsage` | 7, 30 or 90 issue dates, ending with the newest that has a run |
 | `SourceCatalog.config_history` | 10 revisions |
 | `FeedSource.recent` | The latest 7 scheduled runs |
@@ -124,7 +127,14 @@ that login expires.
   body's queue fields, which the daily workflow no longer updates.
 - **Not recorded is not zero.** Model calls recorded before this API lack their purpose, times, Router requests,
   reported models, cost and failure; feed runs before it lack per-source counts; backup pages last written before
-  it lack a progress time. Those fields are absent, and a client says 上线前未记录 instead of showing zero.
+  it lack a progress time; runs before the funnel was kept lack `DirectionFunnel.opened_count` and `dropped_count`
+  (and runs whose feeds gave every direction every lead, `seed_count`). Those fields are absent, and a client says 上线前未记录 instead of showing zero.
+- **The funnel and the reference.** A direction's counts follow the run's own candidate IDs from its feeds artifact
+  through discovery, the pool, the selected tasks and the publication's coverage; a task or story counts for every
+  direction whose candidate it cites. A reference event's stage is the furthest stage a strong match reached
+  (a cited source, or shared English words naming two of its linked entities), with the matched title in `match`;
+  words alone can match another event of the same actors. Only weak matches are `UNCERTAIN`, none `UNSEEN`, and an
+  unreadable reference is `UNAVAILABLE` with no events: nothing here claims that the run missed nothing.
 - **Delivery.** `PROVIDER_ACCEPTED` means the mail provider accepted the mail, not that it reached an inbox. An
   `UNKNOWN` delivery is checked against the actual mail first; it is never sent again under another request key.
 

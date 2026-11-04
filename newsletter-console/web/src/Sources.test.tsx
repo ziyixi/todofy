@@ -64,6 +64,8 @@ describe('来源', () => {
     expect(outcomeText({ code: 'timeout' })).toBe('超时（timeout）');
     expect(outcomeText({ code: 'ok' })).toBe('正常 · 线索数上线前未记录');
     expect(outcomeText({ code: 'ok', seed_count: 0 })).toBe('正常 · 没有新线索');
+    expect(outcomeText({ code: 'ok', entry_count: 8, seed_count: 0 }, true)).toBe('正常 · 参照 8 条事件，不产生线索');
+    expect(outcomeText({ code: 'parse_error' }, true)).toBe('无法解析（parse_error）');
     expect(outcomeText(undefined)).toBe('尚无运行记录');
   });
 

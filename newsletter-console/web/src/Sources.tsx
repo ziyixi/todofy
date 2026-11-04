@@ -15,11 +15,15 @@ import { ConfigCard } from './Overview.tsx';
  * so it has no place on this page.
  */
 
-/** A source's outcome in one run, in words: 4 条线索（14 条中 6 条可用）, or why it failed. */
-export function outcomeText(outcome: SourceOutcome | undefined): string {
+/**
+ * A source's outcome in one run, in words: 4 条线索（14 条中 6 条可用）, or why it failed. A reference source gives no
+ * leads, only the events the run is checked against.
+ */
+export function outcomeText(outcome: SourceOutcome | undefined, reference = false): string {
   if (outcome === undefined) return '尚无运行记录';
   const word = sourceCode(outcome.code);
   if (outcome.code !== 'ok') return `${word.label}${word.label === outcome.code ? '' : `（${outcome.code ?? ''}）`}`;
+  if (reference) return `正常 · 参照 ${String(outcome.entry_count ?? 0)} 条事件，不产生线索`;
   if (outcome.seed_count === undefined) return '正常 · 线索数上线前未记录';
   if (outcome.seed_count === 0) return '正常 · 没有新线索';
   const found = outcome.entry_count === undefined ? '' : `（${String(outcome.entry_count)} 条中 ${String(outcome.accepted_count ?? 0)} 条可用）`;
@@ -44,7 +48,8 @@ function Recent({ recent }: { recent: readonly SourceOutcome[] }) {
 function SourceRow({ source }: { source: FeedSource }) {
   const latest = source.recent?.[0];
   const href = webUrl(source.url);
-  const limits = [
+  const reference = source.kind === 'current_events';
+  const limits = reference ? '前一天（UTC）的事件，只用来核对运行' : [
     source.max_seeds ? `每次最多 ${String(source.max_seeds)} 条线索` : null,
     source.max_age_days ? `只看 ${String(source.max_age_days)} 天内` : null,
   ].filter(Boolean).join(' · ');
@@ -58,7 +63,7 @@ function SourceRow({ source }: { source: FeedSource }) {
       <div className="source-outcome">
         {source.enabled ? <Recent recent={source.recent ?? []} /> : null}
         <span className={latest && latest.code !== 'ok' ? 'source-last bad' : 'source-last'}>
-          {source.enabled ? outcomeText(latest) : '运行不读取'}
+          {source.enabled ? outcomeText(latest, reference) : '运行不读取'}
         </span>
       </div>
       <div className="source-meta">

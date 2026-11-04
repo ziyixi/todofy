@@ -1,11 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
 import type { ModelCall } from '@ziyixi/proto/newsletter/ui/v1/model_call_wire';
-import type { Run } from '@ziyixi/proto/newsletter/ui/v1/run_wire';
+import type { DirectionFunnel, ReferenceCheck, Run } from '@ziyixi/proto/newsletter/ui/v1/run_wire';
 import type { StoryOutcome } from '@ziyixi/proto/newsletter/ui/v1/edition_wire';
 import { read, runQuery } from './api.ts';
 import {
-  callState, count, deliveryState, duration, failureKind, idOf, issueDate, microUsd, nodeNameById, purpose, runState,
-  seconds, short, stopReason, time, trigger, wholeSeconds,
+  REFERENCE_ORDER, callState, count, deliveryState, disposition, dropReason, duration, failureKind, idOf, issueDate,
+  leadStage, microUsd, nodeNameById, nodeState, purpose, referenceStage, runState, seconds, short, stopReason, time,
+  trigger, webUrl, wholeSeconds,
 } from './format.ts';
 import { Mark } from './Mark.tsx';
 import { Dependencies } from './Overview.tsx';
@@ -88,7 +89,6 @@ function Facts({ run }: { run: Run }) {
   );
 }
 
-const DISPOSITIONS: Readonly<Record<string, string>> = { deep: '深读', brief: '简讯', watch: '观察', deferred: '暂缓' };
 const RESULTS: Readonly<Record<string, string>> = {
   approved: '通过', confirmed_signal: '确认信号', withheld: '撤下', repaired: '已修订', invalid_output: '输出无效',
   editor_unavailable: '编辑不可用',
@@ -107,13 +107,162 @@ function Stories({ stories }: { stories: readonly StoryOutcome[] }) {
             <li key={story.story_id}>
               <span className="story-title">{story.title || story.story_id}</span>
               <span className="story-tags">
-                <span className="chip quiet">{DISPOSITIONS[story.disposition ?? ''] ?? story.disposition ?? '—'}</span>
+                <span className="chip quiet">{disposition(story.disposition) ?? '—'}</span>
                 {story.result ? <span className="chip quiet">{RESULTS[story.result] ?? story.result}</span> : null}
               </span>
               {story.reason ? <span className="muted small story-reason">{story.reason}</span> : null}
             </li>
           ))}
         </ul>
+      )}
+    </section>
+  );
+}
+
+const shown = (value: number | undefined): string => (value === undefined ? '未记录' : String(value));
+/** The non-zero parts of a breakdown: 新闻 1 · 研究 2. */
+const parts = (pairs: readonly (readonly [string, number | undefined])[]): string =>
+  pairs.filter(([, value]) => value).map(([label, value]) => `${label} ${String(value)}`).join(' · ');
+
+function FunnelRow({ row }: { row: DirectionFunnel }) {
+  const failed = row.state !== undefined && row.state !== 'succeeded';
+  const cost = microUsd(row.usage?.estimated_cost_microusd);
+  return (
+    <tr>
+      <th scope="row" data-label="方向">
+        {row.direction ?? '未命名方向'}
+        {failed ? <span className="cell-sub"><Mark word={nodeState(row.state)} />{row.error_code ? <> <code>{row.error_code}</code></> : null}</span> : null}
+      </th>
+      <td data-label="线索" className="num">{shown(row.seed_count)}</td>
+      <td data-label="尝试打开" className="num">{shown(row.opened_count)}</td>
+      <td data-label="交接" className="num">
+        {row.handed_count ?? 0}
+        <span className="cell-sub">{parts([['新闻', row.news_count], ['研究', row.research_count], ['未定', row.unknown_count]])}</span>
+        <span className="cell-sub">{parts([['全文', row.full_text_count], ['摘要', row.abstract_count], ['仅线索', row.metadata_count]])}</span>
+      </td>
+      <td data-label="入池" className="num">{row.pooled_count ?? 0}</td>
+      <td data-label="丢弃" className="num">
+        {shown(row.dropped_count)}
+        <span className="cell-sub">{(row.drops ?? []).map((drop) => `${dropReason(drop.reason)} ${String(drop.count ?? 0)}`).join(' · ')}</span>
+      </td>
+      <td data-label="入选" className="num">{row.selected_count ?? 0}</td>
+      <td data-label="刊出" className="num">{row.published_count ?? 0}</td>
+      <td data-label="用时 · 成本" className="num">
+        {row.elapsed_seconds === undefined ? '—' : duration(row.elapsed_seconds)}
+        <span className="cell-sub">{cost ? `估算 ${cost}` : row.usage?.call_count ? `${String(row.usage.call_count)} 次调用` : ''}</span>
+      </td>
+    </tr>
+  );
+}
+
+/** Each discovery direction from its feed leads to the edition, with what the pool left out and why. */
+function Funnel({ rows }: { rows: readonly DirectionFunnel[] }) {
+  if (rows.length === 0) return null;
+  const old = rows.every((row) => row.opened_count === undefined && row.dropped_count === undefined);
+  return (
+    <section className="card funnel" aria-labelledby="funnel-title">
+      <header className="card-head">
+        <h2 id="funnel-title">检索漏斗</h2>
+        <p className="muted">每个方向从订阅源线索到刊出。尝试打开只记录打开动作，不代表读到了页面；交接含仅线索的候选。</p>
+      </header>
+      <div className="table-scroll">
+        <table className="funnel-table">
+          <thead>
+            <tr>
+              <th scope="col">方向</th><th scope="col" className="num">线索</th><th scope="col" className="num">尝试打开</th>
+              <th scope="col" className="num">交接</th><th scope="col" className="num">入池</th><th scope="col" className="num">丢弃</th>
+              <th scope="col" className="num">入选</th><th scope="col" className="num">刊出</th><th scope="col" className="num">用时 · 成本</th>
+            </tr>
+          </thead>
+          <tbody>{rows.map((row) => <FunnelRow key={row.direction} row={row} />)}</tbody>
+        </table>
+      </div>
+      {old ? <p className="muted small funnel-note">尝试打开与丢弃：{NOT_RECORDED}。</p> : null}
+    </section>
+  );
+}
+
+function Headlines({ run }: { run: Run }) {
+  const leads = run.consensus_leads ?? [];
+  return (
+    <div className="must-block">
+      <h3>头条共识</h3>
+      {(run.headlines ?? []).map((summary) => (
+        <p key={summary.direction} className="muted small">
+          {summary.direction} · 头条源 {summary.feed_ok_count ?? 0}/{summary.feed_count ?? 0} 正常 · 窗口内 {summary.entry_count ?? 0} 条，
+          {summary.group_count ?? 0} 组，3 家及以上 {summary.consensus_group_count ?? 0} 组
+          {summary.top_groups?.length ? `；前三组：${summary.top_groups.map((group) => `${group.title ?? ''}（${String(group.outlet_count ?? 0)} 家）`).join('、')}` : ''}
+        </p>
+      ))}
+      {leads.length === 0 ? <p className="muted">这次没有 3 家及以上媒体同报、进入候选池的事件组。</p> : (
+        <ul className="must-rows">
+          {leads.map((lead, index) => {
+            const href = webUrl(lead.url);
+            return (
+              <li key={index}>
+                <span className="must-title">{href ? <a href={href} target="_blank" rel="noopener noreferrer">{lead.title}</a> : lead.title}</span>
+                <span className="must-tags">
+                  <span className="chip quiet">{lead.outlet_count ?? 0} 家</span>
+                  <Mark word={leadStage(lead.stage, lead.disposition)} />
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      <p className="muted small">家数由代码按标题聚类算出，可能把同一议题的不同事件并在一起；是否必知由选题判断。</p>
+    </div>
+  );
+}
+
+function Reference({ check }: { check: ReferenceCheck }) {
+  const events = check.events ?? [];
+  const href = webUrl(check.url);
+  const title = `维基百科时事 · ${issueDate(check.date)}（UTC）`;
+  const counts = REFERENCE_ORDER.map((stage) => [referenceStage(stage).label, events.filter((event) => event.stage === stage).length] as const);
+  return (
+    <div className="must-block">
+      <h3>{href ? <a href={href} target="_blank" rel="noopener noreferrer">{title}</a> : title}</h3>
+      {check.state !== 'available' ? (
+        <p><Mark word={{ label: `参照不可用${check.error_code ? `（${check.error_code}）` : ''}`, tone: 'warn' }} /> <span className="muted">这次读不到参照，不能据此判断有没有漏掉大事。</span></p>
+      ) : (
+        <>
+          <p className="muted small">{events.length === 0 ? '参照里没有读到可比对的条目。' : parts(counts)}</p>
+          <ul className="must-rows">
+            {events.map((event, index) => (
+              <li key={index}>
+                <span className="must-title plain">{event.text}</span>
+                <span className="must-tags"><Mark word={referenceStage(event.stage)} /></span>
+                <span className="muted small must-note">
+                  {[event.category, event.drop_reason ? dropReason(event.drop_reason) : null, event.match ? `匹配：${event.match}` : null].filter(Boolean).join(' · ')}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="muted small">按英文词、引用来源和订阅条目地址比对；匹配的是最接近的一条，可能是同一地点或人物的另一件事；只有弱匹配、或弱匹配走得更远时记未确定。这里不说明没有漏报。</p>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Must-know tracking: the code-counted headline consensus and an independent reference, against what the run did. */
+function MustKnow({ run }: { run: Run }) {
+  const recorded = run.reference !== undefined || (run.headlines ?? []).length > 0
+    || (run.funnel ?? []).some((row) => row.opened_count !== undefined);
+  return (
+    <section className="card must" aria-labelledby="must-title">
+      <header className="card-head">
+        <h2 id="must-title">必知追踪</h2>
+        <p className="muted">多家头条同报的事件与独立参照，各自走到了哪一步</p>
+      </header>
+      {!recorded ? <p className="muted">{NOT_RECORDED}。</p> : (
+        <div className="must-grid">
+          <Headlines run={run} />
+          {run.reference ? <Reference check={run.reference} /> : (
+            <div className="must-block"><h3>参照</h3><p className="muted">这次运行没有参照源。</p></div>
+          )}
+        </div>
       )}
     </section>
   );
@@ -244,6 +393,8 @@ export function RunPage({ id }: { id: string }) {
         </header>
         <Timeline run={data} />
       </section>
+      <Funnel rows={data.funnel ?? []} />
+      <MustKnow run={data} />
       {data.stories?.length ? (
         <div className="pair">
           <Dependencies dependencies={data.dependencies ?? []} title="外部调用" note="这次运行调用了哪些接口，以及结果" />

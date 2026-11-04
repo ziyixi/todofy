@@ -937,3 +937,29 @@ def test_public_context_is_bounded_and_allowlisted():
     ) == [{"title": "Public"}]
     with pytest.raises(errors.EditorError):
         content.public_context([{}] * 101)
+
+
+async def test_discovery_records_the_pages_its_call_tried_to_open(tmp_path):
+    # Attempts, not loads: the gateway sees the open action only. A local or
+    # non-HTTP address never reaches the artifact; the list is bounded.
+    opened = {
+        *(f"https://example.org/page/{n:02d}" for n in range(30)),
+        "http://127.0.0.1/admin",
+        "file:///etc/passwd",
+    }
+    engine = workflow_content.Engine(
+        (workflow_content.discovered(), opened, True)
+    )
+    result = await content.ContentPreparation(engine).discover(
+        instructions.Instruction("03-world", "Find world news", "a" * 64),
+        workflow_content.DAY,
+        tmp_path.resolve() / "opened",
+    )
+    assert result.observed == {
+        "opened": [
+            f"https://example.org/page/{n:02d}"
+            for n in range(content.MAX_OBSERVED_OPENS)
+        ],
+        "opened_count": 30,
+    }
+    assert "opened" not in engine.calls[0][0]

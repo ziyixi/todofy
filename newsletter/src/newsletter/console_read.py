@@ -204,6 +204,8 @@ class _Run:
     workflow_started: str | None
     feeds_diagnostics: Any
     feeds_sources: Any
+    # The feeds' reference source, if any: it gives no leads.
+    feeds_reference: str
     candidate_count: int
     selected_count: int
     parent_run: str
@@ -219,6 +221,20 @@ class _Run:
     def issue_date(self) -> str:
         """The run's issue date."""
         return str(self.row["issue_date"] or "")
+
+    def lead_sources(self) -> list[run_pb.SourceOutcome]:
+        """The outcomes of the run's lead sources, without the reference.
+
+        A reference that could not be read degrades no lead; the run's
+        reference check says it is unavailable.
+        """
+        return [
+            outcome
+            for outcome in views.feed_outcomes(
+                self.issue_date, self.feeds_diagnostics, self.feeds_sources
+            )
+            if outcome.source_id != self.feeds_reference
+        ]
 
 
 def _utc_now() -> datetime.datetime:
@@ -335,6 +351,7 @@ class ConsoleReader:
             ]
         calls = self._calls(snap, run_id)
         diagnostics = sources = None
+        reference = ""
         candidates = selected = 0
         if snap.has("workflow_artifacts"):
             feeds = views.node_of(definition, "api_feed")
@@ -343,10 +360,12 @@ class ConsoleReader:
                 run_id,
                 feeds,
                 "json_extract(body,'$.diagnostics') AS a, "
-                "json_extract(body,'$.sources') AS b",
+                "json_extract(body,'$.sources') AS b, "
+                "json_extract(body,'$.reference.source') AS c",
             )
             if found is not None:
                 diagnostics, sources = _json(found["a"]), _json(found["b"])
+                reference = views.text(found["c"])
             pool = self._artifact(
                 snap,
                 run_id,
@@ -387,6 +406,7 @@ class ConsoleReader:
             workflow_started=started,
             feeds_diagnostics=diagnostics,
             feeds_sources=sources,
+            feeds_reference=reference,
             candidate_count=candidates,
             selected_count=selected,
             parent_run=parent,
@@ -450,9 +470,7 @@ class ConsoleReader:
             else ""
         )
         deadline = views.int32(row["deadline"])
-        outcomes = views.feed_outcomes(
-            run.issue_date, run.feeds_diagnostics, run.feeds_sources
-        )
+        outcomes = run.lead_sources()
         has_feeds = run.feeds_diagnostics is not None
         edition = run.edition or {}
         message = run_pb.Run(
@@ -498,10 +516,20 @@ class ConsoleReader:
         )
         if not detail:
             return message
+        funnel = self._funnel(snap, run)
+        discovery = views.node_of(run.definition, "discovery")
         return dataclasses.replace(
             message,
             nodes=tuple(self._run_nodes(snap, run)),
             stories=tuple(self._stories(snap, run.id)),
+            funnel=tuple(
+                views.direction_funnel(
+                    funnel, discovery, run.attempts, run.calls
+                )
+            ),
+            headlines=tuple(views.headline_summaries(funnel.headlines)),
+            consensus_leads=tuple(views.consensus_leads(funnel)),
+            reference=views.reference_check(funnel),
             dependencies=tuple(
                 views.dependencies(
                     run=self._dependency_run(run),
@@ -568,6 +596,99 @@ class ConsoleReader:
             ):
                 results[str(row[0])] = views.text(row[1])
         return views.story_outcomes(coverage, plan, results)
+
+    def _funnel(self, snap: Snapshot, run: _Run) -> views.Funnel:
+        """The artifacts the funnel reads, for GetRun alone.
+
+        Each is one bounded artifact subtree: the feeds' routed leads, notes,
+        headline counts and reference, each direction's discovery output, the
+        pool, the selected tasks and the publication's coverage.
+        """
+        discovery = views.node_of(run.definition, "discovery")
+        directions: list[views.Row] = []
+        discovered: dict[str, Any] = {}
+        if discovery and snap.has("workflow_runs"):
+            found = snap.one(
+                "SELECT json_extract(body,?) FROM workflow_runs WHERE id=?",
+                [f'$.nodes."{discovery}".items', run.id],
+            )
+            directions = views.rows(_json(found[0]) if found else None)
+        feeds: Any = {}
+        pool: Any = {}
+        tasks = None
+        if snap.has("workflow_artifacts"):
+            feeds = (
+                self._artifact(
+                    snap,
+                    run.id,
+                    views.node_of(run.definition, "api_feed"),
+                    "json_extract(body,'$.candidates') AS candidates,"
+                    " json_extract(body,'$.notes') AS notes,"
+                    " json_extract(body,'$.headlines') AS headlines,"
+                    " json_extract(body,'$.reference') AS reference",
+                )
+                or {}
+            )
+            pool = (
+                self._artifact(
+                    snap,
+                    run.id,
+                    views.node_of(run.definition, "deduplicate"),
+                    "json_extract(body,'$.candidates') AS candidates,"
+                    " json_extract(body,'$.classifications') AS kinds,"
+                    " json_extract(body,'$.dropped') AS dropped",
+                )
+                or {}
+            )
+            chosen = self._artifact(
+                snap,
+                run.id,
+                views.node_of(run.definition, "selection"),
+                "json_extract(body,'$.research_tasks') AS a",
+            )
+            tasks = _json(chosen["a"]) if chosen else None
+            for row in snap.rows(
+                "SELECT item_id,json_extract(body,'$.candidates'),"
+                "json_extract(body,'$.classifications'),"
+                "json_extract(body,'$.observed') FROM workflow_artifacts "
+                "WHERE run_id=? AND node_id=? AND item_id<>''",
+                [run.id, discovery],
+            ):
+                discovered[str(row[0])] = {
+                    "candidates": _json(row[1]),
+                    "classifications": _json(row[2]),
+                    "observed": _json(row[3]),
+                }
+        stories = None
+        if snap.has("publication_snapshots"):
+            found = snap.one(
+                "SELECT json_extract(body,'$.coverage.stories') "
+                "FROM publication_snapshots WHERE run_id=?",
+                [run.id],
+            )
+            stories = _json(found[0]) if found else None
+        notes = _json(feeds["notes"]) if feeds else None
+        dropped = _json(pool["dropped"]) if pool else None
+        reference = _json(feeds["reference"]) if feeds else None
+        classifications = _json(pool["kinds"]) if pool else None
+        return views.Funnel(
+            directions=directions,
+            # Feeds from before notes gave every direction every lead.
+            seeds=views.rows(_json(feeds["candidates"]))
+            if isinstance(notes, dict)
+            else None,
+            notes=notes if isinstance(notes, dict) else {},
+            headlines=views.rows(_json(feeds["headlines"]) if feeds else None),
+            reference=reference if isinstance(reference, dict) else {},
+            discovered=discovered,
+            pool=views.rows(_json(pool["candidates"]) if pool else None),
+            classifications=classifications
+            if isinstance(classifications, dict)
+            else {},
+            dropped=views.rows(dropped) if isinstance(dropped, list) else None,
+            tasks=views.rows(tasks),
+            stories=views.rows(stories),
+        )
 
     def _find_run(self, snap: Snapshot, name: str, prefix: str) -> _Run:
         run_id = name.removeprefix(prefix)
@@ -1224,15 +1345,7 @@ class ConsoleReader:
             )
             usage = self._usage(snap, 7)
             message = self._run_message(snap, latest) if latest else None
-            outcomes = (
-                views.feed_outcomes(
-                    latest.issue_date,
-                    latest.feeds_diagnostics,
-                    latest.feeds_sources,
-                )
-                if latest
-                else []
-            )
+            outcomes = latest.lead_sources() if latest else []
             return overview_pb.Overview(
                 name="overview",
                 generate_time=views.timestamp(now.isoformat()),

@@ -21,6 +21,11 @@ https://info.arxiv.org/help/api/tou.html
 Crossref public pool: serial, polite, no retries (see the Crossref REST API
 tips: https://www.crossref.org/documentation/retrieve-metadata/rest-api/).
 Hugging Face daily papers is an undocumented public endpoint and optional.
+Wikipedia's Current events portal (``current_events``) is read once a run
+through the MediaWiki parse API, with a User-Agent naming the public
+repository as Wikimedia's policy asks
+(https://foundation.wikimedia.org/wiki/Policy:User-Agent_policy). It is only a
+reference the console checks the run against, never a lead.
 """
 
 from __future__ import annotations
@@ -56,7 +61,9 @@ import newsletter.workflow.sources as sources
 _LOGGER = logging.getLogger(__name__)
 
 REGISTRY_FILE = "researcher.yaml"
-KINDS = frozenset({"feed", "arxiv", "crossref", "hf_daily"})
+# The reference kind: yesterday's events, never routed to discovery.
+REFERENCE_KIND = "current_events"
+KINDS = frozenset({"feed", "arxiv", "crossref", "hf_daily", REFERENCE_KIND})
 MAX_SOURCES = 80
 MAX_SEEDS_PER_DIRECTION = 20
 MAX_ARTIFACT_BYTES = 256 * 1024
@@ -70,7 +77,9 @@ REQUEST_SECONDS = 15
 # A headline feed's entries count toward today's front page for this long.
 HEADLINE_HOURS = 48
 HOST_CHAINS = 4
-USER_AGENT = "personal-newsletter/0.1 public-metadata"
+USER_AGENT = (
+    "personal-newsletter/0.1 (https://github.com/ziyixi/todofy) public-metadata"
+)
 # Seconds between consecutive requests to one host.
 HOST_SPACING = {"export.arxiv.org": 3.0, "api.crossref.org": 3.0}
 DEFAULT_SPACING = 1.0
@@ -204,6 +213,8 @@ class _Outcome:
     code: str
     entries: list[Entry]
     truncated: bool = False
+    # A reference source's items (parse_current_events), not entries.
+    items: list[types.Payload] = dataclasses.field(default_factory=list)
 
 
 @dataclasses.dataclass
@@ -221,6 +232,8 @@ class _Lead:
     moment: float = 0.0
     echo: bool = False
     excerpts: list[types.Payload] | None = None
+    # Set on a headline group's member: the leader that stands for it.
+    leader: _Lead | None = None
 
     def rank(self) -> tuple[int, int, int, float, int, int]:
         day = datetime.date.fromisoformat(self.candidate["published_at"])
@@ -419,7 +432,9 @@ def _registry(text: str, directions: frozenset[str]) -> list[Source]:
         _source(index, item, directions)
         for index, item in enumerate(value["sources"])
     ]
-    if len({source.id for source in result}) != len(result):
+    if len({source.id for source in result}) != len(result) or (
+        sum(source.kind == REFERENCE_KIND for source in result) > 1
+    ):
         raise RegistryError()
     return result
 
@@ -758,6 +773,147 @@ def parse_hf_daily(raw: bytes) -> list[Entry]:
     return entries
 
 
+# Wikipedia's Current events portal lists a day's events as bullets under
+# bold category lines; a bullet citing a source is an event, and the bullets
+# above it name its topic. Only these of the portal's categories are kept.
+REFERENCE_CATEGORIES = frozenset(
+    {
+        "Armed conflicts and attacks",
+        "Politics and elections",
+        "Disasters and accidents",
+        "Business and economy",
+        "Health and environment",
+    }
+)
+MAX_REFERENCE_ITEMS = 30
+# A strong match shares at least this many of an item's word stems, a weak
+# one at least _WEAK_WORDS.
+_MATCH_WORDS = 5
+_WEAK_WORDS = 3
+# A reference item keeps at most this many feed addresses it matched.
+MAX_REFERENCE_URLS = 10
+_MONTHS = (
+    "January February March April May June July August September October "
+    "November December"
+).split()
+_WIKI_CATEGORY = re.compile(r"'''([^']+)'''")
+_WIKI_LINK = re.compile(r"\[\[([^\[\]|]*)(?:\|([^\[\]]*))?\]\]")
+_WIKI_SOURCE = re.compile(r"\[(https?://[^\s\]]+)[^\]]*\]")
+_WIKI_TEMPLATE = re.compile(r"\{\{[^{}]*\}\}")
+_WIKI_MARKUP = re.compile(r"<[^<>]*>|'{2,}")
+_WIKI_TAG = re.compile(r"<[^<>]*>")
+_PARENTHESIS = re.compile(r"\s*\([^()]*\)")
+
+
+def reference_page(day: datetime.date) -> str:
+    """The Current events page of a UTC day."""
+    month = _MONTHS[day.month - 1]
+    return f"Portal:Current_events/{day.year}_{month}_{day.day}"
+
+
+def _wiki_line(line: str) -> tuple[str, list[str], list[str]]:
+    """A bullet's plain text, the sources it cites and the entities it links.
+
+    A link names an entity (a place, person or body) by the capitalised
+    words of its target, without a disambiguating parenthesis, and of its
+    text: [[Ministry of the Interior (Spain)|interior ministry]] names
+    "Ministry Interior".
+    """
+    for _ in range(3):  # Templates such as {{small|...}} nest this deep.
+        line = _WIKI_TEMPLATE.sub(" ", line)
+    urls = _WIKI_SOURCE.findall(line)
+    line = _WIKI_SOURCE.sub(" ", line)
+    entities: list[str] = []
+    for target, label in _WIKI_LINK.findall(line):
+        words = _WORD.findall(_PARENTHESIS.sub("", target) + " " + label)
+        named = " ".join(word for word in words if word[0].isupper())
+        if named and named not in entities:
+            entities.append(named)
+    line = _WIKI_LINK.sub(lambda link: link[2] or link[1], line)
+    text = " ".join(html.unescape(_WIKI_MARKUP.sub("", line)).split())
+    return text, urls, entities
+
+
+def parse_current_events(raw: bytes) -> list[types.Payload]:
+    """Parse a Current events day page into bounded reference items.
+
+    Each item is an event of a kept category: the category, its topic (the
+    bullets above it), its plain text, up to two cited public URLs and up
+    to eight linked entities. Past MAX_REFERENCE_ITEMS the categories take
+    turns, since the portal lists them alphabetically and a heavy day of
+    conflict must not push politics out. The text is untrusted: the
+    console shows it as text and only counts it against the run; nothing
+    follows its links or gives it to a model.
+
+    Raises:
+        ValueError: The body is not a MediaWiki parse answer with wikitext
+            (a missing page answers 200 with an error object instead), or
+            it cites events under no kept category line: the markup has
+            changed, and no items would claim a day without events.
+    """
+    value = _json(raw)
+    page = value.get("parse") if isinstance(value, dict) else None
+    wikitext = page.get("wikitext") if isinstance(page, dict) else None
+    if not isinstance(wikitext, str):
+        raise ValueError("Not a parse answer")
+    items: list[types.Payload] = []
+    counts: collections.Counter[str] = collections.Counter()
+    category = ""
+    topic: list[str] = []
+    kept = cited = False
+    for line in wikitext.splitlines():
+        line = line.strip()
+        depth = len(line) - len(line.lstrip("*"))
+        if not depth:
+            # Between bullets only category lines carry text. One of another
+            # shape names no category, so the events below it are never
+            # filed under the one above.
+            plain = _WIKI_TAG.sub("", _WIKI_TEMPLATE.sub("", line)).strip()
+            if plain:
+                heading = _WIKI_CATEGORY.fullmatch(plain)
+                category, topic = heading[1].strip() if heading else "", []
+                kept = kept or category in REFERENCE_CATEGORIES
+            continue
+        text, urls, entities = _wiki_line(line[depth:])
+        del topic[depth - 1 :]
+        cited = cited or bool(urls)
+        if (
+            urls
+            and category in REFERENCE_CATEGORIES
+            and counts[category] < MAX_REFERENCE_ITEMS
+        ):
+            counts[category] += 1
+            public = []
+            for url in urls:
+                try:
+                    contracts.validate_public_url(url)
+                except contracts.ContractError:
+                    continue
+                public.append(url)
+            items.append(
+                {
+                    "category": category,
+                    "topic": " / ".join(topic)[:200],
+                    "text": _excerpt(text),
+                    "urls": public[:2],
+                    "entities": [entity[:80] for entity in entities[:8]],
+                }
+            )
+        topic.append(text[:100])
+    if cited and not kept:
+        raise ValueError("No category line")
+    groups: dict[str, list[int]] = {}
+    for position, item in enumerate(items):
+        groups.setdefault(item["category"], []).append(position)
+    turns = [
+        position
+        for row in itertools.zip_longest(*groups.values())
+        for position in row
+        if position is not None
+    ]
+    return [items[p] for p in sorted(turns[:MAX_REFERENCE_ITEMS])]
+
+
 def _percentiles(entries: Sequence[Entry]) -> list[int | None]:
     """Rank upvotes within one day's list, not across days."""
     votes = [entry.upvotes for entry in entries if entry.upvotes is not None]
@@ -808,6 +964,14 @@ def _params(source: Source, issue_date: str) -> dict[str, str] | None:
         }
     if source.kind == "hf_daily":
         return {"date": (day - datetime.timedelta(days=1)).isoformat()}
+    if source.kind == REFERENCE_KIND:
+        return {
+            "action": "parse",
+            "page": reference_page(day - datetime.timedelta(days=1)),
+            "prop": "wikitext",
+            "format": "json",
+            "formatversion": "2",
+        }
     return None
 
 
@@ -862,9 +1026,16 @@ def _public(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
 
 
 def failed(result: sources.MetadataResult) -> bool:
-    """Report whether any registry source ended with a failure code."""
+    """Report whether any lead source ended with a failure code.
+
+    The reference source does not count: without it the console says the
+    reference is unavailable, and every lead is still there.
+    """
+    reference = result.reference.get("source")
     return any(
-        len(parts := item.split(":")) == 2 and parts[1] in FAILURES
+        len(parts := item.split(":")) == 2
+        and parts[1] in FAILURES
+        and parts[0] != reference
         for item in result.diagnostics
     )
 
@@ -972,6 +1143,8 @@ class Researcher:
         except (httpx.HTTPError, OSError, UnicodeError, ValueError):
             return _Outcome("unavailable", [])
         try:
+            if source.kind == REFERENCE_KIND:
+                return _Outcome("ok", [], items=parse_current_events(raw))
             return _Outcome("ok", _parse(source, raw, truncated), truncated)
         except (ValueError, TypeError, KeyError, RecursionError, OverflowError):
             return _Outcome("parse_error", [])
@@ -1021,7 +1194,7 @@ class Researcher:
                     raw.extend(chunk)
                     if len(raw) > source.max_bytes:
                         # A feed is parsed as far as it got; JSON cannot be.
-                        if source.kind in {"crossref", "hf_daily"}:
+                        if source.kind not in {"feed", "arxiv"}:
                             raise _FetchError("too_large")
                         return bytes(raw[: source.max_bytes]), True
         return bytes(raw), False
@@ -1116,6 +1289,12 @@ def _stem(word: str) -> str:
     return word[:6] if len(word) > 2 and word not in _STOP else ""
 
 
+def _lede(entry: Entry) -> str:
+    """The first sentence of an entry's description, without photo credits."""
+    text = _CREDIT.sub(" ", entry.text)
+    return _SENTENCE_END.split(text, maxsplit=1)[0][:300]
+
+
 @dataclasses.dataclass
 class _Headline:
     """A headline lead with its identity keys and the stems clustering reads.
@@ -1142,8 +1321,7 @@ class _Headline:
         moment: datetime.datetime,
     ) -> _Headline:
         text = _CREDIT.sub(" ", entry.text)
-        first = _SENTENCE_END.split(text, maxsplit=1)[0][:300]
-        words = _WORD.findall((entry.title + " " + first).casefold())
+        words = _WORD.findall((entry.title + " " + _lede(entry)).casefold())
         names = _NAME.findall(entry.title)
         return cls(
             lead,
@@ -1173,6 +1351,7 @@ class _Group:
         self.keys |= item.keys
         self.reports.append(item)
         lead = self.leader.lead
+        item.lead.leader = lead
         if item.lead.source.name in lead.names:
             return
         lead.names.append(item.lead.source.name)
@@ -1266,6 +1445,84 @@ def _cluster(
     return [group.leader.lead for group in groups]
 
 
+def reference_words(
+    texts: Iterable[str], urls: Iterable[str] = ()
+) -> frozenset[str]:
+    """The word stems of some English texts and of some URLs' paths."""
+    parts = [*texts, *(parse.urlsplit(url).path for url in urls)]
+    return frozenset(
+        stem
+        for part in parts
+        for word in _WORD.findall(part.casefold())
+        if (stem := _stem(word))
+    )
+
+
+def url_keys(urls: Iterable[str]) -> frozenset[str]:
+    """The URL identity keys of some URLs, which a match compares."""
+    return frozenset(
+        key
+        for url in urls
+        for key in sources.identity_keys({"url": url})
+        if key.startswith("url:")
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class ReferenceTerms:
+    """A reference item's word stems, entities and sources, for matching."""
+
+    words: frozenset[str]
+    entities: tuple[frozenset[str], ...]
+    urls: frozenset[str]
+
+    @classmethod
+    def of(cls, item: Mapping[str, Any]) -> ReferenceTerms:
+        """Read an item as parse_current_events wrote it; junk reads empty."""
+        entities = tuple(
+            words
+            for entity in item.get("entities") or []
+            if isinstance(entity, str) and (words := reference_words([entity]))
+        )
+        text = item.get("text")
+        urls = [url for url in item.get("urls") or [] if isinstance(url, str)]
+        return cls(
+            reference_words([text] if isinstance(text, str) else []).union(
+                *entities
+            ),
+            entities,
+            url_keys(urls),
+        )
+
+    def match(
+        self, words: frozenset[str], keys: frozenset[str] = frozenset()
+    ) -> int:
+        """How strongly a report matches: 2 strong, 1 weak, 0 not at all.
+
+        ``words`` are reference_words of a report and ``keys`` the url_keys
+        of its URLs. Strong: it is one of the item's cited sources, or it
+        shares at least _MATCH_WORDS of the item's stems, names two of its
+        entities with at least two different words (Norland and its
+        Electoral Commission of Norland need more than "Norland"), and
+        shares a word that names none, so says what happened as well as
+        who and where. Weak: _WEAK_WORDS shared stems, one naming an
+        entity. Words alone cannot tell two events of the same place and
+        actors apart, so the console shows what matched.
+        """
+        if self.urls & keys:
+            return 2
+        shared = self.words & words
+        hits = [entity & words for entity in self.entities if entity & words]
+        if (
+            len(shared) >= _MATCH_WORDS
+            and len(hits) >= 2
+            and len(frozenset().union(*hits)) >= 2
+            and shared.difference(*self.entities)
+        ):
+            return 2
+        return int(len(shared) >= _WEAK_WORDS and bool(hits))
+
+
 def _seed(source: Source, entry: Entry) -> sources.Candidate | None:
     try:
         return content.seed_view(
@@ -1315,8 +1572,15 @@ def _leads(
     diagnostics: list[str],
     accepted: dict[int, int],
     now: datetime.datetime | None,
-) -> tuple[list[_Lead], list[types.Payload]]:
+) -> tuple[list[_Lead], list[types.Payload], list[tuple[Entry, _Lead | None]]]:
+    """Leads, headline counts, and each accepted entry with its lead.
+
+    An entry's lead is the one that stands for it after merging and
+    grouping, whether or not routing keeps it; an entry the history already
+    has gives no lead (None) and is kept only for the reference.
+    """
     known: set[str] = set()
+    seen: list[tuple[Entry, _Lead | None, set[str]]] = []
     for record in history:
         known |= sources.identity_keys(record)
     day = datetime.date.fromisoformat(issue_date)
@@ -1347,8 +1611,10 @@ def _leads(
                 invalid += 1
                 continue
             keys = sources.identity_keys(candidate)
-            # Seen before: only this entry drops, never its headline group.
+            # Seen before: only this entry drops, never its headline group;
+            # the reference still counts it, as an earlier run's.
             if keys & known:
+                seen.append((entry, None, keys))
                 continue
             accepted[source.index] = accepted.get(source.index, 0) + 1
             excerpt = _excerpt(entry.text) if entry.excerpt else ""
@@ -1360,6 +1626,7 @@ def _leads(
                 excerpt,
                 percentiles[position],
             )
+            seen.append((entry, lead, keys))
             if headline and entry.moment:
                 lead.alternates, lead.moment = [], entry.moment.timestamp()
                 headlines.setdefault(source.direction, []).append(
@@ -1374,7 +1641,20 @@ def _leads(
     summaries = _headline_groups(
         registry, outcomes, headlines, set(index), leads
     )
-    return leads, summaries
+    # A merged entry's lead is the indexed one; a headline report another
+    # lead carries is indexed too; any other report stands with its leader.
+    reports = [
+        (
+            entry,
+            None
+            if lead is None
+            else next((index[key] for key in keys if key in index), None)
+            or lead.leader
+            or lead,
+        )
+        for entry, lead, keys in seen
+    ]
+    return leads, summaries, reports
 
 
 def _headline_groups(
@@ -1507,7 +1787,9 @@ def _source_counts(
         {
             "id": source.id,
             "code": outcomes[source.index].code,
-            "entries": len(outcomes[source.index].entries),
+            # A reference source parses items, never entries.
+            "entries": len(outcomes[source.index].entries)
+            + len(outcomes[source.index].items),
             "accepted": accepted.get(source.index, 0),
             "seeds": seeds.get(source.index, 0),
             "truncated": outcomes[source.index].truncated,
@@ -1531,7 +1813,7 @@ def assemble(
     """
     diagnostics: list[str] = []
     accepted: dict[int, int] = {}
-    leads, headlines = _leads(
+    leads, headlines, reports = _leads(
         registry, outcomes, issue_date, history, diagnostics, accepted, now
     )
     routed = _route(leads)
@@ -1571,8 +1853,9 @@ def assemble(
     kept = routed[: len(candidates)]
     counts = _source_counts(registry, outcomes, accepted, kept)
     excerpts = _excerpts(kept, diagnostics)
+    reference = _reference(registry, outcomes, issue_date, reports, kept)
     return sources.MetadataResult(
-        candidates, diagnostics, notes, counts, headlines, excerpts
+        candidates, diagnostics, notes, counts, headlines, excerpts, reference
     )
 
 
@@ -1599,3 +1882,84 @@ def _excerpts(
     if skipped:
         diagnostics.append(f"excerpts:trimmed:{skipped}")
     return frozen
+
+
+def _reference(
+    registry: Sequence[Source],
+    outcomes: Mapping[int, _Outcome],
+    issue_date: str,
+    reports: Sequence[tuple[Entry, _Lead | None]],
+    kept: Sequence[_Lead],
+) -> types.Payload:
+    """Yesterday's reference events, each with how the feeds carried it.
+
+    Per item, ``feeds`` is its best match among every accepted entry the
+    history does not have (2 strong, 1 weak, 0 none) and ``feed_title``
+    that entry's title; ``seeds`` are the routed leads standing for a
+    strongly matching entry, so an event the feeds carried that routing cut
+    has ``feeds`` 2 and no seeds. ``feed_urls`` are the addresses of those
+    leads, their groups' other reports and the strongly matching entries:
+    a candidate at one of them is that report whatever its title's language.
+    ``previous`` is the title of a strongly matching entry the history
+    already has: an earlier run had the event. Empty without an enabled
+    reference source.
+    """
+    source = next((s for s in registry if s.kind == REFERENCE_KIND), None)
+    if source is None:
+        return {}
+    outcome = outcomes[source.index]
+    day = datetime.date.fromisoformat(issue_date) - datetime.timedelta(days=1)
+    routed = {lead.candidate["id"] for lead in kept}
+    texts = [
+        (
+            reference_words([entry.title, _lede(entry)], [entry.url]),
+            url_keys([entry.url]),
+            entry,
+            lead,
+        )
+        for entry, lead in (reports if outcome.items else ())
+    ]
+    items = []
+    for item in outcome.items:
+        terms = ReferenceTerms.of(item)
+        best, title, previous = 0, "", ""
+        seeds: list[str] = []
+        linked: list[str] = []
+        matched: list[str] = []
+        for words, keys, entry, lead in texts:
+            strength = terms.match(words, keys)
+            if lead is None:
+                if strength == 2 and not previous:
+                    previous = entry.title
+                continue
+            if strength > best:
+                best, title = strength, entry.title
+            if strength < 2:
+                continue
+            matched.append(entry.url)
+            seed = lead.candidate["id"]
+            if seed in routed and seed not in seeds and len(seeds) < 3:
+                seeds.append(seed)
+                linked += [lead.candidate["url"], *(lead.alternates or [])]
+        items.append(
+            {
+                **item,
+                "feeds": best,
+                "feed_title": title[:200],
+                "seeds": seeds,
+                "feed_urls": list(dict.fromkeys(linked + matched))[
+                    :MAX_REFERENCE_URLS
+                ],
+                "previous": previous[:200],
+            }
+        )
+    page = reference_page(day)
+    host = parse.urlsplit(source.url).hostname
+    return {
+        "source": source.id,
+        "page": page,
+        "url": f"https://{host}/wiki/{page}",
+        "date": day.isoformat(),
+        "code": outcome.code,
+        "items": items,
+    }

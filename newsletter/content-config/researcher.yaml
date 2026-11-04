@@ -15,6 +15,8 @@
 #   direction          an existing discovery/<id>.md direction
 #   kind               feed (RSS, RDF or Atom; read from the content) | arxiv (API; needs query)
 #                      | crossref (journal works) | hf_daily (Hugging Face daily papers)
+#                      | current_events (Wikipedia's Current events for the day before the issue,
+#                      at most one: a reference the console checks the run against, never leads)
 #   url                https, no port; only a feed URL may carry a query
 #   query              arxiv only; code adds the submittedDate window
 #   keywords           optional prefilter on title or summary: whole words or phrases; a trailing *
@@ -297,6 +299,13 @@ sources:
     max_seeds: 4
     max_age_days: 2
     role: headline
+  # Not a lead source: yesterday's (UTC) conflicts, politics, disasters, business and health events,
+  # independent of these feeds, against which the console shows where each one left the run.
+  - id: wikipedia-current-events
+    name: Wikipedia Current events
+    direction: 03-world
+    kind: current_events
+    url: "https://en.wikipedia.org/w/api.php"
   - id: fed-press
     name: Federal Reserve
     direction: 04-economy
