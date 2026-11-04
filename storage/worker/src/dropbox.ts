@@ -12,6 +12,8 @@ const PROVIDER_TIMEOUT = 30_000;
 const PROVIDER_ERROR_WRITE_INTERVAL = 60_000;
 const SPACE_TTL = 10 * 60_000;
 const SPACE_TIMEOUT = 5_000;
+/** An object scan page; Dropbox's page limit is approximate, so it is bounded well above 1,000 entries. */
+const SCAN_PAGE_BYTES = 4 * 1024 * 1024;
 
 export function endpoints(env: Pick<Env, 'DEV_AUTH_BYPASS' | 'DEV_DROPBOX_ORIGIN'>): { readonly authorize: string; readonly api: string; readonly content: string } {
   const origin = env.DEV_DROPBOX_ORIGIN ?? '';
@@ -293,6 +295,15 @@ export class Dropbox {
       }
     } catch { /* A refused refresh token records its own reason; the space keeps its earlier answer. */ }
     return cached ?? { state: 'unavailable', used: 0, allocated: 0, time: 0 };
+  }
+
+  /** One listing page of the owner's object scan. Its refusals are the scan's own, not provider errors. */
+  async scanPage(method: 'files/list_folder' | 'files/list_folder/continue', args: unknown): Promise<Record<string, unknown>> {
+    const response = await this.fetch(this.origins.api + '/2/' + method, {
+      method: 'POST', headers: { authorization: 'Bearer ' + await this.token(), 'content-type': 'application/json' }, body: JSON.stringify(args),
+    });
+    if (!response.ok) return providerFailure(response);
+    return record(await readJson(response, SCAN_PAGE_BYTES));
   }
 
   async json(method: 'files/get_metadata' | 'files/list_folder' | 'files/list_folder/continue' | 'files/upload_session/start_batch' | 'files/upload_session/finish_batch_v2', args: unknown): Promise<Record<string, unknown>> {

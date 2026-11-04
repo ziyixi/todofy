@@ -1,8 +1,8 @@
 // The owner console's single read: connection status, active credentials, the application requests of the
-// last 14 UTC days and the Dropbox account's space. Counters accumulate in the Durable Object's memory and are
-// written about every 30 seconds; reading the overview writes the pending counts first, so a restart or deploy
-// loses at most those 30 seconds. Only requests that present a known credential are counted; malformed keys
-// refused at the edge, the console itself and /health are not.
+// last 14 UTC days, the Dropbox account's space and the newest object scan. Counters accumulate in the Durable
+// Object's memory and are written about every 30 seconds; reading the overview writes the pending counts first,
+// so a restart or deploy loses at most those 30 seconds. Only requests that present a known credential are
+// counted; malformed keys refused at the edge, the console itself and /health are not.
 syntax = "proto3";
 
 package storage.ui.v1;
@@ -69,6 +69,10 @@ message Overview {
   ];
   // The whole Dropbox account's space; absent while disconnected.
   DropboxSpace space = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The newest object scan; absent before the first.
+  // (-- api-linter: core::0122::embedded-resource=disabled
+  //     aip.dev/not-precedent: read with the counters in one call, so the console opens with one API request. --)
+  ObjectScan object_scan = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // The space of the whole Dropbox account behind the connection: Dropbox reports no App-folder size. Read when the
@@ -101,6 +105,127 @@ message DropboxSpace {
   ];
   // When Dropbox answered.
   google.protobuf.Timestamp observe_time = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// An owner-started, read-only count of the objects under every namespace (a singleton). Dropbox has no folder
+// size, so Durable Object alarms list the App folder in the background: at most 40 pages of about 1,000 objects
+// or one minute a run, about a second apart, each page's totals written with its continuation. Nothing is
+// changed or deleted.
+message ObjectScan {
+  option (google.api.resource) = {
+    type: "storage.ziyixi.science/ObjectScan"
+    pattern: "objectScan"
+    singular: "objectScan"
+    plural: "objectScans"
+  };
+
+  // Where the scan is (AIP-216).
+  enum State {
+    // Never written.
+    STATE_UNSPECIFIED = 0;
+    // Listing; the totals so far are partial. One that has not moved for ten minutes has stopped and can be
+    // started again.
+    STATE_RUNNING = 1;
+    // Every page was listed.
+    STATE_SUCCEEDED = 2;
+    // Stopped at failure_reason; the totals so far are partial.
+    STATE_FAILED = 3;
+  }
+
+  // Always objectScan.
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  // Where the scan is.
+  State state = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When the owner started it.
+  google.protobuf.Timestamp start_time = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When it last listed a page or scheduled a retry.
+  google.protobuf.Timestamp update_time = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // When it succeeded or failed.
+  google.protobuf.Timestamp end_time = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Listing pages read.
+  int32 page_count = 6 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // Background runs used.
+  int32 run_count = 7 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // The Storage reason that stopped a failed scan, such as CONNECTION_INVALID. Never provider content.
+  string failure_reason = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Every object listed so far.
+  int32 object_count = 9 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // Their bytes.
+  double total_bytes = 10 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // The namespaces with objects, in name order: the first 64 a scan meets; any others count only in the totals.
+  repeated NamespaceObjects namespaces = 11 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field).max_items = 64
+  ];
+}
+
+// One namespace's objects as an object scan counted them.
+message NamespaceObjects {
+  // The namespace.
+  string namespace = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its objects.
+  int32 object_count = 2 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // Their bytes.
+  double total_bytes = 3 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // Objects whose current revision Dropbox wrote in the seven days before the scan started.
+  int32 recent_object_count = 4 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // Their bytes.
+  double recent_bytes = 5 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // The largest top-level folders by bytes, at most eight, of the first 32 the scan met in this namespace.
+  repeated FolderObjects folders = 6 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field).max_items = 8
+  ];
+}
+
+// One top-level folder of a namespace as an object scan counted it.
+message FolderObjects {
+  // The first segment of its keys, in lower case; empty for objects at the namespace's root.
+  string folder = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its objects.
+  int32 object_count = 2 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // Their bytes.
+  double total_bytes = 3 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // Objects whose current revision Dropbox wrote in the seven days before the scan started.
+  int32 recent_object_count = 4 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // Their bytes.
+  double recent_bytes = 5 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field).minimum = 0
+  ];
 }
 
 // One UTC day's requests of one credential, operation and outcome.

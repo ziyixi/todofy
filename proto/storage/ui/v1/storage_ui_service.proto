@@ -32,8 +32,8 @@ service StorageUiService {
     option (google.api.method_signature) = "name";
   }
 
-  // Status, credentials, the last 14 UTC days of application requests and the Dropbox space in one read.
-  // Writes the pending in-memory counters first.
+  // Status, credentials, the last 14 UTC days of application requests, the Dropbox space and the newest
+  // object scan in one read. Writes the pending in-memory counters first.
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   rpc GetOverview(GetOverviewRequest) returns (Overview) {
     option (google.api.http) = {get: "/api/v1/{name=overview}"};
@@ -80,6 +80,17 @@ service StorageUiService {
       post: "/api/v1/{name=dropbox}:disconnect"
       body: "*"
     };
+  }
+
+  // Start counting every namespace's objects and bytes in the background; starting while a scan runs
+  // returns that scan. Read-only: no object changes.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  rpc StartObjectScan(StartObjectScanRequest) returns (ObjectScan) {
+    option (google.api.http) = {
+      post: "/api/v1/{name=objectScan}:start"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name";
   }
 }
 
@@ -166,3 +177,12 @@ message DisconnectDropboxRequest {
 
 // A disconnected connection; no object or credential material is returned.
 message DisconnectDropboxResponse {}
+
+// Input of StartObjectScan.
+message StartObjectScanRequest {
+  // Always objectScan.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "storage.ziyixi.science/ObjectScan"
+  ];
+}

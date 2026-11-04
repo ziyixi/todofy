@@ -25,12 +25,13 @@ ts_source_library(name = "batch", srcs = [":batch.ts"], deps = [
     ":dropbox", ":env", ":errors", ":keys", ":objects", ":store", "//proto/storage/objects/v1:ts", "//proto/storage/ui/v1:ts",
     "//proto/ts:protobuf", "//proto/ts:rpc-status", "//proto/ts:wire-json",
 ])
+ts_source_library(name = "scan", srcs = [":scan.ts"], deps = [":dropbox", ":errors", ":keys", ":store", "//proto/storage/ui/v1:ts", "//proto/ts:rpc-status", "//proto/ts:wire-json"])
 ts_source_library(name = "owner", srcs = [":owner.ts"], deps = [
-    ":dropbox", ":env", ":errors", ":keys", ":store", ":usage", "//proto/storage/ui/v1:ts", "//proto/ts:http-transcoder",
+    ":dropbox", ":env", ":errors", ":keys", ":scan", ":store", ":usage", "//proto/storage/ui/v1:ts", "//proto/ts:http-transcoder",
     "//proto/ts:page-token", "//proto/ts:protobuf", "//proto/ts:protobuf-wkt", "//proto/ts:rpc-status", "//proto/ts:wire-json",
 ])
 ts_source_library(name = "state", srcs = [":state.ts"], deps = [
-    ":batch", ":dropbox", ":env", ":errors", ":keys", ":objects", ":owner", ":store", ":usage", "//proto/storage/ui/v1:ts",
+    ":batch", ":dropbox", ":env", ":errors", ":keys", ":objects", ":owner", ":scan", ":store", ":usage", "//proto/storage/ui/v1:ts",
     "//proto/ts:http-transcoder", "//proto/ts:rpc-status", "//proto/ts:wire-json",
 ])
 ts_source_library(name = "http", srcs = [":http.ts"], deps = [":env", ":errors", ":ui", "//packages/edge-auth:lib", "//proto/ts:rpc-status"])

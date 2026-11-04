@@ -31,7 +31,7 @@ function fixture() {
 interface WireClient { readonly name: string; readonly last_use_time?: string }
 interface WireOverview {
   readonly usage?: readonly { readonly day: string }[]; readonly usage_truncated?: boolean; readonly clients?: readonly WireClient[];
-  readonly settings?: Record<string, unknown>; readonly space?: Record<string, unknown>;
+  readonly settings?: Record<string, unknown>; readonly space?: Record<string, unknown>; readonly object_scan?: Record<string, unknown>;
 }
 
 const SPACE: Space = { state: 'observed', used: 600 * 2 ** 30, allocated: 2 * 2 ** 40, time: NOW - 60_000 };
@@ -39,7 +39,7 @@ const SPACE: Space = { state: 'observed', used: 600 * 2 ** 30, allocated: 2 * 2 
 function context(store: Store, flushUsage = vi.fn()): OwnerContext {
   return {
     store, dropbox: { space: () => Promise.resolve(SPACE) } as unknown as Dropbox, redirectUri: 'https://storage.example.test/api/dropbox/callback',
-    flushUsage, buildSha: 'synthetic', stateSizeBytes: () => 8192,
+    flushUsage, buildSha: 'synthetic', stateSizeBytes: () => 8192, scheduleScan: () => Promise.resolve(),
   };
 }
 
@@ -183,6 +183,7 @@ describe('overview', () => {
       recent_failures: [{ failure_time: '2026-11-03T11:59:30Z', client: 'clients/' + READER, namespace: 'synthetic', operation: 'put', reason: 'READ_ONLY', http_status: 403 }],
       space: { state: 'observed', used_bytes: 600 * 2 ** 30, allocated_bytes: 2 * 2 ** 40, observe_time: '2026-11-03T11:59:00Z' },
     });
+    expect(answer).not.toHaveProperty('object_scan');
     expect(answer.usage).toHaveLength(3);
     expect(answer.usage_truncated).toBeUndefined();
     // Both writes predate this connection.

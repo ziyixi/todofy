@@ -298,3 +298,20 @@ describe('Dropbox space for the owner console', () => {
     expect(spaceAnswer(500, { used: 1, allocation: { allocated: 9 } }, 1)).toBeNull();
   });
 });
+
+describe('object scan pages', () => {
+  it('lists with a larger bound and keeps the scan\'s refusals out of the provider error', async () => {
+    const store = new Memory();
+    store.set('connection', connection);
+    const provider = new Dropbox(store, {});
+    let answer = (): Response => Response.json({ entries: [{ '.tag': 'file', path_lower: '/namespaces/a/' + 'x'.repeat(600_000), size: 1 }], has_more: false, cursor: '' });
+    vi.stubGlobal('fetch', (url: string) => url.endsWith('/oauth2/token')
+      ? Promise.resolve(Response.json({ access_token: 'synthetic-access-private', expires_in: 3600 })) : Promise.resolve(answer()));
+    expect(await provider.scanPage('files/list_folder', { path: '/namespaces' })).toMatchObject({ has_more: false });
+    answer = () => new Response(null, { status: 429, headers: { 'retry-after': '4' } });
+    await expect(provider.scanPage('files/list_folder/continue', { cursor: 'synthetic' })).rejects.toMatchObject({ reason: 'UNAVAILABLE', httpStatus: 429 });
+    answer = () => new Response(null, { status: 401 });
+    await expect(provider.scanPage('files/list_folder/continue', { cursor: 'synthetic' })).rejects.toMatchObject({ reason: 'CONNECTION_INVALID' });
+    expect(store.get('provider_error')).toBeNull();
+  });
+});

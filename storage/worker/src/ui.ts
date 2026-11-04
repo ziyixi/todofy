@@ -45,6 +45,11 @@ section{border:1px solid var(--border);border-radius:12px;background:var(--surfa
 .card{border:1px solid var(--line);border-radius:10px;padding:14px 16px;min-width:0}
 .card header{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:4px 12px;margin-bottom:6px}
 .card header code{font-size:1rem;font-weight:600}.card p{color:var(--fg-2);font-size:.88rem}.card p.muted{color:var(--muted);font-size:.82rem}
+.objects{margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}.folders{display:grid;gap:4px;margin-top:6px}
+.folders li{display:grid;grid-template-columns:minmax(0,8em) minmax(0,1fr) auto;gap:4px 10px;align-items:center;font-size:.82rem}
+.folders code,.folders .root{font-size:.8rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.folders .root{color:var(--muted)}.folders .size{color:var(--muted);text-align:right;white-space:nowrap}
+.bar{display:block;height:4px;border-radius:2px;background:var(--line);overflow:hidden}.bar>span{display:block;height:100%;background:var(--s1);opacity:.75}
+.scan{margin:-6px 0 14px}
 .facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:32px}
 .facts div{display:grid;grid-template-columns:7em 1fr;gap:12px;padding:8px 0;border-bottom:1px solid var(--line);min-width:0}
 .facts dt{color:var(--muted);font-size:.87rem}.facts dd{min-width:0;overflow-wrap:anywhere}
@@ -82,6 +87,7 @@ footer{margin-top:24px;font-size:.85rem;color:var(--muted)}
 @media(max-width:600px){main{padding:20px 16px 40px}.masthead{flex-direction:column;align-items:flex-start;gap:12px}
 section{padding:18px 16px;border-radius:10px}.tabs{gap:24px;margin-top:18px}.tiles>div{padding:12px}.tiles dd.value{font-size:1.15rem}
 form.create{grid-template-columns:1fr}.seg{display:flex}.seg label{flex:1}.seg span{text-align:center}
+.folders li{grid-template-columns:minmax(0,1fr) auto}.folders .size{grid-area:1/2}.folders .bar{grid-area:2/1/3/3}
 .facts div{grid-template-columns:6em 1fr}.events li{grid-template-columns:1fr}.events .detail{text-align:left}}
 `;
 
@@ -117,6 +123,7 @@ const clock=(t)=>{const d=new Date(t);return pad(d.getHours())+':'+pad(d.getMinu
 const date=(t)=>{const d=new Date(t);return d.getFullYear()+'/'+pad(d.getMonth()+1)+'/'+pad(d.getDate());};
 function when(t){if(!t)return'—';const d=new Date(t);if(d.toDateString()===new Date().toDateString())return'今天 '+clock(t);
 return(d.getFullYear()===new Date().getFullYear()?(d.getMonth()+1)+'/'+d.getDate():date(t))+' '+clock(t);}
+function duration(a,b){const m=Math.round((Date.parse(b)-Date.parse(a))/60000);return m<1?'不到 1 分钟':m<60?m+' 分钟':Math.floor(m/60)+' 小时 '+(m%60)+' 分';}
 function ago(t){const m=Math.round((Date.now()-new Date(t).getTime())/60000);if(m<1)return'刚刚';if(m<60)return m+' 分钟前';if(m<1440)return Math.round(m/60)+' 小时前';return Math.round(m/1440)+' 天前';}
 const DAY=86400000;const utcDay=(offset=0)=>new Date(Date.now()-offset*DAY).toISOString().slice(0,10);
 const shortDay=(d)=>Number(d.slice(5,7))+'/'+Number(d.slice(8));
@@ -140,11 +147,12 @@ WRITE_PRECONDITION_REQUIRED:['warn','写入缺少条件','写入必须带 If-Non
 READ_ONLY:['warn','只读密钥尝试写入','确认调用方使用了正确的密钥。'],
 CURSOR_INVALID:['warn','列表续页无效','从第一页重新列出。'],
 RANGE_NOT_SATISFIABLE:['warn','读取范围超出对象','检查 Range。'],
-INTERNAL:['warn','存储服务内部错误','查看 Worker 日志。']};
+INTERNAL:['warn','存储服务内部错误','查看 Worker 日志。'],
+SCAN_PAGE_LIMIT:['warn','超过 1,000 页的扫描上限','约一百万个对象之后停止，结果不完整。']};
 function reason(code,status){if(code==='UNAVAILABLE'&&status&&status!==429)return{tone:'warn',title:'Dropbox 暂不可用',hint:REASONS.UNAVAILABLE[2]};
 if(code==='UNAVAILABLE'&&status===429)return{tone:'warn',title:'被 Dropbox 限流',hint:REASONS.UNAVAILABLE[2]};
 const r=REASONS[code];return r?{tone:r[0],title:r[1],hint:r[2]}:{tone:'warn',title:'请求失败（'+code+'）',hint:''};}
-const ERRORS={UNAUTHORIZED:'登录已过期，请刷新页面。',CSRF_FAILED:'页面已过期，请刷新后重试。',BAD_REQUEST:'输入无效，请检查后重试。',
+const ERRORS={UNAUTHORIZED:'登录已过期，请刷新页面。',NOT_CONFIGURED:'尚未连接 Dropbox。',CSRF_FAILED:'页面已过期，请刷新后重试。',BAD_REQUEST:'输入无效，请检查后重试。',
 CLIENT_LIMIT:'已达到 64 个密钥的上限，请先撤销不再使用的密钥。',NOT_FOUND:'密钥不存在或已经撤销。',
 CONNECTION_INVALID:'Dropbox 已连接或授权已变化，请刷新页面查看当前状态。',REVISION_CONFLICT:'状态已变化，请刷新后重试。',
 UNAVAILABLE:'服务暂时不可用，请稍后重试。',INTERNAL:'服务内部错误，请稍后重试。',REQUEST_FAILED:'请求失败，请刷新页面后重试。'};
@@ -161,7 +169,7 @@ const sum=(rows,field,pred=()=>true)=>rows.reduce((t,r)=>t+(pred(r)?Number(r[fie
 const daysAgo=(rows,n)=>rows.filter((r)=>r.day===utcDay(n));
 const today=()=>daysAgo(usage(),0);
 function namespaces(){const m=new Map();const of=(n)=>{if(!m.has(n))m.set(n,{name:n,keys:[]});return m.get(n);};
-for(const c of clients())of(c.namespace).keys.push(c);for(const r of usage())of(r.namespace);
+for(const c of clients())of(c.namespace).keys.push(c);for(const r of usage())of(r.namespace);for(const n of state.object_scan?.namespaces??[])of(n.namespace);
 return [...m.values()].sort((a,b)=>a.name.localeCompare(b.name));}
 
 function overall(){const s=state.settings??{};
@@ -217,6 +225,26 @@ fill('trend',h('div',{class:'head'},h('h2',{text:'近 14 天应用请求'}),h('u
 h('p',{class:'note',text:'按 UTC 日统计带有效密钥的请求，最右侧本 UTC 日的柱仍在累计。全账户 Workers 用量见 Home。'}),
 state.usage_truncated?h('p',{class:'note',text:'计数行超过上限，较早几天的部分数据未显示。'}):null);}
 
+const SCAN_STALE=600000;
+const scanStale=(s)=>s.state==='running'&&Date.now()-Date.parse(s.update_time)>=SCAN_STALE;
+function scanSummary(){const s=state.object_scan;
+if(!s)return h('p',{class:'note scan',text:'对象数量和占用需要扫描：逐页列出 Dropbox 应用文件夹并合计，只读，不改动任何文件。'});
+const listed=num(s.object_count)+' 个对象 · '+bytes(s.total_bytes);
+if(s.state==='succeeded')return h('p',{class:'note scan',text:'扫描于 '+when(s.end_time)+' · 共 '+listed+' · 用时 '+duration(s.start_time,s.end_time)});
+if(s.state==='failed')return h('p',{class:'note scan'},mark('warn','扫描未完成'),' '+reason(s.failure_reason).title+'（'+when(s.end_time)+'）· 已列出 '+listed+'，结果不完整。');
+if(scanStale(s))return h('p',{class:'note scan'},mark('warn','扫描已中断'),' '+when(s.update_time)+' 之后没有进展 · 已列出 '+listed+'，可以重新扫描。');
+return h('p',{class:'note scan'},mark('unknown','正在后台扫描'),' 已列出 '+listed+'（'+num(s.page_count)+' 页）· 点“刷新”查看进度。');}
+function scanButton(){const s=state.object_scan,running=s!=null&&s.state==='running'&&!scanStale(s);
+return h('button',{type:'button',text:running?'扫描中…':s?'重新扫描':'扫描对象',disabled:running||!state.settings?.connected,
+onclick:(e)=>perform(e.currentTarget,async()=>{await api('objectScan:start',{method:'POST',body:'{}'});await load();status('扫描已在后台开始，稍后点“刷新”查看结果。');})});}
+function objectsBlock(name){const s=state.object_scan;if(!s)return h('p',{class:'muted',text:'对象数量与占用尚未扫描'});
+const n=(s.namespaces??[]).find((x)=>x.namespace===name),done=s.state==='succeeded';
+if(!n)return h('p',{class:'muted',text:done?'应用文件夹中没有对象':'扫描尚未列到对象'});
+const total=Number(n.total_bytes??0);
+return h('div',{class:'objects'},h('p',{text:num(n.object_count)+' 个对象 · '+bytes(total)+(n.recent_bytes?' · 近 7 天写入 '+bytes(n.recent_bytes):'')+(done?'':'（未完成）')}),
+h('ul',{class:'folders','aria-label':'按顶层目录'},(n.folders??[]).slice(0,4).map((f)=>{const size=Number(f.total_bytes??0);return h('li',{},f.folder?h('code',{text:f.folder}):h('span',{class:'root',text:'根目录'}),
+h('span',{class:'bar','aria-hidden':'true'},h('span',{style:'width:'+(total?Math.max(1,size/total*100):0).toFixed(1)+'%'})),
+h('span',{class:'size',text:bytes(size)+(f.recent_bytes?' · 7 天 +'+bytes(f.recent_bytes):'')}));})));}
 function renderNamespaces(){const box=byId('namespaces');box.hidden=false;const list=namespaces();
 const cards=list.map((n)=>{const rw=n.keys.filter((k)=>k.access==='read_write').length,ro=n.keys.length-rw;const rows=usage().filter((r)=>r.namespace===n.name);
 const last=n.keys.map((k)=>k.last_use_time).filter(Boolean).sort().pop(),t=daysAgo(rows,0);
@@ -224,8 +252,8 @@ const week=sum(rows,'request_count',(r)=>r.day>=utcDay(6));
 return h('article',{class:'card'},h('header',{},h('code',{text:n.name}),h('span',{class:'muted',text:last?'最近活动 '+ago(last):'近期无活动'})),
 h('p',{text:n.keys.length?n.keys.length+' 个密钥（'+[rw?rw+' 读写':null,ro?ro+' 只读':null].filter(Boolean).join(' · ')+'）':'没有有效密钥'}),
 h('p',{text:'本 UTC 日 '+num(sum(t,'request_count'))+' 次 · 写入 '+num(sum(t,'object_count',isWrite))+' 个 / '+bytes(sum(t,'upload_bytes'))+' · 近 7 天 '+num(week)+' 次'}),
-h('p',{class:'muted',text:'对象数量与占用尚未统计'}));});
-fill('namespaces',h('div',{class:'head'},h('h2',{text:'命名空间'})),cards.length?h('div',{class:'cards'},cards):h('p',{class:'empty',text:'还没有应用密钥。'}));}
+objectsBlock(n.name));});
+fill('namespaces',h('div',{class:'head'},h('h2',{text:'命名空间'}),scanButton()),scanSummary(),cards.length?h('div',{class:'cards'},cards):h('p',{class:'empty',text:'还没有应用密钥。'}));}
 
 function confirmBox(text,label,action,onCancel){const cancel=h('button',{type:'button',class:'quiet',text:'取消',onclick:onCancel});
 const box=h('div',{class:'confirm',role:'group',onkeydown:(e)=>{if(e.key==='Escape')cancel.click();}},h('span',{text}),

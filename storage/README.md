@@ -3,9 +3,9 @@
 Storage gives applications a namespace-scoped HTTP interface to a separate Dropbox App-folder connection.
 The owner console connects Dropbox and creates independently revocable read-only or read/write keys.
 Each key selects a fixed namespace on the server. File data lives in Dropbox; the native SQLite Durable Object
-holds the connection state, key hashes, a cursor-signing key, the last provider error reason, request counters and
-the cached Dropbox space. Storage uses no D1, R2, cron trigger or alarm; counters are written periodically from
-memory (below).
+holds the connection state, key hashes, a cursor-signing key, the last provider error reason, request counters, the
+cached Dropbox space and the newest object scan. Storage uses no D1, R2 or cron trigger; counters are written
+periodically from memory (below), and the only alarm runs an owner-started object scan.
 
 The separate Dropbox app uses `files.metadata.read`, `files.content.read` and `files.content.write` with offline PKCE,
 and `account_info.read` only to show the account's space ([below](#dropbox-space)). The callback is
@@ -96,8 +96,8 @@ the account's 100,000 daily Workers Free requests, writes and reads, a 14-day ch
 connection; 密钥 groups keys by namespace with their created and last-use times behind a collapsed create form; 活动
 lists recent failures, a 14-day table and today's operations. Counts are by UTC day, labelled 本 UTC 日; event times
 use the browser's time zone. Revoking a key and disconnecting Dropbox each ask for a second confirmation that takes
-focus on 取消 and closes on Escape. 概览 also shows the Dropbox space; per-namespace object totals are a placeholder
-that fetches nothing yet.
+focus on 取消 and closes on Escape. 概览 also shows the Dropbox space and, on the namespace cards, the newest object
+scan; 扫描对象 starts one.
 
 The Durable Object counts each application request that presents a known key, by UTC day (when the quota resets), key,
 operation (`stat`, `list`, `get`, `head`, `put`, `batch_create`) and outcome:
@@ -123,7 +123,7 @@ most 2,880 writes a day. The pending timer keeps the object in memory until the 
 A deploy or eviction loses at most those 30 seconds. Daily counts are kept 90 days. Each key's last use and the
 connection's last success and last successful write are written with the counts; a success counted before a reconnect
 is not carried over to the new connection. `GetOverview` answers the settings, keys, 14 days of counts, recent
-failures and the Dropbox space in one call.
+failures, the Dropbox space and the newest object scan in one call.
 
 ## Dropbox space
 
@@ -141,6 +141,25 @@ authorization that asks for a permission the app lacks, so to show the space:
 3. In the console, disconnect and connect again while applications are idle: their requests fail in between. Keys
    and files are unchanged.
 
+## Object scan
+
+Dropbox has no folder size, so 扫描对象 starts `StartObjectScan`: a read-only, recursive listing of `/namespaces` in the
+Durable Object's alarm. Each run lists at most 40 pages of about 1,000 entries, or one minute, and sets the next run a
+second later: with a token refresh, 41 of the 50 subrequests an invocation may make. A page is about 450 KiB of JSON,
+read up to 4 MiB because Dropbox's limit is approximate; a 40-page run measured about 50 ms of CPU locally, far inside
+a Durable Object invocation's 30 seconds. Each page's totals are written with its continuation, so an interrupted run
+repeats at most one page. A rate limit or outage waits for its Retry-After, up to five minutes, or 30 seconds, at most
+three times in a row; any other refusal ends the scan with its reason. Listing refusals are not recorded as provider
+errors. A scan stops after 1,000 pages, about a million objects. Nothing is written, moved or deleted, and nothing
+repeats a scan on a schedule.
+
+The overview carries the newest scan. Per namespace it counts the objects, their bytes and those whose current
+revision Dropbox wrote in the seven days before the scan started (`server_modified`), with the eight largest top-level
+folders, which show where the bytes are and where they grew. Totals keep the first 64 namespaces and 32 folders of
+each a scan meets; any others count only in the totals above them. Starting while a scan runs answers that scan, and a
+running scan that has not moved for ten minutes can be started again. Totals of a running or failed scan are partial.
+The console does not poll; 刷新 shows progress.
+
 ## Development
 
 From the repository root:
@@ -150,6 +169,7 @@ bazel test //storage:check
 bazel build //storage
 ```
 
-The checks use synthetic objects and a fake native Dropbox API. The workerd suite exercises a real SQLite
-Durable Object and bounded content streams. Local checks do not establish a real Dropbox authorization or upload.
+The checks use synthetic objects and a fake native Dropbox API. The workerd suite exercises a real SQLite Durable
+Object, its scan alarm and bounded content streams. Local checks do not establish a real Dropbox authorization or
+upload.
 The app exposes the repository's standard `:config` and `:release` targets; normal release uses protected Actions.
