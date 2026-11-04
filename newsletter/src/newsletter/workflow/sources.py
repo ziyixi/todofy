@@ -200,8 +200,8 @@ class MetadataResult:
     the largest group's outlets and the top three groups' public titles.
     Additive and read by no workflow node, like ``sources``.
 
-    ``excerpts`` holds, for each seeded headline group enough outlets carry
-    for a consensus, one sha256-pinned excerpt per outlet (``feed_excerpts``).
+    ``excerpts`` holds, for each seeded headline group two or more outlets
+    carry, one sha256-pinned excerpt per outlet (``feed_excerpts``).
     Additive: the pool node passes on the groups its candidates point at.
     """
 

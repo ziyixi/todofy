@@ -593,3 +593,22 @@ def test_a_withdrawal_still_needs_its_open():
     ) == ["openPage"]
     with pytest.raises(newsletter_errors.EditorError):
         newsletter_editor._unobserved_approval_actions("[]", set(), True)
+
+
+@pytest.mark.parametrize("signal_urls", [(), (CANONICAL_URL,)])
+async def test_the_open_correction_exempts_only_an_excerpt_only_signal(
+    tmp_path, fake_router, signal_urls
+):
+    value = component_review(body="approved", signal="approved")
+    fake_router.turns = [SourceTurn(value, []), SourceTurn(value, [SHORT_URL])]
+    sources = newsletter_editor.ApprovalSources(
+        {"body": [SHORT_URL], "signal": list(signal_urls)}
+    )
+    await editor.live_editor(tmp_path).execute(
+        "{}", {}, "fixture", tmp_path / "job", approval_sources=sources
+    )
+    correction = fake_router.prompts[1]
+    # The body's missing open still asks for the correction; only a signal
+    # resting on frozen excerpts is told it needs no open of its own.
+    assert SHORT_URL in correction["unverified_urls"]
+    assert ("excerpt_signal" in correction) is (not signal_urls)

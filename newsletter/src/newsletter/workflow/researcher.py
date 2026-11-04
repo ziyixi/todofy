@@ -5,10 +5,11 @@ Registry (``researcher.yaml``, frozen with the run's content configuration)
 feeds: group by event) → rank → route per discovery direction. Every lead is a
 metadata-scope Candidate with a code-written source basis; feed text survives
 only as a short untrusted excerpt in ``notes``, never in a Candidate or the
-candidate pool. The one exception is a consensus headline group's reports,
-frozen with their sha256 pins as ``excerpts`` (see ``feed_excerpts``): a story
-pointing at the group may cite them as abstract-scope evidence. There is no
-model call, no retry and no state between runs.
+candidate pool. The one exception is the reports of a headline group two or
+more outlets carry, frozen with their sha256 pins as ``excerpts`` (see
+``feed_excerpts``): a story pointing at the group may cite them as
+abstract-scope evidence. There is no model call, no retry and no state
+between runs.
 
 Fetch policy: only registry URLs, HTTPS with TLS verification, no redirects,
 no proxies or credentials, every resolved address globally routable and the
@@ -1123,7 +1124,7 @@ class _Headline:
     forms (elected, elections) and some demonyms (Ukraine, Ukrainian; not
     Iran, Iranian) count once. ``names`` stem the title's capitalised words.
     ``excerpt`` freezes the headline and its description, photo credits
-    removed, in case the lead's group reaches a consensus.
+    removed, in case a second outlet joins the lead's group.
     """
 
     lead: _Lead
@@ -1578,14 +1579,15 @@ def assemble(
 def _excerpts(
     kept: Sequence[_Lead], diagnostics: list[str]
 ) -> list[types.Payload]:
-    """Freeze the excerpts of the kept groups enough outlets carry.
+    """Freeze the excerpts of the kept groups two or more outlets carry.
 
-    Groups keep their routed order within one byte budget, which sits outside
-    the leads' budget like the per-source counts.
+    Groups more outlets carry come first, otherwise in routed order, within
+    one byte budget that sits outside the leads' budget like the per-source
+    counts.
     """
     frozen, size, skipped = [], 0, 0
-    for lead in kept:
-        if lead.excerpts is None or len(lead.names) < content.CONSENSUS_OUTLETS:
+    for lead in sorted(kept, key=lambda lead: -len(lead.names)):
+        if lead.excerpts is None or len(lead.names) < feed_excerpts.MIN_OUTLETS:
             continue
         group = {"lead": lead.candidate["id"], "items": lead.excerpts}
         cost = len(contracts.canonical_json(group).encode())

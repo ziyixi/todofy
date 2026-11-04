@@ -167,8 +167,8 @@ class StoryNodes(nodes.EditorialNodes):
             for item in pool["candidates"]
             if item["id"] in task["candidate_ids"]
         ]
-        # A task pointing at a consensus headline group starts from the
-        # group's frozen excerpts: code-built, pinned, abstract-scope evidence.
+        # A task pointing at a headline group two or more outlets carry starts
+        # from its frozen excerpts: code-built, pinned, abstract-scope evidence.
         groups = feed_excerpts.covered(
             pool.get("excerpts", []),
             [

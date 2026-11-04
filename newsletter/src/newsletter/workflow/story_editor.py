@@ -132,11 +132,14 @@ _EXCERPT_WRITER_RULES = (
     "workflow_id为researcher-feed的packet是代码抓取头条订阅源时"
     "冻结的摘要：每个source是一家媒体的标题和导语，sha256已固定，"
     "不是你打开的原文；按标题聚类也可能把不同事件误并。\n"
-    "仍先照常open原文写正文。原文打不开时，signal可以只依据这些"
-    "摘要：一段，至少引用两家不同媒体并确认它们说的是同一件事，"
-    "写明“据X、Y报道”，只复述摘要明确写出的事件，不加摘要没有的"
-    "数字、引语、原因、后果或定性。\n"
     "正文、阅读卡和图表引用这些来源时，仍须本轮独立open其URL。\n"
+)
+# Only a first brief writes a signal.
+_EXCERPT_SIGNAL_RULES = (
+    "原文打不开时，signal可以只依据这些摘要：一段，所引的每个packet"
+    "都至少引用其中两家不同媒体，并确认它们说的是同一件事，写明“据X、"
+    "Y报道”，只复述摘要明确写出的事件；数字只照抄摘要原文里的阿拉伯数"
+    "字（代码逐个核对），不加摘要没有的数字、引语、原因、后果或定性。\n"
 )
 _EXCERPT_REVIEW_RULES = (
     "workflow_id为researcher-feed的来源是代码冻结的头条订阅源摘"
@@ -715,6 +718,9 @@ class StoryEditor:
         is_fixture: bool,
     ) -> tuple[types.Payload, str]:
         repair = "repair_untrusted" in context
+        excerpt_rules = _EXCERPT_WRITER_RULES
+        if context["mode"] == "brief" and not repair:
+            excerpt_rules += _EXCERPT_SIGNAL_RULES
         prompt = {
             **context,
             "task": (
@@ -746,7 +752,7 @@ class StoryEditor:
             ),
             "packets_untrusted": packets,
             **(
-                {"feed_excerpt_rules": _EXCERPT_WRITER_RULES}
+                {"feed_excerpt_rules": excerpt_rules}
                 if feed_excerpts.pinned(packets, self.pins)
                 else {}
             ),

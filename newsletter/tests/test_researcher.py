@@ -10,6 +10,7 @@ import datetime
 import json
 import pathlib
 import time
+import types
 import urllib.parse as parse
 
 import httpx
@@ -1191,7 +1192,7 @@ def test_headline_groups_rank_a_story_many_outlets_carry_first():
         assert content.seed_view(candidate) == candidate
 
 
-def test_consensus_groups_freeze_one_pinned_excerpt_per_outlet(monkeypatch):
+def test_headline_groups_freeze_one_pinned_excerpt_per_outlet(monkeypatch):
     registry = headline_registry()
     page = fake.front_page()
     title, text = page["The Guardian"][0]
@@ -1202,11 +1203,19 @@ def test_consensus_groups_freeze_one_pinned_excerpt_per_outlet(monkeypatch):
         c["id"]: result.notes[c["id"]]["signals"]["independent_sources"]
         for c in result.candidates
     }
-    # Only the groups three or more outlets carry, in routed order.
-    assert [group["lead"] for group in result.excerpts] == [
-        identifier for identifier, count in outlets.items() if count >= 3
+    # Only the groups two or more outlets carry, larger groups first.
+    assert [group["lead"] for group in result.excerpts] == sorted(
+        (identifier for identifier, count in outlets.items() if count >= 2),
+        key=lambda identifier: -outlets[identifier],
+    )
+    assert [len(group["items"]) for group in result.excerpts] == [
+        5,
+        3,
+        3,
+        3,
+        2,
+        2,
     ]
-    assert [len(group["items"]) for group in result.excerpts] == [5, 3, 3, 3]
     election = result.excerpts[0]["items"]
     assert [(item["outlet"], item["url"]) for item in election] == [
         (name, f"https://outlet{n}.example.org/0")
@@ -1232,7 +1241,33 @@ def test_consensus_groups_freeze_one_pinned_excerpt_per_outlet(monkeypatch):
     trimmed = researcher.assemble(registry, outcomes, DAY, now=fake.NOW)
     assert trimmed.excerpts == result.excerpts[:1]
     assert trimmed.candidates == result.candidates
-    assert "excerpts:trimmed:3" in trimmed.diagnostics
+    assert "excerpts:trimmed:5" in trimmed.diagnostics
+
+
+def test_excerpt_budget_goes_to_groups_more_outlets_carry_first():
+    def lead(name, outlets, *, headline=True):
+        return types.SimpleNamespace(
+            candidate={"id": name},
+            names=[f"Outlet {n}" for n in range(outlets)],
+            excerpts=[{"outlet": name}] if headline else None,
+        )
+
+    # Routed order interleaves directions; a lone report or a lead merged
+    # from ordinary feeds freezes nothing.
+    kept = [
+        lead("world-pair", 2),
+        lead("economy-three", 3),
+        lead("lone", 1),
+        lead("merged", 3, headline=False),
+        lead("world-four", 4),
+        lead("economy-pair", 2),
+    ]
+    assert [group["lead"] for group in researcher._excerpts(kept, [])] == [
+        "world-four",
+        "economy-three",
+        "world-pair",
+        "economy-pair",
+    ]
 
 
 def test_headline_window_history_and_times():

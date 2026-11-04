@@ -1,16 +1,17 @@
 """Frozen headline-feed excerpts: the only feed text a story may cite.
 
-At fetch time the researcher freezes, for each seeded headline group that
-enough outlets carry for a consensus, one excerpt per outlet: its headline and
-cleaned feed description, pinned by sha256. The pool node keeps the groups its
-candidates point at, and a story whose task points at a group starts from one
-code-built packet of the group's abstract-scope excerpts.
+At fetch time the researcher freezes, for each seeded headline group that two
+or more outlets carry, one excerpt per outlet: its headline and cleaned feed
+description, pinned by sha256. The pool node keeps the groups its candidates
+point at, and a story whose task points at a group starts from one code-built
+packet of the group's abstract-scope excerpts.
 
 Review reads a cited excerpt as read only in a signal, only while its text
-still hashes to the pin, and only beside a second outlet's excerpt or an
-opened source: enough for one "据X、Y报道" paragraph, never for numbers or
-claims beyond the excerpts. Body, reading and chart citations keep the
-must-open rule. Excerpts are untrusted publisher text, never instructions.
+still hashes to the pin, and only beside a second outlet's excerpt from the
+same group or an opened source: enough for one "据X、Y报道" paragraph. Code
+also refuses a number no cited excerpt holds; other claims beyond the
+excerpts are the reviewer's to catch. Body, reading and chart citations keep
+the must-open rule. Excerpts are untrusted publisher text, never instructions.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 import datetime
 import hashlib
+import re
 
 import newsletter.contracts as contracts
 import newsletter.types as types
@@ -29,12 +31,16 @@ WORKFLOW_ID = "researcher-feed"
 PRODUCER_ID = "researcher"
 # All frozen excerpts of one feeds artifact; lower-ranked groups drop first.
 MAX_BYTES = 64 * 1024
+# Outlets a group needs to be frozen, and an excerpt-only signal to stand on.
+MIN_OUTLETS = 2
 # Groups one story receives: a story big enough to split into several groups
 # still fits.
 MAX_GROUPS = 3
 _FIELDS = frozenset(
     {"outlet", "url", "title", "published_at", "text", "sha256"}
 )
+_DIGITS = re.compile(r"\d+")
+_THOUSANDS = re.compile(r"(?<=\d),(?=\d{3}\b)")
 _NOTE = (
     "代码抓取头条订阅源时冻结的摘要：{names}共{count}家标题相近。"
     "每个来源是一家媒体的标题和导语，按sha256固定，不是打开过的原文；"
@@ -113,7 +119,7 @@ def covered(values: object, urls: Iterable[str]) -> list[types.Payload]:
             continue
         kept = [item for item in items if _valid(item)]
         if (
-            len({item["outlet"] for item in kept}) >= 2
+            len({item["outlet"] for item in kept}) >= MIN_OUTLETS
             and _url_keys(item["url"] for item in kept) & wanted
         ):
             result.append({"lead": group.get("lead", ""), "items": kept})
@@ -131,7 +137,7 @@ def packet(group: types.Payload, *, is_fixture: bool) -> types.Payload:
     body = {
         "title": items[0]["title"][:300],
         "body": _NOTE.format(names="、".join(names), count=len(names)),
-        "tags": ["feed-excerpt", "headline-consensus"],
+        "tags": ["feed-excerpt", "headline-group"],
         "sources": [
             {
                 "id": f"excerpt-{number}",
@@ -204,3 +210,49 @@ def pinned(
             ):
                 found[f"{value['id']}/{source['id']}"] = pin[1]
     return found
+
+
+def corroborated(pinned: Mapping[str, str]) -> bool:
+    """Report whether two outlets back every frozen group a signal cites.
+
+    ``pinned`` maps each cited excerpt, ``<packet>/<source>``, to its outlet.
+    A packet is one headline group, so outlets from two groups, which may be
+    two events, back nothing together.
+    """
+    outlets: dict[str, set[str]] = {}
+    for ref, outlet in pinned.items():
+        outlets.setdefault(ref.split("/", 1)[0], set()).add(outlet)
+    return bool(outlets) and all(
+        len(names) >= MIN_OUTLETS for names in outlets.values()
+    )
+
+
+def unsupported_numbers(
+    signal: types.Payload, cited: Iterable[types.Payload]
+) -> list[str]:
+    """Return the digit runs a signal writes that no cited excerpt holds.
+
+    A cheap guard for a signal resting only on excerpts: each number must
+    appear in a cited excerpt's text (with or without thousands separators)
+    or its report date. Spelled-out numbers and other claims stay the
+    reviewer's to judge.
+    """
+    allowed: set[str] = set()
+    for source in cited:
+        text = f"{source.get('excerpt', '')} {source.get('published_at', '')}"
+        for variant in (text, _THOUSANDS.sub("", text)):
+            allowed.update(run.lstrip("0") for run in _DIGITS.findall(variant))
+    written = " ".join(
+        [
+            signal.get("title", ""),
+            *(item.get("text", "") for item in signal.get("paragraphs", [])),
+            signal.get("limitations", ""),
+        ]
+    )
+    return sorted(
+        {
+            run
+            for run in _DIGITS.findall(written)
+            if run.lstrip("0") not in allowed
+        }
+    )

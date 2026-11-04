@@ -105,15 +105,33 @@ def _evidence_findings(
                 "research",
             )
         )
-    if pinned and not required and len(set(pinned.values())) < 2:
-        checks.append(
-            (
-                "single_outlet_excerpt_signal: 一家媒体的冻结摘要不能单独确认"
-                "事件；须再引用另一家媒体的摘要或本轮打开的原文。",
-                list(pinned)[:16],
-                "research",
+    # A signal resting only on frozen excerpts: two outlets of one group back
+    # it, and it writes no number they lack.
+    if pinned and not required:
+        if not feed_excerpts.corroborated(pinned):
+            checks.append(
+                (
+                    "single_outlet_excerpt_signal: 冻结摘要须同一组至少两家"
+                    "媒体互证；只有一家，或几组各只有一家（可能是不同事件），"
+                    "都不能确认事件；须再引用同组另一家媒体的摘要或本轮打开"
+                    "的原文。",
+                    list(pinned)[:16],
+                    "research",
+                )
             )
+        numbers = feed_excerpts.unsupported_numbers(
+            component, (sources[ref] for ref in pinned)
         )
+        if numbers:
+            checks.append(
+                (
+                    "excerpt_signal_numbers: "
+                    + "、".join(numbers[:8])
+                    + "。只凭冻结摘要的signal只能写摘要原文里的数字。",
+                    list(pinned)[:16],
+                    "research",
+                )
+            )
     if missing_urls:
         missing_refs = [
             ref

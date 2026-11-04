@@ -211,7 +211,7 @@ def _receipt(
         if any(not isinstance(url, str) for url in opened):
             continue
         # Only a signal may rest on pinned excerpts, and then on two outlets
-        # unless it also cites a source the review opened.
+        # of each cited group unless it also cites a source the review opened.
         pinned = (
             _pinned(assessment, references, sources, frozen)
             if component == "signal"
@@ -226,7 +226,7 @@ def _receipt(
             urls
             and assessment.get("opened") is True
             and urls <= {parse.urldefrag(url)[0] for url in opened}
-        ) or (not urls and len(set(pinned.values())) >= 2):
+        ) or (not urls and feed_excerpts.corroborated(pinned)):
             return
     raise PublicationError()
 

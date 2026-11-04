@@ -1986,7 +1986,118 @@ async def test_a_body_citing_excerpts_still_needs_the_open(rig, excerpts):
         REPORTS[0][1],
         REPORTS[2][1],
     }
+    # A repair writes no new signal, so it only hears the must-open rule.
+    rules = rig.calls[2]["prompt"]["feed_excerpt_rules"]
+    assert "仍须本轮独立open" in rules and "据X、Y报道" not in rules
     publication.validate_result(result)
+
+
+QUAKE = (
+    (
+        "Synthetic Post",
+        "https://post.example.org/sylvania-quake",
+        "Earthquake kills 12 in Sylvania capital",
+        "A magnitude 6.8 earthquake killed 12 people in the capital.",
+    ),
+    (
+        "Synthetic Times",
+        "https://times.example.org/world/sylvania",
+        "Sylvania quake leaves thousands displaced",
+        "Officials said 1,250 people were displaced by the 6.8 quake.",
+    ),
+)
+
+
+def vote_and_quake(rig):
+    """Give the rig two frozen groups: the vote and an unrelated quake."""
+    vote, quake = frozen_group(), frozen_group(QUAKE)
+    quake["lead"] = "candidate-quake"
+    rig.editor = newsletter_workflow_story_editor.StoryEditor(
+        rig.editor.editor, pins=feed_excerpts.pins([vote, quake])
+    )
+    return feed_excerpts.packets([vote, quake], is_fixture=True)
+
+
+def signal_only(signal):
+    return [
+        story_editor.reply(story_editor.writer(None, signal), opened=set()),
+        story_editor.reply(
+            story_editor.review(body="not_present", signal="approved"),
+            opened=set(),
+        ),
+    ]
+
+
+@pytest.mark.parametrize(
+    "refs",
+    [
+        # One outlet from each of two groups, which may be two events.
+        [(0, 1), (1, 1)],
+        # Two outlets back the vote, but the quake rests on one.
+        [(0, 1), (0, 3), (1, 2)],
+    ],
+)
+async def test_each_cited_group_needs_two_of_its_own_outlets(
+    rig, monkeypatch, refs
+):
+    packets = vote_and_quake(rig)
+    signal = story_editor.story(
+        "据Synthetic Wire、Synthetic Post报道，虚构事件。"
+    )
+    signal["paragraphs"][0]["citations"] = [
+        f"{packets[group]['id']}/excerpt-{number}" for group, number in refs
+    ]
+    rig.replies = signal_only(signal)
+    result = await rig.run(packets=packets)
+    assert result["signal"] is None and result["reason"] == "withheld"
+    assert any(
+        "single_outlet_excerpt_signal" in finding
+        for finding in signal_receipt(result)["findings"]
+    )
+    # Publication refuses the same pairing even under an approving receipt.
+    with monkeypatch.context() as patch:
+        patch.setattr(feed_excerpts, "corroborated", lambda pinned: True)
+        rig.replies = signal_only(signal)
+        forged = await rig.run(
+            packets=packets, workspace=rig.workspace.parent / "forged"
+        )
+    assert forged["signal"] == signal
+    with pytest.raises(publication.PublicationError):
+        publication.validate_result(forged)
+
+
+@pytest.mark.parametrize(
+    ("text", "refused"),
+    [
+        # Numbers from the excerpts (1,250 written either way) and the
+        # reports' date.
+        (
+            "9月6日，据两家虚构媒体报道，6.8级地震致12人死亡、1250人流离失所。",
+            [],
+        ),
+        ("据两家虚构媒体报道，6.8级地震致12人死亡、1,250人流离失所。", []),
+        (
+            "据两家虚构媒体报道，6.8级地震致15人死亡、2000人流离失所。",
+            ["15", "2000"],
+        ),
+    ],
+)
+async def test_an_excerpt_only_signal_writes_only_the_excerpts_numbers(
+    rig, text, refused
+):
+    packets = vote_and_quake(rig)
+    signal = cited(text, 1, 2, packet_id=packets[1]["id"])
+    rig.replies = signal_only(signal)
+    result = await rig.run(packets=packets)
+    receipt = signal_receipt(result)
+    if refused:
+        assert result["signal"] is None and receipt["status"] == "blocked"
+        assert ("excerpt_signal_numbers: " + "、".join(refused)) in " ".join(
+            receipt["findings"]
+        )
+    else:
+        assert result["signal"] == signal and receipt["status"] == "approved"
+        publication.validate_result(result)
 
 
 async def test_an_edited_excerpt_is_no_longer_read_from_its_text(rig, excerpts):
