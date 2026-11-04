@@ -227,7 +227,9 @@ const SOURCE_CODES: Readonly<Record<string, Word>> = {
 };
 export const sourceCode = (code: string | undefined): Word => lookup(SOURCE_CODES, code, NOT_RECORDED);
 
-const SOURCE_KINDS: Readonly<Record<string, string>> = { feed: 'RSS', arxiv: 'arXiv', crossref: 'Crossref', hf_daily: 'HF 日报' };
+const SOURCE_KINDS: Readonly<Record<string, string>> = {
+  feed: 'RSS', arxiv: 'arXiv', crossref: 'Crossref', hf_daily: 'HF 日报', current_events: '参照',
+};
 export const sourceKind = (kind: string | undefined): string => SOURCE_KINDS[kind ?? ''] ?? (kind || '来源');
 
 /** The editorial limits (content-config `editorial.yaml`). */
@@ -244,6 +246,44 @@ export function editorialOrder<T>(entries: readonly (readonly [string, T])[]): (
   const rank = (key: string): number => (known.includes(key) ? known.indexOf(key) : known.length);
   return [...entries].sort((a, b) => rank(a[0]) - rank(b[0]) || a[0].localeCompare(b[0]));
 }
+
+// ---- Retrieval funnel and reference -------------------------------------------------------------------------------
+
+/** Why the candidate pool left a candidate out (deduplicate's `dropped`). */
+const DROP_REASONS: Readonly<Record<string, string>> = {
+  history: '已见过', duplicate: '重复', research_cap: '研究名额已满', pool_cap: '候选池已满',
+};
+export const dropReason = (reason: string | undefined): string => DROP_REASONS[reason ?? ''] ?? (reason || '原因未记录');
+
+/** How far a headline consensus lead got; a published one says in which form. */
+const LEAD_STAGES: Readonly<Record<string, Word>> = {
+  pooled: { label: '未入选', tone: 'none' },
+  selected: { label: '入选未刊', tone: 'unknown' },
+  deferred: { label: '入选后暂缓', tone: 'warn' },
+  published: { label: '已刊', tone: 'ok' },
+};
+const DISPOSITIONS: Readonly<Record<string, string>> = { deep: '深读', brief: '简讯', watch: '观察', deferred: '暂缓' };
+export const disposition = (value: string | undefined): string | null => DISPOSITIONS[value ?? ''] ?? (value || null);
+export function leadStage(stage: string | undefined, form?: string): Word {
+  const word = lookup(LEAD_STAGES, stage, NOT_RECORDED);
+  const shown = disposition(form);
+  return stage === 'published' && shown ? { ...word, label: `已刊 · ${shown}` } : word;
+}
+
+/** The furthest stage a reference event's strong match reached. None is a failure: an event may simply not matter. */
+const REFERENCE_STAGES: Readonly<Record<string, Word>> = {
+  published: { label: '已刊', tone: 'ok' },
+  selected: { label: '入选未刊', tone: 'unknown' },
+  pooled: { label: '未入选', tone: 'none' },
+  dropped: { label: '入池被丢', tone: 'warn' },
+  not_handed: { label: '给了没交接', tone: 'warn' },
+  cut: { label: '种子被截', tone: 'warn' },
+  unseen: { label: '未见', tone: 'warn' },
+  uncertain: { label: '未确定', tone: 'unknown' },
+};
+export const referenceStage = (stage: string | undefined): Word => lookup(REFERENCE_STAGES, stage, NOT_RECORDED);
+/** The stages in the order a reader follows an event out of the run. */
+export const REFERENCE_ORDER = Object.keys(REFERENCE_STAGES);
 
 // ---- Dates, times and numbers -------------------------------------------------------------------------------------
 

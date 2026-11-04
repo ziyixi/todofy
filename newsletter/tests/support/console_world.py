@@ -157,6 +157,340 @@ EDITION_24, EDITION_25, EDITION_26, EDITION_27, EDITION_29, EDITION_29M = (
 CORRECTION_27 = uid(271)
 
 
+def lead(
+    key: str, direction: str, title: str, url: str, **more: Any
+) -> Payload:
+    """A synthetic candidate with the fields the console's funnel reads."""
+    return {
+        "id": "candidate-" + key,
+        "direction": direction,
+        "title": title,
+        "url": url,
+        "event_key": "",
+        "access_scope": "metadata",
+        "provenance": "rss_metadata",
+        **more,
+    }
+
+
+ML, WORLD = "https://example.org/ml/", "https://example.com/world/"
+# The 10-27 and 10-29 runs' leads: four ML notes and three arXiv papers for
+# 01-ai-ml, and one headline group for 03-world (its three outlets are not
+# registry sources: only the group's record and its lead are synthetic).
+SEEDS = [
+    lead(
+        "sparse",
+        "01-ai-ml",
+        "Sparse attention benchmark",
+        ML + "sparse-attention-benchmark",
+    ),
+    lead(
+        "gpu-prices",
+        "01-ai-ml",
+        "Cloud GPU rental prices fall",
+        ML + "gpu-rental-prices",
+    ),
+    lead("notes-3", "01-ai-ml", "Synthetic ML note three", ML + "note-3"),
+    lead("notes-4", "01-ai-ml", "Synthetic ML note four", ML + "note-4"),
+    *(
+        lead(
+            f"paper-{n}",
+            "01-ai-ml",
+            f"Synthetic paper {n}",
+            f"https://arxiv.org/abs/2610.0000{n}",
+        )
+        for n in (1, 2, 3)
+    ),
+    lead(
+        "harbor",
+        "03-world",
+        "Harbor workers end strike after port deal",
+        WORLD + "harbor-strike-ends",
+    ),
+]
+HARBOR_OUTLETS = (
+    "Synthetic World Wire、Synthetic Harbor Desk、Synthetic River Post"
+)
+FEEDS_EXTRA: Payload = {
+    "notes": {
+        "candidate-harbor": {
+            "source": HARBOR_OUTLETS,
+            "excerpt_untrusted": "",
+            "signals": {"independent_sources": 3, "headline_window_hours": 48},
+            "alternate_urls": [
+                "https://example.net/news/harbor-strike-over",
+                "https://example.edu/post/port-deal",
+            ],
+        }
+    },
+    "headlines": [
+        {
+            "direction": "03-world",
+            "feeds": 3,
+            "feeds_ok": 3,
+            "entries": 41,
+            "groups": 29,
+            "consensus_groups": 1,
+            "max_outlets": 3,
+            "top": [
+                {
+                    "title": "Harbor workers end strike after port deal",
+                    "outlets": 3,
+                },
+                {
+                    "title": "River delta flood barrier vote delayed",
+                    "outlets": 2,
+                },
+                {
+                    "title": "Night trains return to the coast line",
+                    "outlets": 1,
+                },
+            ],
+        }
+    ],
+    "reference": {
+        "source": "synthetic-reference",
+        "page": "Portal:Current_events/2026_October_26",
+        "url": "https://reference.example.org/wiki/Portal:Current_events/2026_October_26",
+        "date": "2026-10-26",
+        "code": "ok",
+        "items": [
+            {
+                "category": "Politics and elections",
+                "topic": "Synthetic Port labour dispute",
+                "text": (
+                    "Harbor workers in Synthetic Port end a two-week strike "
+                    "after the Port Authority agrees a wage deal."
+                ),
+                "urls": [WORLD + "harbor-strike-ends"],
+                "entities": ["Synthetic Port", "Port Authority"],
+                "feeds": 2,
+                "feed_title": "Harbor workers end strike after port deal",
+                "seeds": ["candidate-harbor"],
+            },
+            {
+                "category": "Disasters and accidents",
+                "topic": "",
+                "text": (
+                    "The River Delta Council postpones its vote on the Delta "
+                    "Flood Barrier after a court challenge; the barrier vote "
+                    "is delayed to spring."
+                ),
+                "urls": ["https://example.net/news/barrier"],
+                "entities": ["River Delta Council", "Delta Flood Barrier"],
+                "feeds": 2,
+                "feed_title": "River delta flood barrier vote delayed",
+                "seeds": [],
+            },
+            {
+                "category": "Business and economy",
+                "topic": "",
+                "text": (
+                    "Synthetic Cloud cuts its GPU rental prices by a third."
+                ),
+                "urls": ["https://example.net/news/gpu"],
+                "entities": ["Synthetic Cloud"],
+                "feeds": 2,
+                "feed_title": "Cloud GPU rental prices fall",
+                "seeds": ["candidate-gpu-prices"],
+            },
+            {
+                "category": "Business and economy",
+                "topic": "",
+                "text": (
+                    "Synthetic Lab publishes the Sparse Attention Benchmark."
+                ),
+                "urls": ["https://example.net/news/benchmark"],
+                "entities": ["Synthetic Lab", "Sparse Attention Benchmark"],
+                "feeds": 2,
+                "feed_title": "Sparse attention benchmark",
+                "seeds": ["candidate-sparse"],
+            },
+            {
+                "category": "Business and economy",
+                "topic": "",
+                "text": (
+                    "Synthetic Chipworks halts shipments of its inference "
+                    "chips to two markets."
+                ),
+                "urls": ["https://example.net/news/chips"],
+                "entities": ["Synthetic Chipworks"],
+                "feeds": 2,
+                "feed_title": (
+                    "Synthetic Chipworks halts inference chip shipments"
+                ),
+                "seeds": [],
+            },
+            {
+                "category": "Health and environment",
+                "topic": "",
+                "text": (
+                    "A clinic network in Synthetic Province reports a rise in "
+                    "seasonal flu cases."
+                ),
+                "urls": ["https://example.net/news/flu"],
+                "entities": ["Synthetic Province"],
+                "feeds": 1,
+                "feed_title": "Synthetic Province clinics busy",
+                "seeds": [],
+            },
+            {
+                "category": "Armed conflicts and attacks",
+                "topic": "Synthetic border dispute",
+                "text": (
+                    "Border guards of two synthetic states exchange fire near "
+                    "Synthetic Pass."
+                ),
+                "urls": ["https://example.net/news/border"],
+                "entities": ["Synthetic Pass"],
+                "feeds": 0,
+                "feed_title": "",
+                "seeds": [],
+            },
+        ],
+    },
+}
+FLOOD = WORLD + "river-delta-flood-barrier-vote-delayed"
+DISCOVERED: dict[str, Payload] = {
+    "01-ai-ml": {
+        "candidates": [
+            lead(
+                "small-model",
+                "01-ai-ml",
+                "合成：小模型推理成本下降",
+                ML + "small-model-inference",
+                access_scope="full_text",
+                provenance="web_open",
+            ),
+            # Discovery opened the sparse-attention lead itself.
+            lead(
+                "sparse",
+                "01-ai-ml",
+                "合成：稀疏注意力基准",
+                ML + "sparse-attention-benchmark",
+                access_scope="abstract",
+                provenance="web_open",
+            ),
+            lead(
+                "chip",
+                "01-ai-ml",
+                "合成：推理芯片供货",
+                ML + "inference-chip-supply",
+                access_scope="full_text",
+                provenance="web_open",
+            ),
+        ],
+        "classifications": {
+            "candidate-small-model": {"kind": "research", "basis": ""},
+            "candidate-sparse": {"kind": "research", "basis": ""},
+            "candidate-chip": {"kind": "news", "basis": "合成：供货变化"},
+        },
+        "observed": {
+            "opened": [
+                ML + "small-model-inference",
+                ML + "sparse-attention-benchmark",
+                ML + "inference-chip-supply",
+                ML + "chip-maker",
+            ],
+            "opened_count": 4,
+        },
+    },
+    "03-world": {
+        "candidates": [
+            lead(
+                "flood",
+                "03-world",
+                "合成：河口防洪闸表决推迟",
+                FLOOD,
+                access_scope="full_text",
+                provenance="web_open",
+            ),
+        ],
+        "classifications": {
+            "candidate-flood": {"kind": "news", "basis": "合成：表决推迟"}
+        },
+        "observed": {
+            "opened": [FLOOD, "https://example.net/news/harbor-strike-over"],
+            "opened_count": 2,
+        },
+    },
+}
+POOL: Payload = {
+    "candidates": [
+        DISCOVERED["01-ai-ml"]["candidates"][2],
+        DISCOVERED["03-world"]["candidates"][0],
+        {
+            **SEEDS[-1],
+            "evidence_urls": FEEDS_EXTRA["notes"]["candidate-harbor"][
+                "alternate_urls"
+            ],
+        },
+        DISCOVERED["01-ai-ml"]["candidates"][0],
+    ],
+    "classifications": {
+        "candidate-chip": {"kind": "news", "basis": "合成：供货变化"},
+        "candidate-flood": {"kind": "news", "basis": "合成：表决推迟"},
+        "candidate-harbor": {
+            "kind": "news",
+            "basis": "头条共识："
+            + HARBOR_OUTLETS
+            + "共3家独立媒体48小时内的头条订阅源标题相近（代码按标题聚类计数，"
+            "可能把同一议题下的不同事件误并；仅元数据，正文未核对）",
+        },
+        "candidate-small-model": {"kind": "research", "basis": ""},
+    },
+    "dropped": [
+        {
+            "id": "candidate-sparse",
+            "direction": "01-ai-ml",
+            "reason": "research_cap",
+        },
+        {
+            "id": "candidate-gpu-prices",
+            "direction": "01-ai-ml",
+            "reason": "research_cap",
+        },
+        {
+            "id": "candidate-notes-3",
+            "direction": "01-ai-ml",
+            "reason": "history",
+        },
+        {
+            "id": "candidate-paper-1",
+            "direction": "01-ai-ml",
+            "reason": "research_cap",
+        },
+        {
+            "id": "candidate-paper-2",
+            "direction": "01-ai-ml",
+            "reason": "research_cap",
+        },
+        {
+            "id": "candidate-paper-3",
+            "direction": "01-ai-ml",
+            "reason": "pool_cap",
+        },
+        {
+            "id": "candidate-notes-4",
+            "direction": "01-ai-ml",
+            "reason": "duplicate",
+        },
+    ],
+}
+TASKS = [
+    {
+        "id": "story-ports",
+        "candidate_ids": ["candidate-harbor"],
+        "source_urls": [],
+    },
+    {
+        "id": "story-models",
+        "candidate_ids": ["candidate-small-model"],
+        "source_urls": [],
+    },
+]
+
+
 def recipe(selection: int) -> Payload:
     """The frozen graph, with the selection budget of its day."""
     loaded = definition.load_definition(RECIPE.format(selection=selection))
@@ -797,7 +1131,7 @@ class _Writer:
                             {
                                 "story_id": "story-ports",
                                 "title": "合成选题：港口",
-                                "candidate_ids": [],
+                                "candidate_ids": ["candidate-harbor"],
                                 "disposition": "brief",
                                 "reason": "已发布独立核验的简讯。",
                                 "priority": 1,
@@ -805,7 +1139,7 @@ class _Writer:
                             {
                                 "story_id": "story-models",
                                 "title": "合成选题：小模型",
-                                "candidate_ids": [],
+                                "candidate_ids": ["candidate-small-model"],
                                 "disposition": "deferred",
                                 "reason": "保留继续跟进。",
                                 "priority": 2,
@@ -911,7 +1245,7 @@ class _Writer:
             "feeds",
             "",
             {
-                "candidates": [],
+                "candidates": [] if legacy else SEEDS,
                 "notes": {},
                 "diagnostics": [
                     "synthetic-ml-feed:ok",
@@ -923,6 +1257,7 @@ class _Writer:
                     {}
                     if legacy
                     else {
+                        **FEEDS_EXTRA,
                         "sources": [
                             {
                                 "id": "synthetic-ml-feed",
@@ -948,19 +1283,25 @@ class _Writer:
                                 "seeds": 0,
                                 "truncated": False,
                             },
-                        ]
+                        ],
                     }
                 ),
             },
         )
-        self.artifact(
-            run_id, "candidates", "", {"candidates": [{}, {}, {}, {}]}
-        )
-        self.artifact(run_id, "selection", "", {"research_tasks": [{}, {}]})
-        for key, count in zip(DIRECTIONS, (3, 1), strict=True):
+        if legacy:
             self.artifact(
-                run_id, "discovery", key, {"candidates": [{}] * count}
+                run_id, "candidates", "", {"candidates": [{}, {}, {}, {}]}
             )
+            self.artifact(run_id, "selection", "", {"research_tasks": [{}, {}]})
+            for key, count in zip(DIRECTIONS, (3, 1), strict=True):
+                self.artifact(
+                    run_id, "discovery", key, {"candidates": [{}] * count}
+                )
+        else:
+            self.artifact(run_id, "candidates", "", POOL)
+            self.artifact(run_id, "selection", "", {"research_tasks": TASKS})
+            for key, found in DISCOVERED.items():
+                self.artifact(run_id, "discovery", key, found)
         if legacy:
             records = [
                 call(base + n, stage)

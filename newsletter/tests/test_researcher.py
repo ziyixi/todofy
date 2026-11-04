@@ -1379,7 +1379,11 @@ async def test_authored_headline_feeds_bring_a_major_story_from_every_outlet():
         (path / "researcher.yaml").read_text(encoding="utf-8"),
         [item.stem for item in (path / "discovery").glob("*.md")],
     )
-    world = [s for s in registry if s.direction == "03-world"]
+    world = [
+        s
+        for s in registry
+        if s.direction == "03-world" and s.kind != researcher.REFERENCE_KIND
+    ]
     economy = [s for s in registry if s.direction == "04-economy"]
     assert len({s.name for s in world}) >= 6
     assert all(s.role == "headline" and s.max_age_days <= 2 for s in world)
@@ -1525,3 +1529,223 @@ def test_disabled_sources_are_not_fetched_or_reported():
         [s for s in registry if s.enabled], {}, DAY, ()
     )
     assert result == sources.MetadataResult([], [], {})
+
+
+# The reference: Wikipedia's Current events, never a lead.
+
+
+def reference_source(**changes):
+    return fake.source(
+        id="current-events",
+        name="Wikipedia Current events",
+        kind="current_events",
+        url="https://en.wikipedia.org/w/api.php",
+        **changes,
+    )
+
+
+def test_current_events_keep_cited_events_of_the_kept_categories():
+    border, referendum = researcher.parse_current_events(fake.current_events())
+    assert border == {
+        "category": "Armed conflicts and attacks",
+        "topic": "Norland–Sudria border dispute",
+        "text": "Border guards of Norland and Sudria exchange fire near the "
+        "Ostra Pass.",
+        # The loopback citation is not a public URL.
+        "urls": ["https://news.example.org/border-clash"],
+        "entities": ["Norland", "Sudria", "Ostra Pass Ostra Pass"],
+    }
+    assert referendum["topic"] == ""
+    assert referendum["text"] == (
+        "Norland's electoral commission confirms that voters approved the "
+        "referendum on the constitution."
+    )
+    assert referendum["entities"] == [
+        "Norland",
+        "Electoral Commission Norland",
+    ]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        json.dumps({"error": {"code": "missingtitle"}}).encode(),
+        json.dumps({"parse": {"wikitext": 7}}).encode(),
+        b"<html>",
+    ],
+)
+def test_a_missing_or_odd_reference_page_is_a_parse_error(body):
+    with pytest.raises(ValueError, match=r"parse answer|Malformed JSON"):
+        researcher.parse_current_events(body)
+
+
+def test_a_registry_has_at_most_one_reference():
+    with pytest.raises(researcher.RegistryError):
+        load(reference_source(), {**reference_source(), "id": "second"})
+
+
+def test_a_reference_matches_its_sources_and_named_words():
+    (_, referendum) = researcher.parse_current_events(fake.current_events())
+    terms = researcher.ReferenceTerms.of(referendum)
+
+    def words(text):
+        return researcher.reference_words([text])
+
+    # Its citation alone is enough; the same words without two of its named
+    # entities are only a weak match, and one shared word is none.
+    assert terms.match(
+        frozenset(),
+        researcher.url_keys(["https://news.example.org/referendum"]),
+    )
+    assert (
+        terms.match(
+            words(
+                "Norland voters approve referendum on new constitution, "
+                "electoral commission says"
+            )
+        )
+        == 2
+    )
+    assert terms.match(words("Norland voters approve a referendum")) == 1
+    assert terms.match(words("A referendum in another country")) == 0
+    assert researcher.reference_words(
+        [], ["https://news.example.org/world/norland-votes-2026"]
+    ) == {"norlan", "vote"}
+
+
+async def test_the_reference_is_yesterdays_page_and_never_a_lead():
+    network = fake.Network(
+        {
+            "en.wikipedia.org": fake.current_events(),
+            "feeds.example.org": fake.rss(
+                fake.rss_item(
+                    "Norland voters approve new constitution in referendum, "
+                    "electoral commission says",
+                    "https://feeds.example.org/norland-referendum",
+                ),
+                # Routing keeps one lead of this source: this one is cut.
+                fake.rss_item(
+                    "Norland and Sudria border guards exchange fire at "
+                    "Ostra Pass",
+                    "https://feeds.example.org/ostra-pass",
+                ),
+            ),
+        }
+    )
+    result = await run(
+        network, load(fake.source(max_seeds=1), reference_source())
+    )
+    request = next(
+        r for r in network.requests if r.headers["host"] == "en.wikipedia.org"
+    )
+    assert dict(request.url.params) == {
+        "action": "parse",
+        "page": "Portal:Current_events/2026_October_27",
+        "prop": "wikitext",
+        "format": "json",
+        "formatversion": "2",
+    }
+    assert "https://github.com/ziyixi/todofy" in request.headers["user-agent"]
+    (lead,) = result.candidates
+    assert lead["url"] == "https://feeds.example.org/norland-referendum"
+    reference = result.reference
+    assert {k: v for k, v in reference.items() if k != "items"} == {
+        "source": "current-events",
+        "page": "Portal:Current_events/2026_October_27",
+        "url": "https://en.wikipedia.org/wiki/"
+        "Portal:Current_events/2026_October_27",
+        "date": "2026-10-27",
+        "code": "ok",
+    }
+    border, referendum = reference["items"]
+    assert (border["feeds"], border["seeds"]) == (2, [])
+    assert border["feed_title"].startswith("Norland and Sudria")
+    assert (referendum["feeds"], referendum["seeds"]) == (2, [lead["id"]])
+    sources_by_id = {item["id"]: item for item in result.sources}
+    assert sources_by_id["current-events"]["entries"] == 2
+    assert sources_by_id["current-events"]["seeds"] == 0
+
+
+async def test_an_unavailable_reference_never_degrades_the_feeds():
+    network = fake.Network(
+        {
+            "en.wikipedia.org": httpx.Response(503),
+            "feeds.example.org": fake.rss(fake.rss_item()),
+        }
+    )
+    result = await run(network, load(fake.source(), reference_source()))
+    assert "current-events:http_error" in result.diagnostics
+    assert not researcher.failed(result)
+    assert result.reference["code"] == "http_error"
+    assert result.reference["items"] == []
+    assert len(result.candidates) == 1
+
+
+async def test_a_group_member_matches_through_its_routed_leader():
+    # A reference event worded like the second report of a headline group,
+    # not like its leader, still links to the group's routed lead.
+    registry = load(
+        *[
+            fake.source(
+                id=f"outlet-{n}",
+                name=name,
+                direction="04-economy",
+                url=f"https://outlet{n}.example.org/rss",
+                max_seeds=1,
+                max_age_days=2,
+                role="headline",
+            )
+            for n, name in enumerate(fake.OUTLETS[:2])
+        ],
+        reference_source(),
+    )
+    local = [
+        headline_entry(n, k + 1, f"Outlet {n} synthetic local story {k}", "")
+        for n in range(2)
+        for k in range(5)
+    ]
+    outcomes = {
+        registry[0].index: researcher._Outcome(
+            "ok",
+            [
+                headline_entry(
+                    0,
+                    0,
+                    "Norland voters back new constitution in referendum",
+                    "Voters in Norland approved the draft constitution.",
+                    minutes=10,
+                ),
+                *local[:5],
+            ],
+        ),
+        registry[1].index: researcher._Outcome(
+            "ok",
+            [
+                headline_entry(
+                    1,
+                    0,
+                    "Electoral commission: Norland voters approve "
+                    "constitution referendum",
+                    "Norland voters approved the draft constitution, the "
+                    "commission said.",
+                    minutes=40,
+                ),
+                *local[5:],
+            ],
+        ),
+        registry[2].index: researcher._Outcome(
+            "ok",
+            [],
+            items=researcher.parse_current_events(fake.current_events()),
+        ),
+    }
+    result = researcher.assemble(registry, outcomes, DAY, now=fake.NOW)
+    group = result.candidates[0]
+    assert group["title"].startswith("Norland voters back")
+    assert result.notes[group["id"]]["signals"]["independent_sources"] == 2
+    _, referendum = result.reference["items"]
+    leader = researcher.reference_words(
+        ["Norland voters back new constitution in referendum"]
+    )
+    assert researcher.ReferenceTerms.of(referendum).match(leader) < 2
+    assert referendum["seeds"] == [group["id"]]

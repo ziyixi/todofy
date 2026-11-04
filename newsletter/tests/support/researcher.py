@@ -421,3 +421,39 @@ def front_page() -> dict[str, list[tuple[str, str]]]:
             )
         )
     return page
+
+
+# A synthetic day of Wikipedia's Current events portal, in its wikitext: a
+# kept category with a topic bullet, a category the reference skips, and an
+# event under no topic. Invented places; the second citation of the first
+# event is not public and drops.
+CURRENT_EVENTS = "\n".join(
+    [
+        "{{Current events|year=2026|month=10|day=27|top=yes}}",
+        "<!-- All news items below this line -->",
+        "'''Armed conflicts and attacks'''",
+        "*[[Norland–Sudria border dispute]]",
+        "**Border guards of [[Norland]] and [[Sudria]] exchange fire near "
+        "the [[Ostra Pass (mountain pass)|Ostra Pass]]. "
+        "[https://news.example.org/border-clash (Example Wire)] "
+        "[https://127.0.0.1/border (Local)]",
+        "",
+        "'''Arts and culture'''",
+        "*A synthetic prize is awarded. [https://news.example.org/prize (X)]",
+        "",
+        "'''Politics and elections'''",
+        "*[[Norland]]'s [[Electoral Commission of Norland|electoral "
+        "commission]] confirms that voters approved the [[2026 Norland "
+        "constitutional referendum|referendum]] on the {{small|draft}} "
+        "constitution. [https://news.example.org/referendum (''Example "
+        "Post'')]",
+        "*A context bullet without a source",
+        "<!-- All news items above this line -->",
+    ]
+)
+
+
+def current_events(wikitext: str = CURRENT_EVENTS) -> bytes:
+    """A MediaWiki parse API answer carrying one day's wikitext."""
+    page = {"title": "Portal:Current events/2026 October 27"}
+    return json.dumps({"parse": {**page, "wikitext": wikitext}}).encode()

@@ -39,6 +39,10 @@ describe('at 860 px', () => {
     expect(rulesIn('max-width: 860px', '.tiles')).toMatch(/repeat\(2,/)
   })
 
+  it('puts the must-know headlines and reference in one column', () => {
+    expect(rulesIn('max-width: 860px', '.must-grid')).toMatch(/grid-template-columns:\s*minmax\(0, 1fr\)/)
+  })
+
   it('puts the issue cards and the source directions in one column', () => {
     expect(rulesIn('max-width: 860px', '.issue-grid')).toMatch(/grid-template-columns:\s*minmax\(0, 1fr\)/)
     expect(rulesIn('max-width: 860px', '.directions')).toMatch(/columns:\s*1/)
@@ -55,6 +59,12 @@ describe('at 600 px', () => {
   it('shows each model call as a card instead of a wide table', () => {
     expect(rulesIn('max-width: 600px', '.call-table thead')).toMatch(/display:\s*none/)
     expect(css).toMatch(/\.call-table td::before\s*\{[^}]*content:\s*attr\(data-label\)/)
+  })
+
+  it("shows each funnel direction as a card, its counts under their columns' names", () => {
+    expect(rulesIn('max-width: 600px', '.funnel-table thead')).toMatch(/display:\s*none/)
+    expect(rulesIn('max-width: 600px', '.funnel-table tr')).toMatch(/repeat\(4,/)
+    expect(css).toMatch(/\.funnel-table td::before\s*\{[^}]*content:\s*attr\(data-label\)/)
   })
 
   it('keeps the reader and the email inside the phone: one column of record, a shorter frame', () => {

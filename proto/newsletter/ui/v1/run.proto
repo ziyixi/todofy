@@ -19,8 +19,8 @@ option java_multiple_files = true;
 option java_outer_classname = "RunProto";
 option java_package = "science.ziyixi.newsletter.ui.v1";
 
-// One run. ListRuns and the overview answer every field but `nodes`, `stories` and `dependencies`, which GetRun
-// adds.
+// One run. ListRuns and the overview answer every field but `nodes`, `stories`, `dependencies`, `funnel`,
+// `headlines`, `consensus_leads` and `reference`, which GetRun adds.
 message Run {
   option (google.api.resource) = {
     type: "news.ziyixi.science/Run"
@@ -115,6 +115,15 @@ message Run {
   repeated StoryOutcome stories = 23 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The external interfaces the run called (GetRun only).
   repeated Dependency dependencies = 24 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Each discovery direction's way from feed leads to the edition, in the graph's order (GetRun only).
+  repeated DirectionFunnel funnel = 25 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The headline feeds of each direction that has them (GetRun only); empty for runs from before they were counted.
+  repeated HeadlineSummary headlines = 26 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The headline consensus leads the candidates node offered selection, and what became of each (GetRun only).
+  repeated ConsensusLead consensus_leads = 27 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The day before the issue date as an independent reference lists it, and where each event left the run (GetRun
+  // only); absent when the run had no reference source.
+  ReferenceCheck reference = 28 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // One node of the run's frozen graph.
@@ -257,6 +266,187 @@ message SourceOutcome {
   optional int32 accepted_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Leads routed to discovery.
   optional int32 seed_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One discovery direction's way from its feed leads to the edition. A count the run recorded before it was kept is
+// absent, never 0: a client says 上线前未记录.
+message DirectionFunnel {
+  // The direction's ID (`03-world`).
+  string direction = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Where its discovery item is.
+  RunNode.State state = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its discovery item's error code; empty without one.
+  string error_code = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Feed leads routed to it; absent for runs whose feeds gave every direction every lead.
+  optional int32 seed_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Pages its discovery call tried to open. An attempt: the gateway records the open action, not whether the page
+  // loaded. Absent before it was recorded.
+  optional int32 opened_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Candidates its discovery handed off.
+  int32 handed_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Of those, the ones classified news (a run without classifications has none of the three).
+  int32 news_count = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Of those, the ones classified research.
+  int32 research_count = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Of those, the ones classified unknown.
+  int32 unknown_count = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Of those, the ones read in full.
+  int32 full_text_count = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Of those, the ones read as an abstract.
+  int32 abstract_count = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Of those, metadata only (an unopened lead handed back).
+  int32 metadata_count = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its candidates in the pool selection read, its feed leads included.
+  int32 pooled_count = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its candidates and feed leads the pool left out; absent before it was recorded.
+  optional int32 dropped_count = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Those by reason, in the order history, duplicate, research_cap, pool_cap.
+  repeated DropCount drops = 15 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Research tasks citing its candidates.
+  int32 selected_count = 16 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Published stories citing its candidates (deep, brief or watch).
+  int32 published_count = 17 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // How long its discovery attempt ran, in seconds (milliseconds precision); absent while it runs.
+  optional double elapsed_seconds = 18 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its discovery calls' totals.
+  UsageTotals usage = 19 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// How many candidates the pool left out for one reason.
+message DropCount {
+  // history (already seen), duplicate (of a kept candidate), research_cap (past the research allowance) or pool_cap
+  // (past the pool's size).
+  string reason = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // How many.
+  int32 count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One direction's headline feeds as the researcher read them: one front page, grouped by event.
+message HeadlineSummary {
+  // The direction's ID.
+  string direction = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its headline feeds.
+  int32 feed_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Those that answered; fewer than `feed_count` means a thin front page, not a quiet day.
+  int32 feed_ok_count = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Entries inside the headline window.
+  int32 entry_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Event groups.
+  int32 group_count = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Groups that enough distinct outlets carried for a consensus (3).
+  int32 consensus_group_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The largest group's outlets.
+  int32 max_outlet_count = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The first three groups, in rank order.
+  repeated HeadlineGroup top_groups = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One headline group.
+message HeadlineGroup {
+  // Its lead's title (feed text, untrusted).
+  string title = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The distinct outlets that carried it.
+  int32 outlet_count = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// A headline group enough outlets carried that code offered it to selection as news (头条共识). Whether it is
+// must-know is selection's call, not the outlet count's.
+message ConsensusLead {
+  // How far it got.
+  enum Stage {
+    // Never written.
+    STAGE_UNSPECIFIED = 0;
+    // In the pool; selection did not choose it.
+    STAGE_POOLED = 1;
+    // Selected; the run has not published it (still running, or stopped first).
+    STAGE_SELECTED = 2;
+    // Published (`disposition` deep, brief or watch).
+    STAGE_PUBLISHED = 3;
+    // Selected, then deferred by the publication.
+    STAGE_DEFERRED = 4;
+  }
+
+  // Its lead's title (feed text, untrusted).
+  string title = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its lead's URL (http or https).
+  string url = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The direction it was offered to.
+  string direction = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The distinct outlets that carried it.
+  int32 outlet_count = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // How far it got.
+  Stage stage = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The publication's disposition of its story (deep, brief, watch or deferred); empty before one.
+  string disposition = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// An independent list of the day before the issue date's events (Wikipedia's Current events: conflicts, politics and
+// elections, disasters, business, health), and where each left the run. Matching is by shared English words and
+// cited sources, so a stage says what the best match reached, `match` shows that match, and a weak match is
+// UNCERTAIN. It never says that nothing was missed.
+message ReferenceCheck {
+  // Whether the reference could be read.
+  enum State {
+    // Never written.
+    STATE_UNSPECIFIED = 0;
+    // Read; `events` may still be empty.
+    STATE_AVAILABLE = 1;
+    // The fetch or its parsing failed (`error_code`): nothing is known.
+    STATE_UNAVAILABLE = 2;
+  }
+
+  // The registry source's ID.
+  string source_id = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The day it lists (YYYY-MM-DD, UTC).
+  string date = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its public page (https).
+  string url = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Whether it could be read.
+  State state = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The researcher's code when it could not (`http_error`, `parse_error`, ...).
+  string error_code = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Its events, in its order (at most 30).
+  repeated ReferenceEvent events = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// One reference event and the furthest stage of the run that strongly matched it.
+message ReferenceEvent {
+  // The furthest stage a strong match reached.
+  enum Stage {
+    // Never written.
+    STAGE_UNSPECIFIED = 0;
+    // A published story cites a matching candidate.
+    STAGE_PUBLISHED = 1;
+    // A research task cites one; nothing published it.
+    STAGE_SELECTED = 2;
+    // One was in the pool; selection did not choose it.
+    STAGE_POOLED = 3;
+    // Discovery handed one off; the pool left it out (`drop_reason`).
+    STAGE_DROPPED = 4;
+    // A routed feed lead matched; discovery handed nothing matching off and the lead did not reach the pool either.
+    STAGE_NOT_HANDED = 5;
+    // A feed entry matched, but routing left it out of the leads.
+    STAGE_CUT = 6;
+    // Nothing in the run matched, not even weakly.
+    STAGE_UNSEEN = 7;
+    // Only weak matches: it may or may not be there.
+    STAGE_UNCERTAIN = 8;
+  }
+
+  // Its category on the reference (`Politics and elections`).
+  string category = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The topics above it (`2026 United States elections`); empty without.
+  string topic = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The event (reference text, untrusted).
+  string text = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The sources it cites (http or https), at most two.
+  repeated string source_urls = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The furthest stage a strong match reached.
+  Stage stage = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // For DROPPED (and NOT_HANDED when the pool left the lead out): history, duplicate, research_cap or pool_cap.
+  string drop_reason = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The title of the best match (untrusted); empty when UNSEEN.
+  string match = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // One external interface a run or the service calls (the overview's 外部接口).

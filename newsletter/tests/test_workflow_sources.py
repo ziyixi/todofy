@@ -88,17 +88,19 @@ def test_old_metadata_artifacts_read_without_notes():
     assert "notes" in json.dumps(dataclasses.asdict(current))
 
 
-def test_per_source_and_headline_counts_are_additive():
+def test_per_source_headline_and_reference_records_are_additive():
     # Older artifacts lack the keys; positional construction keeps working.
     current = sources.MetadataResult([lead()], ["nature:ok"], {})
     assert dataclasses.asdict(current)["sources"] == []
     assert dataclasses.asdict(current)["headlines"] == []
+    assert dataclasses.asdict(current)["reference"] == {}
     assert list(dataclasses.asdict(current)) == [
         "candidates",
         "diagnostics",
         "notes",
         "sources",
         "headlines",
+        "reference",
     ]
 
 

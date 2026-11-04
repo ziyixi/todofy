@@ -171,6 +171,8 @@ CONSENSUS_OUTLETS = 3
 MAX_CONSENSUS_LEADS = 3
 # Opens a consensus lead's classification basis; selection.md keys on it.
 CONSENSUS_BASIS = "头条共识："
+# A discovery artifact lists at most this many of the URLs its call opened.
+MAX_OBSERVED_OPENS = 24
 # Editable editorial policy is deliberately separate from the fixed provider
 # permissions and source/protobuf validation. Legacy frozen runs use the exact
 # original instructions above, not whatever configuration is active today.
@@ -329,8 +331,13 @@ def candidate_budget(
     *,
     maximum: int,
     research_maximum: int,
+    dropped: list[tuple[sources.Candidate, str]] | None = None,
 ) -> tuple[list[sources.Candidate], dict[str, types.Payload]]:
-    """Reserve room for news with stable order within each group."""
+    """Reserve room for news with stable order within each group.
+
+    ``dropped`` receives each candidate left out and why: ``research_cap``
+    past the research allowance, else ``pool_cap``.
+    """
     classified = {
         c["id"]: candidate_classification(c, classifications.get(c["id"]))
         for c in candidates
@@ -338,6 +345,14 @@ def candidate_budget(
     news = [c for c in candidates if classified[c["id"]]["kind"] == "news"]
     research = [c for c in candidates if classified[c["id"]]["kind"] != "news"]
     retained = (news + research[:research_maximum])[:maximum]
+    if dropped is not None:
+        kept = {c["id"] for c in retained}
+        over = {c["id"] for c in research[research_maximum:]}
+        dropped.extend(
+            (c, "research_cap" if c["id"] in over else "pool_cap")
+            for c in candidates
+            if c["id"] not in kept
+        )
     return retained, {c["id"]: classified[c["id"]] for c in retained}
 
 
@@ -369,10 +384,20 @@ class ContentEngine(Protocol):
 
 @dataclasses.dataclass(frozen=True)
 class DiscoveryResult:
-    """Carry validated discovery candidates and their explanatory note."""
+    """Carry validated discovery candidates and their explanatory note.
+
+    ``observed`` is what the call's tool was seen doing, for the console:
+    ``opened`` lists up to MAX_OBSERVED_OPENS of the public URLs it tried to
+    open and ``opened_count`` counts them all. They are attempts: the
+    gateway records the open action, never whether the page loaded.
+    Additive: older artifacts have no ``observed``.
+    """
 
     candidates: list[sources.Candidate]
     note: str
+    observed: types.Payload = dataclasses.field(
+        default_factory=dict, kw_only=True
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -765,6 +790,18 @@ def parse_discovery(
     return DiscoveryResult(unique, note)
 
 
+def observed_opens(opened: set[str]) -> types.Payload:
+    """The public URLs a call tried to open, sorted, and how many there were."""
+    urls = []
+    for url in sorted(opened):
+        try:
+            contracts.validate_public_url(url)
+        except contracts.ContractError:
+            continue
+        urls.append(url)
+    return {"opened": urls[:MAX_OBSERVED_OPENS], "opened_count": len(urls)}
+
+
 def parse_plan(
     text: str,
     candidate_ids: set[str],
@@ -960,7 +997,7 @@ class ContentPreparation:
                 ),
                 model_io.prepare_workspace(workspace, issue_date),
             )
-        return parse_discovery(
+        result = parse_discovery(
             text,
             opened,
             searched,
@@ -970,6 +1007,7 @@ class ContentPreparation:
             history=context,
             classified=limits is not None,
         )
+        return dataclasses.replace(result, observed=observed_opens(opened))
 
     async def shortlist(
         self,

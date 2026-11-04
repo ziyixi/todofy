@@ -292,12 +292,14 @@ class EditorialNodes:
             ]
             candidates.extend(consensus.values())
         candidates.extend(leads)
+        removed: list[tuple[sources.Candidate, str]] = []
         candidates = sources.deduplicate_candidates(
             candidates,
             history["candidates"],
             limit=60
             if limits is not None
             else ctx.params.get("max_candidates", 30),
+            dropped=removed,
         )
         if limits is not None:
             candidates, classifications = content.candidate_budget(
@@ -305,7 +307,22 @@ class EditorialNodes:
                 classifications,
                 maximum=ctx.params.get("max_candidates", 30),
                 research_maximum=limits.max_research_candidates,
+                dropped=removed,
             )
+        # For the console's funnel: each candidate left out once, by its
+        # first reason; a copy of a kept candidate is not a loss.
+        kept = {c["id"] for c in candidates}
+        dropped: dict[str, types.Payload] = {}
+        for candidate, reason in removed:
+            if candidate["id"] not in kept:
+                dropped.setdefault(
+                    candidate["id"],
+                    {
+                        "id": candidate["id"],
+                        "direction": candidate["direction"],
+                        "reason": reason,
+                    },
+                )
         normalized = [
             contracts.to_dict(
                 contracts.parse_message(candidate, editorial_pb2.Candidate)
@@ -316,6 +333,7 @@ class EditorialNodes:
         return {
             "candidates": normalized,
             "coverage": self.coverage(ctx),
+            "dropped": list(dropped.values()),
             **(
                 {"classifications": classifications}
                 if limits is not None

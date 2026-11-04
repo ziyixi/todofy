@@ -87,6 +87,7 @@ async def test_without_registry_no_feed_is_fetched(nodes, tmp_path):
             "notes": {},
             "sources": [],
             "headlines": [],
+            "reference": {},
         }
 
 
@@ -367,14 +368,28 @@ def headline_feeds(*groups):
     return value
 
 
-async def pool(nodes, tmp_path, feeds, found=(), kinds=None, **run_inputs):
+async def pool(
+    nodes,
+    tmp_path,
+    feeds,
+    found=(),
+    kinds=None,
+    *,
+    history=(),
+    limit=30,
+    **run_inputs,
+):
     context = engine.NodeContext(
         run_id="researcher",
         node_id="candidates",
         item_id="",
-        params={"max_candidates": 30},
+        params={"max_candidates": limit},
         inputs={
-            "history": {"candidates": [], "editions": [], "watchlist": []},
+            "history": {
+                "candidates": list(history),
+                "editions": [],
+                "watchlist": [],
+            },
             "feeds": feeds,
             "discovery": [
                 {"candidates": list(found), "classifications": kinds or {}}
@@ -573,3 +588,50 @@ async def test_headline_notes_reach_discovery_with_their_alternates(
     notes = prompt["metadata_seed_notes_untrusted"]
     assert notes == {good[0]["id"]: good[1]}
     assert content._HEADLINE_NOTES in rules
+
+
+async def test_the_pool_records_what_it_leaves_out_and_why(nodes, tmp_path):
+    news = [
+        workflow_content.candidate(
+            id=f"candidate-news-{n}",
+            title=f"Synthetic opened news {n}",
+            url=f"https://example.org/news/{n}",
+        )
+        for n in range(2)
+    ]
+    leads = [seed("04-economy", n) for n in range(4)]
+    copy = seed("04-economy", 9, title=news[0]["title"])
+    result = await pool(
+        nodes,
+        tmp_path,
+        feeds_artifact(*leads, copy),
+        news,
+        {c["id"]: {"kind": "news", "basis": "Synthetic change."} for c in news},
+        history=[leads[3]],
+        limit=2,
+        content_config={
+            **config(),
+            "editorial": {
+                **config()["editorial"],
+                "max_research_candidates": 1,
+            },
+        },
+    )
+    assert [c["id"] for c in result["candidates"]] == [c["id"] for c in news]
+    # Each left-out candidate once, by the first stage that left it out: the
+    # first unopened lead fits the research allowance but not the pool.
+    assert result["dropped"] == [
+        {"id": leads[3]["id"], "direction": "04-economy", "reason": "history"},
+        {"id": copy["id"], "direction": "04-economy", "reason": "duplicate"},
+        {"id": leads[0]["id"], "direction": "04-economy", "reason": "pool_cap"},
+        {
+            "id": leads[1]["id"],
+            "direction": "04-economy",
+            "reason": "research_cap",
+        },
+        {
+            "id": leads[2]["id"],
+            "direction": "04-economy",
+            "reason": "research_cap",
+        },
+    ]

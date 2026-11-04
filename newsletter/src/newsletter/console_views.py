@@ -11,6 +11,7 @@ replication journal's, never Notion's.
 """
 
 from collections.abc import Iterable, Mapping, Sequence
+import dataclasses
 import datetime
 import re
 import statistics
@@ -23,6 +24,7 @@ import ziyixi_proto.newsletter.ui.v1.overview_pb as overview_pb
 import ziyixi_proto.newsletter.ui.v1.run_pb as run_pb
 import ziyixi_proto.newsletter.ui.v1.source_catalog_pb as catalog_pb
 
+import newsletter.workflow.content as content
 import newsletter.workflow.researcher as researcher
 
 Row = Mapping[str, Any]
@@ -412,6 +414,349 @@ def feed_summary(
         if counted
         else None,
         failures=failures,
+    )
+
+
+# A run's funnel, consensus leads and reference check (GetRun only).
+
+DROP_REASONS = ("history", "duplicate", "research_cap", "pool_cap")
+_PUBLISHED = frozenset({"deep", "brief", "watch"})
+_STAGE = run_pb.ReferenceEvent_Stage
+_LEAD = run_pb.ConsensusLead_Stage
+
+
+def rows(value: object) -> list[Row]:
+    """The mappings of a stored list; anything else reads as none."""
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, Mapping)]
+
+
+def _mapping(value: object) -> Row:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _strings(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
+
+
+@dataclasses.dataclass(frozen=True)
+class Funnel:
+    """The artifacts of one run that its funnel, leads and reference read.
+
+    All as stored, so possibly from before a field existed: ``seeds`` is None
+    when the feeds gave every direction every lead, ``dropped`` None for a
+    pool from before its drops were kept, and a discovery artifact may lack
+    ``observed``. ``directions`` are the discovery node's items, ``stories``
+    the publication's coverage.
+    """
+
+    directions: list[Row]
+    seeds: list[Row] | None
+    notes: Row
+    headlines: list[Row]
+    reference: Row
+    discovered: Mapping[str, Row]
+    pool: list[Row]
+    classifications: Row
+    dropped: list[Row] | None
+    tasks: list[Row]
+    stories: list[Row]
+
+    def cited(self, record: Row) -> set[str]:
+        """The pool candidates a task or story cites, by ID or source URL."""
+        by_url = {text(c.get("url")): text(c.get("id")) for c in self.pool}
+        ids = set(by_url.values())
+        return {
+            i for i in _strings(record.get("candidate_ids")) if i in ids
+        } | {
+            by_url[u]
+            for u in _strings(record.get("source_urls"))
+            if u in by_url
+        }
+
+    def fates(self) -> tuple[set[str], dict[str, str]]:
+        """The candidates tasks cite, and how the publication disposed each."""
+        selected = set().union(*map(self.cited, self.tasks))
+        disposition: dict[str, str] = {}
+        for story in self.stories:
+            for identifier in self.cited(story):
+                # A published story outranks a deferred one citing it too.
+                if disposition.get(identifier) not in _PUBLISHED:
+                    disposition[identifier] = text(story.get("disposition"))
+        return selected, disposition
+
+
+def direction_funnel(
+    funnel: Funnel, node_id: str, attempts: Sequence[Row], calls: Sequence[Row]
+) -> list[run_pb.DirectionFunnel]:
+    """Each discovery direction from its feed leads to the edition."""
+    timed = {
+        text(a.get("item_id")): a
+        for a in attempts
+        if a.get("node_id") == node_id
+    }
+    return [
+        _direction(
+            funnel,
+            item,
+            timed.get(text(item.get("id")), {}),
+            [
+                call
+                for call in calls
+                if call.get("stage") == f"{node_id}:{text(item.get('id'))}"
+            ],
+        )
+        for item in funnel.directions
+    ]
+
+
+def _direction(
+    funnel: Funnel, item: Row, attempt: Row, calls: Sequence[Row]
+) -> run_pb.DirectionFunnel:
+    direction = text(item.get("id"))
+    found = _mapping(funnel.discovered.get(direction))
+    handed = rows(found.get("candidates"))
+    declared = _mapping(found.get("classifications"))
+    kinds = [
+        text(_mapping(declared.get(text(c.get("id")))).get("kind"))
+        for c in handed
+    ]
+    scopes = [text(c.get("access_scope")) for c in handed]
+    opened = _mapping(found.get("observed")).get("opened_count")
+    own = {
+        text(c.get("id"))
+        for c in funnel.pool
+        if c.get("direction") == direction
+    }
+    drops = (
+        None
+        if funnel.dropped is None
+        else [
+            text(d.get("reason"))
+            for d in funnel.dropped
+            if d.get("direction") == direction
+        ]
+    )
+    return run_pb.DirectionFunnel(
+        direction=direction,
+        state=NODE_STATES.get(
+            str(item.get("state")), run_pb.RunNode_State.UNSPECIFIED
+        ),
+        error_code=text(item.get("error_code")),
+        seed_count=None
+        if funnel.seeds is None
+        else sum(s.get("direction") == direction for s in funnel.seeds),
+        opened_count=int32(opened) if type(opened) is int else None,
+        handed_count=len(handed),
+        news_count=kinds.count("news"),
+        research_count=kinds.count("research"),
+        unknown_count=kinds.count("unknown"),
+        full_text_count=scopes.count("full_text"),
+        abstract_count=scopes.count("abstract"),
+        metadata_count=scopes.count("metadata"),
+        pooled_count=len(own),
+        dropped_count=None if drops is None else len(drops),
+        drops=tuple(
+            run_pb.DropCount(reason=reason, count=(drops or []).count(reason))
+            for reason in DROP_REASONS
+            if reason in (drops or [])
+        ),
+        selected_count=sum(
+            bool(funnel.cited(task) & own) for task in funnel.tasks
+        ),
+        published_count=sum(
+            story.get("disposition") in _PUBLISHED
+            and bool(funnel.cited(story) & own)
+            for story in funnel.stories
+        ),
+        elapsed_seconds=seconds(
+            attempt.get("started_at"), attempt.get("finished_at")
+        ),
+        usage=usage_totals(calls),
+    )
+
+
+def headline_summaries(
+    headlines: Sequence[Row],
+) -> list[run_pb.HeadlineSummary]:
+    """Each direction's headline feeds as the researcher counted them."""
+    return [
+        run_pb.HeadlineSummary(
+            direction=text(h.get("direction")),
+            feed_count=int32(h.get("feeds")),
+            feed_ok_count=int32(h.get("feeds_ok")),
+            entry_count=int32(h.get("entries")),
+            group_count=int32(h.get("groups")),
+            consensus_group_count=int32(h.get("consensus_groups")),
+            max_outlet_count=int32(h.get("max_outlets")),
+            top_groups=tuple(
+                run_pb.HeadlineGroup(
+                    title=text(group.get("title"), MAX_LABEL_CHARS),
+                    outlet_count=int32(group.get("outlets")),
+                )
+                for group in rows(h.get("top"))[:3]
+            ),
+        )
+        for h in headlines
+    ]
+
+
+def consensus_leads(funnel: Funnel) -> list[run_pb.ConsensusLead]:
+    """The headline consensus leads in the pool, and how far each got."""
+    selected, disposition = funnel.fates()
+    result = []
+    for candidate in funnel.pool:
+        identifier = text(candidate.get("id"))
+        classification = _mapping(funnel.classifications.get(identifier))
+        if not text(classification.get("basis")).startswith(
+            content.CONSENSUS_BASIS
+        ):
+            continue
+        signals = _mapping(
+            _mapping(funnel.notes.get(identifier)).get("signals")
+        )
+        fate = disposition.get(identifier, "")
+        if fate in _PUBLISHED:
+            stage = _LEAD.PUBLISHED
+        elif fate == "deferred":
+            stage = _LEAD.DEFERRED
+        elif identifier in selected:
+            stage = _LEAD.SELECTED
+        else:
+            stage = _LEAD.POOLED
+        result.append(
+            run_pb.ConsensusLead(
+                title=text(candidate.get("title"), MAX_LABEL_CHARS),
+                url=http_url(candidate.get("url")),
+                direction=text(candidate.get("direction")),
+                outlet_count=int32(signals.get("independent_sources")),
+                stage=stage,
+                disposition=fate,
+            )
+        )
+    return result
+
+
+# A reference event's stages, furthest first, each with the candidates (and
+# their words and URL keys) a strong match there must be.
+_Ladder = list[tuple[_STAGE, list[tuple[Row, frozenset[str], frozenset[str]]]]]
+
+
+def reference_check(funnel: Funnel) -> run_pb.ReferenceCheck | None:
+    """Where each reference event left the run, by its best strong match.
+
+    Candidates further along win: published, selected, pooled, then handed
+    off by discovery; then the feeds' own record of it (a routed lead, an
+    entry routing cut). A strong match by words can still be another event
+    of the same actors, so ``match`` names it; weak matches alone are
+    UNCERTAIN, none at all UNSEEN. Nothing here says the run missed nothing.
+    """
+    reference = funnel.reference
+    if not reference:
+        return None
+    code = text(reference.get("code"))
+    check = run_pb.ReferenceCheck(
+        source_id=text(reference.get("source")),
+        date=text(reference.get("date")),
+        url=http_url(reference.get("url")),
+        state=run_pb.ReferenceCheck_State.AVAILABLE
+        if code == "ok"
+        else run_pb.ReferenceCheck_State.UNAVAILABLE,
+        error_code="" if code == "ok" else code,
+    )
+    if code != "ok":
+        return check
+    selected, disposition = funnel.fates()
+    handed = [
+        candidate
+        for found in funnel.discovered.values()
+        for candidate in rows(_mapping(found).get("candidates"))
+    ]
+    stages = [
+        (
+            _STAGE.PUBLISHED,
+            [
+                c
+                for c in funnel.pool
+                if disposition.get(text(c.get("id"))) in _PUBLISHED
+            ],
+        ),
+        (_STAGE.SELECTED, [c for c in funnel.pool if c.get("id") in selected]),
+        (_STAGE.POOLED, funnel.pool),
+        (_STAGE.DROPPED, handed),
+    ]
+    ladder: _Ladder = []
+    for stage, candidates in stages:
+        entries = []
+        for c in candidates:
+            urls = [text(c.get("url")), *_strings(c.get("evidence_urls"))]
+            words = researcher.reference_words(
+                [text(c.get("title")), text(c.get("event_key"))], urls
+            )
+            entries.append((c, words, researcher.url_keys(urls)))
+        ladder.append((stage, entries))
+    dropped = {
+        text(d.get("id")): text(d.get("reason")) for d in funnel.dropped or []
+    }
+    seeds = {
+        text(s.get("id")): text(s.get("title")) for s in funnel.seeds or []
+    }
+    return dataclasses.replace(
+        check,
+        events=tuple(
+            _reference_event(item, ladder, dropped, seeds)
+            for item in rows(reference.get("items"))
+        ),
+    )
+
+
+def _reference_event(
+    item: Row,
+    ladder: _Ladder,
+    dropped: Mapping[str, str],
+    seeds: Mapping[str, str],
+) -> run_pb.ReferenceEvent:
+    terms = researcher.ReferenceTerms.of(item)
+    # The routed leads the feeds matched strongly, with every entry's words.
+    linked = _strings(item.get("seeds"))
+    feed_title = text(item.get("feed_title"))
+    found: tuple[_STAGE, str, str] | None = None
+    weak = ""
+    for stage, entries in ladder:
+        for candidate, words, keys in entries:
+            identifier = text(candidate.get("id"))
+            strength = 2 if identifier in linked else terms.match(words, keys)
+            if strength == 2:
+                title = text(candidate.get("title"))
+                found = (stage, title, dropped.get(identifier, ""))
+                break
+            if strength and not weak:
+                weak = text(candidate.get("title"))
+        if found:
+            break
+    if found is None and linked:
+        reason = next((dropped[s] for s in linked if s in dropped), "")
+        found = (_STAGE.NOT_HANDED, seeds.get(linked[0]) or feed_title, reason)
+    elif found is None and item.get("feeds") == 2:
+        found = (_STAGE.CUT, feed_title, "")
+    elif found is None and (weak or item.get("feeds") == 1):
+        found = (_STAGE.UNCERTAIN, weak or feed_title, "")
+    stage, match, reason = found or (_STAGE.UNSEEN, "", "")
+    return run_pb.ReferenceEvent(
+        category=text(item.get("category")),
+        topic=text(item.get("topic")),
+        text=text(item.get("text")),
+        source_urls=tuple(
+            url
+            for value in _strings(item.get("urls"))
+            if (url := http_url(value))
+        )[:2],
+        stage=stage,
+        drop_reason=reason,
+        match=text(match, MAX_LABEL_CHARS),
     )
 
 

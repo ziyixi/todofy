@@ -139,7 +139,7 @@ message FeedSource {
   string display_name = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The direction its leads go to.
   string direction_id = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // feed, arxiv, crossref or hf_daily.
+  // feed, arxiv, crossref, hf_daily or current_events (a reference, never leads).
   string kind = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
   // The endpoint it fetches (http or https; public).
   string url = 5 [(google.api.field_behavior) = OUTPUT_ONLY];

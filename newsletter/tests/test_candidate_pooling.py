@@ -197,7 +197,17 @@ async def test_metadata_remains_after_discovery_missing_feed_never_change_pool(
         first["id"],
         second["id"],
     ]
-    assert capped == await pool(groups, feeds=None, limit=2)
+    # Only the record of what the cap left out tells the two apart.
+    assert capped["dropped"] == [
+        {
+            "id": supplement["id"],
+            "direction": supplement["direction"],
+            "reason": "pool_cap",
+        }
+    ]
+    without = await pool(groups, feeds=None, limit=2)
+    assert without["dropped"] == []
+    assert capped == {**without, "dropped": capped["dropped"]}
     supplemented = await pool(groups, feeds=[supplement], limit=3)
     assert [item["id"] for item in supplemented["candidates"]] == [
         first["id"],

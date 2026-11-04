@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { routerHref } from './RunDetail.tsx';
-import { BLOCKED_RUN, READY_RUN, serve, show, world } from './test/world.tsx';
+import { BLOCKED_RUN, READY_RUN, fixture, serve, show, world } from './test/world.tsx';
 
 afterEach(() => {
   cleanup();
@@ -104,5 +104,65 @@ describe('the runs of a month', () => {
     expect(rows[2]).toHaveAttribute('href', `#/${BLOCKED_RUN}`);
     expect(rows[0]).toHaveTextContent('手动');
     expect(screen.getByText('‹ 没有更早的记录')).toBeVisible();
+  });
+});
+
+describe('the retrieval funnel and must-know tracking', () => {
+  it('counts each direction from its leads to the edition, with what the pool left out and why', async () => {
+    serve(world());
+    show(`#/${READY_RUN}`);
+    const funnel = await section('检索漏斗');
+    const [ai, worldRow] = within(funnel.getByRole('table')).getAllByRole('row').slice(1);
+    expect(ai).toHaveTextContent('01-ai-ml');
+    const cells = (row: HTMLElement | undefined) => within(row!).getAllByRole('cell').map((cell) => cell.textContent);
+    expect(cells(ai).slice(0, 3)).toEqual(['7', '4', '3新闻 1 · 研究 2全文 2 · 摘要 1']);
+    expect(cells(ai)[4]).toBe('7已见过 1 · 重复 1 · 研究名额已满 4 · 候选池已满 1');
+    expect(cells(worldRow).slice(3, 7)).toEqual(['2', '0', '1', '1']);
+    expect(cells(worldRow)[7]).toBe('1 分 30 秒估算 $0.0012');
+    expect(funnel.queryByText(/上线前未记录/)).toBeNull();
+  });
+
+  it('follows the consensus lead and every reference event, naming what matched', async () => {
+    serve(world());
+    show(`#/${READY_RUN}`);
+    const must = await section('必知追踪');
+    const lead = must.getByRole('link', { name: 'Harbor workers end strike after port deal' });
+    expect(lead).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(lead.closest('li')).toHaveTextContent('3 家●已刊 · 简讯');
+    expect(must.getByText(/03-world · 头条源 3\/3 正常 · 窗口内 41 条，\s*29 组，3 家及以上 1 组/)).toBeVisible();
+    const reference = must.getByRole('link', { name: '维基百科时事 · 10月26日（UTC）' });
+    expect(reference).toHaveAttribute('href', 'https://reference.example.org/wiki/Portal:Current_events/2026_October_26');
+    expect(must.getByText('已刊 1 · 未入选 1 · 入池被丢 1 · 给了没交接 1 · 种子被截 1 · 未见 1 · 未确定 1')).toBeVisible();
+    const row = (text: RegExp) => must.getByText(text).closest('li');
+    expect(row(/^Synthetic Cloud cuts/)).toHaveTextContent('▲给了没交接Business and economy · 研究名额已满 · 匹配：Cloud GPU rental prices fall');
+    expect(row(/^The River Delta Council/)).toHaveTextContent('匹配：合成：河口防洪闸表决推迟');
+    expect(row(/^Border guards/)).toHaveTextContent('▲未见Armed conflicts and attacks');
+    expect(must.getByText(/这里不说明没有漏报/)).toBeVisible();
+    // Reference and feed text is text: no event or match becomes a link.
+    expect(must.getAllByRole('link')).toHaveLength(2);
+  });
+
+  it('says what a run from before the funnel did not record, never zero', async () => {
+    serve(world());
+    show(`#/${BLOCKED_RUN}`);
+    const funnel = await section('检索漏斗');
+    const [ai] = within(funnel.getByRole('table')).getAllByRole('row').slice(1);
+    const cells = within(ai!).getAllByRole('cell').map((cell) => cell.textContent);
+    expect([cells[1], cells[4]]).toEqual(['未记录', '未记录']);
+    expect(funnel.getByText('尝试打开与丢弃：上线前未记录。')).toBeVisible();
+    expect((await section('必知追踪')).getByText('上线前未记录。')).toBeVisible();
+  });
+
+  it('says the reference was unavailable instead of listing nothing, and links only an http page', async () => {
+    const ready = fixture<Record<string, unknown>>('run-ready');
+    serve(world({ [`/api/v1/${READY_RUN}`]: {
+      ...ready,
+      reference: { source_id: 'current-events', date: '2026-10-26', url: 'javascript:alert(1)', state: 'unavailable', error_code: 'http_error' },
+    } }));
+    show(`#/${READY_RUN}`);
+    const must = await section('必知追踪');
+    expect(must.getByText('参照不可用（http_error）')).toBeVisible();
+    expect(must.getByText('这次读不到参照，不能据此判断有没有漏掉大事。')).toBeVisible();
+    expect(must.getByRole('heading', { name: '维基百科时事 · 10月26日（UTC）' }).querySelector('a')).toBeNull();
   });
 });
