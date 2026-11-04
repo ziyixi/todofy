@@ -32,8 +32,8 @@ service StorageUiService {
     option (google.api.method_signature) = "name";
   }
 
-  // Status, credentials and the last 14 UTC days of application requests in one read. Writes the
-  // pending in-memory counters first.
+  // Status, credentials, the last 14 UTC days of application requests and the Dropbox space in one read.
+  // Writes the pending in-memory counters first.
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   rpc GetOverview(GetOverviewRequest) returns (Overview) {
     option (google.api.http) = {get: "/api/v1/{name=overview}"};

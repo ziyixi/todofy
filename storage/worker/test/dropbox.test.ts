@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { Dropbox, endpoints } from '../src/dropbox.ts';
+import { Dropbox, endpoints, spaceAnswer } from '../src/dropbox.ts';
 import type { Connection } from '../src/store.ts';
 
 class Memory {
@@ -22,7 +22,8 @@ describe('separate Dropbox authorization', () => {
     expect(authorize.origin).toBe('https://www.dropbox.com');
     expect(authorize.searchParams.get('code_challenge_method')).toBe('S256');
     expect(authorize.searchParams.get('token_access_type')).toBe('offline');
-    expect(authorize.searchParams.get('scope')).toBe('files.metadata.read files.content.read files.content.write');
+    expect(authorize.searchParams.get('scope')).toBe('account_info.read files.metadata.read files.content.read files.content.write');
+    store.set('space', { state: 'scope_missing', used: 0, allocated: 0, time: 1 });
     const requests: URLSearchParams[] = [];
     vi.stubGlobal('fetch', vi.fn((_url: string, init: RequestInit) => {
       requests.push(new URLSearchParams(init.body as string));
@@ -31,6 +32,8 @@ describe('separate Dropbox authorization', () => {
     const search = new URLSearchParams({ state: authorize.searchParams.get('state') ?? '', code: 'synthetic-code' });
     await provider.callback(search);
     expect(store.connection()?.refreshToken).toBe('synthetic-refresh-private');
+    // A new connection reads its own space.
+    expect(store.get('space')).toBeNull();
     expect(requests[0]?.get('code_verifier')).toMatch(/^[A-Za-z0-9_-]{64}$/);
     expect(requests[0]?.has('client_secret')).toBe(false);
     await expect(provider.callback(search)).rejects.toThrow();
@@ -205,5 +208,93 @@ describe('provider errors for the owner console', () => {
     store.set('connection', connection);
     await refused('BAD_REQUEST');
     expect(store.get('provider_error')).toMatchObject({ reason: 'BAD_REQUEST' });
+  });
+});
+
+describe('Dropbox space for the owner console', () => {
+  function provider(): { readonly store: Memory; readonly dropbox: Dropbox; readonly reads: () => number; answer: () => Response } {
+    const store = new Memory();
+    store.set('connection', connection);
+    let reads = 0;
+    const result = {
+      store, dropbox: new Dropbox(store, {}), reads: () => reads,
+      answer: (): Response => Response.json({ used: 300, allocation: { '.tag': 'individual', allocated: 1000 } }),
+    };
+    vi.stubGlobal('fetch', (url: string) => {
+      if (url.endsWith('/oauth2/token')) return Promise.resolve(Response.json({ access_token: 'synthetic-access-private', expires_in: 3600 }));
+      if (!url.endsWith('/2/users/get_space_usage')) throw new Error('unexpected synthetic Dropbox call');
+      reads++;
+      return Promise.resolve(result.answer());
+    });
+    return result;
+  }
+
+  it('reads the whole account at most once in ten minutes', async () => {
+    vi.useFakeTimers();
+    const { dropbox, reads } = provider();
+    const first = Date.now();
+    expect(await dropbox.space()).toEqual({ state: 'observed', used: 300, allocated: 1000, time: first });
+    await vi.advanceTimersByTimeAsync(9 * 60_000);
+    expect(await dropbox.space()).toMatchObject({ time: first });
+    expect(reads()).toBe(1);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(await dropbox.space()).toMatchObject({ time: first + 10 * 60_000 });
+    expect(reads()).toBe(2);
+  });
+
+  it('reports a token without account_info.read calmly and never as a provider error', async () => {
+    vi.useFakeTimers();
+    const context = provider();
+    context.answer = () => Response.json({ error_summary: 'missing_scope/..', error: { '.tag': 'missing_scope', required_scope: 'account_info.read' } }, { status: 401 });
+    expect(await context.dropbox.space()).toEqual({ state: 'scope_missing', used: 0, allocated: 0, time: Date.now() });
+    await context.dropbox.space();
+    expect(context.reads()).toBe(1);
+    expect(context.store.get('provider_error')).toBeNull();
+    // Any other refusal is an unavailable reading, not the connection's error either.
+    const other = provider();
+    other.answer = () => Response.json({ error_summary: 'invalid_access_token/..' }, { status: 401 });
+    expect(await other.dropbox.space()).toMatchObject({ state: 'unavailable', time: 0 });
+    expect(other.store.get('provider_error')).toBeNull();
+    expect(other.store.get('space')).toBeNull();
+  });
+
+  it('keeps the earlier answer when a later read fails and forgets it with the connection', async () => {
+    vi.useFakeTimers();
+    const context = provider();
+    const first = Date.now();
+    await context.dropbox.space();
+    await vi.advanceTimersByTimeAsync(11 * 60_000);
+    context.answer = () => new Response('synthetic-private-body', { status: 503 });
+    expect(await context.dropbox.space()).toEqual({ state: 'observed', used: 300, allocated: 1000, time: first });
+    context.answer = () => { throw new TypeError('synthetic network failure'); };
+    expect(await context.dropbox.space()).toMatchObject({ time: first });
+    expect(context.reads()).toBe(3);
+    expect(context.store.get('provider_error')).toBeNull();
+    vi.stubGlobal('fetch', () => Promise.resolve(new Response('null')));
+    await context.dropbox.disconnect();
+    expect(context.store.get('space')).toBeNull();
+  });
+
+  it('does not keep an answer for a connection that changed while it was read', async () => {
+    const store = new Memory();
+    store.set('connection', connection);
+    let answer: ((value: Response) => void) | undefined;
+    vi.stubGlobal('fetch', (url: string) => url.endsWith('/oauth2/token')
+      ? Promise.resolve(Response.json({ access_token: 'synthetic-access-private', expires_in: 3600 }))
+      : new Promise<Response>((resolve) => { answer = resolve; }));
+    const pending = new Dropbox(store, {}).space();
+    await vi.waitFor(() => { expect(answer).toBeDefined(); });
+    store.set('connection', { ...connection, generation: 'synthetic-other' });
+    answer?.(Response.json({ used: 1, allocation: { '.tag': 'individual', allocated: 2 } }));
+    expect(await pending).toMatchObject({ state: 'observed', used: 1 });
+    expect(store.get('space')).toBeNull();
+  });
+
+  it('maps team allocations and refuses malformed answers', () => {
+    expect(spaceAnswer(200, { used: 5, allocation: { '.tag': 'team', used: 50, allocated: 100 } }, 1)).toEqual({ state: 'observed', used: 50, allocated: 100, time: 1 });
+    for (const body of [{ used: -1, allocation: { allocated: 9 } }, { used: 1 }, { used: 1.5, allocation: { allocated: 9 } }, null, 'synthetic']) {
+      expect(spaceAnswer(200, body, 1)).toBeNull();
+    }
+    expect(spaceAnswer(500, { used: 1, allocation: { allocated: 9 } }, 1)).toBeNull();
   });
 });

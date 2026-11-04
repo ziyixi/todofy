@@ -12,6 +12,7 @@ interface Overview {
   readonly recent_failures?: readonly { readonly client: string; readonly operation: string; readonly reason: string; readonly http_status: number }[];
   readonly build_sha: string;
   readonly state_size_bytes: number;
+  readonly space?: { readonly state: string; readonly used_bytes?: number; readonly allocated_bytes?: number };
 }
 
 let current: Awaited<ReturnType<typeof harness>> | undefined;
@@ -125,4 +126,32 @@ it('keeps a full Dropbox unresolved while reads succeed and records a malformed 
   expect((await put('four.bin')).status).toBe(200);
   const freed = await (await active.owner('overview')).json<Overview>();
   expect(time(freed.settings.last_write_success_time)).toBeGreaterThan(time(freed.settings.last_provider_error_time));
+});
+
+it('shows a missing space permission calmly, caches it across a restart and keeps files working', async () => {
+  current = await harness();
+  current.provider.space = 'missing_scope';
+  await current.connect();
+  const key = await current.client('synthetic');
+  const bytes = new TextEncoder().encode('synthetic-object');
+  const written = await current.machine('content?key=one.bin', key.api_key, { method: 'PUT', body: bytes, headers: { 'if-none-match': '*', 'content-length': String(bytes.byteLength) } });
+  expect(written.status).toBe(200);
+  const overview = await (await current.owner('overview')).json<Overview>();
+  expect(overview.space).toMatchObject({ state: 'scope_missing' });
+  expect(overview.settings.last_provider_error).toBeUndefined();
+  await current.restart();
+  expect((await (await current.owner('overview')).json<Overview>()).space).toMatchObject({ state: 'scope_missing' });
+  expect(current.provider.spaceReads).toBe(1);
+  expect((await current.owner('dropbox:disconnect', 'POST', {})).status).toBe(200);
+  expect(await (await current.owner('overview')).json<Overview>()).not.toHaveProperty('space');
+});
+
+it('reads the account space once in ten minutes', async () => {
+  current = await harness();
+  await current.connect();
+  for (let index = 0; index < 3; index++) {
+    const overview = await (await current.owner('overview')).json<Overview>();
+    expect(overview.space).toMatchObject({ state: 'observed', used_bytes: 600 * 2 ** 30, allocated_bytes: 2 * 2 ** 40 });
+  }
+  expect(current.provider.spaceReads).toBe(1);
 });

@@ -1,8 +1,8 @@
-// The owner console's single read: connection status, active credentials and the application requests of the
-// last 14 UTC days. Counters accumulate in the Durable Object's memory and are written about every 30 seconds;
-// reading the overview writes the pending counts first, so a restart or deploy loses at most those 30 seconds.
-// Only requests that present a known credential are counted; malformed keys refused at the edge, the console
-// itself and /health are not.
+// The owner console's single read: connection status, active credentials, the application requests of the
+// last 14 UTC days and the Dropbox account's space. Counters accumulate in the Durable Object's memory and are
+// written about every 30 seconds; reading the overview writes the pending counts first, so a restart or deploy
+// loses at most those 30 seconds. Only requests that present a known credential are counted; malformed keys
+// refused at the edge, the console itself and /health are not.
 syntax = "proto3";
 
 package storage.ui.v1;
@@ -67,6 +67,40 @@ message Overview {
     (google.api.field_behavior) = OUTPUT_ONLY,
     (common.wire.v1.field).minimum = 0
   ];
+  // The whole Dropbox account's space; absent while disconnected.
+  DropboxSpace space = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// The space of the whole Dropbox account behind the connection: Dropbox reports no App-folder size. Read when the
+// overview is, at most once in ten minutes, and never recorded as a provider error.
+message DropboxSpace {
+  // Whether the space could be read.
+  enum State {
+    // Never written.
+    STATE_UNSPECIFIED = 0;
+    // Read from Dropbox at observe_time.
+    STATE_OBSERVED = 1;
+    // The connection was authorized without account_info.read; reconnecting after the Dropbox app gains that
+    // permission shows the space. Not a connection error: files keep working.
+    STATE_SCOPE_MISSING = 2;
+    // Dropbox did not answer, and no earlier reading is kept.
+    STATE_UNAVAILABLE = 3;
+  }
+
+  // Whether the space could be read. A failed read keeps showing the newest earlier answer with its time.
+  State state = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Bytes used by the account.
+  double used_bytes = 2 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // Bytes the account may use.
+  double allocated_bytes = 3 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field).minimum = 0
+  ];
+  // When Dropbox answered.
+  google.protobuf.Timestamp observe_time = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // One UTC day's requests of one credential, operation and outcome.

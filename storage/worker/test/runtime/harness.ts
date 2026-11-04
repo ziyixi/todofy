@@ -29,6 +29,9 @@ export class FakeDropbox {
   listPages: readonly ProviderPage[] | null = null;
   batchFault: 'start_rate' | 'append_rate' | 'append_partial' | 'finish_rate' | 'finish_partial' | 'finish_failure' | 'finish_unknown' | 'finish_metadata' | null = null;
   uploadFault: 'insufficient_space' | null = null;
+  /** The account's space, or a token without account_info.read. */
+  space: { readonly used: number; readonly allocated: number } | 'missing_scope' = { used: 600 * 2 ** 30, allocated: 2 * 2 ** 40 };
+  spaceReads = 0;
   private readonly sessions = new Map<string, Session>();
   private sessionSequence = 0;
   private revision = 0;
@@ -50,6 +53,11 @@ export class FakeDropbox {
     }
     if (request.headers.get('authorization') !== 'Bearer synthetic-private-access') return new Response(null, { status: 401 });
     if (url.pathname === '/2/auth/token/revoke') return new Response('null');
+    if (url.pathname === '/2/users/get_space_usage') {
+      this.spaceReads++;
+      if (this.space === 'missing_scope') return Response.json({ error_summary: 'missing_scope/..', error: { '.tag': 'missing_scope', required_scope: 'account_info.read' } }, { status: 401 });
+      return Response.json({ used: this.space.used, allocation: { '.tag': 'individual', allocated: this.space.allocated } });
+    }
     if (url.pathname === '/2/files/upload_session/start_batch') {
       const argument = await request.json<{ num_sessions: number }>();
       this.calls.push({ path: url.pathname, argument });

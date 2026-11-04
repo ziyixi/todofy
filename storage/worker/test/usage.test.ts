@@ -3,7 +3,7 @@ import { OverviewSchema, type Overview } from '@ziyixi/proto/storage/ui/v1/overv
 import { ListClientsResponseSchema, type ListClientsResponse } from '@ziyixi/proto/storage/ui/v1/storage_ui_service_pb';
 import { toWire } from '@ziyixi/proto/wire-json';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { Dropbox } from '../src/dropbox.ts';
+import type { Dropbox, Space } from '../src/dropbox.ts';
 import { handlers, type OwnerContext } from '../src/owner.ts';
 import type { Store } from '../src/store.ts';
 import { DAY_MS, outcomeOf, Usage } from '../src/usage.ts';
@@ -29,10 +29,18 @@ function fixture() {
 }
 
 interface WireClient { readonly name: string; readonly last_use_time?: string }
-interface WireOverview { readonly usage?: readonly { readonly day: string }[]; readonly usage_truncated?: boolean; readonly clients?: readonly WireClient[]; readonly settings?: Record<string, unknown> }
+interface WireOverview {
+  readonly usage?: readonly { readonly day: string }[]; readonly usage_truncated?: boolean; readonly clients?: readonly WireClient[];
+  readonly settings?: Record<string, unknown>; readonly space?: Record<string, unknown>;
+}
+
+const SPACE: Space = { state: 'observed', used: 600 * 2 ** 30, allocated: 2 * 2 ** 40, time: NOW - 60_000 };
 
 function context(store: Store, flushUsage = vi.fn()): OwnerContext {
-  return { store, dropbox: {} as Dropbox, redirectUri: 'https://storage.example.test/api/dropbox/callback', flushUsage, buildSha: 'synthetic', stateSizeBytes: () => 8192 };
+  return {
+    store, dropbox: { space: () => Promise.resolve(SPACE) } as unknown as Dropbox, redirectUri: 'https://storage.example.test/api/dropbox/callback',
+    flushUsage, buildSha: 'synthetic', stateSizeBytes: () => 8192,
+  };
 }
 
 /** The overview's wire JSON, as the console reads it. */
@@ -173,6 +181,7 @@ describe('overview', () => {
         { day: '2026-10-21', client: 'clients/' + WRITER, namespace: 'synthetic', operation: 'put', outcome: 'ok', request_count: 1, object_count: 1, upload_bytes: 3 },
       ],
       recent_failures: [{ failure_time: '2026-11-03T11:59:30Z', client: 'clients/' + READER, namespace: 'synthetic', operation: 'put', reason: 'READ_ONLY', http_status: 403 }],
+      space: { state: 'observed', used_bytes: 600 * 2 ** 30, allocated_bytes: 2 * 2 ** 40, observe_time: '2026-11-03T11:59:00Z' },
     });
     expect(answer.usage).toHaveLength(3);
     expect(answer.usage_truncated).toBeUndefined();

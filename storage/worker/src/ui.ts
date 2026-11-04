@@ -30,7 +30,7 @@ section{border:1px solid var(--border);border-radius:12px;background:var(--surfa
 .mark{white-space:nowrap;font-weight:600}.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}.unknown{color:var(--unknown)}
 .status h2{font-size:1.35rem}.status .line{color:var(--fg-2);margin-top:6px}.status .past{margin-top:2px}
 .notice{margin-top:14px;border-radius:8px;padding:10px 14px;background:var(--notice-bg);color:var(--fg-2)}
-.notice.bad{background:var(--bad-bg)}.notice p+p{margin-top:2px;color:var(--muted);font-size:.87rem}
+.notice.bad{background:var(--bad-bg)}.notice.calm{background:var(--surface-2);border:1px solid var(--line)}.notice p+p{margin-top:2px;color:var(--muted);font-size:.87rem}
 .tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-top:18px}
 .tiles>div{background:var(--surface);padding:14px 16px 16px;min-width:0}
 .tiles dt,.tiles dd{font-size:.82rem;color:var(--muted)}.tiles dt{margin-bottom:4px}
@@ -111,6 +111,7 @@ const mark=(tone,text)=>h('span',{class:'mark '+tone},h('span',{'aria-hidden':'t
 const num=(n)=>Number(n??0).toLocaleString('zh-CN');
 function bytes(n){n=Number(n??0);const u=['B','KiB','MiB','GiB','TiB'];let e=0;while(e<u.length-1&&n>=1024**(e+1))e++;const x=n/1024**e;
 return(e===0?String(Math.round(x)):x>=100?x.toFixed(0):x>=10?x.toFixed(1):x.toFixed(2))+' '+u[e];}
+const percent=(f)=>Math.floor(f*100)+'%';
 const pad=(n)=>String(n).padStart(2,'0');
 const clock=(t)=>{const d=new Date(t);return pad(d.getHours())+':'+pad(d.getMinutes());};
 const date=(t)=>{const d=new Date(t);return d.getFullYear()+'/'+pad(d.getMonth()+1)+'/'+pad(d.getDate());};
@@ -173,9 +174,18 @@ const line=['Dropbox 已连接',okTime?'最近成功 '+ago(okTime):'尚无成功
 if(s.last_provider_error&&errTime>=since){const r=reason(s.last_provider_error);
 return{tone:r.tone,title:r.tone==='bad'?'需要处理':'需要注意',line,notice:{tone:r.tone,title:r.title+' · '+when(errTime),hint:r.hint}};}
 const past=s.last_provider_error?'最近一次错误“'+reason(s.last_provider_error).title+'”（'+when(errTime)+'）之后已恢复。':'';
+const f=spaceFraction();
+if(f!==null&&f>=.9)return{tone:'warn',title:'需要注意',line,past,notice:{tone:'warn',title:'Dropbox 空间已用 '+percent(f),hint:'空间用尽后写入会返回 507；释放空间后自动恢复。'}};
 if(failed)return{tone:'warn',title:'需要注意',line,past,notice:{tone:'warn',title:'本 UTC 日有 '+num(failed)+' 次请求失败',hint:'原因见“活动”。'}};
 return{tone:'ok',title:'运行正常',line,past};}
 
+function spaceFraction(){const sp=state.space;return sp?.state==='observed'&&sp.allocated_bytes>0?Number(sp.used_bytes??0)/sp.allocated_bytes:null;}
+function spaceTile(){const sp=state.space,f=spaceFraction();
+if(f!==null){const read=Date.now()-Date.parse(sp.observe_time)>900000?' · 读取于 '+when(sp.observe_time):'';
+return tile('Dropbox 空间',h('dd',{class:'value'},percent(f),h('small',{text:'已用'})),meter(f,f>=.95?'bad':f>=.85?'warn':''),
+bytes(sp.used_bytes)+' / '+bytes(sp.allocated_bytes)+' · 整个 Dropbox 账户'+read);}
+if(sp?.state==='scope_missing')return tile('Dropbox 空间',h('dd',{class:'value idle',text:'—'}),'需重新授权后显示','步骤见下方“Dropbox 连接”');
+return tile('Dropbox 空间',h('dd',{class:'value idle',text:'—'}),state.settings?.connected?'暂时无法读取':'未连接');}
 function tile(label,value,...details){return h('div',{},h('dt',{text:label}),value,details.map((d)=>typeof d==='string'?h('dd',{text:d}):h('dd',{},d)));}
 function meter(fraction,tone){return h('span',{class:'meter '+(tone??'')},h('span',{style:'width:'+Math.min(100,fraction*100).toFixed(1)+'%'}));}
 function renderSummary(){const o=overall(),t=today();
@@ -185,7 +195,7 @@ const batchCount=sum(batches,'request_count'),reads=sum(t,'request_count',(r)=>[
 fill('summary',h('h2',{},mark(o.tone,o.title)),h('p',{class:'line',text:o.line}),o.past?h('p',{class:'muted past',text:o.past}):null,
 o.notice?h('div',{class:'notice '+(o.notice.tone==='bad'?'bad':'')},h('p',{},h('strong',{},mark(o.notice.tone,o.notice.title))),o.notice.hint?h('p',{text:o.notice.hint}):null):null,
 h('dl',{class:'tiles'},
-tile('Dropbox 空间',h('dd',{class:'value idle',text:'—'}),'暂未统计'),
+spaceTile(),
 tile('本 UTC 日应用请求',h('dd',{class:'value',text:num(requests)}),meter(share,share>=.5?'warn':''),'占全账户每日 10 万免费请求的 '+(share*100).toFixed(1)+'% · UTC 0 点重置'),
 tile('本 UTC 日写入',h('dd',{class:'value'},num(written),h('small',{text:'个对象'})),bytes(sum(t,'upload_bytes'))+(batchCount?' · '+num(batchCount)+' 批，平均 '+(sum(batches,'object_count')/batchCount).toFixed(1)+' 个':'')),
 tile('本 UTC 日读取',h('dd',{class:'value'},num(reads),h('small',{text:'次'})),'下载 '+bytes(sum(t,'download_bytes'))+' · 列表 '+num(sum(t,'request_count',(r)=>r.operation==='list'))+' 页')));}
@@ -228,13 +238,15 @@ fact('App key',s.app_key?h('code',{text:s.app_key}):'—');fact('应用文件夹
 if(s.connected){fact('连接时间',when(s.connect_time));fact('最近成功',when(s.last_success_time));}
 const r=s.last_provider_error?reason(s.last_provider_error):null;
 fact('最近错误',r?h('span',{},mark(r.tone,r.title),h('span',{class:'muted',text:' · '+when(s.last_provider_error_time)})):'无');
+const reauthorize=state.space?.state==='scope_missing'?h('div',{class:'notice calm'},h('p',{},h('strong',{text:'显示 Dropbox 空间需要重新授权'})),
+h('p',{text:'在 Dropbox App Console 打开这个应用的 Permissions，勾选 account_info.read 并提交；再在这里断开并重新连接。断开期间应用读写会失败，请选应用空闲的时候。文件和应用密钥不受影响。'})):null;
 const actions=h('div',{class:'actions'});
 if(s.connected){const ask=h('button',{type:'button',text:'断开连接',onclick:()=>{actions.replaceChildren(confirmBox('断开后，所有应用的读写都会立即失败，直到重新连接；Dropbox 中的文件保留。','确认断开',
 async()=>{await api('dropbox:disconnect',{method:'POST',body:'{}'});await load();status('已断开连接，文件保留。');},()=>{actions.replaceChildren(ask);ask.focus();}));}});actions.append(ask);}
 else{const input=h('input',{required:true,pattern:'[a-z0-9]{8,32}',autocomplete:'off',spellcheck:'false',value:s.app_key??''});
 actions.append(h('form',{class:'connect',onsubmit:(e)=>{e.preventDefault();perform(e.submitter,async()=>{const result=await api('dropbox:connect',{method:'POST',body:JSON.stringify({app_key:input.value})});location.assign(result.authorize_url);});}},
 h('label',{},'Dropbox App key',input),h('button',{class:'primary',text:'连接 Dropbox'})));}
-fill('connection',h('div',{class:'head'},h('h2',{text:'Dropbox 连接'})),h('dl',{class:'facts'},facts),actions);}
+fill('connection',h('div',{class:'head'},h('h2',{text:'Dropbox 连接'})),h('dl',{class:'facts'},facts),reauthorize,actions);}
 
 function keyRow(k){const todayCount=sum(today(),'request_count',(r)=>r.client===k.name);
 const revoke=h('button',{type:'button',class:'quiet',text:'撤销',onclick:()=>{if(row.querySelector('.confirm'))return;

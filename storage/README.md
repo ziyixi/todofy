@@ -3,13 +3,15 @@
 Storage gives applications a namespace-scoped HTTP interface to a separate Dropbox App-folder connection.
 The owner console connects Dropbox and creates independently revocable read-only or read/write keys.
 Each key selects a fixed namespace on the server. File data lives in Dropbox; the native SQLite Durable Object
-holds the connection state, key hashes, a cursor-signing key, the last provider error reason and request counters.
-Storage uses no D1, R2, cron trigger or alarm; counters are written periodically from memory (below).
+holds the connection state, key hashes, a cursor-signing key, the last provider error reason, request counters and
+the cached Dropbox space. Storage uses no D1, R2, cron trigger or alarm; counters are written periodically from
+memory (below).
 
-The separate Dropbox app uses `files.metadata.read`, `files.content.read` and `files.content.write` with offline PKCE.
-The callback is `/api/dropbox/callback`. Existing Recall connections, files and archive contracts are independent.
-Disconnecting revokes this connection and retains files. There is no delete-object endpoint. If Dropbox already
-revoked the authorization, disconnecting removes the local connection, and connecting replaces it.
+The separate Dropbox app uses `files.metadata.read`, `files.content.read` and `files.content.write` with offline PKCE,
+and `account_info.read` only to show the account's space ([below](#dropbox-space)). The callback is
+`/api/dropbox/callback`. Existing Recall connections, files and archive contracts are independent. Disconnecting
+revokes this connection and retains files. There is no delete-object endpoint. If Dropbox already revoked the
+authorization, disconnecting removes the local connection, and connecting replaces it.
 
 ## HTTP protocol
 
@@ -94,8 +96,8 @@ the account's 100,000 daily Workers Free requests, writes and reads, a 14-day ch
 connection; 密钥 groups keys by namespace with their created and last-use times behind a collapsed create form; 活动
 lists recent failures, a 14-day table and today's operations. Counts are by UTC day, labelled 本 UTC 日; event times
 use the browser's time zone. Revoking a key and disconnecting Dropbox each ask for a second confirmation that takes
-focus on 取消 and closes on Escape. Dropbox space and per-namespace object totals are placeholders that fetch nothing
-yet.
+focus on 取消 and closes on Escape. 概览 also shows the Dropbox space; per-namespace object totals are a placeholder
+that fetches nothing yet.
 
 The Durable Object counts each application request that presents a known key, by UTC day (when the quota resets), key,
 operation (`stat`, `list`, `get`, `head`, `put`, `batch_create`) and outcome:
@@ -120,8 +122,24 @@ most 2,880 writes a day. The pending timer keeps the object in memory until the 
 20 seconds of Durable Object duration; an alarm would wake a hibernated instance without the counts and cost a request.
 A deploy or eviction loses at most those 30 seconds. Daily counts are kept 90 days. Each key's last use and the
 connection's last success and last successful write are written with the counts; a success counted before a reconnect
-is not carried over to the new connection. `GetOverview` answers the settings, keys, 14 days of counts and recent
-failures in one call.
+is not carried over to the new connection. `GetOverview` answers the settings, keys, 14 days of counts, recent
+failures and the Dropbox space in one call.
+
+## Dropbox space
+
+The space tile reads `users/get_space_usage` when the overview is read, at most once in ten minutes; the answer is
+cached in the Durable Object and a failed read keeps showing the earlier one with its time. Dropbox reports only the
+whole account (a team account's team space), never the App folder. The meter turns amber at 85% and red at 95%, and
+from 90% the status asks for attention, since a full Dropbox refuses writes with 507.
+
+A connection authorized without `account_info.read` gets 401 `missing_scope`. The tile then says the connection must
+be authorized again to show space; this is not a provider error and files keep working. Dropbox refuses an
+authorization that asks for a permission the app lacks, so to show the space:
+
+1. In the Dropbox App Console, open this app's Permissions, tick `account_info.read` and submit.
+2. Release the Storage version that requests it. The installed connection keeps working throughout.
+3. In the console, disconnect and connect again while applications are idle: their requests fail in between. Keys
+   and files are unchanged.
 
 ## Development
 

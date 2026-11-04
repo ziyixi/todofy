@@ -6,9 +6,12 @@ import { randomText } from './keys.ts';
 import type { Connection, PendingConnection, Store } from './store.ts';
 
 const DROPBOX = { authorize: 'https://www.dropbox.com', api: 'https://api.dropboxapi.com', content: 'https://content.dropboxapi.com' } as const;
-const SCOPES = 'files.metadata.read files.content.read files.content.write';
+// account_info.read only reads the account's space; a connection authorized without it keeps every file operation.
+const SCOPES = 'account_info.read files.metadata.read files.content.read files.content.write';
 const PROVIDER_TIMEOUT = 30_000;
 const PROVIDER_ERROR_WRITE_INTERVAL = 60_000;
+const SPACE_TTL = 10 * 60_000;
+const SPACE_TIMEOUT = 5_000;
 
 export function endpoints(env: Pick<Env, 'DEV_AUTH_BYPASS' | 'DEV_DROPBOX_ORIGIN'>): { readonly authorize: string; readonly api: string; readonly content: string } {
   const origin = env.DEV_DROPBOX_ORIGIN ?? '';
@@ -62,6 +65,32 @@ async function providerFailure(response: Response, upload = false): Promise<neve
   throw failure(Code.UNAVAILABLE, 'UNAVAILABLE');
 }
 
+/** The whole account's space as Dropbox last answered it, or that the connection lacks account_info.read. */
+export interface Space {
+  readonly state: 'observed' | 'scope_missing' | 'unavailable';
+  readonly used: number;
+  readonly allocated: number;
+  /** Milliseconds of the answer; 0 when unavailable. */
+  readonly time: number;
+}
+
+const bytes = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+
+/** Maps a get_space_usage answer; null when it is neither the space nor a missing scope. */
+export function spaceAnswer(status: number, body: unknown, time: number): Space | null {
+  const value = typeof body === 'object' && body !== null && !Array.isArray(body) ? body as Record<string, unknown> : {};
+  const error = value.error as Record<string, unknown> | undefined;
+  if (status === 401 && (error?.['.tag'] === 'missing_scope' || /^missing_scope(?:\/|$)/.test(String(value.error_summary)))) {
+    return { state: 'scope_missing', used: 0, allocated: 0, time };
+  }
+  const allocation = value.allocation as Record<string, unknown> | undefined;
+  // A team allocation reports the team's space; an individual one the account's.
+  const used = allocation?.['.tag'] === 'team' ? allocation.used : value.used;
+  const allocated = allocation?.allocated;
+  if (status !== 200 || !bytes(used) || !bytes(allocated)) return null;
+  return { state: 'observed', used, allocated, time };
+}
+
 /** The newest error Dropbox answered, shown to the owner; only a Storage reason, never provider content. */
 export interface ProviderError {
   readonly reason: string;
@@ -85,9 +114,9 @@ export class Dropbox {
 
   constructor(store: Pick<Store, 'get' | 'set' | 'delete' | 'connection'>, env: Pick<Env, 'DEV_AUTH_BYPASS' | 'DEV_DROPBOX_ORIGIN'>) { this.store = store; this.origins = endpoints(env); }
 
-  private async fetch(url: string, init: RequestInit): Promise<Response> {
+  private async fetch(url: string, init: RequestInit, timeoutMs = PROVIDER_TIMEOUT): Promise<Response> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => { controller.abort(); }, PROVIDER_TIMEOUT);
+    const timeout = setTimeout(() => { controller.abort(); }, timeoutMs);
     try {
       return await fetch(url, { ...init, redirect: 'manual', signal: controller.signal });
     } catch {
@@ -177,6 +206,7 @@ export class Dropbox {
     this.store.delete('provider_error');
     this.store.delete('last_success');
     this.store.delete('last_write_success');
+    this.store.delete('space');
     this.recorded = null;
     this.repeated = null;
     this.access = null;
@@ -220,6 +250,7 @@ export class Dropbox {
       this.store.delete('provider_error');
       this.store.delete('last_success');
       this.store.delete('last_write_success');
+      this.store.delete('space');
       this.recorded = null;
       this.repeated = null;
     }
@@ -240,6 +271,28 @@ export class Dropbox {
       await response.body?.cancel();
     }
     this.forget(connection);
+  }
+
+  /**
+   * The account's space for the owner console, read at most once in ten minutes. Never a provider error: a
+   * connection without account_info.read still reads and writes files. A failed read keeps the earlier answer.
+   */
+  async space(): Promise<Space> {
+    const cached = this.store.get('space') as Space | null;
+    const now = Date.now();
+    if (cached !== null && now - cached.time < SPACE_TTL) return cached;
+    const generation = this.store.connection()?.generation;
+    try {
+      const response = await this.fetch(this.origins.api + '/2/users/get_space_usage', {
+        method: 'POST', headers: { authorization: 'Bearer ' + await this.token(), 'content-type': 'application/json' }, body: 'null',
+      }, SPACE_TIMEOUT);
+      const answer = spaceAnswer(response.status, await readJson(response, 16 * 1024).catch(() => null), now);
+      if (answer !== null) {
+        if (this.store.connection()?.generation === generation) this.store.set('space', answer);
+        return answer;
+      }
+    } catch { /* A refused refresh token records its own reason; the space keeps its earlier answer. */ }
+    return cached ?? { state: 'unavailable', used: 0, allocated: 0, time: 0 };
   }
 
   async json(method: 'files/get_metadata' | 'files/list_folder' | 'files/list_folder/continue' | 'files/upload_session/start_batch' | 'files/upload_session/finish_batch_v2', args: unknown): Promise<Record<string, unknown>> {
