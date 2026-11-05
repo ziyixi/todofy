@@ -138,8 +138,8 @@ test('takes over a stale lock past LOCK_STALE_MS and waits when contended by a l
       stdio: ['ignore', 'ignore', 'pipe'],
     });
     let stderr = '';
-    child.stderr.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString('utf8');
+    child.stderr.on('data', (chunk: Uint8Array) => {
+      stderr += String(chunk);
     });
     child.once('error', reject);
     child.once('exit', (code) => resolve({ code, stderr }));
